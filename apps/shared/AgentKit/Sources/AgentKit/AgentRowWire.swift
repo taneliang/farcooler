@@ -219,6 +219,27 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         public var plan: String? = nil
         /// The device whose answer the hook took: "iPhone", "Mac".
         public var answeredBy: String? = nil
+        /// Who answered, on a runner with members (ov-743): nil on a solo
+        /// runner and on a build that doesn't say.
+        public var answeredPerson: Person? = nil
+        /// Whose ask it was, when it was someone else's pane (ov-743).
+        public var answeredFor: Person? = nil
+
+        /// A person as an ask row names them: a member's handle and name,
+        /// both empty for the runner's owner.
+        public struct Person: Sendable, Equatable, Codable {
+            public var handle: String
+            public var name: String
+
+            public init(handle: String, name: String) {
+                self.handle = handle
+                self.name = name
+            }
+
+            init(json: [String: Any]) {
+                self.init(handle: json["handle"] as? String ?? "", name: json["name"] as? String ?? "")
+            }
+        }
 
         public var questionList: [Question] { questions ?? [] }
 
@@ -473,7 +494,9 @@ extension AgentRow {
                 kind: AgentRowJSON.tag(p["kind"])?.name ?? "", text: text("text"), tool: p["tool"] as? String,
                 askedMs: AgentRowJSON.ms(p["asked_ms"]), answered: p["answered"] as? Bool ?? false,
                 held: p["held"] as? String, questions: questions.isEmpty ? nil : questions, plan: p["plan"] as? String,
-                answeredBy: p["answered_by"] as? String))
+                answeredBy: p["answered_by"] as? String,
+                answeredPerson: (p["answered_person"] as? [String: Any]).map(Ask.Person.init(json:)),
+                answeredFor: (p["answered_for"] as? [String: Any]).map(Ask.Person.init(json:))))
         case "Queued":
             return .queued(Queued(text: text("text"), state: AgentRowJSON.tag(p["state"])?.name ?? "Waiting", atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Notice":

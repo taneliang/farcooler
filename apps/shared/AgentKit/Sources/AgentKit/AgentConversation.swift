@@ -420,7 +420,12 @@ public enum AgentConversation {
         }
     }
 
-    public static func askTitle(_ ask: AgentRow.Ask, agent: String = "Claude") -> String {
+    /// `viewer` is who this device is on the runner (`RunnerPeople.you`: ""
+    /// for the owner, a member's handle, nil if not told). On a runner with
+    /// members, an answered ask says who answered (`Ask.answeredSentence`);
+    /// a solo runner, and a viewer not yet told, read as they always did.
+    public static func askTitle(_ ask: AgentRow.Ask, agent: String = "Claude", viewer: String? = nil) -> String {
+        if ask.answered || ask.held == nil, let who = ask.answeredSentence(viewer: viewer) { return who }
         if let by = ask.answeredBy, ask.answered || ask.held == nil { return "Answered on \(by)" }
         if ask.answered { return "Answered" }
         switch ask.kind {
