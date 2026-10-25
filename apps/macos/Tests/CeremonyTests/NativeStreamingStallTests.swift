@@ -11,6 +11,10 @@ import Testing
 /// 52 ms, through the production store and loop. A thread pings the main
 /// queue and records how late each ping ran (`HangMonitor`); the budget is no stall over 50 ms while it streams.
 ///
+/// And the first page of that session coming in (ov-750): no stall over
+/// 50 ms from the store's start until its rows are laid out, with only the
+/// rows on screen built and the reader at the tail.
+///
 /// Opt-in, as a timing harness on a shared machine can't be a gate: runs
 /// only with FARCOOLER_PERF=1.
 @MainActor
@@ -64,28 +68,92 @@ struct NativeStreamingStallTests {
         }
     }
 
+    /// The native view of `source`'s session in an offscreen window, made
+    /// and drawn empty first, then the store started and its first page
+    /// laid out. Returns the main thread's waits from the store's start
+    /// until that layout is done: the first page's window, with the
+    /// window's own making outside it.
+    ///
+    /// Until ov-750 the first page's window opened when `HangMonitor` did,
+    /// before the window was made. Making it (`NSWindow`, the hosting view,
+    /// the composer's text view) holds the main thread 43 to 54 ms on an
+    /// M-series Mac, and the first ping waited through that and the page
+    /// together: the 53 to 280 ms printed as the first page's (ov-703).
+    /// Laid out on its own, the page is 22 to 39 ms.
+    static func open(_ source: Streaming, monitor: HangMonitor) async throws
+        -> (window: NSWindow, model: NativePaneModel, scroll: NSScrollView, firstPage: [Double])
+    {
+        let store = AgentRowStore(key: "stall-\(UUID())", cache: nil)
+        let model = NativePaneModel(terminal: "t", store: store, sink: nil)
+        let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
+        await NativeAgentTests.settle(window, 200)
+        print("PERF[native] window made and drawn empty: main thread: \(HangMonitor.describe(monitor.take())) (not gated)")
+
+        store.start(source)
+        let began = ContinuousClock.now
+        while store.ids.isEmpty, ContinuousClock.now - began < .seconds(120) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        // Whatever layout of the page is still pending runs now, inside the
+        // window, rather than after it closes.
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let firstPage = monitor.take()
+        print("PERF[native] first page laid out after \(ContinuousClock.now - began)")
+        let scroll = try #require(window.contentView.flatMap(Fling.scrollView(in:)), "no scroll view")
+        return (window, model, scroll, firstPage)
+    }
+
+    /// 50 ms here; 100 on the nightly's runner (`PerfBudget`), whose main
+    /// thread already ran 70 ms frames in a fling on Oct 22.
+    static let budget = PerfBudget.limit(local: 50, runner: 100)
+
+    /// The first page of a 5,000-row session (`AgentRowStore.pageSize`
+    /// rows) lays out without stalling: only the rows on screen are built,
+    /// the reader is at the tail, and the main thread is never held over
+    /// the budget. A stack that built and laid out every row of the page
+    /// at once fails all three (ov-750).
+    @Test func theFirstPageOfALongSessionLaysOutWithoutStalling() async throws {
+        let monitor = HangMonitor()
+        monitor.start()
+        defer { monitor.stop() }
+        // No reply: the first page alone.
+        let source = Streaming(held: 5_000, chars: 0, every: .milliseconds(52))
+        let (window, model, scroll, firstPage) = try await Self.open(source, monitor: monitor)
+        defer { window.close() }
+        defer { model.store.stop() }
+
+        let store = model.store
+        let layout = try #require(TranscriptScroller.driving(scroll)?.layout, "the transcript's scroller isn't driven")
+        let built = store.items.filter { layout.has($0.id) }.count
+        print("PERF[native] first page: \(store.ids.count) rows, \(store.items.count) items, \(built) built")
+        #expect(store.ids.count == AgentRowStore.pageSize, "the first page is \(store.ids.count) rows")
+        // 12 of 50 are built in a 560 pt window: those on screen and the
+        // lazy stack's margin around them.
+        #expect(built > 0 && built * 2 < store.items.count, "the first page built \(built) of \(store.items.count) items")
+        let insets = scroll.contentInsets
+        let range = (scroll.documentView?.frame.height ?? 0) + insets.top + insets.bottom - scroll.contentView.bounds.height
+        let y = scroll.contentView.bounds.minY + insets.top
+        #expect(range > 0 && abs(y - range) < 1, "the reader is at \(y) of \(range), not the tail")
+
+        let longest = firstPage.max() ?? 0
+        print("PERF[native] first page: main thread: \(HangMonitor.describe(firstPage)); " + PerfBudget.describe(Self.budget, unit: "ms"))
+        #expect(Double(longest) <= Self.budget, "the first page held the main thread \(longest) ms")
+    }
+
     @Test func aLongReplyStreamsIntoTheNativeViewWithoutStalling() async throws {
         let monitor = HangMonitor()
         monitor.start()
         defer { monitor.stop() }
         let source = Streaming(held: 5_000, chars: 25_600, every: .milliseconds(52))
-        let store = AgentRowStore(key: "stall-\(UUID())", cache: nil)
-        let model = NativePaneModel(terminal: "t", store: store, sink: nil)
-        let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
+        let (window, model, _, firstPage) = try await Self.open(source, monitor: monitor)
         defer { window.close() }
-        store.start(source)
-        defer { store.stop() }
+        defer { model.store.stop() }
+        let store = model.store
+        // The first page's stalls are its own test's to gate.
+        print("PERF[native] first page: main thread: \(HangMonitor.describe(firstPage)) (gated by the first page's test)")
 
         let began = ContinuousClock.now
-        while store.ids.isEmpty, ContinuousClock.now - began < .seconds(120) {
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        print("PERF[native] first page drawn after \(ContinuousClock.now - began)")
-        // The first page's own stalls, printed and not gated: this window
-        // isn't the streaming one, and on Oct 25 its 151 ms layout of the
-        // first page was counted as streaming's until HangMonitor kept each
-        // stall in the window it began in (ov-703).
-        print("PERF[native] first page: main thread: \(HangMonitor.describe(monitor.take()))")
         while await !source.done, ContinuousClock.now - began < .seconds(60) {
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -95,11 +163,8 @@ struct NativeStreamingStallTests {
         print("PERF[native] 25.6K chars streamed: main thread: \(HangMonitor.describe(streaming)) [\(when)]")
         let times = store.applyTimes
         print(String(format: "PERF[native] apply: %d updates, max %.3f ms", times.count, times.map { Double($0.components.attoseconds) / 1e15 + Double($0.components.seconds) * 1000 }.max() ?? 0))
-        // 50 ms here; 100 on the nightly's runner (`PerfBudget`), whose
-        // main thread already ran 70 ms frames in a fling on Oct 22. Its
-        // first night there (Oct 25), streaming's p99 was 28 ms.
-        let budget = PerfBudget.limit(local: 50, runner: 100)
-        print("PERF[native] longest stall \(longest) ms; " + PerfBudget.describe(budget, unit: "ms"))
-        #expect(Double(longest) <= budget, "a stall of \(longest) ms")
+        // Its first night on the runner (Oct 25), streaming's p99 was 28 ms.
+        print("PERF[native] longest stall \(longest) ms; " + PerfBudget.describe(Self.budget, unit: "ms"))
+        #expect(Double(longest) <= Self.budget, "a stall of \(longest) ms")
     }
 }
