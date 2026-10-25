@@ -86,7 +86,7 @@ async fn a_phone_starts_its_own_rep() {
 }
 
 /// A member's phone starts its own rep and is refused anyone else's, the
-/// runner's way (`scope-denied`), through the same bridge. Goes red if the
+/// runner's way (`not_yours`, ov-716 rule 3), through the same bridge. Goes red if the
 /// bridge named the wrong handle, or the runner stopped checking.
 #[tokio::test]
 async fn a_members_phone_starts_only_its_own_rep() {
@@ -104,7 +104,7 @@ async fn a_members_phone_starts_only_its_own_rep() {
     let theirs = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string(), "handle": "alice" })).await;
     let refused = theirs.expect_err("Bob starting Alice's rep");
     assert!(
-        matches!(&refused, crate::session::SessionError::Refused { message, .. } if message == "scope denied: host_admin required"),
+        matches!(&refused, crate::session::SessionError::Refused { what, .. } if what == "not_yours"),
         "{refused:?}"
     );
     // Not signed in to Claude yet, where the runner's admins require their
