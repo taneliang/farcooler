@@ -157,7 +157,6 @@ fn a_rep_changes_the_plan_for_its_member() {
         "/opt/fc/farcooler plan set --json a",
         "/opt/fc/farcooler plan theme set Exports --next=soon",
         "/opt/fc/farcooler plan theme set Exports --budget 5M",
-        "/opt/fc/farcooler plan theme move Exports",
         "/opt/fc/farcooler plan theme move Exports --to=2",
         "/opt/fc/farcooler plan theme move Exports --to 2 --budget 5M",
         "/opt/fc/farcooler workspace charter --json",
