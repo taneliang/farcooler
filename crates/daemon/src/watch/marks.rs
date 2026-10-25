@@ -206,6 +206,20 @@ impl Watcher {
         }
     }
 
+    /// The Needs You list's observations as `viewer` reads them (ov-744): a
+    /// member's view of each pane someone's look is written down for, so the
+    /// owner's look at a member's failed turn leaves the item on their list,
+    /// and their own look takes it off. The owner, a released device and a
+    /// runner with no members read the runner's own, untouched.
+    pub fn observed_as(&self, viewer: &Person, observed: &mut HashMap<Uuid, crate::needs_you::Observation>) {
+        let Person::Member(handle) = viewer else { return };
+        for (pane, o) in observed.iter_mut().filter(|(pane, _)| self.seen.any(**pane)) {
+            let (activity, since) = self.seen.view(handle, *pane, o.activity, Some(o.state_since));
+            o.activity = activity;
+            o.state_since = since.unwrap_or(o.state_since);
+        }
+    }
+
     /// Whether a pane may read differently for some person: only once a
     /// look at it is written down. Until then nobody need be looked up.
     pub fn seen_any(&self, terminal: Uuid) -> bool {

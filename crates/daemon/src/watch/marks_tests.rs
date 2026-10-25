@@ -378,3 +378,37 @@ async fn the_looks_at_a_pane_go_when_its_turn_or_the_pane_does() {
     assert_ne!(t.watcher.activity(moves).await.0, DONE, "a shell's next sample moves it off Done");
     assert!(!t.watcher.seen_any(moves), "and a turn that's over takes its looks");
 }
+
+/// The ids on `rpc`'s Needs You list.
+async fn needs_you(rpc: &RpcFactory) -> Vec<String> {
+    match call(rpc, Request { method: "needs_you.list".into(), ..Default::default() }).await {
+        Some(result::Value::NeedsYouList(l)) => l.items.into_iter().map(|i| i.id).collect(),
+        other => panic!("wrong result: {other:?}"),
+    }
+}
+
+/// ov-744 (1): the owner opening Bob's pane after its turn failed takes the
+/// item off the owner's Needs You, not Bob's or Carol's; Bob's own look takes
+/// it off his.
+#[tokio::test]
+async fn the_owners_look_at_a_failed_turn_leaves_it_on_a_members_list() {
+    let t = team().await;
+    let login_id = t.svc.store.ensure_member_login("bob").unwrap();
+    let login = TerminalLogin { handle: "bob".into(), login_id, config_dir: "/r/claude/bob".into(), shared: false };
+    t.svc.store.set_terminal_login(t.pane, &login).unwrap();
+    let failed = crate::needs_you::Observation { turn_failed: true, ..done_since(now_millis() - 5_000) };
+    t.watcher.observe_for_tests(t.pane, failed).await;
+    let item = format!("blocked:{}", t.pane);
+    for rpc in [&t.owner, &t.bob, &t.carol] {
+        assert_eq!(needs_you(rpc).await, [item.clone()]);
+    }
+
+    call(&t.owner, seen(t.pane)).await;
+    assert_eq!(needs_you(&t.owner).await, Vec::<String>::new(), "the owner has seen it");
+    assert_eq!(needs_you(&t.bob).await, [item.clone()], "Bob hasn't");
+    assert_eq!(needs_you(&t.carol).await, [item.clone()], "nor Carol");
+
+    call(&t.bob, seen(t.pane)).await;
+    assert_eq!(needs_you(&t.bob).await, Vec::<String>::new(), "Bob's own look");
+    assert_eq!(needs_you(&t.carol).await, [item], "isn't Carol's");
+}
