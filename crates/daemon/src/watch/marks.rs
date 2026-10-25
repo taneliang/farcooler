@@ -189,6 +189,36 @@ impl Watcher {
         self.seen.any(terminal)
     }
 
+    /// The person rows about `panes` are read as: `viewer`, asked at most
+    /// once, and only when a look at one of them is written down. On a runner
+    /// with no members nothing ever is (`mark_seen` writes the owner's look
+    /// down only when there are members), so nobody is looked up and every
+    /// row is the runner's own. A person the store can't place reads the
+    /// runner's rows, as a released device does.
+    pub fn viewer_for(
+        &self,
+        panes: impl IntoIterator<Item = Uuid>,
+        viewer: impl FnOnce() -> farcooler_core::Result<Person>,
+    ) -> Person {
+        match panes.into_iter().any(|pane| self.seen.any(pane)) {
+            true => viewer().unwrap_or(Person::Released),
+            false => Person::Owner,
+        }
+    }
+
+    /// `event` as `viewer` reads it: a `terminal_changed` row reshaped for a
+    /// member (`shape_for`), every other event as it is. `viewer` is asked
+    /// only for a pane someone's look is written down for.
+    pub fn shape_event(&self, mut event: pb::Event, viewer: impl FnOnce() -> farcooler_core::Result<Person>) -> pb::Event {
+        if let Some(pb::event::Payload::TerminalChanged(row)) = event.payload.as_mut()
+            && let Some(id) = crate::wire::parse_id(&row.id)
+        {
+            let person = self.viewer_for([id], viewer);
+            self.shape_for(&person, row);
+        }
+        event
+    }
+
     /// A pane row in an event, as `person` reads it (`as_seen_by`), so the
     /// `terminal_changed` the owner's look announces doesn't end a member's
     /// `Done`, and the one a turn ending announces says `Idle` to a member

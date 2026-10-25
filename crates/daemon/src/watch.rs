@@ -3757,7 +3757,9 @@ impl Watcher {
         }
         let done = std::mem::replace(&mut observed.state_since, now_millis());
         observed.activity = next;
-        self.owner_cleared(terminal, done, observed.state_since);
+        if self.service.store.any_members().unwrap_or(true) {
+            self.owner_cleared(terminal, done, observed.state_since); // only a member reads it (`marks`)
+        }
         let snapshot = observed.clone();
         drop(state);
         // A failed turn, seen, is no longer an item.

@@ -282,3 +282,39 @@ async fn a_members_review_is_theirs() {
     assert_eq!(crate::review_ops::waiting(&t.svc).await, Some(0));
     assert_eq!(inbox(&t.carol, wt.id).await, Some(true), "the owner's review isn't Carol's");
 }
+
+fn done_since(at: i64) -> crate::needs_you::Observation {
+    crate::needs_you::Observation {
+        activity: DONE,
+        state_since: at,
+        blocked_question: None,
+        turn_failed: false,
+        command: "claude".into(),
+        trust_prompt: false,
+        trust_folder: None,
+        not_started: None,
+    }
+}
+
+/// ov-740 review F1: a runner with no members looks nobody up for a pane's
+/// rows, even after the owner opened it from their phone: the owner's look
+/// is written down only for a member to read.
+#[tokio::test]
+async fn a_runner_with_no_members_looks_nobody_up() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let checkout = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
+    let pane = svc.store.create_terminal_for_test(checkout.id, workspace);
+    let watcher = Watcher::new(svc.clone());
+    let peer = Peer { client_id: Some("phone-o".into()), scope: Scope::Control };
+    let phone = RpcFactory::new(svc.clone(), watcher.clone(), Arc::new(tokio::sync::Notify::new()), peer);
+    watcher.observe_for_tests(pane, done_since(now_millis() - 5_000)).await;
+
+    call(&phone, seen(pane)).await;
+    assert_eq!(watcher.activity(pane).await.0, IDLE, "the owner's look ends Done");
+    let no_lookup = || -> farcooler_core::Result<Person> { panic!("a person looked up on a runner with no members") };
+    assert_eq!(watcher.viewer_for([pane], no_lookup), Person::Owner);
+    let row = row(&phone, pane).await;
+    let event = Event { payload: Some(event::Payload::TerminalChanged(row.clone())), ..Event::default() };
+    assert_eq!(watcher.shape_event(event.clone(), no_lookup), event, "the row goes as it is");
+}

@@ -260,17 +260,10 @@ impl Handler for RpcFactory {
     }
 
     /// A pane's row as this connection's person reads it (ov-740,
-    /// `Watcher::shape_for`). Nobody is looked up for a pane nobody's look
-    /// is written down for, which is every pane on a runner with no members.
-    fn shape(&self, mut event: farcooler_protocol::v1::Event) -> farcooler_protocol::v1::Event {
-        use farcooler_protocol::v1::event::Payload;
-        if let Some(Payload::TerminalChanged(row)) = event.payload.as_mut()
-            && wire::parse_id(&row.id).is_some_and(|id| self.watcher.seen_any(id))
-            && let Ok(person) = crate::people::person_of(&self.service.store, &self.peer)
-        {
-            self.watcher.shape_for(&person, row);
-        }
-        event
+    /// `Watcher::shape_event`). Nobody is looked up for a pane nobody's look
+    /// is written down for, which on a runner with no members is every pane.
+    fn shape(&self, event: farcooler_protocol::v1::Event) -> farcooler_protocol::v1::Event {
+        self.watcher.shape_event(event, || crate::people::person_of(&self.service.store, &self.peer))
     }
 
     /// This connection's own channel, taken once. See the field.
@@ -1044,12 +1037,16 @@ impl Rpc {
                 let filter = req.target_resource_id.as_deref().and_then(wire::parse_id);
                 let mut items = Vec::new();
                 let seen = svc.claude_logins_seen();
-                for view in svc.fleet().await? {
+                let fleet = svc.fleet().await?;
+                // Whose rows these are, looked up once and only if needed (ov-740).
+                let panes = fleet.iter().flat_map(|v| v.terminals.iter().map(|t| t.terminal.id));
+                let person = self.watcher.viewer_for(panes, || crate::people::person_of(&svc.store, &self.peer));
+                for view in fleet {
                     if filter.is_some_and(|id| id != view.worktree.id) {
                         continue;
                     }
                     for terminal in &view.terminals {
-                        items.push(self.with_activity(terminal, crate::claude_login_wire::Logins::List(&seen)).await);
+                        items.push(self.with_activity(terminal, crate::claude_login_wire::Logins::List(&seen), &person).await);
                     }
                 }
                 // The fleet trace: every ring added together at one width.
@@ -2268,7 +2265,8 @@ impl Rpc {
     async fn terminal_result(&self, id: Uuid) -> Result<result::Value> {
         for view in self.service.fleet().await? {
             if let Some(t) = view.terminals.iter().find(|t| t.terminal.id == id) {
-                return Ok(result::Value::Terminal(self.with_activity(t, crate::claude_login_wire::Logins::One).await));
+                let person = self.watcher.viewer_for([id], || crate::people::person_of(&self.service.store, &self.peer));
+                return Ok(result::Value::Terminal(self.with_activity(t, crate::claude_login_wire::Logins::One, &person).await));
             }
         }
         Err(DomainError::NotFound)
@@ -2280,18 +2278,14 @@ impl Rpc {
     /// reply cannot disagree about whether its agent is waiting for you.
     async fn with_activity(
         &self,
-        view: &crate::service::TerminalView, logins: crate::claude_login_wire::Logins<'_>,
+        view: &crate::service::TerminalView, logins: crate::claude_login_wire::Logins<'_>, person: &crate::people::Person,
     ) -> farcooler_protocol::v1::Terminal {
         let mut message = wire::terminal_with_agent_state(view, self.service.agents());
         // The runner's answers, as `announce` makes them, so a list and an event agree.
         crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
         self.service.stamp_claude_login(logins, &view.terminal, &mut message);
-        // As this caller reads it: a member's own look ends their `Done` (ov-740).
-        let person = match self.watcher.seen_any(view.terminal.id) {
-            true => crate::people::person_of(&self.service.store, &self.peer).unwrap_or(crate::people::Person::Released),
-            false => crate::people::Person::Owner,
-        };
-        let (activity, state_since, turn_started_at) = self.watcher.activity_for(&person, view.terminal.id).await;
+        // As `person` reads it: a member's own look ends their `Done` (ov-740).
+        let (activity, state_since, turn_started_at) = self.watcher.activity_for(person, view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = state_since.map(wire::timestamp);
         message.turn_started_at = turn_started_at.map(wire::timestamp);
