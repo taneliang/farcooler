@@ -314,3 +314,53 @@ async fn a_rep_keeps_nothing_and_starts_no_train() {
     }
     assert_eq!(r.svc.store.ruling(ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing kept");
 }
+
+/// A rep moves no lane that has reached landing (rereview N1): its member's
+/// phone is refused that, so the rep, through `Rpc` from its pane, is
+/// refused dropping a lane the orchestrator moved to landing, which would
+/// take it off its train. A lane short of landing it still drops.
+#[tokio::test]
+async fn a_rep_drops_no_lane_that_reached_landing() {
+    use pb::LaneState as S;
+    let r = runner().await;
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let local = factory(&r.svc, None, Scope::HostAdmin);
+    let own = format!("agent:{}", r.agent.id);
+    let lane = |name: &str| {
+        let task = r.svc.store.create_task(r.workspace, &format!("Export: {name}"), Actor::Manager).unwrap().id;
+        Request {
+            method: "lane.create".into(),
+            payload: Some(request::Payload::LaneCreate(pb::LaneCreate {
+                workspace_id: id_bytes(r.workspace),
+                name: name.into(),
+                branch: name.into(),
+                cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
+                actor: "manager".into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    };
+    let to = |id: &[u8], state: S, actor: &str| Request {
+        method: "lane.update".into(),
+        payload: Some(request::Payload::LaneUpdate(pb::LaneUpdate {
+            lane_id: id.to_vec().into(),
+            state: Some(state as i32),
+            actor: actor.into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    let Ok(Some(result::Value::Lane(landing))) = call(&local, lane("invoices")).await else { panic!("a lane") };
+    let Ok(Some(result::Value::Lane(other))) = call(&local, lane("receipts")).await else { panic!("a lane") };
+    for state in [S::Building, S::Review, S::Landing] {
+        call(&local, to(&landing.id, state, "manager")).await.unwrap_or_else(|e| panic!("{state:?}: {e}"));
+    }
+    assert_eq!(call(&in_rep, to(&landing.id, S::Dropped, &own)).await.err().as_deref(), Some(NOT_YOURS), "a landing lane");
+    let still = r.svc.store.lane(Uuid::from_slice(&landing.id).unwrap()).unwrap().state;
+    assert_eq!(still, farcooler_store::plan::LaneState::Landing, "still landing");
+    call(&in_rep, to(&other.id, S::Dropped, &own)).await.expect("a queued lane it drops");
+}

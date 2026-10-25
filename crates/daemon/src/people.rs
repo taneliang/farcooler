@@ -387,6 +387,13 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         tracing::info!(method = %req.method, "refused: a member's device writing the orchestrator's record");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
+    // A rep's member is refused that from their own device, so the rep is
+    // too: its `--state dropped` would take a landing lane off its train
+    // (rereview N1). `rep_plan_change` holds the rest of the record.
+    if caller_rep.is_some() && moves_a_landing_lane(store, req)? {
+        tracing::info!(method = %req.method, "refused: a rep moving a lane that reached landing");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
     if peer.client_id.is_some() && touches_the_owners_device(store, req)? && person_of(store, peer)?.is_someone_else() {
         tracing::info!(method = %req.method, "refused: a member's device binding or revoking the owner's");
         return Err(DomainError::NotYours { what: "not_yours" });
