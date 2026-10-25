@@ -30,6 +30,20 @@ name = "farcooler-relay"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
 
+# The Cloudflare account that owns every D1 database below.
+#
+# Pinned so wrangler never has to choose one. A login that can see two accounts
+# (the owner's can) makes a non-interactive run fail with "More than one account
+# available but unable to select one", and `d1 execute --remote` and the deploy
+# both hit that. An account id is not a secret; it sits in every dashboard URL.
+#
+# Inherited by every [env.*] block (wrangler reads `account_id` through
+# `inheritable`, checked against the pinned 3.114.17), so one line covers all four
+# relays. It takes precedence over CLOUDFLARE_ACCOUNT_ID: a value that disagrees
+# with this one is ignored, not reported. relay.yml refuses a run where the
+# secret is set to something else, so the two cannot drift silently.
+account_id = "d72ad6117724860cb086e8a92f9151f2"
+
 # The hostname every stable client is compiled to reach.
 #
 # In the file rather than bound in the dashboard, which is where it lived

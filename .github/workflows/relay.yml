@@ -144,6 +144,23 @@ jobs:
       # been touched yet.
       - run: npm test
 
+      # The account the deploy writes to is pinned in wrangler.toml, and that pin
+      # wins over CLOUDFLARE_ACCOUNT_ID: wrangler reads `config.account_id` first
+      # and consults the environment only when the file names none. So a secret
+      # that disagreed would be ignored without a word. Refuse the run instead,
+      # before anything is migrated. The values are not printed.
+      - name: Check the pinned account matches the secret
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^account_id = "\([0-9a-f]*\)"$/\1/p' services/relay/wrangler.toml)"
+          if [ -z "$pinned" ]; then echo "services/relay/wrangler.toml pins no account_id" >&2; exit 1; fi
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ "$CLOUDFLARE_ACCOUNT_ID" != "$pinned" ]; then
+            echo "CLOUDFLARE_ACCOUNT_ID differs from the account_id pinned in services/relay/wrangler.toml" >&2
+            exit 1
+          fi
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       # Which relay this run is for.
       #
       # A push to main is always canary — `inputs.environment` is empty for a push
