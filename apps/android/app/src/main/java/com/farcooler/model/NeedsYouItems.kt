@@ -158,6 +158,26 @@ data class NeedsYouItem(
     /** Whose an Everyone Else row says it is: a member's name, else "Owner". Null for yours and nobody's. */
     val othersName: String?
         get() = concern?.takeIf { !it.yours }?.let { it.name.ifEmpty { "Owner" } }
+
+    /**
+     * Who this item is for, as its row says it (ov-737): "You" for the reader's own, a member's name or "Owner"
+     * for someone else's, "Anyone" for nobody's on a runner with a team ([team]); null on a runner without one,
+     * where there is nothing to tell apart. AgentKit's `NeedsYouItem.whose`.
+     */
+    fun whose(team: Boolean): String? =
+        concern?.let { if (it.yours) YOURS_LABEL else it.name.ifEmpty { "Owner" } } ?: ANYONE_LABEL.takeIf { team }
+
+    /**
+     * The question asked before an answer goes to someone else's item; null for the reader's own and nobody's,
+     * which answer with no extra step. AgentKit's `answerForOthersPrompt`.
+     */
+    val answerForOthersPrompt: String?
+        get() = concern?.takeIf { !it.yours }?.let { "This is for ${it.name.ifEmpty { "the owner" }}. Answer for them?" }
+
+    companion object {
+        const val YOURS_LABEL = "You"
+        const val ANYONE_LABEL = "Anyone"
+    }
 }
 
 /** An item and the runner it came from, which is half its identity: ids are minted per daemon. */

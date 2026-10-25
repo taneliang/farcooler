@@ -361,6 +361,8 @@ internal fun NeedsYouItemRow(
     var sending by remember(item.id) { mutableStateOf<String?>(null) }
     var refusal by remember(item.id) { mutableStateOf<String?>(null) }
     var writing by remember(item.id) { mutableStateOf(false) }
+    // An answer to someone else's item, held until the person confirms it (ov-737).
+    var confirming by remember(item.id) { mutableStateOf<(() -> Unit)?>(null) }
     val agent = item.terminal?.label?.ifBlank { null } ?: "the agent"
 
     fun send(id: String, answer: suspend (Connection) -> Unit) {
@@ -377,6 +379,11 @@ internal fun NeedsYouItemRow(
                 sending = null
             }
         }
+    }
+
+    /** Run [step] now, or after the person confirms when the item is for someone else. */
+    fun confirmed(step: () -> Unit) {
+        if (item.answerForOthersPrompt == null) step() else confirming = step
     }
 
     fun answer(id: String, body: String) {
@@ -438,14 +445,12 @@ internal fun NeedsYouItemRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // Whose it is, on someone else's (ov-633).
-        item.othersName?.let {
+        // Whose it is (ov-633, ov-737): wraps rather than cutting a long name.
+        row.whose?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.testTag("needs-you-whose"),
             )
         }
@@ -459,11 +464,11 @@ internal fun NeedsYouItemRow(
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
                         } else if (action.primary) {
-                            Button(onClick = { answer(action.id, action.id) }, enabled = sending == null) {
+                            Button(onClick = { confirmed { answer(action.id, action.id) } }, enabled = sending == null) {
                                 Text(action.title.ifBlank { action.id })
                             }
                         } else {
-                            OutlinedButton(onClick = { answer(action.id, action.id) }, enabled = sending == null) {
+                            OutlinedButton(onClick = { confirmed { answer(action.id, action.id) } }, enabled = sending == null) {
                                 Text(
                                     action.title.ifBlank { action.id },
                                     color = if (action.destructive) MaterialTheme.colorScheme.error
@@ -473,7 +478,7 @@ internal fun NeedsYouItemRow(
                         }
                     }
                     is NeedsYouButton.Choose -> DecisionOptions(
-                        button.actions, sending, onAnswer = { answer(it.id, it.id) },
+                        button.actions, sending, onAnswer = { confirmed { answer(it.id, it.id) } },
                     )
                     NeedsYouButton.Write ->
                         if (sending == WRITTEN) {
@@ -481,7 +486,7 @@ internal fun NeedsYouItemRow(
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
                         } else {
-                            OutlinedButton(onClick = { writing = true }, enabled = sending == null) {
+                            OutlinedButton(onClick = { confirmed { writing = true } }, enabled = sending == null) {
                                 Text("Answer")
                             }
                         }
@@ -513,6 +518,23 @@ internal fun NeedsYouItemRow(
             preview = { connection.previewReply(task) },
             send = { text, shown -> connection.sendReply(task, text, shown) },
             onDismiss = { replying = false },
+        )
+    }
+
+    confirming?.let { step ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text(item.answerForOthersPrompt.orEmpty()) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirming = null
+                        step()
+                    },
+                    modifier = Modifier.testTag("needs-you-confirm-${item.id}"),
+                ) { Text("Answer") }
+            },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
         )
     }
 

@@ -165,6 +165,37 @@ class NeedsYouItemsTest {
     }
 
     @Test
+    fun `a row says who an item is for and asks before answering for someone else (ov-737)`() {
+        val bob = NeedsYouConcern("bob", "Bartholomew Okafor-Lindqvist", yours = false)
+        val owner = NeedsYouConcern("", "", yours = false)
+        val mine = NeedsYouConcern("alice", "Alice Chen", yours = true)
+        fun item(concern: NeedsYouConcern?) = NeedsYouItem(id = "x", concern = concern)
+        assertEquals(
+            listOf("You", "Bartholomew Okafor-Lindqvist", "Owner", "Anyone"),
+            listOf(mine, bob, owner, null).map { item(it).whose(team = true) },
+        )
+        assertEquals(null, item(null).whose(team = false), "a runner with no team says nothing")
+        assertEquals(null, item(mine).answerForOthersPrompt)
+        assertEquals(null, item(null).answerForOthersPrompt, "nobody's answers with no extra step")
+        assertEquals("This is for Bartholomew Okafor-Lindqvist. Answer for them?", item(bob).answerForOthersPrompt)
+        assertEquals("This is for the owner. Answer for them?", item(owner).answerForOthersPrompt)
+    }
+
+    @Test
+    fun `only a runner that sent a concern is a team (ov-737)`() {
+        fun runner(host: String, vararg items: NeedsYouItem) =
+            NeedsYouRunner(host, host, RunnerNeedsYou(items.toList()), Fleet(workspaces = emptyList()), emptyList())
+        val bob = NeedsYouConcern("bob", "Bob", yours = false)
+        val rows = NeedsYou.rows(
+            listOf(
+                runner("studio", NeedsYouItem(id = "a", kind = "ask", rank = 1, concern = bob), NeedsYouItem(id = "b", kind = "ask", rank = 2)),
+                runner("laptop", NeedsYouItem(id = "c", kind = "ask", rank = 3)),
+            ),
+        )
+        assertEquals(listOf("Bob", "Anyone", null), rows.map { it.whose })
+    }
+
+    @Test
     fun `two runners merge by rank not by clock`() {
         val merged = NeedsYouItems.merge(fixture())
         // The build box's review began before anything on the studio, by the

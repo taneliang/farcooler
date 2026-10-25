@@ -52,8 +52,13 @@ data class NeedsYouRow(
     val place: String,
     /** The runner's name, only when more than one runner is connected. */
     val runner: String?,
+    /** Whether the item's runner has a team, so a row says who each item is for (ov-737). */
+    val team: Boolean = false,
 ) {
     val item: NeedsYouItem get() = entry.item
+
+    /** Who the row says the item is for, or null on a runner without a team. */
+    val whose: String? get() = item.whose(team)
     val hostId: String get() = entry.hostId
     val key: String get() = entry.key
 }
@@ -113,11 +118,13 @@ object NeedsYou {
     fun rows(runners: List<NeedsYouRunner>): List<NeedsYouRow> {
         val byHost = runners.associateBy { it.hostId }
         val namesRunners = runners.size > 1
-        return NeedsYouItems.merge(runners.associate { it.hostId to shown(it) })
-            .map { entry ->
-                val runner = byHost.getValue(entry.hostId)
-                NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null)
-            }
+        val merged = NeedsYouItems.merge(runners.associate { it.hostId to shown(it) })
+        // A runner with a member puts a concern on each item that has an owner; one without puts none on any.
+        val teams = merged.filter { it.item.concern != null }.map { it.hostId }.toSet()
+        return merged.map { entry ->
+            val runner = byHost.getValue(entry.hostId)
+            NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null, entry.hostId in teams)
+        }
     }
 
     /**
