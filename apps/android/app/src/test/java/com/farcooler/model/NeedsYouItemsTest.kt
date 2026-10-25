@@ -174,9 +174,9 @@ class NeedsYouItemsTest {
             listOf("You", "Bartholomew Okafor-Lindqvist", "Owner", "Anyone"),
             listOf(mine, bob, owner, null).map { item(it).whose(team = true) },
         )
-        assertEquals(null, item(null).whose(team = false), "a runner with no team says nothing")
-        assertEquals(null, item(mine).answerForOthersPrompt)
-        assertEquals(null, item(null).answerForOthersPrompt, "nobody's answers with no extra step")
+        assertNull("a runner with no team says nothing", item(null).whose(team = false))
+        assertNull(item(mine).answerForOthersPrompt)
+        assertNull("nobody's answers with no extra step", item(null).answerForOthersPrompt)
         assertEquals("This is for Bartholomew Okafor-Lindqvist. Answer for them?", item(bob).answerForOthersPrompt)
         assertEquals("This is for the owner. Answer for them?", item(owner).answerForOthersPrompt)
     }
