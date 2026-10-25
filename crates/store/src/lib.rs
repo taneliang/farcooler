@@ -19,6 +19,7 @@ pub mod claude_logins;
 pub mod member_connectors;
 pub mod member_login_policy;
 pub mod board_reads;
+mod member_marks;
 mod compat;
 mod error;
 pub mod landing;

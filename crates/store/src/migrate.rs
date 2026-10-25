@@ -97,6 +97,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::claude_logins::migration_0056_harness_asks, Older::Welcome), // ov-652: two nullable columns on 0053's member_logins (claude_logins.rs says why)
     (crate::member_login_policy::migration_0057_member_login_policy, Older::Welcome), // ov-652: one new table, one defaulted column on 0053's terminal_logins (member_login_policy.rs says why)
     (crate::device_enrollers::migration_0058_device_enrollers, Older::Welcome), // ov-719: one new table (device_enrollers.rs says why)
+    (crate::member_marks::migration_0059_member_marks, Older::Welcome), // ov-740: three new tables (member_marks.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

@@ -12,9 +12,10 @@
 //! `review_stack_parents` is a branch's parent when inference got it wrong.
 
 use farcooler_core::Result;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 use uuid::Uuid;
 
+use crate::board_reads::Reader;
 use crate::error::map_err;
 use crate::models::uuid_blob;
 use crate::store::Store;
@@ -86,40 +87,70 @@ impl Store {
         gate_index: i64,
         now_millis: i64,
     ) -> Result<()> {
+        let mark = ReviewedMark {
+            head_commit: head_commit.to_string(),
+            worktree_digest: worktree_digest.to_string(),
+            gate_head,
+            gate_index,
+            marked_at: now_millis,
+        };
+        self.mark_reviewed_as(Reader::Owner, worktree_id, branch, &mark)
+    }
+
+    /// Write `reader`'s mark on a worktree's branch (ov-740): the owner's in
+    /// `review_reviewed` as always, a member's in `member_marks`' copy of it,
+    /// so a member's review leaves the owner's "changed since you looked"
+    /// alone.
+    pub fn mark_reviewed_as(&self, reader: Reader, worktree_id: Uuid, branch: &str, mark: &ReviewedMark) -> Result<()> {
+        let w = uuid_blob(worktree_id);
         self.conn()
             .execute(
-                "INSERT INTO review_reviewed
-                 (worktree_id, branch, head_commit, worktree_digest, gate_head, gate_index, marked_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(worktree_id, branch) DO UPDATE SET
+                &format!(
+                    "INSERT INTO {}
+                 (worktree_id, branch, head_commit, worktree_digest, gate_head, gate_index, marked_at{})
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7{})
+                 ON CONFLICT(worktree_id, branch{}) DO UPDATE SET
                    head_commit = excluded.head_commit,
                    worktree_digest = excluded.worktree_digest,
                    gate_head = excluded.gate_head,
                    gate_index = excluded.gate_index,
                    marked_at = excluded.marked_at",
-                params![
-                    uuid_blob(worktree_id),
-                    branch,
-                    head_commit,
-                    worktree_digest,
-                    gate_head,
-                    gate_index,
-                    now_millis
-                ],
+                    reviewed_table(reader),
+                    reader.handle_column(),
+                    reader.handle_value(8),
+                    reader.handle_column(),
+                ),
+                params_from_iter(reader.bind(vec![
+                    &w,
+                    &branch,
+                    &mark.head_commit,
+                    &mark.worktree_digest,
+                    &mark.gate_head,
+                    &mark.gate_index,
+                    &mark.marked_at,
+                ])),
             )
             .map_err(map_err)?;
         Ok(())
     }
 
     pub fn reviewed_mark(&self, worktree_id: Uuid, branch: &str) -> Result<Option<ReviewedMark>> {
+        self.reviewed_mark_of(Reader::Owner, worktree_id, branch)
+    }
+
+    /// `reader`'s last mark on a worktree's branch, if they ever made one.
+    pub fn reviewed_mark_of(&self, reader: Reader, worktree_id: Uuid, branch: &str) -> Result<Option<ReviewedMark>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare(
+            .prepare(&format!(
                 "SELECT head_commit, worktree_digest, gate_head, gate_index, marked_at
-                 FROM review_reviewed WHERE worktree_id = ?1 AND branch = ?2",
-            )
+                 FROM {} WHERE worktree_id = ?1 AND branch = ?2{}",
+                reviewed_table(reader),
+                reader.and_handle(3, ""),
+            ))
             .map_err(map_err)?;
-        stmt.query_row(params![uuid_blob(worktree_id), branch], |r| {
+        let w = uuid_blob(worktree_id);
+        stmt.query_row(params_from_iter(reader.bind(vec![&w, &branch])), |r| {
             Ok(ReviewedMark {
                 head_commit: r.get(0)?,
                 worktree_digest: r.get(1)?,
@@ -162,6 +193,14 @@ impl Store {
             )
             .map_err(map_err)?;
         Ok(())
+    }
+}
+
+/// Where `reader`'s review marks live: the owner's where they always have.
+fn reviewed_table(reader: Reader) -> &'static str {
+    match reader {
+        Reader::Owner => "review_reviewed",
+        Reader::Member(_) => "member_review_reviewed",
     }
 }
 
