@@ -3,10 +3,11 @@
 //!
 //! A **ruling** is one such call: what was decided in a line, why in one or
 //! two, what reversing it costs, the cards and the theme it touches, and
-//! where it stands. It starts `standing`; the owner confirms it or has it
-//! reversed by telling the orchestrator. The owner's own mark is Keep
-//! (ov-333): `Confirmed` here, said "kept" everywhere the owner reads it, set
-//! by `set_ruling` and, for every open ruling at once, `keep_all_rulings`.
+//! where it stands. It starts `standing`; a person confirms it or has it
+//! reversed by telling the orchestrator. A person's own mark is Keep (ov-333,
+//! any member's since R-84): `Confirmed` here, said "kept" everywhere it's
+//! read, set by `set_ruling` and, for every open ruling at once,
+//! `keep_all_rulings`.
 //! Reversing is the orchestrator's: it does the work, then marks the ruling
 //! with the commit that did it (`reversed_sha`, migration 0030).
 //!
