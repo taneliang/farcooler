@@ -769,5 +769,18 @@ async fn a_members_own_pane_writes_their_marks_and_hears_their_reads() {
     assert!(!watcher.watched_by_for_tests(None, r.agent.id), "not the owner's");
     assert_eq!(refused(&mac, watching(vec![r.agent.id])).await, None);
     assert!(watcher.watched_by_for_tests(None, r.agent.id) && watcher.watched_by_for_tests(Some("bob"), r.agent.id), "each keeps their own claim");
+
+    // Review 747 F4: once Bob is removed, his pane is nobody's. It claims no
+    // screen, the owner's least of all, and writes no marks.
+    r.svc.store.remove_member("bob").unwrap();
+    let other = r.orchestrator.id;
+    assert_eq!(refused(&in_bobs, watching(vec![other])).await.as_deref(), Some(NOT_YOURS), "a removed member's pane");
+    assert!(!watcher.watched_by_for_tests(None, other), "and the owner's screen isn't claimed for it");
+    let mark = Request {
+        method: "workspace.mark_read".into(),
+        payload: Some(request::Payload::WorkspaceMarkRead(pb::WorkspaceMarkRead { workspace_id: id_bytes(r.workspace), floor_ms: Some(floor + 60_000), opened: Vec::new() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_bobs, mark).await.as_deref(), Some(NOT_YOURS), "nor marks a board read");
     r.svc.stop_terminal(shell.id).await.expect("stopped");
 }
