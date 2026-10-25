@@ -5,8 +5,10 @@
 //! says so afterward. When a person's answer lands on a task waiting for a
 //! decision that concerns someone else, the note carries `extra.for`, the
 //! person the card was for: `{"handle": "bob", "name": "Bob Okafor"}`, both
-//! empty for the runner's owner. The board then reads "Alice answered for
-//! Bob".
+//! empty for the runner's owner. The board's line for the note then reads
+//! "Answer · Alice Chen for Bob Okafor · 4m ago": the kind label says it is an
+//! answer, and the byline adds who it was for ("for You" when that is the
+//! reader).
 //!
 //! Written here, from the same rule that files the item in Needs You
 //! (`needs_you::concern`), never taken from a caller: a `for` in a request's
