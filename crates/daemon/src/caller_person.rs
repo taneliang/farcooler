@@ -1,7 +1,10 @@
 //! Whose a caller is, for what is kept per person (ov-747): the one rule
 //! for Needs You (`needs_you.list` and the notices a connection is sent),
-//! the read marks a read carries (`task.list`, `changes.inbox`,
-//! `terminal.list`), and who a held ask's answer was (`terminal.agent_answer`).
+//! the read marks a call reads (`task.list`, `changes.inbox`,
+//! `terminal.list`, a pane's row and a board's read state in events) and
+//! writes (`terminal.seen`, `terminal.watching`, `workspace.mark_read`,
+//! `changes.mark_read`), and who a held ask's answer was
+//! (`terminal.agent_answer`).
 //!
 //! **The rule.**
 //! - A remote device is its person (`people::person_of`): a member's phone
@@ -17,23 +20,27 @@
 //!     socket always was.
 //!
 //! So Bob typing `farcooler terminal agent-answer` in his own shell pane is
-//! Bob, as his rep reads Needs You and his marks as Bob. A pane
-//! is whose login it runs on, not whose keyboard: the owner typing in Bob's
-//! pane from the Mac app is Bob there too.
+//! Bob, as his rep reads Needs You and his marks as Bob. A pane is whose
+//! login it runs on, not whose keyboard: the owner typing in Bob's pane
+//! from the Mac app is Bob there too.
 //!
 //! **Cost.** The walk from a pid to its pane reads the whole process table
 //! (`people::pane_of`). It runs only when some pane could be someone else's,
 //! a rep or a pane on a member's login (two `EXISTS` reads), so a runner
 //! with neither walks nothing and looks no one up. And at most once per
 //! connection: `pane` is the connection's own (`RpcFactory`), since its
-//! caller's pid is fixed for its life. Whose that pane is is read afresh on
-//! each call, so a rep unbound or a member removed counts at once. A process
-//! that leaves its pane after the first call keeps that pane's person on
-//! that connection.
+//! caller's pid is fixed for its life. Only a pane found is kept: a walk
+//! that found none (in no pane, or an inventory not yet read) is made again
+//! on the next call, so a caller is never kept as the owner for having
+//! asked too early. Whose that pane is is read afresh on each call, so a
+//! rep unbound or a member removed counts at once. A process that leaves
+//! its pane after the first call keeps that pane's person on that
+//! connection.
 //!
-//! What this decides is read and attributed, never permitted: whether a
-//! caller may do a thing is `people::gate` and `caller_seat`, and a mark is
-//! written by the device's person (`people::reader_of`).
+//! What this decides is whose marks and whose answer, never what is
+//! permitted: whether a caller may do a thing is `people::gate` and
+//! `caller_seat`. A released person's writes are refused or do nothing
+//! (`people::reader_of`, `Watcher::mark_seen_by`).
 
 use std::sync::OnceLock;
 
@@ -46,8 +53,8 @@ use crate::people::{Person, person_of};
 use crate::service::Service;
 
 /// Whose `peer`, a local caller at `caller_pid`, is (the module's rule).
-/// `pane` holds the connection's walk once made.
-pub fn caller_person(svc: &Service, peer: &Peer, caller_pid: Option<i32>, pane: &OnceLock<Option<Uuid>>) -> Result<Person> {
+/// `pane` holds the pane the connection's walk found, once it found one.
+pub fn caller_person(svc: &Service, peer: &Peer, caller_pid: Option<i32>, pane: &OnceLock<Uuid>) -> Result<Person> {
     caller_person_with(svc, peer, caller_pid, pane, |pid| crate::people::pane_of(svc, pid))
 }
 
@@ -56,7 +63,7 @@ pub(crate) fn caller_person_with(
     svc: &Service,
     peer: &Peer,
     caller_pid: Option<i32>,
-    pane: &OnceLock<Option<Uuid>>,
+    pane: &OnceLock<Uuid>,
     walk: impl FnOnce(i32) -> Option<Uuid>,
 ) -> Result<Person> {
     if peer.client_id.is_some() {
@@ -66,8 +73,15 @@ pub(crate) fn caller_person_with(
     if pane.get().is_none() && !svc.store.any_reps()? && !svc.store.any_terminal_login()? {
         return Ok(Person::Owner);
     }
-    match *pane.get_or_init(|| walk(pid)) {
-        Some(pane) => pane_person(svc, pane),
+    // Only a pane found is kept: none found is asked again next time.
+    let found = match pane.get() {
+        Some(kept) => Some(*kept),
+        None => walk(pid).inspect(|found| {
+            let _ = pane.set(*found);
+        }),
+    };
+    match found {
+        Some(found) => pane_person(svc, found),
         None => Ok(Person::Owner),
     }
 }

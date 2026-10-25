@@ -23,7 +23,7 @@ pub(crate) async fn dispatch(
     svc: &Service,
     watcher: &Watcher,
     peer: &farcooler_transport::Peer,
-    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Option<uuid::Uuid>>),
+    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<uuid::Uuid>),
     req: Request,
 ) -> Result<result::Value> {
     match req.method.as_str() {

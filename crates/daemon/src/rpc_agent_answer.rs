@@ -35,7 +35,7 @@ pub(crate) async fn answer(
     svc: &Service,
     watcher: &Watcher,
     peer: &Peer,
-    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Option<Uuid>>),
+    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Uuid>),
     p: AgentAnswer,
 ) -> Result<Uuid> {
     let id = crate::wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
@@ -91,7 +91,7 @@ pub(crate) async fn answer(
 /// (`caller_person`, ov-747), so Bob answering from the CLI in his own pane
 /// is Bob, not the owner the local socket otherwise is. A store that can't
 /// say marks nobody's, rather than guessing the owner.
-fn answerer(svc: &Service, peer: &Peer, caller_pid: Option<i32>, caller_pane: &std::sync::OnceLock<Option<Uuid>>) -> crate::people::Person {
+fn answerer(svc: &Service, peer: &Peer, caller_pid: Option<i32>, caller_pane: &std::sync::OnceLock<Uuid>) -> crate::people::Person {
     crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane).unwrap_or(crate::people::Person::Released)
 }
 

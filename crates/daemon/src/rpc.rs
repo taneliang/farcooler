@@ -76,8 +76,8 @@ pub struct Rpc {
     stop: Arc<tokio::sync::Notify>,
     /// The local caller's pid, as the kernel says (`RpcFactory::with_caller_pid`).
     caller_pid: Option<i32>,
-    /// The pane that pid runs in, once walked (`RpcFactory::caller_pane`).
-    caller_pane: Arc<std::sync::OnceLock<Option<Uuid>>>,
+    /// The pane that pid runs in, once found (`RpcFactory::caller_pane`).
+    caller_pane: Arc<std::sync::OnceLock<Uuid>>,
 }
 
 impl Rpc {
@@ -174,11 +174,11 @@ pub struct RpcFactory {
     attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     /// The connecting process's pid, for a local caller (ov-494).
     caller_pid: Option<i32>,
-    /// The pane `caller_pid` runs in, walked at most once for this
-    /// connection, by the first call that asks whose it is
-    /// (`caller_person`, ov-744, ov-747). Shared by the clones, which are one
-    /// connection; new with a new pid.
-    caller_pane: Arc<std::sync::OnceLock<Option<Uuid>>>,
+    /// The pane `caller_pid` runs in, kept once a call that asks whose it is
+    /// finds it (`caller_person`, ov-744, ov-747); a walk that finds none is
+    /// made again. Shared by the clones, which are one connection; new with
+    /// a new pid.
+    caller_pane: Arc<std::sync::OnceLock<Uuid>>,
 }
 
 impl RpcFactory {
@@ -190,9 +190,9 @@ impl RpcFactory {
         self
     }
 
-    /// The pane this connection's caller was found in, once walked.
+    /// The pane this connection's caller was found in, once found.
     #[cfg(test)]
-    pub(crate) fn caller_pane_for_tests(&self) -> Option<Option<Uuid>> {
+    pub(crate) fn caller_pane_for_tests(&self) -> Option<Uuid> {
         self.caller_pane.get().copied()
     }
 

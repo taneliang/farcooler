@@ -586,7 +586,7 @@ async fn a_reps_pane_reads_its_members_marks_and_writes_none() {
     let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
 
     assert_eq!(board_reads(&in_rep, r.workspace).await, ("bob".to_string(), floor), "the rep reads Bob's");
-    assert_eq!(in_rep.caller_pane_for_tests(), Some(Some(r.agent.id)), "walked once, kept for the connection");
+    assert_eq!(in_rep.caller_pane_for_tests(), Some(r.agent.id), "walked once, kept for the connection");
     assert_eq!(elsewhere.caller_pane_for_tests(), None, "not walked before it reads");
     let (whose, owners) = board_reads(&elsewhere, r.workspace).await;
     assert_eq!(whose, "", "anyone else on the socket reads the owner's");

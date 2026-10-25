@@ -84,6 +84,26 @@ async fn a_local_caller_is_whose_its_pane_is() {
     assert_eq!(in_pane(&svc, Some(carols)), Person::Released, "a removed member's pane is nobody's");
 }
 
+/// Review 747 F2: a walk that finds no pane (in none, or an inventory not
+/// yet read just after a restart) isn't kept as the owner: the next call
+/// walks again, and keeps the pane once found.
+#[tokio::test]
+async fn a_walk_that_finds_no_pane_is_made_again() {
+    let (_dir, svc, pane) = a_runner().await;
+    svc.store.set_member("bob", "Bob", &[]).unwrap();
+    let bobs = pane();
+    on_login(&svc, bobs, "bob");
+    let walked = OnceLock::new();
+    let walks = std::sync::atomic::AtomicUsize::new(0);
+    let walk = |_: i32| (walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0).then_some(bobs);
+    assert_eq!(caller_person_with(&svc, &LOCAL, Some(4242), &walked, walk).unwrap(), Person::Owner, "not found yet");
+    assert_eq!(walked.get(), None, "nothing kept");
+    for _ in 0..2 {
+        assert_eq!(caller_person_with(&svc, &LOCAL, Some(4242), &walked, walk).unwrap(), Person::Member("bob".into()), "found");
+    }
+    assert_eq!(walks.load(std::sync::atomic::Ordering::SeqCst), 2, "walked again once, then kept");
+}
+
 /// A pane on a member's login is theirs on a runner with no rep: the check
 /// before the walk counts their panes too.
 #[tokio::test]
