@@ -922,6 +922,9 @@ WATCH_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
     # The items `FleetSnapshot.needsYou` holds, which the watch lists first.
     "NeedsYou.swift",
+    # Whose each of them is for, and the question before answering for
+    # someone else (ov-739): the row's label and the confirm.
+    "NeedsYouWhose.swift",
     "SnapshotStore.swift",
     # The runner heartbeat (ov-71): the watch app keeps the pulse credential
     # the phone sends in its context, and asks the relay which runners went
@@ -1264,6 +1267,9 @@ activity_build_ids = {
         # The items `FleetSnapshot.needsYou` holds. Every target that compiles
         # `FleetSnapshot.swift` compiles this beside it; it's plain Foundation.
         "NeedsYou.swift",
+        # Whose an agent's ask is, so a card leaves its buttons off for
+        # someone else's (ov-739). `GlancePermissions.swift` reads it.
+        "NeedsYouWhose.swift",
         "SnapshotStore.swift",
         # Which runners the relay says are still beating, and the credential
         # to ask with. The widget's footer names a quiet one (ov-53).
