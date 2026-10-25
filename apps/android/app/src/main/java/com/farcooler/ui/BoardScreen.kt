@@ -842,7 +842,11 @@ fun TaskDetailScreen(
                 if (asking != null) {
                     item(key = "asking") {
                         NeedsYouItemRow(
-                            row = NeedsYouRow(RunnerNeedsYouItem(connection.host.id, asking), place = "", runner = null),
+                            row = NeedsYouRow(
+                                RunnerNeedsYouItem(connection.host.id, asking), place = "", runner = null,
+                                // The decision says whose it is, and asks before answering for someone else (ov-737).
+                                team = needsYou?.items.orEmpty().any { it.concern != null },
+                            ),
                             connection = connection,
                             showPlace = false,
                             // Open from here is the agent it's about, if any: the
