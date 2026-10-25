@@ -115,6 +115,12 @@ impl Rpc {
     fn who(&self) -> &str {
         self.peer.client_id.as_deref().unwrap_or("-")
     }
+
+    /// Whose this call is (`caller_person`, ov-747): its device's person, or
+    /// on the local socket its pane's, walked once for the connection.
+    fn caller(&self) -> Result<crate::people::Person> {
+        crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)
+    }
 }
 
 /// One `Rpc` per request, over one shared `Service`, for one connection.
@@ -271,9 +277,9 @@ impl Handler for RpcFactory {
     /// `notice_audience`): this connection's person as Needs You reads it
     /// (`caller_person`, walked once for the connection).
     /// And a board's read state only to the person whose it is (ov-740,
-    /// `admits_reads`), by device, as `workspace.mark_read` files it.
+    /// `admits_reads`), by the same rule `workspace.mark_read` files it by.
     fn admits(&self, event: &farcooler_protocol::v1::Event) -> bool {
-        crate::notice_audience::admits_reads(event, || crate::people::person_of(&self.service.store, &self.peer))
+        crate::notice_audience::admits_reads(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
             && crate::notice_audience::admits_event(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
     }
 
@@ -281,7 +287,7 @@ impl Handler for RpcFactory {
     /// `Watcher::shape_event`). Nobody is looked up for a pane nobody's look
     /// is written down for, which on a runner with no members is every pane.
     fn shape(&self, event: farcooler_protocol::v1::Event) -> farcooler_protocol::v1::Event {
-        self.watcher.shape_event(event, || crate::people::person_of(&self.service.store, &self.peer))
+        self.watcher.shape_event(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
     }
 
     /// This connection's own channel, taken once. See the field.
@@ -1615,10 +1621,11 @@ impl Rpc {
             // idle-and-unseen. Deliberately its own method rather than a side
             // effect of listing: appearing in a list is not reading it, and
             // clearing a notification nobody read is worse than not sending one.
-            // A person's look (ov-740): a member's ends `Done` for them alone.
+            // A person's look (ov-740): a member's ends `Done` for them alone,
+            // from their device or their own pane (ov-747).
             "terminal.seen" => {
                 let id = Self::target(&req)?;
-                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                let person = self.caller()?;
                 self.watcher.mark_seen_by(&person, id).await;
                 self.terminal_result(id).await
             }
@@ -1652,12 +1659,21 @@ impl Rpc {
                 let terminals: Vec<Uuid> =
                     p.terminal_ids.iter().filter_map(|id| wire::parse_id(id)).collect();
                 // Whose screen it is (ov-740): a member's silences no push of the
-                // owner's. A released device's call is refused before here.
-                let member = match crate::people::person_of(&svc.store, &self.peer)? {
+                // owner's. A released device's call is refused before here, and
+                // a pane on a removed member's login is refused here (ov-747).
+                let member = match self.caller()? {
                     crate::people::Person::Member(handle) => Some(handle),
-                    _ => None,
+                    crate::people::Person::Owner => None,
+                    crate::people::Person::Released => return Err(DomainError::NotYours { what: "not_yours" }),
                 };
-                self.watcher.report_watching(self.who(), member.as_deref(), terminals);
+                // The local socket is one client to `report_watching`; a
+                // member's pane on it claims apart, so it never replaces the
+                // owner's Mac's claim, nor the Mac's theirs.
+                let client = match (&self.peer.client_id, &member) {
+                    (None, Some(handle)) => format!("-:{handle}"),
+                    _ => self.who().to_string(),
+                };
+                self.watcher.report_watching(&client, member.as_deref(), terminals);
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
@@ -1825,7 +1841,7 @@ impl Rpc {
                 let Some(request::Payload::ChangesMarkRead(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                let person = self.caller()?; // a member's own pane's is theirs (ov-747)
                 crate::review_ops::mark_read(svc, &p, &person).await?;
                 // A reviewed worktree leaves the runner's review count, which
                 // the lock screen shows and no needs-you item moved for. Only
@@ -2286,7 +2302,7 @@ impl Rpc {
     async fn terminal_result(&self, id: Uuid) -> Result<result::Value> {
         for view in self.service.fleet().await? {
             if let Some(t) = view.terminals.iter().find(|t| t.terminal.id == id) {
-                let person = self.watcher.viewer_for([id], || crate::people::person_of(&self.service.store, &self.peer));
+                let person = self.watcher.viewer_for([id], || self.caller());
                 return Ok(result::Value::Terminal(self.with_activity(t, crate::claude_login_wire::Logins::One, &person).await));
             }
         }

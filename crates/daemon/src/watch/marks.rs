@@ -165,6 +165,13 @@ pub(super) fn as_seen_by(
 }
 
 impl Watcher {
+    /// Whether `member`'s clients (`None`: the owner's) have a live claim on
+    /// `terminal`.
+    #[cfg(test)]
+    pub(crate) fn watched_by_for_tests(&self, member: Option<&str>, terminal: Uuid) -> bool {
+        watched_by(&self.watched.lock().unwrap(), member, terminal, now_millis())
+    }
+
     /// `terminal.seen` from `person`: the owner's look ends the runner's
     /// `Done` (`mark_seen`); a member's is theirs alone; a released device
     /// has nothing to see with, and its call never gets here (the gate).

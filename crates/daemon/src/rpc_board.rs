@@ -126,7 +126,7 @@ pub(crate) async fn dispatch(
             let Some(request::Payload::WorkspaceMarkRead(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            let person = crate::people::person_of(&svc.store, peer)?;
+            let person = crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane)?; // and its marks (ov-747)
             Ok(result::Value::BoardReads(crate::board_reads_ops::mark_read(svc, watcher, &p, &person)?))
         }
         other => {

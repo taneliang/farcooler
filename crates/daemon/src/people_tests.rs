@@ -664,3 +664,110 @@ async fn a_reps_pane_reads_its_members_reviews_and_looks() {
     assert_eq!(activity(&in_rep).await, pb::AgentActivity::Idle, "the rep reads Bob's look");
     assert_eq!(activity(&elsewhere).await, pb::AgentActivity::Done, "the owner hasn't looked");
 }
+
+/// ov-747: Bob's own pane (a shell on his login) writes his marks by the one
+/// rule (`caller_person`): his board read, his review, his look at a pane
+/// and his screen, each kept apart from the owner's on the rest of the
+/// socket. And the socket's events carry each one's: a board's read state,
+/// and a pane's row. Red at each call site that asks the device alone.
+#[tokio::test]
+async fn a_members_own_pane_writes_their_marks_and_hears_their_reads() {
+    use farcooler_protocol::v1::{Event, event};
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    let watcher = crate::watch::Watcher::new(r.svc.clone());
+    let on = |client: Option<&str>, pid: Option<i32>| {
+        let peer = Peer { client_id: client.map(str::to_string), scope: Scope::Control };
+        RpcFactory::new(r.svc.clone(), watcher.clone(), Arc::new(tokio::sync::Notify::new()), peer).with_caller_pid(pid)
+    };
+    let shell = r.svc.create_terminal(r.agent.worktree_id, "Bob's", "shell").await.expect("Bob's shell");
+    let login_id = r.svc.store.ensure_member_login("bob").unwrap();
+    let login = farcooler_store::claude_logins::TerminalLogin { handle: "bob".into(), login_id, config_dir: "/r/claude/bob".into(), shared: false };
+    r.svc.store.set_terminal_login(shell.id, &login).unwrap();
+    let pid = r.svc.inventory.refresh().await.claimants(shell.id).into_iter().next().expect("Bob's pane").stamp.pid as i32;
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6747);
+    let (phone, in_bobs, mac) = (on(Some("phone-b"), None), on(None, Some(pid)), on(None, Some(person.pid)));
+
+    // His board.
+    let floor = crate::review::now_millis();
+    let mark = Request {
+        method: "workspace.mark_read".into(),
+        payload: Some(request::Payload::WorkspaceMarkRead(pb::WorkspaceMarkRead { workspace_id: id_bytes(r.workspace), floor_ms: Some(floor), opened: Vec::new() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_bobs, mark).await, None, "Bob marks his board read in his pane");
+    assert_eq!(board_reads(&phone, r.workspace).await, ("bob".to_string(), floor), "his phone reads it");
+    assert!(board_reads(&mac, r.workspace).await.1 < floor, "the owner's isn't moved");
+
+    // His review.
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let wt = r.svc.create_worktree(repo, "wt-own", "feature/own", "main").await.expect("a worktree");
+    r.svc.store.set_review_base(wt.id, "main").unwrap();
+    r.svc.review_cache.set_counts_for_tests(wt.id, std::path::Path::new(&wt.worktree_path), crate::review::Counts::Known(1, 4, 0));
+    let reviewed = Request {
+        method: "changes.mark_read".into(),
+        payload: Some(request::Payload::ChangesMarkRead(pb::ChangesMarkRead { worktree_id: id_bytes(wt.id), branch: wt.branch.clone() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_bobs, reviewed).await, None, "Bob reviews it in his pane");
+    let changed = |rpc: &RpcFactory| {
+        let rpc = rpc.clone();
+        async move {
+            let req = Request { method: "changes.inbox".into(), ..Default::default() };
+            match rpc.handle(req).await.outcome {
+                Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::ChangesInbox(i)) })) => {
+                    i.items.into_iter().find(|w| w.worktree_id == id_bytes(wt.id)).is_some_and(|w| w.changed_since_reviewed)
+                }
+                other => panic!("wrong result: {other:?}"),
+            }
+        }
+    };
+    assert!(!changed(&phone).await, "his phone reads his review");
+    assert!(changed(&mac).await, "the owner hasn't reviewed it");
+
+    // His look at a finished pane.
+    let finished = crate::needs_you::Observation {
+        activity: pb::AgentActivity::Done,
+        state_since: crate::review::now_millis() - 5_000,
+        command: "claude".into(),
+        ..Default::default()
+    };
+    watcher.observe_for_tests(r.agent.id, finished).await;
+    let seen = Request { method: "terminal.seen".into(), target_resource_id: Some(id_bytes(r.agent.id)), ..Default::default() };
+    assert_eq!(refused(&in_bobs, seen).await, None);
+    let bob = Person::Member("bob".into());
+    assert_eq!(watcher.activity_for(&bob, r.agent.id).await.0, pb::AgentActivity::Idle, "Bob's Done is over");
+    assert_eq!(watcher.activity(r.agent.id).await.0, pb::AgentActivity::Done, "the owner's stands");
+
+    // A pane's row, as each reads it.
+    let list = Request { method: "terminal.list".into(), ..Default::default() };
+    let Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TerminalList(l)) })) = mac.handle(list).await.outcome else { panic!("a list") };
+    let row = l.items.into_iter().find(|t| t.id == id_bytes(r.agent.id)).expect("the pane's row");
+    let changed_row = Event { payload: Some(event::Payload::TerminalChanged(row)), ..Event::default() };
+    let activity = |rpc: &RpcFactory| match rpc.shape(changed_row.clone()).payload {
+        Some(event::Payload::TerminalChanged(t)) => t.activity(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!((activity(&in_bobs), activity(&mac)), (pb::AgentActivity::Idle, pb::AgentActivity::Done), "a row's activity is its reader's");
+
+    // A board's read state, to whose it is.
+    let reads = |member: &str| Event {
+        payload: Some(event::Payload::BoardReadsChanged(pb::BoardReads { member: member.into(), ..Default::default() })),
+        ..Event::default()
+    };
+    assert_eq!((in_bobs.admits(&reads("bob")), mac.admits(&reads("bob"))), (true, false), "Bob's reads, to his pane");
+    assert_eq!((in_bobs.admits(&reads("")), mac.admits(&reads(""))), (false, true), "the owner's, to the owner");
+
+    // His screen, which isn't the owner's, and doesn't replace the Mac's.
+    let watching = |ids: Vec<Uuid>| Request {
+        method: "terminal.watching".into(),
+        payload: Some(request::Payload::TerminalsWatched(pb::TerminalsWatched { terminal_ids: ids.iter().map(|id| id_bytes(*id)).collect() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_bobs, watching(vec![r.agent.id])).await, None);
+    assert!(watcher.watched_by_for_tests(Some("bob"), r.agent.id), "Bob's screen");
+    assert!(!watcher.watched_by_for_tests(None, r.agent.id), "not the owner's");
+    assert_eq!(refused(&mac, watching(vec![r.agent.id])).await, None);
+    assert!(watcher.watched_by_for_tests(None, r.agent.id) && watcher.watched_by_for_tests(Some("bob"), r.agent.id), "each keeps their own claim");
+    r.svc.stop_terminal(shell.id).await.expect("stopped");
+}
