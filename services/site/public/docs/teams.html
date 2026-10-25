@@ -44,8 +44,8 @@
 
 <h2>One orchestrator, a rep for each person</h2>
 <p>A workspace has one <b>lead</b>, who talks to its orchestrator directly. At first the lead is the runner’s owner, who can hand it on to a member. Only the owner or the lead can start or replace the workspace’s orchestrator.</p>
-<p>Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work or change the plan. It can read the plan, the tasks and Needs You, and send messages and comments. Only its member, or you, can answer a rep’s questions.</p>
-<p>Today the lead makes the decisions; teammates ask through their reps. Being a lead doesn’t give a member control of the plan: plan changes stay with you.</p>
+<p>Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work. It can read the plan, the tasks and Needs You, send messages and comments, and change the plan when its member asks. A change a rep makes carries its member’s name. Only its member, or you, can answer a rep’s questions.</p>
+<p>The plan belongs to the whole team. Anyone can change it, from their own devices or through their rep, and the orchestrator works from what it says.</p>
 
 <h2 id="logins">Logins</h2>
 <p>The orchestrator, and the agents it starts, run on the lead’s login. A teammate’s own panes and their rep run either on the runner’s shared login or on the teammate’s own. By default a teammate may use the runner’s login, which spends your account and quota, and a teammate who has signed in to Claude on the runner keeps using their own. Turn on Require Own Claude Account and a teammate’s Claude panes can’t open until they sign in.</p>
@@ -63,22 +63,23 @@
 <h2>What a member can see and do</h2>
 <ul>
 <li><b>Members read everything you do.</b> That includes every workspace’s plan, its themes and your asks on them, the tasks, Needs You and the runner’s settings.</li>
-<li><b>The plan is read-only for them.</b> Their devices can’t change the plan, a page, a theme, a lane, a train or a ruling. Keep, Keep All, Reverse and Discuss don’t show for members, and the rulings list reads Open Decisions.</li>
-<li><b>They can do the day-to-day work.</b> They can create tasks, add notes, change a task’s status, open and use lanes and terminals, and answer agents’ questions.</li>
-<li><b>Their writes carry their name.</b> A card, note or message from a member shows that member’s name on every client, and you get a notification for it. A member’s own writes don’t notify their own devices. Nobody can write as you except you.</li>
+<li><b>They can change the plan.</b> Their devices can change the order of lanes, a page, a theme, a lane, a train or a ruling, and keep or reverse a ruling. The rulings list reads Open Decisions for them.</li>
+<li><b>They can do the day-to-day work.</b> They can create tasks and workspaces, add notes, change a task’s status, open and use lanes and terminals, and answer agents’ questions.</li>
+<li><b>Other people’s lanes are answered, not driven.</b> On your lanes and other teammates’, a member can answer an agent’s question and press Stop. They can’t type into the pane, restart it or remove it.</li>
+<li><b>Their writes carry their name.</b> A card, note, message or plan change from a member shows that member’s name on every client, and you get a notification for it. A member’s own writes don’t notify their own devices. Nobody can write as you except you.</li>
 </ul>
 
 <h2 id="owner">What stays yours</h2>
 <p>These are refused to every member’s device, admin or not:</p>
 <ul>
-<li>Changing the plan, pages, themes, lanes, trains and rulings.</li>
 <li>Acting on GitHub as you: Mark Ready and replying to a pull request thread. Turning the PR nudge on is yours too; a member can turn it off.</li>
 <li>Renaming, re-prefixing or deleting a workspace, and changing a workspace’s other settings.</li>
 <li>Changing the runner: repository roots, the branch prefix, the projector, registering a repository, removing a worktree and its files, and stopping the daemon.</li>
 <li>Turning off a Member Logins switch. Admins can require own accounts, not relax it.</li>
 <li>Starting or replacing an orchestrator they don’t lead, or handing off a lead.</li>
+<li>Starting another teammate’s rep. Each member starts their own.</li>
 </ul>
-<p>A few things a member can still reach with your login, and these are the boundary of what Far Cooler can enforce. A member’s shell pane runs as the runner’s Unix user, with that user’s <code>gh</code> and git. A member who types into your lane’s pane drives your agent, on your login. A member’s read of a pull request’s status uses your <code>gh</code> login, but only to read.</p>
+<p>A few things a member can still reach with your login, and these are the boundary of what Far Cooler can enforce. A member’s shell pane runs as the runner’s Unix user, with that user’s <code>gh</code> and git. Far Cooler refuses a member typing into your lane’s pane, but their shell pane can still reach it as the runner’s Unix user. A member’s read of a pull request’s status uses your <code>gh</code> login, but only to read.</p>
 
 <h2>Removing a teammate from a runner</h2>
 <p><code>farcooler member remove &lt;handle&gt;</code> takes their devices’ keys off the runner, stops their rep, and deletes their Claude login there. It also revokes every device they enrolled that was never bound to anyone. A member admin can do this too. If one of their devices is still connected, it can read the board and the plan but can’t change anything, and it gets no notifications.</p>

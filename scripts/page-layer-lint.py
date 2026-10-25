@@ -96,12 +96,12 @@ REGISTRIES = {
     # The gate's list of every write that names an actor (ov-706), and its
     # test's, which a page write is on like any other.
     "crates/daemon/src/people.rs": r"^\s*P::Page(Set|Remove)\(p\) => &\$\(\$m\)\* p\.actor,\s*$|^\s*\| M::Page(Set|Remove)\s*$",
-    # A page is the plan's, so a member's device sets none (ov-637): the
-    # gate's list of plan writes above, and its test's two calls.
-    "crates/daemon/src/people_plan_tests.rs": r"^\s*P::PageSet\(pb::PageSet \{\s*$|^\s*only_the_owner\(r, \"page\.remove\", \|actor\| P::PageRemove\(pb::PageRemove \{ .* \}\), OWNERS_PHONE\)\.await;\s*$",
+    # A page is the plan's, which every member changes (ov-736): the gate's
+    # list of plan writes above, and its test's two calls.
+    "crates/daemon/src/people_plan_tests.rs": r"^\s*P::PageSet\(pb::PageSet \{\s*$|^\s*written\(r, \"page\.remove\", \|actor\| P::PageRemove\(pb::PageRemove \{ .* \}\), BOB\)\.await;\s*$",
     # Every method's member ruling (ov-716), the pages' among them, and the
     # reads a released device may still call, named one by one.
-    "crates/daemon/src/people_rulings.rs": r"^\s*\| M::Page(List|Get|Stats|Set)\s*$|^\s*\| M::PageRemove => Owners\(Why::Plan\),\s*$",
+    "crates/daemon/src/people_rulings.rs": r"^\s*\| M::Page(List|Get|Stats|Set)\s*$|^\s*\| M::PageRemove => Plan,\s*$",
     "crates/daemon/src/people_released_tests.rs": r"^\s*Method::Page(List|Get|Stats),\s*$",
     "crates/daemon/src/people_actor_tests.rs": r"^\s*call\(\"page\.(set|remove)\", P::Page(Set|Remove)\(pb::Page(Set|Remove) \{ actor: a\(\), \.\.Default::default\(\) \}\)\),\s*$|^\s*request::Payload::PageSet\(pb::PageSet \{\s*$",
     # The CI watch (ov-306) reads the subjects pages name, asked of the pages'
@@ -246,10 +246,10 @@ REGISTRY_LINES = {
     "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
     "crates/daemon/src/ci_watch.rs": "    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {",
     "crates/daemon/src/people.rs": "            P::PageRemove(p) => &$($m)* p.actor,\n                | M::PageSet",
-    "crates/daemon/src/people_rulings.rs": "        | M::PageList\n        | M::PageRemove => Owners(Why::Plan),",
+    "crates/daemon/src/people_rulings.rs": "        | M::PageList\n        | M::PageRemove => Plan,",
     "crates/daemon/src/people_released_tests.rs": "    Method::PageStats,",
     "crates/daemon/src/people_actor_tests.rs": "        call(\"page.set\", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),",
-    "crates/daemon/src/people_plan_tests.rs": "        P::PageSet(pb::PageSet {\n    only_the_owner(r, \"page.remove\", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: \"exports\".into(), actor: actor.into() }), OWNERS_PHONE).await;",
+    "crates/daemon/src/people_plan_tests.rs": "        P::PageSet(pb::PageSet {\n    written(r, \"page.remove\", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: \"exports\".into(), actor: actor.into() }), BOB).await;",
 }
 
 
