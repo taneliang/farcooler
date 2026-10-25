@@ -14,8 +14,8 @@
 3075 crates/client/src/session.rs
 2943 apps/ios/FarCooler/ChangesView.swift
 2605 apps/macos/Sources/FarCooler/ChangesPane.swift
-2526 crates/daemon/src/rpc.rs
 2506 apps/ios/FarCooler/TerminalView.swift
+2450 crates/daemon/src/rpc.rs
 2293 apps/ios/FarCooler/Connection.swift
 2286 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
 2251 apps/ios/FarCooler/TerminalSession.swift
