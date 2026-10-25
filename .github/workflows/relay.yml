@@ -152,7 +152,7 @@ jobs:
       - name: Check the pinned account matches the secret
         run: |
           set -euo pipefail
-          pinned="$(sed -n 's/^account_id = "\([0-9a-f]*\)"$/\1/p' services/relay/wrangler.toml)"
+          pinned="$(sed -n 's/^account_id = "\([0-9a-f]*\)"$/\1/p' wrangler.toml)"
           if [ -z "$pinned" ]; then echo "services/relay/wrangler.toml pins no account_id" >&2; exit 1; fi
           if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ "$CLOUDFLARE_ACCOUNT_ID" != "$pinned" ]; then
             echo "CLOUDFLARE_ACCOUNT_ID differs from the account_id pinned in services/relay/wrangler.toml" >&2
