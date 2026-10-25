@@ -48,6 +48,28 @@ struct TaskNoticeTests {
         #expect(review.content.categoryIdentifier.isEmpty, "only a decision has buttons")
     }
 
+    @Test("A banner for someone else's decision has no answer buttons, and decodes whose it is (ov-737)")
+    func aBannerForSomeoneElsesDecisionHasNoButtons() {
+        let options = ["pdfkit", "pdf.js"]
+        func request(member: String, viewer: String?) -> UNNotificationRequest {
+            var event = Self.notice("decision", options: options)
+            event.member = member
+            return Notifier.request(for: event, target: "studio", viewer: viewer)
+        }
+        let category = TaskDecisionActions.category(for: options)
+        #expect(request(member: "bob", viewer: "").content.categoryIdentifier.isEmpty, "the owner's Mac, Bob's decision")
+        #expect(request(member: "bob", viewer: "alice").content.categoryIdentifier.isEmpty)
+        #expect(request(member: "bob", viewer: nil).content.categoryIdentifier.isEmpty, "who this Mac is isn't known yet")
+        #expect(request(member: "bob", viewer: "bob").content.categoryIdentifier == category)
+        #expect(request(member: "", viewer: "alice").content.categoryIdentifier == category, "nobody's or the owner's")
+        // The banner itself stays, and a click still opens the card.
+        #expect(request(member: "bob", viewer: "").content.title == "ov-90 Wake the agent on an answer")
+        let line = #"{"kind":"notice","notice_id":"n","event":"decision","title":"t","task":"ov-90","member":"bob"}"#
+        var heard: [NoticeEvent] = []
+        EventStream.dispatch(Data(line.utf8), decoder: JSONDecoder(), onNotice: { heard.append($0) })
+        #expect(heard.first?.member == "bob")
+    }
+
     @Test("A decision files under its options' category, and a button sends that option")
     func aDecisionHasItsAnswers() {
         let options = ["pdfkit", "pdf.js"]

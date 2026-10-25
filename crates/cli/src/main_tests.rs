@@ -733,8 +733,10 @@ fn a_notice_line_carries_what_the_mac_posts() {
         options: vec!["pdfkit".into()],
         repository_id: bytes::Bytes::copy_from_slice(uuid::Uuid::from_u128(7).as_bytes()),
         author: "alice".into(),
+        member: "bob".into(),
         ..Default::default()
     });
+    assert_eq!(line["member"], "bob", "whose task it is, for the Mac's answer buttons (ov-737)");
     assert_eq!(line["repository"], uuid::Uuid::from_u128(7).to_string());
     // The member whose own write it is, whose Mac doesn't post it (ov-712).
     assert_eq!(line["author"], "alice");

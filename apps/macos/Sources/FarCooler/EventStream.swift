@@ -203,10 +203,15 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
     /// The member whose own write alone this is, by handle; "" for anyone
     /// else's (ov-712). Their own Mac doesn't post it.
     var author: String
+    /// The member whose task it is, by handle; "" for the owner's and
+    /// nobody's (ov-705). Whose decision a banner's answer buttons would
+    /// settle (ov-737).
+    var member: String
 
     init(
         noticeId: String, event: String, level: String, title: String, body: String, task: String,
-        runner: String?, options: [String], repository: String? = nil, author: String = ""
+        runner: String?, options: [String], repository: String? = nil, author: String = "",
+        member: String = ""
     ) {
         self.noticeId = noticeId
         self.event = event
@@ -218,10 +223,11 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         self.options = options
         self.repository = repository
         self.author = author
+        self.member = member
     }
 
     enum CodingKeys: String, CodingKey {
-        case event, level, title, body, task, runner, options, repository, author
+        case event, level, title, body, task, runner, options, repository, author, member
         case noticeId = "notice_id"
     }
 
@@ -237,6 +243,7 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
         repository = try c.decodeIfPresent(String.self, forKey: .repository).flatMap { $0.isEmpty ? nil : $0 }
         author = try c.decodeIfPresent(String.self, forKey: .author) ?? ""
+        member = try c.decodeIfPresent(String.self, forKey: .member) ?? ""
     }
 }
 

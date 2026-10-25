@@ -249,7 +249,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// notice about the same task replaces this one, and so does the relay's
     /// push about it. A decision gets its options' category, whose buttons
     /// are its answers (`TaskDecisionActions`).
-    static func request(for notice: NoticeEvent, target: String) -> UNNotificationRequest {
+    ///
+    /// A decision that is another person's has no answer buttons (ov-737): a
+    /// click on the banner opens the card, where answering for them asks
+    /// first. `viewer` is who this Mac is on that runner (`TalkRoster.viewer`,
+    /// "" for the owner); one not yet known offers none on a member's decision.
+    static func request(for notice: NoticeEvent, target: String, viewer: String? = "") -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = notice.title
         content.body = notice.body
@@ -269,10 +274,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         default: content.interruptionLevel = .active
         }
         if notice.level != "passive" { content.sound = .default }
-        if !task.options.isEmpty {
+        if !task.options.isEmpty && offersAnswers(member: notice.member, viewer: viewer) {
             content.categoryIdentifier = TaskDecisionActions.category(for: task.options)
         }
         return UNNotificationRequest(identifier: notice.noticeId, content: content, trigger: nil)
+    }
+
+    /// Whether a banner for a task of `member` (empty for the owner's and
+    /// nobody's) carries answer buttons for `viewer`: its own person's, and
+    /// anyone's when nobody owns it (ov-737).
+    static func offersAnswers(member: String, viewer: String?) -> Bool {
+        member.isEmpty || member == viewer
     }
 
     /// Whether a pane's own banner is for this Mac's person (ov-717): the
@@ -318,7 +330,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 viewer: client.talk.viewer, event: notice.event),
             ready
         else { return }
-        let request = Self.request(for: notice, target: client.target)
+        let request = Self.request(for: notice, target: client.target, viewer: client.talk.viewer)
         let options = TaskNotice(userInfo: request.content.userInfo)?.options ?? []
         Task {
             if !options.isEmpty { _ = await TaskDecisionActions.register(options: options) }

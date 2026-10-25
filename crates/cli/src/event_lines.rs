@@ -23,6 +23,10 @@ pub(crate) fn notice_json(n: &pb::Notice) -> serde_json::Value {
         // The member whose own write alone this is, "" for anyone else's
         // (ov-712): that member's Mac doesn't post it.
         "author": n.author,
+        // The member whose task it is, "" for the owner's and nobody's
+        // (ov-705): the Mac leaves the answer buttons off a banner for
+        // someone else's decision (ov-737).
+        "member": n.member,
     })
 }
 
