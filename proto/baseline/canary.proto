@@ -1,4 +1,4 @@
-// Shipped by Canary at d64968ed88898e9bd76361fb15ba71b2f7c37456. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 691d6c61f75f4d57441e22fbfe058dfa7424c695. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -3570,14 +3570,21 @@ message TaskRead {
   int64 opened_ms = 2;
 }
 
-// One board's read state on this runner, shared by every device (ov-113).
-// Every time is the runner's clock, Unix milliseconds.
+// One person's read state on one board of this runner, shared by every
+// device of theirs (ov-113) and by nobody else's (ov-740): a member's marks
+// leave the owner's alone. Every time is the runner's clock, Unix
+// milliseconds.
 message BoardReads {
   bytes workspace_id = 1;
   // Everything at or before it counts as read.
   int64 floor_ms = 2;
   // Only marks above the floor, for tickets on the board now.
   repeated TaskRead opened = 3;
+  // Whose it is: a member's handle, or empty for the runner's owner
+  // (ov-740). `board_reads_changed` goes to that person's devices alone, so
+  // a client merges only its own; an older runner sends every device the
+  // one shared state, with this empty.
+  string member = 4;
 }
 
 // Raise what is read on one board (ov-113): each mark and the floor only ever
