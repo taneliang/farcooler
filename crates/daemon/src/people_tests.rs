@@ -586,8 +586,8 @@ async fn a_reps_pane_reads_its_members_marks_and_writes_none() {
     let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
 
     assert_eq!(board_reads(&in_rep, r.workspace).await, ("bob".to_string(), floor), "the rep reads Bob's");
-    assert_eq!(in_rep.marks_rep_for_tests(), Some(Some(r.agent.id)), "walked once, kept for the connection");
-    assert_eq!(elsewhere.marks_rep_for_tests(), None, "not walked before it reads");
+    assert_eq!(in_rep.caller_pane_for_tests(), Some(Some(r.agent.id)), "walked once, kept for the connection");
+    assert_eq!(elsewhere.caller_pane_for_tests(), None, "not walked before it reads");
     let (whose, owners) = board_reads(&elsewhere, r.workspace).await;
     assert_eq!(whose, "", "anyone else on the socket reads the owner's");
     assert!(owners < floor, "and Bob's floor isn't the owner's");
@@ -663,39 +663,4 @@ async fn a_reps_pane_reads_its_members_reviews_and_looks() {
     };
     assert_eq!(activity(&in_rep).await, pb::AgentActivity::Idle, "the rep reads Bob's look");
     assert_eq!(activity(&elsewhere).await, pb::AgentActivity::Done, "the owner hasn't looked");
-}
-
-/// ov-744 (3): a runner with no rep walks no process table for whose marks
-/// a local read carries, and a remote device is its person, unwalked.
-#[tokio::test]
-async fn a_runner_with_no_rep_walks_nobody_for_marks() {
-    let (_dir, svc, _) = crate::test_support::fixture().await;
-    let no_walk = |_: i32| -> Option<Uuid> { panic!("walked for a rep on a runner with none") };
-    let local = Peer { client_id: None, scope: Scope::Control };
-    let walked = std::sync::OnceLock::new();
-    assert_eq!(marks_person_with(&svc.store, &local, Some(4242), &walked, no_walk).unwrap(), Person::Owner);
-    assert_eq!(marks_person_with(&svc.store, &local, None, &walked, no_walk).unwrap(), Person::Owner);
-    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
-    assert_eq!(marks_person_with(&svc.store, &local, Some(4242), &walked, no_walk).unwrap(), Person::Owner, "a member, but no rep");
-    let phone = Peer { client_id: Some("phone-b".into()), scope: Scope::Control };
-    assert_eq!(marks_person_with(&svc.store, &phone, Some(4242), &walked, no_walk).unwrap(), Person::Member("bob".into()));
-}
-
-/// Review finding 1: a connection walks for its caller's rep pane once, by
-/// its first read that carries marks; every later read on it reuses that.
-#[tokio::test]
-async fn a_connection_walks_for_its_rep_once() {
-    let r = runner().await;
-    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
-    let local = Peer { client_id: None, scope: Scope::Control };
-    let walks = std::sync::atomic::AtomicUsize::new(0);
-    let walk = |_: i32| {
-        walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Some(r.agent.id)
-    };
-    let walked = std::sync::OnceLock::new();
-    for _ in 0..3 {
-        assert_eq!(marks_person_with(&r.svc.store, &local, Some(4242), &walked, walk).unwrap(), Person::Member("bob".into()));
-    }
-    assert_eq!(walks.load(std::sync::atomic::Ordering::SeqCst), 1, "one walk for the connection");
 }

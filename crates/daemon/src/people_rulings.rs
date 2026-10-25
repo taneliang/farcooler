@@ -29,11 +29,12 @@ pub enum Ruling {
     /// a member's failed turn leaves it on their Needs You, and the owner's
     /// screen holds back only the owner's push (ov-744).
     ///
-    /// Whose marks a call carries is its device's person. The local socket
-    /// is the owner's, but for a rep's pane, whose reads carry its member's
-    /// marks (`people::marks_person`); a rep writes none, these four being
-    /// no messenger's (`rep_may`). A member's agent in any other pane is the
-    /// owner here, as it always was.
+    /// Whose marks a write carries is its device's person; the local socket
+    /// is the owner's (but for an answer's look, `rpc_agent_answer`). A read carries its caller's person's
+    /// (`caller_person`, ov-747): on the local socket, a rep's pane reads its
+    /// member's marks and a pane on a member's login reads that member's,
+    /// and anything else the owner's. A rep writes none, these four being no
+    /// messenger's (`rep_may`).
     PerPerson,
     /// The plan layer: the ranking, a theme, a lane, a ruling, a train or an
     /// orchestrator's page. Every member's to change, written under their

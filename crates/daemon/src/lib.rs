@@ -46,6 +46,7 @@ pub mod orchestrator;
 pub mod paste_mode;
 pub mod pastes;
 pub mod paths;
+pub mod caller_person;
 pub mod caller_seat;
 pub mod people;
 pub mod runner_key;

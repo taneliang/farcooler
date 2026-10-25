@@ -16,14 +16,14 @@ use crate::watch::Watcher;
 /// One board route, as `Rpc::dispatch` hands it over.
 ///
 /// `peer` says whose read state a board read carries and a mark raises
-/// (ov-740, `people::reader_of`); on the local socket, a read from a rep's
-/// pane carries its member's (`people::marks_person`, ov-744), walked once
-/// per connection (`marks_rep`).
+/// (ov-740, `people::reader_of`); on the local socket, a read from a pane
+/// carries its person's, a rep's its member's (`caller_person`, ov-744,
+/// ov-747), walked once per connection (`caller_pane`).
 pub(crate) async fn dispatch(
     svc: &Service,
     watcher: &Watcher,
     peer: &farcooler_transport::Peer,
-    (caller_pid, marks_rep): (Option<i32>, &std::sync::OnceLock<Option<uuid::Uuid>>),
+    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Option<uuid::Uuid>>),
     req: Request,
 ) -> Result<result::Value> {
     match req.method.as_str() {
@@ -31,7 +31,7 @@ pub(crate) async fn dispatch(
             let Some(request::Payload::TaskList(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            let person = crate::people::marks_person(svc, peer, caller_pid, marks_rep)?; // a rep's is its member's (ov-744)
+            let person = crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane)?; // a pane's is its person's (ov-747)
             Ok(result::Value::TaskList(crate::task_ops::list(svc, &p, &person)?))
         }
 

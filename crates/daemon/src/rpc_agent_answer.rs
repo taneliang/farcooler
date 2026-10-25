@@ -28,9 +28,16 @@ use crate::caller_seat::Seat;
 use crate::service::Service;
 use crate::watch::Watcher;
 
-/// Answer `p` for the caller `peer`, whose local process is `caller_pid`.
-/// Returns the pane answered, for the caller to read back.
-pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller_pid: Option<i32>, p: AgentAnswer) -> Result<Uuid> {
+/// Answer `p` for the caller `peer`, whose local process is `caller_pid`,
+/// in the pane `caller_pane` once walked (`caller_person`). Returns the pane
+/// answered, for the caller to read back.
+pub(crate) async fn answer(
+    svc: &Service,
+    watcher: &Watcher,
+    peer: &Peer,
+    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Option<Uuid>>),
+    p: AgentAnswer,
+) -> Result<Uuid> {
     let id = crate::wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
     if let Ok(actor) = crate::task_ops::actor_from_wire(&p.actor) {
         crate::people::refuse_rep_answer(&svc.store, actor, None)?; // a rep answers nothing (ov-494)
@@ -42,7 +49,7 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
         let press = Press::Trust { ask: p.request_id.clone(), option: p.option_id.clone() };
         let author = Author::of(seat_of(svc, caller_pid, &p.actor).await);
         watcher.deliver(id, Delivery { author, ..Delivery::key(press) }).await?;
-        watcher.mark_seen_by(&answerer(svc, peer), id).await;
+        watcher.mark_seen_by(&answerer(svc, peer, caller_pid, caller_pane), id).await;
         return Ok(id);
     }
     // A claude TUI's hook holds every ask there is to answer. An id it
@@ -52,9 +59,9 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
         return Err(DomainError::Conflict { what: "not_held" });
     }
     may_answer(seat_of(svc, caller_pid, &p.actor).await)?;
-    // Whose answer it is, from the device (ov-743): what the row says, and
-    // whose look it is below.
-    let person = answerer(svc, peer);
+    // Whose answer it is, from the device or the caller's pane (ov-743,
+    // ov-747): what the row says, and whose look it is below.
+    let person = answerer(svc, peer, caller_pid, caller_pane);
     let people = crate::answered_for::ask_people(&svc.store, id, &person);
     let label = match peer.client_id.as_deref() {
         Some(client) => crate::enrollment::label_for(svc, client).await,
@@ -80,10 +87,12 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
     Ok(id)
 }
 
-/// Whose look an answer is: the device's person. A store that can't say
-/// marks nobody's, rather than guessing the owner.
-fn answerer(svc: &Service, peer: &Peer) -> crate::people::Person {
-    crate::people::person_of(&svc.store, peer).unwrap_or(crate::people::Person::Released)
+/// Whose answer, and whose look, an answer is: the caller's person
+/// (`caller_person`, ov-747), so Bob answering from the CLI in his own pane
+/// is Bob, not the owner the local socket otherwise is. A store that can't
+/// say marks nobody's, rather than guessing the owner.
+fn answerer(svc: &Service, peer: &Peer, caller_pid: Option<i32>, caller_pane: &std::sync::OnceLock<Option<Uuid>>) -> crate::people::Person {
+    crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane).unwrap_or(crate::people::Person::Released)
 }
 
 /// Who the caller is (`caller_seat`), unless its `actor` already said it

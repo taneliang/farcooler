@@ -296,6 +296,13 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Whether any pane records a member's login: with no rep either, every
+    /// pane is the owner's, and no walk from a local caller to its pane can
+    /// name anyone else (`caller_person`, ov-747).
+    pub fn any_terminal_login(&self) -> Result<bool> {
+        self.conn().query_row("SELECT EXISTS(SELECT 1 FROM terminal_logins)", [], |r| r.get(0)).map_err(map_err)
+    }
+
     /// Every pane's recorded login, by pane (ov-588): which panes are on a
     /// removed member's login, and every directory string any login was
     /// launched with, so a removal can tell its member's Keychain entry from

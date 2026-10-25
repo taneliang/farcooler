@@ -294,3 +294,33 @@ async fn only_a_person_sends_a_thread_reply() {
         assert_ne!(got.as_deref(), Some("not_a_person"), "{caller:?}");
     }
 }
+
+/// ov-747 (review 743 finding 4): who answered a held ask from the local
+/// socket is whose pane the caller runs in, by the one rule
+/// (`caller_person`): Bob, in his own shell pane on his login, answering
+/// the owner's ask, is Bob; the owner, in a shell pane on the runner's own
+/// login, answering Bob's, is the owner. Red if `answerer` asks the device
+/// alone, which reads both as the owner.
+#[tokio::test]
+async fn an_answer_from_a_members_own_pane_is_theirs() {
+    use crate::hook_asks::whole_notes_for;
+    let mut s = seats().await;
+    s.svc.store.set_member("bob", "Bob Okafor", &[]).unwrap();
+    let (bobs, bobs_shell) = s.shell_pane().await;
+    let login_id = s.svc.store.ensure_member_login("bob").unwrap();
+    let login = farcooler_store::claude_logins::TerminalLogin { handle: "bob".into(), login_id, config_dir: "/r/claude/bob".into(), shared: false };
+    s.svc.store.set_terminal_login(bobs, &login).unwrap();
+    let (owners, owners_shell) = s.shell_pane().await;
+    let note = |terminal: Uuid| whole_notes_for(terminal).into_iter().last().expect("the row was told");
+    let ask = &asks()[0];
+
+    assert_eq!(answered(&s.svc, owners, Some(bobs_shell), "", ask).await, None, "Bob answers");
+    let said = note(owners);
+    assert_eq!(said["person"], serde_json::json!({ "handle": "bob", "name": "Bob Okafor" }), "Bob, from his own pane: {said}");
+    assert_eq!(said["for"], serde_json::json!({ "handle": "", "name": "" }), "for the owner: {said}");
+
+    assert_eq!(answered(&s.svc, bobs, Some(owners_shell), "", ask).await, None, "the owner answers");
+    let said = note(bobs);
+    assert_eq!(said["person"], serde_json::json!({ "handle": "", "name": "" }), "the owner, from the runner's login: {said}");
+    assert_eq!(said["for"]["handle"], "bob", "for Bob: {said}");
+}

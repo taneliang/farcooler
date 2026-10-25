@@ -20,7 +20,8 @@
 //! **A held ask** (ov-743) says the same on its row: `ask_people` names the
 //! person whose device answered it, and whose ask it was when that is someone
 //! else, by the rule that files the ask in Needs You (`whose_terminal`). The
-//! person comes from the authenticated device (`people::person_of`), never
+//! person comes from the authenticated device, or on the local socket from
+//! the pane the caller's process runs in (`caller_person`, ov-747), never
 //! from the request. The note itself only the runner writes
 //! (`SessionProjectors::ask_ended`; a hook frame of that name is dropped),
 //! and it lands on the row holding the ask's id, which only the runner puts

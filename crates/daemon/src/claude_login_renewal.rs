@@ -51,8 +51,10 @@
 //! fail just after Sign In Again, so a failure within `SIGN_IN_GRACE_MS` of
 //! the sign-in is ignored (the daemon is not told when a turn began).
 //!
-//! **Who reads the list.** A caller inside a pane is read by that pane's
-//! login (`needs_you_viewer`), not by the local socket's owner.
+//! **Who reads the list.** A caller inside a pane is read as whoever the pane
+//! is (`caller_person`, ov-747): its rep's member, else its login's, so Bob's
+//! rep, or `farcooler needs-you` typed in his pane, is never told that
+//! Alice's login stopped working. Not the local socket's owner.
 
 use farcooler_core::{DomainError, Result};
 use uuid::Uuid;
@@ -186,25 +188,6 @@ impl Service {
             return Ok(());
         }
         Err(DomainError::Conflict { what: "unsupported" })
-    }
-
-    /// Who is reading Needs You: the caller's person, except that a caller
-    /// inside a pane reads as that pane's login, as `login_for_new_pane`
-    /// decides whose a pane it opens is. Bob's rep, or `farcooler needs-you`
-    /// typed in it, comes in on the local socket as the owner, and must not
-    /// be told Alice's login stopped working. A pane on the runner's own
-    /// login is the owner's; one on a login that is gone reads as nobody.
-    pub(crate) fn needs_you_viewer(&self, peer: &farcooler_transport::Peer, caller_pid: Option<i32>) -> Result<crate::people::Person> {
-        use crate::people::Person;
-        if let Some(pane) = caller_pid.and_then(|pid| crate::people::pane_of(self, pid)) {
-            let term = self.store.get_terminal(pane)?;
-            return Ok(match self.recorded_login(&term)? {
-                Login::Runner => Person::Owner,
-                login @ Login::Member { .. } if self.refuse_a_gone_generation(&login).is_err() => Person::Released,
-                Login::Member { handle, .. } => Person::Member(handle),
-            });
-        }
-        crate::people::person_of(&self.store, peer)
     }
 
     /// Every login that needs its member, oldest first.

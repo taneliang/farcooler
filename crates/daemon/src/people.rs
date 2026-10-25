@@ -89,10 +89,11 @@ pub fn person_of(store: &Store, peer: &Peer) -> Result<Person> {
 /// were; a released device has none (`None`), and its writes are refused
 /// before they get here.
 ///
-/// Worked out from the device: a person reads on their own devices, and an
-/// agent's process in a pane marks nothing read. The one pane that reads as
-/// someone is a rep's, which reads (never writes) its member's marks
-/// (`marks_person`, ov-744).
+/// A mark is written by the device's person (`person_of`): a person reads on
+/// their own devices, and an agent's process in a pane marks nothing read.
+/// A read on the local socket carries the marks of whoever the caller's pane
+/// is (`caller_person`, ov-747): a rep's reads (never writes) its member's
+/// (ov-744), and a member's own pane reads theirs.
 pub fn reader_of(person: &Person) -> Option<farcooler_store::board_reads::Reader<'_>> {
     use farcooler_store::board_reads::Reader;
     match person {
@@ -100,52 +101,6 @@ pub fn reader_of(person: &Person) -> Option<farcooler_store::board_reads::Reader
         Person::Member(handle) => Some(Reader::Member(handle)),
         Person::Released => None,
     }
-}
-
-/// Whose marks a read on behalf of `peer`, a local caller at `caller_pid`,
-/// carries (ov-744): what `task.list` says is unread, `changes.inbox`
-/// reviewed and `terminal.list` seen. A remote device is its person
-/// (`person_of`). On the local socket, a caller in a rep's pane reads as
-/// the rep's member, since it relays to them what's new to them; any other
-/// pane, a member's agent's included, and anything in no pane, is the owner,
-/// as the local socket always was.
-///
-/// Reads only: a rep writes no mark (`rep_may` leaves `terminal.seen`,
-/// `terminal.watching`, `workspace.mark_read` and `changes.mark_read` out,
-/// so the gate refuses them `rep_messenger`), because an agent reading isn't
-/// its person reading. The walk (`rep_pane_of`) runs only on a runner with a
-/// rep, so a runner with none walks nothing, and at most once per
-/// connection: `walked` is the connection's own (`RpcFactory`), since its
-/// caller's pid is fixed for its life. A process that leaves a rep's pane
-/// after its first read keeps reading that member's marks on that
-/// connection: a read-only leak of the member's own marks, to a process
-/// that was their rep's.
-pub fn marks_person(
-    svc: &crate::service::Service,
-    peer: &Peer,
-    caller_pid: Option<i32>,
-    walked: &std::sync::OnceLock<Option<Uuid>>,
-) -> Result<Person> {
-    marks_person_with(&svc.store, peer, caller_pid, walked, |pid| rep_pane_of(svc, pid))
-}
-
-/// `marks_person`, with the walk from a pid to a rep's pane given.
-pub(crate) fn marks_person_with(
-    store: &Store,
-    peer: &Peer,
-    caller_pid: Option<i32>,
-    walked: &std::sync::OnceLock<Option<Uuid>>,
-    rep_pane: impl FnOnce(i32) -> Option<Uuid>,
-) -> Result<Person> {
-    if peer.client_id.is_some() {
-        return person_of(store, peer);
-    }
-    let Some(pid) = caller_pid else { return Ok(Person::Owner) };
-    if walked.get().is_none() && !store.any_reps()? {
-        return Ok(Person::Owner);
-    }
-    let Some(pane) = *walked.get_or_init(|| rep_pane(pid)) else { return Ok(Person::Owner) };
-    Ok(store.rep_of_terminal(pane)?.map_or(Person::Owner, |rep| Person::Member(rep.handle)))
 }
 
 /// Whether `person` leads `workspace`: the member it was handed to, or with
