@@ -54,5 +54,9 @@ func aNoteAnsweredForSomeoneSaysSo() throws {
     let notes = try TaskDetailModel.decode(Data(json.utf8)).notes
     let people = RunnerPeople(
         members: [.init(handle: "alice", name: "Alice Chen")], claudeAccount: "", you: "")
-    #expect(notes.map { $0.byline(on: people) } == ["Alice Chen for Bob Okafor", "You for Owner", "Alice Chen", "Alice Chen"])
+    #expect(notes.map { $0.byline(on: people) } == ["Alice Chen for Bob Okafor", "You for You", "Alice Chen", "Alice Chen"], "the owner's card, read by the owner")
+    let bobsPhone = RunnerPeople(
+        members: [.init(handle: "alice", name: "Alice Chen"), .init(handle: "bob", name: "Bob Okafor")], claudeAccount: "", you: "bob")
+    #expect(notes.map { $0.byline(on: bobsPhone) } == ["Alice Chen for You", "Owner for Owner", "Alice Chen", "Alice Chen"], "Bob's own card says You")
+    #expect(notes[0].byline(on: nil) == "alice for Bob Okafor", "who the reader is isn't known, so no You")
 }
