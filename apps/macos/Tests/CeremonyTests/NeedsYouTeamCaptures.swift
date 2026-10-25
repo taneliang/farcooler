@@ -78,6 +78,20 @@ struct NeedsYouTeamTests {
         }
         #expect(!NeedsYou.grouped(solo).isSplit)
     }
+
+    @Test("Every row on a team's runner says who it is for, and a solo runner's says nothing (ov-737)")
+    func everyRowSaysWhoseItIs() {
+        let team = NeedsYou.teamRunners(in: NeedsYouTeamSample.items)
+        #expect(
+            NeedsYouTeamSample.items.map { $0.whose(teamRunners: team) }
+                == ["You", "Anyone", "Bartholomew Okafor-Lindqvist", "Owner"])
+        let solo = NeedsYouTeamSample.items.map { item -> NeedsYouItem in
+            var item = item
+            item.concern = nil
+            return item
+        }
+        #expect(solo.allSatisfy { $0.whose(teamRunners: NeedsYou.teamRunners(in: solo)) == nil })
+    }
 }
 
 /// Opt-in (FARCOOLER_CAPTURE_OUT): the page above, light and dark, at a
