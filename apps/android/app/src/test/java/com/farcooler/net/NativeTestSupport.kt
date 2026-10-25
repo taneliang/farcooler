@@ -144,7 +144,10 @@ object RowJson {
     fun hint(ord: Long, words: String) = row("hint:composer", ord, "Hint", obj("text" to text(words)))
 
     /** A held ask (ov-370): `question`, `plan` or `permission`, held under `hook-ask-1` unless [held] is null. */
-    fun heldAsk(ord: Long, which: String, held: String? = "hook-ask-1", answeredBy: String? = null): JsonObject {
+    fun heldAsk(
+        ord: Long, which: String, held: String? = "hook-ask-1", answeredBy: String? = null,
+        answeredPerson: JsonObject? = null, answeredFor: JsonObject? = null,
+    ): JsonObject {
         val base = when (which) {
             "question" -> obj(
                 "kind" to text("Question"), "text" to text("Which color should the button be?"), "tool" to text("AskUserQuestion"),
@@ -165,6 +168,8 @@ object RowJson {
         var payload = JsonObject(base + ("answered" to JsonPrimitive(false)))
         if (held != null) payload = JsonObject(payload + ("held" to text(held)))
         if (answeredBy != null) payload = JsonObject(payload + ("answered_by" to text(answeredBy)))
+        if (answeredPerson != null) payload = JsonObject(payload + ("answered_person" to answeredPerson))
+        if (answeredFor != null) payload = JsonObject(payload + ("answered_for" to answeredFor))
         return row("ask:$ord", ord, "Ask", payload)
     }
 

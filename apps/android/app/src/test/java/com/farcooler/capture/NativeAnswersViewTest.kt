@@ -101,9 +101,12 @@ class NativeAnswersViewTest {
     }
 
     /** The view of [model], and a way to press a tag and read what's drawn. */
-    private fun drawn(model: NativePaneModel, body: (tags: () -> Map<String, SemanticsNode>, press: (String) -> Unit) -> Unit) {
+    private fun drawn(
+        model: NativePaneModel, viewer: String? = null,
+        body: (tags: () -> Map<String, SemanticsNode>, press: (String) -> Unit) -> Unit,
+    ) {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
-            scenario.onActivity { it.setContent { FarCoolerTheme { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) } } }
+            scenario.onActivity { it.setContent { FarCoolerTheme { NativeAgentView(model, rememberLazyListState(), showTerminal = {}, viewer = viewer) } } }
             var seen = emptyMap<String, SemanticsNode>()
             val tags = {
                 idle()
@@ -116,9 +119,18 @@ class NativeAnswersViewTest {
                 scenario.onActivity { node.config[SemanticsActions.OnClick].action!!.invoke() }
                 idle()
             }
+            readTexts = {
+                idle()
+                var found = emptyList<String>()
+                scenario.onActivity { found = words(it) }
+                found
+            }
             body(tags, press)
         }
     }
+
+    /** What the view being drawn says, in words (set by [drawn]). */
+    private var readTexts: () -> List<String> = { emptyList() }
 
     private fun heard(count: Int): List<String> {
         eventually("$count answers") { synchronized(answered) { answered.size >= count } }
@@ -164,6 +176,42 @@ class NativeAnswersViewTest {
             }
         }
         assertTrue(answered.isEmpty())
+    }
+
+    /** Every piece of text the unmerged tree draws, so a title is read as the reader sees it. */
+    private fun words(activity: ComponentActivity): List<String> {
+        val out = mutableListOf<String>()
+        fun walk(node: SemanticsNode) {
+            node.config.getOrNull(SemanticsProperties.Text)?.forEach { out += it.text }
+            node.children.forEach(::walk)
+        }
+        walk(roots(activity.window.decorView).first().semanticsOwner.unmergedRootSemanticsNode)
+        return out
+    }
+
+    /** On a team runner an answered ask says who answered, from this phone's own handle (ov-746). */
+    @Test
+    fun anAnsweredAskOnATeamRunnerSaysWhoAnswered() {
+        fun person(handle: String, name: String) = kotlinx.serialization.json.JsonObject(
+            mapOf("handle" to kotlinx.serialization.json.JsonPrimitive(handle), "name" to kotlinx.serialization.json.JsonPrimitive(name)),
+        )
+        val long = "Bartholomew Okafor-Lindqvist"
+        for ((viewer, expected) in listOf(
+            "bob" to "$long answered for you", "" to "$long answered for Bob", null to "Answered on Mac",
+        )) {
+            val model = NativePaneModel(
+                terminal = "t-team", store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1), source = source,
+                sink = { _, _, _ -> false }, memory = InMemoryPaneViews(), scope = running.scope,
+                answers = AnswerSink { _, _, _, _ -> },
+            )
+            source.answerPage(RowJson.page(4, 12, RowJson.turn(0, "Make the sign-up button stand out."),
+                RowJson.heldAsk(1, "permission", null, "Mac", person("bartholomew", long), person("bob", "Bob"))))
+            model.setOnScreen(true)
+            eventually("rows") { model.store.shown.value.rows.size == 2 }
+            drawn(model, viewer) { _, _ ->
+                eventually("the title for viewer $viewer: ${readTexts()}") { expected in readTexts() }
+            }
+        }
     }
 
     @Test
