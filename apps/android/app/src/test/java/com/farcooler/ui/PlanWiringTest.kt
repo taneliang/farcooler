@@ -67,8 +67,8 @@ class PlanWiringTest {
     @Test
     fun `the owner's marks need the write grant, and Reverse asks before it sends`() {
         val board = source("ui/BoardScreen.kt")
-        // RulingActions.canMark: not to a Read grant, nor to a member's phone (ov-707).
-        assertTrue("a Read grant or a member offers no marks", "canMark = RulingActions.canMark(keepsRulingActions, daemon?.grantedScope, viewer)," in board)
+        // RulingActions.canMark: not to a Read grant, nor to a released phone (ov-736).
+        assertTrue("a Read grant or a released phone offers no marks", "canMark = RulingActions.canMark(keepsRulingActions, daemon?.grantedScope, viewer)," in board)
         assertTrue("who the phone is, read on a runner with people", "connection.viewer.ask()" in board)
         val rows = source("ui/PlanRulingRows.kt")
         assertTrue("the menu asks first", "onClick = { open = false; onReverse() }," in rows)

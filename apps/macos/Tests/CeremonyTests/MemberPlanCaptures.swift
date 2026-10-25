@@ -8,9 +8,9 @@ import Testing
 
 /// Opt-in (FARCOOLER_CAPTURE_OUT): the Plan's home, light, on the owner's Mac
 /// and on a member's (ov-637). A member sees the plan the owner does, the
-/// themes' asks of the owner included, and is offered no Keep or Keep All,
-/// which the runner refuses them. The busy scenario's long real titles, with
-/// two rulings standing.
+/// themes' asks of the owner included, and is offered Keep and Keep All as
+/// the owner is (ov-736). The busy scenario's long real titles, with two
+/// rulings standing.
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
 struct MemberPlanCaptures {
@@ -46,7 +46,7 @@ struct MemberPlanCaptures {
             plan: true, defaults: PlanViewTests.defaults(), calls: calls, target: target, you: you)
         await store.client.talk.load(store.client, force: true)
         await store.plan.reload()
-        #expect(store.plan.canMarkRulings == you.isEmpty)
+        #expect(store.plan.canMarkRulings, "the owner's Mac and a member's keep (ov-736)")
         let actions = PlanRulingActions(canKeep: store.plan.canMarkRulings, canAsk: true, alwaysShown: true)
         let (width, height): (CGFloat, CGFloat) = (960, 2050)
         let window = NSWindow(

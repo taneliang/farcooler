@@ -37,8 +37,8 @@ final class TalkRoster {
 
     /// Who this Mac is on the runner (`RunnerPeople.you`): "" for the owner,
     /// as this Mac always is on its own runner, else what the runner last
-    /// said, nil if never told. What hides the owner's marks from a member
-    /// (ov-707).
+    /// said, nil if never told. What hides a ruling's marks from a released
+    /// Mac (ov-736).
     var viewer: String? { target.isEmpty ? "" : people?.you ?? knownYou }
 
     /// Whom `workspace`'s Talk is on `client`'s runner.

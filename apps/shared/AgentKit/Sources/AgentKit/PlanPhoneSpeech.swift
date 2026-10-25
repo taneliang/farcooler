@@ -106,13 +106,21 @@ extension PlanGlanceSentence {
 // MARK: Rulings
 
 extension RulingActions {
-    /// Whether this device offers the owner's marks (Keep, Keep All, Reverse,
+    /// Whether this device offers a person's marks (Keep, Keep All, Reverse,
     /// Discuss): the runner takes them, the grant isn't Read, and the device
-    /// isn't someone else's (ov-707). Either would flip a ruling kept and
-    /// silently put it back. `viewer` is `RunnerPeople.you`: "" for the
-    /// owner, nil until the runner has said.
+    /// is a person's, the owner's or a member's (ov-736), not a released
+    /// one's. Either would flip a ruling kept and silently put it back.
+    /// `viewer` is `RunnerPeople.you`: "" for the owner, nil until the
+    /// runner has said.
     public static func canMark(runnerTakesMarks: Bool, grantedScope: String?, viewer: String?) -> Bool {
-        runnerTakesMarks && grantedScope != "read" && isOwner(viewer)
+        runnerTakesMarks && grantedScope != "read" && isAPerson(viewer)
+    }
+
+    /// Whether `viewer` (`RunnerPeople.you`) is a person on the runner, who
+    /// may change its plan (ov-736): the owner, a member, or not said yet.
+    /// A released device isn't.
+    public static func isAPerson(_ viewer: String?) -> Bool {
+        viewer != RunnerPeople.released
     }
 
     /// Whether `viewer` (`RunnerPeople.you`) may be the owner: "", or not

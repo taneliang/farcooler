@@ -16,10 +16,11 @@ class RulingActionsTest {
         "r", "R-12", 12, "The inbox is amber.", "One attention color.", "One token; every surface follows.",
     )
 
-    /** AgentKit's `aMemberIsOfferedNoMarks` (ov-707): keeping a ruling is the owner's, and the runner refuses a member's. */
+    /** AgentKit's `aMemberIsOfferedMarks` (ov-736): every person changes the plan; a released device is offered none. */
     @Test
-    fun `a member is offered no marks`() {
-        assertFalse(RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = "bob"))
+    fun `a member is offered the marks`() {
+        assertTrue("a member", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = "bob"))
+        assertFalse("a member at Read", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "read", viewer = "bob"))
         assertFalse(RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = "(released)"))
         assertTrue("the owner", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = ""))
         assertTrue("not said yet, as before", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = null))

@@ -51,8 +51,8 @@ struct PlanRulingOwnerActionsTests {
         #expect(!calls.args.contains { $0.first == "terminal" }, "Keep never reaches the orchestrator: \(calls.args)")
     }
 
-    @Test("A member's Mac is offered no Keep or Keep All, and sends none (ov-707): the runner refuses a member's")
-    func aMemberIsOfferedNoKeep() async throws {
+    @Test("A member's Mac is offered Keep and sends it (ov-736): every person changes the plan, and the runner files it under them")
+    func aMemberKeeps() async throws {
         let calls = PlanViewTests.Calls()
         let target = "member-\(UUID().uuidString)"
         defer { UserDefaults.standard.removeObject(forKey: "talk.you.\(target)") }
@@ -61,8 +61,25 @@ struct PlanRulingOwnerActionsTests {
         await store.plan.reload()
         await store.client.talk.load(store.client, force: true)
         #expect(store.client.talk.viewer == "bob")
-        #expect(!store.plan.canMarkRulings)
+        #expect(store.plan.canMarkRulings)
         #expect(store.plan.rulingsTitle == "Open Decisions", "not decided for Bob (ov-712)")
+        calls.args.removeAll()
+        let ruling = try #require(store.plan.plan.rulings.first { $0.short == "R-2" })
+        #expect(await store.plan.keep(ruling))
+        #expect(calls.args.filter { $0.starts(with: ["plan", "ruling", "keep", "R-2"]) }.count == 1, "\(calls.args)")
+    }
+
+    @Test("A released Mac is offered no Keep or Keep All, and sends none: the runner refuses it every write (ov-712)")
+    func aReleasedMacIsOfferedNoKeep() async throws {
+        let calls = PlanViewTests.Calls()
+        let target = "released-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removeObject(forKey: "talk.you.\(target)") }
+        let store = try await PlanViewTests.store(
+            plan: true, defaults: PlanViewTests.defaults(), calls: calls, target: target, you: RunnerPeople.released)
+        await store.plan.reload()
+        await store.client.talk.load(store.client, force: true)
+        #expect(store.client.talk.viewer == RunnerPeople.released)
+        #expect(!store.plan.canMarkRulings)
         calls.args.removeAll()
         let ruling = try #require(store.plan.plan.rulings.first { $0.short == "R-2" })
         #expect(await store.plan.keep(ruling) == false)

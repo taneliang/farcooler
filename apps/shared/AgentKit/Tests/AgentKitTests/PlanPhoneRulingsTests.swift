@@ -84,9 +84,10 @@ struct PlanPhoneRulingsTests {
         #expect(!RulingActions.canMark(runnerTakesMarks: false, grantedScope: "control", viewer: ""), "a runner that takes no marks gets none")
     }
 
-    @Test("a member is offered no marks (ov-707): keeping a ruling is the owner's, and the runner refuses theirs")
-    func aMemberIsOfferedNoMarks() {
-        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: "bob"))
+    @Test("a member is offered the marks (ov-736): every person changes the plan; a released device is offered none")
+    func aMemberIsOfferedMarks() {
+        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: "bob"), "a member")
+        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "read", viewer: "bob"), "a member at Read")
         #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: RunnerPeople.released))
         #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: ""), "the owner")
         #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: nil), "not said yet, as before")

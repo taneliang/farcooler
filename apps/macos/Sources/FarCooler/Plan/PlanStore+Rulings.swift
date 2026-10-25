@@ -1,17 +1,18 @@
 import AgentKit
 import Foundation
 
-// The owner's Keep and Keep All (ov-333), through the CLI as every Mac write
-// is: `farcooler plan ruling keep`. Keep is the owner's own mark, so it never
+// Keep and Keep All (ov-333), through the CLI as every Mac write is:
+// `farcooler plan ruling keep`. Keep is a person's own mark, the owner's or a
+// member's (ov-736), so it never
 // reaches the orchestrator and never changes the plan; Reverse and Discuss do
 // reach it, from the window (`ContentView.planRulingActions`).
 
 extension PlanStore {
-    /// Whether this Mac offers the owner's marks on a ruling: the runner
-    /// takes them, and this Mac isn't a member's (ov-707), whose Keep the
-    /// runner refuses.
+    /// Whether this Mac offers a person's marks on a ruling: the runner
+    /// takes them, and this Mac is the owner's or a member's (ov-736), not a
+    /// released one, whose Keep the runner refuses.
     var canMarkRulings: Bool {
-        client.daemonBuild?.can(.boardRulingActions) == true && RulingActions.isOwner(client.talk.viewer)
+        client.daemonBuild?.can(.boardRulingActions) == true && RulingActions.isAPerson(client.talk.viewer)
     }
 
     /// The open rulings' heading: Decided For You, or Open Decisions on a

@@ -73,7 +73,7 @@ public struct PlanRuling: Decodable, Equatable, Identifiable, Sendable {
     /// orchestrator: "ruling R-12: The inbox is amber."
     public var reference: String { "ruling \(short): \(decision)" }
 
-    /// Open until the owner keeps or reverses it.
+    /// Open until a person keeps or reverses it.
     public var isStanding: Bool { state == .standing }
 
     /// Whether the owner has kept it.
@@ -98,7 +98,8 @@ extension PlanWords {
     /// you".
     public static let decidedForYou = "Decided For You"
     /// The same section on a member's device (ov-712): the orchestrator's
-    /// calls aren't made for them, and only the owner keeps or reverses one.
+    /// calls aren't made for them, though they keep or reverse one as the
+    /// owner does (ov-736).
     /// Beside Past Decisions, as Open is a ruling's state. Android says "Open
     /// decisions".
     public static let openDecisions = "Open Decisions"

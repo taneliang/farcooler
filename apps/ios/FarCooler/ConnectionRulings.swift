@@ -1,8 +1,9 @@
 import Foundation
 
-// The owner's marks on a ruling, from the iPhone (ov-333). Keep is the
-// owner's own mark: `ruling.keep` through the client core, which sends
-// `ruling.set` to confirmed as the user, and never reaches the orchestrator.
+// A person's marks on a ruling, from the iPhone (ov-333), the owner's or a
+// member's (ov-736). Keep is their own mark: `ruling.keep` through the client
+// core, which sends `ruling.set` to confirmed as the user, which the runner
+// files under a member's name, and never reaches the orchestrator.
 // Reverse and Discuss do, through `RulingActions` (AgentKit), which holds the
 // rules and the words.
 

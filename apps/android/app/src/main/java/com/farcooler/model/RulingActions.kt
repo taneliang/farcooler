@@ -17,14 +17,18 @@ package com.farcooler.model
  */
 object RulingActions {
     /**
-     * Whether this phone offers the owner's marks (Keep, Keep all, Reverse,
+     * Whether this phone offers a person's marks (Keep, Keep all, Reverse,
      * Discuss): the runner takes them, the grant isn't Read, and the phone
-     * isn't someone else's (ov-707). Either would flip a ruling kept and
-     * silently put it back. [viewer] is `member.list`'s `you` ([com.farcooler.net.ViewerRead]):
-     * empty for the owner, null until the runner has said.
+     * is the owner's or a member's (ov-736), not a released one's. Either
+     * would flip a ruling kept and silently put it back. [viewer] is
+     * `member.list`'s `you` ([com.farcooler.net.ViewerRead]): empty for the
+     * owner, a handle for a member, null until the runner has said.
      */
     fun canMark(runnerTakesMarks: Boolean, grantedScope: String?, viewer: String?): Boolean =
-        runnerTakesMarks && grantedScope != "read" && viewer.isNullOrEmpty()
+        runnerTakesMarks && grantedScope != "read" && viewer != RELEASED
+
+    /** `member.list`'s `you` on a device that was a member's and is nobody's now. */
+    private const val RELEASED = "(released)"
 
     /** The words left in the composer for Discuss, ending where the owner types. */
     fun discussDraft(r: PlanRuling): String = "About ruling ${r.short} (“${AskAboutTask.oneLine(r.decision)}”): "
