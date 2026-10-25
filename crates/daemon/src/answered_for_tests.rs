@@ -16,6 +16,7 @@ use crate::wire::id_bytes;
 struct Runner {
     _dir: ScratchDir,
     svc: Arc<Service>,
+    repo: Uuid,
     workspace: Uuid,
 }
 
@@ -25,7 +26,7 @@ async fn runner() -> Runner {
     let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
     svc.store.set_member("bob", "Bob Okafor", &["phone-b".to_string()]).unwrap();
-    Runner { _dir: dir, svc, workspace }
+    Runner { _dir: dir, svc, repo, workspace }
 }
 
 /// A decision waiting on an answer, on Bob's desk when `desk` names him.
@@ -116,8 +117,34 @@ async fn a_caller_cannot_say_whose_it_was() {
 #[tokio::test]
 async fn a_solo_runner_records_none() {
     let (dir, svc, repo) = crate::test_support::fixture().await;
-    let r = Runner { _dir: dir, workspace: svc.store.ensure_main_workspace(repo).unwrap().id, svc };
+    let r = Runner { _dir: dir, workspace: svc.store.ensure_main_workspace(repo).unwrap().id, repo, svc };
     let task = decision(&r, None);
     answer(&r, None, task, "").await;
+    assert_eq!(recorded(&r, task).1, None);
+}
+
+/// A card the owner's own login works: a live lane on it that no member's
+/// login was recorded for, which `whose_pane` reads as the owner's.
+#[tokio::test]
+async fn a_member_answering_the_owners_decision_records_the_owner() {
+    use farcooler_protocol::v1::TerminalIntent;
+    let r = runner().await;
+    let task = decision(&r, None);
+    let wt = r.svc.store.create_worktree(r.repo, "lane", "/tmp/lane", false).unwrap();
+    r.svc.store.create_terminal_for_task(wt.id, "pane", "claude", TerminalIntent::Running, 80, 24, Some(task)).unwrap();
+    answer(&r, Some("phone-a"), task, "").await;
+    let (actor, whose) = recorded(&r, task);
+    assert_eq!(actor, "member:alice");
+    assert_eq!(whose, Some(serde_json::json!({ "handle": "", "name": "" })), "the owner's card, said with no handle");
+}
+
+/// Only a decision is answered for: an answer on a card that isn't waiting on
+/// one settles nothing of anyone's.
+#[tokio::test]
+async fn an_answer_on_a_card_not_waiting_for_a_decision_records_none() {
+    let r = runner().await;
+    let task = decision(&r, Some("bob"));
+    r.svc.store.set_task_status(task, TaskStatus::InProgress, Actor::Manager).unwrap();
+    answer(&r, Some("phone-a"), task, "").await;
     assert_eq!(recorded(&r, task).1, None);
 }
