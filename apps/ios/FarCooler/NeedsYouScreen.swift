@@ -772,17 +772,20 @@ struct NeedsYouRow: View {
                 ThreadReplySheet(item: item, replies: replies)
             }
         }
-        .confirmationDialog(
-            item.answerForOthersPrompt ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
-            titleVisibility: .visible
+        // An alert, not a confirmation dialog: on an iPhone the dialog is drawn
+        // as a popover with no Cancel button, and this one has both choices on
+        // screen (ov-737).
+        .alert(
+            item.answerForOthersPrompt ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
         ) {
+            Button("Cancel", role: .cancel) { confirming = nil }
             Button("Answer") {
                 let step = confirming?.step
                 confirming = nil
                 step?()
             }
             .accessibilityIdentifier("needs-you-confirm-\(item.itemID)")
-            Button("Cancel", role: .cancel) { confirming = nil }
         }
         .alert("Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
@@ -985,7 +988,12 @@ struct NeedsYouRow: View {
                 Button("Answer…") {
                     confirmed {
                         draft = ""
-                        writing = true
+                        // After the confirmation has gone: an alert raised in
+                        // the same turn as another's dismissal is dropped.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(400))
+                            writing = true
+                        }
                     }
                 }
                 .buttonStyle(.bordered)

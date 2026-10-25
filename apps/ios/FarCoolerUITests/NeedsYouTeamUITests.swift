@@ -53,10 +53,10 @@ final class NeedsYouTeamUITests: XCTestCase {
         let option = app.buttons["needs-you-action-decision:0198f2c0-0000-7000-8000-00000000e007-pdfkit"]
         XCTAssertTrue(option.waitForExistence(timeout: 30), "no answer on Bob's decision: \(app.debugDescription)")
         option.tap()
-        let prompt = app.staticTexts["This is for Bartholomew Okafor-Lindqvist. Answer for them?"]
+        let prompt = app.alerts["This is for Bartholomew Okafor-Lindqvist. Answer for them?"]
         XCTAssertTrue(prompt.waitForExistence(timeout: 10), "no question before answering for Bob: \(app.debugDescription)")
-        XCTAssertTrue(app.buttons["Answer"].exists, "no Answer in the question")
-        app.buttons["Cancel"].tap()
+        XCTAssertTrue(prompt.buttons["Answer"].exists, "no Answer in the question")
+        prompt.buttons["Cancel"].tap()
         XCTAssertFalse(prompt.waitForExistence(timeout: 2), "the question stayed")
         XCTAssertNotEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit", "Cancel sent the answer")
         XCTAssertTrue(option.exists, "Bob's decision left on Cancel")
@@ -70,8 +70,9 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertTrue(allow.waitForExistence(timeout: 30), "no Allow on your ask")
         let option = app.buttons["needs-you-action-decision:0198f2c0-0000-7000-8000-00000000e007-pdfkit"]
         option.tap()
-        XCTAssertTrue(app.buttons["Answer"].waitForExistence(timeout: 10), "no question before answering for Bob")
-        app.buttons["Answer"].tap()
+        let prompt = app.alerts["This is for Bartholomew Okafor-Lindqvist. Answer for them?"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "no question before answering for Bob")
+        prompt.buttons["Answer"].firstMatch.tap()
         let sent = NSPredicate(format: "value == %@", "task.note bil-7 pdfkit")
         XCTAssertEqual(
             XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
