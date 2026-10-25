@@ -400,13 +400,13 @@ async fn the_owners_look_at_a_failed_turn_leaves_it_on_a_members_list() {
     t.watcher.observe_for_tests(t.pane, failed).await;
     let item = format!("blocked:{}", t.pane);
     for rpc in [&t.owner, &t.bob, &t.carol] {
-        assert_eq!(needs_you(rpc).await, [item.clone()]);
+        assert_eq!(needs_you(rpc).await, std::slice::from_ref(&item));
     }
 
     call(&t.owner, seen(t.pane)).await;
     assert_eq!(needs_you(&t.owner).await, Vec::<String>::new(), "the owner has seen it");
-    assert_eq!(needs_you(&t.bob).await, [item.clone()], "Bob hasn't");
-    assert_eq!(needs_you(&t.carol).await, [item.clone()], "nor Carol");
+    assert_eq!(needs_you(&t.bob).await, std::slice::from_ref(&item), "Bob hasn't");
+    assert_eq!(needs_you(&t.carol).await, std::slice::from_ref(&item), "nor Carol");
 
     call(&t.bob, seen(t.pane)).await;
     assert_eq!(needs_you(&t.bob).await, Vec::<String>::new(), "Bob's own look");
