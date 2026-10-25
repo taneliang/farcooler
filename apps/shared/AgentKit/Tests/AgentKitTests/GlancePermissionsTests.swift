@@ -582,6 +582,37 @@ struct GlancePermissionsTests {
         #expect(leader.until == nil)
     }
 
+    /// Someone else's ask has no buttons on a lock screen, which can't ask
+    /// "Answer for them?"; the card says whose it is (ov-739). The reader's
+    /// own, nobody's and an unknown list keep the buttons.
+    ///
+    /// Mutation: `current` not passing `forOthers`. Red: buttons on Bob's ask.
+    @Test func someoneElsesAskGetsNoButtons() {
+        func ask(_ concern: NeedsYouConcern?) -> NeedsYouItem {
+            NeedsYouItem(
+                id: "ask:1", kind: .ask, rank: 1, since: nil,
+                terminal: NeedsYouTerminal(id: "t1", worktreeID: nil, label: "claude", role: nil, paneMode: "claude"),
+                question: "q", concern: concern)
+        }
+        let bob = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
+        let others = CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [ask(bob)])
+        #expect(others.isPresent)
+        #expect(!others.offersButtons)
+        #expect(others.forOthers == "Bob")
+        #expect(others.othersNote == "This is for Bob. Tap the card to answer.")
+        let owner = NeedsYouConcern(handle: "", name: "", yours: false)
+        #expect(CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [ask(owner)]).forOthers == "Owner")
+        for items in [[ask(NeedsYouConcern(handle: "a", name: "A", yours: true))], [ask(nil)], [], nil] as [[NeedsYouItem]?] {
+            let own = CardLeaderAsk.current(store: .empty, state: card(), now: before, items: items)
+            #expect(own.offersButtons)
+            #expect(own.othersNote == nil)
+        }
+        // Another agent's item says nothing about this card.
+        var elsewhere = ask(bob)
+        elsewhere.terminal = NeedsYouTerminal(id: "t9", worktreeID: nil, label: "x", role: nil, paneMode: "claude")
+        #expect(CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [elsewhere]).offersButtons)
+    }
+
     /// A tap that came back `.over` keeps the buttons off and its sentence on,
     /// even though the card still carries the ask.
     ///

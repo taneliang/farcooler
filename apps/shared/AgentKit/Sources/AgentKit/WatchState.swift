@@ -146,6 +146,13 @@ extension NeedsYouItem {
         return [workspaceName, subject].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// The line under the question when the runner has a team: whose it is
+    /// leads ("Bob · Billing · claude"), so a name is never what a narrow row
+    /// cuts. Just `watchPlace` when `whose` is nil (ov-739).
+    public func watchCaption(whose: String?) -> String {
+        [whose ?? "", watchPlace].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     /// The hedge under an item the app derived from a runner too old to send
     /// its own list (spec §2.6), or nil for one the runner sent. It's a
     /// blocked agent the app saw, and the runner may have asks and decisions

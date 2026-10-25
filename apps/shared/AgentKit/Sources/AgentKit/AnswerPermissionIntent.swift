@@ -224,6 +224,25 @@
                 }
                 return
             }
+            // Someone else's ask is answered in the app, where it can ask
+            // "Answer for them?" first. A card drawn before the list said
+            // so may still hold a button; the tap is refused here (ov-739).
+            if let others = NeedsYou.othersName(
+                askingOn: intent.terminal, in: SnapshotStore.read()?.needsYou)
+            {
+                GlancePermissionStore.update {
+                    $0.claiming(
+                        terminal: intent.terminal, request: intent.request,
+                        option: intent.option, optionName: intent.optionName, at: Date()
+                    )?
+                    .settling(
+                        terminal: intent.terminal, request: intent.request,
+                        outcome: .nothingSent,
+                        message: "This is for \(others). Open the app to answer. Nothing was sent.",
+                        at: Date())
+                }
+                return
+            }
             guard let handler else {
                 GlancePermissionStore.update {
                     // Claimed and settled in one step, so the card has

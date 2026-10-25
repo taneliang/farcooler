@@ -620,13 +620,17 @@ public struct CardLeaderAsk: Equatable, Sendable {
     /// have no fixed word (`CardAskSource.inFixedWords`), for the overflow
     /// line to count.
     public let withheld: Int
+    /// Whose the ask is when it is someone else's: "Bob", or "Owner". A lock
+    /// screen button can't ask "Answer for them?", so the card leaves its
+    /// buttons off and says to open the app (ov-739).
+    public let forOthers: String?
 
     public static let none = CardLeaderAsk(
         terminal: "", permission: nil, answer: nil, caption: nil, until: nil)
 
     public init(
         terminal: String, permission: GlancePermission?, answer: GlanceAnswer?,
-        caption: String?, until: Date?, withheld: Int = 0
+        caption: String?, until: Date?, withheld: Int = 0, forOthers: String? = nil
     ) {
         self.terminal = terminal
         self.permission = permission
@@ -634,10 +638,19 @@ public struct CardLeaderAsk: Equatable, Sendable {
         self.caption = caption
         self.until = until
         self.withheld = withheld
+        self.forOthers = forOthers
     }
 
+    /// What the card says in place of buttons for someone else's ask.
+    public var othersNote: String? {
+        forOthers.map { "This is for \($0). Tap the card to answer." }
+    }
+
+    /// `items` is the fleet's Needs You list, when the card's reader has one:
+    /// it says whose the leader's ask is (`NeedsYou.othersName`).
     public static func current(
-        store: GlancePermissions, state: AgentCardState, now: Date
+        store: GlancePermissions, state: AgentCardState, now: Date,
+        items: [NeedsYouItem]? = nil
     ) -> CardLeaderAsk {
         guard state.status == "blocked", !state.terminal.isEmpty else { return .none }
         let permission = CardAskSource.permission(store: store, state: state, now: now)
@@ -657,7 +670,9 @@ public struct CardLeaderAsk: Equatable, Sendable {
             terminal: state.terminal, permission: permission, answer: answer,
             caption: carded
                 ? CardAskWording.caption(tool: state.ask?.tool, workspace: state.workspace) : nil,
-            until: carded ? state.ask?.until : nil, withheld: withheld)
+            until: carded ? state.ask?.until : nil, withheld: withheld,
+            forOthers: permission == nil
+                ? nil : NeedsYou.othersName(askingOn: state.terminal, in: items))
     }
 
     /// Whether the card has anything to add under the leader.
@@ -666,7 +681,7 @@ public struct CardLeaderAsk: Equatable, Sendable {
     /// Whether a tap may still write to this agent: there is something to
     /// answer and no answer from this phone that refuses another tap.
     public var offersButtons: Bool {
-        guard permission != nil else { return false }
+        guard permission != nil, forOthers == nil else { return false }
         guard let answer else { return true }
         return !answer.refusesAnotherTap
     }

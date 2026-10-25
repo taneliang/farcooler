@@ -45,3 +45,22 @@ extension NeedsYouItem {
         return "This is for \(who). Answer for them?"
     }
 }
+
+extension NeedsYou {
+    /// The ask on `terminal` when it is someone else's, or nil when it is the
+    /// reader's, nobody's, or not listed.
+    ///
+    /// For a surface that holds an agent and not an item, as the Live
+    /// Activity and the watch's agent screen do: it finds the item the runner
+    /// filed for that agent (`ask` or `blocked`, the kinds an agent's answer
+    /// buttons settle). Nil when the list is unknown, so a surface on a build
+    /// or a runner that says nothing keeps its buttons as it always had them.
+    public static func othersItem(askingOn terminal: String, in items: [NeedsYouItem]?) -> NeedsYouItem? {
+        items?.first { ($0.kind == .ask || $0.kind == .blocked) && $0.terminal?.id == terminal && $0.isOthers }
+    }
+
+    /// Whose that ask is, as "Bob" or "Owner".
+    public static func othersName(askingOn terminal: String, in items: [NeedsYouItem]?) -> String? {
+        othersItem(askingOn: terminal, in: items)?.othersName
+    }
+}

@@ -358,7 +358,7 @@ extension Collection where Element == NeedsYouItem {
 
 /// Whose an item is, as the runner told this reader. `NeedsYouConcern` on the
 /// wire.
-public struct NeedsYouConcern: Hashable, Sendable, Decodable {
+public struct NeedsYouConcern: Hashable, Sendable, Codable {
     /// The member's handle; empty for the runner's owner.
     public var handle: String
     /// The member's name; empty for the runner's owner.

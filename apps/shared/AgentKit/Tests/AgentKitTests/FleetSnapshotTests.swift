@@ -942,6 +942,29 @@ struct FleetSnapshotTests {
         #expect(back.needsYou?.first?.actions.map(\.id) == ["allow", "deny"])
     }
 
+    /// The file keeps whose an item is (ov-739), so the watch and the widgets
+    /// can say it; a file from before has none and reads as a runner with no
+    /// team.
+    ///
+    /// Mutation: `StoredItem.init(_:)` dropping `concern`. Red: nil back.
+    @Test func anItemRoundTripsWithWhoseItIs() throws {
+        var bobs = item("ask:2", .ask, rank: 6, terminal: "t2")
+        bobs.concern = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
+        let snapshot = FleetSnapshot(
+            agents: [], capturedAt: Date(timeIntervalSince1970: 1_000_000), complete: true,
+            needsYou: [item("ask:1", .ask, rank: 5, terminal: "t1"), bobs])
+        let back = try JSONDecoder().decode(FleetSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(back.needsYou?.map(\.concern) == [nil, NeedsYouConcern(handle: "bob", name: "Bob", yours: false)])
+        let old = """
+        {"agents":[],"capturedAt":1000000,"complete":true,
+        "needsYou":[{"id":"x:1","kind":"ask","also":[],"rank":5,
+        "workspaceName":"","question":"?","actions":[],"runner":"r1","derived":false}]}
+        """
+        #expect(try JSONDecoder().decode(FleetSnapshot.self, from: Data(old.utf8)).needsYou?.first?.concern == nil)
+        let odd = old.replacingOccurrences(of: "\"derived\":false", with: "\"derived\":false,\"concern\":\"x\"")
+        #expect(try JSONDecoder().decode(FleetSnapshot.self, from: Data(odd.utf8)).needsYou?.count == 1)
+    }
+
     /// A kind a later build writes reads as unknown rather than failing the
     /// file: the rule the wire's decoder keeps, kept on disk.
     @Test func anUnknownKindInTheFileReadsAsUnknown() throws {

@@ -196,6 +196,42 @@ struct WatchListTests {
     }
 }
 
+/// The watch says whose each item is on a runner with a team (ov-739).
+struct WatchWhoseTests {
+    private func ask(_ concern: NeedsYouConcern?) -> NeedsYouItem {
+        var item = NeedsYouItem(
+            id: "ask:1", kind: .ask, rank: 1, since: nil, workspaceName: "Billing",
+            terminal: NeedsYouTerminal(id: "t1", worktreeID: nil, label: "claude", role: nil, paneMode: "claude"),
+            question: "Run it?", askID: "r1", actions: [NeedsYouAction(id: "allow", title: "Allow", destructive: false, primary: true)],
+            concern: concern)
+        item.runner = "studio"
+        return item
+    }
+
+    /// The line leads with the name, and without one is the place alone.
+    ///
+    /// Mutation: `watchCaption` ignoring `whose`. Red: no name on the row.
+    @Test func theCaptionLeadsWithWhose() {
+        #expect(ask(nil).watchCaption(whose: "Bob") == "Bob · Billing · claude")
+        #expect(ask(nil).watchCaption(whose: nil) == "Billing · claude")
+    }
+
+    /// An agent's ask is found by its terminal, and only when it is someone
+    /// else's: the prompt is the one every other surface asks.
+    ///
+    /// Mutation: `othersItem` ignoring `isOthers`. Red: the reader's own asks.
+    @Test func anAgentsOthersAskIsFoundByTerminal() {
+        let bob = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
+        let mine = NeedsYouConcern(handle: "a", name: "A", yours: true)
+        #expect(NeedsYou.othersName(askingOn: "t1", in: [ask(bob)]) == "Bob")
+        #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(bob)])?.answerForOthersPrompt == "This is for Bob. Answer for them?")
+        #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(mine)]) == nil)
+        #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(nil)]) == nil)
+        #expect(NeedsYou.othersItem(askingOn: "t2", in: [ask(bob)]) == nil)
+        #expect(NeedsYou.othersItem(askingOn: "t1", in: nil) == nil)
+    }
+}
+
 /// Derived items are hedged on the watch (ov-55 4C fix round 1).
 struct WatchDerivedTests {
     /// Mutation: `watchHedge` always nil. Red.

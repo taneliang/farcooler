@@ -1227,6 +1227,9 @@ extension FleetSnapshot {
         var actions: [Action]
         var runner: String
         var derived: Bool
+        /// Whose it is (ov-739). Absent from a file an older build wrote and
+        /// for a runner with no team, which read as before: no label.
+        var concern: NeedsYouConcern?
 
         init(_ item: NeedsYouItem) {
             id = item.itemID
@@ -1256,6 +1259,7 @@ extension FleetSnapshot {
             }
             runner = item.runner
             derived = item.isDerived
+            concern = item.concern
         }
 
         var item: NeedsYouItem {
@@ -1281,7 +1285,7 @@ extension FleetSnapshot {
                     NeedsYouAction(
                         id: $0.id, title: $0.title, destructive: $0.destructive, primary: $0.primary)
                 },
-                runner: runner, isDerived: derived)
+                runner: runner, isDerived: derived, concern: concern)
         }
 
         // Lenient where a later build might leave something out, for the
@@ -1306,6 +1310,9 @@ extension FleetSnapshot {
             actions = try c.decodeIfPresent([Action].self, forKey: .actions) ?? []
             runner = try c.decodeIfPresent(String.self, forKey: .runner) ?? ""
             derived = try c.decodeIfPresent(Bool.self, forKey: .derived) ?? false
+            // `try?`: a concern a later build shapes differently costs the
+            // label, never the item.
+            concern = (try? c.decodeIfPresent(NeedsYouConcern.self, forKey: .concern)) ?? nil
         }
     }
 }
