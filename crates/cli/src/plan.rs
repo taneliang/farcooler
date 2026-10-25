@@ -57,6 +57,8 @@ mod pr_body;
 mod dispatch;
 #[path = "plan_agents.rs"]
 mod agents;
+#[path = "plan_move.rs"]
+mod theme_move;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -194,6 +196,15 @@ enum ThemeCmd {
         /// Take the budget away.
         #[arg(long)]
         no_budget: bool,
+    },
+    /// Put a theme at a place in the ranking, 1 being first. The ranking is
+    /// the whole team's: anyone may move a theme.
+    Move {
+        /// The theme's name, or its short id.
+        name: String,
+        /// Its new place: 1 for first.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        to: u32,
     },
     /// Add cards to a theme and take others out.
     Cards {
@@ -717,6 +728,7 @@ async fn theme<L: DispatchLink>(
             };
             Ok(if json { theme_json(&view, &keys).to_string() } else { format!("Updated theme {:?}.", theme_name(&view)) })
         }
+        ThemeCmd::Move { name, to } => theme_move::move_theme(link, board, &plan, &name, to, actor, json).await,
         ThemeCmd::Cards { name, add, remove } => {
             if add.is_empty() && remove.is_empty() {
                 return Err("Name a card with --add or --remove.".into());

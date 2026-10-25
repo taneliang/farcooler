@@ -277,6 +277,7 @@ pub fn plain_cli_command(command: &str, cli: &str) -> bool {
     match rest.as_slice() {
         ["plan"] | ["plan", "--json"] | ["task", "list"] | ["task", "list", "--json"] => true,
         ["task", "show", key] | ["task", "show", key, "--json"] => is_key(key),
+        ["workspace", "charter", ws] | ["workspace", "charter", ws, "--json"] => is_text(ws),
         ["search", pattern] => is_text(pattern),
         ["search", pattern, "--path", dir] => is_text(pattern) && is_search_path(dir),
         ["message", "orchestrator", said] => is_text(said),
@@ -324,6 +325,7 @@ const PLAN_VERBS: &[PlanVerb] = &[
         switches: &["--no-ask"],
         choices: &[],
     },
+    PlanVerb { path: &["plan", "theme", "move"], words: 1..=1, valued: &["--to"], switches: &[], choices: &[] },
     PlanVerb { path: &["plan", "theme", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[], choices: &[] },
     PlanVerb {
         path: &["plan", "lane", "set"],

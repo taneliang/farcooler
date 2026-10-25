@@ -479,6 +479,9 @@ message Result {
     // `workspace.write_charter`: what it wrote.
     RepositorySurvey repository_survey = 470;
     CharterWritten charter_written = 471;
+    // `workspace.charter` (ov-755), behind `workspace_charter`: the charter's
+    // text.
+    WorkspaceCharter workspace_charter = 472;
     // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
     WorktreeGrepResult worktree_grep_result = 480;
     // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
@@ -522,7 +525,7 @@ message Result {
   // The rest of people's block (ov-494).
   reserved 462 to 469;
   // The rest of the repository survey's block (ov-519).
-  reserved 472 to 479;
+  reserved 473 to 479;
   // The rest of the rep search's block (ov-555).
   reserved 481 to 489;
   // The rest of the phone re-key's block (ov-569).
@@ -5885,6 +5888,17 @@ message SurveyGitHub {
 message SurveyFile {
   string path = 1;
   uint32 lines = 2;
+}
+
+// `workspace.charter` (ov-755), at `read`, targeting a workspace and carrying
+// no payload: the charter's text, for the owner, a member, or a member's rep.
+// A device whose member was removed is refused. Behind `workspace_charter`.
+message WorkspaceCharter {
+  // The charter as written. Empty when `exists` is false.
+  string text = 1;
+  // Whether the workspace has a charter yet: a new workspace's is the
+  // orchestrator's to write when it is first talked to.
+  bool exists = 2;
 }
 
 message WorkspaceWriteCharter {

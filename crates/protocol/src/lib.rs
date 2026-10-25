@@ -726,6 +726,11 @@ pub mod capability {
     /// `MemberList.own_logins` and `member.set_own_login`. An app shows the
     /// switches only on a runner with it.
     pub const MEMBER_OWN_LOGINS: &str = "member_own_logins";
+    /// A workspace's charter read by anyone on the runner (ov-755):
+    /// `workspace.charter`, at `read`, which answers the charter's text to the
+    /// owner, a member or a member's rep. An app opens its read-only sheet
+    /// only on a runner with it.
+    pub const WORKSPACE_CHARTER: &str = "workspace_charter";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -748,6 +753,7 @@ pub mod capability {
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
+            WORKSPACE_CHARTER,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1008,6 +1014,7 @@ pub mod method {
         ClaudeSignInCancel = "claude.sign_in_cancel" => CLAUDE_SIGN_IN,
         ClaudeSignOut = "claude.sign_out" => CLAUDE_SIGN_IN,
         MemberSetOwnLogin = "member.set_own_login" => MEMBER_OWN_LOGINS,
+        WorkspaceCharter = "workspace.charter" => WORKSPACE_CHARTER,
     }
 }
 

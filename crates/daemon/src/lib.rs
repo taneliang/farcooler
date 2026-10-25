@@ -104,6 +104,7 @@ pub mod landing_read;
 pub mod charter_draft;
 pub mod survey;
 pub mod survey_ops;
+pub mod charter_read;
 pub mod survey_read;
 pub(crate) mod board_reads_ops;
 pub(crate) mod lfs_ops;

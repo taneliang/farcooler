@@ -74,4 +74,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case repConnectors = "rep_connectors"
     case claudeSignIn = "claude_sign_in"
     case memberOwnLogins = "member_own_logins"
+    case workspaceCharter = "workspace_charter"
 }

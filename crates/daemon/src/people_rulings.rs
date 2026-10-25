@@ -97,6 +97,12 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::ClientList
         | M::MemberList => Reads,
 
+        // A read at Read scope that a removed member's device is refused
+        // (ov-755, ov-753): the charter is the team's, and Reads is the one
+        // ruling a released device keeps. The owner, a member and a member's
+        // rep (`rep_may`) read it.
+        M::WorkspaceCharter => Members,
+
         M::ClientSetNodeKey
         | M::ClientRekey
         | M::ClaudeSignIn

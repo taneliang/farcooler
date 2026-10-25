@@ -412,3 +412,101 @@ async fn a_rep_changes_only_its_own_workspaces_plan() {
     assert_eq!(r.svc.store.ruling(ops_ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing reversed");
     call(&in_rep, theme_on(r.workspace, "Exports", &own)).await.expect("its own board");
 }
+
+/// The pid of `r.agent`'s pane, once `r.agent` is bound as Bob's rep.
+async fn bobs_rep_pid(r: &Runner) -> i32 {
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32
+}
+
+fn charter_request(workspace: Uuid) -> Request {
+    Request { method: "workspace.charter".into(), target_resource_id: Some(id_bytes(workspace)), ..Default::default() }
+}
+
+fn charter_of(value: std::result::Result<Option<result::Value>, String>) -> (bool, String) {
+    let Ok(Some(result::Value::WorkspaceCharter(c))) = value else { panic!("not a charter: {value:?}") };
+    (c.exists, c.text)
+}
+
+/// Every person on the runner reads a workspace's charter (ov-755): the
+/// owner's phone and the local socket, a member's phone, and a member's rep
+/// from its pane, at Read scope. A device whose member was removed does not
+/// (ov-753), though it still reads the plan. And a workspace with no
+/// charter yet answers that, not an error.
+#[tokio::test]
+async fn everyone_on_the_runner_but_a_removed_member_reads_the_charter() {
+    let r = runner().await;
+    let path = crate::workspace_home::charter_path(r.svc.root_dir(), r.workspace);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let nobody = factory(&r.svc, BOB, Scope::Read);
+    assert_eq!(charter_of(call(&nobody, charter_request(r.workspace)).await), (false, String::new()), "none yet");
+
+    std::fs::write(&path, "## Who decides\nThe lead.\n").unwrap();
+    for (who, device, scope) in [("the owner's phone", OWNERS_PHONE, Scope::Read), ("Bob's phone", BOB, Scope::Read), ("the local socket", None, Scope::HostAdmin)] {
+        let said = charter_of(call(&factory(&r.svc, device, scope), charter_request(r.workspace)).await);
+        assert_eq!(said, (true, "## Who decides\nThe lead.\n".to_string()), "{who}");
+    }
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(bobs_rep_pid(&r).await));
+    assert_eq!(charter_of(call(&in_rep, charter_request(r.workspace)).await).1, "## Who decides\nThe lead.\n", "Bob's rep");
+
+    for scope in [Scope::Read, Scope::Control] {
+        let refused = call(&factory(&r.svc, RELEASED, scope), charter_request(r.workspace)).await;
+        assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "a removed member's phone at {scope:?}");
+    }
+    let plan = Request {
+        method: "plan.get".into(),
+        payload: Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id_bytes(r.workspace), include_closed: false })),
+        ..Default::default()
+    };
+    assert!(call(&factory(&r.svc, RELEASED, Scope::Read), plan).await.is_ok(), "the plan is still read: a separate card");
+    assert_eq!(call(&nobody, Request { target_resource_id: None, ..charter_request(r.workspace) }).await.err().as_deref(), Some("not-found:"));
+}
+
+/// Anyone moves a theme (ov-755): one ranking, the whole team's. The owner's
+/// phone, Bob's phone, and Bob's rep from its pane each write a theme's
+/// `ordinal`; a released phone is refused. The rep's write is filed under
+/// Bob (`stamp_rep`), and the same write sneaking a budget in is refused.
+#[tokio::test]
+async fn the_owner_a_member_and_a_rep_move_a_theme() {
+    let r = runner().await;
+    let ids: Vec<Uuid> = ["Alpha", "Beta", "Gamma"]
+        .iter()
+        .map(|n| r.svc.store.create_theme(r.workspace, &farcooler_store::plan::NewTheme { name: n.to_string(), outcome: String::new() }, &[], Actor::Manager).unwrap().id)
+        .collect();
+    let ordinal = |i: usize| r.svc.store.board_theme(ids[i]).unwrap().ordinal;
+    assert_eq!((ordinal(0), ordinal(1), ordinal(2)), (1, 2, 3));
+    let rep_pid = bobs_rep_pid(&r).await;
+    let own = format!("agent:{}", r.agent.id);
+    let mv = |i: usize, to: i64, actor: &str| Request {
+        method: "board_theme.update".into(),
+        payload: Some(request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate {
+            theme_id: id_bytes(ids[i]),
+            ordinal: Some(to),
+            actor: actor.into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+
+    let refused = call(&factory(&r.svc, RELEASED, Scope::Control), mv(0, 9, "user")).await;
+    assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "a removed member");
+    assert_eq!(ordinal(0), 1);
+    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), mv(0, 4, "user")).await.expect("the owner");
+    assert_eq!(ordinal(0), 4);
+    call(&factory(&r.svc, BOB, Scope::Control), mv(1, 5, "user")).await.expect("a member");
+    assert_eq!(ordinal(1), 5);
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(rep_pid));
+    call(&in_rep, mv(2, 6, &own)).await.expect("a member's rep");
+    assert_eq!(ordinal(2), 6);
+
+    let req = mv(2, 7, &own);
+    let found = gate_rep(&r.svc, &peer(None, Scope::HostAdmin), Some(rep_pid), &req).expect("passes");
+    assert_eq!(wire_actor(&stamp_rep(&r.svc.store, found, req).unwrap()), Some("member:bob"), "filed under Bob");
+    let mut greedy = mv(2, 8, &own);
+    let Some(request::Payload::BoardThemeUpdate(p)) = greedy.payload.as_mut() else { panic!() };
+    p.budget_tokens = Some(1_000_000);
+    assert_eq!(call(&in_rep, greedy).await.err().as_deref(), Some("resource-conflict:rep_messenger"), "no budget with it");
+    assert_eq!(ordinal(2), 6);
+}

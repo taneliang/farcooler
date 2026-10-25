@@ -524,6 +524,9 @@ fn scope_of(method: Method) -> Scope {
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
         Method::WorkspaceList => Scope::Read,
+        // The charter's text: the team's rules, which every member reads
+        // (ov-755). Whose to read is the gate's (`Ruling::Members`).
+        Method::WorkspaceCharter => Scope::Read,
         // The writes sit with the board writes and `worktree.create`: they
         // touch no git data and reveal no path, and an orchestrator has to
         // be able to split its own workstream for any of this to be
@@ -1981,6 +1984,7 @@ impl Rpc {
             "worktree.grep" => crate::repo_grep::handle(svc, self.caller_pid, req).await, // ov-555
             "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
+            "workspace.charter" => crate::charter_read::handle(svc, &req), // ov-755
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 

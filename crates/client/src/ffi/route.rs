@@ -144,6 +144,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The first run's survey and charter (ov-519): the Mac's, through the
         // CLI (`repo survey`, `workspace write-charter`), like starting one.
         Method::RepositorySurvey | Method::WorkspaceWriteCharter => None,
+        // A workspace's charter (ov-755): the Mac's sheet, through the CLI.
+        // No phone surface has one yet.
+        Method::WorkspaceCharter => None,
         // A rep's search, through the CLI in its pane (ov-555).
         Method::WorktreeGrep => None,
         // Their own C entry points, `farcooler_client_paste_file` and
