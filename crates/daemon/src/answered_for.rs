@@ -22,7 +22,10 @@
 //! else, by the rule that files the ask in Needs You (`whose_terminal`). The
 //! person comes from the authenticated device, or on the local socket from
 //! the pane the caller's process runs in (`caller_person`, ov-747), never
-//! from the request. The note itself only the runner writes
+//! from the request. On the local socket that is attribution only, and
+//! grants nothing: every process there is the one Unix user, so keys sent
+//! into a member's pane (`tmux send-keys`) answer as that member, and a
+//! process that leaves its pane answers as the owner. The note itself only the runner writes
 //! (`SessionProjectors::ask_ended`; a hook frame of that name is dropped),
 //! and it lands on the row holding the ask's id, which only the runner puts
 //! on a row: `hook_ingress` strips the id from every frame before folding
