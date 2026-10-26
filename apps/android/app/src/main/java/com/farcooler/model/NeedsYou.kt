@@ -43,6 +43,11 @@ data class NeedsYouRunner(
      * A runner that isn't may have more waiting than its last list says.
      */
     val answering: Boolean = true,
+    /**
+     * Whether it removed this phone's member or took its access away (ov-784, ov-818): its own row says so, and it
+     * isn't named among the runners that aren't answering ([NeedsYou.unanswered]).
+     */
+    val shutOut: Boolean = false,
 )
 
 /** One row on the front door: an item, where it is, and whose runner. */
@@ -175,7 +180,7 @@ object NeedsYou {
      * from them, or a link that isn't answering now.
      */
     fun unanswered(runners: List<NeedsYouRunner>): List<String> =
-        runners.filter { it.reading == null || !it.answering }.map { it.label }
+        runners.filter { !it.shutOut && (it.reading == null || !it.answering) }.map { it.label }
 
     /**
      * The line under "Nothing needs you", or null when every runner answered.

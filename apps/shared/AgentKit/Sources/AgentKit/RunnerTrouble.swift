@@ -386,10 +386,14 @@ enum RunnerTrouble: Equatable {
     ///
     /// Every failure but one. A device with no key of its own has no runner to
     /// blame and nothing in a runner editor would change the answer.
-    ///
-    /// Nor a runner that took this device's access away: its details are
-    /// right, and editing them is a road to the same refusal.
-    var offersEditingTheRunner: Bool { self != .noIdentity && self != .accessRemoved }
+    var offersEditingTheRunner: Bool { self != .noIdentity }
+
+    /// The moves a failure offers beside ``nextMove``. A runner that took
+    /// this device's access away may be this person's own, refusing a key
+    /// they forgot or reset (ov-818 review S2): the remedy there is theirs,
+    /// so Authorize This Device stays on offer, showing this device's own key
+    /// and nothing else.
+    var alsoOffers: [NextMove] { self == .accessRemoved ? [.authorizeThisDevice] : [] }
 
     /// Whether the raw text from the core goes on screen under the sentence.
     ///
@@ -490,7 +494,7 @@ enum RunnerTrouble: Equatable {
         case .tunnelFailed(.rendezvous): return "Can’t Reach Tailcat"
         case .tunnelFailed(.notInThisBuild): return "No Tailcat in This Build"
         case .tunnelFailed(.unspecified): return "Tailcat Didn’t Connect"
-        case .refusedThisTime: return "Not Let In This Time"
+        case .refusedThisTime: return "Key Not Accepted"
         case .accessRemoved: return RunnerPeople.noAccessTitle
         case .other: return "Can’t Connect"
         }

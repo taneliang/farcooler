@@ -189,6 +189,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                         // Changing the runner is the redial: the fleet rebuilds
                         // a connection whose runner changed.
                         onConnectDirectly = { model.hosts.switchRoute(connection.host) },
+                        onAuthorize = { model.navigate(Route.Authorize) },
                     )
                 }
 

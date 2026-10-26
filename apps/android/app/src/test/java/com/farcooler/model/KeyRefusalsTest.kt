@@ -74,9 +74,19 @@ class KeyRefusalsTest {
         assertFalse(runners.admitted("b"))
     }
 
+    /** Its own row says it was shut out; "isn't answering" under it would say otherwise (review S5). */
+    @Test
+    fun `a runner that shut this phone out is not among the ones not answering`() {
+        val shut = NeedsYouRunner(hostId = "a", label = "studio", reading = null, answering = false, shutOut = true)
+        val asleep = NeedsYouRunner(hostId = "b", label = "spare room", reading = null, answering = false)
+        assertEquals(listOf("spare room"), NeedsYou.unanswered(listOf(shut, asleep)))
+        assertEquals(null, NeedsYou.caveat(NeedsYou.unanswered(listOf(shut))))
+    }
+
     @Test
     fun `the words match AgentKit's in Material's sentence case`() {
         assertEquals("You no longer have access to this runner", RunnerTeam.NO_ACCESS_TITLE)
         assertTrue(RunnerTeam.NO_ACCESS_BODY.contains("ask the runner’s owner to add this device again"))
+        assertTrue(RunnerTeam.NO_ACCESS_BODY.contains("if the runner is yours, add it yourself"))
     }
 }

@@ -69,6 +69,9 @@ final class Connection: ObservableObject {
     /// (ov-818): "You No Longer Have Access" on its row, through each slow
     /// recheck's dial too, which is a `.reconnecting` that keeps the trouble.
     var accessRemoved: Bool { lastTrouble == .accessRemoved && phase != .connected }
+    /// Whether this runner shows this phone nothing of its team: it removed
+    /// its member (ov-784), or took its access away.
+    var shutsThisPhoneOut: Bool { accessRemoved || talk.removed }
     /// How this runner has answered this phone's key: see `KeyRefusals`.
     /// Read for the runner when `start` is given a new one.
     private var keyRefusals = KeyRefusals(admitted: false)
@@ -728,11 +731,14 @@ final class Connection: ObservableObject {
     }
 
     /// Everything read from this runner, off the screen (ov-818): its
-    /// worktrees and panes, what they changed, and what needs you there.
+    /// worktrees and panes, what they changed, what needs you there, and its
+    /// repositories.
     private func forgetTeamWork() {
         if hasFleet || !fleet.worktrees.isEmpty { (fleet, hasFleet) = (.empty, false) }
         if !inbox.isEmpty { inbox = [:] }
         if !needsYou.isEmpty { needsYou = [] }
+        if !repositories.isEmpty { repositories = [] }
+        // The glances, widgets, watch and Live Activity rows are ov-820's.
     }
 
     /// Dials a runner that took this phone's access away again in five

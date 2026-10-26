@@ -131,10 +131,11 @@ class RunnerPeopleViewTest {
     @Test
     fun `a revoked phone says it has no access, and Check again dials`() {
         var asked = 0
-        shown({ NoAccessRow(longRunner, showLabel = true) { asked += 1 } }) { root, said ->
+        shown({ NoAccessRow(longRunner, showLabel = true, onCheckAgain = { asked += 1 }, onAuthorize = {}, onEdit = {}) }) { root, said ->
             assertTrue(said.toString(), RunnerTeam.NO_ACCESS_TITLE in said)
             assertTrue(said.toString(), RunnerTeam.NO_ACCESS_BODY in said)
-            assertTrue(said.toString(), "Check again" in said)
+            // The owner's own runner keeps its way back (review S2).
+            for (button in listOf("Check again", "Connect this device", "Edit")) assertTrue(said.toString(), button in said)
             assertNotNull(tagged(root, "runner-no-access"))
         }
         assertEquals(0, asked)
@@ -150,5 +151,7 @@ class RunnerPeopleViewTest {
 
     @Test fun removed() = Capture.both("runner-removed", content = screen { RemovedRow(longRunner, showLabel = true) {} })
 
-    @Test fun noAccess() = Capture.both("runner-no-access", content = screen { NoAccessRow(longRunner, showLabel = true) {} })
+    @Test fun noAccess() = Capture.both(
+        "runner-no-access", content = screen { NoAccessRow(longRunner, showLabel = true, onCheckAgain = {}, onAuthorize = {}, onEdit = {}) },
+    )
 }

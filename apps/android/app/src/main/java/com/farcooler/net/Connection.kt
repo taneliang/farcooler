@@ -1176,6 +1176,8 @@ class Connection(
         _fleet.value = Fleet.EMPTY
         _inbox.value = emptyMap()
         _needsYou.value = RunnerNeedsYou(emptyList(), derived = false)
+        _repositories.value = emptyList()
+        // The glances and notifications are ov-820's.
     }
 
     /**

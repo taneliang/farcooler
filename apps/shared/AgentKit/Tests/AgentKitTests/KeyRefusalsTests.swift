@@ -101,7 +101,10 @@ struct KeyRefusalsTests {
         #expect(kind.retry == .afterAWhile)
         #expect(kind.nextMove == .checkAgain)
         #expect(kind.nextMove.acts == [.dialAgain])
-        #expect(!kind.offersEditingTheRunner)
+        // The owner's own runner, after Forget Old Key or a reset: their own
+        // way back stays on offer (review S2).
+        #expect(kind.alsoOffers == [.authorizeThisDevice])
+        #expect(kind.offersEditingTheRunner)
         #expect(!kind.worthRetryingAsAlternative)
     }
 
@@ -120,6 +123,9 @@ struct KeyRefusalsTests {
         #expect(RunnerTrouble.accessRemoved.headline(words) == RunnerPeople.noAccessTitle)
         #expect(RunnerTrouble.accessRemoved.detail(message: "Permission denied", words: words) == RunnerPeople.noAccessBody)
         #expect(RunnerPeople.noAccessBody.contains("ask the runner’s owner to add this device again"))
+        // True for the owner too, whose own runner it may be.
+        #expect(RunnerPeople.noAccessBody.contains("if the runner is yours, add it yourself"))
+        #expect(RunnerTrouble.refusedThisTime.alsoOffers.isEmpty && RunnerTrouble.keyRejected.alsoOffers.isEmpty)
         #expect(RunnerPeople.noAccessTitle(to: "studio") == "You No Longer Have Access to studio")
         #expect(RunnerPeople.noAccessTitle(to: "") == RunnerPeople.noAccessTitle)
         #expect(RunnerTrouble.NextMove.checkAgain.label == "Check Again")
