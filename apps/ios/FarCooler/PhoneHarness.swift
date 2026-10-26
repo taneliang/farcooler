@@ -1211,9 +1211,18 @@ final class HarnessRunner {
         ]
     }
 
-    /// `-phone-big-board`'s eight hundred tasks, or none.
+    /// `-phone-big-board`'s eight hundred tasks, or none: as many as the
+    /// owner's board held on 25 Oct (798), and as big, with intents of
+    /// about 460 characters and two acceptance lines, about 1 MB to read.
     private static func bigBoard(now: Int64) -> [[String: Any]] {
         guard CommandLine.arguments.contains("-phone-big-board") else { return [] }
+        func intent(_ n: Int) -> String {
+            "**Owner, 25 Oct:** the invoice export rounds each line before it sums them, so a multi-currency "
+                + "invoice's total is off by a cent (bil-\(1_000 + (n + 1) % 800)). Round once, at the total, "
+                + "in the currency's own minor unit, and keep the per-line figures as the runner sent them.\n\n"
+                + "- Read the rates once per export.\n- Keep the old totals for invoices already sent.\n"
+                + "- See ov-\(n % 700) for the earlier fix and why it was reverted."
+        }
         return (0..<800).map { (n: Int) -> [String: Any] in
             let key: String = "bil-\(1_000 + n)"
             let status: String = n % 9 == 0 ? "in_progress" : "done"
@@ -1222,7 +1231,11 @@ final class HarnessRunner {
                 "id": String(format: "0198f2c0-0000-7000-8000-%012x", 0x100000 + n), "key": key,
                 "title": "Old task \(n): tidy the invoice export", "status": status,
                 "status_since": since, "workspace": Self.billing,
-                "intent": "Keep bil-\(1_000 + (n + 1) % 800) working as it did.",
+                "intent": intent(n),
+                "acceptance": [
+                    ["id": "a\(n)-1", "text": "The export keeps **bil-\(1_000 + n)**'s totals to the cent (ov-\(n))", "met": n % 2 == 0],
+                    ["id": "a\(n)-2", "text": "A test that fails if the rounding returns", "met": false],
+                ],
             ]
         }
     }

@@ -1390,6 +1390,15 @@ final class Connection: ObservableObject {
         return Date().timeIntervalSince(last) > 60
     }
 
+    /// A board's JSON, decoded off the main thread (ov-791). A long-lived
+    /// runner's board is about 1 MB (798 tasks with their intents, 25 Oct),
+    /// read again on every task notice, which a busy runner sends every few
+    /// seconds; decoded on the main thread, each read was a dropped frame
+    /// in whatever the person was scrolling.
+    nonisolated static func decodeBoard(_ data: Data) async -> TaskBoardModel? {
+        await Task.detached(priority: .userInitiated) { try? TaskBoardModel.decode(data) }.value
+    }
+
     /// Read one workspace's board, or fold into the read already under way.
     ///
     /// `task.list` names the repository and, for a real workspace, the
@@ -1420,7 +1429,7 @@ final class Connection: ObservableObject {
                 return read
             }
             if let data = try? await rpc("task.list", args),
-                let board = try? TaskBoardModel.decode(data)
+                let board = await Self.decodeBoard(data)
             {
                 adoptReads(from: data, workspace: key)
                 boards[key] = board
