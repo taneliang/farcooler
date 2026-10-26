@@ -121,97 +121,103 @@ try {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`)
   })
 
-  // Boot and enroll.
-  await page.goto(origin)
-  await page.waitForFunction(() => document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
-  console.log(`csp-check: enrollment screen up, ${await page.textContent('#offer-fingerprint')}`)
-  const offer = await page.evaluate(async () => {
-    const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
-    const device = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
-    return { offer: JSON.parse(device.offer), extractable: device.ssh.privateKey.extractable, type: device.ssh.privateKey.algorithm.name }
-  })
-  if (offer.extractable || offer.type !== 'Ed25519') failures.push(`the SSH key is ${offer.type}, extractable ${offer.extractable}`)
-  const built = JSON.parse(readFileSync(join(dist, 'version.json'), 'utf8')).channel
-  if (offer.offer.channel !== built || offer.offer.account !== 'acct-test' || offer.offer.node_key.length !== 43) {
-    failures.push(`the offer is wrong: ${JSON.stringify(offer.offer)}`)
-  }
-
-  await page.click('#scan')
-  await page.waitForFunction(() => document.querySelector('#camera-video')?.readyState >= 2, null, { timeout: 30_000 })
-  await page.waitForTimeout(1000)
-  await page.click('#camera-cancel')
-  console.log('csp-check: the camera opened and closed')
-
-  if (runner) {
-    // The dial, swapped for a WebSocket to /test-tunnel. Installed before the
-    // page's own script runs, by trapping the global the Go module sets.
-    await context.addInitScript(() => {
-      let real
-      Object.defineProperty(globalThis, 'fcTailcat', {
-        configurable: true,
-        get: () => real,
-        set: value => {
-          real = {
-            mintNodeKey: () => value.mintNodeKey(),
-            dial: () =>
-              new Promise((resolve, reject) => {
-                const ws = new WebSocket(`ws://${location.host}/test-tunnel`)
-                ws.binaryType = 'arraybuffer'
-                const queue = []
-                let waiting = null
-                let closed = false
-                ws.onmessage = e => {
-                  const bytes = new Uint8Array(e.data)
-                  if (waiting) {
-                    waiting(bytes)
-                    waiting = null
-                  } else queue.push(bytes)
-                }
-                ws.onclose = () => {
-                  closed = true
-                  if (waiting) waiting(null)
-                }
-                ws.onerror = () => reject(new Error('io'))
-                ws.onopen = () =>
-                  resolve({
-                    read: () => (queue.length ? Promise.resolve(queue.shift()) : closed ? Promise.resolve(null) : new Promise(r => (waiting = r))),
-                    write: bytes => ws.send(bytes.slice()),
-                    close: () => ws.close(),
-                  })
-              }),
-          }
-        },
-      })
+  // A step that times out stops the walk, and the violations it caused are
+  // still reported: they are usually why it timed out.
+  try {
+    // Boot and enroll.
+    await page.goto(origin)
+    await page.waitForFunction(() => document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
+    console.log(`csp-check: enrollment screen up, ${await page.textContent('#offer-fingerprint')}`)
+    const offer = await page.evaluate(async () => {
+      const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
+      const device = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
+      return { offer: JSON.parse(device.offer), extractable: device.ssh.privateKey.extractable, type: device.ssh.privateKey.algorithm.name }
     })
+    if (offer.extractable || offer.type !== 'Ed25519') failures.push(`the SSH key is ${offer.type}, extractable ${offer.extractable}`)
+    const built = JSON.parse(readFileSync(join(dist, 'version.json'), 'utf8')).channel
+    if (offer.offer.channel !== built || offer.offer.account !== 'acct-test' || offer.offer.node_key.length !== 43) {
+      failures.push(`the offer is wrong: ${JSON.stringify(offer.offer)}`)
+    }
 
-    const grant = async hostKeyToPin =>
-      page.evaluate(async pin => {
-        const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
-        const store = () => db.transaction('device', 'readwrite').objectStore('device')
-        const device = await new Promise(r => (store().get('this').onsuccess = e => r(e.target.result)))
-        delete device.offer
-        device.runners = [{ id: 'r1', label: 'studio', user: 'owner', host_key: pin, token: 'test', why: '' }]
-        await new Promise(r => (store().put(device, 'this').onsuccess = r))
-      }, hostKeyToPin)
+    await page.click('#scan')
+    await page.waitForFunction(() => document.querySelector('#camera-video')?.readyState >= 2, null, { timeout: 30_000 })
+    await page.waitForTimeout(1000)
+    await page.click('#camera-cancel')
+    console.log('csp-check: the camera opened and closed')
 
-    // The pinned runner: a terminal opens and echoes what is typed.
-    await grant(runner.hostKey)
-    await page.reload()
-    await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
-    await page.waitForFunction(() => document.querySelector('#terminal .xterm-screen canvas'), null, { timeout: 30_000 })
-    await page.keyboard.type('echo hi')
-    const deadline = Date.now() + 10_000
-    while (runner.typed.join('') !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
-    const typed = runner.typed.join('')
-    if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
-    console.log('csp-check: a terminal opened in xterm and the runner got the keystrokes')
+    if (runner) {
+      // The dial, swapped for a WebSocket to /test-tunnel. Installed before the
+      // page's own script runs, by trapping the global the Go module sets.
+      await context.addInitScript(() => {
+        let real
+        Object.defineProperty(globalThis, 'fcTailcat', {
+          configurable: true,
+          get: () => real,
+          set: value => {
+            real = {
+              mintNodeKey: () => value.mintNodeKey(),
+              dial: () =>
+                new Promise((resolve, reject) => {
+                  const ws = new WebSocket(`ws://${location.host}/test-tunnel`)
+                  ws.binaryType = 'arraybuffer'
+                  const queue = []
+                  let waiting = null
+                  let closed = false
+                  ws.onmessage = e => {
+                    const bytes = new Uint8Array(e.data)
+                    if (waiting) {
+                      waiting(bytes)
+                      waiting = null
+                    } else queue.push(bytes)
+                  }
+                  ws.onclose = () => {
+                    closed = true
+                    if (waiting) waiting(null)
+                  }
+                  ws.onerror = () => reject(new Error('io'))
+                  ws.onopen = () =>
+                    resolve({
+                      read: () => (queue.length ? Promise.resolve(queue.shift()) : closed ? Promise.resolve(null) : new Promise(r => (waiting = r))),
+                      write: bytes => ws.send(bytes.slice()),
+                      close: () => ws.close(),
+                    })
+                }),
+            }
+          },
+        })
+      })
 
-    // The pin altered: refused with the host-key sentence, and no terminal.
-    await grant('SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-    await page.reload()
-    await page.waitForFunction(() => document.getElementById('status-detail')?.textContent?.includes('host key has changed'), null, { timeout: 120_000 })
-    if (await page.isVisible('#work')) failures.push('a terminal opened with the pin altered')
-    console.log('csp-check: an altered pin was refused with the host-key sentence')
+      const grant = async hostKeyToPin =>
+        page.evaluate(async pin => {
+          const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
+          const store = () => db.transaction('device', 'readwrite').objectStore('device')
+          const device = await new Promise(r => (store().get('this').onsuccess = e => r(e.target.result)))
+          delete device.offer
+          device.runners = [{ id: 'r1', label: 'studio', user: 'owner', host_key: pin, token: 'test', why: '' }]
+          await new Promise(r => (store().put(device, 'this').onsuccess = r))
+        }, hostKeyToPin)
+
+      // The pinned runner: a terminal opens and echoes what is typed.
+      await grant(runner.hostKey)
+      await page.reload()
+      await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+      await page.waitForSelector('#terminal .xterm', { timeout: 30_000 })
+      await page.keyboard.type('echo hi')
+      const deadline = Date.now() + 10_000
+      while (runner.typed.join('') !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
+      const typed = runner.typed.join('')
+      if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
+      console.log('csp-check: a terminal opened in xterm and the runner got the keystrokes')
+
+      // The pin altered: refused with the host-key sentence, and no terminal.
+      await grant('SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+      await page.reload()
+      await page.waitForFunction(() => document.getElementById('status-detail')?.textContent?.includes('host key has changed'), null, { timeout: 120_000 })
+      if (await page.isVisible('#work')) failures.push('a terminal opened with the pin altered')
+      console.log('csp-check: an altered pin was refused with the host-key sentence')
+    }
+  } catch (e) {
+    failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)
   }
 
   await page.waitForTimeout(500)
