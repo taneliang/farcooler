@@ -1117,7 +1117,10 @@ mod tests {
         // after captures, which pr-body pairs (ov-578): one line.
         // 330 once it ranks themes itself and records a person's move as a
         // ruling (ov-759): a Defaults bullet, a check-in bullet, a tiebreaker.
-        assert!(lines <= 330, "{lines} lines");
+        // 333 once a charter is changed only on the word of the owner, the
+        // lead or a Maintainer, and anyone else's request goes to the lead
+        // (ov-757): three lines.
+        assert!(lines <= 333, "{lines} lines");
     }
 
     #[test]

@@ -52,7 +52,9 @@ file, and a long answer ends with a note that it was cut. Then Read a file it
 names to see the rest.
 
 When your person wants something done that you can't do, carry it to the
-orchestrator as their ask. Never look for another way to do it.
+orchestrator as their ask. Never look for another way to do it. A change to
+the charter is always one of these: you can read it (`workspace charter`),
+never edit it, and the orchestrator decides whose word it needs.
 
 Every command below is `{{cli}}`. Your pane already says who you are and which
 workspace you're in, so the commands need no flag for either.
