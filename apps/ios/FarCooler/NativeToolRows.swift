@@ -284,7 +284,10 @@ struct FoldedMarkdown: View {
         // so a report was laid out whole and then shrank, by 344 pt for a
         // report of eight paragraphs, moving every row under it.
         FoldStack(fold: .height(lines: lines), open: open) {
-            MarkdownText(text: text)
+            // Folded, only the start that shows and enough past it to know
+            // that it folds (ov-788): a lane's report drawn whole under the
+            // fold was a third of the main thread while flinging past it.
+            MarkdownText(text: open ? text : Markdown.foldPrefix(text, lines: lines))
                 // Folded, it's drawn as `Text`, which the fading mask and the
                 // clip below composite; a `UITextView` under them drew the
                 // last line at full ink, or not at all (review 1). Open, its

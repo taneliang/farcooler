@@ -73,6 +73,18 @@ extension NativeHarnessTests {
         #expect(report != literal, "and are not the raw '- ' text")
     }
 
+    @Test("A folded report draws its start, not the whole report under the fold (ov-788)")
+    func aFoldedReportDrawsItsStart() async throws {
+        // About 30 KB, as a lane's report runs.
+        let report = (0..<400).map { "Line \($0) of the report: the lane ran its tests and wrote what it saw." }
+            .joined(separator: "\n\n")
+        let before = Markdown.drawnBytes
+        _ = try #require(await Self.pixels(FoldedMarkdown(text: report, lines: AgentConversation.harnessLines)))
+        let drawn = Markdown.drawnBytes - before
+        #expect(drawn > 0, "nothing was drawn, so this proved nothing")
+        #expect(drawn < 2_000, "a folded report of \(report.utf8.count) bytes drew \(drawn)")
+    }
+
     @Test("A finished agent's tool count is the notification's, and is hidden while unknown (ov-490)")
     func toolCounts() async throws {
         let rows = try Self.rows()

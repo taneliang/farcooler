@@ -278,7 +278,10 @@ struct FoldedMarkdown: View {
         // for a report of eight paragraphs, and every row on the screen
         // jumped up as the reader scrolled past one.
         FoldStack(fold: .height(lines: lines), open: open) {
-            MarkdownText(text: text)
+            // Folded, only the start that shows and enough past it to know
+            // that it folds (ov-788): a lane's report drawn whole under the
+            // fold was a third of the main thread while flinging past it.
+            MarkdownText(text: open ? text : Markdown.foldPrefix(text, lines: lines))
                 .identified("native-folded-markdown")
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }

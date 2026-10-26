@@ -36,6 +36,14 @@ extension Markdown {
     static let mergedCache = RenderMemo<[String], AttributedString>(limit: 200)
 }
 
+#if DEBUG
+extension Markdown {
+    /// `MarkdownPiece.drawnBytes`, for a test of a view outside this module:
+    /// the Mac's folded report (ov-788).
+    @MainActor public static var drawnBytes: Int { MarkdownPiece.drawnBytes }
+}
+#endif
+
 extension EnvironmentValues {
     /// Whether a conversation's text under here offers selection (ov-693).
     /// On unless a row turns it off: a Mac row drawn while the reader

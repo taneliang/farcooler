@@ -593,6 +593,8 @@ AGENTKIT_SOURCES = [
     # a row built just above the screen never changes height on its second
     # (ov-675, ov-691). Shared with the Mac.
     "FoldStack.swift",
+    # A folded report draws only its start (ov-788). Shared with the Mac.
+    "MarkdownFold.swift",
     # How much of the screen the keyboard and the docked composer cover,
     # as `KeyboardInset` publishes it (ov-386). The phone's only unit-testable
     # home for those rules: the iOS target has no unit tests.
