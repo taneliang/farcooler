@@ -447,6 +447,30 @@ struct TeammateCeremonyTests {
         #expect(outcome.transcript?.contains(TeammateEnrollment.notRecorded) == true)
     }
 
+    /// Another admin's ceremony bound the same device while this one's bind
+    /// was refused as stale: the fresh read shows it held, so its key is
+    /// never taken off here, whoever holds it (review of ov-786).
+    @Test func aDeviceBoundMeanwhileIsNeverTakenOff() async throws {
+        let held = { (account: String) in
+            #"{"members":[{"handle":"rob","name":"Rob","devices":["farcooler-0a0b"],"reps":0,"rep_panes":[],"account":"\#(account)","email":""}],"claude_account":"","you":""}"#
+        }
+        // Someone else's: said, and not bound again. Bob's: a second stale
+        // refusal is not recorded, and still nothing is taken off.
+        for (account, adds) in [("user_rob", [(false, Self.stale)]), ("user_bob", [(false, Self.stale), (false, Self.stale)])] {
+            let (journal, folder) = Self.journal()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let runner = Runner()
+            runner.checksRead = true
+            runner.relisted = [held(account)]
+            runner.adds = adds
+            let outcome = await enroll(runner, journal: journal)
+            #expect(runner.call("revoke") == nil, "a device bound meanwhile was taken off: \(account)")
+            #expect(outcome.written.isEmpty)
+            #expect(outcome.transcript != nil)
+            #expect(journal.entries.isEmpty, "\(account)")
+        }
+    }
+
     static let bobbyWithOld =
         #"{"members":[{"handle":"bobby","name":"Bobby","devices":["farcooler-old"],"reps":0,"rep_panes":[],"account":"user_bob","email":"bob@example.com"}],"claude_account":"","you":""}"#
     /// What the CLI says, under `--json`, for a bind the runner found stale.

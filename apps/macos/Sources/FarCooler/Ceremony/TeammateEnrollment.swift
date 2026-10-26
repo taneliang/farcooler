@@ -113,24 +113,29 @@ enum TeammateEnrollment {
         // of the two lists would take the other's device off and revoke it, so
         // the runner refused this one, writing nothing. Read again and bind
         // once more from what's there now.
+        // Whoever the fresh read shows holding the device, if anyone: bound
+        // by another admin's ceremony meanwhile, it's theirs to keep, and
+        // its key is never taken off here (review of ov-786).
+        var freshHolder: RunnerPeople.Member?
         if !added.ok, TaskFailure.what(in: added.output) == "devices_changed" {
             let again = await run(arguments(["member", "list"], runner: runner.id))
             if again.ok, let fresh = Self.people(in: again.output) {
-                let holder = fresh.members.first { $0.devices.contains(clientID) }
-                if let holder, !holder.account.isEmpty, holder.account != member.account {
-                    added = (false, Self.boundToSomeoneElse)
-                } else {
-                    added = await bind(
-                        clientID, to: member, holder: holder, people: fresh, checked: true, on: runner, using: run)
+                freshHolder = fresh.members.first { $0.devices.contains(clientID) }
+                if let freshHolder, !freshHolder.account.isEmpty, freshHolder.account != member.account {
+                    journal.remove(clientID: clientID, runner: runner.id)
+                    return Self.boundToSomeoneElse
                 }
+                added = await bind(
+                    clientID, to: member, holder: freshHolder, people: fresh, checked: true, on: runner, using: run)
             }
         }
         guard added.ok else {
-            // Bound before this ceremony. A runner from ov-719 on unbinds a
-            // device when a member's Mac writes its key, so it can only view
-            // there until a bind succeeds; an older runner kept it bound.
-            // Either way there's nothing to undo.
-            if holder != nil {
+            // Bound before this bind, by an earlier ceremony or by one that
+            // ran alongside it. A runner from ov-719 on unbinds a device when
+            // a member's Mac writes its key, so it can only view there until
+            // a bind succeeds; an older runner kept it bound. Either way
+            // there's nothing to undo.
+            if holder != nil || freshHolder != nil {
                 journal.remove(clientID: clientID, runner: runner.id)
                 return "\(Self.notUpdated(asMember: people.isMember))\n\n\(added.output)"
             }
