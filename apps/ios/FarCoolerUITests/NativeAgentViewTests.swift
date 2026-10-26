@@ -388,24 +388,32 @@ final class NativeAgentViewTests: XCTestCase {
 
     /// **A swipe down puts an open image away** (ov-806), as in Photos, with
     /// no tap for the bar and its X first; a short drag springs back and
-    /// leaves it open.
+    /// leaves it open, and zoomed in, a drag pans.
     func testASwipeDownClosesAnOpenImage() {
         let app = launch(["-native-images"])
         _ = conversation(app)
         let thumbnails = app.descendants(matching: .any).matching(identifier: "native-prompt-image")
         XCTAssertTrue(wait(30) { thumbnails.count == 5 }, "not every image shown: \(thumbnails.count)")
+        let flag = ProcessInfo.processInfo.environment["FARCOOLER_SWIPE_FLAG"]
+        if let flag { FileManager.default.createFile(atPath: flag, contents: nil); Thread.sleep(forTimeInterval: 1) }
         thumbnails.element(boundBy: 1).tap()
         let viewer = app.otherElements["QLPreviewControllerView"]
         XCTAssertTrue(viewer.waitForExistence(timeout: 15), "the image didn't open: \(app.debugDescription)")
         // Settled: a drag during the zoom in is the presentation's, not the swipe's.
         Thread.sleep(forTimeInterval: 1)
         let middle = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let flag = ProcessInfo.processInfo.environment["FARCOOLER_SWIPE_FLAG"]
-        if let flag { FileManager.default.createFile(atPath: flag, contents: nil); Thread.sleep(forTimeInterval: 1) }
         // A short, slow drag isn't a dismissal: the image springs back.
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0)
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a short drag closed the image")
+        // Zoomed in, a drag down pans the image; zoomed back out, it closes.
+        viewer.pinch(withScale: 3, velocity: 3)
+        Thread.sleep(forTimeInterval: 1)
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(viewer.exists, "a drag on the zoomed image closed it rather than panning")
+        viewer.pinch(withScale: 0.2, velocity: -3)
+        Thread.sleep(forTimeInterval: 1.5)
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 10), "a swipe down left the image open")
         if let flag { Thread.sleep(forTimeInterval: 1); try? FileManager.default.removeItem(atPath: flag) }

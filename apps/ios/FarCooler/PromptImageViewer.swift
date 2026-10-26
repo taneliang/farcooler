@@ -97,19 +97,34 @@ struct PromptImageViewer: UIViewRepresentable {
             }
         }
 
-        /// The thumbnail's picture, cropped to a square as the strip shows
-        /// it, to draw as the image grows and shrinks.
+        /// The thumbnail as the strip shows it, cropped to its square, to
+        /// draw as the image grows out of it and shrinks back. Without one
+        /// Quick Look took two seconds to open and its animations never
+        /// settled; with the whole picture and its square as `contentRect`,
+        /// the image shrank to a square over twice the thumbnail's size from
+        /// its top left corner, and hung there before it went.
         nonisolated func previewController(
             _ controller: QLPreviewController, transitionImageFor item: any QLPreviewItem,
             contentRect: UnsafeMutablePointer<CGRect>
         ) -> UIImage? {
             MainActor.assumeIsolated {
-                guard let url = item.previewItemURL, let picture = places.byFile[url]?.picture else { return nil }
-                let size = picture.size
-                let side = min(size.width, size.height)
-                contentRect.pointee = CGRect(x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side)
-                return picture
+                guard let url = item.previewItemURL, let place = places.byFile[url],
+                    let square = Self.square(place.picture, side: place.frame.width)
+                else { return nil }
+                contentRect.pointee = CGRect(origin: .zero, size: square.size)
+                return square
             }
+        }
+
+        /// `picture`'s middle square, as `.fill` shows it in a square, `side`
+        /// points on a side: Quick Look draws the image at its own size from
+        /// the frame's corner, whatever the frame's size.
+        static func square(_ picture: UIImage, side: CGFloat) -> UIImage? {
+            guard let cg = picture.cgImage, side > 0 else { return nil }
+            let pixels = min(cg.width, cg.height)
+            let crop = CGRect(x: (cg.width - pixels) / 2, y: (cg.height - pixels) / 2, width: pixels, height: pixels)
+            guard let cut = cg.cropping(to: crop) else { return nil }
+            return UIImage(cgImage: cut, scale: CGFloat(pixels) / side, orientation: picture.imageOrientation)
         }
 
         nonisolated func previewControllerDidDismiss(_ controller: QLPreviewController) {
