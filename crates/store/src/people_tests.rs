@@ -52,7 +52,7 @@ fn a_member_holds_their_devices_and_no_one_elses() {
 #[test]
 fn a_set_names_the_devices_it_released() {
     let (store, _, _) = board();
-    let set = |h: &str, d: &[&str]| store.set_member_releasing(h, h, &devices(d), Directory::default(), None);
+    let set = |h: &str, d: &[&str]| store.set_member_releasing(h, h, &devices(d), Directory::default(), None).map(|w| (w.member, w.released));
     assert_eq!(set("alice", &["phone-a", "mac-a", "pad-a"]).unwrap().1, devices(&[]), "a new member released nothing");
     set("bob", &["phone-b"]).unwrap();
     let (alice, released) = set("alice", &["phone-a", "watch-a"]).unwrap();
@@ -234,7 +234,7 @@ fn a_set_built_from_a_stale_read_is_refused() {
     let (store, _, _) = board();
     let set = |d: &[&str], read: &[&str]| {
         let read = devices(read);
-        store.set_member_releasing("bob", "Bob", &devices(d), Directory::default(), Some(&read))
+        store.set_member_releasing("bob", "Bob", &devices(d), Directory::default(), Some(&read)).map(|w| (w.member, w.released))
     };
     assert_eq!(set(&["phone-b"], &[]).unwrap().1, devices(&[]), "a new member, read as having none");
     // Two adds that both read Bob with his phone.
@@ -252,6 +252,12 @@ fn a_set_built_from_a_stale_read_is_refused() {
     let carol = store.set_member_releasing("carol", "Carol", &devices(&["c"]), Directory::default(), Some(&devices(&["c"])));
     assert!(matches!(carol, Err(DomainError::Conflict { what: "devices_changed" })), "{carol:?}");
     // Without a read, the last write wins, as it always did.
-    let (_, released) = store.set_member_releasing("bob", "Bob", &devices(&["phone-b"]), Directory::default(), None).unwrap();
-    assert_eq!(released, devices(&["mac-1", "mac-2"]));
+    let write = store.set_member_releasing("bob", "Bob", &devices(&["phone-b"]), Directory::default(), None).unwrap();
+    assert_eq!(write.released, devices(&["mac-1", "mac-2"]));
+    assert_eq!(write.before, Some(devices(&["mac-1", "mac-2", "phone-b"])), "what they had, read with the write");
+    // A row stored padded, from before ids were trimmed, reads as itself.
+    store.conn().execute("INSERT INTO member_devices (client_id, handle) VALUES (' pad-b ', 'bob')", []).unwrap();
+    assert!(set(&["phone-b"], &["phone-b", "pad-b"]).is_ok(), "a padded row made every checked set stale");
+    let new = store.set_member_releasing("dan", "Dan", &[], Directory::default(), None).unwrap();
+    assert_eq!(new.before, None, "someone new had nothing before");
 }

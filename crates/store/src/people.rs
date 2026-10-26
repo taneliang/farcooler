@@ -132,6 +132,16 @@ pub struct Directory<'a> {
     pub email: &'a str,
 }
 
+/// What [`Store::set_member_releasing`] did: the member as written, the
+/// devices it took off their list, and the devices they had before it, or
+/// `None` when they're new.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberWrite {
+    pub member: Member,
+    pub released: Vec<String>,
+    pub before: Option<Vec<String>>,
+}
+
 /// A rep pane: the member the runner bound it to, in a workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rep {
@@ -177,13 +187,13 @@ impl Store {
     /// account never changes once set: refused as `account_taken` and
     /// `account_differs`, writing nothing. An empty field keeps what's there.
     pub fn set_member_in(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<Member> {
-        self.set_member_releasing(handle, name, devices, who, None).map(|(member, _)| member)
+        self.set_member_releasing(handle, name, devices, who, None).map(|w| w.member)
     }
 
     /// [`Store::set_member_in`], answering too with the devices this call
-    /// released: theirs before it and not after, read in the same
-    /// transaction, so a concurrent change to their list can't add one or
-    /// hide one (ov-783). Sorted. The caller revokes them.
+    /// released, and the devices they had before it (`None` for someone new),
+    /// both read in the same transaction, so a concurrent change to their list
+    /// can't add one or hide one (ov-783). Sorted. The caller revokes them.
     ///
     /// With `read`, the devices the caller read as theirs, it's refused as
     /// `devices_changed`, writing nothing, unless their devices are exactly
@@ -197,7 +207,7 @@ impl Store {
         devices: &[String],
         who: Directory,
         read: Option<&[String]>,
-    ) -> Result<(Member, Vec<String>)> {
+    ) -> Result<MemberWrite> {
         let (account, email) = (who.account.trim(), who.email.trim());
         // Printable and short: both are only ever compared and shown.
         let printable = |s: &str, max: usize| s.len() <= max && !s.chars().any(|c| c.is_control() || c.is_whitespace());
@@ -228,11 +238,21 @@ impl Store {
             let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
             rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
         };
+        let existed: bool = tx
+            .query_row("SELECT EXISTS(SELECT 1 FROM members WHERE handle = ?1)", [handle], |r| r.get(0))
+            .map_err(map_err)?;
         if let Some(read) = read {
-            let mut read: Vec<&str> = read.iter().map(|d| d.trim()).filter(|d| !d.is_empty()).collect();
-            read.sort_unstable();
-            read.dedup();
-            if read != had {
+            // Both sides trimmed, sorted and without repeats: compared as sets.
+            let set = |ids: &mut Vec<&str>| {
+                ids.retain(|d| !d.is_empty());
+                ids.sort_unstable();
+                ids.dedup();
+            };
+            let mut read: Vec<&str> = read.iter().map(|d| d.trim()).collect();
+            let mut stored: Vec<&str> = had.iter().map(|d| d.trim()).collect();
+            set(&mut read);
+            set(&mut stored);
+            if read != stored {
                 return Err(DomainError::Conflict { what: "devices_changed" });
             }
         }
@@ -270,7 +290,7 @@ impl Store {
             params![handle, name, now_millis(), some(account), some(email)],
         )
         .map_err(map_err)?;
-        let released: Vec<String> = had.into_iter().filter(|d| !devices.contains(d)).collect();
+        let released: Vec<String> = had.iter().filter(|d| !devices.contains(d)).cloned().collect();
         // A device bound to a member, or taken off one, is no longer waiting
         // on its first binding (ov-719): who enrolled it stops mattering, and
         // released again it's one `released_to_sweep` names (ov-783).
@@ -293,7 +313,8 @@ impl Store {
             .query_row("SELECT account, email FROM members WHERE handle = ?1", [handle], |r| Ok((r.get(0)?, r.get(1)?)))
             .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
-        Ok((Member { handle: handle.to_string(), name: name.to_string(), devices, account, email }, released))
+        let member = Member { handle: handle.to_string(), name: name.to_string(), devices, account, email };
+        Ok(MemberWrite { member, released, before: existed.then_some(had) })
     }
 
     /// Remove `handle`: their devices are released (nobody's, never the

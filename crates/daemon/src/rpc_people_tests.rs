@@ -165,7 +165,7 @@ async fn a_device_taken_off_a_members_list_is_revoked_and_cut_off() {
 
     // A device taken off and bound again at once, before the sweep, is
     // someone's and keeps its line: what's revoked is what's still released.
-    let (_, released) = svc.store.set_member_releasing("bob", "Bob", &[], Default::default(), None).unwrap();
+    let released = svc.store.set_member_releasing("bob", "Bob", &[], Default::default(), None).unwrap().released;
     assert_eq!(released, ["phone-b".to_string()]);
     svc.store.set_member("alice", "Alice", &["phone-a".to_string(), "phone-b".to_string()]).unwrap();
     let swept = crate::release_sweep::sweep(&svc).await.unwrap();

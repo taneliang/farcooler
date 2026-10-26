@@ -51,19 +51,18 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // them by QR says (ov-525). Stored as told: a runner admin's
             // word, like the name, and what offboarding will look them up by.
             let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
-            let before = match svc.store.member(p.handle.trim()) {
-                Err(DomainError::NotFound) => None,
-                other => Some(other?),
-            };
             // What the caller read as theirs, checked with the write (ov-786):
             // a list built from an older read would take off, and revoke, a
             // device another admin added since. Refused as `devices_changed`.
             let read = p.devices_read.as_ref().map(|r| r.client_ids.as_slice());
-            let (after, released) = svc.store.set_member_releasing(p.handle.trim(), &p.name, &p.client_ids, who, read)?;
+            // What they had before is read with the write, so the people log's
+            // `from` is never another admin's list.
+            let farcooler_store::people::MemberWrite { member: after, released, before } =
+                svc.store.set_member_releasing(p.handle.trim(), &p.name, &p.client_ids, who, read)?;
             match before {
                 None => log(svc, peer, caller_pid, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
-                Some(b) if b.devices != after.devices => {
-                    log(svc, peer, caller_pid, &after.handle, "devices", serde_json::json!({ "from": b.devices, "to": after.devices }))
+                Some(had) if had != after.devices => {
+                    log(svc, peer, caller_pid, &after.handle, "devices", serde_json::json!({ "from": had, "to": after.devices }))
                 }
                 Some(_) => {}
             }
