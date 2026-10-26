@@ -20,9 +20,8 @@ extension Markdown {
     /// whichever comes first. Either way it's taller than the fold, so
     /// whether it folds is the same answer, and the lines that show are the
     /// same lines, since blocks are drawn top down and the prefix is cut
-    /// between source lines: never between a table's header and its rule,
-    /// and with a code fence it's cut inside closed again. A text shorter
-    /// than that is returned whole, so it's drawn exactly as before.
+    /// between source lines, never between a table's header and its rule.
+    /// A text shorter than that is returned whole, drawn exactly as before.
     ///
     /// Never inside a line: a line is a paragraph to TextKit, which breaks
     /// a paragraph's lines as a whole, so a paragraph cut short wraps
@@ -53,13 +52,10 @@ extension Markdown {
             guard let newline else { return text }
             let next = text.index(after: newline)
             let full = counted >= wanted || characters >= foldCharacters
-            if full, !fence, !headsTable(text, at: next) {
+            // Inside a fence, any line: a fence the text ends in is code to
+            // its end (`blocks`), so the lines above the cut read the same.
+            if full, fence || !headsTable(text, at: next) {
                 return String(text[..<newline])
-            }
-            if full, fence {
-                // Closed where it's cut: an open fence would read the
-                // rest of nothing as code, and draw nothing else wrong.
-                return text[..<newline] + "\n```"
             }
             start = next
         }

@@ -38,6 +38,8 @@ import Testing
             "```\n" + (1...200).map { "let x\($0) = \($0)" }.joined(separator: "\n") + "\n```\n\nAfter the code.",
             String(repeating: "A long paragraph of words that runs on and on. ", count: 300),
             "| A | B |\n|---|---|\n" + (1...60).map { "| \($0) | row \($0) |" }.joined(separator: "\n"),
+            // The fold fills on a table's header: kept with its rule.
+            (1...6).map { "Line \($0)" }.joined(separator: "\n") + "\n| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |",
             "# Heading\n\n---\n\n" + (1...30).map { "Line \($0)" }.joined(separator: "\n"),
             report(kilobytes: 12),
         ]
@@ -56,11 +58,12 @@ import Testing
         let text = Self.report(kilobytes: kilobytes)
         let prefix = Markdown.foldPrefix(text, lines: Self.lines)
         #expect(prefix.utf8.count <= 1_600, "a \(kilobytes) KB report drew \(prefix.utf8.count) bytes folded")
-        #expect(text.hasPrefix(prefix.hasSuffix("\n```") ? String(prefix.dropLast(4)) : prefix))
+        #expect(text.hasPrefix(prefix))
     }
 
     /// Cut between source lines, the blocks before the cut are the whole
-    /// text's own: a fence closed, a table kept with its rule.
+    /// text's own, and the cut one is the start of its own: a table kept
+    /// with its rule, a fence read as code to the cut.
     @Test func theBlocksBeforeTheCutAreTheTextsOwn() {
         for text in Self.texts {
             let prefix = Markdown.foldPrefix(text, lines: Self.lines)
@@ -68,12 +71,14 @@ import Testing
             let cut = Markdown.blocks(prefix)
             #expect(Array(cut.dropLast()) == Array(whole.prefix(max(cut.count - 1, 0))), "\(text.prefix(40))")
             if let last = cut.last, let same = whole.dropFirst(cut.count - 1).first {
+                // The cut block is the start of the whole text's own.
                 switch (last, same) {
-                case (.code, .code), (.table, .table), (.paragraph, .paragraph), (.bullet, .bullet),
-                    (.heading, .heading), (.numbered, .numbered), (.quote, .quote), (.rule, .rule):
-                    break
+                case let (.paragraph(a), .paragraph(b)), let (.code(a, _), .code(b, _)):
+                    #expect(b.hasPrefix(a), "the cut made a block that isn't the text's: \(a.suffix(40))")
+                case let (.table(h1, r1), .table(h2, r2)):
+                    #expect(h1 == h2 && Array(r2.prefix(r1.count)) == r1)
                 default:
-                    Issue.record("the cut changed its last block from \(same) to \(last)")
+                    #expect(last == same, "the cut changed its last block from \(same) to \(last)")
                 }
             }
         }
