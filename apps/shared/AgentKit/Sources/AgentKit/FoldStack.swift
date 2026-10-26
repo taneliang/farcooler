@@ -57,7 +57,19 @@ public struct FoldStack: Layout {
             if folds && !open { height = cap }
         }
         let button = folds ? subviews[1].sizeThatFits(width) : nil
-        return Plan(width: max(proposal.width ?? words.width, button?.width ?? 0), words: height, button: button)
+        return Plan(width: max(self.width(proposal, words: words), button?.width ?? 0), words: height, button: button)
+    }
+
+    /// The width the stack takes. Words that fold by a line limit (a
+    /// message) are as wide as their longest line, never the whole proposal,
+    /// so a bubble around a short message hugs it, as `Text` does (ov-809).
+    /// Reading `proposal.width` here instead made every bubble as wide as
+    /// its cap since ov-675. A report's blocks (`.height`) fill their column.
+    private func width(_ proposal: ProposedViewSize, words: CGSize) -> CGFloat {
+        switch fold {
+        case .lines: min(words.width, proposal.width ?? words.width)
+        case .height: proposal.width ?? words.width
+        }
     }
 
     public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
