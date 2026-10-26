@@ -7,21 +7,21 @@
 export function connectFailure(word: string, runner: string): string {
   switch (word) {
     case 'host_key_changed':
-      return `${runner} isn't the runner your phone vouched for: its host key has changed, so Far Cooler won't connect. If you reinstalled it, add this browser again.`
+      return `${runner} isn’t the runner your phone vouched for: its host key has changed, so Far Cooler won’t connect. If you reinstalled it, add this browser again.`
     case 'host_key_unknown':
-      return `Your phone didn't send a host key for ${runner}, so Far Cooler won't connect to it. Add this browser again.`
+      return `Your phone didn’t send a host key for ${runner}, so Far Cooler won’t connect to it. Add this browser again.`
     case 'key_rejected':
-      return `${runner} doesn't recognize this browser's key. Add this browser again from your phone.`
+      return `${runner} doesn’t recognize this browser’s key. Add this browser again from your phone.`
     case 'no_answer':
-      return `${runner} didn't answer. Check that it's on and online, then try again.`
+      return `${runner} didn’t answer. Check that it’s on and online, then try again.`
     case 'derp':
-      return "Far Cooler can't reach its rendezvous service. Check your connection, then try again."
+      return "Far Cooler can’t reach its rendezvous service. Check your connection, then try again."
     case 'runner_too_old':
       return `${runner} needs a newer Far Cooler to show terminals here. Update it, then try again.`
     case 'bad_key':
-      return "This browser couldn't sign with its key. Reload the page and try again."
+      return "This browser couldn’t sign with its key. Reload the page and try again."
     default:
-      return `The connection to ${runner} didn't work. Try again.`
+      return `The connection to ${runner} didn’t work. Try again.`
   }
 }
 
@@ -40,15 +40,15 @@ export function replyRefusal(word: string): string {
     case 'already_taken':
       return 'This browser already took a reply for this code. Select Start Over to add it again.'
     case 'no_tunnel':
-      return "Your phone granted a runner this browser can't reach. Select Start Over and try again."
+      return "Your phone granted a runner this browser can’t reach. Select Start Over and try again."
     default:
-      return "That isn't a Far Cooler reply. Scan the code your phone shows after you confirm."
+      return "That isn’t a Far Cooler reply. Scan the code your phone shows after you confirm."
   }
 }
 
 /// Why a granted runner can't be opened here.
 export function unreachable(why: string, runner: string): string {
   return why === 'pending'
-    ? `Your phone couldn't add this browser's key to ${runner}. Add this browser again while your phone can reach it.`
-    : `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler's tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
+    ? `Your phone couldn’t add this browser’s key to ${runner}. Add this browser again while your phone can reach it.`
+    : `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
 }

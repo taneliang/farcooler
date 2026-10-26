@@ -2,7 +2,7 @@
 // The client shell in headless Chromium, under the CSP production sends,
 // failing on any violation (ov-764 acceptance 4).
 //
-//   node test/browser/csp-check.mjs [--dist dist] [--fake-runner BINARY]
+//   node test/browser/csp-check.mjs [--dist dist] [--fake-runner BINARY] [--screenshots DIR]
 //
 // Serves dist/ (build.sh's output, with the real wasm) through
 // shell-server.ts, which uses the Worker's own header and asset code, and
@@ -41,6 +41,17 @@ const flag = name => {
 }
 const dist = resolve(flag('--dist') ?? 'dist')
 const fakeRunner = flag('--fake-runner')
+// For a person judging the screens: each one at a desktop and a phone width.
+const shots = flag('--screenshots')
+const shoot = async (page, name) => {
+  if (!shots) return
+  for (const [width, height] of [[1280, 800], [390, 844]]) {
+    await page.setViewportSize({ width, height })
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(shots, `${name}-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
+}
 
 // The canary channel's DERP settings, from wrangler.toml.
 const toml = readFileSync('wrangler.toml', 'utf8')
@@ -106,7 +117,7 @@ const origin = `http://127.0.0.1:${server.address().port}`
 const failures = []
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] })
 try {
-  const context = await browser.newContext({ permissions: ['camera'] })
+  const context = await browser.newContext({ permissions: ['camera'], viewport: { width: 1280, height: 800 } })
   const violations = []
   await context.exposeFunction('reportViolation', v => violations.push(v))
   await context.addInitScript(() => {
@@ -128,6 +139,7 @@ try {
     await page.goto(origin)
     await page.waitForFunction(() => document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
     console.log(`csp-check: enrollment screen up, ${await page.textContent('#offer-fingerprint')}`)
+    await shoot(page, 'enroll')
     const offer = await page.evaluate(async () => {
       const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
       const device = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
@@ -208,6 +220,7 @@ try {
       const typed = runner.typed.join('')
       if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
       console.log('csp-check: a terminal opened in xterm and the runner got the keystrokes')
+      await shoot(page, 'terminal')
 
       // The pin altered: refused with the host-key sentence, and no terminal.
       await grant('SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
@@ -215,6 +228,7 @@ try {
       await page.waitForFunction(() => document.getElementById('status-detail')?.textContent?.includes('host key has changed'), null, { timeout: 120_000 })
       if (await page.isVisible('#work')) failures.push('a terminal opened with the pin altered')
       console.log('csp-check: an altered pin was refused with the host-key sentence')
+      await shoot(page, 'refused')
     }
   } catch (e) {
     failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)

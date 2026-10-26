@@ -88,7 +88,7 @@ async function enroll(session: Session): Promise<void> {
     const me = await relay('directory/me').catch(() => null)
     const account = typeof me?.user?.id === 'string' ? me.user.id : null
     if (!account) {
-      status("Far Cooler couldn't check your account", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
+      status("Far Cooler couldn’t check your account", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
       return
     }
     device.offer = makeOffer(deviceName(), account, session.keyLine, device.nodePub)
@@ -125,7 +125,7 @@ async function enroll(session: Session): Promise<void> {
       })
     } catch {
       camera.hidden = true
-      note.textContent = "Far Cooler can't use a camera here. Allow camera access for this site, then select Scan Reply again."
+      note.textContent = "Far Cooler can’t use a camera here. Allow camera access for this site, then select Scan Reply again."
       note.hidden = false
     }
   }
@@ -150,6 +150,9 @@ async function takeReply(session: Session, reply: string): Promise<void> {
 }
 
 // MARK: Working
+
+/// The terminal on the page, so a second visit to `work` replaces it.
+let shown: PaneView | null = null
 
 async function work(session: Session): Promise<void> {
   const runners = session.device.runners ?? []
@@ -199,7 +202,9 @@ async function work(session: Session): Promise<void> {
     return
   }
 
+  shown?.dispose()
   const view = new PaneView($('terminal'), word => paneNote(connectFailure(word, target.label)))
+  shown = view
   const open = async (id: string, button: HTMLButtonElement) => {
     for (const b of list.querySelectorAll('button')) b.removeAttribute('aria-current')
     button.setAttribute('aria-current', 'true')
@@ -231,6 +236,8 @@ function paneNote(text: string): void {
 }
 
 async function addAgain(session: Session): Promise<void> {
+  shown?.dispose()
+  shown = null
   delete session.device.runners
   delete session.device.offer
   await saveDevice(session.device)
@@ -254,7 +261,7 @@ async function boot(): Promise<void> {
   try {
     ;[, tailcat] = await Promise.all([init({ module_or_path: __WASM__.web }), loadTailcat(__WASM__.tailcat)])
   } catch {
-    status("Far Cooler couldn't start in this browser", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
+    status("Far Cooler couldn’t start in this browser", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
     return
   }
 
