@@ -44,8 +44,10 @@ pub enum Ruling {
     /// a team works on one plan through one orchestrator.
     Plan,
     /// Decided by what the payload asks (`people::gate`): a workspace
-    /// setting, a pane made the orchestrator, members' logins lent, a shell
-    /// line enrolled, the owner's device bound or revoked (ov-719).
+    /// setting (the owner's, or a Maintainer's for the four that don't act
+    /// as the owner, ov-784), a pane made the orchestrator, members' logins
+    /// lent, a shell line enrolled, the owner's device bound or revoked
+    /// (ov-719).
     ByPayload,
     /// The workspace's lead's and the owner's (R-54, ov-637).
     Lead,
@@ -53,6 +55,10 @@ pub enum Ruling {
     /// lead's and a Maintainer's (`people::may_edit_charter`). A rep never
     /// edits it (`rep_may`); it asks the orchestrator.
     Charter,
+    /// A workspace's name and key prefix (ov-784): the owner's and a
+    /// Maintainer's (`people::maintains`), never a lead's for being one. A
+    /// rep never changes them (`rep_may`).
+    Maintains,
     /// The owner's alone, refused `not_yours`, for the reason given.
     Owners(Why),
 }
@@ -213,6 +219,8 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::WorkspaceSetCharter => Charter,
 
+        M::WorkspaceRename | M::WorkspaceSetPrefix => Maintains,
+
         M::PlanSet
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
@@ -237,8 +245,6 @@ pub fn member_ruling(method: M) -> Ruling {
         M::CrashReport => Owners(Why::OwnersDevice),
 
         M::WorkspaceDelete
-        | M::WorkspaceRename
-        | M::WorkspaceSetPrefix
         | M::WorkspaceWriteCharter
         | M::RepositoryRootAdd
         | M::RepositoryRootRemove

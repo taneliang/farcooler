@@ -19,6 +19,8 @@
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Scope};
 use farcooler_store::landing::LandingPatch;
+use farcooler_store::member_roles::NewPeopleEvent;
+use farcooler_transport::Peer;
 use farcooler_store::models::Workspace;
 use uuid::Uuid;
 
@@ -95,32 +97,67 @@ pub fn create(
     pb_workspace(svc, &workspace, scope)
 }
 
-/// `workspace.rename`.
+/// Who called, for the people log: their device and their process
+/// (`caller_person::log_actor`).
+pub type Caller<'a> = (&'a Peer, Option<i32>);
+
+/// The local socket with no process to walk: the owner, for tests that call
+/// an op straight.
+#[cfg(test)]
+pub(crate) const LOCAL: Caller<'static> = (&Peer { client_id: None, scope: Scope::HostAdmin }, None);
+
+/// Add a workspace change already made to the people log (ov-784), as
+/// `caller`'s person's, about `handle` (empty for nobody). A line that
+/// can't be written is logged, and isn't the change failing.
+fn log_change(svc: &Service, caller: Caller, workspace: Uuid, handle: &str, kind: &str, detail: serde_json::Value) {
+    let (peer, pid) = caller;
+    let written = crate::caller_person::log_actor(svc, peer, pid).and_then(|actor| {
+        let event = NewPeopleEvent { actor: &actor, handle, workspace: Some(workspace), kind, detail: &detail };
+        svc.store.record_people_event(event)
+    });
+    if let Err(e) = written {
+        tracing::warn!(%workspace, kind, error = %e.what(), "a workspace change wasn't logged");
+    }
+}
+
+/// `workspace.rename`. A new name goes to the people log (ov-784): a
+/// Maintainer renames, and the team sees who did.
 pub fn rename(
     svc: &Service,
     watcher: &Watcher,
     id: Uuid,
     req: &pb::WorkspaceRename,
     scope: Scope,
+    caller: Caller,
 ) -> Result<pb::Workspace> {
     let expected = version(svc, id, req.expected_version)?;
+    let was = svc.store.get_workspace(id)?.name;
     let workspace = svc.store.rename_workspace(id, expected, &req.name)?;
+    if workspace.name != was {
+        log_change(svc, caller, id, "", "rename", serde_json::json!({ "from": was, "to": workspace.name }));
+    }
     watcher.announce_fleet_changed();
     // The glance names the board (ov-310 review L3).
     watcher.schedule_count_notice();
     pb_workspace(svc, &workspace, scope)
 }
 
-/// `workspace.set_prefix`. Keys already issued keep resolving.
+/// `workspace.set_prefix`. Keys already issued keep resolving. A new prefix
+/// goes to the people log, as a new name does (ov-784).
 pub fn set_prefix(
     svc: &Service,
     watcher: &Watcher,
     id: Uuid,
     req: &pb::WorkspaceSetPrefix,
     scope: Scope,
+    caller: Caller,
 ) -> Result<pb::Workspace> {
     let expected = version(svc, id, req.expected_version)?;
+    let was = svc.store.get_workspace(id)?.task_prefix;
     let workspace = svc.store.set_workspace_prefix(id, expected, &req.task_prefix)?;
+    if workspace.task_prefix != was {
+        log_change(svc, caller, id, "", "prefix", serde_json::json!({ "from": was, "to": workspace.task_prefix }));
+    }
     watcher.announce_fleet_changed();
     pb_workspace(svc, &workspace, scope)
 }
@@ -133,13 +170,15 @@ pub fn set_prefix(
 /// login (`Service::set_lead`, ov-585). A lead whose login can't be launched
 /// is refused before anything is written. A restart that fails once the lead
 /// is written is no refusal: the answer is the workspace as written, with
-/// `orchestrator_not_restarted` saying why.
+/// `orchestrator_not_restarted` saying why. A lead handed on goes to the
+/// people log, about the new lead, empty for the owner (ov-784).
 pub async fn set_settings(
     svc: &Service,
     watcher: &Watcher,
     id: Uuid,
     req: &pb::WorkspaceSetSettings,
     scope: Scope,
+    caller: Caller<'_>,
 ) -> Result<pb::Workspace> {
     let landing = LandingPatch {
         mode: req.landing.map(|raw| crate::landing_read::from_wire_mode(raw).ok_or(DomainError::InvalidArgument { what: "landing" })).transpose()?,
@@ -193,7 +232,16 @@ pub async fn set_settings(
         workspace = Some(svc.store.set_workspace_wake_on_answer(id, expected, on)?);
     }
     let (fresh, not_restarted) = match lead {
-        Some(handle) => svc.set_lead(id, handle).await?,
+        Some(handle) => {
+            let was = svc.store.workspace_lead(id)?;
+            let set = svc.set_lead(id, handle).await?;
+            if was.as_deref() != handle {
+                let name = |lead: Option<&str>| lead.unwrap_or("owner").to_string();
+                let detail = serde_json::json!({ "from": name(was.as_deref()), "to": name(handle) });
+                log_change(svc, caller, id, handle.unwrap_or(""), "lead", detail);
+            }
+            set
+        }
         None => (None, None),
     };
     watcher.announce_fleet_changed();
@@ -344,12 +392,12 @@ mod tests {
         assert_eq!(main.wake_on_answer, Some(true), "on by default");
         let id = Uuid::from_slice(&main.id).unwrap();
         let off = pb::WorkspaceSetSettings { wake_on_answer: Some(false), ..Default::default() };
-        let set = set_settings(&svc, &watcher, id, &off, Scope::Control).await.unwrap();
+        let set = set_settings(&svc, &watcher, id, &off, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
         assert_eq!(set.wake_on_answer, Some(false));
         assert_eq!(list(&svc, Some(repo), Scope::Read).unwrap().items[0].wake_on_answer, Some(false));
         let nothing = pb::WorkspaceSetSettings::default();
         assert!(matches!(
-            set_settings(&svc, &watcher, id, &nothing, Scope::Control).await,
+            set_settings(&svc, &watcher, id, &nothing, Scope::Control, crate::workspace_ops::LOCAL).await,
             Err(DomainError::InvalidArgument { what: "settings" })
         ));
         let stale = pb::WorkspaceSetSettings {
@@ -357,7 +405,7 @@ mod tests {
             expected_version: Some(main.resource_version),
             ..Default::default()
         };
-        assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control).await, Err(DomainError::ResourceConflict)));
+        assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control, crate::workspace_ops::LOCAL).await, Err(DomainError::ResourceConflict)));
     }
 
     /// Deleting a workspace removes its orchestrator's settings file, and

@@ -2042,7 +2042,7 @@ impl Rpc {
                 let Some(request::Payload::WorkspaceRename(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::Workspace(crate::workspace_ops::rename(svc, &self.watcher, id, &p, scope)?))
+                Ok(result::Value::Workspace(crate::workspace_ops::rename(svc, &self.watcher, id, &p, scope, (&self.peer, self.caller_pid))?))
             }
 
             "workspace.set_prefix" => {
@@ -2050,13 +2050,8 @@ impl Rpc {
                 let Some(request::Payload::WorkspaceSetPrefix(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::Workspace(crate::workspace_ops::set_prefix(
-                    svc,
-                    &self.watcher,
-                    id,
-                    &p,
-                    scope,
-                )?))
+                let caller = (&self.peer, self.caller_pid);
+                Ok(result::Value::Workspace(crate::workspace_ops::set_prefix(svc, &self.watcher, id, &p, scope, caller)?))
             }
 
             "workspace.set_settings" => {
@@ -2064,13 +2059,8 @@ impl Rpc {
                 let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::Workspace(crate::workspace_ops::set_settings(
-                    svc,
-                    &self.watcher,
-                    id,
-                    &p,
-                    scope,
-                ).await?))
+                let caller = (&self.peer, self.caller_pid);
+                Ok(result::Value::Workspace(crate::workspace_ops::set_settings(svc, &self.watcher, id, &p, scope, caller).await?))
             }
 
             "workspace.delete" => {

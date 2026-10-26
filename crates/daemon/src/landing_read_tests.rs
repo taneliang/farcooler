@@ -48,7 +48,7 @@ async fn each_landing_setting_is_set_and_read_back_and_the_wake_switch_is_left_a
         pr_cost_line: Some(true),
         ..Default::default()
     };
-    let set = set_settings(&svc, &watcher, id, &req, Scope::Control).await.unwrap();
+    let set = set_settings(&svc, &watcher, id, &req, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!(set.landing, Some(pb::LandingMode::PullRequests as i32));
     assert_eq!((set.base.as_deref(), set.pr_max_lines, set.pr_cost_line), (Some("trunk"), Some(400), Some(true)));
     assert_eq!(set.wake_on_answer, Some(true));
@@ -69,13 +69,13 @@ async fn a_write_that_cannot_land_leaves_the_wake_switch_as_it_was() {
         ..Default::default()
     };
     assert!(matches!(
-        set_settings(&svc, &watcher, id, &both, Scope::Control).await,
+        set_settings(&svc, &watcher, id, &both, Scope::Control, crate::workspace_ops::LOCAL).await,
         Err(DomainError::InvalidArgument { what: "base" })
     ));
     assert_eq!(list(&svc, Some(repo), Scope::Control).unwrap().items[0].wake_on_answer, Some(true));
     let unspecified = pb::WorkspaceSetSettings { landing: Some(0), ..Default::default() };
     assert!(matches!(
-        set_settings(&svc, &watcher, id, &unspecified, Scope::Control).await,
+        set_settings(&svc, &watcher, id, &unspecified, Scope::Control, crate::workspace_ops::LOCAL).await,
         Err(DomainError::InvalidArgument { what: "landing" })
     ));
 }
@@ -99,11 +99,11 @@ async fn a_base_that_refuses_pushes_is_said_and_the_choice_is_never_changed() {
     );
     assert_eq!(unchosen.landing, None, "it was not switched for the owner");
 
-    let chose_direct = set_settings(&svc, &watcher, id, &settings(Some(pb::LandingMode::Direct)), Scope::Control).await.unwrap();
+    let chose_direct = set_settings(&svc, &watcher, id, &settings(Some(pb::LandingMode::Direct)), Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!(chose_direct.landing, Some(pb::LandingMode::Direct as i32));
     assert!(chose_direct.direct_refused.is_some(), "a choice that can't work is still said");
 
-    let chose_prs = set_settings(&svc, &watcher, id, &settings(Some(pb::LandingMode::PullRequests)), Scope::Control).await.unwrap();
+    let chose_prs = set_settings(&svc, &watcher, id, &settings(Some(pb::LandingMode::PullRequests)), Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!(chose_prs.direct_refused, None);
 }
 
@@ -240,12 +240,12 @@ async fn a_changed_base_does_not_keep_the_old_bases_refusal() {
     assert!(list(&svc, Some(repo), Scope::Control).unwrap().items[0].direct_refused.is_some());
 
     let to_release = pb::WorkspaceSetSettings { base: Some("release".into()), ..Default::default() };
-    let set = set_settings(&svc, &watcher, id, &to_release, Scope::Control).await.unwrap();
+    let set = set_settings(&svc, &watcher, id, &to_release, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!(set.direct_refused, None, "main's refusal isn't release's");
 
     // Back to the default branch: the old read must not come back to life.
     let back = pb::WorkspaceSetSettings { base: Some(String::new()), ..Default::default() };
-    assert_eq!(set_settings(&svc, &watcher, id, &back, Scope::Control).await.unwrap().direct_refused, None);
+    assert_eq!(set_settings(&svc, &watcher, id, &back, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap().direct_refused, None);
 
     // And a read that is about another base than the current one is ignored.
     remember_a_base_that_requires_pull_requests(id);

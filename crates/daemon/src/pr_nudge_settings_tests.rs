@@ -28,18 +28,18 @@ async fn the_switch_and_the_wait_are_set_read_back_and_the_wait_goes_back_to_a_d
     let main = list(&svc, Some(repo), Scope::Control).unwrap().items.remove(0);
     let id = Uuid::from_slice(&main.id).unwrap();
     let on = pb::WorkspaceSetSettings { pr_nudge: Some(true), pr_nudge_hours: Some(48), ..Default::default() };
-    let set = set_settings(&svc, &watcher, id, &on, Scope::Control).await.unwrap();
+    let set = set_settings(&svc, &watcher, id, &on, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!((set.pr_nudge, set.pr_nudge_hours), (Some(true), Some(48)));
     let read = list(&svc, Some(repo), Scope::Read).unwrap().items.remove(0);
     assert_eq!((read.pr_nudge, read.pr_nudge_hours), (Some(true), Some(48)));
 
     let reset = pb::WorkspaceSetSettings { pr_nudge_hours: Some(0), ..Default::default() };
-    let set = set_settings(&svc, &watcher, id, &reset, Scope::Control).await.unwrap();
+    let set = set_settings(&svc, &watcher, id, &reset, Scope::Control, crate::workspace_ops::LOCAL).await.unwrap();
     assert_eq!((set.pr_nudge, set.pr_nudge_hours), (Some(true), Some(24)), "the switch is left where it was");
 
     let too_long = pb::WorkspaceSetSettings { pr_nudge: Some(false), pr_nudge_hours: Some(100_000), ..Default::default() };
     assert!(matches!(
-        set_settings(&svc, &watcher, id, &too_long, Scope::Control).await,
+        set_settings(&svc, &watcher, id, &too_long, Scope::Control, crate::workspace_ops::LOCAL).await,
         Err(DomainError::InvalidArgument { what: "pr_nudge_hours" })
     ));
     let still = list(&svc, Some(repo), Scope::Control).unwrap().items.remove(0);

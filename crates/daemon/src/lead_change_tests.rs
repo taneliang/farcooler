@@ -21,7 +21,7 @@ use super::*;
 async fn hand_lead(svc: &Arc<Service>, workspace: Uuid, handle: &str) -> Result<pb::Workspace> {
     let watcher = crate::watch::Watcher::new(svc.clone());
     let req = pb::WorkspaceSetSettings { lead: Some(handle.into()), ..Default::default() };
-    set_settings(svc, &watcher, workspace, &req, Scope::HostAdmin).await
+    set_settings(svc, &watcher, workspace, &req, Scope::HostAdmin, crate::workspace_ops::LOCAL).await
 }
 
 /// `workspace`'s live orchestrator.

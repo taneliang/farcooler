@@ -183,7 +183,8 @@ async fn every_method_has_a_member_ruling_the_gate_keeps() {
         let ruling = member_ruling(*method);
         let name = method.name();
         match ruling {
-            Ruling::Owners(_) => assert!(not_yours(&member), "{name}, the owner's: {member:?}"),
+            // Bob is no Maintainer (ov-784).
+            Ruling::Owners(_) | Ruling::Maintains => assert!(not_yours(&member), "{name}, {ruling:?}: {member:?}"),
             _ => assert!(member.is_ok(), "{name}, {ruling:?}: {member:?}"),
         }
         // But `member.list`, which tells it only that it was released.

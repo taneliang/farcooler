@@ -777,6 +777,14 @@ pub mod capability {
     /// and files on Far Cooler's own board. A phone sends nothing to a runner
     /// without it, and keeps what it has for one that has it.
     pub const CRASH_REPORTS: &str = "crash_reports";
+    /// A Maintainer keeps the workspaces (ov-784): besides the owner, a
+    /// member whose role is `maintainer` may call `workspace.rename`,
+    /// `workspace.set_prefix`, and `workspace.set_settings` with the four
+    /// settings that act as nobody (`pr_max_lines`, `pr_cost_line`,
+    /// `wake_on_answer`, `pr_nudge_hours`). Renames, prefixes and lead
+    /// changes go to the people log. An app offers a Maintainer those
+    /// controls only on a runner with it; an older one refuses them.
+    pub const WORKSPACE_MAINTAINERS: &str = "workspace_maintainers";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -800,7 +808,7 @@ pub mod capability {
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
-            MEMBER_DEVICES_READ, CRASH_REPORTS,
+            MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever

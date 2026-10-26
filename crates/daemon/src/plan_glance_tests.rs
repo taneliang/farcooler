@@ -180,7 +180,7 @@ async fn a_renamed_board_sends_its_new_name() {
 
     let version = svc.store.get_workspace(ops.id).unwrap().resource_version;
     let rename = farcooler_protocol::v1::WorkspaceRename { name: "Platform".into(), expected_version: Some(version) };
-    crate::workspace_ops::rename(&svc, &watcher, ops.id, &rename, farcooler_protocol::v1::Scope::HostAdmin).unwrap();
+    crate::workspace_ops::rename(&svc, &watcher, ops.id, &rename, farcooler_protocol::v1::Scope::HostAdmin, crate::workspace_ops::LOCAL).unwrap();
     let renamed = next(&mut taps).await.expect("a rename moves the glance");
     assert_eq!(renamed.plan.unwrap()[0].workspace, "Platform");
 }

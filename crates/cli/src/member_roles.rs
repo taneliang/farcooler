@@ -103,6 +103,12 @@ pub(crate) fn event_line(e: &pb::PeopleEvent, now: i64) -> String {
             let short: String = detail["sha256"].as_str().unwrap_or_default().chars().take(8).collect();
             format!("edited a charter ({short})")
         }
+        "rename" => format!("renamed {} to {}", detail["from"].as_str().unwrap_or("a workspace"), detail["to"].as_str().unwrap_or("?")),
+        "prefix" => format!("changed a workspace's prefix from {} to {}", detail["from"].as_str().unwrap_or("?"), detail["to"].as_str().unwrap_or("?")),
+        "lead" => match e.handle.as_str() {
+            "" => "took back a workspace's lead".to_string(),
+            lead => format!("made {lead} a workspace's lead"),
+        },
         other => format!("{other} {}", e.handle),
     };
     format!("{when}  {who} {what}")
@@ -154,5 +160,9 @@ mod tests {
         assert_eq!(line(e("member:ann", "bob", "added", "{}")), "ann added bob");
         assert_eq!(line(e("user", "", "charter", r#"{"sha256":"abcdef0123"}"#)), "the owner edited a charter (abcdef01)");
         assert_eq!(event_line(&e("user", "bob", "removed", "{}"), 3 * 3_600_000), "   3h ago  the owner removed bob");
+        assert_eq!(line(e("member:carol", "", "rename", r#"{"from":"Main","to":"Platform"}"#)), "carol renamed Main to Platform");
+        assert_eq!(line(e("member:carol", "", "prefix", r#"{"from":"OV","to":"PL"}"#)), "carol changed a workspace's prefix from OV to PL");
+        assert_eq!(line(e("user", "bob", "lead", r#"{"from":"owner","to":"bob"}"#)), "the owner made bob a workspace's lead");
+        assert_eq!(line(e("user", "", "lead", r#"{"from":"bob","to":"owner"}"#)), "the owner took back a workspace's lead");
     }
 }

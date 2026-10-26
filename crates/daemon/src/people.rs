@@ -126,12 +126,18 @@ pub fn talks_to_orchestrator(store: &Store, person: &Person, workspace: Uuid) ->
 /// every workspace's. Never a released device. A member's ordinary role
 /// edits none, so with no roles given, only the owner and a lead do.
 pub fn may_edit_charter(store: &Store, person: &Person, workspace: Uuid) -> Result<bool> {
+    Ok(maintains(store, person)? || (matches!(person, Person::Member(_)) && leads(store, person, workspace)?))
+}
+
+/// Whether `person` keeps the workspaces' rules (ov-784, the role table of
+/// `reports/ov-753/design.md`): the owner, or a member the owner made a
+/// Maintainer. They rename a workspace, set its prefix, and set the four
+/// settings that don't act as the owner (`changes_maintained_settings`).
+/// Leading a workspace isn't keeping it. Never a released device.
+pub fn maintains(store: &Store, person: &Person) -> Result<bool> {
     Ok(match person {
         Person::Owner => true,
-        Person::Member(handle) => {
-            leads(store, person, workspace)?
-                || store.member_role(handle)? == farcooler_store::member_roles::Role::Maintainer
-        }
+        Person::Member(handle) => store.member_role(handle)? == farcooler_store::member_roles::Role::Maintainer,
         Person::Released => false,
     })
 }
@@ -298,16 +304,21 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   what's the owner's alone (`Ruling::Owners`) is refused a member's
 ///   device and a released one, `not_yours`, whatever it names as its
 ///   actor: a post to GitHub with the runner's `gh` login (ov-637), the
-///   runner's and a workspace's shape (ov-637: deleting, renaming or
-///   re-prefixing a workspace, its charter, where repositories are found
-///   and, ov-716, which are registered, the branch prefix, the projector,
-///   the terminal themes, and stopping the daemon), and removing a
-///   worktree, the owner's files (ov-716).
-/// - **Some by the payload**: any change to a workspace's settings but
-///   turning the nudge off (`changes_settings`, ov-637), letting
-///   members run on the owner's logins (`lends_the_owners_login`, ov-716),
-///   and enrolling a shell line (`enrolls_a_shell`, ov-719), are refused
-///   the same way.
+///   runner's and a workspace's shape (ov-637: deleting a workspace,
+///   creating its charter file, where repositories are found and, ov-716,
+///   which are registered, the branch prefix, the projector, the terminal
+///   themes, and stopping the daemon), and removing a worktree, the
+///   owner's files (ov-716).
+/// - **Some by the payload**: a workspace's settings that act as the owner,
+///   how it lands, onto what, turning the nudge on and its lead
+///   (`changes_owners_settings`, ov-637), letting members run on the
+///   owner's logins (`lends_the_owners_login`, ov-716), and enrolling a
+///   shell line (`enrolls_a_shell`, ov-719), are refused the same way.
+/// - **A Maintainer keeps the workspaces** (ov-784): renaming one, setting
+///   its prefix (`Ruling::Maintains`), and its pull requests' size and cost
+///   line, waking on an answer and the nudge's hours
+///   (`changes_maintained_settings`) are the owner's and a Maintainer's,
+///   and refused any other member's device `not_yours` (`maintains`).
 /// - **The owner's devices are the owner's** (ov-719): binding one to a
 ///   member, or revoking one, from a member's device is refused
 ///   `not_yours` (`touches_the_owners_device`). A device a member's device
@@ -419,11 +430,20 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     let owners = matches!(ruling_of(req), Some(Ruling::Owners(_)))
-        || changes_settings(req)
+        || changes_owners_settings(req)
         || lends_the_owners_login(req)
         || enrolls_a_shell(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
         tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    // A workspace's name, prefix and the settings that don't act as the
+    // owner are the owner's and a Maintainer's (ov-784).
+    if peer.client_id.is_some()
+        && (ruling_of(req) == Some(Ruling::Maintains) || changes_maintained_settings(req))
+        && !maintains(store, &person_of(store, peer)?)?
+    {
+        tracing::info!(method = %req.method, "refused: a member who isn't a Maintainer changing a workspace");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // A charter is edited by the owner, its workspace's lead and a
@@ -664,34 +684,48 @@ pub fn may_fill_prs(store: &Store, peer: &Peer) -> bool {
     peer.client_id.is_none() || person_of(store, peer).is_ok_and(|p| p != Person::Released)
 }
 
-/// Whether `req` changes a workspace's settings (ov-637): how it lands
-/// (`DIRECT` has the owner's orchestrator push to the base with the owner's
-/// credentials), onto what, its pull requests' size and cost line, the nudge
-/// and how soon it posts, waking on an answer, or its lead. All the owner's.
-/// Turning the nudge off alone isn't: anyone may stop a post in the owner's
-/// name (ov-580). Every field is named, with no `..`, so a setting added to
-/// the message doesn't compile here until it has a ruling (ov-716).
-fn changes_settings(req: &Request) -> bool {
+/// Whether `req` changes a workspace's settings that act as the owner
+/// (ov-637, ov-784): how it lands (`DIRECT` has the owner's orchestrator
+/// push to the base with the owner's credentials), onto what, turning the
+/// nudge on (it posts in the owner's name), or its lead. The owner's alone.
+/// Turning the nudge off isn't: anyone may stop a post in the owner's name
+/// (ov-580). The rest are a Maintainer's too (`changes_maintained_settings`).
+/// Every field is named, with no `..`, so a setting added to the message
+/// doesn't compile here until it has a ruling (ov-716).
+fn changes_owners_settings(req: &Request) -> bool {
+    let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload.as_ref() else { return false };
+    let farcooler_protocol::v1::WorkspaceSetSettings {
+        wake_on_answer: _,
+        expected_version: _,
+        landing,
+        base,
+        pr_max_lines: _,
+        pr_cost_line: _,
+        lead,
+        pr_nudge,
+        pr_nudge_hours: _,
+    } = p;
+    landing.is_some() || base.is_some() || lead.is_some() || *pr_nudge == Some(true)
+}
+
+/// Whether `req` changes a workspace setting that acts as nobody (ov-784):
+/// its pull requests' size and cost line, waking its orchestrator on an
+/// answer, and how soon the nudge posts. The owner's and a Maintainer's
+/// (`maintains`). Every field is named, as in `changes_owners_settings`.
+fn changes_maintained_settings(req: &Request) -> bool {
     let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload.as_ref() else { return false };
     let farcooler_protocol::v1::WorkspaceSetSettings {
         wake_on_answer,
         expected_version: _,
-        landing,
-        base,
+        landing: _,
+        base: _,
         pr_max_lines,
         pr_cost_line,
-        lead,
-        pr_nudge,
+        lead: _,
+        pr_nudge: _,
         pr_nudge_hours,
     } = p;
-    wake_on_answer.is_some()
-        || landing.is_some()
-        || base.is_some()
-        || pr_max_lines.is_some()
-        || pr_cost_line.is_some()
-        || lead.is_some()
-        || *pr_nudge == Some(true)
-        || pr_nudge_hours.is_some()
+    wake_on_answer.is_some() || pr_max_lines.is_some() || pr_cost_line.is_some() || pr_nudge_hours.is_some()
 }
 
 /// Refuse a write from a member's device, or a released one, that names
@@ -1170,3 +1204,7 @@ mod rep_plan_tests;
 #[cfg(test)]
 #[path = "people_roles_tests.rs"]
 mod roles_tests;
+
+#[cfg(test)]
+#[path = "people_maintainer_tests.rs"]
+mod maintainer_tests;

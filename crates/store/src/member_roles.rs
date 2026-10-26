@@ -3,13 +3,15 @@
 //!
 //! - **A role** is Member, everyone's by default, or Maintainer, which the
 //!   owner gives someone trusted with the workspaces' rules: a Maintainer
-//!   edits any workspace's charter. Nothing else reads it yet, so a runner
+//!   edits any workspace's charter, renames a workspace, sets its prefix,
+//!   and sets the settings that don't act as the owner (ov-784). A runner
 //!   where nobody is a Maintainer behaves exactly as before. The owner and
 //!   each workspace's lead are not roles: the owner is the runner's own
 //!   account, and the lead is `workspace_leads`.
 //! - **The people log** is who changed what about the people on the runner,
 //!   and when: a role given or taken, a member added, their devices changed,
-//!   a member removed, a workspace's charter edited through the runner. One
+//!   a member removed, a workspace's charter edited through the runner, a
+//!   workspace renamed or re-prefixed, or its lead handed on (ov-784). One
 //!   row per change, written in the change's own transaction where the
 //!   change is the store's, so a change is never made without its row.
 //!
@@ -61,7 +63,9 @@ pub enum Role {
     /// Every member, by default: today's rulings, unchanged.
     #[default]
     Member,
-    /// Edits any workspace's charter (`workspace.set_charter`).
+    /// Edits any workspace's charter (`workspace.set_charter`), renames a
+    /// workspace and sets its prefix and the settings that don't act as the
+    /// owner (ov-784).
     Maintainer,
 }
 
@@ -92,10 +96,11 @@ pub struct PeopleEvent {
     pub actor: String,
     pub handle: String,
     pub workspace: Option<Uuid>,
-    /// `role`, `added`, `devices`, `removed` or `charter`.
+    /// `role`, `added`, `devices`, `removed`, `revoked`, `revoke_failed`,
+    /// `charter`, `rename`, `prefix` or `lead`.
     pub kind: String,
-    /// A JSON object: a role change's `from` and `to`, a device change's
-    /// `devices`, a charter edit's `sha256`.
+    /// A JSON object: a role change's, rename's, prefix's or lead's `from`
+    /// and `to`, a device change's `devices`, a charter edit's `sha256`.
     pub detail: String,
 }
 

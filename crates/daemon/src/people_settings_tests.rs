@@ -56,12 +56,13 @@ fn refused(r: &Runner, device: Option<&str>, req: &Request) -> Option<&'static s
     }
 }
 
-/// Every setting is the owner's: how the workspace lands (straight to the
-/// base, with the owner's credentials, or by pull request), onto what, the
-/// pull requests' size and cost line, the nudge and how soon it posts, waking
-/// on an answer, and who leads. A member's device and a released one are
-/// refused each, at any scope; the owner's phone and the local socket pass.
-/// Turning the nudge off is anyone's, as before.
+/// Every setting is the owner's, and the four that act as nobody a
+/// Maintainer's too (ov-784, `people_maintainer_tests`): how the workspace
+/// lands (straight to the base, with the owner's credentials, or by pull
+/// request), onto what, the pull requests' size and cost line, the nudge and
+/// how soon it posts, waking on an answer, and who leads. A member's device
+/// and a released one are refused each, at any scope; the owner's phone and
+/// the local socket pass. Turning the nudge off is anyone's, as before.
 #[tokio::test]
 async fn a_member_changes_no_workspace_setting() {
     let r = runner().await;
@@ -134,9 +135,10 @@ async fn only_the_lead_starts_the_orchestrator() {
 
 /// Deleting, renaming or re-prefixing a workspace, rewriting its charter, and
 /// the runner's own settings (where repositories are found, the branch
-/// prefix, the projector, the terminal themes) are the owner's: refused a
-/// member's device and a released one `not_yours`, at any scope. The owner's
-/// phone and the local socket pass the gate, to be answered by the handler.
+/// prefix, the projector, the terminal themes) are the owner's, a rename and
+/// a prefix a Maintainer's too (ov-784): refused a member's device and a
+/// released one `not_yours`, at any scope. The owner's phone and the local
+/// socket pass the gate, to be answered by the handler.
 #[tokio::test]
 async fn a_member_reshapes_no_workspace_or_runner_setting() {
     let r = runner().await;
