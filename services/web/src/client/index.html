@@ -18,9 +18,49 @@
   <span>A newer version of Far Cooler is ready.</span>
   <button id="reload" type="button">Reload</button>
 </div>
-<main class="empty">
-  <h1>Your terminals will open here</h1>
-  <p>This browser isn't enrolled with a runner yet. Enrolling with your phone comes in the next update.</p>
+<main>
+  <section class="empty" id="status">
+    <h1 id="status-title">Starting Far Cooler…</h1>
+    <p id="status-detail"></p>
+    <button id="status-action" type="button" hidden></button>
+  </section>
+
+  <section class="enroll" id="enroll" hidden>
+    <h1>Add this browser to your runners</h1>
+    <p class="lead">Your phone already reaches your runners. It can give this browser a key of its own on the runners you choose, and then your terminals open here.</p>
+    <div class="enroll-body">
+      <figure class="code">
+        <canvas id="offer-code" width="320" height="320"></canvas>
+        <figcaption id="offer-fingerprint"></figcaption>
+      </figure>
+      <ol class="steps">
+        <li>On your phone, open Far Cooler, tap Add Device or Runner, then Add Another Device.</li>
+        <li>Scan this code, choose the runners this browser may use, and confirm.</li>
+        <li>Your phone then shows a code of its own. Select Scan Reply and hold it up to this computer’s camera.</li>
+      </ol>
+    </div>
+    <p class="note" id="enroll-note" hidden></p>
+    <div class="actions">
+      <button id="scan" type="button">Scan Reply</button>
+      <button class="quiet" id="start-over" type="button">Start Over</button>
+    </div>
+    <div class="camera" id="camera" hidden>
+      <video id="camera-video" playsinline muted></video>
+      <p>Hold the code on your phone up to the camera.</p>
+      <button class="quiet" id="camera-cancel" type="button">Cancel</button>
+    </div>
+  </section>
+
+  <section class="work" id="work" hidden>
+    <nav class="sidebar" aria-label="Terminals">
+      <span class="runner" id="runner-name"></span>
+      <div class="terminal-list" id="terminal-list"></div>
+    </nav>
+    <div class="pane">
+      <p class="note" id="pane-note" hidden></p>
+      <div class="terminal" id="terminal"></div>
+    </div>
+  </section>
 </main>
 </body>
 </html>

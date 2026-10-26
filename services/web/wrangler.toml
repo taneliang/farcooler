@@ -100,8 +100,9 @@ APP_RELAY_URL = "https://relay-canary.farcooler.com"
 # https://app.canary.farcooler.com/callback as a redirect URI and
 # https://app.canary.farcooler.com/ as a sign-out redirect.
 APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
-# Off until the terminal lands. Then "owner", with the owner's canary account
-# id (the `user.id` that relay-canary's /v1/directory/me returns) here.
+# Off until the terminal has had its security review (ov-764). Then "owner",
+# with the owner's canary account id (the `user.id` that relay-canary's
+# /v1/directory/me returns) here.
 WEB_CLIENT = ""
 WEB_ACCOUNTS = ""
 DERP_MAP_ORIGIN = "https://tailcat.dev"

@@ -13,10 +13,11 @@
 #
 #   push:
 #     branches: [main]
-#     paths: ['services/web/**', 'services/common/**', '.github/workflows/web.yml']
+#     paths: ['services/web/**', 'services/common/**', '.github/workflows/web.yml',
+#             'crates/web/**', 'crates/ceremony/**', 'crates/protocol/**',
+#             'proto/**', 'crates/tailcat/go/**']
 #
-# and, when the client carries wasm, crates/web/**, crates/client/**,
-# crates/protocol/**, proto/** and crates/tailcat/go/**. Stable joins through
+# (the client carries wasm built from those crates). Stable joins through
 # promote.yml in slice 17, with the build composed from the stable tag as
 # site.yml composes www.
 #
@@ -38,7 +39,7 @@ jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     # One deploy at a time, never cancelled halfway.
     concurrency:
       group: web-${{ inputs.environment }}
@@ -46,20 +47,48 @@ jobs:
     defaults:
       run:
         working-directory: services/web
+    # The wasm tools, pinned as ci.yml's web job pins them.
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
+      BINARYEN_VERSION: version_133
+      BINARYEN_SHA256: 2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/web/package-lock.json
+      - name: Install wasm-bindgen and wasm-opt
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o wb.tgz "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          echo "$WASM_BINDGEN_SHA256  wb.tgz" | sha256sum -c -
+          tar xzf wb.tgz
+          curl -fsSL -o bn.tgz "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-$BINARYEN_VERSION-x86_64-linux.tar.gz"
+          echo "$BINARYEN_SHA256  bn.tgz" | sha256sum -c -
+          tar xzf bn.tgz
+          echo "WASM_BINDGEN=$PWD/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
+          echo "WASM_OPT=$PWD/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
       - run: npx tsc --noEmit -p tsconfig.client.json
       # Before the deploy, so a red suite or an oversized build never ships.
       - run: npm test
+      - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
       - run: node scripts/size-gate.mjs --self-test
-      - run: ./build.sh --channel canary --build "$GITHUB_SHA"
+      - run: ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm"
+      - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm" ./build.sh --channel canary --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - name: Deploy
         env:

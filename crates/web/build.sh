@@ -41,6 +41,17 @@ case "$channel" in
   *) echo "crates/web/build.sh: --channel is canary or stable" >&2; exit 2 ;;
 esac
 
+# The channel the protocol crate will stamp, asked of the one script that
+# decides it. A tree with uncommitted changes stamps `local` whatever was
+# asked, and a canary page holding a local module would offer codes no canary
+# phone accepts and run a daemon no runner has. Refused here, not discovered
+# on a phone.
+stamped=$(FARCOOLER_CHANNEL=$channel ../../scripts/version.sh channel)
+if [ "$stamped" != "$channel" ]; then
+  echo "crates/web/build.sh: this tree stamps the $stamped channel, not $channel (uncommitted changes build as local); commit them first" >&2
+  exit 1
+fi
+
 CARGO=${CARGO:-cargo}
 WASM_BINDGEN=${WASM_BINDGEN:-wasm-bindgen}
 WASM_OPT=${WASM_OPT:-wasm-opt}

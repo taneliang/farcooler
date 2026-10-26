@@ -54,8 +54,9 @@ getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 # The tests run natively against an in-process russh server: the pin, the
-# signer's encoding and the two-channel terminal (tests/).
-tokio = { version = "1", features = ["rt", "macros", "time", "io-util", "sync"] }
+# signer's encoding and the two-channel terminal (tests/). The same server on
+# a TCP port is examples/fake_runner.rs, for the browser check.
+tokio = { version = "1", features = ["rt", "macros", "time", "io-util", "sync", "net"] }
 
 [profile.release]
 opt-level = "z"

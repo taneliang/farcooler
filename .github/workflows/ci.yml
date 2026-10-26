@@ -1324,33 +1324,84 @@ jobs:
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
       - run: npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview
 
-  # The web client's Worker (services/web, ov-764): its tests, both builds and
-  # the size gate, on every push. Deploying is web.yml's.
+  # The web client (services/web and the wasm it serves, ov-764): its tests,
+  # both channels' real bundles with the size gate on each, and the shell in
+  # headless Chromium under its production CSP, on every push. Deploying is
+  # web.yml's.
   web:
     name: Web
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: services/web
+    env:
+      # crates/web/build.sh's tools: rustc's wasm32 target, and these two,
+      # pinned by version and checksum. wasm-bindgen must equal the crate
+      # version in crates/web/Cargo.lock, and build.sh refuses another.
+      WASM_BINDGEN_VERSION: 0.2.129
+      WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
+      BINARYEN_VERSION: version_133
+      BINARYEN_SHA256: 2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489
     steps:
       - uses: actions/checkout@v4
+        with:
+          # build.sh asks scripts/version.sh which channel the tree stamps,
+          # and that reads tags and the commit count.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/web
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/web/package-lock.json
+      - name: Install wasm-bindgen and wasm-opt
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o wb.tgz "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          echo "$WASM_BINDGEN_SHA256  wb.tgz" | sha256sum -c -
+          tar xzf wb.tgz
+          curl -fsSL -o bn.tgz "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-$BINARYEN_VERSION-x86_64-linux.tar.gz"
+          echo "$BINARYEN_SHA256  bn.tgz" | sha256sum -c -
+          tar xzf bn.tgz
+          echo "WASM_BINDGEN=$PWD/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
+          echo "WASM_OPT=$PWD/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
-      - run: npx tsc --noEmit -p tsconfig.client.json
       # Inside workerd: the flag, the CSP, the host check and the API's CSRF
       # checks each have a test that goes red without them.
       - run: npm test
+      # crates/web against an in-process SSH server: the pinned host key (an
+      # altered one is refused before any auth), the signer, the two-channel
+      # pane. Then the tunnel's browser half in a JS engine: one writer, in order.
+      - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
+      - run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
+        working-directory: crates/tailcat/go
       # The gate's own limits, proved against a build that breaks each one.
       - run: node scripts/size-gate.mjs --self-test
-      - run: ./build.sh --channel stable --build "$GITHUB_SHA"
+      - run: ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable"
+      # The client's types need the wasm-bindgen glue only through wasm.d.ts,
+      # so this checks against the declarations the page relies on.
+      - run: npx tsc --noEmit -p tsconfig.client.json
+      - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --outdir /tmp/web-build
-      - run: ./build.sh --channel canary --build "$GITHUB_SHA"
+      - run: ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm-canary"
+      - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
+      # The canary shell in headless Chromium under its production CSP:
+      # boot, enrollment, the camera, and a terminal through crates/web's fake
+      # runner (and refused with its pin altered). Any violation fails it.
+      - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_runner
+      - run: npx playwright-core install --with-deps --only-shell chromium
+      - run: node test/browser/csp-check.mjs --fake-runner ../../crates/web/target/debug/examples/fake_runner
