@@ -198,6 +198,72 @@ async fn the_daemon_learns_the_client_id_from_the_forced_command() {
         .expect("the local caller's own connection was closed by its own revoke");
 }
 
+/// A device a runner admin takes off a member's list (`member.set`, ov-783) is
+/// cut off for real: the session sshd started for it closes at once, and sshd
+/// itself refuses its key afterwards, because its line is gone from the file
+/// sshd authenticates against. A released device that kept its line would log
+/// in again, and over Control a session is a shell.
+///
+/// The login is probed before the drop too, the same way, so a probe that
+/// could never get in proves nothing.
+#[tokio::test]
+async fn a_device_taken_off_a_members_list_cannot_log_in_again() {
+    let runner = start("pad-b", Scope::Control).await;
+    let mut admin =
+        Client::connect(runner.runtime.join("farcoolerd.sock"), "test-admin", "0.0.0")
+            .await
+            .expect("handshake on the runner's own socket");
+    admin.call(member_set("bob", &["pad-b"])).await.expect("the pad bound to Bob");
+    assert!(log_in(&runner).is_ok(), "the pad could not log in while it was Bob's");
+    let (_ssh, mut pad) = connect(&runner, "farcoolerd --stdio").await;
+    pad.call(request("member.list")).await.expect("Bob's pad reads who's here");
+
+    admin.call(member_set("bob", &[])).await.expect("the pad taken off Bob's list");
+
+    let outcome = pad.call(request("member.list")).await;
+    assert!(
+        matches!(outcome, Err(ClientError::Closed | ClientError::Codec(_))),
+        "the pad's open session outlived its release: {outcome:?}"
+    );
+    let refused = log_in(&runner).expect_err("sshd still lets the released pad in");
+    assert!(refused.contains("Permission denied"), "refused for some other reason: {refused}");
+    assert!(!client_ids(&mut admin).await.contains(&"pad-b".to_string()), "the pad is still enrolled");
+}
+
+/// `member.set` of `handle` with exactly `devices`.
+fn member_set(handle: &str, devices: &[&str]) -> farcooler_protocol::v1::Request {
+    let mut req = request("member.set");
+    req.payload = Some(farcooler_protocol::v1::request::Payload::MemberSet(
+        farcooler_protocol::v1::MemberSet {
+            handle: handle.into(),
+            name: "Bob".into(),
+            client_ids: devices.iter().map(|d| d.to_string()).collect(),
+            ..Default::default()
+        },
+    ));
+    req
+}
+
+/// One ssh login with the device's key and nothing on stdin: `Ok` when sshd
+/// let it in and ran the forced command, ssh's own stderr when sshd refused
+/// it (exit 255).
+fn log_in(runner: &Runner) -> Result<(), String> {
+    let out = std::process::Command::new("ssh")
+        .args(["-p", &runner.port.to_string()])
+        .arg("-i")
+        .arg(&runner.identity)
+        .args(["-o", "IdentitiesOnly=yes", "-o", "ControlMaster=no", "-o", "BatchMode=yes"])
+        .args(["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"])
+        .arg("127.0.0.1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run ssh");
+    match out.status.code() {
+        Some(255) => Err(String::from_utf8_lossy(&out.stderr).into_owned()),
+        _ => Ok(()),
+    }
+}
+
 /// The devices this runner's fence enrolls, as the daemon reads the file.
 async fn client_ids(
     admin: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
