@@ -7653,10 +7653,12 @@ mod tests {
     ///   The log counts only background agents, so it says the turn ended and
     ///   the row folds to Done -- correctly, and once.
     /// - tmux runs `window-size latest`, so the phone opening the pane narrows
-    ///   the window. At 40 columns the mode line truncates to `· ← 3 age…`
-    ///   (`claude-background-agent-main-idle-40col`), and with only a shell
-    ///   there is no `◯` row: the screen reads not working. Two samples of that
-    ///   is a settle.
+    ///   the window. At 40 columns the mode line truncates to `· 1 shell · ←
+    ///   3 age…` (`claude-background-agent-main-idle-40col`): the hint is
+    ///   gone, but the shell's count is read (ov-795), so it still reads
+    ///   working. Narrower, the count goes too, `· 1 sh…`, and with only a
+    ///   shell there is no `◯` row: the screen reads not working. Two samples
+    ///   of that is a settle.
     /// - Back on the Mac the window widens and the hint returns.
     ///
     /// A screen that settled after the end and says Working again must not be
@@ -7669,8 +7671,11 @@ mod tests {
         let mode_line = "  ⏵⏵ auto mode on · 1 shell · ← 3 agents · ↓ to manage                     /rc";
         assert!(wide.contains(mode_line), "the capture's own mode line");
         // The 80-column screen's mode line cut the way the 40-column capture
-        // cuts it.
-        let narrow = wide.replace(mode_line, "  ⏵⏵ auto mode on · 1 shell · ← 3 age…");
+        // cuts it: the shell's count still says it runs (ov-795).
+        let forty = wide.replace(mode_line, "  ⏵⏵ auto mode on · 1 shell · ← 3 age…");
+        assert_eq!(registry.classify("claude", &forty), AgentActivity::Working);
+        // A narrower window cuts the count too, and nothing says it.
+        let narrow = wide.replace(mode_line, "  ⏵⏵ auto mode on · 1 sh…");
         assert_eq!(registry.classify("claude", wide), AgentActivity::Working);
         assert_eq!(registry.classify("claude", &narrow), AgentActivity::Idle);
 
