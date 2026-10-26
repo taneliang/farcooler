@@ -105,18 +105,26 @@ enum TeammateEnrollment {
             return await takeOff(clientID, from: runner, journal: journal, because: Self.notAdded, written.output, run)
         }
 
-        // Bind. A teammate already here (by device, or by account) keeps their
-        // handle, name and other devices, and gains this one: `member.set`
-        // replaces a member's devices, so they're read first.
-        let existing = holder ?? people.members.first { $0.account == member.account }
-        let handle =
-            existing?.handle ?? TeammateNames.unique(member.handle, taken: Set(people.members.map(\.handle)))
-        var devices = existing?.devices ?? []
-        if !devices.contains(clientID) { devices.append(clientID) }
-        var add = ["member", "add", handle, "--name", existing?.name ?? member.name]
-        for device in devices { add += ["--device", device] }
-        add += ["--account", member.account, "--email", member.email]
-        let added = await run(arguments(add, runner: runner.id))
+        var added = await bind(
+            clientID, to: member, holder: holder, people: people, checked: checksRead(listed.output), on: runner,
+            using: run)
+        // Their devices changed between the read and the bind: another Add
+        // Teammate for them, from this Mac or another (ov-786). Unchecked, one
+        // of the two lists would take the other's device off and revoke it, so
+        // the runner refused this one, writing nothing. Read again and bind
+        // once more from what's there now.
+        if !added.ok, TaskFailure.what(in: added.output) == "devices_changed" {
+            let again = await run(arguments(["member", "list"], runner: runner.id))
+            if again.ok, let fresh = Self.people(in: again.output) {
+                let holder = fresh.members.first { $0.devices.contains(clientID) }
+                if let holder, !holder.account.isEmpty, holder.account != member.account {
+                    added = (false, Self.boundToSomeoneElse)
+                } else {
+                    added = await bind(
+                        clientID, to: member, holder: holder, people: fresh, checked: true, on: runner, using: run)
+                }
+            }
+        }
         guard added.ok else {
             // Bound before this ceremony. A runner from ov-719 on unbinds a
             // device when a member's Mac writes its key, so it can only view
@@ -134,6 +142,32 @@ enum TeammateEnrollment {
             outcome.tunneled[runner.id] = token
         }
         return nil
+    }
+
+    /// Bind `clientID` to the teammate on `runner`, as `people` read there. A
+    /// teammate already here (by device, or by account) keeps their handle,
+    /// name and other devices, and gains this one: `member.set` replaces a
+    /// member's devices, so they're read first. `checked` sends what was read
+    /// (`--if-devices`, ov-786), so a list built from a read that's gone stale
+    /// is refused rather than taking off a device added since.
+    private static func bind(
+        _ clientID: String, to member: Member, holder: RunnerPeople.Member?, people: RunnerPeople, checked: Bool,
+        on runner: CeremonyRunner, using run: Enrollment.Writer
+    ) async -> (ok: Bool, output: String) {
+        let existing = holder ?? people.members.first { $0.account == member.account }
+        let handle =
+            existing?.handle ?? TeammateNames.unique(member.handle, taken: Set(people.members.map(\.handle)))
+        var devices = existing?.devices ?? []
+        if !devices.contains(clientID) { devices.append(clientID) }
+        var add = ["member", "add", handle, "--name", existing?.name ?? member.name]
+        for device in devices { add += ["--device", device] }
+        add += ["--account", member.account, "--email", member.email]
+        if checked {
+            // What the runner has as this handle's now: none for a new one.
+            let read = people.members.first { $0.handle == handle }?.devices ?? []
+            add += ["--if-devices=" + read.joined(separator: ",")]
+        }
+        return await run(arguments(add, runner: runner.id))
     }
 
     /// Take the key off a runner after a write or a bind that failed. When
@@ -224,6 +258,16 @@ enum TeammateEnrollment {
         guard let line, let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
         else { return false }
         return object["member_accounts"] as? Bool ?? false
+    }
+
+    /// Whether `member list --json` says the runner checks what a bind read
+    /// (ov-786). Absent is no: an older runner would drop `--if-devices`, so
+    /// the CLI refuses it there, and the bind goes unchecked as before.
+    static func checksRead(_ output: String) -> Bool {
+        let line = output.split(whereSeparator: \.isNewline).last { $0.hasPrefix("{") }
+        guard let line, let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+        else { return false }
+        return object["member_devices_read"] as? Bool ?? false
     }
 
     /// What `client enroll --json` says it found: whether the key was there

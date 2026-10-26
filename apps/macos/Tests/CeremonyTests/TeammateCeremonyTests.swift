@@ -153,16 +153,25 @@ struct TeammateCeremonyTests {
         var listFails = false
         /// A runner from before member accounts: its list doesn't say it keeps them.
         var old = false
+        /// Whether its list says it checks what a bind read (ov-786).
+        var checksRead = false
+        /// What each later `member list` answers, in turn, once the first has.
+        var relisted: [String] = []
+        /// What each `member add` answers, in turn, before `addFails` decides.
+        var adds: [(ok: Bool, output: String)] = []
         private(set) var calls: [[String]] = []
 
         func run(_ arguments: [String]) async -> (ok: Bool, output: String) {
             calls.append(arguments)
             if arguments.contains("list") {
                 if listFails { return (false, "Could not reach build-box over ssh.") }
-                let said = old ? listed : String(listed.dropLast()) + #","member_accounts":true}"#
+                if calls.filter({ $0.contains("list") }).count > 1, !relisted.isEmpty { listed = relisted.removeFirst() }
+                var said = old ? listed : String(listed.dropLast()) + #","member_accounts":true}"#
+                if checksRead { said = String(said.dropLast()) + #","member_devices_read":true}"# }
                 return (true, "Welcome to build-box\n" + said)
             }
             if arguments.contains("enroll") { return enrolls.count > 1 ? enrolls.removeFirst() : enrolls[0] }
+            if arguments.contains("add"), !adds.isEmpty { return adds.removeFirst() }
             if arguments.contains("add") { return addFails ? (false, "error: handle") : (true, "{}") }
             if arguments.contains("revoke") { return revokeFails ? (false, "Could not reach build-box over ssh.") : (true, "{}") }
             return (true, "{}")
@@ -383,6 +392,66 @@ struct TeammateCeremonyTests {
         #expect(add.contains("bobby") && add.contains("Bobby") && add.contains("farcooler-old"))
         #expect(add.contains("farcooler-0a0b"))
     }
+
+    /// A runner that checks what a bind read is told it (ov-786): the
+    /// devices its list showed under the handle being bound, and none for a
+    /// handle not there yet.
+    @Test func aBindSaysWhatItRead() async throws {
+        for (listed, read) in [
+            (Self.bobbyWithOld, "--if-devices=farcooler-old"),
+            (#"{"members":[],"claude_account":"","you":""}"#, "--if-devices="),
+        ] {
+            let (journal, folder) = Self.journal()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let runner = Runner()
+            runner.checksRead = true
+            runner.listed = listed
+            _ = await enroll(runner, journal: journal)
+            let add = try #require(runner.call("add"))
+            #expect(add.last == read, "\(add)")
+        }
+    }
+
+    /// Another Add Teammate gave Bob a device between the read and the bind
+    /// (ov-786): the runner refuses the stale list, and the bind reads again
+    /// and goes through once more, keeping that device and taking nothing off.
+    @Test func aStaleBindReadsAgainAndKeepsTheDeviceAddedSince() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        runner.checksRead = true
+        runner.listed = Self.bobbyWithOld
+        runner.relisted = [Self.bobbyWithOld.replacingOccurrences(of: #"["farcooler-old"]"#, with: #"["farcooler-old","farcooler-mac"]"#)]
+        runner.adds = [(false, Self.stale), (true, "{}")]
+        let outcome = await enroll(runner, journal: journal)
+        #expect(runner.verbs() == ["list", "enroll", "add", "list", "add"])
+        let again = try #require(runner.calls.last)
+        #expect(again.contains("farcooler-old") && again.contains("farcooler-mac") && again.contains("farcooler-0a0b"))
+        #expect(again.last == "--if-devices=farcooler-old,farcooler-mac")
+        #expect(outcome.written == [Self.runner.id])
+        #expect(outcome.transcript == nil)
+        #expect(journal.entries.isEmpty)
+    }
+
+    /// Stale twice: it reads again once, not forever, and a key it couldn't
+    /// bind is taken off like any other.
+    @Test func aBindStaleTwiceIsNotRecorded() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        runner.checksRead = true
+        runner.adds = [(false, Self.stale), (false, Self.stale)]
+        let outcome = await enroll(runner, journal: journal)
+        #expect(runner.verbs() == ["list", "enroll", "add", "list", "add", "revoke"])
+        #expect(outcome.written.isEmpty)
+        #expect(outcome.transcript?.contains(TeammateEnrollment.notRecorded) == true)
+    }
+
+    static let bobbyWithOld =
+        #"{"members":[{"handle":"bobby","name":"Bobby","devices":["farcooler-old"],"reps":0,"rep_panes":[],"account":"user_bob","email":"bob@example.com"}],"claude_account":"","you":""}"#
+    /// What the CLI says, under `--json`, for a bind the runner found stale.
+    static let stale =
+        "their devices changed since you read them, so nothing was changed.\ncode: resource-conflict\nwhat: devices_changed"
 
     /// A new Bob where a hand-added `bob` exists gets a handle of his own.
     @Test func aTakenHandleIsMadeUnique() async throws {
