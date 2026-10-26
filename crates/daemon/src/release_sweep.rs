@@ -7,15 +7,16 @@
 //! leave a key that still logs in, with nothing to retry it: the device is
 //! off the list, so the same `member.set` again releases nothing new. The
 //! sweep is that retry. It runs at the end of every `member.set` and
-//! `member.remove`, and once when the daemon starts, and needs no record of
-//! its own: what it must cut off is what `Store::released_to_sweep` names.
+//! `member.remove`, and once when the daemon starts, before its tunnel, and
+//! needs no record of its own: what it must cut off is what
+//! `Store::released_to_sweep` names. Every device it revokes goes in one
+//! write, with one tunnel rebuild at most.
 //!
 //! It never touches a device that isn't released, and it leaves alone one a
 //! member's device enrolled that's waiting on its first binding (ov-719):
 //! that one is released and keeps its line until a runner admin binds it.
 
 use farcooler_core::{DomainError, Result};
-use farcooler_protocol::v1 as pb;
 
 use crate::service::Service;
 
@@ -30,49 +31,52 @@ pub struct Swept {
     pub failed: Vec<(String, DomainError)>,
 }
 
-/// Revoke every released device that still has a line, and close the open
-/// sessions of every one that has none. `Err` only when the store or
+/// Revoke every released device that still has a line, all in one write
+/// with one tunnel rebuild at most (`enrollment::revoke_many`), and close the
+/// open sessions of every one that has none. `Err` only when the store or
 /// `authorized_keys` can't be read, so nothing was tried.
 pub async fn sweep(svc: &Service) -> Result<Swept> {
+    sweep_with(svc, true).await
+}
+
+async fn sweep_with(svc: &Service, rebuild_tunnel: bool) -> Result<Swept> {
     let mut swept = Swept::default();
     let candidates = svc.store.released_to_sweep()?;
     if candidates.is_empty() {
         return Ok(swept);
     }
     let lines = crate::enrollment::list(svc).await?;
-    for device in candidates {
-        if !lines.items.iter().any(|e| e.client_id == device) {
-            if svc.sessions().close(&device) > 0 {
-                swept.closed.push(device);
-            }
-            continue;
+    let (with_line, without): (Vec<String>, Vec<String>) =
+        candidates.into_iter().partition(|d| lines.items.iter().any(|e| e.client_id == *d));
+    for device in without {
+        if svc.sessions().close(&device) > 0 {
+            swept.closed.push(device);
         }
-        // Bound again since the list was read: someone's, and kept.
-        match svc.store.device_released(&device) {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(err) => {
-                swept.failed.push((device, err));
-                continue;
-            }
-        }
-        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await {
-            Ok(_) => swept.revoked.push(device),
-            Err(DomainError::NotFound) => {}
-            Err(err) => {
-                tracing::error!(device = %device, ?err, "revoking a released device failed; the next sweep tries again");
-                swept.failed.push((device, err));
-            }
+    }
+    if with_line.is_empty() {
+        return Ok(swept);
+    }
+    // Asked again inside the fence lock: one bound to a member since the
+    // list above was read is someone's, and kept.
+    let store = svc.store.clone();
+    let still = move |device: &str| store.device_released(device).unwrap_or(false) && store.member_of_device(device).is_ok_and(|m| m.is_none());
+    match crate::enrollment::revoke_many(svc, with_line.clone(), still, rebuild_tunnel).await {
+        Ok(revoked) => swept.revoked = revoked,
+        Err(err) => {
+            tracing::error!(?err, count = with_line.len(), "revoking released devices failed; the next sweep tries again");
+            swept.failed = with_line.into_iter().map(|d| (d, err.clone())).collect();
         }
     }
     Ok(swept)
 }
 
-/// The sweep when the daemon starts: what a failed revoke left before a
-/// restart is cut off before any device can use it. Each revocation goes to
-/// the people log as the runner's own.
+/// The sweep when the daemon starts, before its tunnel does (`main.rs`):
+/// what a failed revoke left before a restart is taken out of the file the
+/// first tunnel is built from, so that tunnel never admits a swept device's
+/// node key. Nothing to rebuild, so it's one store read and one file write at
+/// most. Each revocation goes to the people log as the runner's own.
 pub async fn sweep_at_start(svc: &Service) {
-    let swept = match sweep(svc).await {
+    let swept = match sweep_with(svc, false).await {
         Ok(swept) => swept,
         Err(err) => {
             tracing::error!(?err, "the released devices' sweep couldn't read what to sweep");

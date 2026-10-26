@@ -275,7 +275,9 @@ async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
 /// The released devices' sweep (`release_sweep`), each revocation and each
 /// failure in the people log as the caller's, about `handle` for a device
 /// that was one of `theirs` and about nobody otherwise (ov-783). The first
-/// failure, if any: a line still there, or nothing tried at all.
+/// failure among `theirs`, or nothing tried at all. A failure for an older
+/// device is logged, not answered: the Mac reads an error from `member.set`
+/// as the binding not recorded, and takes the new device's line back off.
 async fn sweep_logged(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handle: &str, theirs: &[String]) -> Option<DomainError> {
     let swept = match crate::release_sweep::sweep(svc).await {
         Ok(swept) => swept,
@@ -288,7 +290,9 @@ async fn sweep_logged(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handl
     let mut first = None;
     for (device, err) in swept.failed {
         log(svc, peer, caller_pid, about(&device), "revoke_failed", serde_json::json!({ "device": device }));
-        first.get_or_insert(err);
+        if theirs.contains(&device) {
+            first.get_or_insert(err);
+        }
     }
     first
 }

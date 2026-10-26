@@ -227,12 +227,11 @@ async fn run() -> Result<(), i32> {
     // Whether the owner's shell startup files export a Claude credential,
     // for the warning a runner with members shows (ov-651).
     service.refresh_claude_key_exports();
-    // A released device a failed revoke left a line for is cut off (ov-783).
-    // Spawned, not awaited: a revoke of a device the tunnel admitted rebuilds
-    // the tunnel, which can take most of a minute, and the socket below must
-    // not wait for that. Its calls are refused meanwhile (ov-758).
-    let sweeping = service.clone();
-    tokio::spawn(async move { farcooler_daemon::release_sweep::sweep_at_start(&sweeping).await });
+    // A released device a failed revoke left a line for is cut off (ov-783),
+    // before the tunnel below reads the file, so the first tunnel never
+    // admits its node key. Awaited: one store read and one file write at
+    // most, with no tunnel to rebuild yet.
+    farcooler_daemon::release_sweep::sweep_at_start(&service).await;
     // A pane still in chat mode from the build before moves to its TUI at
     // its next idle (ov-376).
     farcooler_daemon::chat_migration::start(&service);

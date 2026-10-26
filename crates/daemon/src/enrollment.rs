@@ -553,6 +553,57 @@ fn rerender_with_node_key(
     Ok(fence::Change::Write { entries: ours, foreign })
 }
 
+/// [`revoke`] for many devices at once (ov-783, the released devices'
+/// sweep): every line of each of `client_ids` that `still` admits, decided
+/// and taken out under one lock hold in ONE write, then each one's sessions
+/// closed, then the tunnel rebuilt once, when any removed line carried a
+/// node key and `rebuild_tunnel` asks for it. A device per write would rebuild
+/// the tunnel once per device, dropping every other device's tunnel each time.
+///
+/// `still` is asked inside the lock, so a device it no longer admits (bound
+/// to a member since the caller listed it) keeps its line. A device with no
+/// line is skipped, not refused. Answers with the devices whose lines went;
+/// on a failure, no line went and no session was closed.
+///
+/// `rebuild_tunnel` false is for the daemon's start, before any tunnel runs:
+/// the first `start_tunnel` reads the file this wrote.
+pub async fn revoke_many(
+    svc: &Service,
+    client_ids: Vec<String>,
+    still: impl Fn(&str) -> bool + Send + 'static,
+    rebuild_tunnel: bool,
+) -> Result<Vec<String>> {
+    let path = svc.authorized_keys().to_path_buf();
+    let (revoked, was_tunneled) = blocking(move || {
+        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+            let entries = attributed(entries);
+            // Never an empty id: a foreign line has none (see `revoke`).
+            let revoked: Vec<String> = client_ids
+                .into_iter()
+                .filter(|id| !id.is_empty() && entries.iter().any(|e| e.client_id == *id) && still(id))
+                .collect();
+            if revoked.is_empty() {
+                return Ok((fence::Change::Leave, (revoked, false)));
+            }
+            let was_tunneled = entries.iter().any(|e| revoked.contains(&e.client_id) && !e.node_key.is_empty());
+            let remaining: Vec<Entry> = entries.into_iter().filter(|e| !revoked.contains(&e.client_id)).collect();
+            let (ours, foreign) = sorted(&remaining);
+            Ok::<_, Refusal>((fence::Change::Write { entries: ours, foreign }, (revoked, was_tunneled)))
+        })
+    })
+    .await?;
+    // After the write, for `revoke`'s reason: the file is the authority.
+    for device in &revoked {
+        let closed = svc.sessions().close(device);
+        tracing::info!(client = %device, closed, "revoked a released device and closed its live sessions");
+    }
+    if rebuild_tunnel && was_tunneled {
+        let outcome = crate::allowlist::start_tunnel(svc).await;
+        tracing::info!(?outcome, count = revoked.len(), "made this runner's tunnel match the file a sweep just wrote");
+    }
+    Ok(revoked)
+}
+
 /// Remove a device's lines, close the sessions it was holding, and answer with
 /// what is left.
 ///

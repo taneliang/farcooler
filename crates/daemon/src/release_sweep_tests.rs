@@ -122,3 +122,44 @@ async fn a_device_taken_off_one_member_cant_be_given_to_another() {
     let moved = call(&admin, set("alice", &["phone-b"], "", "")).await;
     assert_eq!(moved.err().as_deref(), Some("invalid-argument:device"));
 }
+
+/// A `member.set` answers with an error only for a device it took off
+/// itself: an older device the sweep still can't revoke is logged, not
+/// answered, or the Mac's Add Teammate would read its own binding as failed
+/// and take the new device's line back off.
+#[tokio::test]
+async fn an_older_devices_failed_revoke_doesnt_fail_someone_elses_set() {
+    let failed = a_failed_revoke().await;
+    let admin = factory(&failed.svc, None, Scope::HostAdmin);
+    let ssh = failed.svc.authorized_keys().parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let alices = call(&admin, set("alice", &["phone-a"], "", "")).await;
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(alices.is_ok(), "Alice's set failed for Bob's pad: {alices:?}");
+    assert!(lines(&failed.svc).contains("pad-b"), "the write failed again, so the pad's line is still there");
+    let log = failed.svc.store.people_events(1).unwrap();
+    assert_eq!((log[0].kind.as_str(), log[0].handle.as_str(), log[0].detail.as_str()), ("revoke_failed", "", r#"{"device":"pad-b"}"#));
+}
+
+/// Every device a sweep revokes goes in one write: the file's backup, which
+/// each write replaces with the file as it was, still holds all of them.
+#[tokio::test]
+async fn a_sweep_revokes_every_device_in_one_write() {
+    let (_dir, svc) = with_bobs_phone_enrolled().await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi pad", "pad-b").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz mac", "mac-b").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIERERERERERERERERERERERERERERERERERERERERERE owner", "phone-o").await;
+    // Taken off in the store alone, as a build from before ov-783 left them.
+    svc.store.set_member("bob", "Bob", &["phone-b".into(), "pad-b".into(), "mac-b".into()]).unwrap();
+    svc.store.set_member("bob", "Bob", &[]).unwrap();
+    let swept = sweep(&svc).await.unwrap();
+    assert_eq!(swept.revoked, ["mac-b", "pad-b", "phone-b"].map(String::from));
+    let mut backup = svc.authorized_keys().as_os_str().to_owned();
+    backup.push(".farcooler-backup");
+    let before = std::fs::read_to_string(&backup).unwrap();
+    for device in ["mac-b", "pad-b", "phone-b"] {
+        assert!(before.contains(&format!("--client {device} ")), "{device} went in a write of its own:\n{before}");
+        assert!(!lines(&svc).contains(&format!("--client {device} ")), "{device} still has a line");
+    }
+    assert!(lines(&svc).contains("--client phone-o "), "the owner's phone lost its line");
+}
