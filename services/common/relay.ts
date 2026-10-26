@@ -17,9 +17,15 @@ export interface AppEnv {
   /// isn't set up yet.
   APP_WORKOS_CLIENT_ID?: string
   /// Per visitor, before every /v1/auth call (wrangler.toml). The relay's own
-  /// limit on those routes is one bucket for this whole Worker, since its
-  /// calls all come from Cloudflare; this keeps one visitor from emptying it.
+  /// limit on those routes is keyed on the caller's address, and this Worker's
+  /// calls all come from Cloudflare's; this keeps one visitor from emptying
+  /// that bucket when the relay can't tell visitors apart (no `VISITOR_SECRET`).
   APP_AUTH_LIMIT?: RateLimit
+  /// A secret shared with the relay (its `VISITOR_SECRET`, the same value). With
+  /// it, each /v1/auth call names the visitor and signs the name, and the relay
+  /// limits that visitor rather than this Worker as a whole (ov-811). Without
+  /// it, or with a different value, the relay keys on the address as before.
+  VISITOR_SECRET?: string
 }
 
 export type Configured = Required<Pick<AppEnv, 'APP_RELAY_URL' | 'APP_WORKOS_CLIENT_ID'>> & AppEnv
@@ -44,15 +50,54 @@ export async function withinLimit(env: AppEnv, visitor: string): Promise<boolean
   return success
 }
 
-/// The visitor's address, as Cloudflare reports it.
+/// Who the visitor is, for a rate limit: their address as Cloudflare reports
+/// it, or for IPv6 the /64 it sits in (`2001:db8:1:2::/64`). One subscriber is
+/// normally given a whole /64 and can use any address in it, so keying on the
+/// full address would give one host 2^64 buckets (ov-811).
 export function visitorOf(request: Request): string {
-  return request.headers.get('cf-connecting-ip') ?? 'unknown'
+  const address = request.headers.get('cf-connecting-ip')?.trim()
+  if (!address) return 'unknown'
+  return address.includes(':') ? (prefix64(address) ?? address) : address
 }
+
+/// The /64 an IPv6 address is in, written in full lowercase hex groups, or null
+/// when it isn't one. An IPv4-mapped address (`::ffff:203.0.113.7`) is the
+/// IPv4 address itself.
+export function prefix64(address: string): string | null {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address)
+  if (mapped) return mapped[1]!
+  const halves = address.toLowerCase().split('::')
+  if (halves.length > 2) return null
+  const groups = (part: string) => (part === '' ? [] : part.split(':'))
+  const head = groups(halves[0]!)
+  const tail = halves.length === 2 ? groups(halves[1]!) : []
+  const missing = 8 - head.length - tail.length
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null
+  const all = [...head, ...Array<string>(missing).fill('0'), ...tail]
+  if (!all.every(group => /^[0-9a-f]{1,4}$/.test(group))) return null
+  return `${all.slice(0, 4).map(group => group.padStart(4, '0')).join(':')}::/64`
+}
+
+/// The headers that name the visitor to the relay, signed with the shared
+/// secret: `x-fc-visitor` and `x-fc-visitor-mac`, an HMAC-SHA256 of
+/// `VISITOR_CONTEXT` and the name. Nothing when there's no secret or visitor.
+/// The relay checks them in `visitorKey` (services/relay/src/index.ts).
+export async function visitorHeaders(env: AppEnv, visitor?: string): Promise<Record<string, string>> {
+  const secret = env.VISITOR_SECRET?.trim()
+  if (!secret || !visitor) return {}
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${VISITOR_CONTEXT}${visitor}`))
+  const hex = [...new Uint8Array(mac)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+  return { 'x-fc-visitor': visitor, 'x-fc-visitor-mac': hex }
+}
+
+/// What the MAC covers before the visitor, so it signs nothing else.
+export const VISITOR_CONTEXT = 'farcooler visitor v1\n'
 
 class Limited extends Error {}
 
-async function post(env: Configured, path: string, body: unknown, token?: string): Promise<Response> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' }
+async function post(env: Configured, path: string, body: unknown, token?: string, visitor?: string): Promise<Response> {
+  const headers: Record<string, string> = { 'content-type': 'application/json', ...(await visitorHeaders(env, visitor)) }
   if (token) headers.authorization = `Bearer ${token}`
   return await fetch(`${env.APP_RELAY_URL.trim().replace(/\/+$/, '')}${path}`, {
     method: 'POST',
@@ -72,8 +117,8 @@ async function tokensFrom(response: Response): Promise<Tokens | null> {
 
 /// Trade the code from WorkOS for a session, proving the PKCE verifier.
 /// 'limited' when the relay's own limit refused the call.
-export async function exchange(env: Configured, code: string, verifier: string): Promise<Tokens | null | 'limited'> {
-  const response = await post(env, '/v1/auth/token', { code, verifier })
+export async function exchange(env: Configured, code: string, verifier: string, visitor: string): Promise<Tokens | null | 'limited'> {
+  const response = await post(env, '/v1/auth/token', { code, verifier }, undefined, visitor)
   return response.status === 429 ? 'limited' : await tokensFrom(response)
 }
 
@@ -145,7 +190,7 @@ export class Caller {
   private async refresh(): Promise<boolean> {
     this.refreshed = true
     if (!(await withinLimit(this.env, this.visitor))) throw new Limited()
-    const response = await post(this.env, '/v1/auth/refresh', { refreshToken: this.tokens.refresh })
+    const response = await post(this.env, '/v1/auth/refresh', { refreshToken: this.tokens.refresh }, undefined, this.visitor)
     if (response.status === 429) throw new Limited()
     if (response.status >= 500) throw new Error('relay unavailable')
     const tokens = await tokensFrom(response)

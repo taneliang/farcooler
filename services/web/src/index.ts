@@ -121,7 +121,7 @@ async function finishSignIn(request: Request, url: URL, env: Configured): Promis
   if (!(await withinLimit(env, visitorOf(request)))) return page(limitedPage(), 429, { 'retry-after': '60' }, [clearSignIn()])
   let tokens
   try {
-    tokens = await exchange(env, code, pending.verifier)
+    tokens = await exchange(env, code, pending.verifier, visitorOf(request))
   } catch {
     return page(unreachablePage(), 502, {}, [clearSignIn()])
   }

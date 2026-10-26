@@ -75,7 +75,14 @@ DERP_HOSTS = "tc301a.ipn.dev tc302a.ipn.dev tc303a.ipn.dev tc304a.ipn.dev"
 
 # The limit on sign-in and refresh per visitor, for the reason the site gives
 # for its own (services/site/wrangler.toml): every call from this Worker reaches
-# the relay from Cloudflare's addresses, in one bucket. Namespace ids are shared
+# the relay from Cloudflare's addresses, in one bucket. A visitor is an IPv4
+# address or an IPv6 /64 (`visitorOf` in services/common/relay.ts).
+#
+# The relay splits that bucket per visitor when this Worker has the secret
+# VISITOR_SECRET, set with `wrangler secret put VISITOR_SECRET --env canary`,
+# and the relay on the same channel has the same value as its VISITOR_SECRET:
+# each /v1/auth call then names the visitor, signed (ov-811). Either side
+# without it, the relay keys on the address as before. Namespace ids are shared
 # across the account (scripts/migration-lint.py); 1001-1007 are taken.
 [[unsafe.bindings]]
 name = "APP_AUTH_LIMIT"
