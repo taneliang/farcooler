@@ -1301,8 +1301,7 @@ final class Connection: ObservableObject {
     let pages = PageReads()
     /// Each task key's card, built once per read of the boards and plans (ov-299).
     let taskKeyCards = TaskKeyCardCache()
-    /// The key index the linker links by, the same value while the keys are
-    /// the same (ov-791): see `TaskKeyIndexCache`.
+    /// The key index the linker links by (ov-791): see `TaskKeyIndexCache`.
     let taskKeyIndexes = TaskKeyIndexCache()
 
     /// Every board this runner keeps, in the order the screens draw them:
@@ -1388,15 +1387,6 @@ final class Connection: ObservableObject {
         guard !(await core.eventsLive) else { return false }
         guard let last = lastBoardsRead else { return true }
         return Date().timeIntervalSince(last) > 60
-    }
-
-    /// A board's JSON, decoded off the main thread (ov-791). A long-lived
-    /// runner's board is about 1 MB (798 tasks with their intents, 25 Oct),
-    /// read again on every task notice, which a busy runner sends every few
-    /// seconds; decoded on the main thread, each read was a dropped frame
-    /// in whatever the person was scrolling.
-    nonisolated static func decodeBoard(_ data: Data) async -> TaskBoardModel? {
-        await Task.detached(priority: .userInitiated) { try? TaskBoardModel.decode(data) }.value
     }
 
     /// Read one workspace's board, or fold into the read already under way.

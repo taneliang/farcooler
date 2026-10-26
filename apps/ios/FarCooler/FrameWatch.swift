@@ -149,7 +149,7 @@ struct FrameWatchReport: View {
 
     var body: some View {
         Color.clear
-            .frame(width: 1, height: 1)
+            .frame(width: 1, height: 1)  // style-exempt: DEBUG probe a UI test reads, not a separator
             .allowsHitTesting(false)
             .accessibilityElement()
             .accessibilityIdentifier("frame-watch")

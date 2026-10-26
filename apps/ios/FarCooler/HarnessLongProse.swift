@@ -42,9 +42,9 @@ enum HarnessLongProse {
         }
         out += "\n### Tests\n\n"
         for t in 1...6 {
-            out += "\(t). `ConversationScrollUITests.testStep\(t)`: passed, and red with the fix reverted (\(t * 3) assertions).\n"
+            out += "\(t). `ConversationScrollUITests.testStep\(t)`: passed with \(t * 3) assertions, and red with the fix reverted.\n"
         }
-        out += "\n---\n\nLeft open: nothing that blocks the train. The full report is in `.claude/agent/reports/ios-\(700 + n % 90)/`.\n"
+        out += "\n---\n\nLeft open: nothing that blocks landing. The full report is in `.claude/agent/reports/ios-\(700 + n % 90)/`.\n"
         return out
     }
 

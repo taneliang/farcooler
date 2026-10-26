@@ -20,6 +20,15 @@ extension Connection {
         return keeper
     }
 
+    /// A board's JSON, decoded off the main thread (ov-791). A long-lived
+    /// runner's board is about 1 MB (798 tasks with their intents, 25 Oct),
+    /// read again on every task notice, which a busy runner sends every few
+    /// seconds; decoded on the main thread, each read was a dropped frame
+    /// in whatever the person was scrolling.
+    nonisolated static func decodeBoard(_ data: Data) async -> TaskBoardModel? {
+        await Task.detached(priority: .userInitiated) { try? TaskBoardModel.decode(data) }.value
+    }
+
     /// A board read's `reads`, adopted by the board's keeper. Only a real
     /// workspace's board carries any: an implicit one is the whole repository's.
     func adoptReads(from board: Data, workspace: String) {
