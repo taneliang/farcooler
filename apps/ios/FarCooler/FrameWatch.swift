@@ -34,6 +34,8 @@ final class FrameWatch: ObservableObject {
     private var fling = 0
     private var hitches: [Double] = []
     private var frames = 0
+    /// `SelectableTextView.made` when the fling began.
+    private var madeBefore = 0
     private var slot: Double = 1.0 / 60
     /// Away from where it starts first: up from a transcript's tail, down
     /// from a list's top.
@@ -62,6 +64,7 @@ final class FrameWatch: ObservableObject {
         self.scroll = scroll
         firstWay = scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 10 ? 1 : -1
         report = ""
+        madeBefore = SelectableTextView.made
         hitches = []
         frames = 0
         fling = 0
@@ -110,8 +113,9 @@ final class FrameWatch: ObservableObject {
         let overOne = hitches.filter { $0 > slot * 1000 }.count
         let worst = hitches.max() ?? 0
         report = String(
-            format: "frames=%d seconds=%.2f hitches=%d over-one-frame=%d worst-ms=%.1f ratio-ms-per-s=%.1f slot-ms=%.1f",
-            frames, seconds, hitches.count, overOne, worst, late / seconds, slot * 1000)
+            format:
+                "frames=%d seconds=%.2f hitches=%d over-one-frame=%d worst-ms=%.1f ratio-ms-per-s=%.1f slot-ms=%.1f text-views-made=%d",
+            frames, seconds, hitches.count, overOne, worst, late / seconds, slot * 1000, SelectableTextView.made - madeBefore)
         NSLog("FRAME-WATCH %@ all=%@", report, hitches.sorted(by: >).prefix(20).map { String(format: "%.0f", $0) }.joined(separator: ","))
     }
 

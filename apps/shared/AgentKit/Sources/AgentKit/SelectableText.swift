@@ -64,7 +64,12 @@ public struct SelectableText: UIViewRepresentable {
     public func makeCoordinator() -> Coordinator { Coordinator() }
 
     public func makeUIView(context: Context) -> SelectableTextView {
+        if let view = SelectableTextView.reused() {
+            view.delegate = context.coordinator
+            return view
+        }
         let view = SelectableTextView()
+        SelectableTextView.made += 1
         view.isEditable = false
         view.isSelectable = true
         view.isScrollEnabled = false
@@ -76,6 +81,11 @@ public struct SelectableText: UIViewRepresentable {
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
         return view
+    }
+
+    /// Back to the pool, for the next row a fling brings in (ov-788).
+    public static func dismantleUIView(_ view: SelectableTextView, coordinator: Coordinator) {
+        SelectableTextView.keep(view)
     }
 
     public func updateUIView(_ view: SelectableTextView, context: Context) {
@@ -169,6 +179,34 @@ public struct SelectableText: UIViewRepresentable {
 /// text it is, by its words, and its selection and Copy are the system's.
 public final class SelectableTextView: UITextView {
     var spoken = ""
+
+    /// Text views no row is using, for the next to take (ov-788). A
+    /// `UITextView` is costly to make: flinging a conversation made one for
+    /// every paragraph run and list item that came into view, about a
+    /// third of what was left of each dropped frame once reports folded.
+    /// A row leaving the lazy list gives its views back, and a row coming
+    /// in takes one, its text and look set again by `updateUIView`.
+    @MainActor private static var pool: [SelectableTextView] = []
+    /// The most kept: a few screens' worth.
+    static let poolLimit = 48
+    /// How many were made, not taken from the pool: for a test.
+    @MainActor static var made = 0
+
+    @MainActor static func keep(_ view: SelectableTextView) {
+        guard pool.count < poolLimit else { return }
+        // Nothing of the row it served: no selection, no menu, no links
+        // to open in its place.
+        view.selectedRange = NSRange(location: 0, length: 0)
+        if view.isFirstResponder { view.resignFirstResponder() }
+        view.delegate = nil
+        pool.append(view)
+    }
+
+    @MainActor static func reused() -> SelectableTextView? {
+        guard let view = pool.popLast() else { return nil }
+        view.removeFromSuperview()
+        return view
+    }
 
     override public var accessibilityLabel: String? {
         get { spoken }
