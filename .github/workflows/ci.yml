@@ -1411,6 +1411,16 @@ jobs:
       # openssh-server) in front of crates/web's fake daemon, at one touch per
       # connect, refused with its pin altered and from canary.farcooler.com.
       # Any violation fails it.
+      - name: Make sure there is an sshd for the passkey login
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get -o Acquire::Retries=3 update
+            sudo apt-get -o Acquire::Retries=3 install -y openssh-server
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: npx playwright-core install --with-deps --only-shell chromium
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon
