@@ -51,12 +51,37 @@ struct BoardReadsKeeperTests {
         func board() -> Data { Data(#"{"tasks":[],"reads":\#(state())}"#.utf8) }
     }
 
+    /// The defaults store, passing everything through and noting what the keeper
+    /// last told it was owed (`savePending`). The keeper writes that before its
+    /// `flush` returns, so this is the event to check; a read of the defaults
+    /// afterwards is a second hop that proves nothing more about the keeper (ov-813).
+    final class OwedSpy: BoardReadStore, @unchecked Sendable {
+        let inner: DefaultsBoardReads
+        private let lock = NSLock()
+        private var last: ReadsRaise?
+        init(_ inner: DefaultsBoardReads) { self.inner = inner }
+        /// What the last `savePending` was given; nil if there has been none.
+        var lastSaved: ReadsRaise? { lock.withLock { last } }
+        func load(host: String, workspace: String, now: Date) -> BoardReads { inner.load(host: host, workspace: workspace, now: now) }
+        func save(_ reads: BoardReads, host: String, workspace: String) { inner.save(reads, host: host, workspace: workspace) }
+        func isUploaded(host: String, workspace: String) -> Bool { inner.isUploaded(host: host, workspace: workspace) }
+        func markUploaded(host: String, workspace: String) { inner.markUploaded(host: host, workspace: workspace) }
+        func keptReads(host: String, workspace: String) -> BoardReads? { inner.keptReads(host: host, workspace: workspace) }
+        func loadPending(host: String, workspace: String) -> ReadsRaise { inner.loadPending(host: host, workspace: workspace) }
+        func savePending(_ pending: ReadsRaise, host: String, workspace: String) {
+            lock.withLock { last = pending }
+            inner.savePending(pending, host: host, workspace: workspace)
+        }
+        func floorWasSet(host: String, workspace: String) -> Bool { inner.floorWasSet(host: host, workspace: workspace) }
+        func markFloorSet(host: String, workspace: String) { inner.markFloorSet(host: host, workspace: workspace) }
+    }
+
     private func defaults() -> DefaultsBoardReads {
         DefaultsBoardReads(ScratchDefaults.suite("ov113-phone-\(UUID().uuidString)")!)
     }
 
     private func keeper(
-        _ runner: Runner, _ store: DefaultsBoardReads, now: Date = Date(), mayWrite: @escaping () -> Bool = { true }
+        _ runner: Runner, _ store: some BoardReadStore, now: Date = Date(), mayWrite: @escaping () -> Bool = { true }
     ) -> BoardReadsKeeper {
         BoardReadsKeeper(store: store, host: Self.host, workspace: Self.ws, now: now, mayWrite: mayWrite) {
             await runner.answer($0)
@@ -154,7 +179,7 @@ struct BoardReadsKeeperTests {
     @Test func anUnsentMarkSurvivesARelaunchAndGoesOnTheNextRead() async {
         let runner = Runner()
         runner.fails = true
-        let store = defaults()
+        let store = OwedSpy(defaults())
         let first = keeper(runner, store)
         first.adopt(board: runner.board())
         first.open(row())
@@ -167,20 +192,10 @@ struct BoardReadsKeeperTests {
         second.adopt(board: runner.board())
         await second.flush()
         #expect(runner.marks[Self.task] == Self.moved)
-        #expect(await settles { store.loadPending(host: Self.host, workspace: Self.ws).isEmpty }, "the answer cleared what was owed")
-    }
-
-    /// Whether `condition` holds within two seconds, asked every 10 ms. For a
-    /// read of the defaults after `flush`: the keeper's code awaits every send
-    /// in order, so the clear is already written, and the read is what can lag
-    /// on a loaded machine. Failed once on main CI and never locally in 400
-    /// runs (ov-790).
-    private func settles(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<200 {
-            if condition() { return true }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        return condition()
+        // `flush` returns once the answer has been taken in, so the keeper has
+        // already told the store nothing is owed: no waiting on a clock, and no
+        // read of the defaults, which failed once on main CI (ov-813, ov-790).
+        #expect(store.lastSaved?.isEmpty == true, "the answer cleared what was owed")
     }
 
     @Test func anyAnswerSettlesAMarkEvenOneTheRunnerSkipped() async {
