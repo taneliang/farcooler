@@ -17,6 +17,8 @@ extension Connection {
         let cards = taskKeyCards.cards(
             runner: runner ?? "", boards: boards, plans: plans.states.compactMapValues(\.plan))
         // `TaskKeyLinker.phone` holds the wiring, where `swift test` reaches it.
-        return .phone(runner: runner, workspaces: fleet.workspaces ?? [], boards: boards, cards: cards, open: open)
+        return .phone(
+            runner: runner, workspaces: fleet.workspaces ?? [], boards: boards, cards: cards, indexes: taskKeyIndexes,
+            open: open)
     }
 }

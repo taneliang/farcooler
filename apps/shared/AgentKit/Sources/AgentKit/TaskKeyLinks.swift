@@ -348,12 +348,18 @@ extension TaskKeyLinker {
     /// `open` (the navigator's push). Links nothing before the runner is
     /// known or without a way to open. Here rather than in the app so
     /// `swift test` holds the wiring: the iOS target has no unit tests.
+    ///
+    /// The index comes from `indexes` where it's given, so a linker made on
+    /// every pass compares with the last one at once (ov-791).
+    @MainActor
     static func phone(
         runner: String?, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel],
-        cards: TaskKeyCards = .empty, open: (@MainActor (PhoneRoute) -> Void)?
+        cards: TaskKeyCards = .empty, indexes: TaskKeyIndexCache? = nil, open: (@MainActor (PhoneRoute) -> Void)?
     ) -> TaskKeyLinker {
         guard let runner, let open else { return .none }
-        let index = TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)
+        let index =
+            indexes?.index(runner: runner, workspaces: workspaces, boards: boards)
+            ?? TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)
         return TaskKeyLinker(index: index, cards: cards) { open($0.phoneRoute) }
     }
 }

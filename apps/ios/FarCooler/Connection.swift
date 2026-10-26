@@ -1301,6 +1301,9 @@ final class Connection: ObservableObject {
     let pages = PageReads()
     /// Each task key's card, built once per read of the boards and plans (ov-299).
     let taskKeyCards = TaskKeyCardCache()
+    /// The key index the linker links by, the same value while the keys are
+    /// the same (ov-791): see `TaskKeyIndexCache`.
+    let taskKeyIndexes = TaskKeyIndexCache()
 
     /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner

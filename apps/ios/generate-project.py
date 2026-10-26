@@ -595,6 +595,8 @@ AGENTKIT_SOURCES = [
     "FoldStack.swift",
     # A folded report draws only its start (ov-788). Shared with the Mac.
     "MarkdownFold.swift",
+    # A runner's key index, the same value while its keys are (ov-791).
+    "TaskKeyIndexCache.swift",
     # How much of the screen the keyboard and the docked composer cover,
     # as `KeyboardInset` publishes it (ov-386). The phone's only unit-testable
     # home for those rules: the iOS target has no unit tests.

@@ -14,7 +14,9 @@ final class ScrollHitchUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func fling(_ app: XCUIApplication, _ name: String) {
+    /// Fling, with `news` posted every second meanwhile: a busy runner's
+    /// notices, each of which the app answers by reading a board again.
+    private func fling(_ app: XCUIApplication, _ name: String, news: String? = nil) {
         let delay = Double(ProcessInfo.processInfo.environment["FRAME_WATCH_DELAY"] ?? "") ?? 3
         print("FRAME-WATCH-READY \(name)")
         Thread.sleep(forTimeInterval: delay)
@@ -22,7 +24,15 @@ final class ScrollHitchUITests: XCTestCase {
             CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("com.farcooler.harness.fling" as CFString), nil,
             nil, true)
         // Untouched until it's done: a query mid-fling is main-thread work.
-        Thread.sleep(forTimeInterval: 22)
+        // A notice isn't a query: it's posted, and the app does what a
+        // runner's notice makes it do.
+        for _ in 0..<22 {
+            if let news {
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(news as CFString), nil, nil, true)
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
         let watch = app.descendants(matching: .any)["frame-watch"]
         let deadline = Date().addingTimeInterval(60)
         var said = ""
@@ -53,7 +63,7 @@ final class ScrollHitchUITests: XCTestCase {
     }
 
     /// The Task screen: bil-7 with a real long card's notes, on a board of
-    /// eight hundred tasks.
+    /// eight hundred tasks that moves every second, as a busy runner's does.
     func testFlingTheTaskScreen() {
         let app = XCUIApplication.phoneHarness([
             "-push-task", "bil-7", "-phone-long-record", "-phone-big-board", "-frame-watch",
@@ -61,6 +71,6 @@ final class ScrollHitchUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["task-heading"].waitForExistence(timeout: 30), "no task")
         // The record is read after the screen shows.
         Thread.sleep(forTimeInterval: 3)
-        fling(app, "task")
+        fling(app, "task", news: "com.farcooler.harness.task-news")
     }
 }
