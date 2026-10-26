@@ -1120,9 +1120,10 @@ mod tests {
         // 333 once a charter is changed only on the word of the owner, the
         // lead or a Maintainer, and anyone else's request goes to the lead
         // (ov-757): three lines.
-        // 337 once ready lanes fold into the waiting train, a flaky red main
-        // is rerun once and a rebased lane re-gates (ov-796): four lines.
-        assert!(lines <= 337, "{lines} lines");
+        // 339 once ready lanes fold into the waiting train, a flaky red main
+        // is rerun once and lanes gated alone push folded unless they might
+        // interact (ov-796): six lines.
+        assert!(lines <= 339, "{lines} lines");
     }
 
     #[test]

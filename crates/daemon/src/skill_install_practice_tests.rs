@@ -354,19 +354,19 @@ fn the_orchestrator_ranks_themes_and_records_overrides() {
 
 /// Trains fold (ov-796): ready lanes join the waiting train rather than queue
 /// behind it, with the reasons to split; a flaky red main is rerun once and a
-/// rebased lane re-runs its gates on the combined tree.
+/// folded lane that might interact gets a combined gate.
 #[test]
 fn ready_lanes_fold_into_the_waiting_train() {
     for h in ALL {
         let body = prose(h);
         let land = section(&body, "4. Land");
         for rule in [
-            "Never queue trains: fold every lane ready while one waits to land into it (one branch off main, one combined gate, one push, one CI watch), and split only for a conflict or a risky lane",
+            "Never queue trains: fold every lane ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky lane",
             "when a known-flaky test did it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
         }
-        let rebased = "A lane rebased onto another's changes re-runs its gates on the combined tree";
+        let rebased = "Lanes already gated alone push folded without a combined gate when they can't plausibly interact (shared files, wire tags, migrations, capability lists, generated files, test floors); gate the combined tree where they might";
         assert!(section(&body, "Defaults").contains(rebased), "{h:?} lacks {rebased:?}");
     }
 }

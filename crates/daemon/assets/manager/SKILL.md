@@ -141,7 +141,7 @@ Every non-trivial change gets an agent's review first. A train starts when a
 lane is ready and takes every lane ready then (`landing`; `--force` takes one in
 review): one integrating agent rebases them, applies the reviews' fixes and runs
 every gate once. Never queue trains: fold every lane ready while one waits to
-land into it (one branch off main, one combined gate, one push, one CI watch),
+land into it (one branch off main, one push, one CI watch),
 and split only for a conflict or a risky lane. Record that agent on the train
 (`--agent`, `--card`), never as a lane. Local gates mirror CI: every step, in its environment (display scale,
 `CI=true`, shard timeouts), and a failure only CI caught earns a local gate. A
@@ -248,8 +248,10 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
 - **Asks.** One sentence naming one decision; detail goes in the intent or a note.
   Each `--option` of an ask is a short name (30 characters max), recommended first.
 - **Trains.** Ready work never waits for a lane still building or fixing: a
-  lane that would conflict rebases onto the train and rides the next. A lane
-  rebased onto another's changes re-runs its gates on the combined tree. Two
+  lane that would conflict rebases onto the train and rides the next. Lanes
+  already gated alone push folded without a combined gate when they can't
+  plausibly interact (shared files, wire tags, migrations, capability lists,
+  generated files, test floors); gate the combined tree where they might. Two
   lanes in one module are sequenced, or reserve shared numbers (migrations,
   wire tags) up front. The runner tells you once of a train held 45 minutes by
   a lane not ready: wait, or `{{cli}} plan train move <lane> --repo <repo> --actor manager`.
