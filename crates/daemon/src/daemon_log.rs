@@ -10,8 +10,15 @@
 //! itself pointed at the current one so a panic or an `eprintln!` lands there
 //! too.
 //!
-//! What goes in is what the daemon already logs: shapes and reasons. This
-//! module only decides where those lines go; it never sees a message.
+//! What goes in is what the daemon already logs: reasons, ids and counts, no
+//! message or prompt text and no credential (the tunnel token is logged as a
+//! length). Some lines carry paths, branch names and a git command's own
+//! stderr. This module only decides where those lines go.
+//!
+//! The bound is on what this module writes. Anything else holding stderr (a
+//! panic, `eprintln!`, a child that inherited it) writes the same file
+//! directly, so a timer checks the size too (`SWEEP_EVERY`); the log is bounded
+//! to roughly its limit, not to the byte.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -23,6 +30,10 @@ pub const FILE_NAME: &str = "farcoolerd.log";
 
 /// A file may reach this size before it is rotated out.
 pub const MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// How often the file's size is checked when nothing is going through the
+/// writer, so a flood from a panic or a child cannot grow it unseen.
+pub const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Files kept, the current one included. With [`MAX_BYTES`] this bounds the
 /// log to about six megabytes.
@@ -63,10 +74,24 @@ struct Inner {
 impl RotatingLog {
     /// Open (creating the folder, mode 0700) and rotate at once if the file is
     /// already full, so a daemon that restarts in a loop cannot grow it.
-    pub fn open(dir: &Path, max: u64, keep: usize, redirect_stderr: bool) -> io::Result<Self> {
-        std::fs::create_dir_all(dir)?;
-        {
-            use std::os::unix::fs::PermissionsExt;
+    ///
+    /// A symlink where the folder or the file should be is refused rather than
+    /// followed, and a folder or file left with looser modes is tightened.
+    /// With `sweep` set, a thread checks the size on that interval.
+    pub fn open(
+        dir: &Path,
+        max: u64,
+        keep: usize,
+        redirect_stderr: bool,
+        sweep: Option<std::time::Duration>,
+    ) -> io::Result<Self> {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        let meta = std::fs::symlink_metadata(dir)?;
+        if !meta.is_dir() {
+            return Err(io::Error::other("the log folder is a symlink or not a folder"));
+        }
+        if meta.permissions().mode() & 0o077 != 0 {
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         }
         let log = Self(Arc::new(Inner {
@@ -82,6 +107,16 @@ impl RotatingLog {
                 log.0.rotate(&mut file)?;
             }
             log.0.redirect(&file);
+        }
+        if let Some(every) = sweep {
+            let weak = Arc::downgrade(&log.0);
+            std::thread::Builder::new().name("daemon-log-sweep".into()).spawn(move || {
+                while let Some(inner) = weak.upgrade() {
+                    let _ = inner.rotate_if_full(0);
+                    drop(inner);
+                    std::thread::sleep(every);
+                }
+            })?;
         }
         Ok(log)
     }
@@ -107,6 +142,16 @@ impl Inner {
         Ok(())
     }
 
+    /// Rotate if `extra` more bytes would take the file past the bound. The
+    /// file's own length is read, not a running count: stderr shares this file.
+    fn rotate_if_full(&self, extra: u64) -> io::Result<()> {
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        if file.metadata().map(|m| m.len()).unwrap_or(0) + extra > self.max {
+            self.rotate(&mut file)?;
+        }
+        Ok(())
+    }
+
     fn redirect(&self, file: &File) {
         if self.redirect_stderr {
             let _ = rustix::stdio::dup2_stderr(file);
@@ -116,18 +161,24 @@ impl Inner {
 
 fn open_append(path: &Path) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new().create(true).append(true).mode(0o600).open(path)
+    use std::os::unix::fs::PermissionsExt;
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    if file.metadata()?.permissions().mode() & 0o077 != 0 {
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
 }
 
 impl Write for &RotatingLog {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let inner = &self.0;
+        inner.rotate_if_full(buf.len() as u64)?;
         let mut file = inner.file.lock().unwrap_or_else(|e| e.into_inner());
-        // The file's own length, not a running count: stderr shares this file,
-        // and what a panic writes there counts too.
-        if file.metadata().map(|m| m.len()).unwrap_or(0) + buf.len() as u64 > inner.max {
-            inner.rotate(&mut file)?;
-        }
         file.write(buf)
     }
 
