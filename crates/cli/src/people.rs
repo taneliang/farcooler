@@ -107,8 +107,10 @@ pub(crate) enum MemberCmd {
     /// or their own terminal, not from a pane on the runner.
     ///
     /// A Maintainer edits every workspace's charter, as the owner and each
-    /// workspace's lead do. A member edits a charter only where they lead.
-    /// Everyone starts a member.
+    /// workspace's lead do, and renames a workspace, changes its prefix, and
+    /// sets its PR size, cost line, nudge hours and wake on answer (ov-784).
+    /// A member edits a charter only where they lead. Everyone starts a
+    /// member.
     Role {
         /// Whose: a member's handle (`farcooler member list`).
         handle: String,
@@ -117,7 +119,8 @@ pub(crate) enum MemberCmd {
     },
     /// Who changed what about the people here, newest first: a role given
     /// or taken, a member added or removed, their devices changed, a charter
-    /// edited through the runner (ov-757).
+    /// edited through the runner (ov-757), a workspace renamed or given a new
+    /// prefix, and its lead handed on (ov-784).
     Log,
 }
 

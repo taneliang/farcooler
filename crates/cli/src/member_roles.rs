@@ -23,7 +23,7 @@ pub(crate) fn role_request(handle: &str, role: &str) -> pb::Request {
 /// What `member role` did, as people read it.
 pub(crate) fn role_said(handle: &str, role: &str) -> String {
     match role {
-        "maintainer" => format!("{handle} is a Maintainer: they can edit every workspace's charter"),
+        "maintainer" => format!("{handle} is a Maintainer: they can edit every workspace's charter, rename a workspace, change its prefix, and set its PR size, cost line, nudge hours and wake on answer"),
         _ => format!("{handle} is a member: they edit a charter only where they lead"),
     }
 }
