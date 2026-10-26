@@ -135,4 +135,13 @@ mod tests {
         let aa = rows.iter().find(|r| r.0 == "aa").unwrap();
         assert_eq!((aa.1.as_str(), aa.2, aa.3.as_str()), ("{\"first\":true}", 2, "101"));
     }
+
+    /// The migration is the 52nd (0061) and `Welcome`.
+    #[test]
+    fn the_migration_is_welcome() {
+        let it = &crate::migrate::MIGRATIONS[51];
+        assert!(std::ptr::fn_addr_eq(it.0, migration_0061_crash_signatures as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
+        assert_eq!(it.1, crate::compat::Older::Welcome);
+        assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 52);
+    }
 }

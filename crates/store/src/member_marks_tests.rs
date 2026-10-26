@@ -116,5 +116,5 @@ fn the_migration_is_welcome() {
     let it = &crate::migrate::MIGRATIONS[49];
     assert!(std::ptr::fn_addr_eq(it.0, migration_0059_member_marks as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
     assert_eq!(it.1, crate::compat::Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 51);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 52);
 }
