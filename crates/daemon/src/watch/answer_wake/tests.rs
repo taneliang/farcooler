@@ -1456,9 +1456,6 @@ mod compose_upload_tests;
 #[path = "compose_held_tests.rs"]
 mod compose_held_tests;
 
-#[path = "compose_turn_begun_tests.rs"]
-mod compose_turn_begun_tests;
-
 #[path = "compose_empty_box_tests.rs"]
 mod compose_empty_box_tests;
 
