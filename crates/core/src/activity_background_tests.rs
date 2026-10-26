@@ -76,3 +76,59 @@ fn a_turn_running_beside_background_agents_is_working_to_its_box() {
         assert_eq!(r.classify("claude", screen), Working, "{name}");
     }
 }
+
+/// claude 2.1.309 between turns with seven background shells and no agent
+/// (`run_in_background` shells, against a stand-in API), at the owner's
+/// phone width: empty, and with the owner's message pasted in as the daemon
+/// pastes it (ov-795). The paste drops `· ↓ to manage` from the mode line and
+/// keeps `· 7 shells`; there are no `◯` rows. Its registry said `shell`
+/// throughout, so read as no background work, the box's read-back before
+/// the Enter (`still_between`) refused it and left it as `paste_left`.
+#[test]
+fn background_shells_still_count_once_the_box_holds_a_message() {
+    let r = Registry::built_in();
+    let empty = include_str!("../captures/claude-2.1.309-shells-empty-59x41-e.txt");
+    let pasted = include_str!("../captures/claude-2.1.309-shells-owner-59x41-e.txt");
+    assert!(composer::printed(empty).contains("⏵⏵ auto mode on · 7 shells · ↓ to manage"));
+    assert!(composer::printed(pasted).lines().any(|l| l.trim_end() == "  ⏵⏵ auto mode on · 7 shells"));
+    assert!(!composer::printed(pasted).contains("◯"));
+    for (name, screen) in [("empty", empty), ("pasted", pasted)] {
+        assert!(r.background_running("claude", screen), "{name}");
+        assert_eq!(r.classify_main("claude", screen), Idle, "{name}");
+        assert_eq!(r.classify("claude", screen), Working, "{name}");
+    }
+    let owner = "Btw to make things go faster, if there are multiple trains waiting to land, if it’s safe you can merge \
+                 them into the same train. Otherwise you’ll have a million trains queueing unnecessarily. Please update \
+                 the manager skill also with such best practices";
+    assert!(composer::drawn::Expected::default().then_paste(owner).shown_on("claude", pasted));
+}
+
+/// The count is read on the mode line only: the same words typed into the
+/// box are a draft, not background work; a count cut short, or another
+/// part of the line, is no count. The owner's own mode line (claude
+/// 2.1.308, 59 columns) carries shells and a monitor in one part.
+#[test]
+fn only_the_mode_lines_own_count_is_background_work() {
+    let r = Registry::built_in();
+    let pasted = include_str!("../captures/claude-2.1.309-shells-owner-59x41-e.txt");
+    let count = "\x1b[38;5;246m · \x1b[38;5;44m7 shells\x1b[39m";
+    assert!(pasted.contains(count));
+    let quiet = pasted.replace(count, "\x1b[39m");
+    assert!(!r.background_running("claude", &quiet), "nothing running");
+    let typed = quiet.replacen("❯\u{a0}Btw to make", "❯\u{a0}7 shells · 1 monitor", 1);
+    let held = composer::read("claude", &typed);
+    assert!(matches!(&held, Composer::Holds(h) if h.starts_with("7 shells · 1 monitor")), "{held:?}");
+    assert!(!r.background_running("claude", &typed), "typed into the box");
+    for (rest, counts) in [
+        (" · 8 shells, 1 monitor · ← 3 agents · ↓…", true),
+        (" · 1 shell", true),
+        (" · 2 monitors", true),
+        (" · 8 she…", false),
+        (" · ← 3 agents", false),
+        (" · shells", false),
+        (" · 8 shells, 1 thing", false),
+    ] {
+        let line = pasted.replace(count, &format!("\x1b[38;5;246m{rest}\x1b[39m"));
+        assert_eq!(r.background_running("claude", &line), counts, "{rest}");
+    }
+}
