@@ -1,4 +1,4 @@
-// Shipped by Canary at 326c69d8dfa1597a7eba2f70f9f1bb1ba2b3ac7c. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 2cf32b6710cedf3b8b82e6c13186e0e6f4f6aa43. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -5307,7 +5307,11 @@ message MemberRemoval {
 
 // `member.set`: add a member, or rename them, with exactly these devices,
 // each one this runner enrolled (`invalid-argument: device` otherwise). A
-// device left off is released: nobody's, never the owner's. `host_admin`.
+// device left off is released (nobody's, never the owner's) and revoked: its
+// key taken off the runner and its sessions closed (ov-783). So moving a
+// device to another member is enrolling it again. A revoke that fails is
+// answered as an error after the list is saved, and retried by every later
+// `member.set` and `member.remove` and at the daemon's start. `host_admin`.
 message MemberSet {
   string handle = 1;
   string name = 2;
@@ -5963,7 +5967,8 @@ message MemberSetRole {
 
 // `member.events` (ov-757), at `read`: who changed what about the people on
 // the runner, newest first: a role given or taken, a member added, their
-// devices changed or removed, a charter edited through the runner.
+// devices changed or revoked, a member removed, a charter edited through the
+// runner.
 message PeopleEventList {
   repeated PeopleEvent events = 1;
 }
@@ -5971,16 +5976,20 @@ message PeopleEventList {
 message PeopleEvent {
   // Milliseconds since the epoch.
   int64 at_ms = 1;
-  // Who made it: `user` for the owner, `member:<handle>` for a member.
+  // Who made it: `user` for the owner, `member:<handle>` for a member,
+  // `runner` for a revocation the daemon retried at its start (ov-783).
   string actor = 2;
-  // Whom it's about; empty for a charter edit.
+  // Whom it's about; empty for a charter edit, and for a revocation the
+  // runner retried for a device whose member it no longer knows.
   string handle = 3;
   // The workspace, for a charter edit; empty otherwise.
   bytes workspace_id = 4;
-  // `role`, `added`, `devices`, `removed` or `charter`.
+  // `role`, `added`, `devices`, `revoked` (a device taken off a member's
+  // list losing its key, ov-783), `revoke_failed` (its key still there, to
+  // be retried), `removed` or `charter`.
   string kind = 5;
   // A JSON object: a role change's `from` and `to`, a device change's
-  // `devices`, a charter edit's `sha256`.
+  // `devices`, a revocation's `device`, a charter edit's `sha256`.
   string detail = 6;
 }
 
