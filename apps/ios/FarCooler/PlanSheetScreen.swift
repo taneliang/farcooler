@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // The Plan on an iPhone (ov-616): one view of the workspace's work, where the
@@ -95,11 +96,13 @@ struct PhonePlanList<Top: View>: View {
     @State private var composing = false
     @State private var fromBranch = false
     @State private var moveFailure: ActionFailure?
-    /// Whether a screen is pushed over this one, and the tree it last drew
-    /// (ov-791): covered, it keeps that tree rather than building it again
-    /// on every board move, a dropped frame each in the screen on top.
-    @State private var covered = false
+    /// The tree it last drew (ov-791): under a pushed screen it keeps that
+    /// tree rather than building it again on every board move, a dropped
+    /// frame each in the screen on top. On a phone only: in columns what's
+    /// beside the top screen is in view.
     @State private var held = HeldTree()
+    @State private var moves = 0
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.phoneNavigator) private var navigator
 
     init(
@@ -173,8 +176,9 @@ struct PhonePlanList<Top: View>: View {
             PlanFilter.remember(chosen, runner: place.runner, workspace: place.workspace)
         }
         .task { await connection.readTree(summary) }
-        .onAppear { covered = false }
-        .onDisappear { covered = true }
+        // Drawn again when the stack moves, so it builds its tree once it's
+        // on top again.
+        .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         .refreshable {
             _ = await connection.readBoard(summary)
             if connection.keepsPlan { await connection.readPlan(summary) }
@@ -186,9 +190,11 @@ struct PhonePlanList<Top: View>: View {
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
     }
 
-    /// The tree under its filter: the one last drawn while covered, else
-    /// built from what's read.
+    /// The tree under its filter: the one last drawn while a screen is over
+    /// it, else built from what's read.
     private var tree: (work: [OneTreeNode], below: [OneTreeNode]) {
+        _ = moves
+        let covered = sizeClass == .compact && navigator?.isOnTop(inSheet ? nil : .workspace(place)) == false
         if covered, let kept = held.root { return kept }
         let made = PhoneTree.root(connection.oneTree(summary, filter: .open, narrow: narrow))
         held.root = made
@@ -337,7 +343,7 @@ struct ChipFlow: Layout {
 }
 
 /// `PhonePlanList`'s last tree, kept by reference: written as it's drawn,
-/// read while the list is covered, and never a reason to draw again.
+/// read while it's covered, and never a reason to draw again.
 final class HeldTree {
     var root: (work: [OneTreeNode], below: [OneTreeNode])?
 }

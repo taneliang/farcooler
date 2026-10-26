@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // The One tree on an iPhone (ov-300; ov-321's iPhone line, ia.md :223): the
@@ -136,10 +137,11 @@ struct TreeLevelScreen: View {
 
     @ObservedObject private var reads: PlanReads
     @State private var moveFailure: ActionFailure?
-    /// Covered by a pushed screen, it keeps the node it last drew rather
-    /// than building the tree again on every board move (ov-791).
-    @State private var covered = false
+    /// Under a pushed screen, on a phone, it keeps the node it last drew
+    /// rather than building the tree again on every board move (ov-791).
     @State private var held = HeldNode()
+    @State private var moves = 0
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.phoneNavigator) private var navigator
 
     init(connection: Connection, place: PhoneWorkspace, nodeID: String) {
@@ -198,14 +200,17 @@ struct TreeLevelScreen: View {
         }
         // Its cards' keys preview their tasks, as the board's do.
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
-        .onAppear { covered = false }
-        .onDisappear { covered = true }
+        // Drawn again when the stack moves, so it builds its node once it's
+        // on top again.
+        .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
     }
 
     /// The node, under the filter the root shows, else under All: a
     /// finished card opened before the filter changed is still itself.
     /// Covered, the one last drawn.
     private func node(_ summary: WorkspaceSummary) -> OneTreeNode? {
+        _ = moves
+        let covered = sizeClass == .compact && navigator?.isOnTop(.tree(place, node: nodeID)) == false
         if covered, let kept = held.node { return kept }
         let made =
             PhoneTree.node(nodeID, in: connection.oneTree(summary, filter: PhoneTreeFilter.remembered(place)))
@@ -381,7 +386,7 @@ struct TreeRow: View {
 }
 
 /// `TreeLevelScreen`'s last node, kept by reference: written as it's drawn,
-/// read while the level is covered, and never a reason to draw again.
+/// read while it's covered, and never a reason to draw again.
 final class HeldNode {
     var node: OneTreeNode?
 }

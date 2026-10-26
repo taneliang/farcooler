@@ -106,6 +106,12 @@ final class PhoneNavigator: ObservableObject {
         WorkspacePlaceMemory.keep(PhoneStackLayout.of(stack, sheets: sheets).path, in: defaults)
     }
 
+    /// Whether the screen at `own` (nil: a Plan sheet's root) is the one on
+    /// top: see `ScreenCover`.
+    func isOnTop(_ own: PhoneRoute?) -> Bool {
+        ScreenCover.onTop(own, stack: stack, sheet: plan, covered: worktree != nil || agents != nil)
+    }
+
     /// Open one screen over the one showing: a worktree covers, a screen of
     /// a workspace's Plan opens in its sheet (pushed onto it when it's up),
     /// and anything else is pushed.

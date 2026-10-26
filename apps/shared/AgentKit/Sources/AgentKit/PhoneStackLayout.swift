@@ -80,3 +80,20 @@ struct PhoneStackLayout: Equatable, Sendable {
     /// the worktree.
     var stack: [PhoneRoute] { path + (sheet?.path ?? []) + (cover.map { [$0] } ?? []) }
 }
+
+/// Whether a screen of the phone's stack is the one on top (ov-791): what a
+/// screen under a pushed one asks before building its tree again on a board
+/// move, which no one would see, and which dropped a frame each in the
+/// screen on top while the board moved.
+///
+/// `own` is the screen's route, or nil for a Plan sheet's own root, which
+/// is on top while nothing is pushed in the sheet and nothing covers it.
+/// `stack` is `PhoneNavigator.stack`: the pushed screens, the sheet's, the
+/// worktree; `covered` is a worktree or the agents view over all of it.
+enum ScreenCover {
+    static func onTop(_ own: PhoneRoute?, stack: [PhoneRoute], sheet: PhonePlanSheet?, covered: Bool) -> Bool {
+        if let own { return stack.last == own }
+        guard let sheet, !covered else { return false }
+        return sheet.path.isEmpty
+    }
+}

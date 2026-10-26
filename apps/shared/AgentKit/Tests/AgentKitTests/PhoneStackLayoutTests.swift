@@ -144,3 +144,23 @@ struct PhoneStackLayoutTests {
         #expect(PhoneLaunch.decode(PhoneLaunch.encode([.agents])) == [.agents])
     }
 }
+
+extension PhoneStackLayoutTests {
+    /// A screen under a pushed one isn't on top, and builds nothing for a
+    /// board move (ov-791); the top screen is; a Plan sheet's root is on top
+    /// until something is pushed in it or a worktree covers it.
+    @Test("Only the screen on top is on top")
+    func onTop() {
+        let place = PhoneWorkspace(runner: "r1", workspace: "w1")
+        let workspace = PhoneRoute.workspace(place)
+        let task = PhoneRoute.task(place, task: "t1")
+        #expect(ScreenCover.onTop(workspace, stack: [workspace], sheet: nil, covered: false))
+        #expect(!ScreenCover.onTop(workspace, stack: [workspace, task], sheet: nil, covered: false))
+        #expect(ScreenCover.onTop(task, stack: [workspace, task], sheet: nil, covered: false))
+        let sheet = PhonePlanSheet(place: place)
+        #expect(ScreenCover.onTop(nil, stack: [workspace], sheet: sheet, covered: false))
+        #expect(!ScreenCover.onTop(nil, stack: [workspace], sheet: sheet, covered: true))
+        #expect(!ScreenCover.onTop(nil, stack: [workspace, task], sheet: PhonePlanSheet(place: place, path: [task]), covered: false))
+        #expect(!ScreenCover.onTop(nil, stack: [workspace], sheet: nil, covered: false), "no sheet, no sheet root on top")
+    }
+}
