@@ -45,6 +45,17 @@ import Testing
         ]
     }
 
+    /// Windows line endings fold as a newline's do, to the same blocks.
+    @Test func aTextWithReturnsFoldsToo() {
+        let text = Self.report(kilobytes: 12)
+        let windows = text.replacingOccurrences(of: "\n", with: "\r\n")
+        let prefix = Markdown.foldPrefix(windows, lines: Self.lines)
+        #expect(prefix.utf8.count <= 1_600, "a report with returns drew \(prefix.utf8.count) bytes folded")
+        #expect(Markdown.blocks(prefix) == Markdown.blocks(Markdown.foldPrefix(text, lines: Self.lines)))
+        let mac = text.replacingOccurrences(of: "\n", with: "\r")
+        #expect(Markdown.blocks(Markdown.foldPrefix(mac, lines: Self.lines)) == Markdown.blocks(prefix))
+    }
+
     @Test func aShortTextIsDrawnWhole() {
         for text in Self.texts.prefix(3) {
             #expect(Markdown.foldPrefix(text, lines: Self.lines) == text)
@@ -89,18 +100,25 @@ import Testing
     /// shows the same pixels, at a phone's widths and a Mac's.
     @Test func itFoldsAndShowsTheSameAsTheWholeText() {
         let line = renderedHeight(Text(verbatim: "M").font(.body), width: 200)
-        let cap = line * CGFloat(Self.lines + 1)
-        for width in [240.0, 402.0, 680.0] {
-            for text in Self.texts {
-                let prefix = Markdown.foldPrefix(text, lines: Self.lines)
-                let whole = renderedHeight(MarkdownText(text: text), width: width)
-                let start = renderedHeight(MarkdownText(text: prefix), width: width)
-                #expect((whole > cap + 1) == (start > cap + 1), "\(width): \(text.prefix(40)) folds \(whole) vs \(start)")
-                guard prefix != text else { continue }
-                let a = Self.fold(text, width: width, cap: cap), b = Self.fold(prefix, width: width, cap: cap)
-                #expect(a == b, "\(width): the fold of \(text.prefix(40)) differs")
+        // A report's fold and a message's (`harnessLines`, `collapsedLines`).
+        for lines in [Self.lines, 6] {
+            let cap = line * CGFloat(lines + 1)
+            for width in [240.0, 402.0, 680.0] {
+                for text in Self.texts {
+                    check(text, lines: lines, width: width, cap: cap)
+                }
             }
         }
+    }
+
+    private func check(_ text: String, lines: Int, width: CGFloat, cap: CGFloat) {
+        let prefix = Markdown.foldPrefix(text, lines: lines)
+        let whole = renderedHeight(MarkdownText(text: text), width: width)
+        let start = renderedHeight(MarkdownText(text: prefix), width: width)
+        #expect((whole > cap + 1) == (start > cap + 1), "\(lines) at \(width): \(text.prefix(40)) folds \(whole) vs \(start)")
+        guard prefix != text else { return }
+        let a = Self.fold(text, width: width, cap: cap), b = Self.fold(prefix, width: width, cap: cap)
+        #expect(a == b, "\(lines) at \(width): the fold of \(text.prefix(40)) differs")
     }
 
     /// The top `cap` points of `text`, as pixels.

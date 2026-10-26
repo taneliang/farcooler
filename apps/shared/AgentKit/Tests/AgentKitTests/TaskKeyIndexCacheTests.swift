@@ -35,6 +35,32 @@ import Testing
         #expect(cache.index(runner: "R2", workspaces: [Self.main], boards: Self.boards(801)).runner == "R2")
     }
 
+    /// Anything the links read is a new index: a key gone, a task moved
+    /// to another workspace under the same key, a prefix changed.
+    @Test func whatTheLinksReadMakesANewIndex() {
+        let cache = TaskKeyIndexCache()
+        let before = cache.index(runner: "R1", workspaces: [Self.main], boards: Self.boards(10))
+        let fewer = cache.index(runner: "R1", workspaces: [Self.main], boards: Self.boards(9))
+        #expect(fewer.targets["ov-9"] == nil && before.targets["ov-9"] != nil)
+        #expect(cache.builds == 2)
+
+        var moved = Self.boards(9)
+        let side = WorkspaceSummary(id: "w-side", name: "Side", taskPrefix: "ov", isMain: false, ordinal: 1)
+        let row = TaskRow(id: "t3", key: "ov-3", title: "Task 3", status: .todo, statusSince: .distantPast)
+        moved["w-side"] = TaskBoardModel(columns: [TaskBoardColumn(status: .todo, rows: [row])])
+        moved["w-main"] = TaskBoardModel(columns: [
+            TaskBoardColumn(status: .todo, rows: (moved["w-main"]?.rows ?? []).filter { $0.key != "ov-3" })
+        ])
+        let there = cache.index(runner: "R1", workspaces: [Self.main, side], boards: moved)
+        #expect(there.targets["ov-3"]?.workspace == "w-side")
+        #expect(cache.builds == 3)
+
+        let renamed = WorkspaceSummary(id: "w-main", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0)
+        let prefixed = cache.index(runner: "R1", workspaces: [renamed, side], boards: moved)
+        #expect(prefixed.prefixes == ["fc", "ov"])
+        #expect(cache.builds == 4)
+    }
+
     /// The phone's linker takes its index from the cache it's given.
     @Test func thePhonesLinkerUsesTheCache() {
         let cache = TaskKeyIndexCache()

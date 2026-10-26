@@ -244,11 +244,15 @@ struct FoldedText: View {
     @ViewBuilder private var button: some View {
         if onBubble {
             Button(open ? "Show Less" : "Show More") { open.toggle() }
+                // Its state, as a disclosure says it (ov-788).
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 .buttonStyle(.plain)
                 .underline()
                 .font(.caption.weight(.semibold))
         } else {
             Button(open ? "Show Less" : "Show More") { open.toggle() }
+                // Its state, as a disclosure says it (ov-788).
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 .buttonStyle(.link)
                 .font(.caption)
         }
@@ -302,6 +306,8 @@ struct FoldedMarkdown: View {
                 }
                 .clipped()
             Button(open ? "Show Less" : "Show More") { open.toggle() }
+                // Its state, as a disclosure says it (ov-788).
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 .buttonStyle(.link)
                 .font(.caption)
                 .foldButton(shown: open || folds, identified: "native-show-more")

@@ -230,6 +230,8 @@ struct FoldedText: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
             Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
+                // Its state, as a disclosure says it (ov-788).
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 // On the person's bubble, the bubble's own text color,
                 // underlined as on the Mac (review 1).
                 .tint(selectableColor.map { Color(uiColor: $0) })
@@ -313,6 +315,8 @@ struct FoldedMarkdown: View {
                 }
                 .clipped()
             Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
+                // Its state, as a disclosure says it (ov-788).
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
                 .font(.caption.weight(.semibold))
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("native-show-more")

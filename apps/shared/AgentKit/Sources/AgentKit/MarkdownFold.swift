@@ -30,7 +30,15 @@ extension Markdown {
     ///
     /// It reads only the lines it keeps: a report of any length costs the
     /// same to fold.
+    ///
+    /// A Windows line ending is one `Character` ("\r\n"), which no search
+    /// for "\n" finds, so a text with returns in it is read as `blocks`
+    /// reads it, each return a line's end, and its start comes back so.
     public static func foldPrefix(_ text: String, lines: Int) -> String {
+        if text.utf8.contains(13) {
+            let lf = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            return foldPrefix(lf, lines: lines)
+        }
         let wanted = Double(lines + 3)
         var counted = 0.0
         var fence = false

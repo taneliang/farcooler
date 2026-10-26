@@ -539,8 +539,10 @@ extension NativeAgentViewTests {
         // line isn't drawn under the fold until Show More opens it.
         let last = NSPredicate(format: "label CONTAINS 'Nothing of mine is still running'")
         XCTAssertEqual(report.staticTexts.matching(last).count, 0, "the whole report is drawn under its fold")
+        XCTAssertEqual(report.buttons["Show More"].value as? String, "Collapsed", "VoiceOver isn't told it's folded")
         report.buttons["Show More"].tap()
         XCTAssertTrue(report.staticTexts.matching(last).firstMatch.waitForExistence(timeout: 10), "Show More didn't open it all")
+        XCTAssertEqual(report.buttons["Show Less"].value as? String, "Expanded", "VoiceOver isn't told it's open")
         report.buttons["Show Less"].tap()
         XCTAssertFalse(report.staticTexts["[Subagent hand-back]"].exists)
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'agent-message' OR label CONTAINS 'Subagent hand-back' OR label CONTAINS 'task-notification'"))
