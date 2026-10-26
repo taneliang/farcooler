@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -85,7 +87,7 @@ fun uploadKeystore(): File? {
         ?: return null
     val out = layout.buildDirectory.file("upload-keystore.jks").get().asFile
     out.parentFile.mkdirs()
-    out.writeBytes(java.util.Base64.getMimeDecoder().decode(encoded))
+    out.writeBytes(Base64.getMimeDecoder().decode(encoded))
     return out
 }
 
