@@ -39,11 +39,8 @@ import Testing
 struct TranscriptJumpTests {
     typealias T = NativeAgentTests
 
-    /// Held until the test ends, which removes its image folder (ov-803).
-    private let images: ScrollImages
-
     init() throws {
-        images = try ScrollImages()
+        _ = try ConversationScrollTests()
     }
 
     /// Where each row on screen is, by probe id, from the top of the window.

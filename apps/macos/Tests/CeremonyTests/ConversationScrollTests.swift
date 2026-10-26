@@ -6,24 +6,6 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The image cache the scroll suites share, in a folder of its own that goes
-/// when the suite's instance does (ov-803). The folder is not left to
-/// `ScratchDirectory`'s exit sweep: a test that forgot to keep this would leave
-/// it for `test-leak-check.py` to fail the run on.
-@MainActor
-final class ScrollImages {
-    private let root: URL
-
-    init() throws {
-        root = try ScratchDirectory.make("fc-scroll-images", sweptAtExit: false)
-        PromptImageStore.disk = PromptImageDisk(
-            files: PaneImageFiles(
-                root: root, paneCap: 50_000_000, totalCap: 100_000_000, whenFull: .evictOldest, maxAge: 3600))
-    }
-
-    deinit { ScratchDirectory.remove(root) }
-}
-
 /// Scrolling a long conversation (ov-691): flung through four hundred real
 /// rows a frame at a time, in a real window on a real display, the list keeps
 /// up with the display, and no row moves on screen except by the scroll.
@@ -35,11 +17,11 @@ struct ConversationScrollTests {
     /// This suite's own pane, so no other suite's remembered view is touched.
     static let terminal = "0199aaaa-0000-7000-8000-000000000691"
 
-    /// Held until the test ends, which removes its image folder (ov-803).
-    private let images: ScrollImages
-
     init() throws {
-        images = try ScrollImages()
+        PromptImageStore.disk = PromptImageDisk(
+            files: PaneImageFiles(
+                root: try ScratchDirectory.make("fc-scroll-images"), paneCap: 50_000_000, totalCap: 100_000_000,
+                whenFull: .evictOldest, maxAge: 3600))
     }
 
     /// The session in a 720 by 900 window, or `width` wide, `rows` long, at
@@ -323,8 +305,7 @@ struct ConversationScrollCaptures {
         let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
             .appendingPathComponent("scroll-frames")
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let images = try ScrollImages()
-        defer { withExtendedLifetime(images) {} }
+        _ = try ConversationScrollTests()
         let (window, _, scroll) = try await ConversationScrollTests.session()
         defer { window.close() }
         // 25 pt a frame is 3,000 pt/s at 120 Hz, a brisk two-finger scroll.
