@@ -64,7 +64,7 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber {
     /// Send what's waiting to `connection`'s runner, if it is the owner's.
     /// Called on every poll; does nothing when nothing waits.
     func send(through connection: Connection) async {
-        let runner = connection.host?.id.uuidString ?? ""
+        let runner = connection.hostId?.uuidString ?? ""
         guard !sending, !outbox.waiting.isEmpty, !notTaking.contains(runner),
             CrashOutbox.mayReport(runnerTakesCrashes: connection.daemon?.can(.crashReports) == true, you: connection.talk.people?.you)
         else { return }
