@@ -143,3 +143,31 @@ async fn an_admins_phone_sets_members_own_logins() {
     assert!(refused.is_err(), "{refused:?}");
     assert!(!phone.service.store.member_login_policy().unwrap().codex, "unchanged");
 }
+
+/// The owner's phone gives a member a role through the bridge (ov-784):
+/// `member.set_role` is routed, `{handle, role}` reaches the runner, and the
+/// answer is the list with the role. A member admin's phone is refused, and
+/// a call with no role never leaves the phone. Goes red without the route,
+/// the arm, or the payload.
+#[tokio::test]
+async fn the_owners_phone_gives_a_role() {
+    assert_eq!(route(Method::MemberSetRole), Some("member.set_role"));
+    let owner = a_runner(Scope::HostAdmin).await;
+    owner.service.store.set_member("alice", "Alice Chen", &[]).unwrap();
+    let session = Session::connect_local(&owner.socket).await.expect("connect");
+    let set = dispatch(&session, "member.set_role", &json!({ "handle": "alice", "role": "maintainer" })).await.expect("set");
+    assert_eq!(set["members"][0]["role"], "maintainer", "{set}");
+    assert_eq!(owner.service.store.member_role("alice").unwrap(), farcooler_store::member_roles::Role::Maintainer);
+    let nothing = dispatch(&session, "member.set_role", &json!({ "handle": "alice" })).await;
+    assert!(nothing.unwrap_err().to_string().contains("needs a handle and a role"));
+
+    let admin = a_runner_for(Scope::HostAdmin, Some("phone-b")).await;
+    admin.service.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    let session = Session::connect_local(&admin.socket).await.expect("connect");
+    let refused = dispatch(&session, "member.set_role", &json!({ "handle": "bob", "role": "maintainer" })).await;
+    assert!(
+        matches!(&refused, Err(crate::session::SessionError::Refused { what, .. }) if what == "not_yours"),
+        "{refused:?}"
+    );
+    assert_eq!(admin.service.store.member_role("bob").unwrap(), farcooler_store::member_roles::Role::Member, "unchanged");
+}

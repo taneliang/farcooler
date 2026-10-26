@@ -1,5 +1,6 @@
-//! A member's Talk, as an app passes it (ov-526): `rep.start`; and a runner
-//! admin's switch for members' own logins (ov-652): `member.set_own_login`.
+//! A member's Talk, as an app passes it (ov-526): `rep.start`; a runner
+//! admin's switch for members' own logins (ov-652): `member.set_own_login`;
+//! and the owner's role picker (ov-784): `member.set_role`.
 
 use serde_json::{Value, json};
 
@@ -35,4 +36,17 @@ pub(super) async fn set_own_login(session: &Session, args: &Value) -> Result<Val
     let harness = args.get("harness").and_then(Value::as_str).map(str::trim).unwrap_or_default();
     let on = args.get("on").and_then(Value::as_bool).ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs on")))?;
     Ok(crate::members_json::members_json(&session.set_own_login(harness, on).await?))
+}
+
+/// `{handle, role}`: give `handle` `role` (`member` or `maintainer`).
+/// Answers `member.list`'s JSON as it is now. The runner refuses anyone but
+/// its owner, a runner admin included.
+pub(super) async fn set_role(session: &Session, args: &Value) -> Result<Value, SessionError> {
+    const METHOD: &str = "member.set_role";
+    let field = |name: &str| args.get(name).and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    let (handle, role) = (field("handle"), field("role"));
+    if handle.is_empty() || role.is_empty() {
+        return Err(SessionError::Protocol(format!("{METHOD} needs a handle and a role")));
+    }
+    Ok(crate::members_json::members_json(&session.set_role(handle, role).await?))
 }

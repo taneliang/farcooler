@@ -147,9 +147,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // A workspace's charter (ov-755): the Mac's sheet, through the CLI.
         // No phone surface has one yet.
         Method::WorkspaceCharter => None,
-        // Roles, the people log and the charter's edit (ov-757): the CLI's
-        // for now. The apps' pickers and editors are slice 2.
-        Method::MemberSetRole | Method::MemberEvents | Method::WorkspaceSetCharter => None,
+        // The owner's role picker on the phones' People (ov-784). The people
+        // log and the charter's edit stay the CLI's and the Mac's: no phone
+        // shows either.
+        Method::MemberSetRole => Some(method.name()),
+        Method::MemberEvents | Method::WorkspaceSetCharter => None,
         // A rep's search, through the CLI in its pane (ov-555).
         Method::WorktreeGrep => None,
         // A crash's signature from the owner's own phone (ov-797).

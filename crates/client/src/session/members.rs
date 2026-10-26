@@ -30,6 +30,19 @@ impl Session {
         }
     }
 
+    /// Give `handle` `role`, `member` or `maintainer` (`member.set_role`,
+    /// ov-757): the runner's owner only. Answers the list as it is now.
+    /// Refused without a round trip on a runner without `member_roles`.
+    pub async fn set_role(&self, handle: &str, role: &str) -> Result<farcooler_protocol::v1::MemberList, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::MEMBER_ROLES, "member.set_role")?;
+        let required = vec![farcooler_protocol::capability::MEMBER_ROLES.to_string()];
+        let payload = request::Payload::MemberSetRole(farcooler_protocol::v1::MemberSetRole { handle: handle.to_string(), role: role.to_string() });
+        match self.value_requiring("member.set_role", None, Some(payload), required).await? {
+            result::Value::MemberList(list) => Ok(list),
+            other => Err(wrong("member_list", &other)),
+        }
+    }
+
     /// Open `handle`'s rep in `workspace` (`rep.start`): what a member's Talk
     /// does when the rep isn't running. The runner decides who may: a member
     /// starts their own, and anyone else's is refused `scope_denied`. A rep

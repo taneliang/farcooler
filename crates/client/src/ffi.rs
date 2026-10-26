@@ -1728,6 +1728,8 @@ async fn dispatch(
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
         // A runner admin's switch: members' own logins, `{harness, on}` (ov-652).
         "member.set_own_login" => rep_args::set_own_login(session, args).await,
+        // The owner gives a member a role, `{handle, role}` (ov-784).
+        "member.set_role" => rep_args::set_role(session, args).await,
         // A member's Talk starts their own rep (ov-526); `{workspace, handle}`.
         "rep.start" => rep_args::start(session, args).await,
         // A member signs in to Claude from their own device (ov-584).
