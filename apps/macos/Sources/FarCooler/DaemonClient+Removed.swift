@@ -15,21 +15,27 @@ extension DaemonClient {
     /// `.noAccess` when ssh says the runner refused this Mac's key, it has
     /// refused it `KeyRefusals.settlesAfter` reads in a row since last
     /// letting it in, over `KeyRefusals.settlesOver` at least (ov-818), and a
-    /// verbose dial proves the refusal is the runner's own (review S1:
-    /// `KeyRefusals.isProvenKeyRefusal`). Short of any of that, it's left as
-    /// it was: a runner that can't be reached, retried on the backoff.
+    /// verbose dial proves the runner refused the very key it named as the
+    /// one this Mac came in with (`KeyRefusals.isProvenKeyRefusal`). No probe
+    /// when the CLI's stderr already shows the agent in trouble, since the
+    /// probe would only ask it again, and none oftener than every 30 s. Short
+    /// of any of that, it's left as it was: a runner that can't be reached,
+    /// retried on the backoff.
     ///
-    /// A runner that already said this Mac was removed, or that settled to
-    /// no access, keeps saying so through the refusals that follow. A Mac
-    /// connected when it was removed reads `(released)` over its still-open
-    /// ssh master (`a_real_sshd_master_outlives_a_revoke`), and meets the
-    /// refused key only once that master ends.
+    /// A Mac connected when it was removed reads `(released)` over its
+    /// still-open ssh master (`a_real_sshd_master_outlives_a_revoke`), so it
+    /// shows `.removed` first, and meets the refused key once that master
+    /// ends. `.removed` holds through refusals short of proof; a proven one
+    /// moves it to `.noAccess`, whose words don't claim the member was
+    /// removed, which a device-only revoke (`member.set`) didn't do.
     func removal(after reason: String) async -> HostState? {
         if !target.isEmpty, KeyRefusals.isKeyRefusal(reason) {
-            if state == .removed || state == .noAccess { return state }
-            guard keyRefusals.refused(at: now()) == .revoked, keyRefusals.mayProbe(at: now()),
-                KeyRefusals.isProvenKeyRefusal(verbose: await refusalProbe(target))
-            else { return nil }
+            if state == .noAccess { return state }
+            let held = state == .removed ? HostState.removed : nil
+            guard keyRefusals.refused(at: now()) == .revoked, let key = keyRefusals.key,
+                !KeyRefusals.showsAgentTrouble(reason), keyRefusals.mayProbe(at: now()),
+                KeyRefusals.isProvenKeyRefusal(verbose: await refusalProbe(target), key: key)
+            else { return held }
             forgetTeamWork()
             return .noAccess
         }
@@ -61,29 +67,66 @@ extension DaemonClient {
         forgetNeedsYou()
     }
 
-    /// The verbose dial `removal(after:)` reads (review S1): the Mac's own
-    /// ssh and config, with no master to reuse, strict host key checking
-    /// whatever the config says, and nothing asked of a person. Its stderr.
-    nonisolated static func probeRefusal(_ target: String) async -> String {
+    /// The runner named the key this Mac came in with (`status --json`'s
+    /// `keyFingerprint`): remembered, so a later refusal counts only when
+    /// it's this key's.
+    func learnKey(_ key: String?) {
+        guard !target.isEmpty, let key, !key.isEmpty else { return }
+        keyRefusals.learn(key: key, for: target, in: admissions)
+    }
+
+    /// The verbose dial `removal(after:)` reads: the same `ssh` the CLI runs
+    /// (the first on the login shell's PATH, `CLI.environment`, so the same
+    /// binary and system config) and the same `~/.ssh/config`, with no master
+    /// to reuse, strict host key checking whatever the config says, and
+    /// nothing asked of a person. Killed by its PID after `probeDeadline`,
+    /// whatever it was waiting for. Its stderr.
+    nonisolated static func probeRefusal(
+        _ target: String, environment: [String: String] = CLI.environment, deadline: TimeInterval = probeDeadline
+    ) async -> String {
         await Task.detached {
             let ssh = Process()
-            ssh.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            ssh.arguments = probeArguments(target)
+            ssh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            ssh.arguments = ["ssh"] + probeArguments(target)
+            ssh.environment = environment
             let err = Pipe()
             ssh.standardError = err
             ssh.standardOutput = FileHandle.nullDevice
             ssh.standardInput = FileHandle.nullDevice
             guard (try? ssh.run()) != nil else { return "" }
-            let data = err.fileHandleForReading.readDataToEndOfFile()
+            // By its own PID, and cancelled the moment it exits.
+            let pid = ssh.processIdentifier
+            let kill = DispatchWorkItem { Darwin.kill(pid, SIGKILL) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + deadline, execute: kill)
             ssh.waitUntilExit()
-            return String(decoding: data, as: UTF8.self)
+            kill.cancel()
+            // Drained without waiting for every writer to close: a
+            // ProxyCommand ssh started may still hold the pipe. `-v` writes a
+            // few kilobytes, well inside a pipe's buffer.
+            return String(decoding: drain(err.fileHandleForReading.fileDescriptor), as: UTF8.self)
         }.value
     }
+
+    /// What's in `fd` now, without blocking.
+    nonisolated static func drain(_ fd: Int32) -> Data {
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 16_384)
+        while true {
+            let n = read(fd, &buffer, buffer.count)
+            guard n > 0 else { break }
+            data.append(buffer, count: n)
+        }
+        return data
+    }
+
+    nonisolated static let probeDeadline: TimeInterval = 10
 
     nonisolated static func probeArguments(_ target: String) -> [String] {
         [
             "-v", "-n", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
-            "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "--", target, "true",
+            "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=3",
+            "-o", "ServerAliveCountMax=1", "--", target, "true",
         ]
     }
 

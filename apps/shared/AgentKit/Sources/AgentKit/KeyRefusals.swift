@@ -22,9 +22,11 @@ import Foundation
 /// config and agent, so "Permission denied (publickey)" there can just as well
 /// be an agent that wouldn't sign (a locked 1Password, a Touch ID prompt
 /// nobody answered), a passphrase key with no agent, a refusing ProxyJump
-/// bastion, or an impostor let through by `StrictHostKeyChecking no`. So the
-/// Mac settles only on a refusal ``isProvenKeyRefusal(verbose:)`` reads off a
-/// verbose probe it makes for the purpose (`DaemonClient.removal(after:)`).
+/// bastion, an impostor let through by `StrictHostKeyChecking no`, or a
+/// stray `~/.ssh/id_*` offered because the agent wasn't there. So the Mac
+/// settles only on a refusal ``isProvenKeyRefusal(verbose:key:)`` reads off a
+/// verbose probe it makes for the purpose (`DaemonClient.removal(after:)`),
+/// and only of ``key``: the key the runner said this Mac came in with.
 ///
 /// **What it tells a stranger: nothing.** The runner says nothing new. sshd
 /// refuses a revoked key in exactly the words it refuses any key it has
@@ -111,7 +113,9 @@ public struct KeyRefusals: Sendable, Equatable {
     /// Kept across launches, because a device removed while the app was
     /// closed first dials the runner after its next launch.
     public static func remembered(_ runner: String, in defaults: UserDefaults = .standard) -> KeyRefusals {
-        KeyRefusals(admitted: defaults.bool(forKey: key(runner)))
+        var refusals = KeyRefusals(admitted: defaults.bool(forKey: key(runner)))
+        refusals.key = defaults.string(forKey: keyKey(runner))
+        return refusals
     }
 
     /// ``letIn()``, and remembered for `runner` in `defaults`.
@@ -122,9 +126,40 @@ public struct KeyRefusals: Sendable, Equatable {
 
     static func key(_ runner: String) -> String { "keyRefusals.admitted.\(runner)" }
 
+    /// The key the runner said this device came in with (`host.get`'s
+    /// `caller_key_fingerprint`, ov-818), as `SHA256:…`; nil until a runner
+    /// that says so has been read. Kept across launches.
+    public private(set) var key: String?
+
+    /// The runner named the key this device came in with: remembered for
+    /// `runner` in `defaults`, and written only when it's news.
+    public mutating func learn(key: String, for runner: String, in defaults: UserDefaults = .standard) {
+        guard !key.isEmpty, key != self.key else { return }
+        self.key = key
+        defaults.set(key, forKey: Self.keyKey(runner))
+    }
+
+    static func keyKey(_ runner: String) -> String { "keyRefusals.key.\(runner)" }
+
+    /// Whether the stderr of a read that failed shows the agent, not the
+    /// runner, in trouble: it wouldn't sign, didn't answer, or wasn't there.
+    /// No probe then (ov-818 review 3): a probe would only ask the agent
+    /// again, and an agent that prompts (Touch ID, 1Password, a
+    /// confirm-each-use key) would put its dialog in front of the person.
+    public static func showsAgentTrouble(_ stderr: String) -> Bool {
+        let lower = stderr.lowercased()
+        return agentTrouble.contains(where: lower.contains)
+    }
+
+    static let agentTrouble = [
+        "sign_and_send_pubkey", "agent refused operation", "communication with agent failed",
+        "ssh_get_authentication_socket", "agent contains no identities",
+    ]
+
     /// Whether a verbose (`ssh -v`) dial proves the runner itself refused
-    /// this device's key (ov-818, review S1): the host key matched the known
-    /// one under strict checking, a key was offered, and none was accepted.
+    /// `key`, the key it let this device in with (ov-818, reviews S1 and 1):
+    /// the host key matched the known one under strict checking, that key was
+    /// offered, and no key was accepted.
     ///
     /// Each other way to the same "Permission denied (publickey)" leaves a
     /// mark this refuses:
@@ -133,20 +168,25 @@ public struct KeyRefusals: Sendable, Equatable {
     ///   `sign_and_send_pubkey`), or a passphrase key with no agent;
     /// - a route through a proxy or a ProxyJump bastion, whose refusal may be
     ///   the bastion's;
-    /// - a host key that didn't match, or that wasn't known at all.
+    /// - a host key that didn't match, or that wasn't known at all;
+    /// - an agent that wasn't there or held nothing, after which ssh offers
+    ///   whatever key files it finds; and any offer that isn't `key`.
     ///
     /// The samples it's held to are real OpenSSH 10.3 output, in
     /// `test/fixtures/ssh-refusals`.
-    public static func isProvenKeyRefusal(verbose: String) -> Bool {
+    public static func isProvenKeyRefusal(verbose: String, key: String) -> Bool {
+        guard !key.isEmpty else { return false }
         let lower = verbose.lowercased()
-        let disqualifying = [
-            "server accepts key", "sign_and_send_pubkey", "agent refused operation",
-            "communication with agent failed", "executing proxy command", "setting implicit proxycommand",
-            "remote host identification has changed", "host key verification failed",
-        ]
+        let disqualifying =
+            agentTrouble + [
+                "server accepts key", "executing proxy command", "setting implicit proxycommand",
+                "remote host identification has changed", "host key verification failed",
+            ]
         guard !disqualifying.contains(where: lower.contains) else { return false }
-        return lower.contains("is known and matches the") && lower.contains("offering public key")
-            && isKeyRefusal(verbose)
+        let offeredTheKey = verbose.split(separator: "\n").contains {
+            $0.contains("Offering public key") && $0.split(separator: " ").contains(Substring(key))
+        }
+        return offeredTheKey && lower.contains("is known and matches the") && isKeyRefusal(verbose)
     }
 
     /// When the Mac last made its verbose probe, so it makes one at most

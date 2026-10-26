@@ -96,7 +96,7 @@ extension RunnerPeople {
         "This runner now refuses this device’s key, though it let it in before. That happens when someone "
         + "who manages the runner removes you or this device. To come back, ask the runner’s owner to add "
         + "this device again, or if the runner is yours, add it yourself. Far Cooler checks every few "
-        + "minutes and reconnects once it’s back."
+        + "minutes and reconnects to the runner once this device is added back."
 
     /// The no-access title naming the runner: "You No Longer Have Access to
     /// studio".

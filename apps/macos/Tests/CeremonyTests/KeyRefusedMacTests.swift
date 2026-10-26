@@ -22,11 +22,33 @@ struct KeyRefusedMacTests {
         #"{"runtime_healthy":true,"live_panes":0,"worktrees":[{"id":"w-1","short":"w1","task":"fix-it","branch":"fix-it","worktree":"/tmp/fix-it","state":"active","terminals":[]}]}"#
             .utf8)
 
+    /// What the CLI shows when the agent wouldn't sign: the agent's trouble,
+    /// then the same refusal.
+    static let agentWouldNotSign = """
+        sign_and_send_pubkey: signing failed for ED25519 "/Users/e/.ssh/farcooler-mac" from agent: agent refused operation
+        you@cosmo: Permission denied (publickey).
+        Could not reach you@cosmo over ssh.
+        """
+
+    /// The key the runner named, the one the samples' runner refused.
+    static let key = "SHA256:GXr0aYtmcLgDEc2veRwu0VEX475UEN/n3nFeTP//P+o"
+
     @MainActor
     final class Runner {
         var refusing = false
+        /// What a refused read's stderr says.
+        var refusal = KeyRefusedMacTests.refused
+        /// The runner released this Mac but its ssh master still serves it
+        /// (ov-784, `a_real_sshd_master_outlives_a_revoke`).
+        var released = false
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
-            if refusing { return (nil, KeyRefusedMacTests.refused) }
+            if refusing { return (nil, refusal) }
+            if released {
+                if args.filter({ $0 != "--json" }) == ["member", "list"] {
+                    return (Data(#"{"members":[],"claude_account":"","you":"(released)"}"#.utf8), nil)
+                }
+                return (nil, "error: someone else's to do on this runner\ncode: not-yours")
+            }
             if args.filter({ $0 != "--json" }) == ["worktree", "list"] { return (KeyRefusedMacTests.fleet, nil) }
             return (Data(), nil)
         }
@@ -44,7 +66,7 @@ struct KeyRefusedMacTests {
     /// off so nothing dials behind the test's back. `probes` counts the probes.
     private func client(
         _ runner: Runner, _ defaults: UserDefaults, probe: String, probes: Counter = Counter(),
-        clock: Clock
+        named: String? = KeyRefusedMacTests.key, clock: Clock
     ) -> DaemonClient {
         let client = DaemonClient(target: "you@cosmo", notifications: NotificationCenter())
         client.admissions = defaults
@@ -55,6 +77,8 @@ struct KeyRefusedMacTests {
             return probe
         }
         client.stopEvents()
+        // What `status --json` says once the link is up (`readDaemonBuild`).
+        client.learnKey(named)
         return client
     }
 
@@ -112,8 +136,8 @@ struct KeyRefusedMacTests {
     /// refusing this Mac's key, read through the probe: never no access, the
     /// work kept, retried fast.
     @Test(arguments: [
-        "agent-refused", "agent-unanswered", "passphrase-no-agent", "bastion-refused", "impostor",
-        "host-key-changed", "penalized",
+        "stray-key-agent-missing", "stray-key-agent-empty", "agent-refused", "agent-unanswered",
+        "passphrase-no-agent", "proxyjump", "impostor", "host-key-changed", "penalized",
     ])
     func aRefusalTheProbeCannotProveIsNotNoAccess(_ name: String) async throws {
         let defaults = try defaults()
@@ -130,6 +154,89 @@ struct KeyRefusedMacTests {
         #expect(!client.fleet.worktrees.isEmpty, "\(name): the work was dropped")
         #expect(!client.teamWorkForgotten)
         #expect(!DaemonClient.waitsLong(client.state))
+    }
+
+    /// The stray key (review 1): a missing agent, a stray `~/.ssh/id_*`
+    /// offered and refused under the right host key. Never counted.
+    @Test(arguments: ["stray-key-agent-missing", "stray-key-agent-empty"])
+    func aStrayKeyRefusedIsNeverNoAccess(_ name: String) async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample(name), clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing + [44, 74, 104, 134], clock: clock)
+        #expect(client.state == .unreachable(reason: Self.refused), "\(name): \(client.state)")
+        #expect(!client.fleet.worktrees.isEmpty)
+    }
+
+    /// One probe in a stretch of refusals under 30 s apart (review 5): the
+    /// limit at the call site, which every other test here would pass without.
+    @Test func refusalsUnderThirtySecondsApartProbeOnce() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("agent-refused"), probes: probes, clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing + [15, 16, 20, 43], clock: clock)
+        #expect(probes.count == 1, "probed \(probes.count) times in 29 s")
+    }
+
+    /// A runner that never named the key this Mac came in with (one from
+    /// before) can't be proven, so it's never probed.
+    @Test func noKeyNamedIsNeverProbed() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, named: nil, clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing + [44], clock: clock)
+        #expect(probes.count == 0)
+        #expect(client.state == .unreachable(reason: Self.refused))
+    }
+
+    /// The CLI already said the agent wouldn't sign (review 3): no probe, so
+    /// no agent is asked to put up its prompt again.
+    @Test func anAgentInTroubleIsNotProbed() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        runner.refusal = Self.agentWouldNotSign
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing + [44, 74], clock: clock)
+        #expect(probes.count == 0)
+        #expect(client.state == .unreachable(reason: Self.agentWouldNotSign))
+    }
+
+    /// The S6 case, end to end (review 4): a Mac connected when only this
+    /// device was taken off its member's list. Over its old ssh master it
+    /// reads `(released)` and says it was removed; once the master ends, the
+    /// refusals hold and the probe proves them, and it moves to no access,
+    /// whose words don't say the member was removed.
+    @Test func removedOverTheMasterThenProvenIsNoAccess() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        #expect(client.state == .connected)
+
+        runner.released = true
+        await client.refresh()
+        #expect(client.state == .removed, "\(client.state)")
+        #expect(client.fleet.worktrees.isEmpty)
+
+        runner.released = false
+        let start = clock.at
+        await refuse(client, runner, from: start, at: Array(Self.spacing.prefix(3)), clock: clock)
+        #expect(client.state == .removed, "short of proof it said something else: \(client.state)")
+        await refuse(client, runner, from: start, at: [14], clock: clock)
+        #expect(client.state == .noAccess, "\(client.state)")
+        #expect(client.state.refusal == RunnerPeople.noAccessBody)
     }
 
     /// Settled once, it stays settled through the refusals after, without
@@ -232,6 +339,28 @@ struct KeyRefusedMacTests {
         }
         #expect(args.contains("-v"))
         #expect(args.suffix(3) == ["--", "you@cosmo", "true"])
+    }
+
+    /// The probe runs the `ssh` first on the PATH it's given (the login
+    /// shell's, as the CLI's is), and is killed by its PID at the deadline,
+    /// even with a child of its holding the pipe open (review 2 and 3).
+    @Test func theProbeRunsTheCLIsSshAndStopsAtItsDeadline() async throws {
+        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("fc818-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bin) }
+        let ssh = bin.appendingPathComponent("ssh")
+        // Says which ssh it is, leaves a child holding stderr, then hangs.
+        try "#!/bin/sh\necho \"the CLI's ssh: $*\" >&2\n(sleep 6 >&2 &)\nexec sleep 6\n".write(
+            to: ssh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ssh.path)
+
+        let started = Date()
+        let said = await DaemonClient.probeRefusal(
+            "you@cosmo", environment: ["PATH": bin.path + ":/usr/bin:/bin"], deadline: 1)
+        let took = Date().timeIntervalSince(started)
+        #expect(said.contains("the CLI's ssh: -v -n"), "\(said)")
+        #expect(said.contains("you@cosmo true"))
+        #expect(took < 4, "the probe outlived its deadline, or waited on its child: \(took) s")
     }
 
     @Test func theScreensSayNoAccessAndNameTheRunner() {

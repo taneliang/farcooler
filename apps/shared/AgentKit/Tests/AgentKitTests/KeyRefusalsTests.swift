@@ -140,10 +140,11 @@ struct KeyRefusalsTests {
         #expect(KeyRefusals.isKeyRefusal("e@box: Permission denied (password,publickey,keyboard-interactive)."))
     }
 
-    // MARK: - Whose refusal it is, on the Mac (review S1)
+    // MARK: - Whose refusal it is, on the Mac (reviews S1 and 1)
 
-    /// Real `ssh -v` output from OpenSSH 10.3 against a scratch sshd, in
-    /// `test/fixtures/ssh-refusals`, reduced to its authentication lines.
+    /// Real `ssh -v` output from OpenSSH 10.3 against a scratch sshd, whole,
+    /// in `test/fixtures/ssh-refusals`. `agent-unanswered` alone is derived:
+    /// `agent-refused` with the other word an agent fails with.
     static func sample(_ name: String) throws -> String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<6 { root.deleteLastPathComponent() }
@@ -151,35 +152,84 @@ struct KeyRefusalsTests {
             contentsOf: root.appendingPathComponent("test/fixtures/ssh-refusals/\(name).txt"), encoding: .utf8)
     }
 
+    /// The keys in the samples, as the runner names them.
+    static let revokedKey = "SHA256:GXr0aYtmcLgDEc2veRwu0VEX475UEN/n3nFeTP//P+o"
+    static let admittedKey = "SHA256:L+FUm1ISP4h71h8/tMcyQkO6f8KqhMcOFcPru3/7eSY"
+    static let lockedKey = "SHA256:UdkElBmTjsbY7q9zFNey0EjT6nH4twvAuP6kvbQXkhU"
+
+    /// The runner refusing the key it let this device in with, from a file
+    /// and from an agent.
     @Test(arguments: ["revoked", "revoked-agent-key"])
-    func theRunnerRefusingAnOfferedKeyUnderAKnownHostKeyIsProven(_ name: String) throws {
+    func theRunnerRefusingItsOwnKeyIsProven(_ name: String) throws {
         let verbose = try Self.sample(name)
         #expect(KeyRefusals.isKeyRefusal(verbose))
-        #expect(KeyRefusals.isProvenKeyRefusal(verbose: verbose), "\(name)")
+        #expect(KeyRefusals.isProvenKeyRefusal(verbose: verbose, key: Self.revokedKey), "\(name)")
     }
 
-    /// Each way to "Permission denied (publickey)" that isn't the runner
-    /// refusing the key, and the two failures that aren't refusals at all.
+    /// The same refusal proves nothing about a key that wasn't offered, or
+    /// when the runner never named one.
+    @Test func aRefusalOfAnotherKeyOrNoneNamedIsNotProven() throws {
+        let verbose = try Self.sample("revoked")
+        #expect(!KeyRefusals.isProvenKeyRefusal(verbose: verbose, key: Self.admittedKey))
+        #expect(!KeyRefusals.isProvenKeyRefusal(verbose: verbose, key: ""))
+    }
+
+    /// Every other way to "Permission denied (publickey)", each asked about
+    /// the key it would have had to be, and the failures that aren't refusals.
     @Test(arguments: [
-        "agent-refused",  // the agent wouldn't sign: a locked agent, a confirm-each-use key
-        "agent-unanswered",  // a Touch ID or Secretive prompt nobody answered
-        "passphrase-no-agent",  // the server would take the key; nothing could unlock it
-        "bastion-refused",  // a ProxyJump bastion's own refusal
-        "impostor",  // a different host key, let through by StrictHostKeyChecking no
-        "host-key-changed",  // strict checking stopped at the host key
-        "penalized",  // sshd's PerSourcePenalties turned the source away
-        "admitted",  // it got in
+        // The runner's own key refused, but with the agent missing: not
+        // counted either (ov-818 review 1b). Without the agent, ssh may have
+        // offered only what it found on disk, which can't be told from here.
+        ("revoked-agent-missing", revokedKey),
+        ("stray-key-agent-missing", revokedKey),  // no agent: a stray ~/.ssh key offered and refused
+        ("stray-key-agent-empty", revokedKey),  // an agent holding nothing: the same
+        ("agent-refused", admittedKey),  // the agent wouldn't sign: a locked agent, a confirm-each-use key
+        ("agent-unanswered", admittedKey),  // a Touch ID or Secretive prompt nobody answered
+        ("passphrase-no-agent", lockedKey),  // the server would take the key; nothing could unlock it
+        ("proxyjump", revokedKey),  // a ProxyJump route, whose refusal may be the bastion's
+        ("impostor", revokedKey),  // a different host key, let through by StrictHostKeyChecking no
+        ("host-key-changed", revokedKey),  // strict checking stopped at the host key
+        ("penalized", revokedKey),  // sshd's PerSourcePenalties turned the source away
+        ("admitted", admittedKey),  // it got in
     ])
-    func everyOtherWayToARefusalIsNotProven(_ name: String) throws {
-        let verbose = try Self.sample(name)
-        #expect(!KeyRefusals.isProvenKeyRefusal(verbose: verbose), "\(name)")
+    func everyOtherWayToARefusalIsNotProven(_ name: String, _ key: String) throws {
+        #expect(!KeyRefusals.isProvenKeyRefusal(verbose: try Self.sample(name), key: key), "\(name)")
     }
 
-    /// The four that end in the same line the CLI shows are the ones that
-    /// matter: without the probe, each would have counted.
-    @Test(arguments: ["agent-refused", "agent-unanswered", "passphrase-no-agent", "bastion-refused", "impostor"])
-    func theFalsePositivesAllLookLikeARefusalToTheCLI(_ name: String) throws {
-        #expect(KeyRefusals.isKeyRefusal(try Self.sample(name)), "\(name)")
+    /// The stray key would have been proven on the first round's rules: the
+    /// host key matched, a key was offered and refused. What stops it is that
+    /// it wasn't the runner's key, and that the agent wasn't there.
+    @Test(arguments: ["stray-key-agent-missing", "stray-key-agent-empty"])
+    func aStrayKeyLooksLikeTheRunnersRefusalInEveryOtherWay(_ name: String) throws {
+        let verbose = try Self.sample(name)
+        #expect(verbose.contains("is known and matches the") && verbose.contains("Offering public key"))
+        #expect(KeyRefusals.isKeyRefusal(verbose))
+        #expect(!verbose.contains("Server accepts key"))
+    }
+
+    /// The CLI's own stderr already says when the agent is the trouble, and
+    /// then no probe is made, so no agent is asked to prompt again.
+    @Test func theAgentsTroubleIsReadOffTheCLIsStderr() throws {
+        let signing = """
+            sign_and_send_pubkey: signing failed for ED25519 "/Users/e/.ssh/farcooler" from agent: agent refused operation
+            you@cosmo: Permission denied (publickey).
+            Could not reach you@cosmo over ssh.
+            """
+        #expect(KeyRefusals.showsAgentTrouble(signing))
+        for name in ["agent-refused", "agent-unanswered", "stray-key-agent-missing", "stray-key-agent-empty"] {
+            #expect(KeyRefusals.showsAgentTrouble(try Self.sample(name)), "\(name)")
+        }
+        #expect(!KeyRefusals.showsAgentTrouble("you@cosmo: Permission denied (publickey).\nCould not reach you@cosmo over ssh."))
+        #expect(!KeyRefusals.showsAgentTrouble(try Self.sample("revoked-agent-key")), "a healthy agent is no trouble")
+    }
+
+    @Test func theKeyTheRunnerNamedIsRememberedPerRunner() throws {
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
+        var refusals = KeyRefusals.remembered("studio", in: defaults)
+        #expect(refusals.key == nil)
+        refusals.learn(key: Self.revokedKey, for: "studio", in: defaults)
+        #expect(KeyRefusals.remembered("studio", in: defaults).key == Self.revokedKey)
+        #expect(KeyRefusals.remembered("other", in: defaults).key == nil)
     }
 
     @Test func aProbeIsMadeAtMostEveryThirtySeconds() {

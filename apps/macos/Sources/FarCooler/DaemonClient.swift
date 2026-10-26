@@ -70,7 +70,7 @@ final class DaemonClient: ObservableObject {
     var now: () -> Date = Date.init
     /// The verbose dial that proves a refusal is the runner's (review S1);
     /// `teamWorkForgotten` says nothing of the runner's team may stay held.
-    var refusalProbe: (String) async -> String = DaemonClient.probeRefusal
+    var refusalProbe: (String) async -> String = { await DaemonClient.probeRefusal($0) }
     var teamWorkForgotten = false
 
     /// Cancels the retry loop rather than leaving it to run against a client
@@ -974,6 +974,7 @@ final class DaemonClient: ObservableObject {
         readOnlyFolders = ReadOnlyFolders.names(in: body, offered: daemonBuild?.can(.readOnlyFolders) == true)
         pushPaired = body["pushPaired"] as? Bool ?? false
         suggestThemesPrompt = body["suggestThemesPrompt"] as? String ?? ""
+        learnKey(body["keyFingerprint"] as? String)  // ov-818
     }
 
     /// Which agents this runner can start: every one from a runner that

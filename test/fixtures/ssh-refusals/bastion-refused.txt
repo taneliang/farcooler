@@ -1,5 +1,0 @@
-debug1: Setting implicit ProxyCommand from ProxyJump: ssh -l e -p 22818 -F /dev/null -v -W '[%h]:%p' localhost
-debug1: Executing proxy command: exec ssh -l e -p 22818 -F /dev/null -v -W '[127.0.0.1]:22818' localhost
-e@bastion.example: Permission denied (publickey).
-kex_exchange_identification: Connection closed by remote host
-Connection closed by UNKNOWN port 65535
