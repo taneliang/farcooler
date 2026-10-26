@@ -68,10 +68,12 @@ pub struct RemoteLink {
 /// power does not, and halving the detection time matters for a tool whose
 /// purpose is noticing when an agent needs you.
 ///
+/// **A tunneled runner probes every three seconds** (ov-781): see [`Route`].
+///
 /// `ConnectTimeout` bounds the one failure `ControlMaster` can introduce: a
 /// stale control socket left by a master that died badly, which a new
 /// connection would otherwise wait on indefinitely.
-fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
+fn ssh_args(target: &str, identity: Option<&Path>, route: Route) -> Vec<String> {
     let mut args: Vec<String> = vec!["-o".into(), "BatchMode=yes".into()];
 
     match identity {
@@ -120,11 +122,12 @@ fn ssh_args(target: &str, identity: Option<&Path>) -> Vec<String> {
         }
     }
 
+    let (interval, count) = route.server_alive();
     args.extend([
         "-o".into(),
-        "ServerAliveInterval=15".into(),
+        format!("ServerAliveInterval={interval}"),
         "-o".into(),
-        "ServerAliveCountMax=3".into(),
+        format!("ServerAliveCountMax={count}"),
         "-o".into(),
         "ConnectTimeout=10".into(),
         // Everything after this is a destination, never a flag.
@@ -206,6 +209,96 @@ fn control_path_under(home: &str) -> Option<String> {
     (expanded + SSH_TEMP_SUFFIX <= SUN_PATH_USABLE).then_some(path)
 }
 
+/// How `ssh` reaches a runner, as far as its keepalive is concerned.
+///
+/// A tunneled runner is one whose `~/.ssh/config` block names
+/// `farcooler runner pipe <id>` as its `ProxyCommand` (`SshConfig.swift` on
+/// the Mac writes exactly that). ssh's TCP then lives inside the tunnel, so a
+/// runner crash or restart, or a relay drop, sends it nothing at all: no
+/// reset, no EOF. Only an unanswered probe ends that session, and at
+/// fifteen seconds that is most of a minute of a fleet showing a runner that
+/// is gone (ov-781).
+///
+/// So a tunneled runner takes the tunnel's own setting, the one the client
+/// core gives a phone (`Liveness::TUNNEL`): a probe after 3 s of quiet, and
+/// the session over once two have gone unanswered, inside nine seconds. A
+/// runner reached at an address keeps fifteen seconds, unchanged. ssh probes
+/// only when nothing has arrived for the interval, so a busy session sends no
+/// more than it did; an idle tunneled one sends a probe and gets an answer
+/// every three seconds, about 1.7 KB a minute at the SSH layer.
+///
+/// Decided from what ssh itself will do (`ssh -G`), not from a list of ours:
+/// the config is the owner's, and an alias, a `Match` block or an `Include`
+/// can each put the `ProxyCommand` where nothing short of ssh would find it.
+/// The command line has to say it, because ssh takes the first value it
+/// obtains for an option and `-o` comes before every config file: a
+/// `ServerAliveInterval` in the tunneled block could never undercut this
+/// module's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Route {
+    Address,
+    Tunnel,
+}
+
+impl Route {
+    /// `ServerAliveInterval` in seconds, and `ServerAliveCountMax`.
+    fn server_alive(self) -> (u64, usize) {
+        match self {
+            Route::Address => (15, 3),
+            Route::Tunnel => {
+                let tunnel = farcooler_client::ceremony::Liveness::TUNNEL;
+                (tunnel.probe_after.as_secs(), tunnel.unanswered)
+            }
+        }
+    }
+
+    /// How `ssh` will reach `target`, read from its own resolved config, with
+    /// `before` handed to `ssh -G` ahead of the target (only the tests' `-F`).
+    ///
+    /// An address when ssh cannot say: the fifteen-second probe is what every
+    /// runner had before, so a doubt costs only the faster notice.
+    async fn resolved(target: &str, before: &[&str]) -> Self {
+        let output = Command::new("ssh")
+            .arg("-G")
+            .args(before)
+            .arg("--")
+            .arg(target)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .await;
+        match output {
+            Ok(out) if out.status.success() => Self::in_resolved(&String::from_utf8_lossy(&out.stdout)),
+            _ => Route::Address,
+        }
+    }
+
+    /// The route `ssh -G`'s output names: a tunnel exactly when its
+    /// `proxycommand` is a `farcooler runner pipe <id>`.
+    fn in_resolved(resolved: &str) -> Self {
+        let tunneled = resolved.lines().any(|line| {
+            let mut words = line.split_whitespace();
+            if words.next() != Some("proxycommand") {
+                return false;
+            }
+            let words: Vec<&str> = words.collect();
+            words.windows(4).any(|w| {
+                Path::new(w[0].trim_matches(['"', '\''])).file_name().is_some_and(|n| n == "farcooler")
+                    && w[1] == "runner"
+                    && w[2] == "pipe"
+                    && !w[3].is_empty()
+            })
+        });
+        if tunneled { Route::Tunnel } else { Route::Address }
+    }
+}
+
+/// `ssh_args` for `target` on the route ssh will take to it: what both
+/// `connect` and `exec` run. `before` is empty except in the tests.
+async fn ssh_args_for(target: &str, identity: Option<&Path>, before: &[&str]) -> Vec<String> {
+    ssh_args(target, identity, Route::resolved(target, before).await)
+}
+
 /// What to run on the far side to get a daemon speaking the protocol.
 ///
 /// `runner install` puts it in ~/.local/bin, but a non-login ssh command's PATH
@@ -233,7 +326,7 @@ pub async fn connect(
     identity: Option<&Path>,
 ) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
-    command.args(ssh_args(target, identity));
+    command.args(ssh_args_for(target, identity, &[]).await);
     command.arg(daemon_command());
     command
         .stdin(Stdio::piped())
@@ -364,7 +457,7 @@ pub async fn exec(
     }
     // The streaming path is a byte pipe for a person at a terminal, so it
     // uses ordinary ssh identity resolution like any other shell command.
-    command.args(ssh_args(target, None));
+    command.args(ssh_args_for(target, None, &[]).await);
     command.arg(cli_command(args));
     command.kill_on_drop(true);
 
@@ -497,7 +590,7 @@ mod tests {
 
     #[test]
     fn ssh_never_waits_for_input_it_will_not_get() {
-        let args = ssh_args("box", None);
+        let args = ssh_args("box", None, Route::Address);
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"));
         assert_eq!(args.last().unwrap(), "box");
     }
@@ -521,7 +614,7 @@ mod tests {
     /// should have to touch this test on purpose.
     #[test]
     fn ssh_notices_a_peer_that_stopped_answering() {
-        let args = ssh_args("box", None);
+        let args = ssh_args("box", None, Route::Address);
         let has_pair =
             |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
         assert!(
@@ -533,6 +626,76 @@ mod tests {
             has_pair(["-o", "ConnectTimeout=10"]),
             "a stale control socket could hang: {args:?}"
         );
+    }
+
+    /// A tunneled runner is noticed gone inside nine seconds, as a phone's
+    /// session on the tunnel is (ov-781), and only a tunneled one: the test
+    /// above holds an address to its fifteen.
+    #[test]
+    fn a_tunneled_runner_probes_every_three_seconds() {
+        let args = ssh_args("box", None, Route::Tunnel);
+        let has_pair =
+            |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has_pair(["-o", "ServerAliveInterval=3"]), "no 3 s probe on the tunnel: {args:?}");
+        assert!(has_pair(["-o", "ServerAliveCountMax=2"]), "no limit of 2 on the tunnel: {args:?}");
+        let (interval, count) = Route::Tunnel.server_alive();
+        assert!(
+            interval * (count as u64 + 1) <= 10,
+            "a dead tunnel goes unnoticed for up to {}s",
+            interval * (count as u64 + 1)
+        );
+    }
+
+    /// What `ssh -G` prints for a block `SshConfig.swift` wrote, and for the
+    /// ones it did not.
+    #[test]
+    fn only_a_runner_pipe_proxy_command_is_the_tunnel() {
+        let ours = "user you\nhostname box\n\
+            proxycommand /Users/you/.config/farcooler/canary/bin/farcooler runner pipe fc-1\n\
+            serveraliveinterval 0\n";
+        assert_eq!(Route::in_resolved(ours), Route::Tunnel);
+        let quoted = "proxycommand \"/Applications/Far Cooler.app/x/farcooler\" runner pipe fc-1\n";
+        // A path with a space splits into words; the tail still names the pipe.
+        assert_eq!(Route::in_resolved(quoted), Route::Tunnel);
+
+        for other in [
+            "hostname box.tail-1234.ts.net\nport 22\n",
+            "proxycommand nc -X 5 -x proxy:1080 %h %p\n",
+            "proxycommand /usr/bin/farcooler-not runner pipe fc-1\n",
+            "proxycommand /x/farcooler runner pipe\n",
+            "proxyjump bastion\n# proxycommand /x/farcooler runner pipe fc-1\n",
+        ] {
+            assert_eq!(Route::in_resolved(other), Route::Address, "{other}");
+        }
+    }
+
+    /// The real `ssh -G`, reading a config shaped like the one the Mac
+    /// writes, finds the tunnel through an alias; and an address in the same
+    /// file stays an address.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ssh_itself_says_which_runner_is_tunneled() {
+        if std::process::Command::new("ssh").arg("-V").output().is_err() {
+            panic!("no ssh on this machine, so nothing here was tested");
+        }
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let config = dir.path().join("config");
+        std::fs::write(
+            &config,
+            "Host box\n  ProxyCommand /x/bin/farcooler runner pipe fc-1\n  User you\n\
+             Host plain\n  HostName plain.example.com\n  Port 22\n",
+        )
+        .expect("write the config");
+        let config = config.to_string_lossy().into_owned();
+        assert_eq!(Route::resolved("box", &["-F", &config]).await, Route::Tunnel);
+        assert_eq!(Route::resolved("you@box", &["-F", &config]).await, Route::Tunnel);
+        assert_eq!(Route::resolved("plain", &["-F", &config]).await, Route::Address);
+
+        // And what `connect` and `exec` hand ssh follows it.
+        let tunneled = ssh_args_for("box", None, &["-F", &config]).await;
+        assert!(tunneled.contains(&"ServerAliveInterval=3".to_string()), "{tunneled:?}");
+        let plain = ssh_args_for("plain", None, &["-F", &config]).await;
+        assert!(plain.contains(&"ServerAliveInterval=15".to_string()), "{plain:?}");
     }
 
     /// A never-reachable host must be told apart from a reachable one
@@ -581,7 +744,7 @@ mod tests {
     /// transition that turns a latent hazard into a vulnerability.
     #[test]
     fn the_destination_cannot_be_read_as_an_option() {
-        let args = ssh_args("-oProxyCommand=touch /tmp/pwned", None);
+        let args = ssh_args("-oProxyCommand=touch /tmp/pwned", None, Route::Address);
         let end = args.iter().position(|a| a == "--").expect("no -- before the destination");
         let target =
             args.iter().position(|a| a.starts_with("-oProxyCommand")).expect("no destination");
@@ -591,7 +754,7 @@ mod tests {
 
     #[test]
     fn an_ordinary_destination_is_still_last() {
-        let args = ssh_args("you@box", None);
+        let args = ssh_args("you@box", None, Route::Address);
         assert_eq!(args.last().map(String::as_str), Some("you@box"));
         assert_eq!(args[args.len() - 2], "--");
     }
@@ -599,7 +762,7 @@ mod tests {
     /// A named identity is the only identity offered.
     #[test]
     fn a_named_identity_is_the_only_one_offered() {
-        let args = ssh_args("you@box", Some(Path::new("/tmp/farcooler-key")));
+        let args = ssh_args("you@box", Some(Path::new("/tmp/farcooler-key")), Route::Address);
         let has_pair =
             |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
         assert!(has_pair(["-i", "/tmp/farcooler-key"]), "no -i: {args:?}");
@@ -614,7 +777,7 @@ mod tests {
     /// `ssh -O exit` reaches a socket on the client's own disk.
     #[test]
     fn a_named_identity_does_not_multiplex() {
-        let args = ssh_args("you@box", Some(Path::new("/tmp/k")));
+        let args = ssh_args("you@box", Some(Path::new("/tmp/k")), Route::Address);
         let has_pair =
             |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
         assert!(has_pair(["-o", "ControlMaster=no"]), "still multiplexing: {args:?}");
@@ -633,7 +796,7 @@ mod tests {
     /// `ControlPath` argument appears exactly when `control_path` yields one.
     #[test]
     fn the_unnamed_path_multiplexes_per_channel() {
-        let args = ssh_args("you@box", None);
+        let args = ssh_args("you@box", None, Route::Address);
         let found = args.iter().find(|a| a.starts_with("ControlPath="));
 
         match control_path() {
@@ -712,7 +875,7 @@ mod tests {
 
     #[test]
     fn the_destination_is_still_last_with_an_identity() {
-        let args = ssh_args("you@box", Some(Path::new("/tmp/k")));
+        let args = ssh_args("you@box", Some(Path::new("/tmp/k")), Route::Address);
         assert_eq!(args.last().map(String::as_str), Some("you@box"));
         assert_eq!(args[args.len() - 2], "--");
     }

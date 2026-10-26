@@ -114,6 +114,14 @@ impl Liveness {
     /// (ov-781). Three seconds with two allowed to go unanswered notices
     /// within nine, and still waits six seconds for an answer before giving
     /// up, which a slow cellular round trip through the relay fits inside.
+    ///
+    /// **The cost, accepted by the owner (ov-781):** an idle session sends a
+    /// probe and gets an answer every three seconds, 52 and 36 bytes at the
+    /// SSH layer (about 1.7 KB a minute before the tunnel's own framing), and
+    /// on a phone that keeps the cellular radio from dropping to idle while
+    /// the app is in the foreground on the tunnel. A suspended app runs no
+    /// timers and a direct connection never sees this setting, so neither
+    /// pays it.
     pub const TUNNEL: Liveness =
         Liveness { probe_after: std::time::Duration::from_secs(3), unanswered: 2 };
 
