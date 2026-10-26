@@ -34,7 +34,9 @@
 //! claude puts the message in its own queue (R-29). A claude whose turn has
 //! ended while background agents run is between turns (ov-468). One that
 //! can't be typed to safely yet, or a command mid-turn, is answered Queued
-//! and held until it can (`held`, ov-468).
+//! and held until it can (`held`, ov-468). A turn claude begins between the
+//! paste and a between-turns Enter takes the message as a mid-turn send
+//! would, under the fence or at the turn's end (`enter_between`, ov-808).
 //!
 //! **The confirmation.** Queued once claude's transcript has its `enqueue`
 //! record, or its `UserPromptSubmit` hook names the prompt in the turn
