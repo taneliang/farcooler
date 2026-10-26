@@ -76,6 +76,16 @@ describe('the flag', () => {
     await notAvailable(await get('/', env, signedIn))
   })
 
+  it('refuses "everyone" when the relay returns an empty, missing or non-string user id', async () => {
+    const env = envWith({ WEB_CLIENT: 'everyone', WEB_ACCOUNTS: '' })
+    const api = { method: 'POST', headers: { cookie: SESSION, 'x-fc': '1', origin: 'https://app.canary.farcooler.com' } }
+    for (const user of [{ id: '' }, {}, { id: 7 }, { id: null }]) {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ user, teams: [], devices: [] })))
+      await notAvailable(await get('/', env, signedIn))
+      expect((await get('/api/relay/directory/me', env, api)).status, JSON.stringify(user)).toBe(404)
+    }
+  })
+
   it('reads the account list split on commas and spaces, and matches ids exactly', async () => {
     relay()
     expect(await (await get('/', envWith({ WEB_ACCOUNTS: 'user_A, user_OWNER user_B' }), signedIn)).text()).toBe(SHELL)

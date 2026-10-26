@@ -20,6 +20,9 @@ import { withHeaders } from './headers'
 
 /// The relay routes the page may call, under /v1/. Slice 1 needs only who is
 /// signed in, for the enrollment offer's account.
+///
+/// With WEB_CLIENT "everyone" a route here is reachable by every signed-in
+/// stranger, so any new route needs its own security review (ov-810).
 export const ROUTES = new Set(['directory/me'])
 
 const MAX_BODY = 16 * 1024
