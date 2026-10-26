@@ -310,7 +310,7 @@ final class NativeComposerProbe: ObservableObject {
     /// `caretFaded=1` while the caret's line is under one.
     @Published private(set) var fade = "fade=none caretFaded=0"
 
-    func faded(_ fade: ComposerField.Fade) {
+    func faded(_ fade: ComposerFade) {
         let edges = [fade.above ? "above" : nil, fade.below ? "below" : nil].compactMap { $0 }
         let said = "fade=\(edges.isEmpty ? "none" : edges.joined(separator: "+")) caretFaded=\(fade.caretFaded ? 1 : 0)"
         DispatchQueue.main.async { self.fade = said }

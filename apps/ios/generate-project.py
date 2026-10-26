@@ -847,6 +847,8 @@ AGENTKIT_SOURCES = [
     # What a phone's composer sends with a message: a picked or pasted image as
     # the runner takes it, converted where it doesn't (ov-404).
     "OutgoingImage.swift",
+    # Which edges of the composer's scrolled text fade (ov-789).
+    "ComposerFade.swift",
     # A composer's photos kept across a restart, and the files under a cap
     # they and the phone's prompt-image cache sit in (ov-622).
     "PaneImageFiles.swift",
@@ -1184,6 +1186,12 @@ UI_TEST_SOURCES = [
     "ConversationScrollUITests.swift",
     # A fling over a long conversation and a long card, timed (ov-788, ov-791).
     "ScrollHitchUITests.swift",
+    # Captures of the composer and the cards' glass for a review (ov-789,
+    # ov-792, ov-794), opt-in.
+    "GlassCapturesUITests.swift",
+    # The composer's fade and held photo, the cards held and tapped (ov-789,
+    # ov-792, ov-794). Needs no runner.
+    "GlassUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

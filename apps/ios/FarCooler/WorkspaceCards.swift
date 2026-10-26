@@ -161,10 +161,12 @@ struct WorkspaceCards: View {
         }
         // The glass answers the press; the words don't dim under it too.
         .buttonStyle(GlassCardStyle())
-        // The sheet's source and the menu INSIDE the glass. Outside it, the
-        // Plan grew from the middle of the screen, its source never found,
-        // and a hold never showed the menu: the release was taken as a tap
-        // (both measured, in frames and in GlassUITests).
+        // The sheet's source, then the menu, then the glass: the order is
+        // measured, not taste. With the source outside the glass the Plan
+        // grew from the middle of the screen, its source never found (frames
+        // of the tap); with the menu between the glass and the source, a
+        // hold never showed the menu and its release was taken as a tap
+        // (GlassUITests).
         .zoomSource(PhoneZoom.plan(place), in: zoom)
         .contentShape(.contextMenuPreview, .floating)
         .contextMenu {

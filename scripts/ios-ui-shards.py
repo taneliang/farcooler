@@ -137,6 +137,7 @@ SHARDS = {
         "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
         "AgentsUITests",  # ~250 s; -phone-harness -phone-native -native-agents (ov-619). Moved from phone3 (ov-722)
         "ConversationScrollUITests",  # 284 s, about 420 s with ov-675's two flings; -native-agent-harness -native-live (ov-626). Moved from phone3
+        "GlassUITests",  # untimed, 5 tests; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789)
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
     # device by this name. On an iPhone every method of the class skips, which
@@ -177,13 +178,14 @@ LOCAL = {
 CAPTURE_SHARDS = {
     "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 870 + 434 s
     "captures2": ["PolishSweepUITests"],  # 1,001 s
-    "captures3": ["ConversationCapturesUITests"],  # 764 s
+    "captures3": ["ConversationCapturesUITests", "GlassCapturesUITests"],  # 764 s, and four short launches
 }
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
     "PolishSweepUITests": "each shipped screen at its extremes, light and dark (ov-412)",
     "ConversationCapturesUITests": "the iPhone conversation screen, light and dark, two type sizes (ov-611)",
     "NavigationCapturesUITests": "the iPhone's navigation, light and dark, two type sizes (ov-616)",
+    "GlassCapturesUITests": "the composer and the cards' glass, held and opened, light and dark (ov-789)",
 }
 
 # The per-push smoke set (ov-534): the core flows, as few seconds as will show

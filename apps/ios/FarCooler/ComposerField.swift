@@ -32,50 +32,16 @@ final class ComposerField: UITextView {
 
     /// Scrolled, the lines beyond the field's edges fade at them instead of
     /// being cut there, as Messages' box does: the text's own inset scrolls
-    /// away with its first line (ov-614 review 1). An edge fades only while
-    /// TEXT is out of view past it, and never over the caret's line (ov-789).
-    /// A layer mask, which a hosted view takes where a SwiftUI mask over it
-    /// didn't draw.
-    ///
-    /// The bottom used to fade "while there's more below", and the text's
-    /// own 2 pt inset counted as more: scrolled to the caret at the end of a
-    /// draft taller than the field, the text view stops with the caret's line
-    /// on the edge and the inset still under it, so the fade sat on that line
-    /// and cut the tails of its p's and g's, on every line typed past the
-    /// field's height.
+    /// away with its first line (ov-614 review 1). Which edges fade is
+    /// `ComposerFade`'s rule: only with text out of view past them, never over
+    /// the caret's line (ov-789). A layer mask, which a hosted view takes
+    /// where a SwiftUI mask over it didn't draw.
     private let edgeFade = CAGradientLayer()
-    static let fadeHeight: CGFloat = 8
 
     /// Told the edges that fade whenever they change: the native composer's
     /// DEBUG probe, for the UI tests.
-    var onFade: ((Fade) -> Void)?
-    private var fade = Fade.none
-
-    /// Which edges fade, and whether the caret's line is under one of them.
-    struct Fade: Equatable {
-        var above = false
-        var below = false
-        var caretFaded = false
-        static let none = Fade()
-    }
-
-    /// The edges to fade, for a text view scrolled to `offset`, `height`
-    /// tall, over `content` of text and its `insets`: an edge with text out
-    /// of view past it, unless the caret's line is inside that edge's fade.
-    static func fade(offset: CGFloat, height: CGFloat, content: CGFloat, insets: UIEdgeInsets, caret: CGRect?) -> Fade {
-        guard height > fadeHeight * 2 else { return .none }
-        let top = offset, bottom = offset + height
-        var above = top > insets.top + 0.5
-        var below = bottom < content - insets.bottom - 0.5
-        if let caret {
-            if caret.maxY > bottom - fadeHeight { below = false }
-            if caret.minY < top + fadeHeight { above = false }
-        }
-        // Read off the result, not the rule: whatever decided the edges, is
-        // the caret's line under one?
-        let faded = caret.map { (above && $0.minY < top + fadeHeight) || (below && $0.maxY > bottom - fadeHeight) } ?? false
-        return Fade(above: above, below: below, caretFaded: faded)
-    }
+    var onFade: ((ComposerFade) -> Void)?
+    private var fade = ComposerFade.none
 
     /// The caret, while there's one in a field being typed in.
     private var caret: CGRect? {
@@ -90,9 +56,10 @@ final class ComposerField: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let now = Self.fade(
-            offset: contentOffset.y, height: bounds.height, content: contentSize.height, insets: textContainerInset,
-            caret: caret)
+        let now = ComposerFade.edges(
+            offset: contentOffset.y, height: bounds.height, content: contentSize.height,
+            insetTop: textContainerInset.top, insetBottom: textContainerInset.bottom,
+            caretTop: caret?.minY, caretBottom: caret?.maxY)
         if now != fade {
             fade = now
             onFade?(now)
@@ -102,7 +69,7 @@ final class ComposerField: UITextView {
             if layer.mask != nil { layer.mask = nil }
             return
         }
-        let edge = NSNumber(value: Double(Self.fadeHeight / bounds.height))
+        let edge = NSNumber(value: Double(ComposerFade.depth / bounds.height))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         edgeFade.frame = bounds
