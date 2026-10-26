@@ -69,6 +69,10 @@ Three consequences worth understanding before anything else:
 - **git**, for worktrees.
 - **systemd with user sessions**, for the daemon to survive logout. Almost every
   modern distribution has this.
+- **OpenSSH 8.4 or newer, for a browser to connect.** A browser's SSH key is a
+  passkey, and sshd accepts passkey signatures from 8.4 on. On an older sshd
+  (Ubuntu 20.04 has 8.2, RHEL 8 has 8.0) the runner doesn't offer passkeys
+  (`passkey_keys`) and won't enroll one. The apps work with any version.
 
 ```bash
 ssh you@box 'sudo apt-get install -y tmux git'    # Debian, Ubuntu
