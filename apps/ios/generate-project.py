@@ -100,6 +100,8 @@ SOURCES = [
     "PlanSheetScreen.swift",
     # Now/Next and Agents over a conversation (ov-616, ov-619).
     "WorkspaceCards.swift",
+    # The cards held: a live preview and quick actions (ov-794).
+    "WorkspaceCardMenus.swift",
     # The agents at work, for a workspace and as All Agents (ov-619, ov-617).
     "AgentsView.swift",
     # Starting an orchestrator from the Plan or the conversation (ov-616).

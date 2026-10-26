@@ -15,6 +15,13 @@ import SwiftUI
 //
 // At the accessibility sizes the two stack, Agents under Now/Next, rather
 // than cut either one's words.
+//
+// Glass the system's way (ov-794): each card's glass is interactive, so a
+// press or a drag swells and lights it as the pills in Messages and Maps do;
+// both are one glass container, so Agents comes out of and goes back into
+// Now/Next as one piece; held, each shows a live preview with its quick
+// actions (`WorkspaceCardMenus`); and a tap grows its sheet out of the card
+// (`PhoneZoom`) rather than sliding one up from the foot of the screen.
 
 struct WorkspaceCards: View {
     @ObservedObject var connection: Connection
@@ -29,6 +36,9 @@ struct WorkspaceCards: View {
     @Environment(\.screenMargin) private var margin
     @Environment(\.dynamicTypeSize) private var type
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.phoneZoom) private var zoom
+    /// The two cards' glass, for Agents to morph out of Now/Next.
+    @Namespace private var glass
     /// Read for the card's cap: a turn of the phone changes it, so the cap,
     /// a share of the screen's height, is worked out again (a phone on its
     /// side kept its upright cap, two thirds of the screen).
@@ -50,15 +60,19 @@ struct WorkspaceCards: View {
         let layout = type.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.group))
             : AnyLayout(HStackLayout(spacing: Spacing.group))
-        layout {
-            if showsPlan { nowNext(strip) }
-            if agents.count > 0 {
-                agentsCard(agents)
-                    .transition(.scale(scale: 0.6, anchor: .trailing).combined(with: .opacity))
+        // One container: closer than the gap between the cards, so at rest
+        // they stay two, and pressed, a card's swell reaches toward the other.
+        FloatingGroup(spacing: Spacing.tight) {
+            layout {
+                if showsPlan { nowNext(strip) }
+                if agents.count > 0 {
+                    // Morphs out of Now/Next's glass and back into it.
+                    agentsCard(agents)
+                }
             }
+            // One height for both: the taller one's.
+            .fixedSize(horizontal: false, vertical: true)
         }
-        // One height for both: the taller one's.
-        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, margin)
         .padding(.bottom, showsPlan || agents.count > 0 ? Spacing.group : 0)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: agents.count > 0)
@@ -145,8 +159,26 @@ struct WorkspaceCards: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .surface(.floating, in: .floating)
+        // The glass answers the press; the words don't dim under it too.
+        .buttonStyle(GlassCardStyle())
+        // The sheet's source and the menu INSIDE the glass. Outside it, the
+        // Plan grew from the middle of the screen, its source never found,
+        // and a hold never showed the menu: the release was taken as a tap
+        // (both measured, in frames and in GlassUITests).
+        .zoomSource(PhoneZoom.plan(place), in: zoom)
+        .contentShape(.contextMenuPreview, .floating)
+        .contextMenu {
+            Button("Open Plan", systemImage: "list.bullet.rectangle") { navigator?.openPlan(place) }
+                .accessibilityIdentifier("plan-strip-open")
+            if strip.needsYou > 0 {
+                Button("Show Needs You", systemImage: "exclamationmark.circle") { navigator?.go([]) }
+                    .accessibilityIdentifier("plan-strip-needs-you-action")
+            }
+        } preview: {
+            PlanCardPreview(connection: connection, summary: summary, strip: strip)
+        }
+        .surface(.floating, in: .floating, interactive: true)
+        .glassEffectID("plan", in: glass)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(strip.isEmpty && strip.band == nil ? "Plan" : strip.bandAccessibilityLabel)
         .accessibilityHint("Shows the plan")
@@ -215,8 +247,17 @@ struct WorkspaceCards: View {
             .frame(maxWidth: wide ? .infinity : nil, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .surface(.floating, in: .floating)
+        .buttonStyle(GlassCardStyle())
+        // Inside the glass, as Now/Next's (`nowNext`).
+        .zoomSource(PhoneZoom.agents(place), in: zoom)
+        .contentShape(.contextMenuPreview, .floating)
+        .contextMenu {
+            AgentsCardActions(agents: agents, showAll: { navigator?.openAgents(place) }, navigator: navigator)
+        } preview: {
+            AgentsCardPreview(agents: agents, answering: connection.isAnswering)
+        }
+        .surface(.floating, in: .floating, interactive: true)
+        .glassEffectID("agents", in: glass)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(agents.summary)
         .accessibilityValue("\(agents.count)")
@@ -224,4 +265,10 @@ struct WorkspaceCards: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("agents-card")
     }
+}
+
+/// A card's press, left to its interactive glass: `.plain` dimmed the words
+/// under a finger as the glass swelled, two answers to one touch.
+private struct GlassCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }

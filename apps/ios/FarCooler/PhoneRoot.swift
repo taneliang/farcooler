@@ -20,6 +20,39 @@ extension EnvironmentValues {
     /// The phone's stack, for a screen in it to push onto. Nil outside it,
     /// in a harness that mounts the shell alone.
     @Entry var phoneNavigator: PhoneNavigator? = nil
+    /// Where the Plan and agents sheets grow from (ov-794): the cards over
+    /// a conversation are their sources, by `PhoneZoom`'s ids.
+    @Entry var phoneZoom: Namespace.ID? = nil
+}
+
+/// The ids a sheet and the card it opens from share, so the sheet grows out
+/// of the card (`matchedTransitionSource`) and goes back into it, rather than
+/// sliding up from the screen's foot (ov-794).
+enum PhoneZoom {
+    static func plan(_ place: PhoneWorkspace) -> String { "plan:\(place.runner)/\(place.workspace)" }
+    static func agents(_ place: PhoneWorkspace) -> String { "agents:\(place.runner)/\(place.workspace)" }
+}
+
+extension View {
+    /// Grow out of the card `id` names, when there's a namespace for it.
+    @ViewBuilder
+    func zooms(from id: String, in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            self
+        }
+    }
+
+    /// Be the card a sheet grows out of, when there's a namespace for it.
+    @ViewBuilder
+    func zoomSource(_ id: String, in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            matchedTransitionSource(id: id, in: namespace)
+        } else {
+            self
+        }
+    }
 }
 
 /// The phone's stack of screens over Needs You, and what's over it: the
@@ -366,6 +399,7 @@ struct PhoneRoot: View {
     @Binding var pendingDestination: Destination?
 
     @StateObject private var navigator = PhoneNavigator()
+    @Namespace private var zoom
     /// What waits for its runner to open: the tap just taken up, or the place
     /// the last run was in. One at a time, and a tap outranks a relaunch.
     @State private var waiting: PhoneWaiting?
@@ -400,16 +434,19 @@ struct PhoneRoot: View {
                 .sheet(item: $navigator.agents, onDismiss: navigator.dismissed) { sheet in
                     AgentsSheetScreen(fleet: fleet, navigator: navigator, place: sheet.place)
                         .environment(\.phoneNavigator, navigator)
+                        .zooms(from: PhoneZoom.agents(sheet.place), in: zoom)
                 }
         }
         .sheet(item: $navigator.plan, onDismiss: navigator.dismissed) { sheet in
             PlanSheetScreen(fleet: fleet, hosts: hosts, navigator: navigator, place: sheet.place)
                 .environment(\.phoneNavigator, navigator)
+                .zooms(from: PhoneZoom.plan(sheet.place), in: zoom)
                 #if DEBUG
                 .overlay(alignment: .topLeading) { PhoneProbeView() }
                 #endif
         }
         .environment(\.phoneNavigator, navigator)
+        .environment(\.phoneZoom, zoom)
         #if DEBUG
         .overlay(alignment: .topLeading) { PhoneProbeView().offset(y: 2) }
         #endif
