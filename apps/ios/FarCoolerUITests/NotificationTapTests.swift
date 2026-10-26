@@ -16,11 +16,21 @@ final class NotificationTapTests: XCTestCase {
     }
 
     /// The owner's case: the app was not running, and the tap launched it.
+    ///
+    /// On the iOS 27 simulator the old delegate survived this one, so it is
+    /// the next test that goes red for the crash; this one holds that a tap
+    /// from closed still opens the app, which is what the phone failed at.
     func testATapThatLaunchesTheAppLeavesItOpen() throws {
         try tapBanner { app in app.terminate() }
     }
 
     /// The app was in the background, and the tap brought it back.
+    ///
+    /// Against the old delegate this crashed on the simulator with the
+    /// phone's own stack: `@objc closure #1 in
+    /// ForegroundPresenter.userNotificationCenter(_:didReceive:)` into
+    /// `-[UIApplication _updateSnapshotAndStateRestorationWithAction:windowScene:]`,
+    /// on a cooperative-pool thread.
     func testATapThatReopensTheAppLeavesItOpen() throws {
         try tapBanner { _ in XCUIDevice.shared.press(.home) }
     }
