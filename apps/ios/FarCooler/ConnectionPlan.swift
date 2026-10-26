@@ -19,8 +19,11 @@ import Foundation
 @MainActor
 final class PlanReads: ObservableObject {
     /// Each board's plan read, by workspace id.
-    @Published private(set) var states: [String: PlanReadState] = [:] { didSet { version &+= 1 } }
-    /// Moves whenever `states` does: what a cache compares in their place (ov-791).
+    @Published private(set) var states: [String: PlanReadState] = [:] {
+        didSet { if states != oldValue { version &+= 1 } }
+    }
+    /// Moves whenever `states` changes, compared once per read (ov-791): a
+    /// read that changed nothing keeps it.
     private(set) var version = 0
     /// Each theme's and lane's record, by page, once read.
     @Published private(set) var records: [PhonePlanPage: PlanRecord] = [:]
