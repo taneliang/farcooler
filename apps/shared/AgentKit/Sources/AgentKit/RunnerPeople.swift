@@ -38,11 +38,14 @@ public struct RunnerPeople: Equatable, Sendable {
         /// runner before it. Its email is the member's and the owner's to
         /// read; to anyone else it's "".
         public let claudeLogin: ClaudeLogin?
+        /// Their role on the runner (ov-757), or nil from a runner before
+        /// roles, which has no Maintainers.
+        public let role: Role?
         public var id: String { handle }
 
         public init(
             handle: String, name: String, reps: [Rep] = [], devices: [String] = [], account: String = "",
-            email: String = "", claudeLogin: ClaudeLogin? = nil
+            email: String = "", claudeLogin: ClaudeLogin? = nil, role: Role? = nil
         ) {
             self.handle = handle
             self.name = name
@@ -51,6 +54,7 @@ public struct RunnerPeople: Equatable, Sendable {
             self.account = account
             self.email = email
             self.claudeLogin = claudeLogin
+            self.role = role
         }
     }
 
@@ -87,7 +91,8 @@ public struct RunnerPeople: Equatable, Sendable {
             members: wire.members.map {
                 Member(
                     handle: $0.handle, name: $0.name, reps: $0.rep_panes ?? [], devices: $0.devices ?? [],
-                    account: $0.account ?? "", email: $0.email ?? "", claudeLogin: $0.claude_login)
+                    account: $0.account ?? "", email: $0.email ?? "", claudeLogin: $0.claude_login,
+                    role: $0.role.flatMap(Role.init(rawValue:)))
             },
             claudeAccount: wire.claude_account.trimmingCharacters(in: .whitespaces),
             you: wire.you, offersClaudeSignIn: wire.claude_sign_in ?? false, ownLogins: wire.own_logins)
@@ -136,9 +141,11 @@ public struct RunnerPeople: Equatable, Sendable {
     }
 
     /// A member's second line: their handle, their email when they were
-    /// added by QR, and where their reps work.
+    /// added by QR, Maintainer when they are one (ov-784), and where their
+    /// reps work.
     public static func detail(of member: Member, reps: String) -> String {
-        [member.handle, member.email, reps].filter { !$0.isEmpty }.joined(separator: " · ")
+        let role = member.role == .maintainer ? Role.maintainer.title : ""
+        return [member.handle, member.email, role, reps].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     public static let released = "(released)"
@@ -152,6 +159,7 @@ public struct RunnerPeople: Equatable, Sendable {
             let account: String?
             let email: String?
             let claude_login: ClaudeLogin?
+            let role: String?
         }
         let members: [Member]
         let claude_account: String
