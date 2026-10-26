@@ -37,18 +37,22 @@ enum DaemonLog {
         folder.appendingPathComponent("farcoolerd.log")
     }
 
-    /// Select the log in Finder, or open its folder when the runner has not
-    /// written one yet.
+    /// Whether there is anything to show: the menu item is dimmed until the
+    /// runner has written its first line.
+    static var exists: Bool {
+        FileManager.default.fileExists(atPath: folder().path)
+    }
+
+    /// Select the log in Finder, or open its folder when the current file is
+    /// not there.
     @MainActor
     static func reveal() {
         let dir = folder()
         let current = file(folder: dir)
         if FileManager.default.fileExists(atPath: current.path) {
             NSWorkspace.shared.activateFileViewerSelecting([current])
-        } else if FileManager.default.fileExists(atPath: dir.path) {
-            NSWorkspace.shared.open(dir)
         } else {
-            NSWorkspace.shared.open(dir.deletingLastPathComponent())
+            NSWorkspace.shared.open(dir)
         }
     }
 }

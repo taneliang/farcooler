@@ -44,7 +44,7 @@ fn child() {
 }
 
 fn run_case(case: &str) -> std::path::PathBuf {
-    let dir = tempfile::tempdir().unwrap().keep().join("logs");
+    let dir = farcooler_core::scratch::dir("dl").join("logs");
     let status = Command::new(std::env::current_exe().unwrap())
         .args(["child", "--exact", "--nocapture", "--test-threads=1"])
         .env("LOG_CASE", case)
@@ -85,10 +85,10 @@ fn a_flood_to_stderr_alone_is_rotated_by_the_timer() {
 #[test]
 fn the_modes_that_are_not_a_daemon_make_no_log_folder() {
     for args in [vec!["--version"], vec!["--stdio"], vec!["--stream", "t"], vec!["--fanout", "%1"]] {
-        let home = tempfile::tempdir().unwrap();
+        let home = farcooler_core::scratch::dir("dm");
         let mut child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
             .args(&args)
-            .env("FARCOOLER_HOME", home.path())
+            .env("FARCOOLER_HOME", home.as_path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -97,6 +97,6 @@ fn the_modes_that_are_not_a_daemon_make_no_log_folder() {
         std::thread::sleep(std::time::Duration::from_millis(1500));
         let _ = child.kill();
         let _ = child.wait();
-        assert!(!home.path().join("logs").exists(), "{args:?} made a log folder");
+        assert!(!home.as_path().join("logs").exists(), "{args:?} made a log folder");
     }
 }

@@ -10,11 +10,11 @@ use std::process::{Command, Stdio};
 /// Start a daemon the way `daemon_link::daemon_command` does, with stderr to
 /// nowhere, run until it has said something, and return what the log holds.
 fn run_and_read_log(extra_env: &[(&str, &str)]) -> (std::path::PathBuf, String) {
-    let home = tempfile::tempdir().unwrap();
+    let home = farcooler_core::scratch::dir("dk");
     let mut command = Command::new(env!("CARGO_BIN_EXE_farcoolerd"));
     command
-        .env("FARCOOLER_HOME", home.path())
-        .env("FARCOOLER_CONFIG", home.path().join("config.toml"))
+        .env("FARCOOLER_HOME", home.as_path())
+        .env("FARCOOLER_CONFIG", home.as_path().join("config.toml"))
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -24,7 +24,7 @@ fn run_and_read_log(extra_env: &[(&str, &str)]) -> (std::path::PathBuf, String) 
     }
     let mut child = command.spawn().expect("spawn farcoolerd");
 
-    let log = home.path().join("logs/farcoolerd.log");
+    let log = home.as_path().join("logs/farcoolerd.log");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut text = String::new();
     while std::time::Instant::now() < deadline {
@@ -36,7 +36,7 @@ fn run_and_read_log(extra_env: &[(&str, &str)]) -> (std::path::PathBuf, String) 
     }
     let _ = child.kill();
     let _ = child.wait();
-    if let Ok(install) = std::fs::read_to_string(home.path().join("install-id")) {
+    if let Ok(install) = std::fs::read_to_string(home.as_path().join("install-id")) {
         farcooler_tmux::reap_server(&format!("farcooler-{}", install.trim()));
     }
     (log, text)

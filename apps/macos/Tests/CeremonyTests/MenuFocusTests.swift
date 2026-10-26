@@ -196,6 +196,7 @@ struct MenuWiringTests {
     /// Each item's title, as written, and what its `.disabled(` must read.
     static let rules: [String: String] = [
         "Check for Updates…": "Updates.shared.isEnabled",
+        "Show Runner Log in Finder": "DaemonLog.exists",
         "New Terminal": "hasWorktree",
         "New Worktree…": "MainWindowFocus.isKey(",
         "New Workspace…": "makesWorkspaces",

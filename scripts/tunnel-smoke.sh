@@ -40,7 +40,14 @@ DAEMON="$(cd "$(dirname "$DAEMON")" && pwd)/$(basename "$DAEMON")"
 # of them. `crates/daemon/tests/an_empty_allowlist_starts_no_tunnel.rs` keeps
 # its own root short for the same reason, and names it.
 ROOT="$(mktemp -d /tmp/fcsmoke.XXXXXX)"
+# The daemon keeps its own log under FARCOOLER_HOME/logs (ov-798) and its stderr
+# no longer reaches this script's redirect, so what it said is read from there.
+# OUT is whatever still reached stdout/stderr (a daemon that fails before it
+# opens its log); LOG is both together, which every check below reads.
+OUT="$ROOT/daemon.out"
+KEPT="$ROOT/logs/farcoolerd.log"
 LOG="$ROOT/daemon.log"
+refresh() { cat "$OUT" "$KEPT" > "$LOG" 2>/dev/null || true; }
 PID=""
 
 # Kill by PID, never by name. A developer machine is very likely running a real
@@ -93,7 +100,7 @@ echo "==> Starting $DAEMON against $ROOT"
 # HOME as well as FARCOOLER_HOME: the daemon finds `authorized_keys` through
 # the user's home directory, and a check that wrote into the real one would be
 # editing the file that holds this machine's SSH access.
-HOME="$ROOT/home" FARCOOLER_HOME="$ROOT" RUST_LOG=info "$DAEMON" > "$LOG" 2>&1 &
+HOME="$ROOT/home" FARCOOLER_HOME="$ROOT" RUST_LOG=info "$DAEMON" > "$OUT" 2>&1 &
 PID=$!
 
 # What this waits for is a line saying what happened to the tunnel — any of
@@ -109,10 +116,24 @@ REACHED="the tunnel did not start|serving the tunnel|the tunnel is serving"
 REFUSED="serves no tunnel"
 
 for _ in $(seq 1 30); do
+  refresh
   grep -qE "no_tailcat|$REACHED|$REFUSED" "$LOG" && break
   kill -0 "$PID" 2>/dev/null || break
   sleep 1
 done
+
+refresh
+
+# The kept log is part of what is being proved: a daemon that said its tunnel
+# line to a stderr nobody keeps would pass everything below on `$OUT` alone.
+if [ ! -s "$KEPT" ]; then
+  echo
+  echo "FAILED: the daemon kept no log at $KEPT, so what it says about its"
+  echo "tunnel is lost to whoever starts it. Its output follows."
+  echo
+  cat "$OUT" 2>/dev/null || true
+  exit 1
+fi
 
 if grep -q "no_tailcat" "$LOG"; then
   echo

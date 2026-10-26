@@ -7,7 +7,9 @@ import Testing
 /// `crates/daemon/src/daemon_log.rs` writes.
 struct DaemonLogTests {
     @Test func aNamedHomeKeepsItsLogsInsideItself() {
-        let dir = DaemonLog.folder(environment: ["FARCOOLER_HOME": "/tmp/fc9"], channel: "canary", home: "/Users/x")
+        var environment: [String: String] = [:]
+        ScratchDaemon.isolate(&environment, home: "/tmp/fc9")
+        let dir = DaemonLog.folder(environment: environment, channel: "canary", home: "/Users/x")
         #expect(dir.path == "/tmp/fc9/logs")
     }
 

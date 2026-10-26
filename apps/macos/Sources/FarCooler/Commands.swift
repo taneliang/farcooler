@@ -573,6 +573,7 @@ struct FarCoolerCommands: Commands {
                     .disabled(!MainWindowFocus.isKey(mainWindow))
                 // Where the runner's warnings and refusals are kept (ov-798).
                 Button("Show Runner Log in Finder") { DaemonLog.reveal() }
+                    .disabled(!DaemonLog.exists)
             }
         }
     }
