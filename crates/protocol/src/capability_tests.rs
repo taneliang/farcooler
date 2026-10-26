@@ -89,3 +89,14 @@ fn bring_here_is_served_behind_its_own_word() {
     assert!(capability::ALL.contains(&capability::BRING_DRAFT));
     assert_eq!(method::Method::ALL.iter().filter(|m| m.capability() == capability::BRING_DRAFT).count(), 1);
 }
+
+/// A capability that depends on the host is off in a process that never
+/// asked (ov-765): `passkey_keys` is in the table, and not in the hello
+/// until something offers it.
+#[test]
+fn passkey_keys_is_withheld_until_offered() {
+    assert!(capability::ALL.contains(&capability::PASSKEY_KEYS));
+    assert!(capability::WITHHELD_UNTIL_OFFERED.contains(&capability::PASSKEY_KEYS));
+    assert!(!capability::advertised().iter().any(|c| c == capability::PASSKEY_KEYS));
+    assert!(!capability::offered(capability::PASSKEY_KEYS));
+}
