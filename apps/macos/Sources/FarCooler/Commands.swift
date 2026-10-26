@@ -571,6 +571,8 @@ struct FarCoolerCommands: Commands {
                 Button("Keyboard Shortcuts") { AppCommand.showShortcuts.post() }
                     .keyboardShortcut("/", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
+                // Where the runner's warnings and refusals are kept (ov-798).
+                Button("Show Runner Log in Finder") { DaemonLog.reveal() }
             }
         }
     }
