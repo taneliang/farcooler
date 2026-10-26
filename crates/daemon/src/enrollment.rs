@@ -790,6 +790,22 @@ fn attributed(entries: &[Entry]) -> Vec<Entry> {
         .collect()
 }
 
+/// The fingerprint of the key `client_id`'s Far Cooler line enrolls, the one a
+/// connection under that id authenticated with (ov-818): its restricted line,
+/// never a Mac's plain Key B. `None` when it has none, or the file can't be read.
+pub async fn key_of(svc: &Service, client_id: &str) -> Option<String> {
+    if client_id.is_empty() {
+        return None;
+    }
+    let path = svc.authorized_keys().to_path_buf();
+    let id = client_id.to_string();
+    let entries = blocking(move || read(&path).map_err(Refusal::from)).await.ok()?;
+    entries
+        .into_iter()
+        .find(|e| e.client_id == id && !e.shell_access && !e.fingerprint.is_empty())
+        .map(|e| e.fingerprint)
+}
+
 fn listing(entries: &[Entry]) -> ClientList {
     ClientList { items: entries.iter().map(|e| wire::enrolled_client(e, 0)).collect() }
 }

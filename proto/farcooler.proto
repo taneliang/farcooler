@@ -1271,6 +1271,14 @@ message Host {
   // runner from before. A client words the warning with
   // `farcooler_core::claude_keys::warning`.
   repeated string rc_claude_keys = 19;
+  // The fingerprint (`SHA256:…`, as `ssh-keygen -lf` prints it) of the key
+  // the caller's own connection authenticated with: its Far Cooler line in
+  // this runner's `authorized_keys` (ov-818). Empty for a caller with no line,
+  // such as the owner's Mac on its own socket, and from a runner from before.
+  // It names only the caller's own key, which the caller holds already. A Mac
+  // whose key is refused later counts the refusal only when it was this key
+  // that was offered and refused.
+  string caller_key_fingerprint = 20;
 }
 
 // One extra read-only folder (ov-232).

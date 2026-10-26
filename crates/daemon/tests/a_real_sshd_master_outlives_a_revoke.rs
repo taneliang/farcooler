@@ -31,6 +31,12 @@ async fn a_new_channel_on_a_master_from_before_the_revoke() {
     // The first read opens the master; it keeps answering for 120 s after.
     let (_first, mut first) = connect(&runner, &control).await;
     first.call(request("member.list")).await.expect("Bob's Mac reads who's here");
+    // The runner names the key this Mac came in with (ov-818), which the Mac
+    // remembers so a later refusal counts only when it's this key's.
+    let host = first.call(request("host.get")).await.expect("host.get");
+    let Some(result::Value::Host(host)) = host.value else { panic!("not a host: {host:?}") };
+    let key = fingerprint(&runner.identity);
+    assert_eq!(host.caller_key_fingerprint, key, "the runner named another key than the one that got in");
     assert!(master_alive(&runner, &control), "no master was left up");
 
     admin.call(member_set("bob", &[])).await.expect("the Mac taken off Bob's list");
@@ -58,6 +64,51 @@ async fn a_new_channel_on_a_master_from_before_the_revoke() {
     );
     stop_master(&runner, &control);
     assert!(!master_alive(&runner, &control), "the master outlived this test");
+
+    // Once the master is gone, the next read dials, and the Mac's verbose
+    // probe sees what `KeyRefusals.isProvenKeyRefusal` needs: the key the
+    // runner named, offered under a known host key, and refused.
+    let probe = probe(&runner);
+    assert!(probe.contains("Permission denied (publickey"), "not refused: {probe}");
+    assert!(probe.contains("is known and matches the"), "host key not checked: {probe}");
+    assert!(
+        probe.lines().any(|l| l.contains("Offering public key") && l.contains(&key)),
+        "the refused key isn't the one the runner named: {probe}"
+    );
+    assert!(!probe.contains("Server accepts key"), "the runner took the key: {probe}");
+}
+
+/// `ssh-keygen -lf`'s `SHA256:…` for `identity`'s public half.
+fn fingerprint(identity: &Path) -> String {
+    let out = std::process::Command::new("ssh-keygen")
+        .arg("-lf")
+        .arg(identity.with_extension("pub"))
+        .output()
+        .expect("ssh-keygen");
+    String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).expect("a fingerprint").to_string()
+}
+
+/// The Mac's probe, `DaemonClient.probeArguments`, against this runner: strict
+/// host key checking against the host key this test records first.
+fn probe(runner: &Runner) -> String {
+    let known = runner.runtime.join("known_hosts");
+    let scan = std::process::Command::new("ssh-keyscan")
+        .args(["-p", &runner.port.to_string(), "127.0.0.1"])
+        .output()
+        .expect("ssh-keyscan");
+    std::fs::write(&known, &scan.stdout).expect("known_hosts");
+    let out = std::process::Command::new("ssh")
+        .args(["-F", "/dev/null", "-p", &runner.port.to_string()])
+        .arg("-i")
+        .arg(&runner.identity)
+        .args(["-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none"])
+        .args(["-v", "-n", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"])
+        .args(["-o", "StrictHostKeyChecking=yes", "-o"])
+        .arg(format!("UserKnownHostsFile={}", known.display()))
+        .args(["--", "127.0.0.1", "true"])
+        .output()
+        .expect("ssh");
+    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 fn member_set(handle: &str, devices: &[&str]) -> farcooler_protocol::v1::Request {
