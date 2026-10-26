@@ -251,6 +251,160 @@ async fn revoking_one_device_closes_the_others_sessions_instead_of_hanging_them(
     reach(&runner, &laptop).await;
 }
 
+/// A tunnel that dies without a word is noticed in seconds, and the device
+/// dials again as soon as the relay is back (ov-781).
+///
+/// The revoke above ends sessions with a FIN; this is the case nothing
+/// announces: a runner that crashes or restarts, or a relay that drops. The
+/// device's TCP lives inside the tunnel, so no reset ever reaches it, and
+/// before ov-781 its session hung until the 30 s keepalive had gone
+/// unanswered three times: about two minutes.
+///
+/// **The relay is frozen, not the runner killed.** The runner's tunnel is in
+/// this test's own process, so it cannot crash without the test. A SIGSTOP on
+/// the relay is the same silence to the device: every connection stays open
+/// and no byte moves on any of them, which is what a crashed runner behind a
+/// live relay, or a relay that vanished, looks like from the phone.
+///
+/// The bound is on the call made just after the freeze, so it measures what
+/// a person would see: the session ending, which is what the apps redial on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_tunnel_that_dies_without_a_word_is_noticed_in_seconds() {
+    /// The card's number. The tunnel's keepalive gives up nine seconds after
+    /// the last byte it received (`Liveness::TUNNEL`).
+    const NOTICED_WITHIN: Duration = Duration::from_secs(10);
+    /// Past the old keepalive's two minutes, so the unfixed number is
+    /// measured rather than truncated.
+    const WATCH: Duration = Duration::from_secs(150);
+
+    let _serial = SERIAL.lock().await;
+    let relay = derper::start().await;
+    let phone = Device::mint("phone-7", Scope::Read);
+    let runner = Runner::start(&relay, &[&phone]).await;
+
+    let mut session = reach(&runner, &phone).await;
+    let mut client = speak(&mut session).await;
+    client.call(request("client.list")).await.expect("the session answers before the drop");
+
+    relay.freeze();
+    let began = Instant::now();
+    let answer = tokio::time::timeout(WATCH, client.call(request("client.list"))).await;
+    let noticed = began.elapsed();
+    derper::note(&format!("with the relay frozen the call ended in {noticed:?}: {answer:?}"));
+    match answer {
+        Err(_) => {
+            relay.thaw();
+            panic!("the session was still hanging {WATCH:?} after its tunnel died")
+        }
+        Ok(Ok(_)) => {
+            relay.thaw();
+            panic!(
+                "the call was answered with the relay frozen, so this run's bytes did not \
+                 go through the relay and the test proved nothing"
+            )
+        }
+        Ok(Err(error)) => {
+            relay.thaw();
+            assert!(
+                matches!(error, ClientError::Closed),
+                "the session ended with {error}, not as a closed link the apps redial on"
+            );
+            assert!(
+                noticed < NOTICED_WITHIN,
+                "a dead tunnel went unnoticed for {noticed:?}; the redial must start within \
+                 {NOTICED_WITHIN:?}"
+            );
+        }
+    }
+    drop(client);
+    drop(session);
+
+    // The redial, as an app makes it the moment the session ends: no wait
+    // for the runner to register, because it never left the relay.
+    let redial = Instant::now();
+    let deadline = redial + Duration::from_secs(60);
+    let mut attempt = 0;
+    let mut session = loop {
+        attempt += 1;
+        match open(&runner, &phone).await {
+            Ok(session) => break session,
+            Err(SshError::Tunnel { code: "no_answer" }) if Instant::now() < deadline => {}
+            Err(other) => panic!("the redial failed on attempt {attempt}: {other}"),
+        }
+    };
+    let mut client = speak(&mut session).await;
+    client.call(request("client.list")).await.expect("the redialed session answers");
+    derper::note(&format!(
+        "the redial answered {:?} after the relay came back, on attempt {attempt}; \
+         {:?} from the drop to a working session",
+        redial.elapsed(),
+        began.elapsed()
+    ));
+}
+
+/// What the tunnel's keepalive costs an idle device on the relay, per minute.
+///
+/// A measurement for the report, not a check, so it is `#[ignore]`d:
+/// `./scripts/tunnel-e2e.sh an_idle_tunnel --ignored` runs it. It reads the
+/// relay's own byte counters (`nettop`, by its pid) across a minute with an
+/// idle session and a minute with none, on the same relay and runner. The
+/// difference is the session's keepalive, as DERP payload: the relay's TCP
+/// and IP headers, and TLS (this relay is plain HTTP), are on top.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement; run it by name with --ignored"]
+async fn an_idle_tunnel_minute_on_the_relay() {
+    const MINUTE: Duration = Duration::from_secs(60);
+
+    let _serial = SERIAL.lock().await;
+    let relay = derper::start().await;
+    let phone = Device::mint("phone-7", Scope::Read);
+    let runner = Runner::start(&relay, &[&phone]).await;
+
+    let mut session = reach(&runner, &phone).await;
+    let mut client = speak(&mut session).await;
+    client.call(request("client.list")).await.expect("the session answers");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let before = relay_bytes(relay.pid()).await;
+    tokio::time::sleep(MINUTE).await;
+    let idle = relay_bytes(relay.pid()).await;
+    drop(client);
+    drop(session);
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let quiet = relay_bytes(relay.pid()).await;
+    tokio::time::sleep(MINUTE).await;
+    let after = relay_bytes(relay.pid()).await;
+
+    let with = (idle.0 - before.0, idle.1 - before.1);
+    let without = (after.0 - quiet.0, after.1 - quiet.1);
+    derper::note(&format!(
+        "the relay carried {} in and {} out in an idle session's minute, {} and {} in a \
+         minute with no session: the keepalive is {} in and {} out",
+        with.0,
+        with.1,
+        without.0,
+        without.1,
+        with.0 as i64 - without.0 as i64,
+        with.1 as i64 - without.1 as i64
+    ));
+}
+
+/// The relay's bytes in and out so far, from `nettop`.
+async fn relay_bytes(pid: u32) -> (u64, u64) {
+    let out = tokio::process::Command::new("/usr/bin/nettop")
+        .args(["-P", "-x", "-L", "1", "-J", "bytes_in,bytes_out", "-p", &pid.to_string()])
+        .output()
+        .await
+        .expect("run nettop");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let row = text
+        .lines()
+        .find(|line| line.contains(&format!(".{pid},")))
+        .unwrap_or_else(|| panic!("no row for the relay in nettop's output: {text}"));
+    let fields: Vec<&str> = row.split(',').collect();
+    (fields[1].parse().expect("bytes_in"), fields[2].parse().expect("bytes_out"))
+}
+
 /// A Mac's `farcooler runner pipe` reaches the runner's sshd through the
 /// tunnel, from a `runners.json` the shipped commands wrote.
 ///

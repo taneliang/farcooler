@@ -80,6 +80,30 @@ pub struct Derper {
     _dir: tempfile::TempDir,
 }
 
+impl Derper {
+    /// Stop the relay where it stands, by its pid: every connection to it
+    /// stays open and nothing on any of them moves. To a device this is a
+    /// runner or a relay that vanished without a word, the drop no FIN
+    /// announces (ov-781). `Drop` still ends a frozen relay, since SIGKILL
+    /// reaches a stopped process.
+    pub fn freeze(&self) {
+        // SAFETY: a signal to the pid of the child this struct started and
+        // has not yet reaped, so it cannot have been reused.
+        unsafe { libc::kill(self.derper.id() as i32, libc::SIGSTOP) };
+    }
+
+    /// Let a frozen relay carry on.
+    pub fn thaw(&self) {
+        // SAFETY: as `freeze`.
+        unsafe { libc::kill(self.derper.id() as i32, libc::SIGCONT) };
+    }
+
+    /// The relay's pid, for measuring what it carries.
+    pub fn pid(&self) -> u32 {
+        self.derper.id()
+    }
+}
+
 impl Drop for Derper {
     fn drop(&mut self) {
         // `Child::kill` signals this child's pid. Then `wait`, so the relay is
