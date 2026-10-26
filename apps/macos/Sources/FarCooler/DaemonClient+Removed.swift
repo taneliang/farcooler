@@ -31,6 +31,15 @@ extension DaemonClient {
         return .removed
     }
 
+    /// Forgets everything read from this runner, for one that doesn't let
+    /// this Mac see its work anymore (ov-818): its worktrees and panes, what
+    /// they changed, and what needs you there.
+    func forgetTeamWork() {
+        if fleet != .empty { fleet = .empty }
+        if !changesInbox.isEmpty { changesInbox = [:] }
+        forgetNeedsYou()
+    }
+
     /// A read got in: this runner accepts this Mac's key, and remembers so
     /// across launches (ov-818). Written only when that's news.
     func letIn() {

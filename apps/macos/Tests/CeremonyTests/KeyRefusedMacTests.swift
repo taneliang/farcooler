@@ -40,17 +40,15 @@ struct KeyRefusedMacTests {
         return client
     }
 
-    private func defaults() throws -> (UserDefaults, String) {
-        let suite = "KeyRefusedMacTests.\(UUID().uuidString)"
-        return (try #require(UserDefaults(suiteName: suite)), suite)
+    private func defaults() throws -> UserDefaults {
+        try #require(ScratchDefaults.suite("KeyRefusedMacTests.\(UUID().uuidString)"))
     }
 
     /// The backoff's spacing, in seconds from the first refusal.
     private static let spacing: [TimeInterval] = [0, 2, 6, 14]
 
     @Test func aKeyHeldRefusedByARunnerThatLetThisMacInIsNoAccess() async throws {
-        let (defaults, suite) = try defaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try defaults()
         let runner = Runner()
         var at = Date(timeIntervalSince1970: 1_800_000_000)
         let client = client(runner, defaults) { at }
@@ -75,8 +73,7 @@ struct KeyRefusedMacTests {
     /// Being let in is remembered: a Mac removed while the app was closed
     /// says so on the next launch's reads.
     @Test func aRelaunchRemembersTheRunnerLetThisMacIn() async throws {
-        let (defaults, suite) = try defaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try defaults()
         let runner = Runner()
         var at = Date(timeIntervalSince1970: 1_800_000_000)
         await client(runner, defaults) { at }.refresh()
@@ -95,8 +92,7 @@ struct KeyRefusedMacTests {
     /// retried on the backoff throughout, and the work stays until it's read
     /// again.
     @Test func aRefusalThatPassesIsStillUnreachableAndRetriedFast() async throws {
-        let (defaults, suite) = try defaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try defaults()
         let runner = Runner()
         var at = Date(timeIntervalSince1970: 1_800_000_000)
         let client = client(runner, defaults) { at }
@@ -122,8 +118,7 @@ struct KeyRefusedMacTests {
     /// A runner this Mac never got into is a stranger's refusal: as before,
     /// unreachable, and nothing said about access it never had.
     @Test func aRunnerThatNeverLetThisMacInIsNotNoAccess() async throws {
-        let (defaults, suite) = try defaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try defaults()
         let runner = Runner()
         runner.refusing = true
         var at = Date(timeIntervalSince1970: 1_800_000_000)

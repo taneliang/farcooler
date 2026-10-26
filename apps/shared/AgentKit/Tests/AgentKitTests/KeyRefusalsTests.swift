@@ -54,9 +54,7 @@ struct KeyRefusalsTests {
     }
 
     @Test func beingLetInIsRememberedForThatRunnerAcrossLaunches() throws {
-        let suite = "KeyRefusalsTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
 
         #expect(KeyRefusals.remembered("studio", in: defaults).admitted == false)
         var refusals = KeyRefusals.remembered("studio", in: defaults)

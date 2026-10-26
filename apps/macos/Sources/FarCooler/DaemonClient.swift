@@ -63,12 +63,10 @@ final class DaemonClient: ObservableObject {
     /// never becomes idle, without a runner.
     var commandRunnerForTesting: (@MainActor ([String]) async -> (data: Data?, message: String?))?
 
-    /// Where this Mac remembers which runners have let it in (ov-818). A
-    /// test gives its own.
+    /// Whether this runner let this Mac in, and its refusals since, with
+    /// where that's remembered and the clock read: see `KeyRefusals` (ov-818).
     var admissions: UserDefaults = .standard
-    /// How this runner has answered this Mac's key: see `KeyRefusals`.
     lazy var keyRefusals = KeyRefusals.remembered(target, in: admissions)
-    /// The clock `keyRefusals` reads. A test moves its own.
     var now: () -> Date = Date.init
 
     /// Cancels the retry loop rather than leaving it to run against a client
@@ -235,30 +233,6 @@ final class DaemonClient: ObservableObject {
         return base * jitter
     }
 
-    /// Whether a failure names a runner that needs installing rather than
-    /// one that is merely unreachable right now.
-    ///
-    /// `crates/cli/src/remote.rs`'s `explain` produces this exact phrase when
-    /// ssh connects fine but nothing answers `farcoolerd --stdio` on the far
-    /// side, which from here is indistinguishable from "not installed" — and
-    /// is the CLI's own signal for it, not a guess. Local-only: the Mac
-    /// bundles and starts its own daemon, so a local failure is never "go
-    /// install this".
-    private func looksNotInstalled(_ message: String) -> Bool {
-        !target.isEmpty && message.localizedCaseInsensitiveContains("is far cooler installed")
-    }
-
-    /// Whether a failure names two sides speaking different protocol
-    /// versions.
-    ///
-    /// Same source as `looksNotInstalled`: `explain`'s other branch, for
-    /// `ClientError::VersionMismatch`. No amount of retrying updates the
-    /// older side, so this gets the same slow cadence as `notInstalled`
-    /// rather than the fast exponential one — see `scheduleRetry()`.
-    private func looksVersionMismatch(_ message: String) -> Bool {
-        !target.isEmpty && message.localizedCaseInsensitiveContains("update the older side")
-    }
-
     /// How long a runner that needs installing, or that speaks a different
     /// protocol version, waits between checks.
     ///
@@ -270,25 +244,8 @@ final class DaemonClient: ObservableObject {
     /// the older side, goes unnoticed until someone restarts the app.
     private let slowRetrySeconds: Double = 300
 
-    /// Whether `state` is checked again on the slow cadence: a runner that
-    /// needs installing, or that removed this Mac's member or refuses its
-    /// key (ov-784, ov-818). Retrying fixes none of them, and a refused key
-    /// retried fast is a refused login on the runner every thirty seconds.
-    nonisolated static func waitsLong(_ state: HostState) -> Bool {
-        switch state {
-        case .notInstalled, .removed, .noAccess: return true
-        case .connecting, .connected, .reconnecting, .unreachable: return false
-        }
-    }
-
-    /// Forgets everything read from this runner, for one that doesn't let
-    /// this Mac see its work anymore (ov-818): its worktrees and panes, what
-    /// they changed, and what needs you there.
-    func forgetTeamWork() {
-        if fleet != .empty { fleet = .empty }
-        if !changesInbox.isEmpty { changesInbox = [:] }
-        if !needsYouRead.isEmpty { needsYouRead = [] }
-    }
+    /// `forgetTeamWork`'s part that only this file may write (ov-818).
+    func forgetNeedsYou() { if !needsYouRead.isEmpty { needsYouRead = [] } }
 
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
     /// failure paths cannot each schedule their own and race.

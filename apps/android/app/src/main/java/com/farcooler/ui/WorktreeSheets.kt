@@ -54,6 +54,7 @@ import com.farcooler.model.prChecksWord
 import com.farcooler.model.prReviewWord
 import com.farcooler.model.prStateWord
 import com.farcooler.net.Connection
+import com.farcooler.net.removeWorktree
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleFor
