@@ -1720,6 +1720,7 @@ use spinner::spinning;
 pub mod trust;
 
 mod background;
+pub use background::Background;
 
 #[cfg(test)]
 #[path = "activity_spinner_tests.rs"]

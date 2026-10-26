@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use farcooler_core::activity::Background;
 use farcooler_core::session_log::projector::Activity;
 
 use super::mid_turn;
@@ -102,20 +103,21 @@ pub(crate) async fn config_of(pid: i32) -> Option<PathBuf> {
 }
 
 /// `said`, for a main loop the screen shows between turns with background
-/// work running beside it (`Registry::background_running`): claude 2.1.296
-/// keeps its registry `busy` while background agents run, the turn over, and
-/// `shell` for a background shell, so either is Idle then. `waiting`, a
-/// dialog, or no status is never (ov-468).
-pub(crate) fn said_beside(config: &Path, pid: i32, background: bool) -> Said {
-    match status(config, pid) {
-        Status::Busy | Status::Idle if background => Said::Idle,
+/// work running beside it (`Registry::background_work`): claude 2.1.296
+/// keeps its registry `busy` while background agents run, the turn over, so
+/// beside agents `busy` is Idle; it writes `shell` for background shells,
+/// Idle beside any. Beside shells alone `busy` is a turn running, and stays
+/// NotIdle (ov-795). `waiting`, a dialog, or no status is never (ov-468).
+pub(crate) fn said_beside(config: &Path, pid: i32, background: Background) -> Said {
+    match (status(config, pid), background) {
+        (Status::Idle, Background::Shells | Background::Agents) | (Status::Busy, Background::Agents) => Said::Idle,
         _ => said(config, pid),
     }
 }
 
 /// `said_beside`, for the process `pid`, its config found from its
-/// environment: `said`'s, when `background` is false.
-pub(crate) async fn said_beside_of(pid: i32, background: bool) -> Said {
+/// environment: `said`'s, when `background` is `None`.
+pub(crate) async fn said_beside_of(pid: i32, background: Background) -> Said {
     match config_of(pid).await {
         Some(config) => said_beside(&config, pid, background),
         None => Said::Nothing,

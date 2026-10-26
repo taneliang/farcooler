@@ -339,7 +339,7 @@ pub(crate) struct Proven {
     pub(crate) held: bool,
     /// claude between turns with background work running beside it, which
     /// its registry's `busy` is then about (ov-468).
-    pub(crate) background: bool,
+    pub(crate) background: farcooler_core::activity::Background,
 }
 
 /// What a wake came to on one pass.
@@ -743,7 +743,8 @@ impl Watcher {
         // A screen that reads between turns while claude's registry says it
         // works (ov-392): mid-turn, so an Enter goes in only under the fence.
         // Not while background agents run: the registry says busy for them
-        // with the main loop between turns (claude 2.1.296, ov-468).
+        // with the main loop between turns (claude 2.1.296, ov-468). Beside
+        // shells alone it says `shell`, so `busy` there is a turn (ov-795).
         // A torn registry is not proof of idle either: the Enter goes in
         // only under the fence, and an answer waits (`paste_waits`).
         let not_idle = || async { matches!(registry_turn::said_beside_of(pid, background).await, registry_turn::Said::NotIdle | registry_turn::Said::Torn) };
@@ -868,7 +869,7 @@ impl Watcher {
     /// turns (`Registry::background_running`). The turn is the main loop's
     /// (`classify_main`): a claude waiting on background agents takes a
     /// message as a turn of its own, as it does with nothing running (ov-468).
-    async fn box_beside_background(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn, bool), Held>> {
+    async fn box_beside_background(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn, farcooler_core::activity::Background), Held>> {
         let (screen, _, _) = self.service.screen(to.id).await?;
         Ok(self.box_on(preset, &screen))
     }
@@ -881,14 +882,14 @@ impl Watcher {
     }
 
     /// `box_beside_background` on `screen`.
-    fn box_on(&self, preset: &str, screen: &str) -> std::result::Result<(Composer, Turn, bool), Held> {
+    fn box_on(&self, preset: &str, screen: &str) -> std::result::Result<(Composer, Turn, farcooler_core::activity::Background), Held> {
         let registry = self.service.registry();
         let command = registry_command(preset);
         match registry.classify_main(command, screen) {
-            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, screen), Turn::During, false)),
+            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, screen), Turn::During, farcooler_core::activity::Background::None)),
             AgentActivity::Working => Err(Held::Busy),
             AgentActivity::Blocked => Err(Held::Prompt),
-            AgentActivity::Idle => Ok((composer::read(preset, screen), Turn::Between, registry.background_running(command, screen))),
+            AgentActivity::Idle => Ok((composer::read(preset, screen), Turn::Between, registry.background_work(command, screen))),
             _ => Err(Held::Unfamiliar),
         }
     }

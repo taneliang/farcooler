@@ -64,6 +64,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use farcooler_core::activity::Background;
 use farcooler_core::composer::{self, Composer, drawn::Expected};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
@@ -485,7 +486,7 @@ impl Watcher {
         // Background agents keep claude's registry busy between turns: the
         // screen still showing them is what says that's all it is (ov-468).
         let main = registry.classify_main(preset, &screen);
-        let background = main == AgentActivity::Idle && registry.background_running(preset, &screen);
+        let background = if main == AgentActivity::Idle { registry.background_work(preset, &screen) } else { Background::None };
         let check = if main != AgentActivity::Idle {
             Some("not_idle")
         } else if !expected.shown_on(preset, &screen) {
@@ -495,7 +496,7 @@ impl Watcher {
                 registry_turn::Said::Idle => None,
                 registry_turn::Said::Nothing if unlisted => None,
                 registry_turn::Said::Nothing => Some("registry_none"),
-                registry_turn::Said::NotIdle if background => Some("registry_busy"),
+                registry_turn::Said::NotIdle if background != Background::None => Some("registry_busy"),
                 registry_turn::Said::NotIdle => Some("registry_busy_no_background"),
                 registry_turn::Said::Torn => Some("registry_torn"),
             }
@@ -618,7 +619,7 @@ fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, che
         terminal = %to.id,
         check,
         main = ?registry.classify_main(preset, screen),
-        background = registry.background_running(preset, screen),
+        background = ?registry.background_work(preset, screen),
         held,
         chars,
         rows = screen.lines().count(),
@@ -659,7 +660,7 @@ struct Confirm {
 /// `procStart` check, so a stale file is nothing; `Torn` for a file that is
 /// there but doesn't parse, which is claude mid-write more often than gone
 /// (ov-645).
-async fn session_of(pid: i32, background: bool) -> std::result::Result<(String, PathBuf, bool), Gone> {
+async fn session_of(pid: i32, background: Background) -> std::result::Result<(String, PathBuf, bool), Gone> {
     let config = registry_turn::config_of(pid).await.ok_or(Gone::Nothing)?;
     let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,
