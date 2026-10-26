@@ -376,10 +376,13 @@ async fn a_turn_begun_during_the_paste_is_queued_under_the_fence() {
     for mode in ["working-lagging-on-paste", "working-hidden-on-paste"] {
         let b = board().await;
         let (agent, si) = idle_claude(&b).await;
+        b.watcher.mark_fence_in(PathBuf::from(format!("{}.fence", si.control.display())));
         si.show(mode).await;
         let turn = b.watcher.compose_into(agent.id, "one\ntwo", &[]).await;
         assert_eq!(turn.expect("queued"), Turn::During, "{mode}: {}", si.log());
         assert!(si.log().contains("QUEUED one\\ntwo") && !si.log().contains("SUBMIT"), "{mode}: {}", si.log());
+        assert_eq!(si.log().lines().filter(|l| l.starts_with("ENTER")).count(), 1, "{mode}: {}", si.log());
+        assert!(si.log().lines().any(|l| l == "ENTER fenced"), "{mode}: the Enter was fenced: {}", si.log());
     }
 }
 

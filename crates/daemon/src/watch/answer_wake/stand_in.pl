@@ -489,7 +489,8 @@ while (1) {
             $pasting = 1;
         } elsif (substr($buf, 0, 1) eq "\r") {
             $buf = substr($buf, 1);
-            logit("ENTER");
+            # A fenced Enter is said by the daemon's marker file (`fence_marker`).
+            logit(-e "$control.fence" ? "ENTER fenced" : "ENTER");
             my $sent = whole($composer);
             if ($mode eq 'trust') {
                 logit("TRUSTED");

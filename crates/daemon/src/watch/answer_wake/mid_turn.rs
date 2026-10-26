@@ -127,6 +127,33 @@ impl Witness {
 }
 
 #[cfg(test)]
+impl Watcher {
+    /// Say the fence is held, in the file a test named (`fence_marker`),
+    /// until the guard returned is dropped.
+    fn fence_marked(&self) -> Option<FenceMarked> {
+        let path = self.fence_marker.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        std::fs::write(&path, "").ok()?;
+        Some(FenceMarked(path))
+    }
+
+    /// Have every fenced Enter from now on say so in `path`.
+    pub(crate) fn mark_fence_in(&self, path: PathBuf) {
+        *self.fence_marker.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+    }
+}
+
+/// The fence marker's file, removed when the fence is let go.
+#[cfg(test)]
+struct FenceMarked(PathBuf);
+
+#[cfg(test)]
+impl Drop for FenceMarked {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
 impl Witness {
     /// A witness for `session`'s transcript at `path`, the paste beginning now.
     pub(crate) fn for_tests(session: &str, path: &Path) -> Witness {
@@ -236,6 +263,8 @@ impl Watcher {
         // A send that overruns its deadline is dropped, which kills its
         // `tmux` (`kill_on_drop`). It may still have reached the pane, late,
         // so the fence is held a while longer before it's let go.
+        #[cfg(test)]
+        let _marked = self.fence_marked();
         let send = async {
             #[cfg(test)]
             tokio::time::sleep(Duration::from_millis(self.slow_enter_ms.load(std::sync::atomic::Ordering::SeqCst))).await;

@@ -86,14 +86,14 @@ impl Watcher {
             self.paste_checked(to, &runtime, &proven.tty, preset, std::mem::replace(&mut first, false), &quoted(path)).await?;
             unpasted.0.clear();
             expected = expected.then_image();
-            held = self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            held = self.shown(to, proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let placeholders = composer::drawn::images(&held);
         if !composed.text.is_empty() {
             let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
             self.paste_checked(to, &runtime, &proven.tty, preset, first, &text).await?;
             expected = expected.then_codex_paste(&text);
-            self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            self.shown(to, proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         #[cfg(test)]
         if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {

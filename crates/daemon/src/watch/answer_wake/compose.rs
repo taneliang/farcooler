@@ -36,7 +36,8 @@
 //! can't be typed to safely yet, or a command mid-turn, is answered Queued
 //! and held until it can (`held`, ov-468). A turn claude begins between the
 //! paste and a between-turns Enter takes the message as a mid-turn send
-//! would, under the fence or at the turn's end (`enter_between`, ov-808).
+//! would, under the fence, or, with no fence to be had, is answered Queued
+//! while its Enter waits out the turn off the lock (`pending`, ov-808).
 //!
 //! **The confirmation.** Queued once claude's transcript has its `enqueue`
 //! record, or its `UserPromptSubmit` hook names the prompt in the turn
@@ -80,6 +81,7 @@ use crate::watch::{Watcher, now_millis};
 
 pub(super) mod codex;
 pub(crate) mod held;
+mod pending;
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.
@@ -91,11 +93,11 @@ pub(crate) const MOST_IMAGES: usize = crate::pastes::staged::MOST_IMAGES;
 /// How long after the Enter claude has to say it took the message.
 pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
 
-/// How long a compose whose claude began a turn between the paste and the
-/// Enter waits for a fenced Enter or the turn's end before it leaves the
-/// message in the box (`enter_between`, ov-808): a short turn's worth, as a
-/// background shell finishing starts one, inside what a phone waits for its
-/// answer.
+/// How long a composed message whose claude began a turn between the paste
+/// and the Enter waits for a fenced Enter or the turn's end before it's left
+/// in the box (`pending`, ov-808): a short turn's worth, as a background
+/// shell finishing starts one. Nothing waits on it: the send was answered
+/// Queued, and the box is taken only for each try.
 pub(crate) const TURN_BEGUN_WAIT: Duration = Duration::from_secs(30);
 
 /// claude 2.1.290's own commands that aren't prompts: each opens a panel or
@@ -276,7 +278,7 @@ impl Watcher {
         // send, from the gate's first check through the confirmation
         // (`Watcher::typing`, ov-372).
         let _typing = self.typing(to.id).await;
-        self.compose_locked(&to, &composed).await
+        self.compose_locked(&to, &composed, raw).await
     }
 
     /// The request's own checks: the pane, and the message (`composition_with`).
@@ -296,8 +298,9 @@ impl Watcher {
     }
 
     /// `compose_into` past its checks of the request, under `to`'s typing
-    /// lock: the gate, the pastes, the Enter and the confirmation.
-    async fn compose_locked(&self, to: &Terminal, composed: &Composition) -> Result<Turn> {
+    /// lock: the gate, the pastes, the Enter and the confirmation. `raw` is
+    /// what the person wrote, for a row while its Enter waits (`pending`).
+    async fn compose_locked(&self, to: &Terminal, composed: &Composition, raw: &str) -> Result<Turn> {
         // Written before the gate, so nothing slow sits between its checks
         // and the first paste (review finding 8).
         let paths = self.write_images(composed)?;
@@ -385,19 +388,19 @@ impl Watcher {
             paste(quoted(path)).await?;
             unpasted.0.clear();
             expected = expected.then_image();
-            held = self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            held = self.shown(to, &proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let placeholders = composer::drawn::images(&held);
         if let Some(name) = &composed.command {
             paste(name.clone()).await?;
             expected = expected.then_paste(name);
-            self.shown(to, preset, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
+            self.shown(to, &proven, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
         }
         if !composed.text.is_empty() {
             let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
             paste(text.clone()).await?;
             expected = expected.then_paste(&text);
-            self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            self.shown(to, &proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let submitted = composed.submitted(&placeholders);
         let since = Instant::now();
@@ -408,7 +411,12 @@ impl Watcher {
                 if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     run();
                 }
-                self.enter_between(to, &proven, started, &expected, &submitted).await?
+                if let Entered::Pending(left) = self.enter_between(to, &proven, started, &expected, &submitted).await? {
+                    let confirm = Confirm { session, transcript, from, queued_before, since, submitted };
+                    let echo = pending::echo(placeholders.len(), raw);
+                    self.pend_enter(pending::Pending { to: to.clone(), proven, started, expected, confirm, echo, left });
+                    return Ok(Turn::During);
+                }
             }
             Some(witness) => {
                 let witness = witness.clone().pasted_at(started);
@@ -487,7 +495,7 @@ impl Watcher {
     pub(super) async fn still_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
         match self.between_or_why(to, proven, started, expected, unlisted).await? {
             None => Ok(()),
-            Some(left) => Err(left.logged(&self.service.registry(), to, proven.preset)),
+            Some(left) => Err(left.logged(&self.service.registry(), to, proven)),
         }
     }
 
@@ -506,7 +514,11 @@ impl Watcher {
     /// shows them. Gone, they leave the registry `shell` or `idle`, never
     /// `busy`, but for a turn begun the moment they ended, which the screen
     /// reads Idle only until its spinner is drawn: the same window a registry
-    /// read `idle` has before any between-turns Enter.
+    /// read `idle` has before any between-turns Enter. A registry `waiting`
+    /// (a dialog it says is up before the screen draws it) reads as a turn
+    /// too, and is waited out rather than left at once: neither Enter can
+    /// take a dialog, as the plain one needs the registry idle and the
+    /// fenced one's box check reads the dialog (`NoEnter::Dialog`).
     async fn between_or_why(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<Option<Left>> {
         let (preset, pid, seen) = (proven.preset, proven.pid, proven.background);
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
@@ -540,37 +552,50 @@ impl Watcher {
         Ok(Some(Left { check, screen: Some(screen), turn }))
     }
 
-    /// The between-turns Enter for a compose, past `between_or_why`. A turn
-    /// claude began since the gate (its registry `busy` with no agents seen,
-    /// or its spinner drawn) no longer leaves the message in the box (ov-808):
-    /// claude queues a message entered mid-turn, so it goes in as a mid-turn
-    /// send does, under the fence (`mid_turn`) once the session's hooks give
-    /// a witness, or between turns once the turn is over, whichever comes
-    /// first within `turn_begun_wait`, the box read back each time. Never
-    /// with no fence into a turn running: a dialog drawn as the key lands
-    /// would take it as Yes. A claude no hook was heard from (the owner's
-    /// orchestrator, ov-711) can only wait for the turn's end; one still
-    /// running at the bound leaves the message, as does any other check.
-    async fn enter_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, submitted: &str) -> Result<()> {
-        let deadline = tokio::time::Instant::now() + self.timing().turn_begun_wait;
-        loop {
-            let Some(left) = self.between_or_why(to, proven, started, expected, false).await? else {
-                let runtime = Runtime { marks: None, ..self.service.runtime() };
-                return runtime.send_bytes_hex(to.id, "0d").await;
-            };
-            if !left.turn || tokio::time::Instant::now() >= deadline {
-                return Err(left.logged(&self.service.registry(), to, proven.preset));
-            }
-            if let Some(witness) = self.witness(proven, to, submitted).await {
-                let witness = witness.pasted_at(started);
-                return self.enter_expecting(to, proven.preset, &witness, expected).await.map_err(|no| match no {
-                    mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
-                    mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
-                    mid_turn::NoEnter::Failed => DomainError::OperationFailed,
-                });
-            }
-            tokio::time::sleep(PASTE_POLL).await;
+    /// The between-turns Enter for a compose, past `between_or_why`, tried
+    /// once under the typing lock. Between turns, the Enter. A turn claude
+    /// began since the gate (its registry `busy` or `waiting` with no agents
+    /// seen, or its spinner drawn) no longer leaves the message in the box
+    /// (ov-808): claude queues a message entered mid-turn, so it goes in as a
+    /// mid-turn send does, under the fence (`mid_turn`), when the session's
+    /// hooks give a witness now. When they don't (a call in flight, or a
+    /// claude no hook is heard from, as the owner's orchestrator, ov-711),
+    /// `Entered::Pending`: the send is answered Queued and the Enter waits
+    /// out the turn off the lock (`pending`). Never with no fence into a turn
+    /// running: a dialog drawn as the key lands would take it as Yes.
+    async fn enter_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, submitted: &str) -> Result<Entered> {
+        let Some(left) = self.between_or_why(to, proven, started, expected, false).await? else {
+            let runtime = Runtime { marks: None, ..self.service.runtime() };
+            runtime.send_bytes_hex(to.id, "0d").await?;
+            return Ok(Entered::Now);
+        };
+        if !left.turn {
+            return Err(left.logged(&self.service.registry(), to, proven));
         }
+        match self.witness(proven, to, submitted).await {
+            Some(witness) => {
+                self.enter_fenced_for(to, proven, started, &witness, expected).await.map_err(|what| match what {
+                    "failed" => DomainError::OperationFailed,
+                    what => DomainError::Conflict { what },
+                })?;
+                Ok(Entered::Now)
+            }
+            None => Ok(Entered::Pending(left)),
+        }
+    }
+
+    /// The fenced Enter for a compose a turn began under, with `witness`
+    /// taken now (`mid_turn::Witness::pasted_at`: a key typed since the paste
+    /// still stops it; its call and gate windows start at the witness, which
+    /// the hooks' own in-flight and quiet checks cover, N1 of the ov-808
+    /// review). Refused with the word a send is refused with.
+    async fn enter_fenced_for(&self, to: &Terminal, proven: &super::Proven, started: i64, witness: &mid_turn::Witness, expected: &Expected) -> std::result::Result<(), &'static str> {
+        let witness = witness.clone().pasted_at(started);
+        self.enter_expecting(to, proven.preset, &witness, expected).await.map_err(|no| match no {
+            mid_turn::NoEnter::Dialog => "dialog",
+            mid_turn::NoEnter::Moved => "paste_left",
+            mid_turn::NoEnter::Failed => "failed",
+        })
     }
 
     /// Write `composed`'s images to the runner's paste directory, which a
@@ -595,13 +620,14 @@ impl Watcher {
 
     /// Read `to`'s box back, until `PASTE_SETTLES`, for `expected`; with
     /// `command`, until claude's popup highlights exactly it as well.
-    async fn shown(&self, to: &Terminal, preset: &str, started: i64, expected: &Expected, command: Option<&str>) -> Shown {
+    async fn shown(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, command: Option<&str>) -> Shown {
+        let (preset, gate) = (proven.preset, proven.background);
         let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
         let mut last = None;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-                left_in_box(&self.service.registry(), to, "typed", None);
+                left_in_box(&self.service.registry(), to, "typed", gate, None);
                 return Shown::Typed;
             }
             let Ok((screen, _, _)) = self.service.screen(to.id).await else { continue };
@@ -616,7 +642,7 @@ impl Watcher {
             }
             last = Some(screen);
         }
-        left_in_box(&self.service.registry(), to, "never_shown", last.as_deref().map(|screen| (preset, screen)));
+        left_in_box(&self.service.registry(), to, "never_shown", gate, last.as_deref().map(|screen| (preset, screen)));
         Shown::No
     }
 
@@ -668,11 +694,12 @@ impl Shown {
 /// Say why a paste was left in `to`'s box (ov-795): `check`, the read-back
 /// that refused it, and on `screen` its shape, never its text: what the
 /// agent reads as, whether background work shows, what the box holds as a
-/// kind and a length, and the pane's rows. The owner's report of one had
-/// nothing to go on, as nothing was written.
-fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, check: &'static str, screen: Option<(&str, &str)>) {
+/// kind and a length, and the pane's rows; and `gate`, the background work
+/// the gate saw (ov-808), which the screen can stop showing. The owner's
+/// report of one had nothing to go on, as nothing was written.
+fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, check: &'static str, gate: Background, screen: Option<(&str, &str)>) {
     let Some((preset, screen)) = screen else {
-        tracing::info!(terminal = %to.id, check, "a paste was left in the box");
+        tracing::info!(terminal = %to.id, check, ?gate, "a paste was left in the box");
         return;
     };
     let (held, chars) = match composer::read(preset, screen) {
@@ -685,11 +712,20 @@ fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, che
         check,
         main = ?registry.classify_main(preset, screen),
         background = ?registry.background_work(preset, screen),
+        ?gate,
         held,
         chars,
         rows = screen.lines().count(),
         "a paste was left in the box"
     );
+}
+
+/// What `enter_between`'s one try came to.
+enum Entered {
+    /// The Enter went.
+    Now,
+    /// A turn runs and no fence can be had yet: the Enter waits (`pending`).
+    Pending(Left),
 }
 
 /// Why `between_or_why` would leave a paste in the box.
@@ -705,8 +741,8 @@ pub(super) struct Left {
 
 impl Left {
     /// Log it (`left_in_box`) and refuse as `paste_left`.
-    fn logged(&self, registry: &farcooler_core::activity::Registry, to: &Terminal, preset: &str) -> DomainError {
-        left_in_box(registry, to, self.check, self.screen.as_deref().map(|screen| (preset, screen)));
+    fn logged(&self, registry: &farcooler_core::activity::Registry, to: &Terminal, proven: &super::Proven) -> DomainError {
+        left_in_box(registry, to, self.check, proven.background, self.screen.as_deref().map(|screen| (proven.preset, screen)));
         DomainError::Conflict { what: "paste_left" }
     }
 }
@@ -724,6 +760,7 @@ impl Drop for Unpasted {
 }
 
 /// Where to look for claude saying it took a message.
+#[derive(Clone)]
 struct Confirm {
     session: String,
     transcript: PathBuf,

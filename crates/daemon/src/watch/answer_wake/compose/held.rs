@@ -80,6 +80,9 @@ pub(crate) struct Tellers {
     running: HashSet<Uuid>,
     slots: HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>,
     resumed: bool,
+    /// Panes whose composed message waits in the box for its Enter
+    /// (`pending`): a send meanwhile is held behind it.
+    pub(super) pending: HashSet<Uuid>,
     /// When each pane's registry first read torn, in a run of tries that
     /// all did (`torn_for`).
     torn_since: HashMap<Uuid, Instant>,
@@ -96,7 +99,7 @@ impl Watcher {
     /// held for `id`, the message held and answered Queued (`Turn::During`).
     pub(super) async fn compose_or_hold(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
         let _slot = self.compose_slot(id).await;
-        if self.service.store.holds_compose(id)? {
+        if self.service.store.holds_compose(id)? || self.enter_pending(id) {
             self.compose_request(id, raw, images, files)?;
             self.hold_composed(id, raw, images, files)?;
             return Ok(Turn::During);
@@ -286,7 +289,7 @@ fn echo(hold: &ComposeHold) -> String {
 }
 
 /// The agent a preset launches, by name.
-fn agent_name(preset: &str) -> &'static str {
+pub(super) fn agent_name(preset: &str) -> &'static str {
     match preset.split(':').next() {
         Some("claude") => "Claude",
         Some("codex") => "Codex",
@@ -307,6 +310,7 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "not_running" | "not_an_agent" => format!("Not sent: “{quoted}”. {agent} isn’t running in this pane anymore."),
         "paste_left" | "dialog" => format!("Not sent: “{quoted}”. It didn’t land as typed, so it was left in {agent}’s box."),
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
+        "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it was left in {agent}’s box."),
         "queued_unseen" => format!("{agent} took “{quoted}” into its queue but never showed it ran. Check the terminal before sending it again."),
         _ => format!("Not sent: “{quoted}”. The runner couldn’t type it."),
     }
