@@ -597,6 +597,10 @@ AGENTKIT_SOURCES = [
     "MarkdownFold.swift",
     # A runner's key index, the same value while its keys are (ov-791).
     "TaskKeyIndexCache.swift",
+    # A value and a number that moves when it changes (ov-791).
+    "Versioned.swift",
+    # Objects kept for reuse: a conversation's text views (ov-788).
+    "ReusePool.swift",
     # How much of the screen the keyboard and the docked composer cover,
     # as `KeyboardInset` publishes it (ov-386). The phone's only unit-testable
     # home for those rules: the iOS target has no unit tests.

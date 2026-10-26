@@ -96,3 +96,20 @@ import Testing
         #expect(cache.builds == 1)
     }
 }
+
+/// The number a cache compares moves on a change and stays put on an equal
+/// value, as a board read again that changed nothing is (ov-791).
+@Suite struct VersionedTests {
+    @Test func itMovesOnlyOnAChange() {
+        var boards = Versioned<[String: Int]>([:])
+        #expect(boards.version == 0)
+        boards.value["w"] = 1
+        #expect(boards.version == 1)
+        boards.value["w"] = 1
+        boards.value = ["w": 1]
+        #expect(boards.version == 1, "an equal read moved it")
+        boards.value["w"] = 2
+        boards.value["v"] = 3
+        #expect(boards.version == 3)
+    }
+}

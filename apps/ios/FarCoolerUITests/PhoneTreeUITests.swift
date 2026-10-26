@@ -300,6 +300,33 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["tree-row-Hidden"].exists, "Hidden stayed with nothing in it")
     }
 
+    /// **A level the board moved under shows the move once it's on top
+    /// again** (ov-791): covered by a pushed screen it keeps the tree it
+    /// drew rather than building it on every board move, and Back builds
+    /// it again, with nothing more from the runner.
+    func testALevelShowsWhatMovedWhileItWasCovered() {
+        let app = XCUIApplication.phoneHarness(["-phone-empty-inbox"])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        for id in ["tree-row-No Theme", "tree-row-bil-9"] {
+            XCTAssertTrue(app.reveal(app.buttons[id]) || app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            app.buttons[id].tap()
+        }
+        XCTAssertTrue(app.buttons["tree-own"].waitForExistence(timeout: 10), "bil-9's level didn't open")
+        XCTAssertFalse(app.buttons["tree-row-bil-77"].exists, "bil-77 is on the board before it was added")
+        // The board grows under No Theme while bil-9's level covers it.
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("com.farcooler.harness.board-grows" as CFString),
+            nil, nil, true)
+        Thread.sleep(forTimeInterval: 3)
+        app.tapBack()
+        let grown = app.buttons["tree-row-bil-77"]
+        XCTAssertTrue(
+            app.reveal(grown) || grown.waitForExistence(timeout: 10),
+            "Back showed the tree held while covered, without bil-77: \(app.debugDescription)")
+    }
+
     /// **A relaunch onto a theme's level opens on it**, reading the plan it's
     /// built from, never on "No Longer Here" (review 1).
     func testARelaunchOntoAThemeLevelOpensOnIt() {

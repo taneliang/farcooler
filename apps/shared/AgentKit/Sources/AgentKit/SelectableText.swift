@@ -69,7 +69,9 @@ public struct SelectableText: UIViewRepresentable {
             return view
         }
         let view = SelectableTextView()
+        #if DEBUG
         SelectableTextView.made += 1
+        #endif
         view.isEditable = false
         view.isSelectable = true
         view.isScrollEnabled = false
@@ -186,24 +188,31 @@ public final class SelectableTextView: UITextView {
     /// third of what was left of each dropped frame once reports folded.
     /// A row leaving the lazy list gives its views back, and a row coming
     /// in takes one, its text and look set again by `updateUIView`.
-    @MainActor private static var pool: [SelectableTextView] = []
-    /// The most kept: a few screens' worth.
-    static let poolLimit = 48
-    /// How many were made, not taken from the pool: for a test.
+    ///
+    /// A kept view holds nothing of the row it served: no text (and so no
+    /// layout of it, which for a long reply is most of a view's bytes), no
+    /// selection, no menu, no links to open in its place. A memory warning
+    /// lets them all go.
+    @MainActor static let pool: ReusePool<SelectableTextView> = {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { _ in MainActor.assumeIsolated { SelectableTextView.pool.drain() } }
+        return ReusePool(limit: 48) { view in
+            view.attributedText = NSAttributedString()
+            view.selectedRange = NSRange(location: 0, length: 0)
+            if view.isFirstResponder { view.resignFirstResponder() }
+            view.delegate = nil
+        }
+    }()
+    #if DEBUG
+    /// How many were made, not taken from the pool: what `FrameWatch` reports.
     @MainActor static var made = 0
+    #endif
 
-    @MainActor static func keep(_ view: SelectableTextView) {
-        guard pool.count < poolLimit else { return }
-        // Nothing of the row it served: no selection, no menu, no links
-        // to open in its place.
-        view.selectedRange = NSRange(location: 0, length: 0)
-        if view.isFirstResponder { view.resignFirstResponder() }
-        view.delegate = nil
-        pool.append(view)
-    }
+    @MainActor static func keep(_ view: SelectableTextView) { pool.keep(view) }
 
     @MainActor static func reused() -> SelectableTextView? {
-        guard let view = pool.popLast() else { return nil }
+        guard let view = pool.take() else { return nil }
         view.removeFromSuperview()
         return view
     }

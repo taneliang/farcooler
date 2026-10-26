@@ -1283,12 +1283,12 @@ final class Connection: ObservableObject {
     /// through a dropped link and a failed read, on the
     /// same terms as `fleet` and `inbox` — a Needs Decision count that vanished
     /// every time the Wi-Fi blinked would be a count nobody could trust.
-    @Published private(set) var boards: [String: TaskBoardModel] = [:] {
-        didSet { if boards != oldValue { boardsVersion &+= 1 } }
-    }
-    /// Moves whenever `boards` changes, compared once per read rather than by
-    /// each cache on each pass (ov-791): a read that changed nothing keeps it.
-    private(set) var boardsVersion = 0
+    var boards: [String: TaskBoardModel] { boardsRead.value }
+    /// `boards`, with a number that moves whenever they change, compared once
+    /// per read rather than by each cache on each pass (ov-791): a read that
+    /// changed nothing keeps it. See `Versioned`.
+    @Published private(set) var boardsRead = Versioned<[String: TaskBoardModel]>([:])
+    var boardsVersion: Int { boardsRead.version }
 
     /// Boards, by workspace id, whose last read failed. The workspace's list
     /// keeps the last good board; the board itself says it could not read.
@@ -1427,7 +1427,7 @@ final class Connection: ObservableObject {
                 let decoded = await Self.decodeBoard(data)
             {
                 adoptReads(decoded.reads, workspace: key)
-                boards[key] = decoded.board
+                boardsRead.value[key] = decoded.board
                 unreadBoards.remove(key)
                 read = true
             } else {

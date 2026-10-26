@@ -19,12 +19,11 @@ import Foundation
 @MainActor
 final class PlanReads: ObservableObject {
     /// Each board's plan read, by workspace id.
-    @Published private(set) var states: [String: PlanReadState] = [:] {
-        didSet { if states != oldValue { version &+= 1 } }
-    }
-    /// Moves whenever `states` changes, compared once per read (ov-791): a
-    /// read that changed nothing keeps it.
-    private(set) var version = 0
+    var states: [String: PlanReadState] { read.value }
+    /// `states`, with a number that moves whenever they change (ov-791): see
+    /// `Versioned`.
+    @Published private var read = Versioned<[String: PlanReadState]>([:])
+    var version: Int { read.version }
     /// Each theme's and lane's record, by page, once read.
     @Published private(set) var records: [PhonePlanPage: PlanRecord] = [:]
     /// Boards with a read out, and boards whose news came while it was.
@@ -38,7 +37,7 @@ final class PlanReads: ObservableObject {
     func state(_ workspace: String) -> PlanReadState? { states[workspace] }
 
     fileprivate func set(_ state: PlanReadState, for workspace: String) {
-        if states[workspace] != state { states[workspace] = state }
+        if states[workspace] != state { read.value[workspace] = state }
     }
 
     /// Show `ids` kept now (ov-333), before the runner's answer, as the Mac does:

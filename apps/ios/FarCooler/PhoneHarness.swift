@@ -271,6 +271,14 @@ struct PhoneHarness: View {
                     ])
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.boardGrows)) { _ in
+                HarnessRunner.grown = true
+                Task {
+                    await runner.deliver([
+                        "event": "task", "repository": HarnessRunner.repository, "workspace": HarnessRunner.billing,
+                    ])
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.taskNews)) { _ in
                 Task {
                     await runner.deliver([
@@ -357,6 +365,8 @@ enum HarnessTaps {
     static let planNews = Notification.Name("com.farcooler.harness.plan-news")
     static let linkLost = Notification.Name("com.farcooler.harness.link-lost")
     static let taskNews = Notification.Name("com.farcooler.harness.task-news")
+    /// A task added to Billing's board, bil-77, and its notice (ov-791).
+    static let boardGrows = Notification.Name("com.farcooler.harness.board-grows")
     static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
     /// `PadCompactWindow` on or off.
     static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
@@ -372,7 +382,7 @@ enum HarnessTaps {
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, linkLost, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto, nativeOlder] {
+        for name in [agent, decision, linkLost, planNews, taskNews, boardGrows, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto, nativeOlder] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -1211,6 +1221,9 @@ final class HarnessRunner {
         ]
     }
 
+    /// Whether `HarnessTaps.boardGrows` added bil-77 to Billing's board.
+    static var grown = false
+
     /// `-phone-big-board`'s eight hundred tasks, or none: as many as the
     /// owner's board held on 25 Oct (798), and as big, with intents of
     /// about 460 characters and two acceptance lines, about 1 MB to read.
@@ -1281,7 +1294,13 @@ final class HarnessRunner {
                 ],
             ]
         }
-        let many = Self.bigBoard(now: now)
+        var many = Self.bigBoard(now: now)
+        if Self.grown {
+            many.append([
+                "id": "0198f2c0-0000-7000-8000-000000000077", "key": "bil-77", "title": "Grown while covered",
+                "status": "in_progress", "status_since": now, "workspace": Self.billing,
+            ])
+        }
         return many + startStates() + HarnessPlan.boardTasks(on: Self.billing) + [
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
