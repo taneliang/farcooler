@@ -53,7 +53,7 @@ import Testing
     }
 
     /// The caps of a bubble in the column of a 375 and a 393 pt phone.
-    static let caps: [CGFloat] = [(375 - 32) * MessageBubble.widest, (393 - 32) * MessageBubble.widest]
+    nonisolated static let caps: [CGFloat] = [(375 - 32) * MessageBubble.widest, (393 - 32) * MessageBubble.widest]
 
     @Test(arguments: caps)
     func aWordTakesItsOwnWidth(cap: CGFloat) {
@@ -78,9 +78,11 @@ import Testing
     }
 
     @Test(arguments: caps)
-    func aLongMessageFillsItsCap(cap: CGFloat) {
+    func aLongMessageFillsItsCapToItsWidestLine(cap: CGFloat) {
         let text = String(repeating: "Fold this where it wraps past six lines. ", count: 12)
-        #expect(fitted(text, offered: cap).width == cap)
+        // Wrapped at word breaks, so the widest line is a little short of it.
+        let width = fitted(text, offered: cap).width
+        #expect(width <= cap && width > cap * 0.85, "a long message took \(width) of a cap of \(cap)")
     }
 
     /// A report's blocks still fill the column they're given.

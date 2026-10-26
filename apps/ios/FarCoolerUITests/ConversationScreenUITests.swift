@@ -116,7 +116,8 @@ final class ConversationScreenUITests: XCTestCase {
         for (bubble, start) in zip(bubbles, starts) {
             XCTAssertTrue(bubble.waitForExistence(timeout: 30), "no bubble for \"\(start)\": \(app.debugDescription)")
         }
-        let widths = bubbles.map { $0.frame.width }
+        var widths = bubbles.map { $0.frame.width }
+        let firstWidths = widths
         let column = app.windows.firstMatch.frame.width
         shoot("bubbles", expecting: .shows(bubbles[3], "the four bubbles, the long one last"))
         // The cap is three quarters of the column; the long message fills it.
@@ -132,6 +133,25 @@ final class ConversationScreenUITests: XCTestCase {
         // Every bubble at the trailing edge, whatever its width.
         let edges = bubbles.map { $0.frame.maxX }
         XCTAssertLessThan((edges.max() ?? 0) - (edges.min() ?? 0), 1.5, "the bubbles don't share a trailing edge: \(edges)")
+
+        // Scrolled up through thirty long paragraphs and back, the views the
+        // paragraphs used (the lazy list gives them back, and the bubbles take
+        // them) draw the same widths: a view that held a long text is not
+        // the width of it for a short one.
+        let list = element(app, "native-transcript")
+        let top = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        for _ in 0..<6 { top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 500)), withVelocity: .fast, thenHoldForDuration: 0.1) }
+        let bottom = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+        for _ in 0..<12 where !bubbles[0].isHittable {
+            bottom.press(forDuration: 0.05, thenDragTo: bottom.withOffset(CGVector(dx: 0, dy: -500)), withVelocity: .fast, thenHoldForDuration: 0.1)
+        }
+        XCTAssertTrue(wait(10) { bubbles.allSatisfy { $0.exists } }, "the bubbles never came back: \(app.debugDescription)")
+        Thread.sleep(forTimeInterval: 1)
+        shoot("bubbles-after-scroll", expecting: .shows(bubbles[3], "the four bubbles again"))
+        widths = bubbles.map { $0.frame.width }
+        let again = widths.map { Int($0.rounded()) }
+        let first = firstWidths.map { Int($0.rounded()) }
+        XCTAssertEqual(again, first, "scrolling away and back changed the bubbles' widths")
     }
 
     /// Every block on the owner's screen (the Now/Next and Agents cards, the

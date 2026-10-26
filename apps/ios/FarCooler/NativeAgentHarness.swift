@@ -722,10 +722,18 @@ final class NativeHarnessRunner: ObservableObject {
         String(repeating: "Fold this where it wraps past the bubble. ", count: 5),
     ]
 
+    /// Under them, thirty long paragraphs of the agent's: scrolled past and
+    /// back, their text views go to the pool and come back for the bubbles'
+    /// words, short ones in a view that held a long one.
     private static func bubbleRows() -> [[String: Any]] {
-        bubbleMessages.enumerated().map { n, text in
-            row("turn:b\(n)", ord: UInt64(60 + n), rev: UInt64(60 + n), kind: ["Turn": turn(text, origin: "Typed")])
+        let long = String(repeating: "The parser reads a token, looks one ahead and builds the node. ", count: 6)
+        let before = (0..<30).map { n in
+            row("prose:f\(n):0", ord: UInt64(100 + n), rev: UInt64(100 + n), kind: ["Prose": ["text": "\(n). " + long, "conclusion": false]])
         }
+        let bubbles = bubbleMessages.enumerated().map { n, text in
+            row("turn:b\(n)", ord: UInt64(200 + n), rev: UInt64(200 + n), kind: ["Turn": turn(text, origin: "Typed")])
+        }
+        return before + bubbles
     }
 
     /// `-native-polish`'s rows (ov-452), as the owner's own check-in came.
