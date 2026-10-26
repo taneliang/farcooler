@@ -62,7 +62,7 @@ fn kept_log() -> Option<farcooler_daemon::daemon_log::RotatingLog> {
         return None;
     }
     let dir = log::log_dir()?;
-    log::RotatingLog::open(&dir, log::MAX_BYTES, log::KEEP, true)
+    log::RotatingLog::open(&dir, log::MAX_BYTES, log::KEEP, true, Some(log::SWEEP_EVERY))
         .inspect_err(|e| eprintln!("cannot keep a log in {}: {e}", dir.display()))
         .ok()
 }
@@ -301,7 +301,9 @@ async fn run() -> Result<(), i32> {
     let tunnel_service = service.clone();
     tokio::spawn(async move {
         if let Some(blob) = farcooler_daemon::allowlist::start_tunnel(&tunnel_service).await.blob() {
-            tracing::info!(token = %blob, "serving the tunnel");
+            // The token is a dial credential and the log is a file that outlives
+            // this process: say that it exists, and how long, never what it is.
+            tracing::info!(token_chars = blob.chars().count(), "serving the tunnel");
         }
     });
 

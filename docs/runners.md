@@ -181,12 +181,13 @@ log out of it.
 ## Troubleshooting
 
 **Where the runner's log is** — `farcoolerd` keeps its own log: `farcoolerd.log`
-and up to two older files beside it (`.1`, `.2`), about 2 MB each. On a Mac it is
+and up to two older files beside it (`.1`, `.2`), roughly 2 MB each. On a Mac it is
 in `~/Library/Logs/com.farcooler.FarCooler` (the channel's name replaces
 `FarCooler` on preview and canary), and Help > Show Runner Log in Finder opens
 it. On a Linux runner it is the `logs` folder inside the data folder that holds
 `farcooler.db`. It holds the daemon's warnings and the reasons it refused
-something, never message text.
+something, never message or prompt text or a credential. Some lines name paths,
+branch names or a git command's own error.
 
 **"`farcoolerd --stdio` did not answer"** — the binary is not on the remote
 user's `PATH`. `~/.local/bin` is added by the login shell, so check that the
