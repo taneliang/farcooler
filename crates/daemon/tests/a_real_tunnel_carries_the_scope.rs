@@ -185,6 +185,72 @@ async fn a_revoked_device_does_not_reach_sshd_through_the_tunnel() {
     );
 }
 
+/// Revoking one device CLOSES every other device's live session at once, so
+/// it redials, instead of leaving it to hang until the ssh keepalive gives up.
+///
+/// A revoke rebuilds the runner's tunnel server, because tailcat can only
+/// replace an allowlist; the new server has none of the old one's WireGuard
+/// peers or TCP connections. Before ov-762 the old server was simply closed,
+/// so nothing told a surviving device: its session kept the old tunnel, every
+/// write went unanswered, and it learned only from the keepalive (30 s × 3 in
+/// `Session::open`). Measured here before the fix: the laptop's next call failed after 118.9 s. What has to hold
+/// is that the laptop's call fails within [`A_DROP_IS_SEEN_WITHIN`] — the
+/// runner sends it a FIN — and that redialing then gets through, which is the
+/// phones' reconnect.
+///
+/// The bound is asserted against a call made AFTER the revoke has returned,
+/// so it measures what a person would see on their next keystroke.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn revoking_one_device_closes_the_others_sessions_instead_of_hanging_them() {
+    /// Seconds, not the keepalive's minutes. The FIN rides the same relay as
+    /// every keystroke, so on loopback this is milliseconds; the margin is for
+    /// a loaded machine, not for a design that polls.
+    const A_DROP_IS_SEEN_WITHIN: Duration = Duration::from_secs(5);
+    /// How long to watch before calling it a hang. Longer than the keepalive's
+    /// 90 s so the unfixed number is measured rather than truncated.
+    const WATCH: Duration = Duration::from_secs(150);
+
+    let _serial = SERIAL.lock().await;
+    let relay = derper::start().await;
+    let phone = Device::mint("phone-7", Scope::Read);
+    let laptop = Device::mint("laptop-2", Scope::Read);
+    let mut runner = Runner::start(&relay, &[&phone, &laptop]).await;
+
+    // Two live sessions, each shown to answer, before anything is revoked.
+    let mut phone_session = reach(&runner, &phone).await;
+    let mut phone_client = speak(&mut phone_session).await;
+    phone_client.call(request("client.list")).await.expect("the phone's session answers");
+    let mut laptop_session = reach(&runner, &laptop).await;
+    let mut laptop_client = speak(&mut laptop_session).await;
+    laptop_client.call(request("client.list")).await.expect("the laptop's session answers");
+
+    runner.revoke(&phone, &[&laptop]).await;
+
+    let began = Instant::now();
+    let answer = tokio::time::timeout(WATCH, laptop_client.call(request("client.list"))).await;
+    let waited = began.elapsed();
+    derper::note(&format!("after the revoke the laptop's call ended in {waited:?}: {answer:?}"));
+    match answer {
+        Err(_) => panic!("the laptop's session hung for {WATCH:?} after another device was revoked"),
+        Ok(Ok(_)) => panic!(
+            "the laptop's call was answered over a tunnel that was rebuilt underneath it, \
+             which this test does not expect: a rebuilt server has no TCP state"
+        ),
+        Ok(Err(error)) => assert!(
+            waited < A_DROP_IS_SEEN_WITHIN,
+            "the laptop learned its session was gone only after {waited:?} ({error}); \
+             a revoke must close a surviving session, not leave it to the keepalive"
+        ),
+    }
+    drop(laptop_client);
+    drop(laptop_session);
+    drop(phone_client);
+    drop(phone_session);
+
+    // The reconnect: the surviving device dials again and is admitted.
+    reach(&runner, &laptop).await;
+}
+
 /// A Mac's `farcooler runner pipe` reaches the runner's sshd through the
 /// tunnel, from a `runners.json` the shipped commands wrote.
 ///
