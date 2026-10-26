@@ -75,6 +75,38 @@ final class TalkSeats: ObservableObject {
         }
     }
 
+    /// Whether the runner removed this phone's member from its team
+    /// (ov-784): every read but `member.list` is refused, and that one says
+    /// `(released)`. What puts "You Were Removed from This Runner" on its row.
+    var removed: Bool { people?.isReleased == true }
+
+    /// Check Again, on a removed runner's row: the next refusal reads
+    /// `member.list` at once rather than after `staleAfter`.
+    func checkAgain() { lastRead = nil }
+
+    /// After the fleet read failed with `error`: whether it's because this
+    /// phone's member was removed. A refusal as someone else's (`not_yours`)
+    /// asks `member.list` straight, whatever the build says it can do, since
+    /// a removed phone is refused the read that says; again at most every
+    /// `staleAfter` once removed, so being added back is noticed.
+    func noticeRemoval(after error: Error, on connection: Connection) async -> Bool {
+        guard let core = error as? ClientCore.CoreError, case let .rejected(_, _, what) = core, what == "not_yours",
+            !reading
+        else { return false }
+        if removed, let lastRead, Date().timeIntervalSince(lastRead) < Self.staleAfter { return true }
+        reading = true
+        defer { reading = false }
+        guard let data = try? await connection.rpc("member.list"), let read = RunnerPeople(json: data) else {
+            return removed
+        }
+        connection.objectWillChange.send()
+        people = read
+        failed = false
+        lastRead = Date()
+        UserDefaults.standard.set(read.you, forKey: youKey)
+        return read.isReleased
+    }
+
     /// Open `handle`'s rep in `workspace`: nil when it started (or turned out
     /// to be running already), else what to say. The phone names its own
     /// handle; the runner refuses any other.

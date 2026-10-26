@@ -179,6 +179,33 @@ final class RunnerSettingsModel: ObservableObject {
         people = updated
     }
 
+    /// Whether the runner keeps members' roles (`member_roles`, ov-757):
+    /// what the owner's role picker waits on.
+    var hasRoles: Bool { connection.daemon?.can(.memberRoles) == true }
+
+    /// Give a member a role (`member.set_role`, ov-784): the runner's owner
+    /// only. The list comes back with the role as it now is; a refusal or no
+    /// answer leaves `people` as it was, so the picker goes back to what the
+    /// runner has, and says so in `failure`.
+    func setRole(_ handle: String, _ role: RunnerPeople.Role) async {
+        let data: Data
+        do {
+            data = try await connection.rpc("member.set_role", ["handle": handle, "role": role.rawValue])
+        } catch ClientCore.CoreError.rejected {
+            failure = RunnerPeople.roleNotSaved
+            return
+        } catch {
+            failure = Self.notReached
+            return
+        }
+        guard let updated = RunnerPeople(json: data) else {
+            failure = RunnerPeople.roleNotSaved
+            return
+        }
+        failure = nil
+        people = updated
+    }
+
     /// The sentence for a write that got no answer: nothing changed here,
     /// and it may not have reached the runner.
     private static let notReached = "Couldn’t reach that runner, so nothing changed. Try again."
@@ -313,7 +340,9 @@ struct RunnerSettingsView: View {
                             sharedAccount: people.sharedClaudeAccount)
                 }
                 RunnerPeopleSection(
-                    people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered)
+                    people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered,
+                    setRole: people.offersRoles(runnerHasRoles: model.hasRoles)
+                        ? { handle, role in await model.setRole(handle, role) } : nil)
                 // Whether members share this runner's logins (ov-652).
                 if let logins = people.ownLogins {
                     MemberLoginsSection(

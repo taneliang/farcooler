@@ -809,6 +809,9 @@ AGENTKIT_SOURCES = [
     # Whom a device talks to in a workspace: the orchestrator, or a member's
     # own rep (ov-526).
     "RunnerPeopleTalk.swift",
+    # Roles on a shared runner: the owner's role picker, who edits a
+    # charter, and the words for a removed device (ov-784).
+    "RunnerPeopleRoles.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule
     # the Mac and the phone share, and the board notice that says which
     # workspace's board to read again. `CoreModel.swift` decodes the fleet's

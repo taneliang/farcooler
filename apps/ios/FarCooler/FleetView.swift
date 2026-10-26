@@ -222,7 +222,7 @@ struct FleetView: View {
     /// is every time any connection publishes — the store republishes on each
     /// of them, and this view observes the store.
     private var unanswered: [(host: Runner, connection: Connection)] {
-        fleet.runners.filter { $0.connection.phase != .connected }
+        fleet.runners.filter { $0.connection.phase != .connected || $0.connection.talk.removed }
     }
 
     /// Every runner, and what each of them is doing, while none of them has

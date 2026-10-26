@@ -1060,6 +1060,7 @@ final class Connection: ObservableObject {
             if let core = error as? ClientCore.CoreError, case .disconnected = core, link == daemonLink {
                 linkDropped()
             }
+            if await talk.noticeRemoval(after: error, on: self) { (fleet, hasFleet) = (.empty, false) }  // ov-784
             return
         }
 

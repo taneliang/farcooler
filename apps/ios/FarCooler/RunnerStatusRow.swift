@@ -112,7 +112,7 @@ struct RunnerStatusRow: View {
         // an early return rather than a branch that draws an `EmptyView` inside
         // the stack, so a list of these adds no spacing for the runners that are
         // fine.
-        if case .connected = connection.phase {
+        if case .connected = connection.phase, !connection.talk.removed {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 6) {
@@ -130,6 +130,36 @@ struct RunnerStatusRow: View {
 
     @ViewBuilder
     private var content: some View {
+        // The runner removed this phone's member (ov-784): connected, and
+        // shown nothing. Said in place of everything else about it, with the
+        // one move that helps once they're added back.
+        if connection.talk.removed {
+            removed
+        } else {
+            phaseContent
+        }
+    }
+
+    /// "You Were Removed from This Runner", what it means, and Check Again,
+    /// which reads the runner afresh.
+    @ViewBuilder
+    private var removed: some View {
+        Text(RunnerPeople.removedTitle)
+            .font(.subheadline.weight(.semibold))
+            .accessibilityIdentifier("runner-removed")
+        Text(RunnerPeople.removedBody)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Button("Check Again") {
+            connection.talk.checkAgain()
+            onRetry()
+        }
+        .font(.footnote)
+    }
+
+    @ViewBuilder
+    private var phaseContent: some View {
         switch connection.phase {
         case .connected:
             EmptyView()

@@ -105,7 +105,7 @@ struct NeedsYouScreen: View {
     /// it's about.
     @ViewBuilder
     private var trouble: some View {
-        let troubled = fleet.runners.filter { $0.connection.phase != .connected }
+        let troubled = fleet.runners.filter { $0.connection.phase != .connected || $0.connection.talk.removed }
         if !troubled.isEmpty {
             Section {
                 ForEach(troubled, id: \.host.id) { runner in
