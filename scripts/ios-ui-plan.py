@@ -65,6 +65,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PATTERNS = [
     r"apps/ios/",
     r"apps/shared/",
+    r"crates/ceremony/",
     r"crates/client/",
     r"crates/core/",
     r"crates/fence/",
@@ -198,6 +199,7 @@ def self_test():
     SAMPLES = [
         "apps/ios/FarCooler/App.swift",
         "apps/shared/AgentKit/Sources/x.swift",
+        "crates/ceremony/src/lib.rs",
         "crates/client/src/lib.rs",
         "crates/core/src/lib.rs",
         "crates/fence/src/lib.rs",

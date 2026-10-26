@@ -46,7 +46,7 @@ let package = Package(
         // The Mac reaches runners by running `ssh`, which is why this library
         // was a phone's concern until now. What changed is that every rule
         // deciding whether a scanned code is acceptable lives in
-        // crates/client/src/ceremony.rs, and a Mac that could not call it would
+        // crates/ceremony/src/lib.rs, and a Mac that could not call it would
         // be a third implementation of those rules — which is the duplication
         // the Rust core exists to prevent.
         .systemLibrary(name: "CFarCoolerClient", path: "Sources/CFarCoolerClient"),

@@ -123,7 +123,7 @@ internal object NativeClient {
     // MARK: - The enrollment ceremony
     //
     // Four moments, and every rule about whether a scan is acceptable is behind
-    // them in `crates/client/src/ceremony.rs`. Each answers the payload it was
+    // them in `crates/ceremony/src/lib.rs`. Each answers the payload it was
     // asked for, or `{"error":"stale"}` — a stable word this app owns the
     // sentence for. Kotlin decides nothing.
     //

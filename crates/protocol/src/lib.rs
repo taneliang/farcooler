@@ -1057,6 +1057,24 @@ pub mod method {
     }
 }
 
+/// Whether a tailcat node public key is spelled the one way this product
+/// writes it: 43 characters of unpadded base64-URL, and nothing else.
+///
+/// Deliberately not a base64 decode: what matters is that the string cannot end
+/// the quoted command the fence interpolates it into, and a decoder that
+/// accepts whitespace or padding would let it. An X25519 public key is 32
+/// bytes, so the length is a constant rather than a range.
+///
+/// Here rather than in `farcooler-fence`, which re-exports it, because two
+/// callers ask it: the fence before it writes `--node-key` into a line, and the
+/// enrollment ceremony of an offer — "is this a key a tunnel could ever admit".
+/// A second spelling would be a second answer, and the ceremony builds for a
+/// browser where the fence's file writer cannot (ov-764).
+pub fn usable_node_key(node_key: &str) -> bool {
+    node_key.len() == 43
+        && node_key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// Control envelopes are capped at 1 MiB.
 pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 

@@ -37,7 +37,7 @@ import kotlin.coroutines.resume
 // four entry points below — version, channel, freshness, the account, the three
 // echoes, the byte budget. This file shows a code, points a camera at one, and
 // turns the word that comes back into a sentence. If something here starts to
-// look like validation, it belongs in `crates/client/src/ceremony.rs` instead.
+// look like validation, it belongs in `crates/ceremony/src/lib.rs` instead.
 //
 // A refusal crosses as a stable word, never a sentence: `{"error":"stale"}`. The
 // copy for each is [Refusal], and it is the app's, so no Rust error string can
@@ -410,7 +410,7 @@ object CeremonyCore : CeremonyCalls {
      * The client id a device is enrolled under, derived from its own key.
      *
      * Derived in Rust, and derived rather than invented for the reason
-     * `client_id` gives in `crates/client/src/ceremony.rs`: an id that comes out
+     * `client_id` gives in `crates/ceremony/src/lib.rs`: an id that comes out
      * of the key is stable, so a device re-running a ceremony against a runner
      * it is already on lands on the id already in that runner's fence instead of
      * enrolling a second line naming the same device. The daemon's "this device

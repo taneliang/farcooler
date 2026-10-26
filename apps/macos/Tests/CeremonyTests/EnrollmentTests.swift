@@ -142,7 +142,7 @@ struct EnrollmentTests {
     // MARK: - The id a device is enrolled under
 
     /// Two real Ed25519 public keys, the same pair
-    /// `crates/client/src/ceremony.rs`'s own tests use, so the ids asserted here
+    /// `crates/ceremony/src/lib.rs`'s own tests use, so the ids asserted here
     /// and the ids asserted there are the ids of the same keys.
     static let keyA =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1iLbeqDzK4CDeUC3t+ffVPDI9Gk+sBwIZqJZW1NfS5 device-a"

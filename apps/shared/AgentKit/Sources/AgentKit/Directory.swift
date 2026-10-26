@@ -175,7 +175,7 @@ public struct DirectoryClient {
     /// isn't personal, as `{"me": …, "rosters": […]}`.
     ///
     /// Passed on as the relay sent them, unjudged: which teams and roles
-    /// count is `crates/client/src/ceremony/teammate.rs`'s to decide. A
+    /// count is `crates/ceremony/src/teammate.rs`'s to decide. A
     /// roster the relay refused is left out, and the core treats a team
     /// it needed and doesn't have as an answer it can't use. Nil when `me`
     /// itself didn't answer, which the core refuses as unreachable.

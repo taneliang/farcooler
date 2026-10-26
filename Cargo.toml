@@ -10,6 +10,7 @@ members = [
     "crates/transport",
     "crates/tailcat",
     "crates/fence",
+    "crates/ceremony",
     "crates/ffi-guard",
     "crates/vt",
     "crates/review",
@@ -35,6 +36,7 @@ farcooler-tmux = { path = "crates/tmux" }
 farcooler-transport = { path = "crates/transport" }
 farcooler-tailcat = { path = "crates/tailcat" }
 farcooler-fence = { path = "crates/fence" }
+farcooler-ceremony = { path = "crates/ceremony" }
 farcooler-ffi-guard = { path = "crates/ffi-guard" }
 farcooler-review = { path = "crates/review" }
 farcooler-client = { path = "crates/client" }

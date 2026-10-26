@@ -23,7 +23,7 @@ struct CeremonyOffer: Codable, Equatable {
     /// The device's tailcat node public key: 43 characters of unpadded
     /// base64-URL, or empty from a device that has none.
     ///
-    /// **Optional here, not on the wire.** `crates/client/src/ceremony.rs`
+    /// **Optional here, not on the wire.** `crates/ceremony/src/lib.rs`
     /// always serializes it, so a code this build scanned always carries the
     /// key. Decoding it as optional anyway costs one `?? ""` and buys the one
     /// thing that matters: a missing field turns into an empty node key rather
@@ -49,7 +49,7 @@ struct CeremonyOffer: Codable, Equatable {
 /// needs to trust it with.
 ///
 /// Field names are the wire's, not Swift's, because this round-trips through
-/// `crates/client/src/ceremony.rs` byte for byte and a `CodingKeys` table is a
+/// `crates/ceremony/src/lib.rs` byte for byte and a `CodingKeys` table is a
 /// second place for a name to be wrong.
 struct CeremonyRunner: Codable, Equatable, Identifiable {
     var id: String
@@ -380,7 +380,7 @@ enum Refusal: Equatable {
 
 // MARK: - The four entry points
 
-/// The ceremony, as four calls into `crates/client/src/ceremony.rs`.
+/// The ceremony, as four calls into `crates/ceremony/src/lib.rs`.
 ///
 /// Every one of them takes the buffer contract `farcooler_client_generate_key`
 /// has used since the first release: JSON into a buffer, returning the bytes

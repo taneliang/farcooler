@@ -104,7 +104,7 @@ export async function createTeam(request: Request, env: Env): Promise<Response> 
 /// also comes, to the team's admins, with `keys`: the Key A
 /// fingerprint of each of their devices that is trusted or certified (ov-549).
 /// That is what a runner admin's scan checks a teammate's code against
-/// (`crates/client/src/ceremony/teammate.rs`). A pending device isn't listed:
+/// (`crates/ceremony/src/teammate.rs`). A pending device isn't listed:
 /// nothing vouched for it, and a stolen session can register one. A revoked
 /// one isn't either. Nobody else gets the field at all, so its absence says
 /// "not told", and an empty list says "none registered".

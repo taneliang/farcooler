@@ -123,7 +123,7 @@ enum DeviceKey {
     /// goes into that device's line comes from that key.
     ///
     /// **Derived, not invented.** `farcooler_client_client_id` is
-    /// `crates/client/src/ceremony.rs`'s `client_id` — the one place the format
+    /// `crates/ceremony/src/lib.rs`'s `client_id` — the one place the format
     /// is decided, so the Mac, iOS and Android spell one device one way. That
     /// matters twice. The daemon's "this device is already enrolled" arm
     /// compares client ids, so an id invented per platform defeats it; and the

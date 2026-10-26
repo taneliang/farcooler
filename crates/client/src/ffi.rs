@@ -1717,7 +1717,7 @@ async fn dispatch(
         // MARK: - Device enrollment
         //
         // The end of the ceremony, and the only part of it that changes
-        // anything: `crates/client/src/ceremony.rs` decides whether a scan is
+        // anything: `crates/ceremony/src/lib.rs` decides whether a scan is
         // acceptable, and these three write the result into the file sshd reads.
         //
         // Unrouted until now, which made the whole feature unreachable from

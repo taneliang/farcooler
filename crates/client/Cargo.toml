@@ -31,6 +31,9 @@ farcooler-protocol.workspace = true
 farcooler-transport.workspace = true
 farcooler-ffi-guard.workspace = true
 farcooler-tailcat.workspace = true
+# The ceremony's codes and rules, re-exported as `ceremony` so every caller is
+# unchanged. Their own crate so the browser builds the same rules (ov-764).
+farcooler-ceremony.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 uuid.workspace = true

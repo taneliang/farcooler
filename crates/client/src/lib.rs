@@ -9,7 +9,9 @@
 //! between platforms in one place, and give the platforms a narrow boundary.
 
 pub mod actions;
-pub mod ceremony;
+/// The enrollment ceremony, from its own crate so the browser runs the same
+/// rules (ov-764). Re-exported under its old name, so no caller changed.
+pub use farcooler_ceremony as ceremony;
 pub mod deadlines;
 pub mod device_keys;
 pub mod changes_json;

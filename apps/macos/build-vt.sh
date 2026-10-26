@@ -8,7 +8,7 @@
 #
 # Two libraries now, not one. The terminal core has always been here; the client
 # core arrived with device onboarding, because every rule about whether a
-# scanned code is acceptable lives in crates/client/src/ceremony.rs and a Mac
+# scanned code is acceptable lives in crates/ceremony/src/lib.rs and a Mac
 # that could not call it would be a third implementation of those rules. The
 # name is still build-vt.sh: build-app.sh, the release script and everyone's
 # muscle memory call it by that name, and renaming it buys a tidier filename at

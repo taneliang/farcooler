@@ -10,7 +10,7 @@ import UIKit
 // four entry points below — version, channel, freshness, the three echoes, the
 // byte budget. This file shows a code, points a camera at one, and turns the
 // word that comes back into a sentence. If something here starts to look like
-// validation, it belongs in `crates/client/src/ceremony.rs` instead.
+// validation, it belongs in `crates/ceremony/src/lib.rs` instead.
 //
 // A refusal crosses as a stable word, never a sentence: `{"error":"stale"}`.
 // The copy for each is `Refusal` below, and it is the app's, so no Rust error
@@ -32,7 +32,7 @@ struct CeremonyOffer: Decodable, Equatable {
     /// unpadded base64-URL, or empty from a device that has none — the device
     /// this one is being asked to add, never this one.
     ///
-    /// **Optional here, not on the wire.** `crates/client/src/ceremony.rs`
+    /// **Optional here, not on the wire.** `crates/ceremony/src/lib.rs`
     /// always serializes it, so a code this build scanned always carries the
     /// key. Decoding it as optional anyway costs one `?? ""` and buys the one
     /// thing that matters: a missing field turns into an empty node key rather

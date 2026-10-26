@@ -692,20 +692,14 @@ fn usable_client_id(client_id: &str) -> bool {
 
 /// 43 characters of unpadded base64, and nothing else.
 ///
-/// Deliberately not a base64 decode: what matters here is that the string
-/// cannot end the quoted command it is interpolated into, and a decoder that
-/// accepts whitespace or padding would let it. An X25519 public key is 32
-/// bytes, so the length is a constant rather than a range.
-///
-/// `pub` because the enrollment ceremony asks the same question of the node key
-/// in an offer — "is this a key a tunnel could ever admit" — and a second
-/// spelling of the predicate is a second answer. A device whose node key this
-/// refuses is a device `render` would refuse to write a line for, so granting it
-/// a tunneled runner would grant something no allowlist will ever contain.
-pub fn usable_node_key(node_key: &str) -> bool {
-    node_key.len() == 43
-        && node_key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
+/// Defined in `farcooler-protocol` and re-exported here, so every caller that
+/// names it through the fence is unchanged. It moved because the enrollment
+/// ceremony asks the same question of the node key in an offer — "is this a key
+/// a tunnel could ever admit" — and the ceremony now builds for a browser,
+/// where this crate's file writer cannot (ov-764). One function, so still one
+/// answer: a device whose node key this refuses is a device `render` would
+/// refuse to write a line for.
+pub use farcooler_protocol::usable_node_key;
 
 /// The key is the identity; the comment is a label for humans.
 ///

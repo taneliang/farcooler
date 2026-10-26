@@ -51,15 +51,15 @@
 use std::time::Duration;
 
 use rand::RngExt;
-use russh::keys::ssh_key;
 use serde::{Deserialize, Serialize};
 
-/// How a granted runner is reached, re-exported rather than redefined.
+/// How a granted runner is reached.
 ///
-/// One enum, because a reply writes it and [`crate::ssh::Destination`] reads
-/// it: two definitions that agree today are two definitions that disagree after
-/// the next variant.
-pub use crate::ssh::Reach;
+/// One enum, because a reply writes it and `farcooler_client::ssh::Destination`
+/// reads it: two definitions that agree today are two definitions that
+/// disagree after the next variant.
+mod reach;
+pub use reach::Reach;
 
 mod fit;
 pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
@@ -513,11 +513,13 @@ pub fn accept_manifest(
 /// a v=1 device the day one learns to carry a key. The version says what a code
 /// can express; the node key says what the device it came from can be granted.
 ///
-/// The predicate is `farcooler_fence`'s own, not a second spelling of it: a key
+/// The predicate is the fence's own, not a second spelling of it: it lives in
+/// `farcooler-protocol` so this crate can build for a browser, and
+/// `farcooler_fence::usable_node_key` is the same function re-exported. A key
 /// this refuses is a key `fence::render` would refuse to write, so it could
 /// never appear in the allowlist the runner's tunnel admits.
 fn can_be_granted_a_tunnel(offer: &Offer) -> bool {
-    farcooler_fence::usable_node_key(&offer.node_key)
+    farcooler_protocol::usable_node_key(&offer.node_key)
 }
 
 fn has_a_tunneled_runner(manifest: &Manifest) -> bool {

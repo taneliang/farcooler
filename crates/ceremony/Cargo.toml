@@ -1,0 +1,36 @@
+[package]
+name = "farcooler-ceremony"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The enrollment ceremony's two codes and every rule that refuses one, in a
+# crate of their own so the browser runs the same rules (ov-764). Out of
+# `farcooler-client`, which re-exports it as `farcooler_client::ceremony`, so
+# every native caller is unchanged.
+#
+# Nothing here may reach for a socket, a file or a thread: `crates/web` builds
+# it for wasm32-unknown-unknown. That is why the node-key predicate comes from
+# `farcooler-protocol` rather than from `farcooler-fence`, whose file writer
+# is unix syscalls.
+[lib]
+name = "farcooler_ceremony"
+
+[dependencies]
+farcooler-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# The same version russh brings, so a fingerprint here is the one the
+# daemon's fence and the host-key check print. `alloc` is all the ceremony
+# asks of it: parsing an OpenSSH public key and printing its SHA256.
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
+# The ceremony id's 128 random bits, from the RNG russh itself uses.
+rand = "0.10"
+
+# A browser has no OS RNG for rand to call, so wasm asks the page's
+# `crypto.getRandomValues` for the ceremony id's bits. Not a native build's
+# concern: the target gate keeps it off every other graph.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }

@@ -879,6 +879,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "farcooler-ceremony"
+version = "0.1.0"
+dependencies = [
+ "farcooler-protocol",
+ "getrandom 0.4.3",
+ "rand",
+ "serde",
+ "serde_json",
+ "ssh-key",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "farcooler-cli"
 version = "0.1.0"
 dependencies = [
@@ -915,6 +928,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "farcooler-ceremony",
  "farcooler-core",
  "farcooler-daemon",
  "farcooler-fence",
