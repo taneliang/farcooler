@@ -594,6 +594,12 @@ def main(argv):
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
+    # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
+    # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
+    left_out = [j for j in JOBS if j in reach and j not in chosen]
+    partial = bool(left_out) and bool(only or skip)
+    if partial:
+        print(f"lane-gate: PARTIAL GATE: --only/--skip leaves out {', '.join(left_out)}, which this diff reaches")
     print(f"lane-gate: {len(files)} changed file(s) against {args.base}; jobs: {', '.join(chosen) or 'none'}")
     for j in chosen:
         why = reach[j][:3]
@@ -617,7 +623,7 @@ def main(argv):
         failed = True
         raise
     finally:
-        print_summary(rows, repo, args.base, logdir, failed)
+        print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [])
         shutil.rmtree(tmp, ignore_errors=True)
     return 1 if failed else 0
 
@@ -656,15 +662,21 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     return failed
 
 
-def print_summary(rows, repo, base, logdir, failed):
-    print("\n## lane-gate summary\n")
+def print_summary(rows, repo, base, logdir, failed, left_out=()):
+    print("\n## lane-gate summary" + (" (PARTIAL)" if left_out else "") + "\n")
     head = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     print(f"Branch HEAD {head} against {base}; logs in {logdir}\n")
     print("| Job | Command | Result | Secs | Tests |")
     print("| --- | --- | --- | --- | --- |")
     for r in rows:
         print("| " + " | ".join(md(c) for c in r) + " |")
-    print("\nlane-gate: FAILED" if failed else "\nlane-gate: all steps passed", flush=True)
+    note = f" (PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run by --only/--skip)" if left_out else ""
+    if failed:
+        print("\nlane-gate: FAILED" + note, flush=True)
+    elif left_out:
+        print(f"\nlane-gate: PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run (--only/--skip); the steps that ran passed", flush=True)
+    else:
+        print("\nlane-gate: all steps passed", flush=True)
 
 
 # ---------------------------------------------------------------- self-test
@@ -926,6 +938,17 @@ def self_test():
         run_jobs = real_run_jobs
     text_out = out.getvalue()
     expect("the summary table prints after an exception", ("## lane-gate summary" in text_out, "a step that ran" in text_out, "FAIL: RuntimeError: the gate tripped" in text_out, "lane-gate: FAILED" in text_out), (True, True, True, True))
+
+    # A filtered gate says so in its summary heading and its last line, and an unfiltered one does not (ov-817).
+    for left, failed_, want_head, want_last in [
+        (["relay", "wire"], False, "## lane-gate summary (PARTIAL)", "lane-gate: PARTIAL, NOT A FULL GATE: relay, wire not run"),
+        ([], False, "## lane-gate summary\n", "lane-gate: all steps passed"),
+    ]:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_summary([("wire", "x", "pass", "1", "")], ROOT, "HEAD", "/tmp", failed_, left)
+        o = buf.getvalue()
+        expect(f"summary with {len(left)} job(s) left out", (want_head in o, want_last in o, ("PARTIAL" in o) == bool(left)), (True, True, True))
 
     for failure in failures:
         print(f"lane-gate self-test: {failure}", file=sys.stderr)
