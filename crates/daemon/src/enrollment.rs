@@ -343,7 +343,7 @@ async fn tunnel_route(svc: &Service, node_key: &str) -> String {
 /// are two things that can disagree about who a runner admits.
 ///
 /// Both calls are synchronous and hold the Go side's package-wide mutex —
-/// `serve` on the same runner can hold it for 30-45 seconds — so neither may
+/// `serve` on the same runner can hold it for 30-50 seconds — so neither may
 /// run on a runtime worker.
 async fn admit_to_a_running_tunnel(node_key: &str) -> Option<String> {
     let admitting = node_key.to_string();

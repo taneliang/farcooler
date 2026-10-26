@@ -198,15 +198,17 @@ async fn withdraw(key_path: PathBuf, ssh_port: u16) {
 /// split out rather than inlined here.
 ///
 /// `farcooler_tailcat::serve` and `conn_blob` are synchronous and can block
-/// for 30-45 seconds: the Go side holds a package-wide mutex for the whole of
+/// for 30-50 seconds: the Go side holds a package-wide mutex for the whole of
 /// `serve`, which includes up to two 15-second region-pick budgets plus two
-/// `Start` attempts. Both run on the blocking pool so a slow tunnel start
+/// `Start` attempts, plus up to 2 more seconds hanging up the old server's
+/// live tunnels before it closes (ov-762; on the helper backend, up to 5
+/// before a helper that will not stop is killed). Both run on the blocking pool so a slow tunnel start
 /// never stalls the runtime workers serving this daemon's Unix socket. The
 /// `authorized_keys` read runs there too, for the same reason
 /// `enrollment.rs`'s file work does.
 ///
 /// Callers must not `.await` this inline before the daemon binds its Unix
-/// socket: the same 30-45 seconds happens before this runner is reachable at
+/// socket: the same 30-50 seconds happens before this runner is reachable at
 /// all if they do. See the call site in `main.rs`.
 pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
     let key_path = service.tailcat_key();

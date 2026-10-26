@@ -50,7 +50,8 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
+use std::time::Duration;
 
 /// Where to find the helper, when it is not next to this executable.
 ///
@@ -84,13 +85,58 @@ impl Drop for Helper {
     /// running helper precisely so a revoked device stops being admitted, and
     /// two helpers briefly serving two allowlists is the state that would
     /// undo.
+    ///
+    /// Killing sends the devices nothing, so `serve` asks a serving helper to
+    /// `stop` first (`Helper::stop`); by the time this runs there is nothing
+    /// left to hang up, or the helper would not answer.
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
+/// How long a helper being replaced gets to hang up its tunnels before it is
+/// killed anyway.
+///
+/// The helper's own bound is `drainTimeout` in `tailcat.go` (2 s) plus closing
+/// its server; this is that with room to spare, and it exists only for a helper
+/// that is wedged or too old to know `stop`. Shorter under test so the
+/// wedged-helper test does not wait out the production number.
+const STOP_WITHIN: Duration =
+    if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(5) };
+
 impl Helper {
+    /// Asks the helper to hang up every live tunnel and close its server, and
+    /// waits at most `STOP_WITHIN` for it to say it has.
+    ///
+    /// Killing it outright is what this used to do, and that is the ov-762
+    /// freeze on Linux: the helper is the only process holding the tunnels, so
+    /// a SIGKILL sends no FIN and every device that was NOT revoked keeps a
+    /// session nobody answers until its keepalive gives up (119 s measured on
+    /// the linked backend, which had the same silent close). The answer comes
+    /// only once the server is closed, so after this returns the helper admits
+    /// nobody, and `Drop`'s promise — never two helpers serving two allowlists
+    /// — still holds.
+    ///
+    /// A helper that does not answer in time is killed by the watchdog, which
+    /// ends the read below with EOF. Its pid cannot have been reused: the
+    /// child is not reaped until `Drop`, after the watchdog is joined.
+    fn stop(&mut self) {
+        let pid = self.child.id() as libc::pid_t;
+        let (answered, wait) = mpsc::channel::<()>();
+        let watchdog = std::thread::spawn(move || {
+            if wait.recv_timeout(STOP_WITHIN) == Err(mpsc::RecvTimeoutError::Timeout) {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        });
+        let outcome = self.ask("stop").and_then(|reply| parse(&reply).map(|_| ()));
+        let _ = answered.send(());
+        let _ = watchdog.join();
+        if let Err(error) = outcome {
+            tracing::warn!(%error, "the tunnel helper did not hang up its tunnels; killing it");
+        }
+    }
+
     /// Sends one command and returns what came back, without the trailing
     /// newline.
     fn ask(&mut self, command: &str) -> Result<String, TunnelError> {
@@ -229,6 +275,13 @@ pub fn serve(key_path: &Path, ssh_port: u16, allow: &[String]) -> Result<(), Tun
     // `allowlist::start_tunnel` hands this an allowlist admitting nobody
     // precisely when the last tunneled device has just been revoked, and a
     // refusal that returned before this line would leave that device peered.
+    //
+    // Asked to stop before it is dropped, so the devices that were not
+    // revoked hear their tunnels end and redial rather than hang (see
+    // `Helper::stop`).
+    if let Some(running) = slot.as_mut() {
+        running.stop();
+    }
     *slot = None;
 
     // Refused before anything is SPAWNED, which is the assertion
@@ -704,6 +757,84 @@ mod tests {
         );
 
         super::super::set_derp_map_url("");
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// Replacing a running helper asks it to stop FIRST, and only then starts
+    /// the next one (ov-762).
+    ///
+    /// The old helper is the only process holding the live tunnels. Killed
+    /// without warning it sends no FIN, and every device that was not revoked
+    /// hangs until its keepalive gives up. The pids prove the order: the stop
+    /// came from the old process, before the new process heard its serve.
+    #[test]
+    fn replacing_a_helper_asks_it_to_stop_before_the_next_one_serves() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43), "b".repeat(43)]).expect("the first serve");
+        serve(&key, 22, &["b".repeat(43)]).expect("the revoke's serve");
+
+        let lines = heard(&log);
+        assert_eq!(
+            commands(&log),
+            [
+                format!("serve 22 {} {}", "a".repeat(43), "b".repeat(43)),
+                "stop".to_string(),
+                format!("serve 22 {}", "b".repeat(43)),
+            ],
+            "the old helper was not asked to stop before the new one served: {lines:?}"
+        );
+        assert_eq!(lines[0].0, lines[1].0, "stop went to a different helper: {lines:?}");
+        assert_ne!(lines[1].0, lines[2].0, "the revoke did not start a new helper: {lines:?}");
+
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// A helper that never answers `stop` — wedged, or too old to know it —
+    /// costs `STOP_WITHIN` and is killed, rather than holding the revoke up.
+    #[test]
+    fn a_helper_that_never_answers_stop_is_killed_after_the_bound() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        // Answers everything but stop, on which it turns into a sleep that
+        // will never answer. `exec`, so the pid the watchdog kills IS the
+        // sleep, and nothing is left behind.
+        let script = dir.path().join("wedged-tunnel-helper");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\t%s\\n' \"$$\" \"$line\" >> {}\n  [ \"$line\" = stop ] && exec sleep 30\n  echo ok\ndone\n",
+                log.display()
+            ),
+        )
+        .expect("the wedged helper is written");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("the wedged helper is executable");
+        unsafe { std::env::set_var(HELPER_PATH_ENV, &script) };
+
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the first serve");
+        let began = std::time::Instant::now();
+        serve(&key, 22, &["a".repeat(43)]).expect("the second serve, past a wedged helper");
+        let took = began.elapsed();
+        assert!(
+            took >= STOP_WITHIN && took < STOP_WITHIN + Duration::from_secs(2),
+            "replacing a wedged helper took {took:?}, want just over {STOP_WITHIN:?}"
+        );
+        assert_eq!(commands(&log).len(), 3, "{:?}", heard(&log));
+
         *helper().lock().expect("the tunnel helper lock") = None;
         unsafe { std::env::remove_var(HELPER_PATH_ENV) };
     }

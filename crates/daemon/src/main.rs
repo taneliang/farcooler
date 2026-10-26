@@ -249,11 +249,12 @@ async fn run() -> Result<(), i32> {
     // somebody would use to fix it.
     //
     // `tokio::spawn`, not `.await`ed inline. `start_tunnel` can block on the
-    // blocking pool for 30-45 seconds — the Go side holds a package-wide
-    // mutex across up to two 15-second region-pick budgets plus two `Start`
-    // attempts — and the Unix socket this runner is reached through does not
-    // exist until `UnixListenerServer::bind` a few lines down. Awaiting this
-    // here would leave the runner unreachable, still holding the daemon
+    // blocking pool for 30-50 seconds — the Go side holds a package-wide
+    // mutex across up to two 15-second region-pick budgets, two `Start`
+    // attempts and a 2-second hang-up of live tunnels — and the Unix socket
+    // this runner is reached through does not exist until
+    // `UnixListenerServer::bind` a few lines down. Awaiting this here would
+    // leave the runner unreachable, still holding the daemon
     // lock so nothing else could take over either, for the whole of that
     // window. `farcooler daemon ensure` gives a starting daemon 5 seconds
     // (`crates/cli/src/daemon_link.rs`) — a runner on a slow DERP region
