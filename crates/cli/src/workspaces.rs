@@ -133,6 +133,22 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Replace the workspace's charter with a file's text, or standard
+    /// input's with `-` (ov-757). The owner, the workspace's lead and a
+    /// Maintainer may. `--expect` is the `sha256` `workspace charter --json`
+    /// gave, so an edit made since is never written over; leave it out only
+    /// for a workspace with no charter yet.
+    SetCharter {
+        workspace: String,
+        /// The new charter's file, or `-` for standard input.
+        #[arg(long = "from")]
+        from: String,
+        /// The hash of the charter this edit was made to.
+        #[arg(long)]
+        expect: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Write the workspace's charter from a survey of its repository (ov-519),
     /// or with `--draft` the draft its orchestrator goes through with you.
     /// A charter that exists is never replaced.
@@ -401,6 +417,15 @@ async fn workspace_via(
         WorkspaceCmd::Charter { workspace, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             charter::show(&mut link, &ws, json).await?;
+        }
+
+        WorkspaceCmd::SetCharter { workspace, from, expect, repo } => {
+            let text = match from.as_str() {
+                "-" => std::io::read_to_string(std::io::stdin())?,
+                path => std::fs::read_to_string(path).map_err(|e| format!("couldn't read {path}: {e}"))?,
+            };
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            charter::set(&mut link, &ws, text, expect.as_deref().unwrap_or_default(), json).await?;
         }
 
         WorkspaceCmd::WriteCharter(args) => {

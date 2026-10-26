@@ -94,6 +94,22 @@ pub(crate) enum MemberCmd {
         #[arg(value_parser = ["on", "off"])]
         state: String,
     },
+    /// Give a member a role (ov-757). Only the runner's owner, from the app
+    /// or their own terminal, not from a pane on the runner.
+    ///
+    /// A Maintainer edits every workspace's charter, as the owner and each
+    /// workspace's lead do. A member edits a charter only where they lead.
+    /// Everyone starts a member.
+    Role {
+        /// Whose: a member's handle (`farcooler member list`).
+        handle: String,
+        #[arg(value_parser = ["member", "maintainer"])]
+        role: String,
+    },
+    /// Who changed what about the people here, newest first: a role given
+    /// or taken, a member added or removed, their devices changed, a charter
+    /// edited through the runner (ov-757).
+    Log,
 }
 
 /// `farcooler rep`'s arguments.
@@ -179,6 +195,11 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     if !link.capabilities().iter().any(|c| c == capability::REPRESENTATIVES) {
         return Err(NO_PEOPLE.into());
     }
+    match &cmd {
+        MemberCmd::Role { handle, role } => return roles::role_on(link, handle, role, json).await,
+        MemberCmd::Log => return roles::log_on(link, json).await,
+        _ => {}
+    }
     if let MemberCmd::Connectors { handle, allow, none } = &cmd {
         let set = (!allow.is_empty() || *none).then_some(allow.as_slice());
         return crate::member_connectors::connectors_on(link, handle, set, json).await;
@@ -218,6 +239,8 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
             Some(own_login_said(harness, state == "on")),
         ),
         MemberCmd::Connectors { .. }
+        | MemberCmd::Role { .. }
+        | MemberCmd::Log
         | MemberCmd::ClaudeSignIn { .. }
         | MemberCmd::ClaudeSignInFinish { .. }
         | MemberCmd::ClaudeSignInCancel { .. }
@@ -342,7 +365,8 @@ pub(crate) fn list_lines(list: &pb::MemberList, done: Option<&str>) -> String {
             n => format!("{n} reps"),
         };
         let you = if m.handle == list.you { "  (you)" } else { "" };
-        lines.push(format!("{:16} {:24} {rep:7} {devices}{you}", m.handle, crate::truncate(&m.name, 24)));
+        let role = if m.role == "maintainer" { "  Maintainer" } else { "" };
+        lines.push(format!("{:16} {:24} {rep:7} {devices}{role}{you}", m.handle, crate::truncate(&m.name, 24)));
     }
     lines.push(shared_account(&list.claude_account));
     if let Some(own) = &list.own_logins {
@@ -441,6 +465,9 @@ pub(crate) fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error
     }
     Box::new(e)
 }
+
+#[path = "member_roles.rs"]
+mod roles;
 
 #[cfg(test)]
 #[path = "people_tests.rs"]
