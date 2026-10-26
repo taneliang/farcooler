@@ -181,6 +181,7 @@ describe('a passkey registering as Key A (ov-766)', () => {
       { origin: 'https://farcooler.com' },
       { origin: `http://${RP_ID}` },
       { crossOrigin: true },
+      { signatureOrigin: 'https://farcooler.com' },
     ]) {
       expect(await as('alice', 'devices/register', await proven('alice', passkey, tweak))).toEqual({
         status: 403,

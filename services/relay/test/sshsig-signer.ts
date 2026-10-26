@@ -71,7 +71,11 @@ export interface PasskeyTweak {
   /// Another application to hash into authenticatorData, as an authenticator
   /// asked by a page on another RP ID would.
   application?: string
-  /// mpint r with a superfluous leading zero byte.
+  /// The signature's own origin field alone, with clientDataJSON's left be.
+  signatureOrigin?: string
+  /// mpint r with a superfluous leading zero byte. The signer signs again
+  /// until r's top bit is clear, so the padded mpint is 33 bytes, the one
+  /// length only the canonical-form check refuses.
   paddedR?: boolean
 }
 
@@ -117,7 +121,10 @@ export async function makePasskey(rpId: string, comment = 'passkey'): Promise<Te
       const webauthn = (tweak.format ?? 'webauthn') === 'webauthn'
       const authenticatorData = concat(await sha256(text(tweak.application ?? rpId)), flags, counter)
       const signed = concat(authenticatorData, await sha256(webauthn ? clientData : data))
-      const raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, signed))
+      let raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, signed))
+      while (tweak.paddedR && (raw[0] & 0x80) !== 0) {
+        raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, signed))
+      }
       const ecdsa = concat(mpint(raw.subarray(0, 32), tweak.paddedR ?? false), mpint(raw.subarray(32), false))
       const signature = webauthn
         ? concat(
@@ -125,7 +132,7 @@ export async function makePasskey(rpId: string, comment = 'passkey'): Promise<Te
             sshString(ecdsa),
             flags,
             counter,
-            sshString(text(origin)),
+            sshString(text(tweak.signatureOrigin ?? origin)),
             sshString(clientData),
             sshString(new Uint8Array()),
           )
