@@ -525,3 +525,24 @@ async fn the_owner_a_member_and_a_rep_move_a_theme() {
     }
     assert_eq!(places(), [1, 2, 3]);
 }
+
+/// The charter is a regular file and nothing else (ov-755 review): a link
+/// the orchestrator's pane left at its path answers none, never the target's
+/// text, and a pipe there answers none instead of blocking the runner.
+#[tokio::test]
+async fn a_charter_that_is_a_link_or_a_pipe_is_none() {
+    use std::os::unix::fs::symlink;
+    let r = runner().await;
+    let path = crate::workspace_home::charter_path(r.svc.root_dir(), r.workspace);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let secret = r.dir.path().join("secret.txt");
+    std::fs::write(&secret, "not a charter").unwrap();
+    let read = || async { charter_of(call(&factory(&r.svc, BOB, Scope::Read), charter_request(r.workspace)).await) };
+    let _ = std::fs::remove_file(&path);
+    symlink(&secret, &path).unwrap();
+    assert_eq!(read().await, (false, String::new()), "a link");
+    std::fs::remove_file(&path).unwrap();
+    let made = std::process::Command::new("mkfifo").arg(&path).status().unwrap();
+    assert!(made.success());
+    assert_eq!(read().await, (false, String::new()), "a pipe");
+}
