@@ -17,7 +17,7 @@
 /// hold.
 
 import { json, type Env } from '../index'
-import { parsePublicKey } from '../sshsig'
+import { parseDeviceKey } from '../sshsig'
 import { audit, bodyOf, requireUser, teamFor } from './common'
 import { deviceNotice, tellAccount } from './notices'
 
@@ -105,7 +105,7 @@ export async function confirmHeldDevice(request: Request, env: Env): Promise<Res
   // Your own devices are confirmed by your own devices, never by your say-so
   // as an admin: that is the one person a stolen session can always be.
   if (user === account) return json({ error: 'own device' }, 403)
-  const keyA = await parsePublicKey(body?.keyA)
+  const keyA = await parseDeviceKey(body?.keyA, env.PASSKEY_RP_ID)
   if (!keyA) return json({ error: 'keyA' }, 400)
 
   const team = found.team.id

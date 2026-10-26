@@ -73,6 +73,11 @@ export interface Env {
   /// above belongs to it. Set per environment in wrangler.toml; absent on a
   /// deployment made before this check, which is only ever the stable one.
   CHANNEL?: string
+  /// The RP ID a passkey must carry to be a device's Key A: this channel's
+  /// web app host, exactly (`app.canary.farcooler.com`), never a parent
+  /// domain (ov-766). Absent on a channel with no web app, which then refuses
+  /// every passkey and takes Ed25519 keys alone.
+  PASSKEY_RP_ID?: string
   FCM_SERVICE_ACCOUNT: string
   /// `"1"` to give a team's admins each member's vouched-for Key A in
   /// `teams/members`, which turns on the teammate rule's key match (ov-549,

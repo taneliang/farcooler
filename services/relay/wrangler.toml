@@ -271,6 +271,11 @@ WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
 # The stable block says why at length, and what the bare host cost.
 WORKOS_ISSUER = "https://api.workos.com/user_management/client_01M03MZKRH5ZPR160DATT149WX"
 CHANNEL = "canary"
+# The RP ID a passkey must carry to register as a device's Key A: canary's web
+# app host, exactly, never a parent domain (ov-766, sshsig.ts says why). Only
+# canary has a web app so far; the stable block gains app.farcooler.com when
+# that host opens (ov-752 slice 17), and until then stable refuses passkeys.
+PASSKEY_RP_ID = "app.canary.farcooler.com"
 
 [[env.canary.unsafe.bindings]]
 name = "AUTH_LIMIT"

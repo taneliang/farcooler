@@ -18,7 +18,7 @@
 /// ov-561). There is no support desk or admin step to stand in for it.
 
 import { json, type Env } from '../index'
-import { parsePublicKey, verifySignature, type PublicKey } from '../sshsig'
+import { parseDeviceKey, parsePublicKey, verifyDeviceSignature, verifySignature, type PublicKey } from '../sshsig'
 import { audit, bodyOf, isConstraint, nameOf, requireUser } from './common'
 import { deviceNotice, tellAccount } from './notices'
 
@@ -114,7 +114,9 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
   const label = nameOf(body.label)
   if (!label) return json({ error: 'label' }, 400)
 
-  const keyA = await parsePublicKey(body.keyA)
+  // Key A may be a passkey on this channel's app host (ov-766). Key B is a
+  // Mac's second key, and stays Ed25519.
+  const keyA = await parseDeviceKey(body.keyA, env.PASSKEY_RP_ID)
   if (!keyA) return json({ error: 'keyA' }, 400)
   let keyB: PublicKey | null = null
   if (body.keyB !== undefined && body.keyB !== null) {
@@ -131,7 +133,7 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
   if (typeof body.challenge !== 'string' || !CHALLENGE.test(body.challenge)) return json({ error: 'challenge' }, 400)
   const challenge = body.challenge
   const statement = registerStatement(account, challenge, keyA.fingerprint, keyB?.fingerprint ?? null, node)
-  const signerA = await verifySignature(body.proofA, REGISTER_NAMESPACE, statement)
+  const signerA = await verifyDeviceSignature(body.proofA, REGISTER_NAMESPACE, statement, env.PASSKEY_RP_ID)
   if (signerA?.fingerprint !== keyA.fingerprint) return json({ error: 'proofA' }, 403)
   if (keyB) {
     const signerB = await verifySignature(body.proofB, REGISTER_NAMESPACE, statement)
@@ -317,7 +319,7 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   if (typeof body?.device === 'string' && body.device) {
     where = { column: 'id', value: body.device }
   } else if (body?.keyA !== undefined) {
-    const keyA = await parsePublicKey(body.keyA)
+    const keyA = await parseDeviceKey(body.keyA, env.PASSKEY_RP_ID)
     if (!keyA) return json({ error: 'keyA' }, 400)
     where = { column: 'key_a_fingerprint', value: keyA.fingerprint }
   } else {
@@ -333,6 +335,8 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   if (device.state !== 'pending') return json({ error: 'state', state: device.state }, 409)
 
   const statement = certifyStatement(account, device.key_a_fingerprint, device.key_b_fingerprint, device.node_key)
+  // The voucher signs with Ed25519 alone, even when the device it vouches
+  // for is a passkey: a runner checks this certificate offline, in Rust.
   const signer = await verifySignature(body.certificate, CERTIFY_NAMESPACE, statement)
   if (!signer) return json({ error: 'certificate' }, 403)
   const voucher = await env.DB.prepare(

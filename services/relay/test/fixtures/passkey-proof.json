@@ -1,0 +1,22 @@
+{
+  "account": "user_01FIXTURE",
+  "challenge": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "rpId": "app.canary.farcooler.com",
+  "made": "Chromium 145.0.7632.6 virtual authenticator (ctap2, internal), scripts/passkey-fixture.mjs",
+  "exact": {
+    "rpId": "app.canary.farcooler.com",
+    "publicKey": "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBP0B6NPGiD0cFJKV2hITiE66KP4SWUcCc5bvCSOWmWfqtGHj/6bRugyi7iNmC3Jt6BeM76h9IzAclSkpvxkJt1kAAAAYYXBwLmNhbmFyeS5mYXJjb29sZXIuY29t",
+    "fingerprint": "SHA256:XszTsGdKAgW0WwSBdQdkyhHJCKk+cw92jawHx1vVopg",
+    "statement": "farcooler register-device\naccount user_01FIXTURE\nchallenge fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\nkey-a SHA256:XszTsGdKAgW0WwSBdQdkyhHJCKk+cw92jawHx1vVopg\nkey-b none\nnode none\n",
+    "proof": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAJMAAAAic2stZWNkc2Etc2hhMi1uaXN0cDI1NkBvcGVuc3NoLmNvbQ\nAAAAhuaXN0cDI1NgAAAEEE/QHo08aIPRwUkpXaEhOITroo/hJZRwJzlu8JI5aZZ+q0YeP/\nptG6DKLuI2YLcm3oF4zvqH0jMByVKSm/GQm3WQAAABhhcHAuY2FuYXJ5LmZhcmNvb2xlci\n5jb20AAAATZmFyY29vbGVyLWRldmljZS12MQAAAAAAAAAGc2hhNTEyAAABpgAAACt3ZWJh\ndXRobi1zay1lY2RzYS1zaGEyLW5pc3RwMjU2QG9wZW5zc2guY29tAAAASAAAACAE9Gz6+1\nFmAdu3Ty8TaWA/YjJUB7PJrztBGNRgYkM0lAAAACAvOUBJE796LdFZTUDlqwa4JKaBgOHf\nIfis4OwV2jrH1AEAAAACAAAAIGh0dHBzOi8vYXBwLmNhbmFyeS5mYXJjb29sZXIuY29tAA\nAA+nsidHlwZSI6IndlYmF1dGhuLmdldCIsImNoYWxsZW5nZSI6IlUxTklVMGxIQUFBQUUy\nWmhjbU52YjJ4bGNpMWtaWFpwWTJVdGRqRUFBQUFBQUFBQUJuTm9ZVFV4TWdBQUFFRGl1RD\nV0LXA1WjdZMVY3NkFERW5uQWxHYjNfTklCV1hLQ0lJczJZMUxnNllHQkFwYm44T2xnNnpn\nSHU4SmxFTUNnZDBMbkF3TDNkanNIQ0J1dTFfMjMiLCJvcmlnaW4iOiJodHRwczovL2FwcC\n5jYW5hcnkuZmFyY29vbGVyLmNvbSIsImNyb3NzT3JpZ2luIjpmYWxzZX0AAAAA\n-----END SSH SIGNATURE-----\n",
+    "clientDataJSON": "{\"type\":\"webauthn.get\",\"challenge\":\"U1NIU0lHAAAAE2ZhcmNvb2xlci1kZXZpY2UtdjEAAAAAAAAABnNoYTUxMgAAAEDiuD5t-p5Z7Y1V76ADEnnAlGb3_NIBWXKCIIs2Y1Lg6YGBApbn8Olg6zgHu8JlEMCgd0LnAwL3djsHCBuu1_23\",\"origin\":\"https://app.canary.farcooler.com\",\"crossOrigin\":false}"
+  },
+  "parent": {
+    "rpId": "farcooler.com",
+    "publicKey": "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBEkQu61XaOqImitImB4JlR+gYXy1DLmb3AxGwdh8ZfNO+UqQwAsZsqpjqhS7++lH3NscouHohiVbViLKFHFkU78AAAANZmFyY29vbGVyLmNvbQ==",
+    "fingerprint": "SHA256:NltUfa8vkvbI4pA82YdzVEr5L03Mr7bGoMY9DS96yYY",
+    "statement": "farcooler register-device\naccount user_01FIXTURE\nchallenge fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\nkey-a SHA256:NltUfa8vkvbI4pA82YdzVEr5L03Mr7bGoMY9DS96yYY\nkey-b none\nnode none\n",
+    "proof": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAIgAAAAic2stZWNkc2Etc2hhMi1uaXN0cDI1NkBvcGVuc3NoLmNvbQ\nAAAAhuaXN0cDI1NgAAAEEESRC7rVdo6oiaK0iYHgmVH6BhfLUMuZvcDEbB2Hxl8075SpDA\nCxmyqmOqFLv76Ufc2xyi4eiGJVtWIsoUcWRTvwAAAA1mYXJjb29sZXIuY29tAAAAE2Zhcm\nNvb2xlci1kZXZpY2UtdjEAAAAAAAAABnNoYTUxMgAAAacAAAArd2ViYXV0aG4tc2stZWNk\nc2Etc2hhMi1uaXN0cDI1NkBvcGVuc3NoLmNvbQAAAEkAAAAhAPT+ztkxo1VKhoo2Jetlm3\n1+FKRpoer650DZDuJc1GMGAAAAIBjSB6x7J5WpXZSE7zUncgWOQxzLeyK5VVWKaz0wQdFk\nAQAAAAIAAAAgaHR0cHM6Ly9hcHAuY2FuYXJ5LmZhcmNvb2xlci5jb20AAAD6eyJ0eXBlIj\noid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiVTFOSVUwbEhBQUFBRTJaaGNtTnZiMnhs\nY2kxa1pYWnBZMlV0ZGpFQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUVBWThmQS1mY2NLT0F0VW\nREbG1hSGhKNTVhTEZMZTBUM3FTY29YUHV5UHoydTN5SE02SGlmRDBxeTFNTGlmZFlBaXI2\nbVRkODNUcE0yNmtRRDcwYjJpUyIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwLmNhbmFyeS5mYX\nJjb29sZXIuY29tIiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQAAAAA=\n-----END SSH SIGNATURE-----\n",
+    "clientDataJSON": "{\"type\":\"webauthn.get\",\"challenge\":\"U1NIU0lHAAAAE2ZhcmNvb2xlci1kZXZpY2UtdjEAAAAAAAAABnNoYTUxMgAAAEAY8fA-fccKOAtUdDlmaHhJ55aLFLe0T3qScoXPuyPz2u3yHM6HifD0qy1MLifdYAir6mTd83TpM26kQD70b2iS\",\"origin\":\"https://app.canary.farcooler.com\",\"crossOrigin\":false}"
+  }
+}

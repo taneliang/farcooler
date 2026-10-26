@@ -1,4 +1,5 @@
-/// SSH public keys and SSH signatures (`ssh-keygen -Y sign`), Ed25519 only.
+/// SSH public keys and SSH signatures (`ssh-keygen -Y sign`): Ed25519, and
+/// for a device's Key A, a passkey.
 ///
 /// The directory holds public keys and checks signatures made with the private
 /// halves, which never leave a device. Two things here need that: a device
@@ -8,27 +9,55 @@
 /// OpenSSH's PROTOCOL.sshsig exactly rather than inventing a wire format, and
 /// the tests check it against a signature `ssh-keygen` made.
 ///
-/// Ed25519 only, because the fence admits nothing else
-/// (`crates/fence/src/lib.rs`, `Algorithm::Ed25519`): a key of any other type
-/// could never be enrolled anywhere, so there is nothing to register.
+/// `parsePublicKey` and `verifySignature` are Ed25519 only. A runner's key, a
+/// Key B and a certificate's signer are always Ed25519, and a runner checks a
+/// certificate offline, in Rust.
+///
+/// A device's Key A may also be a passkey (ov-766): a WebAuthn ES256
+/// credential presented as `sk-ecdsa-sha2-nistp256@openssh.com`, the way
+/// OpenSSH 8.4 and later take one, with the passkey's RP ID as its
+/// application. `parseDeviceKey` and `verifyDeviceSignature` take one only
+/// when that RP ID is exactly this channel's app host (`PASSKEY_RP_ID`), never
+/// a parent domain. A passkey scoped to `farcooler.com` could be asked to sign
+/// by any page on any `*.farcooler.com` host, including www, which loads a
+/// third-party beacon script.
 
 export interface PublicKey {
-  /// `ssh-ed25519 AAAA…`, with no comment. A comment is free text from the
-  /// device and the directory has no use for it.
+  /// `ssh-ed25519 AAAA…` or `sk-ecdsa-sha2-nistp256@openssh.com AAAA…`, with
+  /// no comment. A comment is free text from the device and the directory has
+  /// no use for it.
   text: string
   /// `SHA256:…`, unpadded, as `ssh-keygen -lf` prints it.
   fingerprint: string
+  /// The 32 Ed25519 key bytes, or a passkey's uncompressed P-256 point.
   raw: Uint8Array
+  /// A passkey's application, which is its RP ID. Absent for Ed25519.
+  application?: string
 }
 
 const ALGORITHM = 'ssh-ed25519'
 const MAGIC = 'SSHSIG'
+const SK_ALGORITHM = 'sk-ecdsa-sha2-nistp256@openssh.com'
 
 // Every name on the wire is compared as BYTES, never through TextDecoder,
 // which strips a leading byte-order mark by default: a key blob named
-// "\uFEFFssh-ed25519" read as text passes for "ssh-ed25519", and its
+// "﻿ssh-ed25519" read as text passes for "ssh-ed25519", and its
 // fingerprint, taken over the odd blob, gives one key a second identity.
 const ALGORITHM_BYTES = new TextEncoder().encode(ALGORITHM)
+const SK_ALGORITHM_BYTES = new TextEncoder().encode(SK_ALGORITHM)
+const NISTP256 = new TextEncoder().encode('nistp256')
+
+/// A passkey's two signature formats (PROTOCOL.u2f): what a security key
+/// signs through OpenSSH, and what a browser's `navigator.credentials.get`
+/// signs, which wraps the message in WebAuthn's clientDataJSON.
+const SK_SIGNATURE = SK_ALGORITHM_BYTES
+const WEBAUTHN_SIGNATURE = new TextEncoder().encode('webauthn-sk-ecdsa-sha2-nistp256@openssh.com')
+
+/// authenticatorData's flags: user present, attested credential data (never
+/// in an assertion), and extension data.
+const FLAG_UP = 0x01
+const FLAG_AT = 0x40
+const FLAG_ED = 0x80
 
 /// Parse `ssh-ed25519 <base64> [comment]`, or null for anything else: another
 /// algorithm, options in front, a blob that doesn't decode to exactly one
@@ -40,6 +69,21 @@ export async function parsePublicKey(line: unknown): Promise<PublicKey | null> {
   const blob = fromBase64(parts[1])
   if (!blob) return null
   return await keyFromBlob(blob)
+}
+
+/// Parse a device's Key A: anything `parsePublicKey` takes, or a passkey line,
+/// `sk-ecdsa-sha2-nistp256@openssh.com <base64> [comment]`, whose application
+/// is exactly `rpId`. With no `rpId`, on a channel with no web app, every
+/// passkey is null.
+export async function parseDeviceKey(line: unknown, rpId: string | undefined): Promise<PublicKey | null> {
+  if (typeof line !== 'string' || line.length > 1024) return null
+  const parts = line.trim().split(/\s+/)
+  if (parts.length < 2) return null
+  if (parts[0] === ALGORITHM) return await parsePublicKey(line)
+  if (parts[0] !== SK_ALGORITHM) return null
+  const blob = fromBase64(parts[1])
+  if (!blob) return null
+  return await passkeyFromBlob(blob, rpId)
 }
 
 /// Verify an armored SSH signature over `message` in `namespace`, and return
@@ -54,6 +98,25 @@ export async function verifySignature(
   namespace: string,
   message: string,
 ): Promise<PublicKey | null> {
+  return await verify(armored, namespace, message, null)
+}
+
+/// `verifySignature` for a device's Key A, whose signer may also be a passkey
+/// with application exactly `rpId`, signing as a security key or through
+/// WebAuthn. Either way the authenticator must say the user was present. A
+/// WebAuthn signature must also be a `webauthn.get` over this very message,
+/// made on `https://<rpId>`.
+export async function verifyDeviceSignature(
+  armored: unknown,
+  namespace: string,
+  message: string,
+  rpId: string | undefined,
+): Promise<PublicKey | null> {
+  return await verify(armored, namespace, message, rpId || null)
+}
+
+/// Both of the above. A null `rpId` takes Ed25519 alone.
+async function verify(armored: unknown, namespace: string, message: string, rpId: string | null): Promise<PublicKey | null> {
   if (typeof armored !== 'string' || armored.length > 4096) return null
   const body = armored.trim().match(/^-----BEGIN SSH SIGNATURE-----\s+([A-Za-z0-9+/=\s]+?)\s*-----END SSH SIGNATURE-----$/)
   if (!body) return null
@@ -81,14 +144,6 @@ export async function verifySignature(
       : null
   if (!hash) return null
 
-  const key = await keyFromBlob(keyBlob)
-  if (!key) return null
-
-  const signature = new Reader(signatureBlob)
-  if (!same(signature.bytes(), ALGORITHM_BYTES)) return null
-  const raw = signature.bytes()
-  if (!signature.done() || !raw || raw.length !== 64) return null
-
   const digest = new Uint8Array(
     await crypto.subtle.digest(hash === 'sha512' ? 'SHA-512' : 'SHA-256', new TextEncoder().encode(message)),
   )
@@ -99,9 +154,107 @@ export async function verifySignature(
     sshString(hashBlob),
     sshString(digest),
   )
+
+  if (rpId !== null && same(new Reader(keyBlob).bytes(), SK_ALGORITHM_BYTES)) {
+    const key = await passkeyFromBlob(keyBlob, rpId)
+    if (!key) return null
+    return (await verifyPasskey(key, rpId, signatureBlob, signed)) ? key : null
+  }
+
+  const key = await keyFromBlob(keyBlob)
+  if (!key) return null
+
+  const signature = new Reader(signatureBlob)
+  if (!same(signature.bytes(), ALGORITHM_BYTES)) return null
+  const raw = signature.bytes()
+  if (!signature.done() || !raw || raw.length !== 64) return null
+
   const material = await crypto.subtle.importKey('raw', key.raw, { name: 'Ed25519' }, false, ['verify'])
   if (!(await crypto.subtle.verify({ name: 'Ed25519' }, material, raw, signed))) return null
   return key
+}
+
+/// Whether `signatureBlob` is `key`'s signature over `data`, the SSHSIG
+/// blob, in either passkey format. It checks what OpenSSH's
+/// `ssh_ecdsa_sk_verify` checks, and is stricter where that costs nothing:
+/// the user must have been present, mpints must be canonical, and a WebAuthn
+/// signature must come from `https://<rpId>` and not from a frame on another
+/// site.
+///
+/// What the authenticator signed is its authenticatorData followed by a
+/// SHA-256: of `data` for a security key, or of clientDataJSON for WebAuthn,
+/// whose challenge must be `data` itself. authenticatorData is rebuilt here
+/// from the key's own application (so its RP ID hash can't name any other
+/// site), the flags, the counter and any extensions.
+async function verifyPasskey(key: PublicKey, rpId: string, signatureBlob: Uint8Array, data: Uint8Array): Promise<boolean> {
+  const signature = new Reader(signatureBlob)
+  const format = signature.bytes()
+  const webauthn = same(format, WEBAUTHN_SIGNATURE)
+  if (!webauthn && !same(format, SK_SIGNATURE)) return false
+  const ecdsa = signature.bytes()
+  const flags = signature.take(1)
+  const counter = signature.take(4)
+  if (!ecdsa || !flags || !counter) return false
+  let extensions: Uint8Array = new Uint8Array()
+  let clientData: Uint8Array | null = null
+  if (webauthn) {
+    const origin = signature.bytes()
+    clientData = signature.bytes()
+    const ext = signature.bytes()
+    if (!origin || !clientData || !ext) return false
+    if (!same(origin, new TextEncoder().encode(`https://${rpId}`))) return false
+    if (!isAssertionOver(clientData, data, `https://${rpId}`)) return false
+    extensions = ext
+  }
+  if (!signature.done()) return false
+
+  // A touch every time: a passkey that signs with nobody there proves only
+  // that something can reach the authenticator.
+  if ((flags[0] & FLAG_UP) === 0) return false
+  if ((flags[0] & FLAG_AT) !== 0) return false
+  if (((flags[0] & FLAG_ED) !== 0) !== (extensions.length !== 0)) return false
+
+  const rs = new Reader(ecdsa)
+  const r = scalar(rs.bytes())
+  const s = scalar(rs.bytes())
+  if (!r || !s || !rs.done()) return false
+
+  const application = await sha256(new TextEncoder().encode(key.application!))
+  const signed = concat(application, flags, counter, extensions, await sha256(clientData ?? data))
+  const material = await crypto.subtle.importKey('raw', key.raw, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+  return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, material, concat(r, s), signed)
+}
+
+/// Whether `clientData` is a browser's record of `navigator.credentials.get`
+/// over `challenge` on `origin`. Its start is compared as bytes against the
+/// one form browsers write, as OpenSSH compares it, so this verifier and the
+/// runner's sshd agree. Then it is read as JSON, to refuse an assertion made
+/// in a frame embedded on another site.
+function isAssertionOver(clientData: Uint8Array, challenge: Uint8Array, origin: string): boolean {
+  const expected = new TextEncoder().encode(`{"type":"webauthn.get","challenge":"${base64Url(challenge)}","origin":"${origin}"`)
+  if (!same(clientData.subarray(0, expected.length), expected)) return false
+  let fields: unknown
+  try {
+    fields = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(clientData))
+  } catch {
+    return false
+  }
+  if (typeof fields !== 'object' || fields === null) return false
+  const record = fields as Record<string, unknown>
+  return record.type === 'webauthn.get' && record.origin === origin && record.crossOrigin !== true && record.topOrigin === undefined
+}
+
+/// A canonical, positive, nonzero SSH mpint of at most 32 bytes, as the 32
+/// big-endian bytes that WebCrypto's raw ECDSA signature wants.
+function scalar(mpint: Uint8Array | null): Uint8Array | null {
+  if (!mpint || mpint.length === 0 || mpint.length > 33) return null
+  if ((mpint[0] & 0x80) !== 0) return null
+  if (mpint[0] === 0 && (mpint.length === 1 || (mpint[1] & 0x80) === 0)) return null
+  const value = mpint[0] === 0 ? mpint.subarray(1) : mpint
+  if (value.length > 32) return null
+  const out = new Uint8Array(32)
+  out.set(value, 32 - value.length)
+  return out
 }
 
 /// The key in `blob`, named and fingerprinted by its canonical encoding,
@@ -119,6 +272,34 @@ async function keyFromBlob(blob: Uint8Array): Promise<PublicKey | null> {
     text: `${ALGORITHM} ${toBase64(canonical)}`,
     fingerprint: `SHA256:${toBase64(digest).replace(/=+$/, '')}`,
     raw,
+  }
+}
+
+/// The passkey in `blob`: curve `nistp256`, an uncompressed point on that
+/// curve, and an application that is exactly `rpId`. Named and fingerprinted
+/// by its canonical encoding, rebuilt from those parts, as `keyFromBlob` does.
+async function passkeyFromBlob(blob: Uint8Array, rpId: string | null | undefined): Promise<PublicKey | null> {
+  if (!rpId) return null
+  const reader = new Reader(blob)
+  if (!same(reader.bytes(), SK_ALGORITHM_BYTES)) return null
+  if (!same(reader.bytes(), NISTP256)) return null
+  const point = reader.bytes()
+  const application = reader.bytes()
+  if (!reader.done() || !point || point.length !== 65 || point[0] !== 0x04) return null
+  const rp = new TextEncoder().encode(rpId)
+  if (!same(application, rp)) return null
+  try {
+    // Refuses a point that isn't on the curve.
+    await crypto.subtle.importKey('raw', point, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+  } catch {
+    return null
+  }
+  const canonical = concat(sshString(SK_ALGORITHM_BYTES), sshString(NISTP256), sshString(point), sshString(rp))
+  return {
+    text: `${SK_ALGORITHM} ${toBase64(canonical)}`,
+    fingerprint: `SHA256:${toBase64(await sha256(canonical)).replace(/=+$/, '')}`,
+    raw: point,
+    application: rpId,
   }
 }
 
@@ -179,6 +360,10 @@ function same(a: Uint8Array | null, b: Uint8Array): boolean {
   return a !== null && a.length === b.length && a.every((byte, i) => byte === b[i])
 }
 
+async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+}
+
 function fromBase64(text: string): Uint8Array | null {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return null
   try {
@@ -190,4 +375,9 @@ function fromBase64(text: string): Uint8Array | null {
 
 export function toBase64(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
+}
+
+/// Unpadded base64url, as WebAuthn writes a challenge into clientDataJSON.
+export function base64Url(bytes: Uint8Array): string {
+  return toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
