@@ -7,8 +7,8 @@
 //! records in `farcooler_store::people`, and a rep's start in `reps`.
 //!
 //! Each change to who's here goes to the people log (`member.events`): a
-//! member added, their devices changed, a member removed, a role given or
-//! taken, with who did it.
+//! member added, their devices changed, a device taken off their list
+//! revoked, a member removed, a role given or taken, with who did it.
 //!
 //! Every answer about members carries the Claude account the runner uses,
 //! because joining a shared runner is joining that account (ov-479 D2), and
@@ -55,7 +55,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
                 Err(DomainError::NotFound) => None,
                 other => Some(other?),
             };
-            let after = svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
+            let (after, released) = svc.store.set_member_releasing(p.handle.trim(), &p.name, &p.client_ids, who)?;
             match before {
                 None => log(svc, peer, caller_pid, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
                 Some(b) if b.devices != after.devices => {
@@ -63,8 +63,17 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
                 }
                 Some(_) => {}
             }
+            // A device taken off their list loses its access too, as on
+            // `member.remove` (ov-783): released, it reads nothing, but its
+            // key would still log in and its open sessions keep running.
+            let failed = revoke_released(svc, peer, caller_pid, &after.handle, &released).await;
             svc.refresh_claude_key_exports();
             watcher.announce_fleet_changed();
+            // The list is changed either way; a key left in `authorized_keys`
+            // is said, not answered with a cheerful list.
+            if let Some(err) = failed {
+                return Err(err);
+            }
             Ok(result::Value::MemberList(list(svc, peer)?))
         }
         "member.remove" => {
@@ -247,6 +256,34 @@ async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
             Ok(_) | Err(DomainError::NotFound) => {}
             Err(err) => {
                 tracing::error!(device = %device, ?err, "revoking a removed member's device failed");
+                failed.get_or_insert(err);
+            }
+        }
+    }
+    failed
+}
+
+/// Revoke each device a `member.set` took off `handle`'s list, all of them
+/// whatever any one does, and log each revocation as `revoked` (ov-783). Only
+/// one still released when its turn comes: a device bound again meanwhile is
+/// someone's, and kept. A device with no line is done (`NotFound`). The first
+/// other failure, if any.
+async fn revoke_released(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handle: &str, released: &[String]) -> Option<DomainError> {
+    let mut failed = None;
+    for device in released {
+        match svc.store.device_released(device) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(err) => {
+                failed.get_or_insert(err);
+                continue;
+            }
+        }
+        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await {
+            Ok(_) => log(svc, peer, caller_pid, handle, "revoked", serde_json::json!({ "device": device })),
+            Err(DomainError::NotFound) => {}
+            Err(err) => {
+                tracing::error!(device = %device, ?err, "revoking a device taken off a member's list failed");
                 failed.get_or_insert(err);
             }
         }

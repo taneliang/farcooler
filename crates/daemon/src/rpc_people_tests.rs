@@ -82,14 +82,16 @@ async fn a_teammates_phone_is_bound_with_their_account_and_sees_itself() {
     // One account is one member: the same person can't be added twice.
     assert_eq!(call(&admin, set("bob2", &[], "user_bob", "")).await.err().as_deref(), Some("resource-conflict:account_taken"));
 
-    // The people log (ov-757): Bob added, then his devices changed. Set
-    // again as he is, nothing more; a refused call, nothing at all.
+    // The people log (ov-757): Bob added, then his devices changed, and the
+    // phone taken off revoked (ov-783). Set again as he is, nothing more; a
+    // refused call, nothing at all.
     call(&admin, set("bob", &[], "", "")).await.expect("his phone taken off");
     call(&admin, set("bob", &[], "", "")).await.expect("nothing changed");
     let log = svc.store.people_events(10).unwrap();
     let kinds: Vec<(&str, &str, &str)> = log.iter().map(|e| (e.kind.as_str(), e.handle.as_str(), e.actor.as_str())).collect();
-    assert_eq!(kinds, [("devices", "bob", "user"), ("added", "bob", "user")]);
-    assert_eq!(log[0].detail, r#"{"from":["phone-b"],"to":[]}"#);
+    assert_eq!(kinds, [("revoked", "bob", "user"), ("devices", "bob", "user"), ("added", "bob", "user")]);
+    assert_eq!(log[0].detail, r#"{"device":"phone-b"}"#);
+    assert_eq!(log[1].detail, r#"{"from":["phone-b"],"to":[]}"#);
 }
 
 /// Removing a teammate still revokes their devices, so the account on the row
@@ -114,4 +116,58 @@ async fn removing_a_teammate_revokes_their_phone() {
     assert!(svc.store.member("bob").is_err());
     // And his account is free again, for the day he's added back.
     svc.store.set_member_in("bob", "Bob", &[], farcooler_store::people::Directory { account: "user_bob", email: "" }).unwrap();
+}
+
+/// Enroll `key` as `client_id`, at Control, with no tunnel.
+async fn enroll(svc: &Service, key: &str, client_id: &str) {
+    let enroll = pb::ClientEnroll {
+        public_key: key.into(),
+        label: client_id.into(),
+        client_id: client_id.into(),
+        scope: Scope::Control as i32,
+        shell_access: false,
+        node_key: String::new(),
+    };
+    crate::enrollment::enroll(svc, &enroll).await.expect("enrolled");
+}
+
+/// A device `member.set` takes off a member's list loses its line in
+/// `authorized_keys` and its open sessions close at once (ov-783), with each
+/// revocation in the people log under who made the change. The device that
+/// stays on the list, another member's, and the owner's own keep their lines
+/// and their sessions.
+#[tokio::test]
+async fn a_device_taken_off_a_members_list_is_revoked_and_cut_off() {
+    let (_dir, svc) = with_bobs_phone_enrolled().await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi pad", "pad-b").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz alice", "phone-a").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIERERERERERERERERERERERERERERERERERERERERERE owner", "phone-o").await;
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    call(&admin, set("bob", &["phone-b", "pad-b"], "", "")).await.expect("Bob bound");
+    call(&admin, set("alice", &["phone-a"], "", "")).await.expect("Alice bound");
+    let open = |d: &str| svc.sessions().open(Some(d.to_string()));
+    let (pad, phone, alices, owners) = (open("pad-b"), open("phone-b"), open("phone-a"), open("phone-o"));
+
+    call(&admin, set("bob", &["phone-b"], "", "")).await.expect("his pad taken off");
+
+    let enrolled = |svc: &Service| std::fs::read_to_string(svc.authorized_keys()).unwrap();
+    let keys = enrolled(&svc);
+    assert!(!keys.contains("pad-b"), "the pad still has a line:\n{keys}");
+    assert!(pad.is_closed(), "the pad's open session still runs");
+    for (device, session) in [("phone-b", &phone), ("phone-a", &alices), ("phone-o", &owners)] {
+        assert!(keys.contains(device), "{device} lost its line:\n{keys}");
+        assert!(!session.is_closed(), "{device}'s session was closed");
+    }
+    let log = svc.store.people_events(1).unwrap();
+    assert_eq!((log[0].kind.as_str(), log[0].handle.as_str(), log[0].actor.as_str()), ("revoked", "bob", "user"));
+    assert_eq!(log[0].detail, r#"{"device":"pad-b"}"#);
+
+    // A device taken off and bound again at once, before its revoke, is
+    // someone's and keeps its line: what's revoked is what's still released.
+    let (_, released) = svc.store.set_member_releasing("bob", "Bob", &[], Default::default()).unwrap();
+    assert_eq!(released, ["phone-b".to_string()]);
+    svc.store.set_member("alice", "Alice", &["phone-a".to_string(), "phone-b".to_string()]).unwrap();
+    let admin_peer = Peer { client_id: None, scope: Scope::HostAdmin };
+    assert!(super::revoke_released(&svc, &admin_peer, None, "bob", &released).await.is_none());
+    assert!(enrolled(&svc).contains("phone-b") && !phone.is_closed(), "a device bound again was revoked");
 }

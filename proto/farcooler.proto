@@ -5962,7 +5962,8 @@ message MemberSetRole {
 
 // `member.events` (ov-757), at `read`: who changed what about the people on
 // the runner, newest first: a role given or taken, a member added, their
-// devices changed or removed, a charter edited through the runner.
+// devices changed or revoked, a member removed, a charter edited through the
+// runner.
 message PeopleEventList {
   repeated PeopleEvent events = 1;
 }
@@ -5976,10 +5977,11 @@ message PeopleEvent {
   string handle = 3;
   // The workspace, for a charter edit; empty otherwise.
   bytes workspace_id = 4;
-  // `role`, `added`, `devices`, `removed` or `charter`.
+  // `role`, `added`, `devices`, `revoked` (a device taken off a member's
+  // list losing its key, ov-783), `removed` or `charter`.
   string kind = 5;
   // A JSON object: a role change's `from` and `to`, a device change's
-  // `devices`, a charter edit's `sha256`.
+  // `devices`, a revocation's `device`, a charter edit's `sha256`.
   string detail = 6;
 }
 
