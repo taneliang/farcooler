@@ -193,10 +193,10 @@ async fn a_revoked_device_does_not_reach_sshd_through_the_tunnel() {
 /// peers or TCP connections. Before ov-762 the old server was simply closed,
 /// so nothing told a surviving device: its session kept the old tunnel, every
 /// write went unanswered, and it learned only from the keepalive (30 s × 3 in
-/// `Session::open`). Measured here before the fix: the laptop's next call failed after 118.9 s. What has to hold
-/// is that the laptop's call fails within [`A_DROP_IS_SEEN_WITHIN`] — the
-/// runner sends it a FIN — and that redialing then gets through, which is the
-/// phones' reconnect.
+/// `Session::open`). Measured here before the fix: the laptop's next call
+/// failed after 118.9 s. What has to hold is that the laptop's call fails
+/// within `A_DROP_IS_SEEN_WITHIN` — the runner sends it a FIN — and that
+/// redialing then gets through, which is the phones' reconnect.
 ///
 /// The bound is asserted against a call made AFTER the revoke has returned,
 /// so it measures what a person would see on their next keystroke.
