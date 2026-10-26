@@ -64,7 +64,6 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use farcooler_core::activity::Background;
 use farcooler_core::composer::{self, Composer, drawn::Expected};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
@@ -473,36 +472,25 @@ impl Watcher {
     /// the paste began; a fresh capture reads Idle with the box showing
     /// `expected`; and claude's registry still says idle, or with `unlisted`,
     /// says nothing at all (an answer's claude that has no registry, as the
-    /// gate allows). Anything else leaves the text in the box: `paste_left`,
-    /// logged with which check it was (`left_in_box`).
+    /// gate allows). Anything else leaves the text in the box: `paste_left`.
     pub(super) async fn still_between(&self, to: &Terminal, preset: &str, pid: i32, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
         let left = DomainError::Conflict { what: "paste_left" };
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-            left_in_box(&self.service.registry(), to, "typed", None);
             return Err(left);
         }
         let (screen, _, _) = self.service.screen(to.id).await?;
         let registry = self.service.registry();
         // Background agents keep claude's registry busy between turns: the
         // screen still showing them is what says that's all it is (ov-468).
-        let main = registry.classify_main(preset, &screen);
-        let background = if main == AgentActivity::Idle { registry.background_work(preset, &screen) } else { Background::None };
-        let check = if main != AgentActivity::Idle {
-            Some("not_idle")
-        } else if !expected.shown_on(preset, &screen) {
-            Some("not_shown")
-        } else {
-            match registry_turn::said_beside_of(pid, background).await {
-                registry_turn::Said::Idle => None,
-                registry_turn::Said::Nothing if unlisted => None,
-                registry_turn::Said::Nothing => Some("registry_none"),
-                registry_turn::Said::NotIdle if background != Background::None => Some("registry_busy"),
-                registry_turn::Said::NotIdle => Some("registry_busy_no_background"),
-                registry_turn::Said::Torn => Some("registry_torn"),
+        let background = registry.classify_main(preset, &screen) == AgentActivity::Idle && registry.background_running(preset, &screen);
+        if registry.classify_main(preset, &screen) != AgentActivity::Idle
+            || !expected.shown_on(preset, &screen)
+            || !match registry_turn::said_beside_of(pid, background).await {
+                registry_turn::Said::Idle => true,
+                registry_turn::Said::Nothing => unlisted,
+                registry_turn::Said::NotIdle | registry_turn::Said::Torn => false,
             }
-        };
-        if let Some(check) = check {
-            left_in_box(&registry, to, check, Some((preset, &screen)));
+        {
             return Err(left);
         }
         Ok(())
@@ -532,16 +520,13 @@ impl Watcher {
     /// `command`, until claude's popup highlights exactly it as well.
     async fn shown(&self, to: &Terminal, preset: &str, started: i64, expected: &Expected, command: Option<&str>) -> Shown {
         let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
-        let mut last = None;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-                left_in_box(&self.service.registry(), to, "typed", None);
                 return Shown::Typed;
             }
             let Ok((screen, _, _)) = self.service.screen(to.id).await else { continue };
             if !matches!(self.service.registry().classify(preset, &screen), AgentActivity::Idle | AgentActivity::Working) {
-                last = Some(screen);
                 continue;
             }
             let held = composer::read(preset, &screen);
@@ -549,9 +534,7 @@ impl Watcher {
             if expected.shown_on(preset, &screen) && popup.as_deref() == command {
                 return Shown::Yes(held);
             }
-            last = Some(screen);
         }
-        left_in_box(&self.service.registry(), to, "never_shown", last.as_deref().map(|screen| (preset, screen)));
         Shown::No
     }
 
@@ -600,33 +583,6 @@ impl Shown {
     }
 }
 
-/// Say why a paste was left in `to`'s box (ov-795): `check`, the read-back
-/// that refused it, and on `screen` its shape, never its text: what the
-/// agent reads as, whether background work shows, what the box holds as a
-/// kind and a length, and the pane's rows. The owner's report of one had
-/// nothing to go on, as nothing was written.
-fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, check: &'static str, screen: Option<(&str, &str)>) {
-    let Some((preset, screen)) = screen else {
-        tracing::info!(terminal = %to.id, check, "a paste was left in the box");
-        return;
-    };
-    let (held, chars) = match composer::read(preset, screen) {
-        Composer::Empty => ("empty", 0),
-        Composer::Holds(text) => ("holds", text.chars().count()),
-        Composer::Unrecognized => ("unrecognized", 0),
-    };
-    tracing::info!(
-        terminal = %to.id,
-        check,
-        main = ?registry.classify_main(preset, screen),
-        background = ?registry.background_work(preset, screen),
-        held,
-        chars,
-        rows = screen.lines().count(),
-        "a paste was left in the box"
-    );
-}
-
 /// A compose's written images whose paths nothing has pasted yet: deleted
 /// when the send ends, so a refused one leaves no copy behind (ov-393).
 struct Unpasted(Vec<PathBuf>);
@@ -660,7 +616,7 @@ struct Confirm {
 /// `procStart` check, so a stale file is nothing; `Torn` for a file that is
 /// there but doesn't parse, which is claude mid-write more often than gone
 /// (ov-645).
-async fn session_of(pid: i32, background: Background) -> std::result::Result<(String, PathBuf, bool), Gone> {
+async fn session_of(pid: i32, background: bool) -> std::result::Result<(String, PathBuf, bool), Gone> {
     let config = registry_turn::config_of(pid).await.ok_or(Gone::Nothing)?;
     let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,

@@ -9,79 +9,14 @@
 //! (`captures/claude-2.1.296-background-agents-main-idle-120x40-e.txt`), its
 //! transcript a `user` record and no `enqueue`. So `classify` says Working,
 //! and `classify_main`, which the daemon types by, says Idle.
-//!
-//! **Text in the box.** claude drops the mode line's `· ↓ to manage` once
-//! its box holds anything. Agents still show as their `◯` rows; shells and
-//! monitors have no rows, only the mode line's count, `· 7 shells` or
-//! `· 8 shells, 1 monitor` (claude 2.1.308 and 2.1.309,
-//! `captures/claude-2.1.309-shells-*-59x41-e.txt`). Read by the needles
-//! alone, a pane with background shells and a message pasted into it read
-//! no background work, and the daemon left the message in the box as
-//! `paste_left` (ov-795). So the count is read too, on the mode line row
-//! alone (`composer::claude_mode_line`): `N shells` anywhere in the footer
-//! could be words typed into the box, and the row under the box's closing
-//! rule can't be.
-
-//!
-//! **Which work.** The kind matters to a caller trusting claude's registry
-//! beside it: claude keeps the registry `busy` while background agents run,
-//! but writes `shell` for shells alone, so beside shells alone `busy` is a
-//! turn running (`Background::Shells`, ov-795 review). Agents are told by
-//! their `◯` rows under the box's mode line (`composer::claude_agent_rows`),
-//! which every agent capture here has, never by a `◯ ` anywhere in the
-//! footer, which takes in the box and the transcript; the tray hint or a
-//! count with no row is shells or monitors.
-//!
-//! **Known gaps, failing safe.** The count is read on the row right under the
-//! box, so a row claude or vim puts there first (`-- INSERT --`, a long
-//! paste's `paste again to expand`) hides it: beside shells alone the box
-//! then reads no background work, and a send is left as `paste_left`.
 
 use super::{Registry, footer_text};
-
-/// The background work a claude footer shows (`Registry::background_work`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Background {
-    /// None shows.
-    None,
-    /// Shells or monitors, and no agent row: claude's registry says `shell`
-    /// for these, never `busy`.
-    Shells,
-    /// Background agents, by their `◯` rows: claude's registry says `busy`
-    /// while they run, the turn over.
-    Agents,
-}
 
 impl Registry {
     /// Whether the agent's footer shows background work still running.
     pub fn background_running(&self, command: &str, screen: &str) -> bool {
-        self.background_work(command, screen) != Background::None
-    }
-
-    /// Which background work the agent's footer shows (this module's docs).
-    pub fn background_work(&self, command: &str, screen: &str) -> Background {
-        let Some(rules) = self.identify(command, screen) else { return Background::None };
+        let Some(rules) = self.identify(command, screen) else { return false };
         let footer = footer_text(screen, rules.footer_lines);
-        let running = rules.background.iter().any(|needle| footer.contains(needle.as_str()))
-            || (rules.preset == "claude" && crate::composer::claude_mode_line(screen).is_some_and(|line| counts_background(&line)));
-        match running {
-            false => Background::None,
-            true if rules.preset == "claude" && crate::composer::claude_agent_rows(screen) => Background::Agents,
-            true => Background::Shells,
-        }
+        rules.background.iter().any(|needle| footer.contains(needle.as_str()))
     }
-}
-
-/// Whether claude's mode line `line` counts background shells or monitors:
-/// a ` · `-separated part that is only `N shell(s)` and `N monitor(s)`,
-/// joined by `, `. A count cut short (`8 she…`) isn't one.
-fn counts_background(line: &str) -> bool {
-    line.split(" · ").any(|part| {
-        let part = part.trim();
-        !part.is_empty()
-            && part.split(", ").all(|item| {
-                let Some((n, what)) = item.split_once(' ') else { return false };
-                !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && matches!(what, "shell" | "shells" | "monitor" | "monitors")
-            })
-    })
 }
