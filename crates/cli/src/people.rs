@@ -48,6 +48,13 @@ pub(crate) enum MemberCmd {
         /// That account's email, which People shows. Kept when left off.
         #[arg(long)]
         email: Option<String>,
+        /// The devices `member list` showed as theirs, comma-separated, and
+        /// empty for someone not here yet (ov-786). The add is refused,
+        /// changing nothing, if their devices have changed since: read the
+        /// list again and add from it, so a device someone else just gave
+        /// them isn't taken off.
+        #[arg(long, value_name = "DEVICES")]
+        if_devices: Option<String>,
     },
     /// Remove a person: their devices are revoked, so they can no longer log
     /// in, a workspace they led goes back to the owner, and their reps stop.
@@ -142,8 +149,16 @@ pub(crate) fn shared_account(account: &str) -> String {
 
 const NO_ACCOUNTS: &str =
     "this runner's Far Cooler is too old to record a teammate's directory account, so they weren't added. update it and try again";
+const NO_DEVICES_READ: &str =
+    "this runner's Far Cooler can't check what you read before changing someone's devices. update it, or leave out --if-devices";
 const NO_PEOPLE: &str = "this runner's Far Cooler doesn't know its people yet. update it and try again";
 const NO_OWN_LOGINS: &str = "this runner's Far Cooler can't let members share its logins yet. update it and try again";
+
+/// `--if-devices`: a comma-separated list, empty for none.
+fn devices_read(list: &str) -> pb::MemberDevicesRead {
+    let client_ids = list.split(',').map(str::trim).filter(|d| !d.is_empty()).map(str::to_string).collect();
+    pb::MemberDevicesRead { client_ids }
+}
 
 /// The agents' names as people read them.
 fn agent_name(harness: &str) -> &'static str {
@@ -220,7 +235,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     }
     let (r, done) = match &cmd {
         MemberCmd::List => (req("member.list"), None),
-        MemberCmd::Add { handle, name, devices, account, email } => (
+        MemberCmd::Add { handle, name, devices, account, email, if_devices } => (
             with(
                 req("member.set"),
                 request::Payload::MemberSet(pb::MemberSet {
@@ -229,6 +244,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
                     client_ids: devices.clone(),
                     account: account.as_deref().unwrap_or_default().trim().to_string(),
                     email: email.as_deref().unwrap_or_default().trim().to_string(),
+                    devices_read: if_devices.as_deref().map(devices_read),
                 }),
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
@@ -271,6 +287,14 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
         }
         r.required_capabilities.push(capability::MEMBER_ACCOUNTS.to_string());
     }
+    // What the caller read (ov-786): a runner from before it would drop the
+    // field and replace the list as it stands, so it's refused here instead.
+    if let MemberCmd::Add { if_devices: Some(_), .. } = &cmd {
+        if !link.capabilities().iter().any(|c| c == capability::MEMBER_DEVICES_READ) {
+            return Err(NO_DEVICES_READ.into());
+        }
+        r.required_capabilities.push(capability::MEMBER_DEVICES_READ.to_string());
+    }
     let answer = link.call(r).await.map_err(refused)?;
     let result::Value::MemberList(list) = expect_value(answer.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
@@ -289,6 +313,8 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     // And whether it signs a member in to Claude (ov-584), which the Mac reads
     // to offer the Claude section: it has no handshake of its own to ask.
     answer["claude_sign_in"] = link.capabilities().iter().any(|c| c == capability::CLAUDE_SIGN_IN).into();
+    // And whether `member add --if-devices` can be checked here (ov-786).
+    answer["member_devices_read"] = link.capabilities().iter().any(|c| c == capability::MEMBER_DEVICES_READ).into();
     Ok(answer.to_string())
 }
 
@@ -441,6 +467,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "handle" => "a handle is a lowercase letter, then up to 31 letters, digits or `-`, and not one the runner keeps",
         "member_name" => "a name is one line of up to 64 characters, with no [ or ]",
         "device_taken" => "one of those devices is someone else's. remove it from them first",
+        "devices_changed" => "their devices changed since you read them, so nothing was changed. run `farcooler member list` and try again",
         "rep_running" => "their rep is already running on this board",
         "device" => "that isn't a device enrolled on this runner. `farcooler client list` names them",
         "command_preset" => "a rep runs claude, with an optional `:model`",

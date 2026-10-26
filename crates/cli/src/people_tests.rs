@@ -10,6 +10,8 @@ struct Runner {
     accounts: bool,
     /// Whether it signs a member in to Claude (ov-584).
     sign_in: bool,
+    /// Whether it checks what a `member.set` caller read (ov-786).
+    devices_read: bool,
     refuse: Option<(pb::ErrorCode, &'static str)>,
     /// What `member.remove` answers it did to the login (ov-588).
     removed: Option<pb::MemberRemoval>,
@@ -39,6 +41,9 @@ impl tasks::DispatchLink for Runner {
         }
         if self.accounts {
             have.push(capability::MEMBER_ACCOUNTS.to_string());
+        }
+        if self.devices_read {
+            have.push(capability::MEMBER_DEVICES_READ.to_string());
         }
         if self.sign_in {
             have.push(capability::CLAUDE_SIGN_IN.to_string());
@@ -77,7 +82,7 @@ impl tasks::DispatchLink for Runner {
 }
 
 fn runner() -> Runner {
-    Runner { sent: Vec::new(), people: true, accounts: true, sign_in: false, refuse: None, removed: None }
+    Runner { sent: Vec::new(), people: true, accounts: true, sign_in: false, devices_read: true, refuse: None, removed: None }
 }
 
 fn parsed(line: &str) -> crate::Command {
@@ -337,4 +342,55 @@ async fn own_login_sets_one_switch_and_says_what_it_means() {
     assert!(old.sent.is_empty());
     use clap::Parser as _;
     assert!(crate::Cli::try_parse_from(["farcooler", "member", "own-login", "aider", "on"]).is_err(), "only the three agents");
+}
+
+/// `member add --if-devices` sends what the caller read (ov-786), comma-
+/// separated and empty for none, and names the capability. A runner without
+/// it would drop the read and replace the list as it stands, so it's refused
+/// before anything is sent; without the flag, nothing is read or named. A
+/// stale refusal is said in this CLI's words, with its word for the Mac.
+#[tokio::test]
+async fn adding_from_a_read_sends_what_was_read() {
+    let read = |link: &Runner| {
+        let Some(request::Payload::MemberSet(set)) = &link.sent[0].payload else { panic!() };
+        set.devices_read.as_ref().map(|r| r.client_ids.clone())
+    };
+    let mut link = runner();
+    let cmd = member_cmd("farcooler member add bob --name Bob --device phone-b --device mac-b --if-devices phone-b,,pad-b");
+    member_on(&mut link, cmd, false).await.unwrap();
+    assert_eq!(read(&link), Some(vec!["phone-b".to_string(), "pad-b".to_string()]));
+    assert!(link.sent[0].required_capabilities.iter().any(|c| c == capability::MEMBER_DEVICES_READ));
+
+    let mut link = runner();
+    member_on(&mut link, member_cmd("farcooler member add bob --name Bob --device phone-b --if-devices="), false).await.unwrap();
+    assert_eq!(read(&link), Some(Vec::new()), "someone not here yet is read as having none");
+
+    let mut link = runner();
+    member_on(&mut link, member_cmd("farcooler member add bob --name Bob --device phone-b"), false).await.unwrap();
+    assert_eq!(read(&link), None);
+    assert!(!link.sent[0].required_capabilities.iter().any(|c| c == capability::MEMBER_DEVICES_READ));
+
+    let mut old = Runner { devices_read: false, ..runner() };
+    let cmd = member_cmd("farcooler member add bob --name Bob --device phone-b --if-devices=");
+    let refused = member_on(&mut old, cmd, false).await.expect_err("refused").to_string();
+    assert!(refused.contains("can't check what you read"), "{refused}");
+    assert!(old.sent.is_empty(), "something was sent: {:?}", old.sent);
+
+    let mut stale = Runner { refuse: Some((pb::ErrorCode::ResourceConflict, "devices_changed")), ..runner() };
+    let cmd = member_cmd("farcooler member add bob --name Bob --device phone-b --if-devices=");
+    let err = member_on(&mut stale, cmd, true).await.expect_err("refused");
+    assert!(err.to_string().contains("their devices changed since you read them"), "{err}");
+    let refused = err.downcast_ref::<tasks::Refused>().expect("a refusal that keeps its word");
+    assert_eq!((refused.word(), refused.what()), (Some("resource-conflict"), Some("devices_changed")));
+}
+
+/// `member list --json` says whether the runner checks what was read, so
+/// the Mac sends `--if-devices` only where it's checked (ov-786).
+#[tokio::test]
+async fn the_list_says_whether_a_read_is_checked() {
+    for have in [true, false] {
+        let mut link = Runner { devices_read: have, ..runner() };
+        let out = member_on(&mut link, MemberCmd::List, true).await.unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["member_devices_read"], have);
+    }
 }
