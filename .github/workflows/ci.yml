@@ -183,6 +183,9 @@ jobs:
       # The page itself is checked daily by claude-prices.yml, which no push
       # waits on.
       - run: ./scripts/claude-prices.py --self-test
+      # The DERP-hosts check's parser, on maps written in the test. The live map
+      # is checked daily by derp-hosts.yml, which no push waits on.
+      - run: ./scripts/derp-hosts-check.py --self-test
       # No source file grows past 1,500 lines (ov-169); the ones already past
       # it are grandfathered in scripts/file-size-budget.txt, each with a
       # ceiling of its size then plus max(2%, 50 lines). The rule against its
