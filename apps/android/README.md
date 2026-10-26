@@ -87,6 +87,96 @@ suites testing "the same sort of thing" would not.
 The instrumented tests cannot run on a desktop JVM — there is no `.so` on its
 library path, and mocking one would test the mock.
 
+## Canary on Google Play
+
+Every build of `main` that passes CI goes to Play's internal testing track as
+`com.farcooler.android.canary`, from the `Android (Play internal testing)` job in
+`.github/workflows/canary.yml`. Your phone installs it from Play and updates by
+itself, the way TestFlight does for iOS: no USB debugging, no sideloading.
+
+Play App Signing holds the key your phone verifies. CI holds only an **upload
+key**, which proves a bundle came from us and which Google can reset if it is
+lost. `versionCode` is the commit count (`scripts/version.sh build`), the same
+number iOS uses, so it only ever goes up.
+
+Until the steps below are done the job skips and says why in the run's
+annotations. Nothing fails.
+
+### One-time setup
+
+1. **Generate the upload key.** Anywhere outside the repository:
+
+   ```sh
+   keytool -genkeypair -v -keystore farcooler-upload.jks -storetype PKCS12 \
+     -alias farcooler-upload -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+   Store the `.jks` file and both passwords in your login Keychain, and add
+   them to GitHub as secrets (below). Never put the keystore in the repository.
+
+2. **Create the app in Play Console.** All apps, Create app. Name it Far Cooler
+   Canary, then finish the dashboard's required declarations. Its package name
+   is fixed by the first upload, and must be `com.farcooler.android.canary`.
+   Accept Play App Signing when asked.
+
+3. **Upload the first bundle by hand.** Play requires this before its API
+   accepts anything. Build it with the upload key, then in Play Console go to
+   Testing, Internal testing, Create new release, and upload it:
+
+   ```sh
+   ./scripts/build-android-libs.sh
+   cd apps/android
+   FARCOOLER_CHANNEL=canary \
+   ANDROID_UPLOAD_KEYSTORE=/path/to/farcooler-upload.jks \
+   ANDROID_UPLOAD_STORE_PASSWORD=... ANDROID_UPLOAD_KEY_ALIAS=farcooler-upload \
+   ANDROID_UPLOAD_KEY_PASSWORD=... \
+   ./gradlew bundleRelease -Pfarcooler.sign=true
+   # app/build/outputs/bundle/release/app-release.aab
+   ```
+
+   Run it from a full clone: `versionCode` is the commit count, and the script
+   refuses a shallow one.
+
+4. **Add internal testers.** Testing, Internal testing, Testers: create an
+   email list with your Google account. Copy the opt-in link from the same page
+   and open it on the phone once. After that the app is in Play's updates.
+
+5. **Create a service account.** Google Cloud console, IAM, Service accounts,
+   create one, then Keys, Add key, JSON. In Play Console, Users and
+   permissions, invite its email and grant it release permission for this app
+   (Release to testing tracks is enough). Enable the Google Play Android
+   Developer API on the same Cloud project.
+
+6. **Add the GitHub secrets** (Settings, Secrets and variables, Actions):
+
+   | Secret | What |
+   | --- | --- |
+   | `ANDROID_UPLOAD_KEYSTORE_B64` | `base64 -i farcooler-upload.jks` |
+   | `ANDROID_UPLOAD_STORE_PASSWORD` | the keystore password |
+   | `ANDROID_UPLOAD_KEY_ALIAS` | `farcooler-upload` |
+   | `ANDROID_UPLOAD_KEY_PASSWORD` | the key password |
+   | `PLAY_SERVICE_ACCOUNT_JSON` | the whole service account JSON file |
+
+   Then set the repository **variable** `CANARY_PLAY` to `true`. That is your
+   statement that step 3 is done; without it the job skips.
+
+7. **Firebase push (optional).** In the Firebase console add an Android app with
+   package `com.farcooler.android.canary` to the canary project and download its
+   `google-services.json`. Add it as the secret `GOOGLE_SERVICES_JSON_CANARY`
+   (the file's contents). CI writes it next to `app/build.gradle.kts` before the
+   build. Without it the app builds and works, and push is unavailable. For a
+   local build, put the file at `app/google-services.json`; it is gitignored.
+
+### How signing is gated
+
+`./gradlew assembleRelease` is unchanged: unsigned, no secrets, the compile
+check CI runs. `-Pfarcooler.sign=true` signs the release build with the upload
+key, read from the environment or from `farcooler.upload.keystore`,
+`.keystoreB64`, `.storePassword`, `.keyAlias` and `.keyPassword` Gradle
+properties. If any is missing the build fails and names it. `bundleRelease`
+refuses to run at all without `-Pfarcooler.sign=true`, so the bundle that gets
+uploaded can never be unsigned.
+
 ## What is different from iOS, and why
 
 Everything below the UI is the same. These are the places the platform made a
