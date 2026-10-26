@@ -1,4 +1,4 @@
-// Shipped by Canary at 39401086d4c3756ea634db3b95eac046d8fc5179. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 6eaaf55686ecb0b1900ee21e9581fd46084d8233. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -305,6 +305,10 @@ message Request {
     // takes no payload. 552-559 are their block, held by `reserved` below.
     MemberSetRole member_set_role = 550;
     WorkspaceSetCharter workspace_set_charter = 551;
+    // `crash.report` (ov-797), behind `crash_reports`: a crash or hang the
+    // owner's own phone recorded, as its signature only. 561-569 are its
+    // block, held by `reserved` below.
+    CrashReport crash_report = 560;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -346,6 +350,8 @@ message Request {
   reserved 541 to 549;
   // The rest of members' roles' block (ov-757).
   reserved 552 to 559;
+  // The rest of crash reports' block (ov-797).
+  reserved 561 to 569;
 }
 
 message Response {
@@ -516,6 +522,9 @@ message Result {
     // (ov-584): the member's Claude login as it is now. 522-529 are their
     // block, held by `reserved` below.
     MemberClaudeLogin member_claude_login = 521;
+    // `crash.report` (ov-797), behind `crash_reports`: what the runner kept.
+    // 561-569 are its block, held by `reserved` below.
+    CrashRecorded crash_recorded = 560;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -558,6 +567,8 @@ message Result {
   reserved 541 to 549;
   // The rest of the people log's block (ov-757).
   reserved 551 to 559;
+  // The rest of crash reports' block (ov-797).
+  reserved 561 to 569;
 }
 
 // ---------------------------------------------------------------------------
@@ -6027,4 +6038,61 @@ message CharterWritten {
   bool draft = 2;
   // The Markdown written, or that would have been.
   string text = 3;
+}
+
+// `crash.report` (ov-797), at `control`: one crash or hang the owner's own
+// phone recorded, delivered by MetricKit on the launch after it. The
+// signature and nothing else: no exception message, no thread name, no call
+// tree, nothing a person typed. The owner's alone (`not_yours` from a
+// member's device, refused from a rep), and a phone sends it only to a
+// runner that says the phone is its owner's. Every text field has a strict
+// character set, refused `invalid_argument` otherwise, so nothing reads as
+// more than a name on a card. The runner keeps each signature once, with a
+// count, and files a card for a new one on Far Cooler's own board when the
+// runner has one; past ten new signatures a day it counts and files nothing.
+// Answers `CrashRecorded`.
+message CrashReport {
+  // `crash` or `hang`.
+  string kind = 1;
+  // The Mach exception type (1 is EXC_BAD_ACCESS), its code, and the signal
+  // (11 is SIGSEGV), each absent when the report has none.
+  optional int32 exception_type = 2;
+  optional int64 exception_code = 3;
+  optional int32 signal = 4;
+  // An Objective-C exception's class name, `NSInvalidArgumentException`: a
+  // name in code, never its message. Empty when there is none.
+  string exception_name = 5;
+  // The faulting thread's top frames, top first, then the first frame in the
+  // app's own binary if none of those is. At most 16.
+  repeated CrashFrame frames = 6;
+  // The app's version and build that crashed, and the OS it ran on, as
+  // MetricKit says them: `1.4`, `1093`, `iPhone OS 26.1 (23B85)`. ASCII
+  // letters, digits, spaces, `.`, `_`, `(`, `)`, `,` and `-`.
+  string app_version = 7;
+  string app_build = 8;
+  string os = 9;
+}
+
+// One frame of a crash signature.
+message CrashFrame {
+  // The binary's file name, `FarCooler` or `libc++abi.dylib`, never a path:
+  // ASCII letters, digits, `.`, `_`, `+`, `-` and inner spaces.
+  string binary = 1;
+  // The offset into the binary's text segment.
+  uint64 offset = 2;
+  // A symbol. Always empty for now: MetricKit's frames carry none, and the
+  // runner refuses one until a source that has them is reviewed.
+  string symbol = 3;
+  // Where in the stack it was: 0 is the top.
+  uint32 depth = 4;
+  // Whether it is in the app's own executable rather than a library.
+  bool own = 5;
+}
+
+// What `crash.report` kept: how many times this signature has been reported,
+// this one included (past the day's cap, how many have overflowed), and the
+// key of the card it is on (`ov-812`), or empty when the runner filed none.
+message CrashRecorded {
+  uint32 count = 1;
+  string task_key = 2;
 }
