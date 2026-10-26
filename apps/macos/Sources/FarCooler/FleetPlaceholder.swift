@@ -37,6 +37,9 @@ struct FleetPlaceholder: View {
         /// at once never flashes "Connecting…" or "No Workspace Selected"
         /// on its way back (ov-296).
         case settling
+        /// The runner removed this Mac's member from its team (ov-784): the
+        /// runner, `""` for this Mac. It shows them none of its work.
+        case removed(String)
     }
 
     /// How long a restore waits before it says it's connecting: a runner
@@ -58,7 +61,9 @@ struct FleetPlaceholder: View {
     /// past all of this, whichever runner it came from.
     ///
     /// A window going back to a place on a runner still connecting says so,
-    /// whatever else the fleet holds: that place is the one it opens. Until
+    /// whatever else the fleet holds: that place is the one it opens; one
+    /// that removed this Mac's member (`removedFrom`) says that instead,
+    /// whatever else is true. Until
     /// the runner says what's wrong (`trouble`), or has been waited for past
     /// `connectingLimit`: then it's unreachable, with Try Again.
     ///
@@ -68,8 +73,9 @@ struct FleetPlaceholder: View {
     nonisolated static func phase(
         hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool,
         restoringOn runner: String? = nil, trouble: String? = nil, waited: TimeInterval = 0,
-        restoring: Bool = false
+        restoring: Bool = false, removedFrom: String? = nil
     ) -> Phase {
+        if let removedFrom { return .removed(removedFrom) }
         if let runner {
             if trouble != nil || waited >= connectingLimit { return .unreachable(runner, reason: trouble) }
             return waited < connectingDelay ? .settling : .connecting(runner)
@@ -248,6 +254,19 @@ struct FleetPlaceholder: View {
                     Button("Show Needs You Instead", action: onShowNeedsYou)
                 }
             }
+        case .removed:
+            ContentUnavailableView {
+                Label(RunnerPeople.removedTitle, systemImage: "person.crop.circle.badge.xmark")
+            } description: {
+                Text(RunnerPeople.removedBody)
+            } actions: {
+                // Asks again: a member added back is let in at once.
+                Button("Check Again", action: onTryAgain)
+                if let onShowNeedsYou {
+                    Button("Show Needs You Instead", action: onShowNeedsYou)
+                }
+            }
+            .accessibilityIdentifier("runner-removed")
         case .chooseWorkspace:
             ContentUnavailableView {
                 EmptyStateTitle("No Workspace Selected", symbol: "square.stack.3d.up")

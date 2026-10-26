@@ -197,7 +197,11 @@ extension ContentView {
                     errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
                 }
             },
-            onReadCharter: { charterSheet = CharterSheetRequest(host: host, workspace: workspace) },
+            onReadCharter: {
+                charterSheet = CharterSheetRequest(
+                    host: host, workspace: workspace,
+                    editable: store.clients[host]?.editsCharter(of: workspace) == true)
+            },
             target: seat.flatMap { store.client(for: $0.worktree)?.target } ?? "",
             onRestart: {
                 if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
@@ -212,6 +216,7 @@ extension ContentView {
                     if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
                 }
             },
+            keepsSettings: store.clients[host]?.keepsWorkspaces,
             starts: ConversationColumn.offers(
                 column, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))
             ).compactMap { offer in

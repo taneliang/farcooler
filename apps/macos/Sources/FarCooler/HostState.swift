@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// Where a runner's connection stands.
@@ -15,12 +16,16 @@ enum HostState: Equatable {
     case reconnecting(attempt: Int)
     case unreachable(reason: String)
     case notInstalled
+    /// This Mac's member was removed from the runner (ov-784): it refuses
+    /// every read but `member list`, which says so. Not fixed by retrying
+    /// at full speed, but checked again slowly, so being added back is seen.
+    case removed
 
     var isUsable: Bool { self == .connected }
 
     /// What to tell someone whose action was refused, or nil to let it proceed.
     ///
-    /// Only `.unreachable` and `.notInstalled` refuse. Those are the two states
+    /// Only `.unreachable`, `.notInstalled` and `.removed` refuse. Those are the two states
     /// where a command was already tried against this runner and failed, so
     /// trying another is asking the same question twice. `.connecting` and
     /// `.reconnecting` mean "we do not know yet", not "no" — refusing on those
@@ -35,6 +40,7 @@ enum HostState: Equatable {
         case .connected, .connecting, .reconnecting: return nil
         case .unreachable(let why): return why
         case .notInstalled: return "Far Cooler isn’t installed on this runner."
+        case .removed: return RunnerPeople.removedBody
         }
     }
 }

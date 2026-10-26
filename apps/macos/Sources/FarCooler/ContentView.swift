@@ -639,10 +639,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(item: $charterSheet) { request in
-            CharterSheet(workspace: request.workspace) {
+            CharterSheet(workspace: request.workspace, load: {
                 guard let client = store.clients[request.host] else { return .failed(CharterReading.unreachable(request.workspace)) }
                 return await client.readCharter(request.workspace)
-            }
+            }, save: !request.editable ? nil : { text, expected in
+                guard let client = store.clients[request.host] else { return .failed(CharterReading.notSaved(request.workspace)) }
+                return await client.saveCharter(request.workspace, text: text, expected: expected)
+            })
         }
         .sheet(item: $signInRunner) { choice in
             RunnerSettingsSheet(

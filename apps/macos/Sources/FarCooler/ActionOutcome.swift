@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import os
 
@@ -314,6 +315,8 @@ enum ActionCopy {
             return "That runner isn’t set up anymore."
         case .notInstalled:
             return "Far Cooler isn’t installed on that runner yet."
+        case .removed:
+            return RunnerPeople.removedBody
         case .unreachable(let why):
             log.error("refused, runner unreachable: \(why, privacy: .private)")
             return "That runner can’t be reached right now. Far Cooler will keep trying."

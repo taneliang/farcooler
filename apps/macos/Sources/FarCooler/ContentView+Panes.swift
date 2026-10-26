@@ -201,6 +201,15 @@ extension ContentView {
         return (runner.isEmpty ? client?.fleetError : nil) ?? client?.state.refusal
     }
 
+    /// The runner whose removal of this Mac's member the placeholder says
+    /// (ov-784): the one a restore waits for, or with no work from anywhere
+    /// to show, any runner that removed them.
+    func removedFrom(restoringOn runner: String?) -> String? {
+        if let runner { return store.clients[runner]?.state == .removed ? runner : nil }
+        guard store.fleet.worktrees.isEmpty else { return nil }
+        return store.hosts.first { store.clients[$0]?.state == .removed }
+    }
+
     private func placeholder(restoringOn runner: String?, waited: TimeInterval, restoring: Bool) -> some View {
         let local = store.clients[""]
         let (step, agents) = macStep()
@@ -208,7 +217,8 @@ extension ContentView {
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
                 localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty,
-                restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited, restoring: restoring),
+                restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited, restoring: restoring,
+                removedFrom: removedFrom(restoringOn: runner)),
             onShowNeedsYou: { selection = .needsYou },
             onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }

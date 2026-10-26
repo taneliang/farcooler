@@ -141,10 +141,10 @@ public struct RunnerPeople: Equatable, Sendable {
     }
 
     /// A member's second line: their handle, their email when they were
-    /// added by QR, Maintainer when they are one (ov-784), and where their
-    /// reps work.
-    public static func detail(of member: Member, reps: String) -> String {
-        let role = member.role == .maintainer ? Role.maintainer.title : ""
+    /// added by QR, Maintainer when they are one (ov-784) and no picker
+    /// beside it says so (`role: false`), and where their reps work.
+    public static func detail(of member: Member, reps: String, role showsRole: Bool = true) -> String {
+        let role = showsRole && member.role == .maintainer ? Role.maintainer.title : ""
         return [member.handle, member.email, role, reps].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

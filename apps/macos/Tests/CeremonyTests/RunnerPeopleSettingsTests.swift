@@ -129,6 +129,64 @@ struct RunnerPeopleSettingsTests {
         }
     }
 
+    /// The owner's view of a runner with roles (ov-784): a Maintainer and a
+    /// member, long names.
+    static let roles =
+        #"{"members":[{"handle":"alexandra-montgomery","name":"Alexandra Montgomery-Fitzgerald of the Platform Team","devices":["phone-a"],"reps":1,"#
+        + #""rep_panes":[{"terminal":"t1","workspace":"w-long"}],"role":"maintainer"},"#
+        + #"{"handle":"bob","name":"Bob","devices":[],"reps":0,"rep_panes":[],"role":"member"}],"claude_account":"team@example.com","you":""}"#
+
+    @Test("The owner gets a role picker on each member; a member doesn't")
+    func rolePicker() async {
+        let (owner, ownerWindow) = await Self.drawn(members: Self.roles)
+        ownerWindow.close()
+        #expect(owner.contains("runner-person-role-alexandra-montgomery") && owner.contains("runner-person-role-bob"), "\(owner)")
+        let asBob = Self.roles.replacingOccurrences(of: #""you":"""#, with: #""you":"bob""#)
+        let (member, memberWindow) = await Self.drawn(members: asBob)
+        memberWindow.close()
+        #expect(member.contains("runner-person-bob"), "\(member)")
+        #expect(!member.contains { $0.hasPrefix("runner-person-role-") }, "\(member)")
+        let older = Self.roles.replacingOccurrences(of: #","role":"maintainer""#, with: "")
+            .replacingOccurrences(of: #","role":"member""#, with: "")
+        let (before, beforeWindow) = await Self.drawn(members: older)
+        beforeWindow.close()
+        #expect(!before.contains { $0.hasPrefix("runner-person-role-") }, "a runner before roles: \(before)")
+    }
+
+    @Test("Choosing a role asks the runner by handle, and the list it answers is drawn")
+    func choosingARole() async {
+        let store = RunnerSettingsStore(target: "box")
+        var asked: [String] = []
+        store.cliForTesting = { args in
+            asked = args
+            return CLI.Result(ok: true, output: Self.roles, errors: "")
+        }
+        await store.setRole("bob", .maintainer)
+        #expect(asked == ["--host", "box", "--json", "member", "role", "bob", "maintainer"])
+        #expect(store.people?.members.first?.role == .maintainer)
+        #expect(store.failure == nil)
+        store.cliForTesting = { _ in CLI.Result(ok: false, output: "", errors: "code: not-yours") }
+        await store.setRole("bob", .member)
+        #expect(store.failure == RunnerPeople.roleNotSaved)
+        #expect(store.people?.members.first?.role == .maintainer, "kept as the runner has it")
+    }
+
+    /// The owner's sheet with roles, light and dark, at the sheet's width,
+    /// into `FARCOOLER_CAPTURE_OUT`. Opt-in, as `captures` is.
+    @Test("Captures of the role picker", .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
+    func roleCaptures() async throws {
+        let out = URL(fileURLWithPath: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]!)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        for scheme in [ColorScheme.light, .dark] {
+            let (ids, window) = await Self.drawn(members: Self.roles, scheme: scheme)
+            let view = try #require(window.contentView)
+            try await Capture.keep(
+                view, to: out.appendingPathComponent("mac-people-roles-\(scheme == .dark ? "dark" : "light").png"),
+                expecting: "the People section with role pickers", until: { ids.contains("runner-person-role-bob") })
+            window.close()
+        }
+    }
+
     @Test("A runner nobody shares shows no People section")
     func privateRunner() async {
         let (drawn, window) = await Self.drawn(members: Self.alone)

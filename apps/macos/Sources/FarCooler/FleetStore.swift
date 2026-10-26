@@ -501,7 +501,7 @@ final class FleetStore: ObservableObject {
                 return false
             case .connected:
                 return !(clients[host]?.fleet.runtimeHealthy ?? true)
-            case .reconnecting, .unreachable, .notInstalled:
+            case .reconnecting, .unreachable, .notInstalled, .removed:
                 return true
             }
         }

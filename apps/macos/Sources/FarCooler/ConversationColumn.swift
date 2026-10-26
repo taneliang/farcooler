@@ -107,6 +107,12 @@ struct OrchestratorMenu: View {
     /// row, its only home before, went (ov-178).
     var wakeOnAnswer: Bool? = nil
     var onSetWakeOnAnswer: (Bool) -> Void = { _ in }
+    /// Whether this Mac may change the workspace's settings that act as
+    /// nobody, the wake switch among them: the owner and a Maintainer
+    /// (ov-784), whether or not they lead it. Nobody else gets the switch.
+    /// Nil while who this Mac is isn't known: the switch goes with `canAct`,
+    /// as it did before.
+    var keepsSettings: Bool?
     /// With no orchestrator: the harnesses Start Orchestrator offers
     /// (`ConversationColumn.offers`), and what starting one does.
     var starts: [OrchestratorHarness] = []
@@ -121,7 +127,9 @@ struct OrchestratorMenu: View {
         // Drawn with no orchestrator too (ov-178): Show Charter and Wake
         // the Agent When You Answer are the workspace's, not the seat's.
         ForEach(
-            Self.items(canAct: canAct, hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer),
+            Self.items(
+                canAct: canAct, hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer,
+                keepsSettings: keepsSettings),
             id: \.self
         ) { item in
             menuItem(item)
@@ -143,12 +151,17 @@ extension OrchestratorMenu {
     /// What the menu draws: the workspace's items for a caller that can act,
     /// and for one that can't (a member can't restart, replace or step down
     /// anyone's orchestrator) only Show Charter, which every member reads
-    /// (ov-755) and which opens as a sheet on another machine's runner.
+    /// (ov-755) and which opens as a sheet on another machine's runner. The
+    /// wake switch is the owner's and a Maintainer's (`keepsSettings`,
+    /// ov-784), whoever acts on the orchestrator: a lead who isn't one would
+    /// be refused it, and a Maintainer who doesn't lead isn't. Not known
+    /// (nil), it goes with `canAct`.
     nonisolated static func items(
-        canAct: Bool, hasSeat: Bool, charter: CharterAccess?, wakeOnAnswer: Bool?
+        canAct: Bool, hasSeat: Bool, charter: CharterAccess?, wakeOnAnswer: Bool?, keepsSettings: Bool? = nil
     ) -> [WorkspaceMenu.Item] {
-        if canAct { return menu(hasSeat: hasSeat, charter: charter, wakeOnAnswer: wakeOnAnswer) }
-        return charter == .read ? [.showCharter] : []
+        let wake = (keepsSettings ?? canAct) ? wakeOnAnswer : nil
+        if canAct { return menu(hasSeat: hasSeat, charter: charter, wakeOnAnswer: wake) }
+        return (charter == .read ? [.showCharter] : []) + (wake == nil ? [] : [.wakeOnAnswer])
     }
 
     /// The workspace's items in the menu, in `WorkspaceMenu`'s

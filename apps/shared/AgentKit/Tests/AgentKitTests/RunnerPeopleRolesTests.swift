@@ -69,10 +69,11 @@ struct RunnerPeopleRolesTests {
         #expect(RunnerPeople.removedTitle == "You Were Removed from This Runner")
     }
 
-    @Test("A Maintainer's row says so, and a member's row doesn't")
+    @Test("A Maintainer's row says so where no picker does, and a member's row doesn't")
     func detail() throws {
         let people = try #require(RunnerPeople(json: Self.listed(you: "")))
         #expect(RunnerPeople.detail(of: people.members[0], reps: "No rep") == "alice · Maintainer · No rep")
         #expect(RunnerPeople.detail(of: people.members[1], reps: "No rep") == "bob · No rep")
+        #expect(RunnerPeople.detail(of: people.members[0], reps: "No rep", role: false) == "alice · No rep", "the picker says it")
     }
 }

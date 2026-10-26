@@ -162,7 +162,7 @@ final class DaemonClient: ObservableObject {
         state: HostState, build: DaemonBuild?, unreadable: Bool, remote: Bool
     ) -> DaemonSkew {
         switch state {
-        case .connecting, .reconnecting, .notInstalled:
+        case .connecting, .reconnecting, .notInstalled, .removed:
             return .unavailable
         case .unreachable(let reason):
             // The one flavor of unreachable that IS a version. `explain` in
@@ -287,7 +287,7 @@ final class DaemonClient: ObservableObject {
 
         let wait: Double
         switch state {
-        case .notInstalled:
+        case .notInstalled, .removed:
             // `attempt` resets rather than climbs here: it drives the fast
             // exponential schedule only, means nothing at this cadence, and
             // letting it grow would leave a later, genuinely transient
@@ -549,7 +549,7 @@ final class DaemonClient: ObservableObject {
                     // measured in minutes, not moments — showing
                     // "reconnecting" over that whole span would say less
                     // than what `refresh()` already determined.
-                    if case .notInstalled = self.state { return }
+                    if [.notInstalled, .removed].contains(self.state) { return }
                     if case .unreachable(let reason) = self.state, self.looksVersionMismatch(reason) {
                         return
                     }
@@ -786,11 +786,8 @@ final class DaemonClient: ObservableObject {
             if Task.isCancelled { return }
             let reason = failureMessage ?? "Couldn’t reach this runner."
             fleetError = reason
-            if looksNotInstalled(reason) {
-                state = .notInstalled
-            } else {
-                state = .unreachable(reason: reason)
-            }
+            let removed = looksNotInstalled(reason) ? nil : await removal(after: reason)  // ov-784
+            state = looksNotInstalled(reason) ? .notInstalled : removed ?? .unreachable(reason: reason)
             // Not a failure to retry forever at full speed (`.notInstalled`
             // and a version mismatch are not fixed by retrying at all), but
             // not one to never check again either — `scheduleRetry()` reads

@@ -89,7 +89,10 @@ struct RunnerSettingsSheet: View {
                             handle: people.you, login: login, support: support, startNow: signInOnOpen,
                             sharedAccount: people.sharedClaudeAccount)
                     }
-                    RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
+                    RunnerPeopleSection(
+                        people: people, workspaceNames: workspaceNames,
+                        setRole: people.offersRoles(runnerHasRoles: people.members.contains { $0.role != nil })
+                            ? { handle, role in await store.setRole(handle, role) } : nil)
                     // Whether members share this runner's logins (ov-652).
                     if let logins = people.ownLogins {
                         MemberLoginsSection(

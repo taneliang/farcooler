@@ -12,6 +12,9 @@ import SwiftUI
 struct RunnerPeopleSection: View {
     let people: RunnerPeople
     let workspaceNames: [String: String]
+    /// Give a member a role (ov-784): the owner's alone, on a runner with
+    /// roles (`RunnerPeople.offersRoles`); nil draws no picker.
+    var setRole: ((String, RunnerPeople.Role) async -> Void)?
 
     var body: some View {
         Section {
@@ -24,13 +27,17 @@ struct RunnerPeopleSection: View {
                 MemberRow(
                     member: member, you: people.isYou(member),
                     reps: RunnerPeople.reps(of: member, workspaceNames: workspaceNames),
-                    claude: people.offersClaudeSignIn ? people.claudeLine(of: member) : nil)
+                    claude: people.offersClaudeSignIn ? people.claudeLine(of: member) : nil,
+                    setRole: setRole)
             }
         } header: {
             Text("People")
         } footer: {
-            Text(RunnerPeople.repPurpose)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(RunnerPeople.repPurpose)
+                if setRole != nil { Text(RunnerPeople.rolesPurpose) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -50,6 +57,10 @@ private struct MemberRow: View {
     let reps: String
     /// Their Claude login (ov-584): the state, and for the owner the email.
     var claude: String?
+    /// The owner's role picker (ov-784), or nil for none.
+    var setRole: ((String, RunnerPeople.Role) async -> Void)?
+    /// The role just chosen, shown while the runner takes it.
+    @State private var choosing: RunnerPeople.Role?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -57,7 +68,7 @@ private struct MemberRow: View {
                 Text(member.name)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(RunnerPeople.detail(of: member, reps: reps))
+                Text(RunnerPeople.detail(of: member, reps: reps, role: setRole == nil))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -77,8 +88,28 @@ private struct MemberRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let setRole {
+                Picker(RunnerPeople.roleLabel, selection: Binding(
+                    get: { choosing ?? member.role ?? .member },
+                    set: { role in
+                        choosing = role
+                        Task {
+                            await setRole(member.handle, role)
+                            choosing = nil
+                        }
+                    })
+                ) {
+                    ForEach(RunnerPeople.Role.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                .disabled(choosing != nil)
+                .accessibilityLabel("\(member.name)’s \(RunnerPeople.roleLabel.lowercased())")
+                .identified("runner-person-role-\(member.handle)")
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: setRole == nil ? .combine : .contain)
         .identified("runner-person-\(member.handle)")
     }
 }

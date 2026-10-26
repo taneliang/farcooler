@@ -153,6 +153,20 @@ final class RunnerSettingsStore: ObservableObject {
         people = updated
     }
 
+    /// Give a member a role (`member role`, ov-784): the runner's owner
+    /// only. The list comes back with the role as it now is; a refusal
+    /// leaves the list as it was, so the picker goes back to what the
+    /// runner has, and says so in `failure`.
+    func setRole(_ handle: String, _ role: RunnerPeople.Role) async {
+        let result = await cli(hostArguments + ["--json", "member", "role", handle, role.rawValue])
+        guard result.ok, let updated = RunnerPeople(json: Data(result.output.utf8)) else {
+            failure = RunnerPeople.roleNotSaved
+            return
+        }
+        failure = nil
+        people = updated
+    }
+
     // MARK: - Claude sign-in (ov-584)
 
     /// What the Claude section needs to sign a member in and out on this
