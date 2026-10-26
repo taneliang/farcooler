@@ -100,6 +100,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::member_marks::migration_0059_member_marks, Older::Welcome), // ov-740: three new tables (member_marks.rs says why)
     (crate::member_roles::migration_0060_member_roles, Older::Welcome), // ov-757: a defaulted column on 0046's members, one new table (member_roles.rs says why)
     (crate::crash_signatures::migration_0061_crash_signatures, Older::Welcome), // ov-797: one new table (crash_signatures.rs says why)
+    (crate::compose_waits::migration_0062_compose_waits, Older::Welcome), // ov-816: one new table (compose_waits.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
