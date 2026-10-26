@@ -30,7 +30,7 @@ pub use inventory::{inventory, inventory_of, Inventory, Listed, MAX_FILE_BYTES};
 mod rekey;
 pub use rekey::{rekey_statement, REKEY_NAMESPACE};
 mod passkey;
-pub use passkey::{admits_as_key_a, APPLICATIONS};
+pub use passkey::{admits_as_key_a, app_host, app_host_for, holds_ed25519};
 
 use farcooler_protocol::v1::Scope;
 use rustix::fs::{AtFlags, FlockOperation, Mode, OFlags, RawMode};
@@ -241,7 +241,7 @@ fn entry_from_line(line: &str) -> Entry {
     // can still be reported by fingerprint rather than as an opaque string.
     if let Ok(key) = ssh_key::PublicKey::from_openssh(raw) {
         let comment = key.comment().to_string();
-        let Some(client_id) = shell_client_id(&comment) else { return foreign(Some(&key)) };
+        let Some(client_id) = shell_client_id(&comment).filter(|_| passkey::can_be_key_b(&key)) else { return foreign(Some(&key)) };
         return Entry {
             fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
             client_id: client_id.to_string(),

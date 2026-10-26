@@ -121,6 +121,14 @@ pub(super) fn rewrite(
     if matches!(old.scope, Scope::Unspecified) {
         return Err(Refusal(DomainError::InvalidArgument { what: "scope" }));
     }
+    // Only an Ed25519 line moves (ov-765, fix round 1). A browser's passkey
+    // line needs a touch on every login and its key can't be exported; one
+    // touch must not be enough to swap it for a software key that needs
+    // neither, at the same id and scope, for good. A passkey-to-passkey rekey
+    // needs a webauthn proof this daemon can't verify yet.
+    if !fence::holds_ed25519(old) {
+        return Err(Refusal(DomainError::InvalidArgument { what: "public_key algorithm" }));
+    }
     let statement = fence::rekey_statement(&old.fingerprint, new_fingerprint)
         .ok_or(Refusal(DomainError::InvalidArgument { what: "public_key" }))?;
     if new_key.verify(fence::REKEY_NAMESPACE, statement.as_bytes(), proof).is_err() {

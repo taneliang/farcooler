@@ -37,8 +37,11 @@ use sha2::{Digest as _, Sha256};
 mod common;
 mod real_sshd;
 
-/// The canary app's host: the RP ID the passkey is made for.
-const HOST: &str = "app.canary.farcooler.com";
+/// This channel's app host: the RP ID the passkey is made for, and the only
+/// one the fence enrolls on this build.
+fn host() -> &'static str {
+    farcooler_fence::app_host()
+}
 
 /// The client id the line carries.
 const DEVICE: &str = "farcooler-0123456789ab";
@@ -82,6 +85,15 @@ async fn a_passkey_logs_in_through_a_real_sshd() {
 #[tokio::test]
 async fn a_passkey_signature_with_a_flipped_bit_is_refused() {
     assert_refused(Tamper::FlipS).await;
+}
+
+/// An assertion made for another RP ID (the parent domain) is refused, though
+/// its signature is valid: sshd checks authenticatorData's rpIdHash against
+/// SHA-256 of the line's application. That binding is what makes the fence's
+/// host check mean anything.
+#[tokio::test]
+async fn a_passkey_assertion_for_another_rp_id_is_refused() {
+    assert_refused(Tamper::OtherRpId).await;
 }
 
 /// Without the user-presence flag, a valid signature is refused: the line
@@ -130,7 +142,7 @@ fn user() -> String {
     }
 }
 
-/// A software passkey for `HOST`.
+/// A software passkey for `host()`.
 struct Passkey {
     key: SigningKey,
 }
@@ -143,6 +155,8 @@ enum Tamper {
     FlipS,
     /// The user-presence flag left off.
     NoTouch,
+    /// Signed as a passkey for `farcooler.com` would sign.
+    OtherRpId,
 }
 
 impl Passkey {
@@ -160,7 +174,7 @@ impl Passkey {
         put_string(&mut blob, b"sk-ecdsa-sha2-nistp256@openssh.com");
         put_string(&mut blob, b"nistp256");
         put_string(&mut blob, point.as_bytes());
-        put_string(&mut blob, HOST.as_bytes());
+        put_string(&mut blob, host().as_bytes());
         format!("sk-ecdsa-sha2-nistp256@openssh.com {}", base64(&blob, STANDARD, true))
     }
 
@@ -213,7 +227,7 @@ impl Assertions {
     /// `webauthn-sk-ecdsa-sha2-nistp256@openssh.com` over `data`, the SSH
     /// session's signed data, which a browser passes as the challenge.
     fn assertion(&self, data: &[u8]) -> Vec<u8> {
-        let origin = format!("https://{HOST}");
+        let origin = format!("https://{}", host());
         let client_data = format!(
             r#"{{"type":"webauthn.get","challenge":"{}","origin":"{origin}","crossOrigin":false}}"#,
             base64(data, URL_SAFE, false)
@@ -224,7 +238,11 @@ impl Assertions {
         };
         let counter: u32 = 1;
 
-        let mut authenticator_data = Sha256::digest(HOST.as_bytes()).to_vec();
+        let rp_id = match self.tamper {
+            Tamper::OtherRpId => "farcooler.com",
+            _ => host(),
+        };
+        let mut authenticator_data = Sha256::digest(rp_id.as_bytes()).to_vec();
         authenticator_data.push(flags);
         authenticator_data.extend_from_slice(&counter.to_be_bytes());
         let mut signed = authenticator_data;

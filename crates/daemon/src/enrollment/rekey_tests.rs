@@ -204,3 +204,25 @@ fn a_scope_this_build_cant_read_is_left_alone() {
     );
     assert!(matches!(refused, Err(Refusal(DomainError::InvalidArgument { what: "scope" }))));
 }
+
+/// A passkey's line never moves to a software key (ov-765, fix round 1): the
+/// proof is valid and the session is the line's own, and it is still refused.
+#[test]
+fn a_passkey_line_is_never_moved_to_a_software_key() {
+    let passkey = match fence::app_host() {
+        "app.farcooler.com" => "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAARYXBwLmZhcmNvb2xlci5jb20=",
+        _ => "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAAYYXBwLmNhbmFyeS5mYXJjb29sZXIuY29t",
+    };
+    let text = fence::render(passkey, "Browser", "farcooler-web", Scope::Control, fence::Grant::FarCooler, None).unwrap();
+    let browser = read_back(&text).unwrap();
+    let entries = vec![browser.clone()];
+    let new = key(9);
+    let refused = rewrite(
+        &entries, "farcooler-web", new.public_key(), &fingerprint(&new),
+        &proof(&new, &browser.fingerprint), &ask(&new, "farcooler-web"), &owner,
+    );
+    assert!(
+        matches!(refused, Err(Refusal(DomainError::InvalidArgument { what: "public_key algorithm" }))),
+        "a passkey line was moved to a software key"
+    );
+}

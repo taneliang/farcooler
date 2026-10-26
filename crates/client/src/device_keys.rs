@@ -223,7 +223,7 @@ fn ed25519_private(text: &str) -> Result<PrivateKey, DeviceKeyError> {
     Ok(key)
 }
 
-/// Key A to certify: Ed25519, or a browser's passkey for the app's own host
+/// Key A to certify: Ed25519, or a browser's passkey for this channel's app host
 /// (ov-765). Exactly what the fence would write a Key A line for, asked of
 /// the fence, so a phone never vouches for a key no runner would enroll.
 fn key_a_fingerprint(line: &str) -> Result<String, DeviceKeyError> {

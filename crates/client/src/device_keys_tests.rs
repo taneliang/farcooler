@@ -204,20 +204,22 @@ fn a_rekey_proof_refuses_the_same_key_and_other_kinds() {
 fn passkey(host: &str) -> String {
     let blob = match host {
         "app.canary.farcooler.com" => "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAAYYXBwLmNhbmFyeS5mYXJjb29sZXIuY29t",
+        "app.farcooler.com" => "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAARYXBwLmZhcmNvb2xlci5jb20=",
         "farcooler.com" => "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAANZmFyY29vbGVyLmNvbQ==",
         other => panic!("no fixture for {other}"),
     };
     format!("sk-ecdsa-sha2-nistp256@openssh.com {blob}")
 }
 
-/// A phone vouches for a browser whose Key A is a passkey for the app's host,
-/// over that key's fingerprint, and for nothing the fence would not enroll:
-/// a passkey for the parent domain, a plain ECDSA key, or a passkey as Key B.
+/// A phone vouches for a browser whose Key A is a passkey for its own
+/// channel's app host, over that key's fingerprint, and for nothing the fence
+/// would not enroll: a passkey for the other channel's host or the parent
+/// domain, a plain ECDSA key, or a passkey as Key B.
 #[test]
 fn a_certificate_covers_a_passkey_for_the_app_host_alone() {
     let voucher = random_key();
     let own = PrivateKey::from_openssh(&voucher).unwrap().public_key().to_openssh().unwrap();
-    let browser = passkey("app.canary.farcooler.com");
+    let browser = passkey(farcooler_fence::app_host());
     let made = certificate_for_scanned(&voucher, "user_01ALICE", &browser).expect("a passkey Key A");
     let fingerprint = crate::ceremony::fingerprint(&browser).expect("a passkey has a fingerprint");
     PublicKey::from_openssh(&own)
@@ -226,6 +228,11 @@ fn a_certificate_covers_a_passkey_for_the_app_host_alone() {
         .expect("signed over the passkey's fingerprint");
 
     assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", &passkey("farcooler.com")), Err(DeviceKeyError::Key));
+    let other_channel = match farcooler_fence::app_host() {
+        "app.farcooler.com" => "app.canary.farcooler.com",
+        _ => "app.farcooler.com",
+    };
+    assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", &passkey(other_channel)), Err(DeviceKeyError::Key));
     let plain = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU=";
     assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", plain), Err(DeviceKeyError::Key));
     let other = PrivateKey::from_openssh(random_key()).unwrap().public_key().to_openssh().unwrap();
@@ -236,7 +243,7 @@ fn a_certificate_covers_a_passkey_for_the_app_host_alone() {
 /// fingerprint, and a client id the fence takes.
 #[test]
 fn the_ceremony_names_a_passkey_device() {
-    let browser = passkey("app.canary.farcooler.com");
+    let browser = passkey(farcooler_fence::app_host());
     let fingerprint = crate::ceremony::fingerprint(&browser).expect("a fingerprint");
     assert!(fingerprint.starts_with("SHA256:"), "{fingerprint}");
     let id = crate::ceremony::client_id(&browser).expect("a client id");

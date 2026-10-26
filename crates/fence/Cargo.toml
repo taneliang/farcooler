@@ -35,9 +35,11 @@ path = "src/lib.rs"
 #
 # One exception, on `ssh-key`: `ecdsa`, for a browser's passkey as Key A
 # (`src/passkey.rs`, ov-765). It only decodes a P-256 point, so it adds `sec1`
-# and no curve arithmetic. The daemon already had it through russh, so a
-# workspace build parsed passkey lines before this; `-p farcooler-fence` alone
-# did not, and that is the build the fence's own tests run in.
+# and no curve arithmetic. Only workspace builds had it before, through russh;
+# the shipped `cargo build -p farcooler-daemon --bin farcoolerd` and
+# `-p farcooler-fence` did not. So the shipped daemon now also decodes foreign
+# ECDSA and sk lines, and lists them by fingerprint where it used to list them
+# as unreadable. It adopts none as Key B: only Ed25519 can be (`can_be_key_b`).
 [dependencies]
 farcooler-protocol.workspace = true
 rustix = { version = "1", features = ["fs", "process"] }
