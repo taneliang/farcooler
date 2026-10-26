@@ -38,10 +38,12 @@ final class ComposerField: UITextView {
     /// where a SwiftUI mask over it didn't draw.
     private let edgeFade = CAGradientLayer()
 
-    /// Told the edges that fade whenever they change: the native composer's
-    /// DEBUG probe, for the UI tests.
-    var onFade: ((ComposerFade) -> Void)?
+    /// Told the edges that fade, and whether their fade lies over the caret's
+    /// line (`ComposerFade.covers`), whenever either changes: the native
+    /// composer's DEBUG probe, for the UI tests.
+    var onFade: ((ComposerFade, Bool) -> Void)?
     private var fade = ComposerFade.none
+    private var fadeCoversCaret = false
 
     /// The caret, while there's one in a field being typed in.
     private var caret: CGRect? {
@@ -56,13 +58,18 @@ final class ComposerField: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        let caret = self.caret
         let now = ComposerFade.edges(
             offset: contentOffset.y, height: bounds.height, content: contentSize.height,
             insetTop: textContainerInset.top, insetBottom: textContainerInset.bottom,
             caretTop: caret?.minY, caretBottom: caret?.maxY)
-        if now != fade {
+        let covers = caret.map {
+            now.covers(caretTop: $0.minY, caretBottom: $0.maxY, offset: contentOffset.y, height: bounds.height)
+        } ?? false
+        if now != fade || covers != fadeCoversCaret {
             fade = now
-            onFade?(now)
+            fadeCoversCaret = covers
+            onFade?(now, covers)
         }
         let above = now.above, below = now.below
         guard above || below else {

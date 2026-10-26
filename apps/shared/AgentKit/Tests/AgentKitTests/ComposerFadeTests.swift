@@ -28,7 +28,7 @@ import Testing
             caretTop: caretTop, caretBottom: caretTop + line)
         #expect(!fade.below, "the bottom fades over the caret's line, with only the inset below it")
         #expect(fade.above, "the lines out of view above don't fade")
-        #expect(!fade.caretFaded)
+        #expect(!fade.covers(caretTop: caretTop, caretBottom: caretTop + line, offset: offset, height: height))
     }
 
     /// The inset alone below, with no caret (the field not being typed in):
@@ -47,7 +47,7 @@ import Testing
             caretTop: inset, caretBottom: inset + line)
         #expect(fade.below, "two lines out of view below and no fade")
         #expect(!fade.above)
-        #expect(!fade.caretFaded)
+        #expect(!fade.covers(caretTop: inset, caretBottom: inset + line, offset: 0, height: height))
     }
 
     /// The caret on the bottom line with text still below it: that edge
@@ -58,7 +58,7 @@ import Testing
             offset: 0, height: height, content: content, insetTop: inset, insetBottom: inset,
             caretTop: caretTop, caretBottom: caretTop + line)
         #expect(!fade.below)
-        #expect(!fade.caretFaded)
+        #expect(!fade.covers(caretTop: caretTop, caretBottom: caretTop + line, offset: 0, height: height))
     }
 
     /// Everything in view: no fade at either edge.
@@ -66,5 +66,22 @@ import Testing
         let fits = line * 3 + 2 * inset
         let fade = ComposerFade.edges(offset: 0, height: fits, content: fits, insetTop: inset, insetBottom: inset)
         #expect(fade == .none)
+    }
+
+    /// **The check can say yes**: a bottom fade over a caret on the bottom
+    /// line covers it, a top fade over one on the top line covers it, and a
+    /// caret in the middle is clear of both. Without this, every "not
+    /// covered" above could pass on a check that never answers yes.
+    @Test func coversSeesAFadeOverTheCaretsLine() {
+        let both = ComposerFade(above: true, below: true)
+        let bottomLine = height - inset - line
+        #expect(both.covers(caretTop: bottomLine, caretBottom: bottomLine + line, offset: 0, height: height))
+        #expect(both.covers(caretTop: inset, caretBottom: inset + line, offset: 0, height: height))
+        let middle = height / 2 - line / 2
+        #expect(!both.covers(caretTop: middle, caretBottom: middle + line, offset: 0, height: height))
+        #expect(!ComposerFade.none.covers(caretTop: bottomLine, caretBottom: bottomLine + line, offset: 0, height: height))
+        // Scrolled: the same lines, measured from the offset.
+        #expect(ComposerFade(below: true).covers(
+            caretTop: 100 + bottomLine, caretBottom: 100 + bottomLine + line, offset: 100, height: height))
     }
 }

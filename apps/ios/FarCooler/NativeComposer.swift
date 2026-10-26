@@ -78,8 +78,13 @@ struct NativeComposer: View {
     @State private var fieldHeight = NativeComposerField.lineHeight
     @State private var picked: [PhotosPickerItem] = []
     @State private var stopArmed = false
-    /// A photo's held preview is up (`chip`).
-    @State private var previewing = false
+    /// The photo whose held preview is up (`chip`): the field's glass stands
+    /// down while it is. Cleared when the preview goes, and also whenever that
+    /// can't have been told: the photo leaves the message, the draft changes
+    /// (no one types under a menu), or the app leaves the foreground, since a
+    /// menu that's cancelled or interrupted isn't promised to say it went.
+    @State private var previewing: UUID?
+    @Environment(\.scenePhase) private var scenePhase
     /// The screen's one margin (ov-611).
     @Environment(\.screenMargin) private var margin
 
@@ -104,6 +109,11 @@ struct NativeComposer: View {
         }
         .padding(.horizontal, margin)
         .padding(.vertical, Spacing.group)
+        .onChange(of: model.images) { _, images in
+            if let held = previewing, !images.contains(where: { $0.id == held }) { previewing = nil }
+        }
+        .onChange(of: model.draft) { _, _ in previewing = nil }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { previewing = nil } }
         .task(id: action) {
             stopArmed = false
             guard action == .stop else { return }
@@ -144,7 +154,7 @@ struct NativeComposer: View {
         // Not while a held photo's menu is up: the menu's Remove sits over
         // the field, and interactive glass under it took the tap, so Remove
         // did nothing (measured, GlassUITests).
-        .surface(.floating, in: Self.shape, interactive: !previewing)
+        .surface(.floating, in: Self.shape, interactive: previewing == nil)
         #if DEBUG
         // The surface's own edges, for the UI tests (ov-611, ov-614): a
         // container's frame is its children's, not its surface's.
@@ -190,7 +200,7 @@ struct NativeComposer: View {
         .frame(minHeight: Self.targetSide, alignment: .center)
         .overlay(alignment: .leading) { suggestionButton }
         #if DEBUG
-        .overlay(alignment: .topTrailing) { FieldProbe() }
+        .overlay(alignment: .topTrailing) { FieldProbe(still: previewing != nil) }
         #endif
     }
 
@@ -198,6 +208,8 @@ struct NativeComposer: View {
     /// `overwrote=N`, for the UI tests: `NativeComposerProbe`.
     private struct FieldProbe: View {
         @ObservedObject var probe = NativeComposerProbe.shared
+        /// The field's glass stood down for a held photo.
+        let still: Bool
 
         var body: some View {
             Color.clear
@@ -205,7 +217,7 @@ struct NativeComposer: View {
                 .allowsHitTesting(false)
                 .accessibilityElement()
                 .accessibilityIdentifier("native-composer-probe")
-                .accessibilityValue("overwrote=\(probe.overwrites) \(probe.fade)")
+                .accessibilityValue("overwrote=\(probe.overwrites) \(probe.fade) glass=\(still ? "still" : "live")")
         }
     }
     #endif
@@ -314,13 +326,15 @@ struct NativeComposer: View {
         // the remove badge, so the badge isn't lifted with it.
         .contentShape(.contextMenuPreview, Self.chipShape)
         .contextMenu {
-            Button("Remove", systemImage: "trash", role: .destructive) { model.detach(image.id) }
+            Button("Remove Photo", systemImage: "trash", role: .destructive) { model.detach(image.id) }
                 .accessibilityIdentifier("native-image-preview-remove")
         } preview: {
             OutgoingImagePreview(image: image)
-                .onAppear { previewing = true }
-                .onDisappear { previewing = false }
+                .onAppear { previewing = image.id }
+                .onDisappear { if previewing == image.id { previewing = nil } }
         }
+        // Decoded for that preview ahead of a hold, off the main thread.
+        .task(id: image.id) { await PreviewImages.prepare(image, longest: PreviewImages.longest(for: OutgoingImagePreview.most)) }
         .overlay(alignment: .topTrailing) {
             Button {
                 model.detach(image.id)
@@ -524,7 +538,7 @@ struct NativeComposerField: UIViewRepresentable {
         view.offersTab = offersTab
         view.onTab = onTab
         #if DEBUG
-        view.onFade = { NativeComposerProbe.shared.faded($0) }
+        view.onFade = { NativeComposerProbe.shared.faded($0, coversCaret: $1) }
         #endif
         DispatchQueue.main.async { context.coordinator.report(view) }
         // A change of text size from outside the app (Control Center, Settings)

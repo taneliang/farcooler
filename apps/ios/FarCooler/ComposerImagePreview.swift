@@ -5,23 +5,35 @@ import UIKit
 /// A photo waiting in the composer, held (ov-792): the context menu's
 /// preview, as Messages shows a photo in its field. Drawn from the bytes the
 /// message will carry (`OutgoingImage.data`, after any conversion), never the
-/// chip's thumbnail, so what's seen is what's sent; read at the screen's size,
-/// since a 48 MP photo decoded whole would hold up the menu as it opens.
+/// chip's thumbnail, so what's seen is what's sent.
+///
+/// Decoded once per photo, at the window's size, off the main thread when the
+/// chip appears (`PreviewImages.prepare`), and taken from that cache here: a
+/// 48 MP photo decoded in `body` held up the menu as it opened, and again on
+/// every pass that re-evaluated it.
 struct OutgoingImagePreview: View {
     let image: OutgoingImage
 
-    /// The most the preview takes of the screen, so the menu's Remove still
+    /// The most the preview takes of the window, so the menu's Remove still
     /// fits under it.
-    static let screenShare: CGFloat = 0.6
+    static let windowShare: CGFloat = 0.6
+
+    /// The box the preview fits in: the window's width less a margin either
+    /// side, and a share of its height. The window's, not the screen's: an
+    /// iPad in Split View or Slide Over has a narrower one.
+    @MainActor static var most: CGSize {
+        let window = WindowBounds.current
+        return CGSize(width: window.width - 2 * Spacing.section, height: window.height * windowShare)
+    }
 
     var body: some View {
-        let screen = UIScreen.main.bounds.size
-        let most = CGSize(width: screen.width - 2 * Spacing.section, height: screen.height * Self.screenShare)
+        let most = Self.most
         Group {
-            if let drawn = Self.decode(image.data, longest: max(most.width, most.height) * UIScreen.main.scale) {
+            if let drawn = PreviewImages.drawn(image, longest: PreviewImages.longest(for: most)) {
+                let size = Self.fit(drawn.size, in: most)
                 Image(uiImage: drawn)
                     .resizable()
-                    .frame(width: Self.fit(drawn.size, in: most).width, height: Self.fit(drawn.size, in: most).height)
+                    .frame(width: size.width, height: size.height)
             } else {
                 Image(systemName: "photo")
                     .font(.largeTitle)
@@ -30,7 +42,7 @@ struct OutgoingImagePreview: View {
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Photo")
+        .accessibilityLabel("Photo Preview")
         .accessibilityIdentifier("native-image-preview")
     }
 
@@ -41,6 +53,36 @@ struct OutgoingImagePreview: View {
         guard size.width > 0, size.height > 0 else { return box }
         let scale = min(box.width / size.width, box.height / size.height)
         return CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+    }
+}
+
+/// The held previews' decoded photos, by photo: each one's bytes never change
+/// under its id, so a decode is good for as long as the photo waits.
+enum PreviewImages {
+    nonisolated(unsafe) private static let cache: NSCache<NSUUID, UIImage> = {
+        let cache = NSCache<NSUUID, UIImage>()
+        cache.countLimit = AgentConversation.mostImages
+        return cache
+    }()
+
+    /// Pixels on the long side for a preview that fits `box`.
+    @MainActor static func longest(for box: CGSize) -> CGFloat {
+        max(box.width, box.height) * WindowBounds.scale
+    }
+
+    /// `image` decoded for a preview, from the cache, or decoded now and kept.
+    static func drawn(_ image: OutgoingImage, longest: CGFloat) -> UIImage? {
+        if let kept = cache.object(forKey: image.id as NSUUID) { return kept }
+        guard let drawn = decode(image.data, longest: longest) else { return nil }
+        cache.setObject(drawn, forKey: image.id as NSUUID)
+        return drawn
+    }
+
+    /// Decode `image` off the main thread, ahead of a hold, so the menu opens
+    /// on a picture already made.
+    static func prepare(_ image: OutgoingImage, longest: CGFloat) async {
+        if cache.object(forKey: image.id as NSUUID) != nil { return }
+        await Task.detached(priority: .utility) { _ = drawn(image, longest: longest) }.value
     }
 
     /// `data` decoded no larger than `longest` pixels on its long side, the
@@ -55,4 +97,23 @@ struct OutgoingImagePreview: View {
         guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return UIImage(cgImage: cg)
     }
+}
+
+/// The app's foreground window's size and scale: what a preview that isn't
+/// laid out inside a container (a context menu's) sizes itself to. The
+/// window's, not `UIScreen.main`'s, which on an iPad in Split View or Slide
+/// Over is the whole screen.
+@MainActor
+enum WindowBounds {
+    private static var window: UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scene?.keyWindow ?? scene?.windows.first
+    }
+
+    /// An iPhone's, for a moment with no window yet.
+    private static let fallback = CGSize(width: 390, height: 844)
+
+    static var current: CGSize { window?.bounds.size ?? fallback }
+    static var scale: CGFloat { window?.traitCollection.displayScale ?? 3 }
 }

@@ -8,14 +8,31 @@ import SwiftUI
 //   and, when something waits, Needs You.
 // - Agents: who is at work and on what, over Show All Agents and each agent.
 
-/// The width of a held card's preview: the screen's, less a margin either
-/// side, and no wider than a phone's on an iPad.
+/// A held card's preview's box: the window's width less a margin either side,
+/// no wider than a phone's on an iPad, and at most half the window's height.
+/// The window's, not the screen's (`WindowBounds`).
 @MainActor
 enum CardPreview {
     static let widest: CGFloat = 400
-    static var width: CGFloat { min(UIScreen.main.bounds.width - 2 * Spacing.section, widest) }
+    static var width: CGFloat { min(WindowBounds.current.width - 2 * Spacing.section, widest) }
+    static var tallest: CGFloat { WindowBounds.current.height * 0.5 }
     /// The most agents the preview lists, and the menu offers one by one.
     static let mostAgents = 5
+}
+
+extension View {
+    /// The preview whole when it fits the box, and otherwise its top in a
+    /// scroll the box's height: at the accessibility sizes the lines ran past
+    /// the menu's room.
+    func cardPreviewBox() -> some View {
+        ViewThatFits(in: .vertical) {
+            self
+            ScrollView(.vertical) { self }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(width: CardPreview.width, alignment: .leading)
+        .frame(maxHeight: CardPreview.tallest, alignment: .top)
+    }
 }
 
 /// The Now/Next card held: the orchestrator and the plan, as the sheet's top
@@ -51,6 +68,7 @@ struct PlanCardPreview: View {
         }
         .padding(Spacing.section)
         .frame(width: CardPreview.width, alignment: .leading)
+        .cardPreviewBox()
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("plan-strip-preview")
     }
@@ -96,6 +114,7 @@ struct AgentsCardPreview: View {
         }
         .padding(Spacing.section)
         .frame(width: CardPreview.width, alignment: .leading)
+        .cardPreviewBox()
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("agents-card-preview")
     }

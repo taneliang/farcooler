@@ -37,11 +37,39 @@ final class GlassUITests: XCTestCase {
         return app
     }
 
-    /// The probe's `fade=… caretFaded=…`.
+    /// The probe's `fade=… caretFaded=…`: the edges the field fades, and
+    /// whether their fade lies over the caret's line, measured from the
+    /// geometry rather than the rule (`ComposerFade.covers`).
     private func fade(_ app: XCUIApplication) -> String {
         let said = element(app, "native-composer-probe").value as? String ?? ""
-        guard let at = said.range(of: "fade=") else { return said }
-        return String(said[at.lowerBound...])
+        guard let at = said.range(of: "fade="), let end = said.range(of: " glass=") else { return said }
+        return String(said[at.lowerBound..<end.lowerBound])
+    }
+
+    /// The probe's `glass=live|still`: whether the field's glass answers a
+    /// touch, or stood down for a held photo's menu.
+    private func glass(_ app: XCUIApplication) -> String {
+        let said = element(app, "native-composer-probe").value as? String ?? ""
+        guard let at = said.range(of: "glass=") else { return said }
+        return String(said[at.upperBound...])
+    }
+
+    private func postPhoto() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.farcooler.harness.native-photo" as CFString), nil, nil, true)
+    }
+
+    /// Hold the photo in its lower left, clear of its remove badge, and wait
+    /// for its preview.
+    @discardableResult
+    private func holdPhoto(_ app: XCUIApplication) -> XCUIElement {
+        let chip = element(app, "native-image-chip")
+        XCTAssertTrue(chip.waitForExistence(timeout: 60), "no chip for the photo")
+        chip.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).press(forDuration: 1.2)
+        let preview = element(app, "native-image-preview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "holding the photo showed no preview: \(app.debugDescription)")
+        return preview
     }
 
     /// Words with tails on every line.
@@ -96,24 +124,45 @@ final class GlassUITests: XCTestCase {
     /// (ov-792), and Remove takes it out of the message.
     func testHoldingAPhotoPreviewsItWithRemove() {
         let app = composer()
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.farcooler.harness.native-photo" as CFString), nil, nil, true)
+        postPhoto()
         let chip = element(app, "native-image-chip")
         XCTAssertTrue(chip.waitForExistence(timeout: 60), "no chip for the photo")
         let small = chip.frame
-        // Held in the photo's lower left, clear of its remove badge.
-        chip.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).press(forDuration: 1.2)
-        let preview = element(app, "native-image-preview")
-        XCTAssertTrue(preview.waitForExistence(timeout: 10), "holding the photo showed no preview: \(app.debugDescription)")
+        let preview = holdPhoto(app)
         XCTAssertGreaterThan(preview.frame.width, small.width * 3, "the preview \(preview.frame) isn't large beside the chip \(small)")
-        let remove = app.buttons["Remove"].firstMatch
+        let remove = element(app, "native-image-preview-remove")
         XCTAssertTrue(remove.waitForExistence(timeout: 10), "no Remove under the preview")
+        XCTAssertEqual(remove.label, "Remove Photo", "the menu names it as the badge does")
         // Over the field: its interactive glass took this tap, until it
         // stood down for the menu.
         remove.tap()
         XCTAssertTrue(wait(30) { !chip.exists }, "Remove left the photo in the message")
         XCTAssertFalse(preview.exists, "the preview stayed after Remove")
+        XCTAssertTrue(wait(10) { self.glass(app) == "live" }, "the field's glass stayed still after Remove: \(glass(app))")
+    }
+
+    /// **The field's glass comes back however the menu goes** (ov-792 review):
+    /// it stands down while a held photo's menu is up, and answers a touch
+    /// again once the menu is dismissed, and once the app has left the
+    /// foreground with the menu up.
+    func testTheFieldsGlassComesBackAfterAHeldPhoto() {
+        let app = composer()
+        postPhoto()
+        holdPhoto(app)
+        XCTAssertTrue(wait(10) { self.glass(app) == "still" }, "the field's glass didn't stand down under the menu: \(glass(app))")
+        // Dismissed by a tap outside it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        XCTAssertTrue(element(app, "native-image-preview").waitForNonExistence(timeout: 10), "the menu stayed up")
+        XCTAssertTrue(wait(10) { self.glass(app) == "live" }, "dismissed, the field's glass stayed still: \(glass(app))")
+
+        // Interrupted: the app goes to the background with the menu up.
+        holdPhoto(app)
+        XCTAssertTrue(wait(10) { self.glass(app) == "still" }, glass(app))
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+        XCTAssertTrue(element(app, "native-composer-probe").waitForExistence(timeout: 30))
+        XCTAssertTrue(wait(10) { self.glass(app) == "live" }, "back from the background, the field's glass stayed still: \(glass(app))")
     }
 
     // MARK: The cards

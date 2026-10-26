@@ -37,6 +37,7 @@ struct WorkspaceCards: View {
     @Environment(\.dynamicTypeSize) private var type
     @Environment(\.colorScheme) private var scheme
     @Environment(\.phoneZoom) private var zoom
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The two cards' glass, for Agents to morph out of Now/Next.
     @Namespace private var glass
     /// Read for the card's cap: a turn of the phone changes it, so the cap,
@@ -66,8 +67,11 @@ struct WorkspaceCards: View {
             layout {
                 if showsPlan { nowNext(strip) }
                 if agents.count > 0 {
-                    // Morphs out of Now/Next's glass and back into it.
+                    // Morphs out of Now/Next's glass and back into it; with
+                    // Reduce Motion, fades in and out where it stands.
                     agentsCard(agents)
+                        .glassEffectTransition(reduceMotion ? .identity : .matchedGeometry)
+                        .transition(.opacity)
                 }
             }
             // One height for both: the taller one's.
@@ -75,7 +79,8 @@ struct WorkspaceCards: View {
         }
         .padding(.horizontal, margin)
         .padding(.bottom, showsPlan || agents.count > 0 ? Spacing.group : 0)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: agents.count > 0)
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.8), value: agents.count > 0)
         // Nothing else over the conversation asks for the plan or the board.
         .task(id: connection.keepsPlan) {
             if connection.boards[summary.id] == nil { _ = await connection.readBoard(summary) }
