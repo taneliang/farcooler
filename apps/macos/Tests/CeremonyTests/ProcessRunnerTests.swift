@@ -11,6 +11,21 @@ import Testing
 struct ProcessRunnerTests {
     private static let sh = "/bin/sh"
 
+    /// A call that failed prints its reason on stderr and leaves stdout empty;
+    /// a real-CLI test must report that reason, not "Unable to parse empty
+    /// data" (ov-801).
+    @Test func aFailedCallsAccountCarriesStderrAndHowItEnded() async throws {
+        let failed = await ProcessRunner.run(Self.sh, ["-c", "echo no daemon here >&2; exit 3"])
+        #expect(failed.account.contains("exited 3"))
+        #expect(failed.account.contains("no daemon here"))
+        let thrown = #expect(throws: RealCLIFailure.self) { try failed.jsonObject("worktree create") }
+        #expect(thrown?.message.contains("worktree create: the CLI exited 3; stderr: no daemon here") == true)
+        let slow = await ProcessRunner.run(Self.sh, ["-c", "sleep 30"], deadline: 0.3)
+        #expect(slow.account.contains("killed at its deadline"))
+        let fine = await ProcessRunner.run(Self.sh, ["-c", #"printf '{"id":"t"}'"#])
+        #expect(try fine.jsonObject("terminal create")["id"] as? String == "t")
+    }
+
     /// A pipe holds 64 KB. A child that writes 200 KB to stderr and only then
     /// writes stdout blocks in its stderr write until somebody reads it, and the
     /// old runners read stdout to EOF first. With both drained at once this
