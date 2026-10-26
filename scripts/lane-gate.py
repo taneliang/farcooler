@@ -41,8 +41,12 @@ this narrows by path, always towards running more:
   - Any other path outside the site-only allowlist (one this table does not
     know): every app job, the same safe side ci-changes.py takes.
 
-Not run here, and said so in the output: the iOS build and UI smoke
-(`.github/actions/ios-ui-*` build an archive and a simulator; use
+The ios job runs the steps of .github/actions/ios-ui-build that compile: the
+Rust xcframeworks, the generated project, and `xcodebuild build-for-testing` of
+the FarCooler scheme, so a compile error in the app or FarCoolerUITests is red
+here as it is in CI (ov-812).
+
+Not run here, and said so in the output: the iOS UI smoke (a simulator; use
 scripts/ios-ui-tests.sh, one simulator at most) and the parts of the web job
 that download Linux binaries. A heavy job waits while the 1-minute load average
 is 20 or more.
@@ -83,6 +87,12 @@ WEB_LINUX_ONLY = re.compile(
 )
 # The ios job's own steps build an archive; its plan job's checks are the cheap half.
 IOS_KEEP = re.compile(r"import-ios-certificate-test|generator-test|ios-ui-shards\.py|ios-ui-pick-simulator\.py|ios-ui-plan\.py --self-test")
+
+
+# The steps of ios-ui-build that compile. The rest check the runner's Xcode
+# label, install the watchOS platform (several GB, into the system Xcode) or
+# package the products for CI's UI shards.
+IOS_BUILD_KEEP = re.compile(r"build-ios-frameworks\.sh|generate-project\.py|^xcodebuild -project")
 
 
 class Step:
@@ -207,6 +217,14 @@ def parse_steps(block):
     return out
 
 
+def action_as_job(text):
+    """A composite action's lines shaped like a ci.yml job block, for parse_steps.
+
+    The action nests `steps:` two spaces in and a job nests it four, so every
+    line moves two to the right and the parser reads it unchanged."""
+    return ["  " + l for l in text.splitlines()]
+
+
 def expand(text, ctx):
     """Fill `${{ expr }}`. An expression this does not know is an error, never a blank."""
     def sub(m):
@@ -232,10 +250,18 @@ def steps_for(job, workflows, ctx):
         block = job_block(text, ci_id)
         if block is None:
             raise KeyError(f"ci.yml has no job {ci_id}")
-        for name, run, wd, env in parse_steps(block):
+        parsed = [(None, *p) for p in parse_steps(block)]
+        if ci_id == "ios":
+            # The job's build is a composite action, which parse_steps never sees
+            # as it has no `run:` in the job itself; CI runs it first.
+            parsed = [(True, *p) for p in parse_steps(action_as_job(workflows["ios-ui-build"]))] + parsed
+        for from_action, name, run, wd, env in parsed:
             skip = None
             hay = name + "\n" + run
-            if SETUP.search(hay):
+            if from_action:
+                if not IOS_BUILD_KEEP.search(run):
+                    skip = "checks the runner, installs the watchOS platform or packages products for CI's UI shards"
+            elif SETUP.search(hay):
                 skip = "installs a toolchain on a CI runner"
             elif job == "web" and WEB_LINUX_ONLY.search(hay):
                 skip = "needs the Linux x86 wasm toolchain CI downloads; left to CI"
@@ -476,7 +502,7 @@ def run_step_safely(step, repo, env, logdir, tmp):
     A tool the host lacks, a directory a failed step never made, or anything
     else this script trips over becomes that step's FAIL row, so the summary
     table still prints for every step that did run (ov-802)."""
-    reason = blocker(step, repo, env)
+    reason = blocker(step, repo, {**env, **step.env})
     if reason:
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     try:
@@ -550,7 +576,8 @@ def main(argv):
         return self_test()
 
     repo = pathlib.Path(args.worktree).resolve()
-    workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text()}
+    workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
+                 "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
@@ -612,8 +639,10 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
                 print(f"  skip {s.label()}  ({s.skip})")
                 continue
             print(f"  run  {s.label()}", flush=True)
-            # A step's own `env:` (CAPTURE_JDK among them) is part of what it needs.
-            result, secs, counts, ok, log, output = run_step_safely(s, repo, {**env, **s.env}, logdir, tmp)
+            # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
+            # swift job's APP_NAME) is read back into it for the steps after
+            # (ov-812). The step's own `env:` is laid over it inside run_step.
+            result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp)
             rows.append((j, s.label(), result, f"{secs:.0f}", counts))
             if not ok:
                 failed = True
@@ -623,7 +652,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
                     tail = "\n".join(output.splitlines()[-15:])
                     print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
     if "ios" in chosen:
-        rows.append(("ios", "iOS build and UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
+        rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
     return failed
 
 
@@ -642,6 +671,9 @@ def print_summary(rows, repo, base, logdir, failed):
 
 
 def self_test():
+    global run_jobs
+    import contextlib
+    import io
     failures = []
 
     def expect(what, got, want):
@@ -655,7 +687,7 @@ def self_test():
     with tempfile.TemporaryDirectory() as t:
         ctx = make_ctx(ROOT, pathlib.Path(t), "origin/main")
     ctx["steps.jdk21.outputs.path"] = ctx["steps.jdk21.outputs.path"] or "/jdk21"
-    wf = {"ci": text}
+    wf = {"ci": text, "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
 
     # A job added to ci.yml must be added here, or the script quietly under-gates.
     for job in job_ids(text):
@@ -707,6 +739,33 @@ def self_test():
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
     expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
     expect("the web job leaves the Linux downloads to CI", any(s.skip and "curl" in s.run for s in plans["web"]), True)
+
+    # The iOS job compiles what CI's does (ov-812): the generated project's
+    # FarCooler scheme, build-for-testing, after the frameworks and the project.
+    ios_cmds = [s.run for s in plans["ios"] if not s.skip]
+    build = [i for i, r in enumerate(ios_cmds) if r.startswith("xcodebuild -project apps/ios/FarCooler.xcodeproj")]
+    expect("ios runs one xcodebuild of the project", len(build), 1)
+    if build:
+        expect("ios builds the FarCooler scheme for testing, as the action does", all(w in ios_cmds[build[0]] for w in ("-scheme FarCooler", "build-for-testing", "ARCHS=arm64", "generic/platform=iOS Simulator")), True)
+        expect("... after the frameworks and the generated project", [i for i, r in enumerate(ios_cmds) if "build-ios-frameworks.sh" in r or "generate-project.py" in r], [build[0] - 2, build[0] - 1])
+    expect("ios leaves the watchOS download and the packaging to CI", sum(1 for s in plans["ios"] if s.skip and ("downloadPlatform" in s.run or "ios-ui-products" in s.run)) >= 1, True)
+
+    # What a step writes to $GITHUB_ENV reaches the steps after it, through run_jobs
+    # as well as run_step: the swift job's APP_NAME was lost between them (ov-812).
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        chain = [Step("x", "set", 'echo "APP_NAME=Far Cooler Test" >> "$GITHUB_ENV"\n'),
+                 Step("x", "read", '[ "$APP_NAME" = "Far Cooler Test" ]\n'),
+                 Step("x", "unset", '[ -z "${APP_NAME_NEVER_SET:-}" ] && set -u && : "$APP_NAME_NEVER_SET"\n')]
+        rows = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            failed = run_jobs(["x"], {"x": chain}, rows, t, t, ctx, t, argparse.Namespace(no_load_wait=True, strict_leaks=False))
+        expect("a step reads what an earlier step put in GITHUB_ENV", [r[2] for r in rows[:2]], ["pass", "pass"])
+        expect("... and an unset variable still fails a step", rows[2][2].startswith("FAIL"), True)
+    swift_run = [s for s in plans["swift"] if not s.skip]
+    names = [i for i, s in enumerate(swift_run) if 'GITHUB_ENV' in s.run and "APP_NAME=" in s.run]
+    users = [i for i, s in enumerate(swift_run) if "$APP_NAME" in s.run]
+    expect("the swift job sets APP_NAME before any step uses it", bool(names and users and names[0] < users[0]), True)
 
     # The parser, on the shapes ci.yml uses, so a mistake cannot hide in ci.yml.
     sample = (
@@ -788,9 +847,6 @@ def self_test():
     expect("vitest is counted", count_tests(" Tests  42 passed (42)"), "42 vitest")
 
     # A host missing a tool, a directory or a JDK is a named FAIL row, not a crash (ov-802).
-    import contextlib
-    import io
-
     with tempfile.TemporaryDirectory() as t:
         t = pathlib.Path(t)
 
@@ -854,7 +910,6 @@ def self_test():
     expect("--strict-leaks turns strict back on", base_env(ROOT, pathlib.Path("/tmp"), ctx, True).get("FC_LEAK_STRICT"), "1")
 
     # The table prints even when running the jobs raises (the ov-800 crash printed none).
-    global run_jobs
     real_run_jobs = run_jobs
     def boom(chosen, plans, rows, *rest):
         rows.append(("wire", "a step that ran", "pass", "1", ""))
