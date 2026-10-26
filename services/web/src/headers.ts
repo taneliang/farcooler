@@ -39,11 +39,16 @@ const ORIGIN = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/
 /// is not `unsafe-eval`; Trusted Types refuse any string-to-script sink but
 /// through the one policy named `fc`. A DERP host or map origin that isn't
 /// shaped like one is left out, never passed through.
+///
+/// Each DERP host is allowed twice: `wss://` for the relay connection itself,
+/// and `https://` because Tailcat's js build also fetches the relay's
+/// `/derp/probe` to measure it (found in Chromium through a real tunnel, ov-764;
+/// plan-763 §1 listed only `wss://`).
 export function shellCsp(env: WebEnv): string {
   const derp = (env.DERP_HOSTS ?? '')
     .split(/\s+/)
     .filter(h => HOST.test(h))
-    .map(h => `wss://${h}`)
+    .flatMap(h => [`https://${h}`, `wss://${h}`])
   const map = ORIGIN.test(env.DERP_MAP_ORIGIN ?? '') ? [env.DERP_MAP_ORIGIN!] : []
   return [
     "default-src 'none'",

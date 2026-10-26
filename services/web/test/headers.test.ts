@@ -27,7 +27,7 @@ describe("the shell's CSP", () => {
       'style-src': "'self'",
       'img-src': "'self' data: blob:",
       'font-src': "'self'",
-      'connect-src': "'self' https://tailcat.dev wss://*.ipn.dev",
+      'connect-src': "'self' https://tailcat.dev https://*.ipn.dev wss://*.ipn.dev",
       'worker-src': "'self'",
       'manifest-src': "'self'",
       'form-action': "'self' https://api.workos.com",
@@ -51,7 +51,7 @@ describe("the shell's CSP", () => {
 
   it('lists the DERP hosts from DERP_HOSTS, and drops anything not shaped like a host', () => {
     const csp = directives(shellCsp(envWith({ DERP_HOSTS: 'derp.example.com *.ipn.dev evil.com;script-src * https://x.com', DERP_MAP_ORIGIN: "https://tailcat.dev 'unsafe-inline'" })))
-    expect(csp['connect-src']).toBe("'self' wss://derp.example.com wss://*.ipn.dev")
+    expect(csp['connect-src']).toBe("'self' https://derp.example.com wss://derp.example.com https://*.ipn.dev wss://*.ipn.dev")
     expect(csp['script-src']).toBe("'self' 'wasm-unsafe-eval'")
   })
 })

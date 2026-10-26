@@ -18,6 +18,12 @@
 // in xterm. Then it does it again with the pin altered and expects the
 // host-key sentence and no terminal.
 //
+// What the swapped dial leaves out is Tailcat's own traffic: the DERP
+// WebSocket and its `/derp/probe` fetch, which the CSP must allow too. CI
+// can't depend on a public relay, so that path was checked by hand through a
+// real tunnel (ov-764 lane report), and it is what the owner's live check
+// exercises.
+//
 // Chromium comes from playwright-core; set PLAYWRIGHT_BROWSERS_PATH to where
 // `npx playwright-core install chromium-headless-shell` put it.
 
