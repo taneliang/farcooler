@@ -18,14 +18,6 @@ export const TEAM_ROLES: readonly TeamRole[] = ['admin', 'member', 'billing']
 export async function requireUser(request: Request, env: Env): Promise<string | Response> {
   const account = await requireAccount(request, env)
   if (account instanceof Response) return account
-  // Read before writing: every directory call lands here, and after the first
-  // both inserts are no-ops that still take the database's write path (ov-811).
-  const made = await env.DB.prepare(
-    `SELECT 1 FROM teams t JOIN memberships m ON m.team_id = t.id AND m.account_id = ? WHERE t.personal_of = ?`,
-  )
-    .bind(account, account)
-    .first()
-  if (made) return account
   const now = Date.now()
   await env.DB.batch([
     env.DB.prepare(
