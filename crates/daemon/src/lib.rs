@@ -76,6 +76,7 @@ pub mod session_projectors;
 pub mod stack;
 pub mod session_discovery;
 pub mod skill_install;
+pub mod sshd_version;
 pub mod task_link;
 pub(crate) mod rpc_board;
 pub mod rpc_people;

@@ -741,6 +741,16 @@ pub mod capability {
     /// owner, the workspace's lead or a Maintainer may call. An app offers
     /// the role and the charter edit only on a runner with it.
     pub const MEMBER_ROLES: &str = "member_roles";
+    /// A browser's passkey may be a device's Key A (ov-765): `client.enroll`
+    /// takes an `sk-ecdsa-sha2-nistp256@openssh.com` key for the app's own
+    /// host, and this runner's sshd accepts the `webauthn-sk` signatures a
+    /// browser makes, which needs OpenSSH 8.4 or newer.
+    ///
+    /// Withheld until the daemon has asked its sshd (`WITHHELD_UNTIL_OFFERED`):
+    /// on an older sshd the fence would still write the line, and the browser
+    /// could never log in with it. A client that reads it absent says the
+    /// runner needs OpenSSH 8.4 or newer, and offers no other key (R-88).
+    pub const PASSKEY_KEYS: &str = "passkey_keys";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -763,7 +773,7 @@ pub mod capability {
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
-            WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES,
+            WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -792,10 +802,20 @@ pub mod capability {
         "adapter.test",
     ];
 
+    /// Capabilities no process offers until something in it says it may.
+    ///
+    /// For a feature that depends on the host rather than on this build,
+    /// so a process that never checks (a test's server, a path someone adds
+    /// later) says no rather than yes. `passkey_keys` is offered once the
+    /// daemon has read its sshd's version.
+    pub const WITHHELD_UNTIL_OFFERED: &[&str] = &[PASSKEY_KEYS];
+
     /// Capabilities this process has but does not offer: a feature behind a
-    /// runner's flag (`agent_rows` with the projector off). Set at start, and
-    /// again when `settings.set_projector` turns it on or off.
-    static WITHHELD: std::sync::RwLock<Vec<&'static str>> = std::sync::RwLock::new(Vec::new());
+    /// runner's flag (`agent_rows` with the projector off), and until
+    /// offered, `WITHHELD_UNTIL_OFFERED`. Set at start, and again when
+    /// `settings.set_projector` turns it on or off.
+    static WITHHELD: std::sync::LazyLock<std::sync::RwLock<Vec<&'static str>>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(WITHHELD_UNTIL_OFFERED.to_vec()));
 
     /// Stop offering `capability`, in the hello and in `daemon.version`.
     pub fn withhold(capability: &'static str) {
@@ -808,6 +828,11 @@ pub mod capability {
     /// Offer `capability` again (`settings.set_projector` turning it on).
     pub fn offer(capability: &str) {
         WITHHELD.write().unwrap_or_else(|e| e.into_inner()).retain(|c| *c != capability);
+    }
+
+    /// Whether this process offers `capability` now.
+    pub fn offered(capability: &str) -> bool {
+        ALL.contains(&capability) && !WITHHELD.read().unwrap_or_else(|e| e.into_inner()).contains(&capability)
     }
 
     /// What this process offers: `ALL`, less what it withholds.

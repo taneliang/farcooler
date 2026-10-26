@@ -79,5 +79,6 @@ enum class Capability(val wire: String) {
     MEMBER_OWN_LOGINS("member_own_logins"),
     WORKSPACE_CHARTER("workspace_charter"),
     BOARD_THEME_MOVE("board_theme_move"),
-    MEMBER_ROLES("member_roles");
+    MEMBER_ROLES("member_roles"),
+    PASSKEY_KEYS("passkey_keys");
 }

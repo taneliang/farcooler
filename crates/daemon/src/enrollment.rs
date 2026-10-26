@@ -142,6 +142,11 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
         offered,
     )
     .map_err(refused)?;
+    // A passkey on a runner whose sshd can't verify a browser's signatures
+    // (older than OpenSSH 8.4) would be a line that admits nobody (ov-765).
+    if !passkey_takes(&request.public_key) {
+        return Err(refused(Rejected::Algorithm));
+    }
     // Read the line just rendered with the parser that will read it back out of
     // the file, rather than parsing the key a second way here. Two readers of
     // one line is two answers about what is enrolled.
@@ -789,6 +794,15 @@ fn refused(rejected: Rejected) -> DomainError {
             Rejected::NodeKey => "node_key",
         },
     }
+}
+
+/// Whether `public_key` is fine to enroll on this runner as far as its sshd
+/// goes: anything but a passkey, or a passkey while `passkey_keys` is offered.
+/// Only ever asked after `fence::render` accepted the key.
+fn passkey_takes(public_key: &str) -> bool {
+    let passkey = ssh_key::PublicKey::from_openssh(public_key)
+        .is_ok_and(|key| key.algorithm() == ssh_key::Algorithm::SkEcdsaSha2NistP256);
+    !passkey || farcooler_protocol::capability::offered(farcooler_protocol::capability::PASSKEY_KEYS)
 }
 
 /// A refusal on its way out of the blocking closure.

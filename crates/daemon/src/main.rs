@@ -187,6 +187,10 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    // Whether a browser's passkey can log in here (ov-765): `passkey_keys`
+    // is withheld until this has read the sshd's version, before any hello.
+    farcooler_daemon::sshd_version::offer_passkey_keys().await;
+
     // Read now rather than at the first agent launch, so a stand-in leaked
     // into this daemon's environment is in the log from its first line. It
     // also rides on `Host`, which is where a person will see it.
@@ -607,6 +611,8 @@ async fn serve_stdio_session() -> Result<(), i32> {
 
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
+    // This process answers the hello itself, so it asks too (ov-765).
+    farcooler_daemon::sshd_version::offer_passkey_keys().await;
 
     let cfg = HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() };
 
