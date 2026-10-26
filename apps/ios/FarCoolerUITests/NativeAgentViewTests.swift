@@ -386,6 +386,32 @@ final class NativeAgentViewTests: XCTestCase {
         capture("images-full", expecting: .when("the image opened at full size") { preview.exists || app.navigationBars.firstMatch.exists })
     }
 
+    /// **A swipe down puts an open image away** (ov-806), as in Photos, with
+    /// no tap for the bar and its X first; a short drag springs back and
+    /// leaves it open.
+    func testASwipeDownClosesAnOpenImage() {
+        let app = launch(["-native-images"])
+        _ = conversation(app)
+        let thumbnails = app.descendants(matching: .any).matching(identifier: "native-prompt-image")
+        XCTAssertTrue(wait(30) { thumbnails.count == 5 }, "not every image shown: \(thumbnails.count)")
+        thumbnails.element(boundBy: 1).tap()
+        let viewer = app.otherElements["QLPreviewControllerView"]
+        XCTAssertTrue(viewer.waitForExistence(timeout: 15), "the image didn't open: \(app.debugDescription)")
+        // Settled: a drag during the zoom in is the presentation's, not the swipe's.
+        Thread.sleep(forTimeInterval: 1)
+        let middle = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let flag = ProcessInfo.processInfo.environment["FARCOOLER_SWIPE_FLAG"]
+        if let flag { FileManager.default.createFile(atPath: flag, contents: nil); Thread.sleep(forTimeInterval: 1) }
+        // A short, slow drag isn't a dismissal: the image springs back.
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0)
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(viewer.exists, "a short drag closed the image")
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(viewer.waitForNonExistence(timeout: 10), "a swipe down left the image open")
+        if let flag { Thread.sleep(forTimeInterval: 1); try? FileManager.default.removeItem(atPath: flag) }
+        XCTAssertTrue(thumbnails.element(boundBy: 1).isHittable, "the conversation isn't back under the finger")
+    }
+
     /// ov-622: a sent message's photos are on screen after a restart with no
     /// runner serving them, drawn from the cache on disk and opening at full
     /// size, and not drawn again for a pane with nothing cached.

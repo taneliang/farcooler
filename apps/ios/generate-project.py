@@ -242,6 +242,8 @@ SOURCES = [
     "NativeHarnessRows.swift",
     # A prompt's images as thumbnails that open at full size (ov-458).
     "NativePromptImages.swift",
+    # Their full-size viewer, swiped down to close (ov-806).
+    "PromptImageViewer.swift",
     # The agents at work, pinned above the composer, and one opened (ov-453).
     "NativeAgentTray.swift",
     # A busy live conversation for the harness: streaming, settles, resets (ov-626).

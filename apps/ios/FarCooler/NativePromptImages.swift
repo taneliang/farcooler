@@ -159,8 +159,9 @@ extension EnvironmentValues {
 }
 
 /// A turn's images above its message, as thumbnails that open at full size in
-/// Quick Look. Nothing where the prompt had none, or the runner doesn't serve
-/// them.
+/// Quick Look, grown out of the thumbnail and swiped down to put away
+/// (`PromptImageViewer`). Nothing where the prompt had none, or the runner
+/// doesn't serve them.
 struct PromptImageStrip: View {
     let row: String
     let images: [AgentRow.PromptImage]
@@ -180,6 +181,8 @@ struct PromptImageStrip: View {
         let images: [AgentRow.PromptImage]
         @ObservedObject var store: PromptImageStore
         @State private var preview: URL?
+        /// Where each thumbnail is, for the viewer to grow out of.
+        @State private var places = PromptImageViewer.Places()
 
         var body: some View {
             if store.source != nil || images.indices.contains(where: { store.isKept(row: row, index: $0, mime: images[$0].mime) }) {
@@ -201,7 +204,7 @@ struct PromptImageStrip: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .quickLookPreview($preview, in: files)
+            .background { PromptImageViewer(preview: $preview, files: files, places: places) }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("native-prompt-images")
         }
@@ -222,6 +225,11 @@ struct PromptImageStrip: View {
                         .contentShape(.control)
                 }
                 .buttonStyle(.plain)
+                // Kept as it moves, without a redraw: the viewer reads it only
+                // as it opens and closes.
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    places.byFile[url] = .init(frame: frame, picture: picture)
+                }
                 .accessibilityLabel(label)
                 .accessibilityHint("Opens the image at full size.")
                 .accessibilityIdentifier("native-prompt-image")
