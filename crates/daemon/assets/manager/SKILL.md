@@ -142,8 +142,8 @@ lane is ready and takes every lane ready then (`landing`; `--force` takes one in
 review): one integrating agent rebases them, applies the reviews' fixes and runs
 every gate once. Never queue trains: fold every lane ready while one waits to
 land into it (one branch off main, one combined gate, one push, one CI watch),
-and split only for a conflict or a risky lane. Record that agent on the train (`--agent`, `--card`), never as
-a lane. Local gates mirror CI: every step, in its environment (display scale,
+and split only for a conflict or a risky lane. Record that agent on the train
+(`--agent`, `--card`), never as a lane. Local gates mirror CI: every step, in its environment (display scale,
 `CI=true`, shard timeouts), and a failure only CI caught earns a local gate. A
 red main comes first; when a known-flaky test did it, rerun the failed job
 once, file a flaky card, and keep landing on the rerun's result.
