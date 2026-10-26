@@ -42,13 +42,24 @@ export async function requireSession(request: Request, env: Env): Promise<Sessio
   // and no window where someone is authenticated but has nowhere to be stored.
   // COALESCE, because a WorkOS access token carries no `email` claim: without
   // it every request erased the email sign-in stored.
-  const account = await env.DB.prepare(
-    `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email)
-     RETURNING sessions_revoked_at`,
-  )
-    .bind(session.userId, Date.now(), session.email ?? null)
-    .first<{ sessions_revoked_at: number | null }>()
+  //
+  // Read first, and write only when there's something to write: the account
+  // is new, or the token carries an email the row doesn't have. The upsert
+  // alone wrote a row on every signed-in request, which any account could loop
+  // on (ov-811). The upsert still settles a race between two first requests.
+  const known = await env.DB.prepare(`SELECT sessions_revoked_at, email FROM accounts WHERE id = ?`)
+    .bind(session.userId)
+    .first<{ sessions_revoked_at: number | null; email: string | null }>()
+  const unchanged = known !== null && (session.email == null || session.email === known.email)
+  const account = unchanged
+    ? known
+    : await env.DB.prepare(
+        `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email)
+         RETURNING sessions_revoked_at`,
+      )
+        .bind(session.userId, Date.now(), session.email ?? null)
+        .first<{ sessions_revoked_at: number | null }>()
   const revokedAt = account?.sessions_revoked_at ?? null
 
   // WorkOS always sets `sid`. A token without one can only be cut off by its
