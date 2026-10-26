@@ -34,19 +34,37 @@ use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "farcooler=info,warn".into()),
-        )
-        // stderr always: in --stdio mode stdout IS the wire, and one log line
-        // on it would corrupt the first frame.
-        .with_writer(std::io::stderr)
-        .init();
+    // stderr always: in --stdio mode stdout IS the wire, and one log line
+    // on it would corrupt the first frame.
+    let builder = tracing_subscriber::fmt().with_env_filter(
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "farcooler=info,warn".into()),
+    );
+    match kept_log() {
+        // The daemon proper keeps its log (ov-798): whoever started it handed
+        // it `/dev/null`, so what it says would otherwise be said to no one.
+        Some(log) => builder.with_writer(log).init(),
+        None => builder.with_writer(std::io::stderr).init(),
+    }
 
     if let Err(code) = run().await {
         std::process::exit(code);
     }
+}
+
+/// The log file, for the one mode that is a daemon. The others are short-lived
+/// children of sshd or tmux whose stderr is somebody's pipe and is read.
+/// Failing to open it is not a reason to not run: stderr stays as it was.
+fn kept_log() -> Option<farcooler_daemon::daemon_log::RotatingLog> {
+    use farcooler_daemon::daemon_log as log;
+    let modes = ["--stdio", "--stream", "--fanout", "--version", "-V"];
+    if std::env::args().any(|a| modes.contains(&a.as_str())) {
+        return None;
+    }
+    let dir = log::log_dir()?;
+    log::RotatingLog::open(&dir, log::MAX_BYTES, log::KEEP, true)
+        .inspect_err(|e| eprintln!("cannot keep a log in {}: {e}", dir.display()))
+        .ok()
 }
 
 async fn run() -> Result<(), i32> {
