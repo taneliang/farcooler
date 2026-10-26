@@ -126,7 +126,9 @@ final class RunnerPeopleUITests: XCTestCase {
             XCTAssertEqual(noAccess.label, "You No Longer Have Access to This Runner")
             XCTAssertTrue(app.buttons["Check Again"].firstMatch.exists, "no Check Again: \(app.debugDescription)")
             XCTAssertFalse(app.buttons["Authorize This Device"].firstMatch.exists, "offered to authorize a revoked phone")
-            XCTAssertFalse(app.staticTexts["Billing"].firstMatch.exists, "the runner's work stayed on screen: \(app.debugDescription)")
+            // The harness's runner has a decision and an ask waiting; with its
+            // work forgotten, nothing does.
+            XCTAssertTrue(app.staticTexts["Nothing Needs You"].firstMatch.exists, "the runner's work stayed on screen: \(app.debugDescription)")
             keep(app, "runner-no-access-\(appearance)", expecting: .shows(noAccess))
             app.terminate()
         }
