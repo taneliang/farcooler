@@ -212,9 +212,16 @@ func restoreServerState(t *testing.T, s *tailcat.Server, closer func(*tailcat.Se
 // TestTheProductionTimeoutsAreUnchanged.
 func shortTimeouts(t *testing.T) {
 	t.Helper()
+	shortTimeoutsOf(t, 300*time.Millisecond)
+}
+
+// shortTimeoutsOf is shortTimeouts with the bound named, for a test whose pass
+// depends on the pick finishing inside it rather than on the pick failing.
+func shortTimeoutsOf(t *testing.T, d time.Duration) {
+	t.Helper()
 	mu.Lock()
 	prevPick, prevDial := regionPickTimeout, dialTimeout
-	regionPickTimeout, dialTimeout = 300*time.Millisecond, 300*time.Millisecond
+	regionPickTimeout, dialTimeout = d, d
 	mu.Unlock()
 	t.Cleanup(func() { mu.Lock(); regionPickTimeout, dialTimeout = prevPick, prevDial; mu.Unlock() })
 }
@@ -1067,8 +1074,12 @@ func pinnedIdentity(t *testing.T, regionID tailcfg.DERPRegionID) string {
 func TestARegionThatHasLeftTheMapIsForgotten(t *testing.T) {
 	captureLog(t)
 	// A netcheck answers from STUN at once and then waits out its other
-	// probes; the shortened bound cuts it there with the answer in hand.
-	shortTimeouts(t)
+	// probes. This test needs the answer, so the bound is generous: a 300 ms
+	// bound lost the race to STUN on a loaded machine (measured at load ~22:
+	// 2 of 5 runs came back pinned to 0 because the deadline fell before the
+	// reply). It is a ceiling, not a wait -- the pick returns as soon as the
+	// netcheck does -- and the production values are pinned elsewhere.
+	shortTimeoutsOf(t, 20*time.Second)
 	defer restoreServerState(t, nil, closeServer)()
 	stunAddr, stopSTUN := stuntest.Serve(t)
 	t.Cleanup(stopSTUN)
