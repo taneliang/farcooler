@@ -75,7 +75,13 @@ public final class BoardReadsKeeper {
     /// sends none after it did went back to an older build: this phone keeps
     /// the state again.
     public func adopt(board data: Data) {
-        if let wire = WireBoardReads.decode(board: data) {
+        adopt(boardReads: WireBoardReads.decode(board: data))
+    }
+
+    /// `adopt(board:)`, with the board's `reads` already read out of it
+    /// (`WireBoardReads.decode(board:)`), off the main thread (ov-791).
+    public func adopt(boardReads wire: WireBoardReads?) {
+        if let wire {
             adopt(runner: wire.reads)
             seedFromThisPhone()
             queueFlush()

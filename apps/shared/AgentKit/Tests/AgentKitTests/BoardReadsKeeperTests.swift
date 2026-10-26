@@ -83,6 +83,19 @@ struct BoardReadsKeeperTests {
         #expect(k.reads.floor == ms(Self.moved + 1000))
     }
 
+    /// The reads decoded beforehand, off the main thread (ov-791), are
+    /// adopted as the board they came from is; none from an older runner.
+    @Test func readsDecodedBeforehandAreAdoptedTheSame() {
+        let runner = Runner()
+        runner.floor = Self.moved + 1000
+        let k = keeper(runner, defaults())
+        k.adopt(boardReads: WireBoardReads.decode(board: runner.board()))
+        #expect(k.runnerKeepsReads)
+        #expect(k.reads.floor == ms(Self.moved + 1000))
+        k.adopt(boardReads: WireBoardReads.decode(board: Data(#"{"tasks":[]}"#.utf8)))
+        #expect(!k.runnerKeepsReads, "an older runner's board left the runner keeping reads")
+    }
+
     @Test func aMarkIsSentWithTheRunnersTimeAndKeptNowhereElse() async {
         let runner = Runner()
         let store = defaults()

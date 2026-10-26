@@ -24,15 +24,19 @@ extension Connection {
     /// runner's board is about 1 MB (798 tasks with their intents, 25 Oct),
     /// read again on every task notice, which a busy runner sends every few
     /// seconds; decoded on the main thread, each read was a dropped frame
-    /// in whatever the person was scrolling.
-    nonisolated static func decodeBoard(_ data: Data) async -> TaskBoardModel? {
-        await Task.detached(priority: .userInitiated) { try? TaskBoardModel.decode(data) }.value
+    /// in whatever the person was scrolling. Its `reads` too, which are read
+    /// out of the same JSON.
+    nonisolated static func decodeBoard(_ data: Data) async -> (board: TaskBoardModel, reads: WireBoardReads?)? {
+        await Task.detached(priority: .userInitiated) {
+            guard let board = try? TaskBoardModel.decode(data) else { return nil }
+            return (board, WireBoardReads.decode(board: data))
+        }.value
     }
 
     /// A board read's `reads`, adopted by the board's keeper. Only a real
     /// workspace's board carries any: an implicit one is the whole repository's.
-    func adoptReads(from board: Data, workspace: String) {
-        readsKeeper(for: workspace).adopt(board: board)
+    func adoptReads(_ reads: WireBoardReads?, workspace: String) {
+        readsKeeper(for: workspace).adopt(boardReads: reads)
     }
 
     /// `row` was opened on `place`'s board: read, through the newest of its

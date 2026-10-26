@@ -1421,10 +1421,10 @@ final class Connection: ObservableObject {
                 return read
             }
             if let data = try? await rpc("task.list", args),
-                let board = await Self.decodeBoard(data)
+                let decoded = await Self.decodeBoard(data)
             {
-                adoptReads(from: data, workspace: key)
-                boards[key] = board
+                adoptReads(decoded.reads, workspace: key)
+                boards[key] = decoded.board
                 unreadBoards.remove(key)
                 read = true
             } else {
