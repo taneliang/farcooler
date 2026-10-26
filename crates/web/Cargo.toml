@@ -1,0 +1,65 @@
+[package]
+name = "farcooler-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+# The browser's Far Cooler client (ov-764): SSH, the runner's protocol and the
+# enrollment ceremony, built for wasm32-unknown-unknown and handed to the page
+# by wasm-bindgen. `crates/web/build.sh` builds it; services/web serves it.
+#
+# A workspace of its own, not a member of the repo's. Its russh is the ring
+# backend (aws-lc compiles C that needs libc headers a browser target does not
+# have), and in one workspace feature unification would hand every native
+# crate both backends. A workspace of its own also keeps wasm-bindgen off the
+# native build entirely. Its path dependencies still inherit from the repo's
+# workspace, so the ceremony and the protocol here are the same source a phone
+# builds.
+[workspace]
+
+[lib]
+name = "farcooler_web"
+# cdylib for wasm-bindgen; rlib so the tests in tests/ can link it natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+farcooler-protocol = { path = "../protocol" }
+farcooler-ceremony = { path = "../ceremony" }
+russh = { version = "0.62", default-features = false, features = ["ring"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "sync"] }
+futures = "0.3"
+bytes = "1"
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# `js` gives uuid's v7 ids (every request id) the page's RNG.
+uuid = { version = "1", features = ["v7", "js"] }
+
+# Natively (the tests), a pane's tasks run on tokio's LocalSet.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", default-features = false, features = ["rt"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Pinned exactly: the wasm-bindgen CLI that post-processes this crate must be
+# the same version, and build.sh refuses a mismatch.
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+# ring asks getrandom 0.2 for randomness, and a browser's is the page's.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+# The tests run natively against an in-process russh server: the pin, the
+# signer's encoding and the two-channel terminal (tests/).
+tokio = { version = "1", features = ["rt", "macros", "time", "io-util", "sync"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

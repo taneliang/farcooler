@@ -1,0 +1,23 @@
+//! Far Cooler in a browser (ov-764, plan-763 slice 1).
+//!
+//! Three things, each the native client's rule rather than a second copy of
+//! it:
+//!
+//! - **Enrollment** ([`enroll`]): the offer this browser shows and the reply it
+//!   accepts, through `farcooler-ceremony` — the same rules a phone runs.
+//! - **SSH** ([`ssh`]): russh on its ring backend over whatever byte stream the
+//!   page hands it, with the runner's host key pinned from the reply.
+//! - **The runner's protocol** ([`wire`]): one control session and one stream
+//!   per pane, laid out as `crates/client/src/session.rs` lays them out.
+//!
+//! `js` is the wasm-bindgen surface the page calls, and only it knows there is
+//! a page. Everything else builds natively too, which is how `tests/` drives it
+//! against an in-process SSH server.
+
+pub mod enroll;
+pub mod error;
+pub mod ssh;
+pub mod wire;
+
+#[cfg(target_arch = "wasm32")]
+mod js;

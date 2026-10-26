@@ -1,0 +1,212 @@
+//! What the page calls: the wasm-bindgen surface, and nothing else.
+//!
+//! Every failure reaches the page as an `Error` whose `message` is one stable
+//! word ([`WebError::word`], or the ceremony's own `CeremonyError::code`) and
+//! whose `detail` is this crate's description, for the console only. The page
+//! owns the sentence a person reads.
+
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use js_sys::{Function, Promise, Reflect, Uint8Array};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+use uuid::Uuid;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+
+use crate::enroll;
+use crate::error::WebError;
+use crate::ssh::{self, Ed25519Signer, RawSign};
+use crate::wire::{self, Pane, Runner, spawn};
+
+fn failure(word: &str, detail: &str) -> JsValue {
+    let error = js_sys::Error::new(word);
+    let _ = Reflect::set(&error, &"detail".into(), &detail.into());
+    error.into()
+}
+
+fn web_failure(e: WebError) -> JsValue {
+    failure(e.word(), &e.to_string())
+}
+
+/// A browser future is not `Send`, and russh's signer must return one that is.
+/// The page has one thread, so nothing can ever move it to another; this says
+/// so to the compiler and nothing more.
+struct AssertSend<F>(F);
+// SAFETY: wasm32-unknown-unknown without threads has exactly one thread.
+unsafe impl<F> Send for AssertSend<F> {}
+impl<F: Future> Future for AssertSend<F> {
+    type Output = F::Output;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        // SAFETY: a projection to the only field, which is never moved out.
+        unsafe { self.map_unchecked_mut(|s| &mut s.0) }.poll(cx)
+    }
+}
+
+/// `sign(data: Uint8Array) → Promise<ArrayBuffer>`: WebCrypto's Ed25519 sign
+/// with the browser's non-extractable key.
+struct JsSigner(Function);
+
+impl RawSign for JsSigner {
+    fn sign(&mut self, data: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send>> {
+        let sign = self.0.clone();
+        Box::pin(AssertSend(async move {
+            let promise = sign
+                .call1(&JsValue::NULL, &Uint8Array::from(&data[..]))
+                .map_err(|_| "the signer threw".to_string())?;
+            let signed = JsFuture::from(Promise::from(promise)).await.map_err(|_| "the signer refused".to_string())?;
+            Ok(Uint8Array::new(&signed).to_vec())
+        }))
+    }
+}
+
+/// The SSH stream over a dialed tunnel connection the Go module handed the
+/// page: `{read() → Promise<Uint8Array | null>, write(bytes), close()}`.
+///
+/// Two local tasks copy between it and one end of an in-memory pipe; russh
+/// reads and writes the other end. Either side ending ends both.
+fn bridge(conn: JsValue) -> Result<DuplexStream, JsValue> {
+    let method = |name: &str| -> Result<Function, JsValue> {
+        Reflect::get(&conn, &name.into())?.dyn_into::<Function>().map_err(|_| failure("io", "not a connection"))
+    };
+    let (read, write, close) = (method("read")?, method("write")?, method("close")?);
+    let (ssh_side, page_side) = tokio::io::duplex(1 << 16);
+    let (mut from_ssh, mut to_ssh) = tokio::io::split(page_side);
+
+    let (reader, writer) = (conn.clone(), conn.clone());
+    let closer = close.clone();
+    spawn(async move {
+        loop {
+            let Ok(promise) = read.call0(&reader) else { break };
+            let Ok(bytes) = JsFuture::from(Promise::from(promise)).await else { break };
+            if bytes.is_null() || bytes.is_undefined() {
+                break;
+            }
+            if to_ssh.write_all(&Uint8Array::new(&bytes).to_vec()).await.is_err() {
+                break;
+            }
+        }
+        let _ = to_ssh.shutdown().await;
+        let _ = closer.call0(&reader);
+    });
+    spawn(async move {
+        let mut buf = vec![0u8; 1 << 15];
+        loop {
+            match from_ssh.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if write.call1(&writer, &Uint8Array::from(&buf[..n])).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = close.call0(&writer);
+    });
+    Ok(ssh_side)
+}
+
+/// The offer this browser shows, as the JSON its QR code carries.
+#[wasm_bindgen(js_name = makeOffer)]
+pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str) -> String {
+    farcooler_ceremony::encode_offer(&enroll::offer(name, account, key_a, node_key))
+}
+
+/// Take the phone's reply to the offer this browser showed. Answers the
+/// granted runners as JSON (`enroll::Granted`), each with its pinned host key,
+/// or refuses with the ceremony's word.
+#[wasm_bindgen(js_name = acceptReply)]
+pub fn accept_reply(reply: &str, offer: &str, already_taken: bool) -> Result<String, JsValue> {
+    let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
+    let manifest = enroll::accept(reply, &offer, already_taken).map_err(|e| failure(e.code(), &e.to_string()))?;
+    serde_json::to_string(&enroll::granted(&manifest)).map_err(|e| failure("malformed", &e.to_string()))
+}
+
+/// WebCrypto's raw Ed25519 public key as the OpenSSH line an offer carries.
+#[wasm_bindgen(js_name = publicKeyLine)]
+pub fn public_key_line(raw: &[u8], comment: &str) -> Result<String, JsValue> {
+    ssh::ed25519_public_line(raw, comment).map_err(web_failure)
+}
+
+/// The `SHA256:` fingerprint the phone shows beside this browser's name.
+#[wasm_bindgen]
+pub fn fingerprint(public_key: &str) -> Option<String> {
+    farcooler_ceremony::fingerprint(public_key)
+}
+
+/// A connected runner.
+#[wasm_bindgen]
+pub struct WebRunner(std::rc::Rc<Runner>);
+
+/// One attached pane.
+#[wasm_bindgen]
+pub struct WebPane(std::rc::Rc<std::cell::RefCell<Pane>>);
+
+/// SSH to a runner over a dialed tunnel connection, refusing any host key but
+/// `host_key`, and start its control session.
+#[wasm_bindgen]
+pub async fn connect(conn: JsValue, host_key: String, user: String, key_a: String, sign: Function) -> Result<WebRunner, JsValue> {
+    let stream = bridge(conn)?;
+    let mut signer = Ed25519Signer(JsSigner(sign));
+    let connection = ssh::connect(stream, &host_key, &user, &key_a, &mut signer).await.map_err(web_failure)?;
+    let runner = Runner::start(connection).await.map_err(web_failure)?;
+    Ok(WebRunner(std::rc::Rc::new(runner)))
+}
+
+#[wasm_bindgen]
+impl WebRunner {
+    /// `terminal.list`, as JSON (`wire::TerminalSummary`).
+    pub async fn terminals(&self) -> Result<String, JsValue> {
+        let list = self.0.terminals().await.map_err(web_failure)?;
+        serde_json::to_string(&list).map_err(|e| failure("protocol", &e.to_string()))
+    }
+
+    /// Attach a pane: `output(Uint8Array)` for every byte, `ended()` once.
+    pub async fn attach(&self, terminal: String, output: Function, ended: Function) -> Result<WebPane, JsValue> {
+        let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
+        let pane = self
+            .0
+            .attach(
+                id,
+                move |bytes| {
+                    let _ = output.call1(&JsValue::NULL, &Uint8Array::from(bytes));
+                },
+                move || {
+                    let _ = ended.call0(&JsValue::NULL);
+                },
+            )
+            .await
+            .map_err(web_failure)?;
+        Ok(WebPane(std::rc::Rc::new(std::cell::RefCell::new(pane))))
+    }
+}
+
+#[wasm_bindgen]
+impl WebPane {
+    /// Type into the terminal. Bytes reach the runner in call order whether or
+    /// not the page awaits each answer.
+    pub fn write(&self, bytes: &[u8]) -> Promise {
+        let answer = self.0.borrow().write(bytes);
+        wasm_bindgen_futures::future_to_promise(async move {
+            answer.await.map(|_| JsValue::UNDEFINED).map_err(web_failure)
+        })
+    }
+
+    pub fn resize(&self, columns: u32, rows: u32) -> Promise {
+        let answer = self.0.borrow().resize(columns, rows);
+        wasm_bindgen_futures::future_to_promise(async move {
+            answer.await.map(|_| JsValue::UNDEFINED).map_err(web_failure)
+        })
+    }
+
+    pub fn close(&self) {
+        spawn(self.0.borrow_mut().close());
+    }
+}
+
+/// The client's name and build, for the page's About line and the runner's log.
+#[wasm_bindgen]
+pub fn build() -> String {
+    format!("{} {}", wire::CLIENT_NAME, farcooler_protocol::BUILD)
+}

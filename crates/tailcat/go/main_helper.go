@@ -1,4 +1,4 @@
-//go:build !cgo
+//go:build !cgo && !js
 
 // The entry point for the standalone helper. See `helper.go` for what it is
 // and why Linux runs one.
