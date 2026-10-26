@@ -16,14 +16,17 @@
 
 mod soft_passkey;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use farcooler_web::error::WebError;
-use farcooler_web::passkey::{self, PasskeySigner};
-use farcooler_web::ssh;
+use farcooler_web::passkey::{self, Assertion, Authenticate, PasskeySigner};
+use farcooler_web::ssh::{self, SignError};
 use russh::keys::{HashAlg, PublicKey};
 use soft_passkey::{SoftPasskey, Tamper};
 
@@ -165,4 +168,91 @@ async fn a_false_signature_is_refused_by_sshd() {
     }
     let log = sshd.log_saying("Failed publickey").await;
     assert!(log.contains("Failed publickey"), "sshd did not log the refusal:\n{log}");
+}
+
+/// What a captured login is worth in another session: nothing. The passkey
+/// signed the first session's user-auth data, which starts with that
+/// session's id. Offered again in a second session, the browser's encoder
+/// refuses it before sending (its challenge isn't this login's), and sent
+/// anyway, as an attacker would, sshd refuses it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_captured_assertion_is_refused_in_another_session() {
+    let passkey = SoftPasskey::new();
+    let line = passkey::public_line(&passkey.spki(), "farcooler-web").unwrap();
+    let sshd = Sshd::start(&line, "replay");
+
+    // Session one, signed in, with what the passkey handed back kept.
+    let captured: Kept = Arc::default();
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", sshd.port)).await.unwrap();
+    let mut capturing = PasskeySigner(Capture { passkey: passkey.authenticator(), kept: captured.clone() });
+    drop(ssh::connect(stream, &sshd.host_key, &user(), &line, &mut capturing).await.expect("the first session"));
+    let (data, assertion) = captured.lock().unwrap().clone().expect("an assertion was made");
+
+    // Session two, through the browser's signer: refused before it is sent.
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", sshd.port)).await.unwrap();
+    let mut replaying = PasskeySigner(Replay(assertion.clone()));
+    match ssh::connect(stream, &sshd.host_key, &user(), &line, &mut replaying).await {
+        Err(WebError::Signer(why)) => assert!(why.contains("other than this login"), "{why}"),
+        other => panic!("a replayed assertion was not refused by the browser: {:?}", other.map(|_| ())),
+    }
+
+    // Session two again, the captured signature sent as is: sshd refuses it.
+    let blob = passkey::signature_blob(&data, &assertion).unwrap();
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", sshd.port)).await.unwrap();
+    match ssh::connect(stream, &sshd.host_key, &user(), &line, &mut Raw(blob)).await {
+        Err(WebError::KeyRejected) => {}
+        other => panic!("sshd took a replayed signature: {:?}", other.map(|_| ())),
+    }
+    let log = sshd.log_saying("Failed publickey").await;
+    assert!(log.contains("Failed publickey"), "sshd did not log the refusal:\n{log}");
+}
+
+/// The data a passkey was asked to sign, and what it answered.
+type Kept = Arc<Mutex<Option<(Vec<u8>, Assertion)>>>;
+
+/// An authenticator that keeps what it was asked and what it answered.
+struct Capture {
+    passkey: soft_passkey::Soft,
+    kept: Kept,
+}
+
+impl Authenticate for Capture {
+    fn assert(&mut self, challenge: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Assertion, SignError>> + Send>> {
+        let asking = self.passkey.assert(challenge.clone());
+        let kept = self.kept.clone();
+        Box::pin(async move {
+            let assertion = asking.await?;
+            *kept.lock().unwrap() = Some((challenge, assertion.clone()));
+            Ok(assertion)
+        })
+    }
+}
+
+/// An authenticator that answers every ask with one captured assertion.
+struct Replay(Assertion);
+
+impl Authenticate for Replay {
+    fn assert(&mut self, _challenge: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Assertion, SignError>> + Send>> {
+        let assertion = self.0.clone();
+        Box::pin(async move { Ok(assertion) })
+    }
+}
+
+/// russh's signer sending a fixed signature blob after whatever it is asked
+/// to sign, as an attacker holding a captured one would.
+struct Raw(Vec<u8>);
+
+impl russh::Signer for Raw {
+    type Error = SignError;
+
+    fn auth_sign(
+        &mut self,
+        _key: &russh::keys::agent::AgentIdentity,
+        _hash_alg: Option<HashAlg>,
+        mut to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, SignError>> + Send {
+        to_sign.extend_from_slice(&(self.0.len() as u32).to_be_bytes());
+        to_sign.extend_from_slice(&self.0);
+        async move { Ok(to_sign) }
+    }
 }
