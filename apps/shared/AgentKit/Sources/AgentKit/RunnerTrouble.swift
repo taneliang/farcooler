@@ -78,6 +78,16 @@ enum RunnerTrouble: Equatable {
     /// word in front of a person, in the one situation where a clear sentence
     /// matters most.
     case tunnelFailed(TunnelWord)
+    /// A runner that let this device in before refused its key, fewer than
+    /// ``KeyRefusals/settlesAfter`` dials in a row (ov-818). Possibly
+    /// passing, so it's dialed again on the backoff. Never raised by the
+    /// core: ``reading(_:)`` makes it out of ``keyRejected``.
+    case refusedThisTime
+    /// A runner that let this device in before has refused its key
+    /// ``KeyRefusals/settlesAfter`` dials in a row: this device's access was
+    /// taken away (ov-818). Checked again slowly, so being added back is
+    /// noticed, and its team's work leaves the screen.
+    case accessRemoved
     case other
 
     /// The four stable words `farcooler_tailcat::TunnelError::code` sends, and
@@ -182,6 +192,21 @@ enum RunnerTrouble: Equatable {
         }
     }
 
+    /// This failure read against this device's history with the runner
+    /// (ov-818): a ``keyRejected`` from a runner that let this device in
+    /// before is ``refusedThisTime`` until ``KeyRefusals/settlesAfter``
+    /// refusals in a row, then ``accessRemoved``. Every other kind, and a
+    /// refusal from a runner that never let it in, is itself. Counts the
+    /// refusal into `refusals`.
+    func reading(_ refusals: inout KeyRefusals) -> RunnerTrouble {
+        guard self == .keyRejected else { return self }
+        switch refusals.refused() {
+        case .stranger: return .keyRejected
+        case .passing: return .refusedThisTime
+        case .revoked: return .accessRemoved
+        }
+    }
+
     /// The fingerprint to put to a person, when the core's word says this
     /// failure is the first-contact question rather than a failure at all.
     ///
@@ -215,6 +240,9 @@ enum RunnerTrouble: Equatable {
         /// can admit.
         case addThisDeviceAgain
         case tryAgain
+        /// A dial, worded for a runner that took this device's access away
+        /// (ov-818): the removed screen's button, and what it does.
+        case checkAgain
 
         /// Title case, as every button in this app is.
         var label: String {
@@ -224,6 +252,7 @@ enum RunnerTrouble: Equatable {
             case .showTheKeyAgain: return "Show the Key Again"
             case .addThisDeviceAgain: return "Add This Device Again"
             case .tryAgain: return "Try Again"
+            case .checkAgain: return "Check Again"
             }
         }
 
@@ -255,7 +284,7 @@ enum RunnerTrouble: Equatable {
             case .authorizeThisDevice, .addThisDeviceAgain: return [.offerThisDevicesKey]
             case .reviewTheNewKey: return [.forgetThePinnedKey]
             case .showTheKeyAgain: return [.forgetThePinnedKey, .dialAgain]
-            case .tryAgain: return [.dialAgain]
+            case .tryAgain, .checkAgain: return [.dialAgain]
             }
         }
     }
@@ -282,6 +311,10 @@ enum RunnerTrouble: Equatable {
         // Deliberately not "Try Again": the dial would use the key that is
         // missing, so the button could only fail, every time, forever.
         case .noNodeKey: return .addThisDeviceAgain
+        // The person to act is the runner's owner, so there's nothing for
+        // this device to authorize. Checking is what notices being added back
+        // before the slow schedule would.
+        case .accessRemoved: return .checkAgain
         // Including every tunnel word. A tunnel that did not open is the
         // tunnel's version of a runner nobody could reach, and dialing again
         // is what fixes a runner that was asleep. `notInThisBuild` is the
@@ -289,7 +322,7 @@ enum RunnerTrouble: Equatable {
         // but it is the Simulator's answer and never a shipped device's, so
         // the alternative would be a button nobody will ever tap either way.
         // What it must not do is retry on a SCHEDULE; see `retry`.
-        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other, .tunnelFailed:
+        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other, .tunnelFailed, .refusedThisTime:
             return .tryAgain
         }
     }
@@ -323,9 +356,14 @@ enum RunnerTrouble: Equatable {
         // seconds, forever, for an answer that cannot change.
         case .tunnelFailed(.notInThisBuild):
             return .never
-        case .daemonMissing:
+        // Slowly, not never: being added back has nobody to tap anything on
+        // this device, and fast, a revoked key is a refused login on the
+        // runner every thirty seconds, forever.
+        case .daemonMissing, .accessRemoved:
             return .afterAWhile
-        case .unreachable, .stopped, .other, .tunnelFailed:
+        // A runner that let this device in before: a refusal can pass, so it
+        // isn't ``keyRejected``'s `never` until it has held (ov-818).
+        case .unreachable, .stopped, .other, .tunnelFailed, .refusedThisTime:
             return .onTheBackoff
         }
     }
@@ -338,7 +376,7 @@ enum RunnerTrouble: Equatable {
         case .keyRejected: return true
         case .hostKeyChanged, .keyNotTrusted: return false
         case .unreachable, .daemonMissing, .noIdentity, .noNodeKey, .stopped, .other,
-            .tunnelFailed:
+            .tunnelFailed, .refusedThisTime, .accessRemoved:
             return false
         }
     }
@@ -347,7 +385,10 @@ enum RunnerTrouble: Equatable {
     ///
     /// Every failure but one. A device with no key of its own has no runner to
     /// blame and nothing in a runner editor would change the answer.
-    var offersEditingTheRunner: Bool { self != .noIdentity }
+    ///
+    /// Nor a runner that took this device's access away: its details are
+    /// right, and editing them is a road to the same refusal.
+    var offersEditingTheRunner: Bool { self != .noIdentity && self != .accessRemoved }
 
     /// Whether the raw text from the core goes on screen under the sentence.
     ///
@@ -369,7 +410,8 @@ enum RunnerTrouble: Equatable {
     var failedBeforeTheRunner: Bool {
         switch self {
         case .tunnelFailed, .unreachable, .noNodeKey, .stopped: return true
-        case .keyRejected, .hostKeyChanged, .daemonMissing, .noIdentity, .keyNotTrusted, .other:
+        case .keyRejected, .hostKeyChanged, .daemonMissing, .noIdentity, .keyNotTrusted, .other,
+            .refusedThisTime, .accessRemoved:
             return false
         }
     }
@@ -386,7 +428,9 @@ enum RunnerTrouble: Equatable {
 
     var symbol: String {
         switch self {
-        case .keyRejected, .noIdentity, .noNodeKey: return "key.slash"
+        case .keyRejected, .noIdentity, .noNodeKey, .refusedThisTime: return "key.slash"
+        // The removed screen's mark, since it's the removed screen's sibling.
+        case .accessRemoved: return "person.crop.circle.badge.xmark"
         case .hostKeyChanged: return "exclamationmark.shield"
         case .keyNotTrusted: return "key"
         case .unreachable: return "network.slash"
@@ -445,6 +489,8 @@ enum RunnerTrouble: Equatable {
         case .tunnelFailed(.rendezvous): return "Can’t Reach Tailcat"
         case .tunnelFailed(.notInThisBuild): return "No Tailcat in This Build"
         case .tunnelFailed(.unspecified): return "Tailcat Didn’t Connect"
+        case .refusedThisTime: return "Not Let In This Time"
+        case .accessRemoved: return RunnerPeople.noAccessTitle
         case .other: return "Can’t Connect"
         }
     }
@@ -505,6 +551,10 @@ enum RunnerTrouble: Equatable {
         // was never the problem.
         case .tunnelFailed(.unspecified):
             return "Tailcat couldn’t connect."
+        case .refusedThisTime:
+            return "\(words.reachDetail) refused this device’s key, though it let it in before."
+        case .accessRemoved:
+            return RunnerPeople.noAccessBody
         // Sentences somebody wrote, each naming both what happened and what to
         // do about it — three of them in `Connection`, `hostKeyChanged` in
         // `crates/client/src/ssh.rs`. They are the core's words only in the

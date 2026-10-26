@@ -85,4 +85,21 @@ extension RunnerPeople {
     public static func removedTitle(from runner: String) -> String {
         runner.isEmpty ? removedTitle : "You Were Removed from \(runner)"
     }
+
+    /// A device whose key the runner now refuses, after letting it in before
+    /// (ov-818, ``KeyRefusals``): the removed screen's sibling. It can't say
+    /// "removed you", because the device can't tell which of two things
+    /// happened: its member was removed, or only this device was taken off
+    /// the member's list. Both revoke its key (ov-783).
+    public static let noAccessTitle = "You No Longer Have Access to This Runner"
+    public static let noAccessBody =
+        "This runner now refuses this device’s key, though it let it in before. That happens when someone "
+        + "who manages the runner removes you or this device. To come back, ask the runner’s owner to add "
+        + "this device again. Far Cooler checks every few minutes and reconnects once you’re back."
+
+    /// The no-access title naming the runner: "You No Longer Have Access to
+    /// studio".
+    public static func noAccessTitle(to runner: String) -> String {
+        runner.isEmpty ? noAccessTitle : "You No Longer Have Access to \(runner)"
+    }
 }
