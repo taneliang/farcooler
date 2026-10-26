@@ -80,3 +80,97 @@ impl Reach {
         }
     }
 }
+
+/// How a connection on one reach finds out that the far end has gone quiet.
+///
+/// After `probe_after` with nothing received, the client sends one probe
+/// that asks for an answer (OpenSSH's `keepalive@openssh.com`), and again
+/// every `probe_after` while nothing arrives. Once more than `unanswered`
+/// probes have gone unanswered, the connection is over. ANY byte received
+/// resets both the clock and the count, so a connection that is carrying
+/// output sends no probes at all: the cost is paid only while it is idle.
+///
+/// Here, beside `Reach`, so the native client and the browser read one
+/// definition. Each runs it on its own clock: the native client hands these
+/// numbers to russh, and the browser, which has no clock russh can use, has
+/// to run its own timer (ov-772).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Liveness {
+    pub probe_after: std::time::Duration,
+    pub unanswered: usize,
+}
+
+impl Liveness {
+    /// An address. A dead host there is rare and the probe is paid for in
+    /// radio wake-ups on a phone, so it is noticed in two minutes. This is
+    /// the setting every direct connection already had; a tunnel's
+    /// tighter one must not leak onto it.
+    pub const DIRECT: Liveness =
+        Liveness { probe_after: std::time::Duration::from_secs(30), unanswered: 3 };
+
+    /// The tunnel. A runner crash or restart, or a relay drop, sends
+    /// nothing to the device: its TCP lives inside the tunnel, so no reset
+    /// ever arrives and the session hangs until a probe goes unanswered
+    /// (ov-781). Three seconds with two allowed to go unanswered notices
+    /// within nine, and still waits six seconds for an answer before giving
+    /// up, which a slow cellular round trip through the relay fits inside.
+    pub const TUNNEL: Liveness =
+        Liveness { probe_after: std::time::Duration::from_secs(3), unanswered: 2 };
+
+    /// The longest a dead link goes unnoticed, counted from the last byte
+    /// received: the probe that is one past `unanswered` is the one that
+    /// ends it, so it is `probe_after` times `unanswered + 1`.
+    pub fn noticed_within(&self) -> std::time::Duration {
+        self.probe_after * (self.unanswered as u32 + 1)
+    }
+}
+
+impl Reach {
+    /// How a connection on this reach notices a far end that went quiet.
+    ///
+    /// `Pipe` is the tunnel too, carried by the CLI: a dead tunnel leaves the
+    /// CLI's pipe open and silent, exactly as it leaves a phone's socket.
+    pub fn liveness(&self) -> Liveness {
+        match self {
+            Self::Direct { .. } => Liveness::DIRECT,
+            Self::Tailcat { .. } => Liveness::TUNNEL,
+            #[cfg(target_os = "macos")]
+            Self::Pipe { .. } => Liveness::TUNNEL,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{Liveness, Reach};
+
+    #[test]
+    fn a_tunnel_notices_a_dead_far_end_within_ten_seconds() {
+        let tunnel = Reach::Tailcat { token: "tc-x".into(), client_key: String::new() };
+        assert_eq!(tunnel.liveness(), Liveness::TUNNEL);
+        assert!(
+            tunnel.liveness().noticed_within() <= Duration::from_secs(10),
+            "a dead tunnel goes unnoticed for {:?}",
+            tunnel.liveness().noticed_within()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_macs_pipe_is_a_tunnel_too() {
+        let pipe = Reach::Pipe { argv: vec!["/x/farcooler".into()] };
+        assert_eq!(pipe.liveness(), Liveness::TUNNEL);
+    }
+
+    #[test]
+    fn an_address_keeps_the_probe_it_always_had() {
+        let direct = Reach::Direct { host: "box".into(), port: 22 };
+        assert_eq!(
+            direct.liveness(),
+            Liveness { probe_after: Duration::from_secs(30), unanswered: 3 }
+        );
+        assert_eq!(direct.liveness().noticed_within(), Duration::from_secs(120));
+    }
+}

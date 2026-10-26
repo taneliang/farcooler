@@ -59,7 +59,7 @@ use serde::{Deserialize, Serialize};
 /// reads it: two definitions that agree today are two definitions that
 /// disagree after the next variant.
 mod reach;
-pub use reach::Reach;
+pub use reach::{Liveness, Reach};
 
 mod fit;
 pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
