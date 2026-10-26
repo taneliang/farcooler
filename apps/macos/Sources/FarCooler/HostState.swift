@@ -20,12 +20,17 @@ enum HostState: Equatable {
     /// every read but `member list`, which says so. Not fixed by retrying
     /// at full speed, but checked again slowly, so being added back is seen.
     case removed
+    /// The runner refuses this Mac's key, after letting it in before
+    /// (ov-818, ``KeyRefusals``): its member was removed, or this Mac was
+    /// taken off the member's list, and either revoked its key (ov-783).
+    /// Checked again slowly, as `.removed` is, so being added back is seen.
+    case noAccess
 
     var isUsable: Bool { self == .connected }
 
     /// What to tell someone whose action was refused, or nil to let it proceed.
     ///
-    /// Only `.unreachable`, `.notInstalled` and `.removed` refuse. Those are the two states
+    /// Only `.unreachable`, `.notInstalled`, `.removed` and `.noAccess` refuse. Those are the two states
     /// where a command was already tried against this runner and failed, so
     /// trying another is asking the same question twice. `.connecting` and
     /// `.reconnecting` mean "we do not know yet", not "no" — refusing on those
@@ -41,6 +46,7 @@ enum HostState: Equatable {
         case .unreachable(let why): return why
         case .notInstalled: return "Far Cooler isn’t installed on this runner."
         case .removed: return RunnerPeople.removedBody
+        case .noAccess: return RunnerPeople.noAccessBody
         }
     }
 }

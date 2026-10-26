@@ -6,6 +6,9 @@ import Testing
 /// A runner that refuses this device's key after letting it in before has
 /// taken its access away; one refusal may pass (ov-818). See `KeyRefusals`.
 struct KeyRefusalsTests {
+    /// The backoff's spacing: about two, four and eight seconds apart.
+    private static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    private static let dials = [0.0, 2, 6, 14, 44].map { t0.addingTimeInterval($0) }
     // MARK: - The count
 
     @Test func aRunnerThatNeverLetThisDeviceInIsAStrangersRefusalEveryTime() {
@@ -14,21 +17,39 @@ struct KeyRefusalsTests {
         #expect(refusals.refusals == 0)
     }
 
-    @Test func threeRefusalsInARowFromARunnerThatLetThisDeviceInAreARevoke() {
+    @Test func refusalsInARowOverTenSecondsFromARunnerThatLetThisDeviceInAreARevoke() {
         var refusals = KeyRefusals(admitted: true)
-        #expect(refusals.refused() == .passing)
-        #expect(refusals.refused() == .passing)
-        #expect(refusals.refused() == .revoked)
-        #expect(refusals.refused() == .revoked)
+        #expect(refusals.refused(at: Self.dials[0]) == .passing)
+        #expect(refusals.refused(at: Self.dials[1]) == .passing)
+        // Three, but six seconds: not yet.
+        #expect(refusals.refused(at: Self.dials[2]) == .passing)
+        #expect(refusals.refused(at: Self.dials[3]) == .revoked)
+        #expect(refusals.refused(at: Self.dials[4]) == .revoked)
+    }
+
+    /// The Mac's reads can dial several at once: a burst is one moment.
+    @Test func manyRefusalsWithinASecondAreStillPassing() {
+        var refusals = KeyRefusals(admitted: true)
+        for i in 0..<8 {
+            #expect(refusals.refused(at: Self.t0.addingTimeInterval(Double(i) / 10)) == .passing)
+        }
+    }
+
+    /// Ten seconds of two refusals is not enough either.
+    @Test func twoRefusalsFarApartAreStillPassing() {
+        var refusals = KeyRefusals(admitted: true)
+        _ = refusals.refused(at: Self.t0)
+        #expect(refusals.refused(at: Self.t0.addingTimeInterval(600)) == .passing)
     }
 
     @Test func aDialThatGetsInStartsTheCountAgain() {
         var refusals = KeyRefusals(admitted: true)
-        _ = refusals.refused()
-        _ = refusals.refused()
+        _ = refusals.refused(at: Self.dials[0])
+        _ = refusals.refused(at: Self.dials[1])
+        _ = refusals.refused(at: Self.dials[2])
         refusals.letIn()
-        #expect(refusals.refused() == .passing)
-        #expect(refusals.refused() == .passing)
+        #expect(refusals.refused(at: Self.dials[3]) == .passing)
+        #expect(refusals.refused(at: Self.dials[4]) == .passing)
         #expect(refusals.verdict == .passing)
     }
 
@@ -48,8 +69,8 @@ struct KeyRefusalsTests {
 
     @Test func aStrangersRefusalIsStillNotAuthorizedYetAndNotRetried() {
         var refusals = KeyRefusals(admitted: false)
-        for _ in 0..<5 {
-            let kind = RunnerTrouble.keyRejected.reading(&refusals)
+        for dial in Self.dials {
+            let kind = RunnerTrouble.keyRejected.reading(&refusals, at: dial)
             #expect(kind == .keyRejected)
             #expect(kind.retry == .never)
             #expect(kind.nextMove == .authorizeThisDevice)
@@ -61,24 +82,23 @@ struct KeyRefusalsTests {
     /// leaves no trace of it.
     @Test func aPassingRefusalIsRetriedOnTheBackoffAndNeverSaysRemoved() {
         var refusals = KeyRefusals(admitted: true)
-        for _ in 0..<2 {
-            let kind = RunnerTrouble.keyRejected.reading(&refusals)
+        for dial in Self.dials.prefix(3) {
+            let kind = RunnerTrouble.keyRejected.reading(&refusals, at: dial)
             #expect(kind == .refusedThisTime)
             #expect(kind.retry == .onTheBackoff)
         }
         refusals.letIn()
-        let kind = RunnerTrouble.keyRejected.reading(&refusals)
+        let kind = RunnerTrouble.keyRejected.reading(&refusals, at: Self.dials[4])
         #expect(kind == .refusedThisTime)
         #expect(kind.retry == .onTheBackoff)
     }
 
-    /// The revoked case: the third refusal in a row is the no-access screen,
+    /// The revoked case: the fourth refusal on the backoff is the no-access screen,
     /// checked slowly, with Check Again.
     @Test func aHeldRefusalIsAccessRemovedCheckedSlowly() {
         var refusals = KeyRefusals(admitted: true)
-        _ = RunnerTrouble.keyRejected.reading(&refusals)
-        _ = RunnerTrouble.keyRejected.reading(&refusals)
-        let kind = RunnerTrouble.keyRejected.reading(&refusals)
+        for dial in Self.dials.prefix(3) { _ = RunnerTrouble.keyRejected.reading(&refusals, at: dial) }
+        let kind = RunnerTrouble.keyRejected.reading(&refusals, at: Self.dials[3])
         #expect(kind == .accessRemoved)
         #expect(kind.retry == .afterAWhile)
         #expect(kind.nextMove == .checkAgain)

@@ -194,13 +194,14 @@ enum RunnerTrouble: Equatable {
 
     /// This failure read against this device's history with the runner
     /// (ov-818): a ``keyRejected`` from a runner that let this device in
-    /// before is ``refusedThisTime`` until ``KeyRefusals/settlesAfter``
-    /// refusals in a row, then ``accessRemoved``. Every other kind, and a
+    /// before is ``refusedThisTime`` until it has refused
+    /// ``KeyRefusals/settlesAfter`` dials in a row over
+    /// ``KeyRefusals/settlesOver``, then ``accessRemoved``. Every other kind, and a
     /// refusal from a runner that never let it in, is itself. Counts the
     /// refusal into `refusals`.
-    func reading(_ refusals: inout KeyRefusals) -> RunnerTrouble {
+    func reading(_ refusals: inout KeyRefusals, at now: Date = Date()) -> RunnerTrouble {
         guard self == .keyRejected else { return self }
-        switch refusals.refused() {
+        switch refusals.refused(at: now) {
         case .stranger: return .keyRejected
         case .passing: return .refusedThisTime
         case .revoked: return .accessRemoved

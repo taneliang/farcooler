@@ -11,12 +11,31 @@ extension DaemonClient {
     /// also drops everything read from it before, so none of the team's work
     /// stays on screen. Nil for any other failure, or a list that can't be
     /// read, which leaves the failure as it was.
+    ///
+    /// `.noAccess` when ssh says the runner refused this Mac's key, and it
+    /// has refused it `KeyRefusals.settlesAfter` reads in a row since last
+    /// letting it in, over `KeyRefusals.settlesOver` at least (ov-818),
+    /// which drops what was read from the runner too. Fewer are left as they
+    /// were, a runner that can't be reached, retried on the backoff: a
+    /// refusal can pass.
     func removal(after reason: String) async -> HostState? {
+        if !target.isEmpty, KeyRefusals.isKeyRefusal(reason) {
+            guard keyRefusals.refused(at: now()) == .revoked else { return nil }
+            forgetTeamWork()
+            return .noAccess
+        }
         guard Self.mayBeRemoval(reason) else { return nil }
         let (data, _) = await runRaw(["member", "list", "--json"], background: true)
         guard let data, Self.saysRemoved(data) else { return nil }
         if fleet != .empty { fleet = .empty }
         return .removed
+    }
+
+    /// A read got in: this runner accepts this Mac's key, and remembers so
+    /// across launches (ov-818). Written only when that's news.
+    func letIn() {
+        guard !target.isEmpty, !keyRefusals.admitted || keyRefusals.refusals > 0 else { return }
+        keyRefusals.letIn(target, in: admissions)
     }
 
     /// Whether a failure could be a removal: a refusal as someone else's.

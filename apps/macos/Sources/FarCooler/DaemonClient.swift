@@ -63,6 +63,14 @@ final class DaemonClient: ObservableObject {
     /// never becomes idle, without a runner.
     var commandRunnerForTesting: (@MainActor ([String]) async -> (data: Data?, message: String?))?
 
+    /// Where this Mac remembers which runners have let it in (ov-818). A
+    /// test gives its own.
+    var admissions: UserDefaults = .standard
+    /// How this runner has answered this Mac's key: see `KeyRefusals`.
+    lazy var keyRefusals = KeyRefusals.remembered(target, in: admissions)
+    /// The clock `keyRefusals` reads. A test moves its own.
+    var now: () -> Date = Date.init
+
     /// Cancels the retry loop rather than leaving it to run against a client
     /// nobody holds anymore.
     ///
@@ -162,7 +170,7 @@ final class DaemonClient: ObservableObject {
         state: HostState, build: DaemonBuild?, unreadable: Bool, remote: Bool
     ) -> DaemonSkew {
         switch state {
-        case .connecting, .reconnecting, .notInstalled, .removed:
+        case .connecting, .reconnecting, .notInstalled, .removed, .noAccess:
             return .unavailable
         case .unreachable(let reason):
             // The one flavor of unreachable that IS a version. `explain` in
@@ -262,6 +270,26 @@ final class DaemonClient: ObservableObject {
     /// the older side, goes unnoticed until someone restarts the app.
     private let slowRetrySeconds: Double = 300
 
+    /// Whether `state` is checked again on the slow cadence: a runner that
+    /// needs installing, or that removed this Mac's member or refuses its
+    /// key (ov-784, ov-818). Retrying fixes none of them, and a refused key
+    /// retried fast is a refused login on the runner every thirty seconds.
+    nonisolated static func waitsLong(_ state: HostState) -> Bool {
+        switch state {
+        case .notInstalled, .removed, .noAccess: return true
+        case .connecting, .connected, .reconnecting, .unreachable: return false
+        }
+    }
+
+    /// Forgets everything read from this runner, for one that doesn't let
+    /// this Mac see its work anymore (ov-818): its worktrees and panes, what
+    /// they changed, and what needs you there.
+    func forgetTeamWork() {
+        if fleet != .empty { fleet = .empty }
+        if !changesInbox.isEmpty { changesInbox = [:] }
+        if !needsYouRead.isEmpty { needsYouRead = [] }
+    }
+
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
     /// failure paths cannot each schedule their own and race.
     ///
@@ -287,7 +315,7 @@ final class DaemonClient: ObservableObject {
 
         let wait: Double
         switch state {
-        case .notInstalled, .removed:
+        case _ where Self.waitsLong(state):
             // `attempt` resets rather than climbs here: it drives the fast
             // exponential schedule only, means nothing at this cadence, and
             // letting it grow would leave a later, genuinely transient
@@ -549,7 +577,7 @@ final class DaemonClient: ObservableObject {
                     // measured in minutes, not moments — showing
                     // "reconnecting" over that whole span would say less
                     // than what `refresh()` already determined.
-                    if [.notInstalled, .removed].contains(self.state) { return }
+                    if [.notInstalled, .removed, .noAccess].contains(self.state) { return }
                     if case .unreachable(let reason) = self.state, self.looksVersionMismatch(reason) {
                         return
                     }
@@ -818,6 +846,7 @@ final class DaemonClient: ObservableObject {
             WebPanes.shared.close(terminals: PaneBanner.closed(before: before, after: after))
             if read != fleet { fleet = read }
             if !hasLoaded { hasLoaded = true }
+            letIn()  // ov-818
             // Who's on this runner, when its panes changed (a rep started
             // elsewhere): whom the window talks to (ov-526).
             Task { await self.talk.load(self, panes: after) }

@@ -25,11 +25,15 @@ import Foundation
 /// **Revoked against transient.** A runner that never let this device in is a
 /// stranger's refusal: ``Verdict/stranger``, and nothing changes from before.
 /// A runner that did, and refuses ``settlesAfter`` dials in a row with no
-/// success in between, has taken the access away: ``Verdict/revoked``. Fewer
-/// than that is ``Verdict/passing``: a refusal that can pass (an
-/// `authorized_keys` being rewritten, a home directory whose permissions
-/// sshd's StrictModes refused for a moment), so it's retried on the usual
-/// backoff, whose first three rungs are about two, four and eight seconds.
+/// success in between, spread over ``settlesOver`` at least, has taken the
+/// access away: ``Verdict/revoked``. Short of that is ``Verdict/passing``: a
+/// refusal that can pass (an `authorized_keys` being rewritten, a home
+/// directory whose permissions sshd's StrictModes refused for a moment), so
+/// it's retried on the usual backoff, whose rungs are about two, four and
+/// eight seconds: the fourth refusal, some fourteen seconds after the first,
+/// is usually the one that settles it. The time floor is for the Mac, where
+/// any of some thirty reads can dial, so three refusals can land within a
+/// second of each other.
 /// Any dial that gets in starts the count again. A failure that isn't a
 /// refusal says nothing about the key and leaves the count as it is.
 ///
@@ -38,16 +42,20 @@ import Foundation
 public struct KeyRefusals: Sendable, Equatable {
     /// How many refused dials in a row settle it.
     public static let settlesAfter = 3
+    /// How long, at least, from the first refusal in a row to the one that
+    /// settles it.
+    public static let settlesOver: TimeInterval = 10
 
     /// What a refused dial means, given this device's history with the runner.
     public enum Verdict: Sendable, Equatable {
         /// The runner never let this device in: it isn't authorized yet.
         case stranger
-        /// It did, and has refused fewer than ``settlesAfter`` dials since:
-        /// retried as a failure that can pass.
+        /// It did, and has refused fewer than ``settlesAfter`` dials since,
+        /// or over less than ``settlesOver``: retried as a failure that can
+        /// pass.
         case passing
-        /// It did, and has refused ``settlesAfter`` dials in a row: this
-        /// device's access was taken away.
+        /// It did, and has refused ``settlesAfter`` dials in a row over
+        /// ``settlesOver`` or more: this device's access was taken away.
         case revoked
     }
 
@@ -55,6 +63,10 @@ public struct KeyRefusals: Sendable, Equatable {
     public private(set) var admitted: Bool
     /// Refused dials since the last one that got in.
     public private(set) var refusals = 0
+    /// When the first of ``refusals`` came.
+    public private(set) var firstRefusal: Date?
+    /// When the latest did.
+    public private(set) var lastRefusal: Date?
 
     public init(admitted: Bool) {
         self.admitted = admitted
@@ -64,19 +76,26 @@ public struct KeyRefusals: Sendable, Equatable {
     public mutating func letIn() {
         admitted = true
         refusals = 0
+        firstRefusal = nil
+        lastRefusal = nil
     }
 
     /// A dial was refused: what that means now.
-    public mutating func refused() -> Verdict {
+    public mutating func refused(at now: Date = Date()) -> Verdict {
         guard admitted else { return .stranger }
         refusals += 1
+        if firstRefusal == nil { firstRefusal = now }
+        lastRefusal = now
         return verdict
     }
 
     /// What the refusals so far mean, without counting another.
     public var verdict: Verdict {
         guard admitted else { return .stranger }
-        return refusals >= Self.settlesAfter ? .revoked : .passing
+        guard refusals >= Self.settlesAfter, let firstRefusal, let lastRefusal,
+            lastRefusal.timeIntervalSince(firstRefusal) >= Self.settlesOver
+        else { return .passing }
+        return .revoked
     }
 
     /// Whether ``letIn()`` was ever called for `runner`, from `defaults`.
