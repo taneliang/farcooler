@@ -376,7 +376,8 @@ fn daemon_command(binary: &Path, stub_switch: Option<&std::ffi::OsStr>) -> std::
     command
         // Detached: the daemon outlives the command that started it, which is
         // the whole point of a daemon. Its output goes nowhere rather than
-        // interleaving with this command's own.
+        // interleaving with this command's own: the daemon keeps its own log
+        // file (`farcooler_daemon::daemon_log`, ov-798), so nothing is lost.
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
