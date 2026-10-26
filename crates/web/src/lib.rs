@@ -6,7 +6,8 @@
 //! - **Enrollment** ([`enroll`]): the offer this browser shows and the reply it
 //!   accepts, through `farcooler-ceremony` — the same rules a phone runs.
 //! - **SSH** ([`ssh`]): russh on its ring backend over whatever byte stream the
-//!   page hands it, with the runner's host key pinned from the reply.
+//!   page hands it, with the runner's host key pinned from the reply, signing
+//!   in with this browser's passkey ([`passkey`]).
 //! - **The runner's protocol** ([`wire`]): one control session and one stream
 //!   per pane, laid out as `crates/client/src/session.rs` lays them out.
 //!
@@ -16,6 +17,7 @@
 
 pub mod enroll;
 pub mod error;
+pub mod passkey;
 pub mod ssh;
 pub mod wire;
 

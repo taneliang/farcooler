@@ -53,6 +53,37 @@ h7DDD8nev+bIjsSCAucjAAAABW90aGVy
 pub const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 pub const TERMINAL: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_0001);
 
+/// An Ed25519 key in memory as the browser's signer. The in-process russh
+/// server can't verify a passkey's `webauthn-sk` signature, so the tests that
+/// are about the pin and the protocol sign with this; the passkey's own
+/// signing is tested against a real sshd (`a_passkey_signs_in_to_a_real_sshd.rs`).
+pub struct Ed25519InMemory(pub PrivateKey);
+
+impl russh::Signer for Ed25519InMemory {
+    type Error = farcooler_web::ssh::SignError;
+
+    fn auth_sign(
+        &mut self,
+        _key: &russh::keys::agent::AgentIdentity,
+        _hash_alg: Option<HashAlg>,
+        mut to_sign: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>> + Send {
+        use russh::keys::signature::Signer as _;
+        let signed: Result<russh::keys::ssh_key::Signature, _> = self.0.try_sign(&to_sign);
+        async move {
+            let raw = signed.map_err(|e| farcooler_web::ssh::SignError::Sign(e.to_string()))?;
+            // string("ssh-ed25519") string(sig), as one SSH string (RFC 8709 §6).
+            let (alg, sig) = (b"ssh-ed25519", raw.as_bytes());
+            to_sign.extend_from_slice(&((8 + alg.len() + sig.len()) as u32).to_be_bytes());
+            to_sign.extend_from_slice(&(alg.len() as u32).to_be_bytes());
+            to_sign.extend_from_slice(alg);
+            to_sign.extend_from_slice(&(sig.len() as u32).to_be_bytes());
+            to_sign.extend_from_slice(sig);
+            Ok(to_sign)
+        }
+    }
+}
+
 pub fn key(text: &str) -> PrivateKey {
     PrivateKey::from_openssh(text).expect("test key")
 }

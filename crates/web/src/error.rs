@@ -28,6 +28,10 @@ pub enum WebError {
     /// The browser's key could not sign, or is not a key this client signs with.
     #[error("this browser's key could not sign: {0}")]
     Signer(String),
+    /// The passkey prompt was dismissed, or the browser would not show one
+    /// without a click just before it. Nothing is wrong with the key.
+    #[error("the passkey did not sign")]
+    PasskeyDeclined,
     /// The runner's daemon could not be started on a channel.
     #[error("the runner's daemon could not be started: {0}")]
     Exec(String),
@@ -57,6 +61,7 @@ impl WebError {
             WebError::KeyRejected => "key_rejected",
             WebError::Handshake(_) => "handshake_failed",
             WebError::Signer(_) => "bad_key",
+            WebError::PasskeyDeclined => "passkey_declined",
             WebError::Exec(_) => "exec_failed",
             WebError::Protocol(_) => "protocol",
             WebError::Capability(_) => "runner_too_old",

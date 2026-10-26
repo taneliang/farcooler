@@ -8,36 +8,24 @@
 //!   before any authentication (ov-764's acceptance line 3). Remove the pin in
 //!   `ssh::Pinned::check_server_key` and the first test fails.
 //! - A runner entry with no pin is never dialed at all.
-//! - The pinned runner connects with the browser's signer, lists its
+//! - The pinned runner connects (with an Ed25519 key standing in for the
+//!   passkey, which this server cannot verify; see
+//!   `a_passkey_signs_in_to_a_real_sshd.rs`), lists its
 //!   terminals, and a pane's input goes on the control channel while its
 //!   output arrives on a channel of its own (`crates/client/src/session.rs`'s
 //!   layout).
 
 mod support;
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use farcooler_ceremony::{Reach, RunnerEntry};
 use farcooler_web::enroll;
 use farcooler_web::error::WebError;
-use farcooler_web::ssh::{self, Ed25519Signer, RawSign};
+use farcooler_web::ssh;
 use farcooler_web::wire::Runner;
-use russh::keys::PrivateKey;
-use russh::keys::signature::Signer as _;
-use support::{BROWSER_KEY, HOST_KEY, NODE_KEY, OTHER_KEY, Seen, TERMINAL, fingerprint, key, line};
-
-/// The browser's signer, with the key in memory where a browser has WebCrypto.
-struct InMemory(PrivateKey);
-
-impl RawSign for InMemory {
-    fn sign(&mut self, data: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send>> {
-        let signed: Result<russh::keys::ssh_key::Signature, _> = self.0.try_sign(&data);
-        Box::pin(async move { signed.map(|s| s.as_bytes().to_vec()).map_err(|e| e.to_string()) })
-    }
-}
+use support::{BROWSER_KEY, Ed25519InMemory, HOST_KEY, NODE_KEY, OTHER_KEY, Seen, TERMINAL, fingerprint, key, line};
 
 /// A runner holding `host_key`, admitting only the browser's key, on one end
 /// of an in-memory pipe. The other end is what a Tailcat connection would be.
@@ -69,7 +57,7 @@ fn granted_runner(host_key: &str) -> enroll::Granted {
 }
 
 async fn dial(stream: tokio::io::DuplexStream, granted: &enroll::Granted, client_key: &str) -> Result<Runner, WebError> {
-    let mut signer = Ed25519Signer(InMemory(key(client_key)));
+    let mut signer = Ed25519InMemory(key(client_key));
     let conn = ssh::connect(stream, &granted.host_key, &granted.user, &line(client_key), &mut signer).await?;
     Runner::start(conn).await
 }
@@ -212,28 +200,4 @@ fn only_a_written_tunneled_runner_is_dialable_from_a_browser() {
         why,
         vec![("tunneled", "tc-token", ""), ("pending", "", "pending"), ("address", "", "address_only")]
     );
-}
-
-/// The signature a russh server verifies is `string("ssh-ed25519")
-/// string(sig)` after the signed data; anything but 64 raw bytes is refused
-/// rather than sent.
-#[test]
-fn a_raw_signature_is_framed_as_ssh_ed25519_or_refused() {
-    let framed = ssh::ed25519_signature_blob(b"data".to_vec(), &[7u8; 64]).unwrap();
-    let mut want = b"data".to_vec();
-    want.extend_from_slice(&83u32.to_be_bytes());
-    want.extend_from_slice(&11u32.to_be_bytes());
-    want.extend_from_slice(b"ssh-ed25519");
-    want.extend_from_slice(&64u32.to_be_bytes());
-    want.extend_from_slice(&[7u8; 64]);
-    assert_eq!(framed, want);
-    assert!(ssh::ed25519_signature_blob(b"data".to_vec(), &[7u8; 63]).is_err());
-}
-
-/// WebCrypto's 32 raw public-key bytes become the same line ssh-keygen prints.
-#[test]
-fn a_raw_public_key_becomes_its_openssh_line() {
-    let public = key(BROWSER_KEY).public_key().clone();
-    let raw = public.key_data().ed25519().unwrap().0;
-    assert_eq!(ssh::ed25519_public_line(&raw, "test-browser").unwrap(), line(BROWSER_KEY));
 }

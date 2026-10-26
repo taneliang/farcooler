@@ -15,37 +15,21 @@
 //! with, and the reply is the only statement anybody made about this runner.
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use russh::client::{self, Handle, Handler};
-use russh::keys::agent::AgentIdentity;
-use russh::keys::{HashAlg, PublicKey, ssh_key};
+use russh::keys::{HashAlg, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::WebError;
-
-/// Signs SSH's user-auth data with an Ed25519 key this crate never holds, and
-/// answers the raw 64-byte signature.
-///
-/// In a browser that is WebCrypto with a non-extractable key; in the tests a
-/// key in memory. The future must be `Send` because russh's signer is; a
-/// browser's is not, and `js.rs` says why it may be marked so there.
-pub trait RawSign {
-    fn sign(&mut self, data: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send>>;
-}
-
-/// A [`RawSign`] presented to russh as an `ssh-ed25519` signer.
-///
-/// The only key type slice 1 has: the fence accepts Ed25519 and nothing else
-/// (`crates/fence/src/lib.rs`, `render`), so a browser that enrolled anything
-/// else could never be written into a line.
-pub struct Ed25519Signer<S>(pub S);
 
 /// Why the signer failed. russh wants its own send error convertible into it.
 #[derive(Debug)]
 pub enum SignError {
     Send,
+    /// The person dismissed the passkey prompt, or the browser refused to
+    /// show one (Safari, without a click just before it).
+    Declined,
     Sign(String),
 }
 
@@ -53,54 +37,6 @@ impl From<russh::SendError> for SignError {
     fn from(_: russh::SendError) -> Self {
         SignError::Send
     }
-}
-
-impl<S: RawSign> russh::Signer for Ed25519Signer<S> {
-    type Error = SignError;
-
-    fn auth_sign(
-        &mut self,
-        key: &AgentIdentity,
-        _hash_alg: Option<HashAlg>,
-        to_sign: Vec<u8>,
-    ) -> impl Future<Output = Result<Vec<u8>, SignError>> + Send {
-        let ed25519 = matches!(key.public_key().algorithm(), ssh_key::Algorithm::Ed25519);
-        let signing = self.0.sign(to_sign.clone());
-        async move {
-            if !ed25519 {
-                return Err(SignError::Sign("only an Ed25519 key signs here".into()));
-            }
-            let raw = signing.await.map_err(SignError::Sign)?;
-            ed25519_signature_blob(to_sign, &raw).map_err(SignError::Sign)
-        }
-    }
-}
-
-/// What russh sends: the data it asked to have signed, followed by the
-/// signature as an SSH string holding `string("ssh-ed25519") string(sig)`
-/// (RFC 8709 §6).
-pub fn ed25519_signature_blob(mut to_sign: Vec<u8>, raw: &[u8]) -> Result<Vec<u8>, String> {
-    if raw.len() != 64 {
-        return Err(format!("an Ed25519 signature is 64 bytes, not {}", raw.len()));
-    }
-    const ALG: &[u8] = b"ssh-ed25519";
-    let inner = 4 + ALG.len() + 4 + raw.len();
-    to_sign.extend_from_slice(&(inner as u32).to_be_bytes());
-    to_sign.extend_from_slice(&(ALG.len() as u32).to_be_bytes());
-    to_sign.extend_from_slice(ALG);
-    to_sign.extend_from_slice(&(raw.len() as u32).to_be_bytes());
-    to_sign.extend_from_slice(raw);
-    Ok(to_sign)
-}
-
-/// An Ed25519 public key's 32 raw bytes as the OpenSSH line an enrollment
-/// offer carries (`Offer.key_a`).
-pub fn ed25519_public_line(raw: &[u8], comment: &str) -> Result<String, WebError> {
-    let bytes: [u8; 32] = raw
-        .try_into()
-        .map_err(|_| WebError::Signer(format!("an Ed25519 public key is 32 bytes, not {}", raw.len())))?;
-    let key = PublicKey::new(ssh_key::public::KeyData::Ed25519(ssh_key::public::Ed25519PublicKey(bytes)), comment);
-    key.to_openssh().map_err(|e| WebError::Signer(e.to_string()))
 }
 
 /// Checks the runner's host key against the pin, and remembers what it saw.
@@ -126,20 +62,22 @@ impl Handler for Pinned {
 pub type Connection = Handle<Pinned>;
 
 /// Run SSH over `stream`, refuse any host key but `pinned_host_key`, and
-/// authenticate as `user` with `public_key`, signed by `signer`.
+/// authenticate as `user` with `public_key`, signed by `signer`: in a browser
+/// the passkey's (`passkey::PasskeySigner`), and in the tests whatever key the
+/// in-process server can verify.
 ///
 /// The pin is checked before authentication is attempted, so a runner that is
 /// not the pinned one never sees a signature from this key.
-pub async fn connect<S, R>(
+pub async fn connect<S, G>(
     stream: S,
     pinned_host_key: &str,
     user: &str,
     public_key: &str,
-    signer: &mut Ed25519Signer<R>,
+    signer: &mut G,
 ) -> Result<Connection, WebError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    R: RawSign,
+    G: russh::Signer<Error = SignError>,
 {
     if pinned_host_key.is_empty() {
         return Err(WebError::HostKeyUnknown);
@@ -170,6 +108,7 @@ where
         .await
         .map_err(|e| match e {
             SignError::Send => WebError::Closed,
+            SignError::Declined => WebError::PasskeyDeclined,
             SignError::Sign(why) => WebError::Signer(why),
         })?;
     if !auth.success() {

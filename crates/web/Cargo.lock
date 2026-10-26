@@ -519,16 +519,19 @@ dependencies = [
 name = "farcooler-web"
 version = "0.1.0"
 dependencies = [
+ "base64ct",
  "bytes",
  "farcooler-ceremony",
  "farcooler-protocol",
  "futures",
  "getrandom 0.2.17",
  "js-sys",
+ "p256",
  "prost",
  "russh",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "uuid",

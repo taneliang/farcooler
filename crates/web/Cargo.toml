@@ -35,6 +35,10 @@ prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# The passkey's signature (src/passkey.rs): SHA-256 of the RP ID, and the
+# challenge's base64url. Both already in the tree through russh's ssh-key.
+sha2 = "0.11"
+base64ct = { version = "1.8", features = ["alloc"] }
 # `js` gives uuid's v7 ids (every request id) the page's RNG.
 uuid = { version = "1", features = ["v7", "js"] }
 
@@ -57,6 +61,10 @@ getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 # signer's encoding and the two-channel terminal (tests/). The same server on
 # a TCP port is examples/fake_runner.rs, for the browser check.
 tokio = { version = "1", features = ["rt", "macros", "time", "io-util", "sync", "net"] }
+# A passkey in software for the real-sshd test: a P-256 key signing what an
+# authenticator signs.
+p256 = { version = "0.14", features = ["ecdsa"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = "z"

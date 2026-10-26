@@ -17,7 +17,8 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::enroll;
 use crate::error::WebError;
-use crate::ssh::{self, Ed25519Signer, RawSign};
+use crate::passkey::{self, Assertion, Authenticate, PasskeySigner};
+use crate::ssh::{self, SignError};
 use crate::wire::{self, Pane, Runner, spawn};
 
 fn failure(word: &str, detail: &str) -> JsValue {
@@ -44,19 +45,38 @@ impl<F: Future> Future for AssertSend<F> {
     }
 }
 
-/// `sign(data: Uint8Array) → Promise<ArrayBuffer>`: WebCrypto's Ed25519 sign
-/// with the browser's non-extractable key.
-struct JsSigner(Function);
+/// `assert(challenge: Uint8Array) → Promise<{authenticatorData,
+/// clientDataJSON, signature}>`: `navigator.credentials.get` with this
+/// browser's passkey, each field an `ArrayBuffer` as the browser gave it. It
+/// rejects with an Error whose message is `declined` when the person dismissed
+/// the prompt or the browser wouldn't show one.
+struct JsAuthenticator(Function);
 
-impl RawSign for JsSigner {
-    fn sign(&mut self, data: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send>> {
-        let sign = self.0.clone();
+impl Authenticate for JsAuthenticator {
+    fn assert(&mut self, challenge: Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Assertion, SignError>> + Send>> {
+        let assert = self.0.clone();
         Box::pin(AssertSend(async move {
-            let promise = sign
-                .call1(&JsValue::NULL, &Uint8Array::from(&data[..]))
-                .map_err(|_| "the signer threw".to_string())?;
-            let signed = JsFuture::from(Promise::from(promise)).await.map_err(|_| "the signer refused".to_string())?;
-            Ok(Uint8Array::new(&signed).to_vec())
+            let promise = assert
+                .call1(&JsValue::NULL, &Uint8Array::from(&challenge[..]))
+                .map_err(|_| SignError::Sign("the passkey call threw".into()))?;
+            let answer = JsFuture::from(Promise::from(promise)).await.map_err(|e| {
+                match e.dyn_ref::<js_sys::Error>().map(|e| String::from(e.message())) {
+                    Some(word) if word == "declined" => SignError::Declined,
+                    _ => SignError::Sign("the passkey refused".into()),
+                }
+            })?;
+            let field = |name: &str| -> Result<Vec<u8>, SignError> {
+                let value = Reflect::get(&answer, &name.into()).map_err(|_| SignError::Sign(format!("no {name}")))?;
+                if !value.is_instance_of::<js_sys::ArrayBuffer>() && !value.is_instance_of::<Uint8Array>() {
+                    return Err(SignError::Sign(format!("{name} is not bytes")));
+                }
+                Ok(Uint8Array::new(&value).to_vec())
+            };
+            Ok(Assertion {
+                authenticator_data: field("authenticatorData")?,
+                client_data_json: field("clientDataJSON")?,
+                signature: field("signature")?,
+            })
         }))
     }
 }
@@ -140,10 +160,18 @@ pub fn offer_is_stale(shown_at_ms: f64) -> bool {
     enroll::offer_is_stale(shown_at_ms, js_sys::Date::now())
 }
 
-/// WebCrypto's raw Ed25519 public key as the OpenSSH line an offer carries.
-#[wasm_bindgen(js_name = publicKeyLine)]
-pub fn public_key_line(raw: &[u8], comment: &str) -> Result<String, JsValue> {
-    ssh::ed25519_public_line(raw, comment).map_err(web_failure)
+/// The RP ID this build makes and signs with its passkey for: its channel's
+/// app host, never the page's location.
+#[wasm_bindgen(js_name = rpId)]
+pub fn rp_id() -> String {
+    passkey::rp_id().to_string()
+}
+
+/// A new passkey's public key (`getPublicKey()`'s SPKI) as the OpenSSH line an
+/// offer carries.
+#[wasm_bindgen(js_name = passkeyKeyLine)]
+pub fn passkey_key_line(spki: &[u8], comment: &str) -> Result<String, JsValue> {
+    passkey::public_line(spki, comment).map_err(web_failure)
 }
 
 /// The `SHA256:` fingerprint the phone shows beside this browser's name.
@@ -161,11 +189,12 @@ pub struct WebRunner(std::rc::Rc<Runner>);
 pub struct WebPane(std::rc::Rc<std::cell::RefCell<Pane>>);
 
 /// SSH to a runner over a dialed tunnel connection, refusing any host key but
-/// `host_key`, and start its control session.
+/// `host_key`, signing in with the passkey `key_a` through `assert` (one
+/// touch), and start its control session.
 #[wasm_bindgen]
-pub async fn connect(conn: JsValue, host_key: String, user: String, key_a: String, sign: Function) -> Result<WebRunner, JsValue> {
+pub async fn connect(conn: JsValue, host_key: String, user: String, key_a: String, assert: Function) -> Result<WebRunner, JsValue> {
     let stream = bridge(conn)?;
-    let mut signer = Ed25519Signer(JsSigner(sign));
+    let mut signer = PasskeySigner(JsAuthenticator(assert));
     let connection = ssh::connect(stream, &host_key, &user, &key_a, &mut signer).await.map_err(web_failure)?;
     let runner = Runner::start(connection).await.map_err(web_failure)?;
     Ok(WebRunner(std::rc::Rc::new(runner)))
