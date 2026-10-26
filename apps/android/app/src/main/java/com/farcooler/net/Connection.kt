@@ -1,6 +1,10 @@
 package com.farcooler.net
 
 import com.farcooler.model.Capability
+import com.farcooler.model.AdmittedRunners
+import com.farcooler.model.InMemoryAdmittedRunners
+import com.farcooler.model.KeyRefusals
+import com.farcooler.model.reading
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.FleetRead
 import com.farcooler.model.given
@@ -108,6 +112,8 @@ class Connection(
     private val scope: CoroutineScope,
     /** Where this phone keeps what it has read, until the runner keeps it (ov-113). */
     boardReadsStore: com.farcooler.model.BoardReadsStore = com.farcooler.model.InMemoryBoardReads(),
+    /** Which runners have let this phone in, across launches (ov-818). `Settings` on a phone. */
+    private val admissions: AdmittedRunners = InMemoryAdmittedRunners(),
 ) : ChangesSource, com.farcooler.notify.VisibleTerminalSink {
 
     sealed interface Phase {
@@ -285,6 +291,18 @@ class Connection(
          */
         TUNNEL_UNSPECIFIED("io"),
 
+        /**
+         * A runner that let this phone in before refused its key, short of [KeyRefusals]' settling (ov-818). Possibly
+         * passing, so dialed again on the backoff. Never the core's word: [reading] makes it out of [KEY_REJECTED].
+         */
+        REFUSED_THIS_TIME,
+
+        /**
+         * A runner that let this phone in before has refused its key until it settled (ov-818): this phone's access
+         * was taken away. Checked again slowly, and its team's work leaves the screen.
+         */
+        ACCESS_REMOVED,
+
         OTHER;
 
         /**
@@ -314,10 +332,13 @@ class Connection(
                 // seconds, forever, for an answer that cannot change.
                 TUNNEL_NOT_IN_THIS_BUILD -> Retry.NEVER
 
-                DAEMON_MISSING -> Retry.AFTER_A_WHILE
+                // Slowly, not never: being added back has nobody to tap anything on this phone, and fast, a revoked
+                // key is a refused login on the runner every thirty seconds.
+                DAEMON_MISSING, ACCESS_REMOVED -> Retry.AFTER_A_WHILE
 
                 UNREACHABLE, STOPPED, OTHER,
                 TUNNEL_NO_ANSWER, TUNNEL_RENDEZVOUS, TUNNEL_UNSPECIFIED,
+                REFUSED_THIS_TIME,
                 -> Retry.ON_THE_BACKOFF
             }
 
@@ -774,6 +795,12 @@ class Connection(
     private val _lastTrouble = MutableStateFlow<Failure?>(null)
     val lastTrouble: StateFlow<Failure?> = _lastTrouble.asStateFlow()
 
+    /** How this runner has answered this phone's key: see [KeyRefusals]. */
+    private val keyRefusals = KeyRefusals(admissions.admitted(host.id))
+
+    /** The clock [keyRefusals] reads. A test moves its own. */
+    internal var nowMs: () -> Long = System::currentTimeMillis
+
     /**
      * Which connection attempt is current.
      *
@@ -930,7 +957,12 @@ class Connection(
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             steps.dialEnded(dialed, connected = false)
-            if (mine == attempt) _phase.value = classify(e)
+            if (mine != attempt) return
+            val next = readRefusals(classify(e))
+            // A runner that let this phone in is dialed again on its own, as a reconnect's is (ov-818): a cold
+            // start's refusal is where a removal is first met after a relaunch. Every other failure stays where a
+            // cold start has always left it.
+            if (next is Phase.Failed && next.kind in AFTER_ADMISSION) settle(next, 0) else _phase.value = next
             return
         }
         steps.dialEnded(dialed, connected = true)
@@ -939,6 +971,7 @@ class Connection(
         linkCameUp()
         _phase.value = Phase.Connected
         _lastTrouble.value = null
+        letIn()
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
         boardReads.ledger.linkCameUp()
@@ -1064,6 +1097,7 @@ class Connection(
         linkCameUp()
         _phase.value = Phase.Connected
         _lastTrouble.value = null
+        letIn()
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         _reconnects.value += 1
@@ -1085,8 +1119,10 @@ class Connection(
      * It is the difference between a screen that explains what to fix and one
      * that spins forever over something retrying will never fix.
      */
-    private fun retryOrGiveUp(error: Exception, attempt: Int) {
-        val next = classify(error)
+    private fun retryOrGiveUp(error: Exception, attempt: Int) = settle(readRefusals(classify(error)), attempt)
+
+    /** [retryOrGiveUp]'s decision, for a failure already read. */
+    private fun settle(next: Phase, attempt: Int) {
         if (next !is Phase.Failed) {
             // The host key is unknown again, which is a question for a human
             // and not something to retry past.
@@ -1095,6 +1131,13 @@ class Connection(
         }
         _lastTrouble.value = next.kind
 
+        // The no-access row stays up through the slow wait, rather than the "Reconnecting…" a slow
+        // [scheduleReconnect] would put there (ov-818).
+        if (next.kind == Failure.ACCESS_REMOVED) {
+            _phase.value = next
+            recheckSlowly()
+            return
+        }
         // Which of the three, per failure, is [Failure.retry] — a table a JVM
         // unit test reads, rather than a `when` in here, which nothing can
         // build. What is left here is only the mechanism for each.
@@ -1108,6 +1151,53 @@ class Connection(
 
             Retry.ON_THE_BACKOFF -> scheduleReconnect(attempt + 1, LinkRevival.backoffMs(attempt + 1))
         }
+    }
+
+    /**
+     * A failed dial's phase, read against this phone's history with the runner (ov-818): see [reading]. A runner
+     * that has taken this phone's access away takes its work off the screen with it.
+     */
+    private fun readRefusals(next: Phase): Phase {
+        if (next !is Phase.Failed) return next
+        val read = next.kind.reading(keyRefusals, nowMs())
+        if (read == Failure.ACCESS_REMOVED) forgetTeamWork()
+        return Phase.Failed(next.message, read)
+    }
+
+    /** A dial got in: the runner accepts this phone's key, remembered across launches. Written only when news. */
+    private fun letIn() {
+        if (keyRefusals.admitted && keyRefusals.refusals == 0) return
+        keyRefusals.letIn()
+        admissions.remember(host.id)
+    }
+
+    /** Everything read from this runner, off the screen (ov-818): its worktrees, what they changed, what needs you. */
+    private fun forgetTeamWork() {
+        _fleet.value = Fleet.EMPTY
+        _inbox.value = emptyMap()
+        _needsYou.value = RunnerNeedsYou(emptyList(), derived = false)
+    }
+
+    /**
+     * Dials a runner that took this phone's access away again in five minutes, from its no-access row, so being added
+     * back is noticed without a tap. Anything that dials sooner replaces it.
+     */
+    private fun recheckSlowly() {
+        reconnector?.cancel()
+        reconnector = scope.launch {
+            delay(SLOW_RETRY_MS)
+            val now = _phase.value
+            if (now is Phase.Failed && now.kind == Failure.ACCESS_REMOVED) reconnectNow()
+        }
+    }
+
+    /**
+     * Whether the runner refuses this phone's key after letting it in (ov-818): the no-access row, held through each
+     * slow recheck's dial, which is a [Phase.Reconnecting] that keeps the trouble.
+     */
+    val accessRemoved: StateFlow<Boolean> by lazy {
+        combine(_phase, _lastTrouble) { phase, trouble -> trouble == Failure.ACCESS_REMOVED && phase !is Phase.Connected }
+            .stateIn(scope + derived, SharingStarted.Eagerly, false)
     }
 
     /**
@@ -2261,6 +2351,9 @@ class Connection(
          * installing it later should be noticed without relaunching the app.
          */
         private const val SLOW_RETRY_MS = 300_000L
+
+        /** The failures from a runner that let this phone in before, which a cold start dials again (ov-818). */
+        private val AFTER_ADMISSION = setOf(Failure.REFUSED_THIS_TIME, Failure.ACCESS_REMOVED)
 
         /** What one `client.enroll` sends. See [CallArgs.enrollArgs]. */
         fun enrollArgs(publicKey: String, label: String, clientId: String, nodeKey: String): JsonObject =
