@@ -464,10 +464,11 @@ async fn everyone_on_the_runner_but_a_removed_member_reads_the_charter() {
     assert_eq!(call(&nobody, Request { target_resource_id: None, ..charter_request(r.workspace) }).await.err().as_deref(), Some("not-found:"));
 }
 
-/// Anyone moves a theme (ov-755): one ranking, the whole team's. The owner's
-/// phone, Bob's phone, and Bob's rep from its pane each write a theme's
-/// `ordinal`; a released phone is refused. The rep's write is filed under
-/// Bob (`stamp_rep`), and the same write sneaking a budget in is refused.
+/// Anyone moves a theme (ov-755): one ranking, the whole team's, by
+/// `board_theme.move`. The owner's phone, Bob's phone, and Bob's rep from its
+/// pane each move one; a released phone is refused. Each move is one call that
+/// leaves the places 1..N and one event naming who made it: the rep's as Bob
+/// (`stamp_rep`). The rep may not write a place through the general update.
 #[tokio::test]
 async fn the_owner_a_member_and_a_rep_move_a_theme() {
     let r = runner().await;
@@ -475,38 +476,52 @@ async fn the_owner_a_member_and_a_rep_move_a_theme() {
         .iter()
         .map(|n| r.svc.store.create_theme(r.workspace, &farcooler_store::plan::NewTheme { name: n.to_string(), outcome: String::new() }, &[], Actor::Manager).unwrap().id)
         .collect();
-    let ordinal = |i: usize| r.svc.store.board_theme(ids[i]).unwrap().ordinal;
-    assert_eq!((ordinal(0), ordinal(1), ordinal(2)), (1, 2, 3));
+    let places = || ids.iter().map(|id| r.svc.store.board_theme(*id).unwrap().ordinal).collect::<Vec<_>>();
+    let by = |i: usize| -> Vec<String> {
+        let events = r.svc.store.plan_events(farcooler_store::plan::Subject::Theme(ids[i]), 0).unwrap();
+        events.into_iter().filter(|e| e.kind == "rank").map(|e| e.actor).collect()
+    };
     let rep_pid = bobs_rep_pid(&r).await;
     let own = format!("agent:{}", r.agent.id);
-    let mv = |i: usize, to: i64, actor: &str| Request {
+    let mv = |i: usize, to: u32, actor: &str| Request {
+        method: "board_theme.move".into(),
+        payload: Some(request::Payload::BoardThemeMove(pb::BoardThemeMove { theme_id: id_bytes(ids[i]), to, actor: actor.into() })),
+        ..Default::default()
+    };
+    assert_eq!(places(), [1, 2, 3]);
+
+    let refused = call(&factory(&r.svc, RELEASED, Scope::Control), mv(2, 1, "user")).await;
+    assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "a removed member");
+    assert_eq!(places(), [1, 2, 3]);
+    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), mv(2, 1, "user")).await.expect("the owner");
+    assert_eq!(places(), [2, 3, 1], "Gamma first");
+    assert_eq!(by(2), ["user"]);
+    call(&factory(&r.svc, BOB, Scope::Control), mv(1, 1, "user")).await.expect("a member");
+    assert_eq!(places(), [3, 1, 2]);
+    assert_eq!(by(1), ["member:bob"], "filed under Bob");
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(rep_pid));
+    call(&in_rep, mv(0, 1, &own)).await.expect("a member's rep");
+    assert_eq!(places(), [1, 2, 3]);
+    assert_eq!(by(0), ["member:bob"], "the rep's move is its member's");
+    let req = mv(0, 2, &own);
+    let found = gate_rep(&r.svc, &peer(None, Scope::HostAdmin), Some(rep_pid), &req).expect("passes");
+    assert_eq!(wire_actor(&stamp_rep(&r.svc.store, found, req).unwrap()), Some("member:bob"), "stamped");
+    assert_eq!(call(&in_rep, mv(0, 9, &own)).await.err().as_deref(), Some("invalid-argument:place"), "off the ranking");
+
+    // A place through the general update, or a budget, is not a rep's.
+    let update = |ordinal, budget| Request {
         method: "board_theme.update".into(),
         payload: Some(request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate {
-            theme_id: id_bytes(ids[i]),
-            ordinal: Some(to),
-            actor: actor.into(),
+            theme_id: id_bytes(ids[2]),
+            ordinal,
+            budget_tokens: budget,
+            actor: own.clone(),
             ..Default::default()
         })),
         ..Default::default()
     };
-
-    let refused = call(&factory(&r.svc, RELEASED, Scope::Control), mv(0, 9, "user")).await;
-    assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "a removed member");
-    assert_eq!(ordinal(0), 1);
-    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), mv(0, 4, "user")).await.expect("the owner");
-    assert_eq!(ordinal(0), 4);
-    call(&factory(&r.svc, BOB, Scope::Control), mv(1, 5, "user")).await.expect("a member");
-    assert_eq!(ordinal(1), 5);
-    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(rep_pid));
-    call(&in_rep, mv(2, 6, &own)).await.expect("a member's rep");
-    assert_eq!(ordinal(2), 6);
-
-    let req = mv(2, 7, &own);
-    let found = gate_rep(&r.svc, &peer(None, Scope::HostAdmin), Some(rep_pid), &req).expect("passes");
-    assert_eq!(wire_actor(&stamp_rep(&r.svc.store, found, req).unwrap()), Some("member:bob"), "filed under Bob");
-    let mut greedy = mv(2, 8, &own);
-    let Some(request::Payload::BoardThemeUpdate(p)) = greedy.payload.as_mut() else { panic!() };
-    p.budget_tokens = Some(1_000_000);
-    assert_eq!(call(&in_rep, greedy).await.err().as_deref(), Some("resource-conflict:rep_messenger"), "no budget with it");
-    assert_eq!(ordinal(2), 6);
+    for req in [update(Some(1), None), update(None, Some(1_000_000))] {
+        assert_eq!(call(&in_rep, req).await.err().as_deref(), Some("resource-conflict:rep_messenger"));
+    }
+    assert_eq!(places(), [1, 2, 3]);
 }

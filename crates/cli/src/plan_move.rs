@@ -1,32 +1,18 @@
 //! `plan theme move <name> --to <n>` (ov-755): put a theme at place `n` in
-//! the plan's ranking, 1 being first.
-//!
-//! The ranking is the themes' `ordinal`, which is all this writes. A bare
-//! write of `n` would tie with whichever theme already holds it, and a tie
-//! falls to the older theme, so the move would not put it first. So the
-//! themes are renumbered 1, 2, 3 in their new order, and only the ones whose
-//! number changes are written. The ranking is one the whole team shares
-//! (ov-755): anyone, a rep for its person included, may move a theme.
+//! the plan's ranking, 1 being first. One call, `board_theme.move`: the
+//! runner renumbers the themes in one write and records who moved it, so two
+//! people moving at once never leave a half-numbered ranking, and a rep's
+//! move is filed under its member. The ranking is one the whole team shares:
+//! anyone, a rep for its person included, may move a theme.
 
 use super::*;
 
-/// The ordinal each theme in `ranked` (id and current ordinal, in the
-/// ranking's order) should hold once `moving` sits at place `to`: only those
-/// whose ordinal changes, in the order to write them.
-pub(super) fn renumbered(ranked: &[(bytes::Bytes, i64)], moving: &bytes::Bytes, to: usize) -> Vec<(bytes::Bytes, i64)> {
-    let mut order: Vec<&(bytes::Bytes, i64)> = ranked.iter().filter(|(id, _)| id != moving).collect();
-    if let Some(held) = ranked.iter().find(|(id, _)| id == moving) {
-        order.insert((to - 1).min(order.len()), held);
-    }
-    order
-        .iter()
-        .enumerate()
-        .filter(|(i, (_, ordinal))| *ordinal != *i as i64 + 1)
-        .map(|(i, (id, _))| (id.clone(), i as i64 + 1))
-        .collect()
+/// `board_theme.move` for `theme` to place `to`.
+pub(super) fn move_payload(theme: bytes::Bytes, to: u32, actor: &str) -> request::Payload {
+    request::Payload::BoardThemeMove(pb::BoardThemeMove { theme_id: theme, to, actor: actor.into() })
 }
 
-/// `plan theme move`: the themes renumbered with `name` at place `to`.
+/// `plan theme move`: the theme `name` at place `to`.
 pub(super) async fn move_theme<L: DispatchLink>(
     link: &mut L,
     board: &Board,
@@ -36,23 +22,22 @@ pub(super) async fn move_theme<L: DispatchLink>(
     actor: &str,
     json: bool,
 ) -> Result<String, Failed> {
+    if !link.capabilities().iter().any(|c| c == capability::BOARD_THEME_MOVE) {
+        return Err("This runner needs an update to move a theme.".into());
+    }
     let moving = find_theme(plan, name)?;
     let Some(theme) = moving.theme.as_ref() else { return Err(unreadable()) };
-    let ranked: Vec<(bytes::Bytes, i64)> =
-        plan.themes.iter().filter_map(|v| v.theme.as_ref()).map(|t| (t.id.clone(), t.ordinal)).collect();
-    if to == 0 || to as usize > ranked.len() {
-        return Err(format!("There are {} themes here, so --to takes 1 to {}.", ranked.len(), ranked.len()).into());
+    let of = plan.themes.len();
+    if to == 0 || to as usize > of {
+        return Err(format!("There are {of} themes here, so --to takes 1 to {of}.").into());
     }
-    for (id, ordinal) in renumbered(&ranked, &theme.id, to as usize) {
-        let p = request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate {
-            theme_id: id,
-            ordinal: Some(ordinal),
-            actor: actor.into(),
-            ..Default::default()
-        });
-        send(link, board, "board_theme.update", p).await?;
-    }
-    let said = format!("Moved theme {:?} to place {to} of {}.", theme.name, ranked.len());
-    Ok(if json { serde_json::json!({ "theme": theme.name, "place": to, "of": ranked.len() }).to_string() } else { said })
+    let mut r = with(req_for("board_theme.move", board.repository), move_payload(theme.id.clone(), to, actor));
+    r.required_capabilities.extend([capability::BOARD_PLAN, capability::BOARD_THEME_MOVE].map(String::from));
+    let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't record that. Try again."))?;
+    expect_value(answer.value)?;
+    Ok(if json {
+        serde_json::json!({ "theme": theme.name, "place": to, "of": of }).to_string()
+    } else {
+        format!("Moved theme {:?} to place {to} of {of}.", theme.name)
+    })
 }
-

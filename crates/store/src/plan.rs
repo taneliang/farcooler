@@ -752,6 +752,51 @@ impl Store {
         Ok(after)
     }
 
+    /// Put `theme` at place `to` of its workspace's ranking, 1 being first:
+    /// the themes still in the plan are renumbered 1, 2, 3 in the new order,
+    /// all in one transaction, and one `rank` event names `actor` when the
+    /// theme's place changed. A place off the ranking is `place`.
+    pub fn move_theme(&self, theme: Uuid, to: u32, actor: Actor) -> Result<BoardTheme> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let moving = theme_in(&tx, theme)?;
+        let mut order: Vec<(Uuid, i64)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, ordinal FROM board_themes WHERE workspace_id = ?1 AND state <> 'dropped'
+                      ORDER BY ordinal, created_at, id",
+                )
+                .map_err(map_err)?;
+            let rows = stmt
+                .query_map(params![uuid_blob(moving.workspace_id)], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?)))
+                .map_err(map_err)?;
+            rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
+        };
+        let was = order.iter().position(|(id, _)| *id == theme).ok_or_else(|| invalid("place"))?;
+        if to == 0 || to as usize > order.len() {
+            return Err(invalid("place"));
+        }
+        let held = order.remove(was);
+        order.insert(to as usize - 1, held);
+        for (i, (id, ordinal)) in order.iter().enumerate() {
+            let rank = i as i64 + 1;
+            if *ordinal != rank {
+                tx.execute(
+                    "UPDATE board_themes SET ordinal = ?2, resource_version = resource_version + 1 WHERE id = ?1",
+                    params![uuid_blob(*id), rank],
+                )
+                .map_err(map_err)?;
+            }
+        }
+        if was + 1 != to as usize {
+            let said = format!("Moved to {}.", ordinal_word(to));
+            event(&tx, Subject::Theme(theme), "rank", actor, &said, serde_json::json!({ "from": was + 1, "to": to }))?;
+        }
+        let after = theme_in(&tx, theme)?;
+        tx.commit().map_err(map_err)?;
+        Ok(after)
+    }
+
     /// Add cards to a theme and take others out. An added card in another
     /// theme moves; a removed card that isn't in this one is skipped.
     pub fn theme_cards(&self, theme: Uuid, add: &[Uuid], remove: &[Uuid], actor: Actor) -> Result<BoardTheme> {
@@ -1210,3 +1255,7 @@ fn record_agent(tx: &Connection, lane: Uuid, agent: &AgentRecord, actor: Actor) 
 #[cfg(test)]
 #[path = "plan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "plan_rank_tests.rs"]
+mod rank_tests;

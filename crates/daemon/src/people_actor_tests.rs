@@ -79,6 +79,7 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("board_theme.create", P::BoardThemeCreate(pb::BoardThemeCreate { actor: a(), ..Default::default() })),
         call("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { actor: a(), ..Default::default() })),
         call("board_theme.cards", P::BoardThemeCards(pb::BoardThemeCards { actor: a(), ..Default::default() })),
+        call("board_theme.move", P::BoardThemeMove(pb::BoardThemeMove { actor: a(), ..Default::default() })),
         call("lane.create", P::LaneCreate(pb::LaneCreate { actor: a(), ..Default::default() })),
         call("lane.update", P::LaneUpdate(pb::LaneUpdate { actor: a(), ..Default::default() })),
         call("lane.cards", P::LaneCards(pb::LaneCards { actor: a(), ..Default::default() })),

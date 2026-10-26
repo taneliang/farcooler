@@ -249,7 +249,7 @@ struct Runner {
 fn runner() -> Runner {
     Runner {
         capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS, capability::BOARD_COST,
-         capability::BOARD_RULING_ACTIONS]
+         capability::BOARD_RULING_ACTIONS, capability::BOARD_THEME_MOVE]
             .map(String::from)
             .to_vec(),
         sent: vec![],
@@ -288,7 +288,7 @@ impl DispatchLink for Runner {
                     order: p.lane_ids,
                     ..plan
                 }),
-                ("board_theme.create" | "board_theme.update" | "board_theme.cards", _) => {
+                ("board_theme.create" | "board_theme.update" | "board_theme.cards" | "board_theme.move", _) => {
                     result::Value::BoardThemeView(plan.themes[0].clone())
                 }
                 ("lane.create", Some(request::Payload::LaneCreate(p))) => {

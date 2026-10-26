@@ -731,6 +731,10 @@ pub mod capability {
     /// owner, a member or a member's rep. An app opens its read-only sheet
     /// only on a runner with it.
     pub const WORKSPACE_CHARTER: &str = "workspace_charter";
+    /// A theme moved to a place in the ranking in one write (ov-755):
+    /// `board_theme.move`. A CLI refuses `plan theme move` before sending,
+    /// saying the runner needs an update.
+    pub const BOARD_THEME_MOVE: &str = "board_theme_move";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -753,7 +757,7 @@ pub mod capability {
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
-            WORKSPACE_CHARTER,
+            WORKSPACE_CHARTER, BOARD_THEME_MOVE,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -979,6 +983,7 @@ pub mod method {
         BoardThemeCreate = "board_theme.create" => BOARD_PLAN,
         BoardThemeUpdate = "board_theme.update" => BOARD_PLAN,
         BoardThemeCards = "board_theme.cards" => BOARD_PLAN,
+        BoardThemeMove = "board_theme.move" => BOARD_THEME_MOVE,
         LaneCreate = "lane.create" => BOARD_PLAN,
         LaneUpdate = "lane.update" => BOARD_PLAN,
         LaneCards = "lane.cards" => BOARD_PLAN,

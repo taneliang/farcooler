@@ -34,7 +34,7 @@ fn a_rep_makes_the_plan_changes_its_gate_reaches() {
         req("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { next: Some("Receipts".into()), ..Default::default() })),
         req("board_theme.cards", P::BoardThemeCards(pb::BoardThemeCards::default())),
         // Its place in the ranking: the plan's order is the whole team's (ov-755).
-        req("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { ordinal: Some(2), ..Default::default() })),
+        req("board_theme.move", P::BoardThemeMove(pb::BoardThemeMove { to: 2, ..Default::default() })),
         lane_update(|p| p.title = Some("PDF invoices".into())),
         lane_update(|p| p.reason = Some("Invoices first".into())),
         lane_update(|p| p.state = Some(LaneState::Queued as i32)),
@@ -81,6 +81,8 @@ refused! {
     a_rep_sets_no_lane_budget: lane_update(|p| p.budget_tokens = Some(5_000_000));
     a_rep_sets_no_theme_budget: req("board_theme.update", request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate { budget_tokens: Some(1), ..Default::default() }));
     a_rep_sets_no_theme_budget_while_moving_it: req("board_theme.update", request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate { ordinal: Some(1), budget_tokens: Some(1), ..Default::default() }));
+    a_rep_moves_no_theme_through_the_general_update: req("board_theme.update", request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate { ordinal: Some(1), ..Default::default() }));
+    a_rep_sends_no_bare_theme_move: Request { method: "board_theme.move".into(), ..Default::default() };
     a_rep_empties_no_ranking: req("plan.set", request::Payload::PlanSet(pb::PlanSet::default()));
     a_rep_sends_no_bare_plan_write: Request { method: "plan.set".into(), ..Default::default() };
     a_rep_sends_no_mismatched_payload: req("plan.set", request::Payload::RulingKeepAll(pb::RulingKeepAll::default()));

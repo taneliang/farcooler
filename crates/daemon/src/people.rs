@@ -219,6 +219,7 @@ macro_rules! actor_field {
             P::BoardThemeCreate(p) => &$($m)* p.actor,
             P::BoardThemeUpdate(p) => &$($m)* p.actor,
             P::BoardThemeCards(p) => &$($m)* p.actor,
+            P::BoardThemeMove(p) => &$($m)* p.actor,
             P::LaneCreate(p) => &$($m)* p.actor,
             P::LaneUpdate(p) => &$($m)* p.actor,
             P::LaneCards(p) => &$($m)* p.actor,
@@ -787,6 +788,7 @@ pub fn rep_may(req: &Request) -> bool {
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
         | M::BoardThemeCards
+        | M::BoardThemeMove
         | M::LaneUpdate
         | M::LaneCards
         | M::RulingAdd
@@ -840,7 +842,23 @@ fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) ->
     match (method, req.payload.as_ref()) {
         (M::PlanSet, Some(P::PlanSet(p))) => !p.lane_ids.is_empty(),
         (M::BoardThemeCreate, Some(P::BoardThemeCreate(_))) => true,
-        (M::BoardThemeUpdate, Some(P::BoardThemeUpdate(p))) => p.budget_tokens.is_none(),
+        (M::BoardThemeUpdate, Some(P::BoardThemeUpdate(p))) => {
+            let farcooler_protocol::v1::BoardThemeUpdate {
+                theme_id: _,
+                name: _,
+                outcome: _,
+                story: _,
+                next: _,
+                owner_ask: _,
+                state: _,
+                ordinal,
+                actor: _,
+                budget_tokens,
+            } = p;
+            // Its place is `board_theme.move`'s, which records who moved it.
+            ordinal.is_none() && budget_tokens.is_none()
+        }
+        (M::BoardThemeMove, Some(P::BoardThemeMove(_))) => true,
         (M::BoardThemeCards, Some(P::BoardThemeCards(_))) => true,
         (M::LaneUpdate, Some(P::LaneUpdate(p))) => {
             let farcooler_protocol::v1::LaneUpdate {
@@ -994,6 +1012,10 @@ fn refuse_rep_plan_reach(store: &Store, rep: Uuid, req: &Request) -> Result<()> 
         Some(P::BoardThemeCreate(p)) => named(&p.workspace_id),
         Some(P::RulingAdd(p)) => named(&p.workspace_id),
         Some(P::BoardThemeUpdate(p)) => match named(&p.theme_id) {
+            Some(theme) => found(store.board_theme(theme).map(|t| t.workspace_id))?,
+            None => None,
+        },
+        Some(P::BoardThemeMove(p)) => match named(&p.theme_id) {
             Some(theme) => found(store.board_theme(theme).map(|t| t.workspace_id))?,
             None => None,
         },

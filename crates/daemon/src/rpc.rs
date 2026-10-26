@@ -506,6 +506,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
         | Method::BoardThemeCards
+        | Method::BoardThemeMove
         | Method::LaneCreate
         | Method::LaneUpdate
         | Method::LaneCards
@@ -1968,7 +1969,7 @@ impl Rpc {
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"
-            | "board_theme.cards" | "lane.create" | "lane.update" | "lane.cards" | "lane.agent"
+            | "board_theme.move" | "board_theme.cards" | "lane.create" | "lane.update" | "lane.cards" | "lane.agent"
             | "ruling.add" | "ruling.set" | "ruling.keep_all" | "train.start" | "train.set" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }

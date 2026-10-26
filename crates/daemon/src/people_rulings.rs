@@ -205,6 +205,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
         | M::BoardThemeCards
+        | M::BoardThemeMove
         | M::LaneCreate
         | M::LaneUpdate
         | M::LaneCards

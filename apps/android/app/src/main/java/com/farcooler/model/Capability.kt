@@ -77,5 +77,6 @@ enum class Capability(val wire: String) {
     REP_CONNECTORS("rep_connectors"),
     CLAUDE_SIGN_IN("claude_sign_in"),
     MEMBER_OWN_LOGINS("member_own_logins"),
-    WORKSPACE_CHARTER("workspace_charter");
+    WORKSPACE_CHARTER("workspace_charter"),
+    BOARD_THEME_MOVE("board_theme_move");
 }

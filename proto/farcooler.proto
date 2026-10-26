@@ -231,6 +231,9 @@ message Request {
     // through `plan.get`'s `Plan.rulings`, so only the writes are here.
     RulingAdd ruling_add = 180;
     RulingSet ruling_set = 181;
+    // `board_theme.move` (ov-755), behind `board_theme_move`: a theme to a
+    // place in the ranking. Takes 182 from the rulings' block.
+    BoardThemeMove board_theme_move = 182;
     // Trains (ov-309), the plan layer's batches of lanes landing together,
     // behind `board_trains`. Experimental with the layer: 190-199 are theirs,
     // the rest held by `reserved` below. Read through `plan.get`'s
@@ -301,7 +304,7 @@ message Request {
   reserved "set_pane_mode", "agent_set_mode", "agent_set_model", "agent_set_config",
       "agent_edit_queued", "agent_cancel_queued", "agent_steer_queued", "adapter";
   // The rest of rulings' block, kept for them (review 1005a L1).
-  reserved 182 to 189;
+  reserved 183 to 189;
   // The rest of trains' block.
   reserved 192 to 199;
   // The rest of the owner's marks' block (ov-333).
@@ -4903,6 +4906,15 @@ message BoardThemeUpdate {
   string actor = 9;
   // A token budget (ov-307), or 0 to take it away. Needs `board_cost`.
   optional uint64 budget_tokens = 10;
+}
+
+// `board_theme.move`, at `control`: put a theme at place `to` of the
+// workspace's ranking, 1 being first. The themes are renumbered 1, 2, 3 in one
+// write, with one event naming `actor`. Answers the moved theme.
+message BoardThemeMove {
+  bytes theme_id = 1;
+  uint32 to = 2;
+  string actor = 3;
 }
 
 // `board_theme.cards`, at `control`.

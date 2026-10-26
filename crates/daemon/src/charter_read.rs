@@ -6,6 +6,7 @@
 //! the asker's scope, since its text carries no path.
 
 use std::io::Read as _;
+use std::os::unix::fs::OpenOptionsExt as _;
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, result};
@@ -24,16 +25,22 @@ pub fn handle(svc: &Service, req: &pb::Request) -> Result<result::Value> {
     let id = req.target_resource_id.as_deref().and_then(wire::parse_id).ok_or(DomainError::NotFound)?;
     svc.store.get_workspace(id)?;
     let path = workspace_home::charter_path(svc.root_dir(), id);
-    let file = match std::fs::File::open(&path) {
+    let none = || Ok(result::Value::WorkspaceCharter(pb::WorkspaceCharter { text: String::new(), exists: false }));
+    // The orchestrator's pane writes this file, so it may be a link to any
+    // file the runner can read, or a pipe that never answers: neither is a
+    // charter. Opened without following or waiting, and only a regular file
+    // is read (as `survey_read::read_named` does).
+    let file = match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path) {
         Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(result::Value::WorkspaceCharter(pb::WorkspaceCharter { text: String::new(), exists: false }));
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ELOOP) => return none(),
         Err(e) => {
             tracing::warn!(workspace = %id, error = %e, "could not open the charter");
             return Err(DomainError::OperationFailed);
         }
     };
+    if !file.metadata().is_ok_and(|m| m.is_file()) {
+        return none();
+    }
     let mut bytes = Vec::new();
     file.take(MAX_BYTES).read_to_end(&mut bytes).map_err(|e| {
         tracing::warn!(workspace = %id, error = %e, "could not read the charter");

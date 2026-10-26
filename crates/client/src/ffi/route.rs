@@ -196,6 +196,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
         | Method::BoardThemeCards
+        | Method::BoardThemeMove
         | Method::LaneCreate
         | Method::LaneUpdate
         | Method::LaneCards

@@ -108,6 +108,14 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             watcher.announce_plan_changed(theme.workspace_id, actor);
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
         }
+        "board_theme.move" => {
+            let Some(request::Payload::BoardThemeMove(p)) = req.payload else { return Err(payload_missing()) };
+            let theme = required_id(&p.theme_id)?;
+            let actor = actor_from_wire(&p.actor)?;
+            let theme = svc.store.move_theme(theme, p.to, actor)?;
+            watcher.announce_plan_changed(theme.workspace_id, actor);
+            Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
+        }
         "board_theme.cards" => {
             let Some(request::Payload::BoardThemeCards(p)) = req.payload else { return Err(payload_missing()) };
             let theme = required_id(&p.theme_id)?;

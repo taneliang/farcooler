@@ -468,6 +468,7 @@ fn said_here(what: &str) -> Option<&'static str> {
     Some(match what {
         "name" => "A lane's name is one word with no spaces, and a theme's is a short phrase. Neither can be empty.",
         "name_taken" => "That name is already in use on this board.",
+        "place" => "That place isn't in the ranking.",
         "other_board" => "Those cards aren't all on this board.",
         "lane_state" => "A lane can't make that move. It goes queued, building, review, landing, landed, with fixing between review and either landing or landed. It can be dropped until it lands.",
         "lane_closed" => "That lane has landed or been dropped, so it takes no more changes.",
