@@ -11,14 +11,20 @@
 ///    tunnel, SSHes in with that host key pinned, lists its terminals and
 ///    attaches the one picked.
 ///
+/// The SSH key is a passkey (ov-767). Safari shows a passkey prompt only
+/// from a click, so every prompt here follows a button: Make Passkey before
+/// the code, Connect before each sign-in, and Use Passkey if the browser
+/// refused to prompt because that click was too long ago (the dial and the
+/// SSH handshake come between). Each connection costs one touch.
+///
 /// Every value from the network goes into the page through `textContent`,
 /// never markup: the CSP's Trusted Types (`require-trusted-types-for
 /// 'script'`) refuse an HTML string sink outright.
 
-import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, publicKeyLine, type WebRunner } from 'fc-web'
+import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, passkeyKeyLine, rpId, type WebRunner } from 'fc-web'
 
 import { connectFailure, joinDetail, joinTitle, replyRefusal, unreachable } from './copy'
-import { type Device, forgetDevice, type Granted, loadDevice, publicKeyBytes, saveDevice, signer } from './device'
+import { assertWith, canUsePasskeys, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { drawCode, scan } from './qr'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat } from './tunnel'
@@ -76,8 +82,46 @@ function deviceName(): string {
 
 interface Session {
   device: Device
+  /// The passkey's OpenSSH line, once there is a passkey.
   keyLine: string
+  email: string
   tailcat: Tailcat
+}
+
+// MARK: The passkey
+
+/// Ask for this browser's passkey, from a button.
+function passkeyScreen(session: Session, migrated: boolean, notice = ''): void {
+  const why = migrated ? 'Far Cooler now signs in to your runners with a passkey instead of a key kept in this site’s storage, so this browser needs adding again. ' : ''
+  status(
+    'Make a passkey for this browser',
+    notice ||
+      `${why}Your passkey stays in this device’s password manager or security key, and Far Cooler never sees it. You’ll touch it once each time this browser connects to a runner.`,
+    {
+      label: 'Make Passkey',
+      run: () =>
+        void makePasskey(rpId(), session.email).then(
+          async passkey => {
+            session.device.passkey = passkey
+            await saveDevice(session.device)
+            session.keyLine = keyLineOf(passkey)
+            void enroll(session)
+          },
+          e =>
+            passkeyScreen(
+              session,
+              migrated,
+              (e as Error).message === 'declined'
+                ? 'Far Cooler didn’t get a passkey. Select Make Passkey and follow your browser’s prompt.'
+                : 'This browser couldn’t make a passkey Far Cooler can use. Use a current version of Chrome, Safari, Edge or Firefox.',
+            ),
+        ),
+    },
+  )
+}
+
+function keyLineOf(passkey: Passkey): string {
+  return passkeyKeyLine(passkey.spki, 'farcooler-web')
 }
 
 /// The timer that retires the code on screen when it expires.
@@ -107,7 +151,7 @@ async function enroll(session: Session, notice = ''): Promise<void> {
   }
 
   drawCode($<HTMLCanvasElement>('offer-code'), device.offer)
-  $('offer-fingerprint').textContent = `This browser’s key: ${fingerprint(session.keyLine) ?? ''}`
+  $('offer-fingerprint').textContent = `This browser’s passkey: ${fingerprint(session.keyLine) ?? ''}`
   const note = $('enroll-note')
   note.textContent = notice
   note.hidden = notice === ''
@@ -220,23 +264,55 @@ async function work(session: Session): Promise<void> {
     const first = runners[0]
     status(
       'No runner here can be opened from a browser yet',
-      first ? unreachable(first.why, first.label) : 'Your phone granted no runners.',
+      first ? unreachable(first.why, first.label, true) : 'Your phone granted no runners.',
       { label: 'Add Again', run: () => void addAgain(session) },
     )
     return
   }
 
+  // A button first: the passkey prompt this leads to needs a click (Safari).
+  status(`Connect to ${target.label}`, 'You’ll touch your passkey to sign in.', { label: 'Connect', run: () => void connectTo(session, target) })
+}
+
+/// The passkey's signature over the SSH login's data. Straight away while the
+/// Connect click still counts as a gesture; otherwise from a button, with the
+/// call made inside its click, which is what Safari requires.
+function signIn(session: Session, label: string): (challenge: Uint8Array) => Promise<Signed> {
+  const passkey = session.device.passkey as Passkey
+  const rp = rpId()
+  return async challenge => {
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation
+    if (!activation || activation.isActive) {
+      try {
+        return await assertWith(passkey, rp, challenge)
+      } catch (e) {
+        if ((e as Error).message !== 'declined') throw e
+      }
+    }
+    return await new Promise<Signed>((resolve, reject) =>
+      status(`Sign in to ${label}`, 'Select Use Passkey, then touch your passkey.', {
+        label: 'Use Passkey',
+        run: () => {
+          status(`Connecting to ${label}…`)
+          assertWith(passkey, rp, challenge).then(resolve, reject)
+        },
+      }),
+    )
+  }
+}
+
+async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
   let runner: WebRunner
   try {
     const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
-    runner = await connect(conn, target.host_key, target.user, session.keyLine, signer(session.device))
+    runner = await connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label))
   } catch (e) {
     const word = (e as Error).message
     const action =
       word === 'host_key_changed' || word === 'host_key_unknown' || word === 'key_rejected'
         ? { label: 'Add Again', run: () => void addAgain(session) }
-        : { label: 'Try Again', run: () => void work(session) }
+        : { label: 'Connect', run: () => void connectTo(session, target) }
     status(`Can’t connect to ${target.label}`, connectFailure(word, target.label), action)
     return
   }
@@ -246,8 +322,8 @@ async function work(session: Session): Promise<void> {
     terminals = JSON.parse(await runner.terminals())
   } catch (e) {
     status(`Can’t list ${target.label}’s terminals`, connectFailure((e as Error).message, target.label), {
-      label: 'Try Again',
-      run: () => void work(session),
+      label: 'Connect',
+      run: () => void connectTo(session, target),
     })
     return
   }
@@ -343,21 +419,22 @@ async function boot(): Promise<void> {
     return
   }
 
-  let device: Device
-  try {
-    device = await loadDevice(account, () => tailcat.mintNodeKey())
-  } catch (e) {
-    status(
-      'This browser can’t hold a Far Cooler key',
-      (e as Error).message === 'no_ed25519'
-        ? 'Far Cooler needs a browser that can make Ed25519 keys. Use a current version of Chrome, Safari or Firefox.'
-        : 'Far Cooler keeps its key in this site’s storage. Allow site data for this site, then reload.',
-    )
+  if (!canUsePasskeys()) {
+    status('This browser can’t use passkeys', 'Far Cooler signs in to your runners with a passkey. Use a current version of Chrome, Safari, Edge or Firefox.')
     return
   }
-  const keyLine = publicKeyLine(await publicKeyBytes(device), 'farcooler-web')
-  const session: Session = { device, keyLine, tailcat }
-  if (device.runners?.length) void work(session)
+  let kept: { device: Device; migrated: boolean }
+  try {
+    kept = await loadDevice(account, () => tailcat.mintNodeKey())
+  } catch {
+    status('This browser can’t keep Far Cooler’s settings', 'Far Cooler keeps this browser’s runners in this site’s storage. Allow site data for this site, then reload.')
+    return
+  }
+  const { device, migrated } = kept
+  const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
+  const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, tailcat }
+  if (!device.passkey) passkeyScreen(session, migrated)
+  else if (device.runners?.length) void work(session)
   else void enroll(session)
 }
 

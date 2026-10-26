@@ -13,14 +13,19 @@ declare module 'fc-web' {
   export function acceptReply(reply: string, offer: string, alreadyTaken: boolean, shownAtMs: number): string
   export function offerIsStale(shownAtMs: number): boolean
   export function freshnessMs(): number
-  export function publicKeyLine(raw: Uint8Array, comment: string): string
+  /// This build's app host: the RP ID its passkey is made and used for.
+  export function rpId(): string
+  /// A passkey's SPKI (`getPublicKey()`) as an `sk-ecdsa` OpenSSH line.
+  export function passkeyKeyLine(spki: Uint8Array, comment: string): string
   export function fingerprint(publicKey: string): string | undefined
   export function connect(
     conn: import('./tunnel').TunnelConn,
     hostKey: string,
     user: string,
     keyA: string,
-    sign: (data: Uint8Array) => Promise<ArrayBuffer>,
+    /// `navigator.credentials.get` over the login's data; rejects with
+    /// `declined` when the person or the browser said no.
+    assert: (challenge: Uint8Array) => Promise<import('./device').Signed>,
   ): Promise<WebRunner>
   export function build(): string
   export class WebRunner {

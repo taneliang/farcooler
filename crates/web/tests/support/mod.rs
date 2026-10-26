@@ -1,5 +1,5 @@
-//! A fake runner for crates/web's tests and for the browser check
-//! (`examples/fake_runner.rs`): a russh server holding a host key, behind
+//! A fake runner for crates/web's tests, whose frames the browser check's
+//! `examples/fake_daemon.rs` shares: a russh server holding a host key, behind
 //! which a fake daemon speaks enough of `farcoolerd --stdio` for one pane —
 //! hello, `terminal.list`, `terminal.attach` (a replay, then an echo of every
 //! write), `terminal.write` and `terminal.resize`.
@@ -161,7 +161,7 @@ impl server::Handler for FakeRunner {
     }
 }
 
-fn envelope(body: wire_envelope::Body) -> Vec<u8> {
+pub fn envelope(body: wire_envelope::Body) -> Vec<u8> {
     let env = WireEnvelope {
         protocol_version: farcooler_protocol::PROTOCOL_VERSION,
         message_id: Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
@@ -170,14 +170,14 @@ fn envelope(body: wire_envelope::Body) -> Vec<u8> {
     framing::encode(&env).unwrap().to_vec()
 }
 
-fn answer(req: &Request, value: result::Value) -> Vec<u8> {
+pub fn answer(req: &Request, value: result::Value) -> Vec<u8> {
     envelope(wire_envelope::Body::Response(Response {
         request_id: req.request_id.clone(),
         outcome: Some(response::Outcome::Result(farcooler_protocol::v1::Result { value: Some(value) })),
     }))
 }
 
-fn output(bytes: &[u8]) -> Vec<u8> {
+pub fn output(bytes: &[u8]) -> Vec<u8> {
     envelope(wire_envelope::Body::Event(Event {
         payload: Some(event::Payload::TerminalFrame(TerminalFrame {
             terminal_id: Bytes::copy_from_slice(TERMINAL.as_bytes()),

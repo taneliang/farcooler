@@ -1,14 +1,15 @@
 /// What this browser keeps about itself, in IndexedDB, for ONE account.
 ///
-/// - **The SSH key** is a WebCrypto Ed25519 key made non-extractable: no script
-///   can export the private half, this page included. That is all it means.
-///   The key's bytes still sit in the browser profile's IndexedDB files on
-///   disk, not in an OS keychain, and any script running on this origin can
-///   ask it to sign. Think of it as an unencrypted `~/.ssh` key in the profile;
-///   slice 4's passkey is what moves it into hardware.
+/// - **The SSH key is a passkey** (ov-767, owner R-88): an ES256 credential the
+///   authenticator holds (Touch ID, Windows Hello, a phone or a security key),
+///   made for this build's app host as its RP ID. Its private half never
+///   reaches this page or this profile's files. What is kept here is only how
+///   to name it to the authenticator (its credential id) and its public key.
+///   Every sign-in asks for it, at one touch.
 /// - **The account** that enrolled it. A different account signed in on this
-///   browser never sees or uses the key or the runners: they are deleted, and
-///   Sign Out deletes them too (ov-764 review).
+///   browser never sees or uses the passkey or the runners: they are deleted,
+///   and Sign Out deletes them too (ov-764 review). The passkey itself stays
+///   in the authenticator, where only its owner can delete it.
 /// - **The node key** is 32 raw bytes, because WireGuard runs in Go and needs
 ///   them (plan-763 §0 point 8). It grants a route to a runner, never a login.
 /// - **The open offer** survives a reload, so a phone that already scanned the
@@ -25,10 +26,18 @@ export interface Granted {
   why: string
 }
 
+export interface Passkey {
+  /// The credential id, to name it in `allowCredentials`.
+  id: Uint8Array
+  /// Its public key as `getPublicKey()` gave it: a P-256 SPKI.
+  spki: Uint8Array
+}
+
 export interface Device {
   /// The relay's `user.id` this device belongs to.
   account: string
-  ssh: CryptoKeyPair
+  /// Absent until the person makes one, which needs a click (Safari).
+  passkey?: Passkey
   nodePriv: string
   nodePub: string
   /// The offer on screen, as its JSON, until a reply is taken or it expires.
@@ -71,32 +80,89 @@ export const forgetDevice = () => transact('readwrite', store => store.delete(KE
 /// This browser's device for `account`, made the first time it is needed.
 ///
 /// A device kept for any other account, or for none, is deleted first: its key
-/// is enrolled on someone else's runners.
-///
-/// Throws `no_ed25519` when WebCrypto here has no Ed25519, which the fence
-/// requires (the only key type it writes).
-export async function loadDevice(account: string, mintNodeKey: () => { priv: string; pub: string }): Promise<Device> {
-  const kept = await readDevice()
-  if (kept && kept.account === account) return kept
+/// is enrolled on someone else's runners. So is one from before passkeys
+/// (slice 1's WebCrypto Ed25519 key): `migrated` says so, and the page asks
+/// for a passkey and a new enrollment. Its old line on a runner admits nobody
+/// once the key is deleted, and can be removed from Far Cooler's device list.
+export async function loadDevice(account: string, mintNodeKey: () => { priv: string; pub: string }): Promise<{ device: Device; migrated: boolean }> {
+  const kept = (await readDevice()) as (Device & { ssh?: unknown }) | undefined
+  if (kept && kept.account === account && !kept.ssh) return { device: kept, migrated: false }
   if (kept) await forgetDevice()
-  let ssh: CryptoKeyPair
-  try {
-    ssh = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as CryptoKeyPair
-  } catch {
-    throw new Error('no_ed25519')
-  }
   const node = mintNodeKey()
-  const device: Device = { account, ssh, nodePriv: node.priv, nodePub: node.pub }
+  const device: Device = { account, nodePriv: node.priv, nodePub: node.pub }
   await saveDevice(device)
-  return device
+  return { device, migrated: kept?.account === account && !!kept.ssh }
 }
 
-/// The SSH public key's 32 raw bytes.
-export async function publicKeyBytes(device: Device): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.exportKey('raw', device.ssh.publicKey))
+/// Whether this browser can make and use a passkey at all.
+export function canUsePasskeys(): boolean {
+  return typeof PublicKeyCredential === 'function' && typeof navigator.credentials?.create === 'function'
 }
 
-/// Sign with the non-extractable key; crates/web frames the 64 bytes for SSH.
-export function signer(device: Device): (data: Uint8Array) => Promise<ArrayBuffer> {
-  return data => crypto.subtle.sign({ name: 'Ed25519' }, device.ssh.privateKey, data as Uint8Array<ArrayBuffer>)
+/// WebAuthn's "the person said no, or the browser wouldn't ask": a dismissed
+/// prompt, a timeout, or Safari without a click just before the call.
+function declined(e: unknown): boolean {
+  return e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError')
+}
+
+const bytes = (n: number) => crypto.getRandomValues(new Uint8Array(n))
+
+/// Make this browser's passkey, for `rpId` (crates/web's `rpId()`, this
+/// build's app host, never `location`). Call it from a click: Safari shows no
+/// prompt otherwise. Throws `declined`, or `no_passkey` when the browser can't
+/// make an ES256 passkey or won't say its public key.
+///
+/// - `residentKey: 'required'`, so a later slice can find it without the
+///   stored id (plan-763 slice 16).
+/// - `userVerification: 'discouraged'`: one touch, no PIN or face (R-89). sshd
+///   checks presence, which every assertion carries, not verification.
+/// - ES256 only: the one algorithm OpenSSH's sk keys have.
+export async function makePasskey(rpId: string, email: string): Promise<Passkey> {
+  let credential: PublicKeyCredential
+  try {
+    credential = (await navigator.credentials.create({
+      publicKey: {
+        rp: { id: rpId, name: 'Far Cooler' },
+        user: { id: bytes(16), name: email || 'Far Cooler', displayName: email || 'Far Cooler' },
+        challenge: bytes(32),
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'discouraged' },
+        attestation: 'none',
+        timeout: 120_000,
+      },
+    })) as PublicKeyCredential
+  } catch (e) {
+    throw new Error(declined(e) ? 'declined' : 'no_passkey')
+  }
+  const response = credential?.response as AuthenticatorAttestationResponse | undefined
+  const spki = response?.getPublicKey?.()
+  if (!spki || response?.getPublicKeyAlgorithm?.() !== -7) throw new Error('no_passkey')
+  return { id: new Uint8Array(credential.rawId), spki: new Uint8Array(spki) }
+}
+
+export interface Signed {
+  authenticatorData: ArrayBuffer
+  clientDataJSON: ArrayBuffer
+  signature: ArrayBuffer
+}
+
+/// Ask the passkey to sign `challenge` (the SSH login's data; crates/web
+/// encodes the answer as `webauthn-sk-ecdsa-sha2-nistp256@openssh.com`). One
+/// touch. Throws `declined` when the person or the browser said no.
+export async function assertWith(passkey: Passkey, rpId: string, challenge: Uint8Array): Promise<Signed> {
+  try {
+    const credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge as Uint8Array<ArrayBuffer>,
+        rpId,
+        allowCredentials: [{ type: 'public-key', id: passkey.id as Uint8Array<ArrayBuffer> }],
+        userVerification: 'discouraged',
+        timeout: 120_000,
+      },
+    })) as PublicKeyCredential
+    const response = credential.response as AuthenticatorAssertionResponse
+    return { authenticatorData: response.authenticatorData, clientDataJSON: response.clientDataJSON, signature: response.signature }
+  } catch (e) {
+    throw new Error(declined(e) ? 'declined' : 'failed')
+  }
 }

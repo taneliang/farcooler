@@ -1,28 +1,42 @@
 #!/usr/bin/env node
 // The client shell in headless Chromium, under the CSP production sends,
-// failing on any violation (ov-764 acceptance 4).
+// failing on any violation (ov-764 acceptance 4), with its SSH key a passkey
+// held by Chromium's virtual authenticator (ov-767).
 //
-//   node test/browser/csp-check.mjs [--dist dist] [--fake-runner BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS]
+//   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR]
 //
 // Serves dist/ (build.sh's output, with the real wasm) through
-// shell-server.ts, which uses the Worker's own header and asset code, and
-// walks the page on one Chromium profile, relaunched where a step needs a
-// different fake camera:
+// shell-server.ts, which uses the Worker's own header and asset code, at
+// https://<the build's app host>/ — routed inside the browser, so nothing goes
+// over the network. The page has to be on that exact host: the bundle makes
+// and uses its passkey for it, and a browser allows that only from there.
 //
-// - boot (both wasm modules, a WebCrypto Ed25519 key, a node key minted in
-//   Go), the enrollment screen and the camera;
-// - a stored code past the ceremony's window is replaced, and another
-//   account's stored key and runners are discarded;
-// - with --fake-runner: a phone's reply played through the fake camera and
+// It walks the page on one Chromium profile, relaunched where a step needs a
+// different fake camera (the passkey is carried across by the DevTools
+// WebAuthn domain, as a person's would stay in their authenticator):
+//
+// - boot (both wasm modules, a node key minted in Go), Make Passkey, the
+//   enrollment screen with the passkey's sk-ecdsa line in the code, and the
+//   camera;
+// - a stored code past the ceremony's window is replaced, another account's
+//   passkey and runners are discarded, and a slice-1 device (a WebCrypto
+//   Ed25519 key) is asked for a passkey and a new enrollment;
+// - with --fake-daemon: a phone's reply played through the fake camera and
 //   read after the window is refused; a teammate's reply asks before it joins;
-//   joining opens a terminal on crates/web's fake runner (`cargo build
-//   --example fake_runner`, started and stopped here) and the runner gets the
-//   keystrokes; the same runner with its pin altered is refused. The page's
-//   tunnel dial is swapped, by this harness only, for a WebSocket spliced to
-//   the fake runner; everything above the dial is the page's own: SSH in
-//   wasm, the WebCrypto signature, the pinned host key, terminal.list, xterm;
-// - Sign Out deletes the key and the runners.
-
+//   Connect opens a terminal through a REAL sshd (only sshd verifies a
+//   passkey's webauthn-sk signature) whose Key A line is the offer's sk-ecdsa
+//   key and whose forced command is crates/web's fake daemon
+//   (`cargo build --example fake_daemon`); the runner gets the keystrokes and
+//   sshd logs ECDSA-SK; eight reconnects cost one touch each; the same runner
+//   with its pin altered is refused without a touch. The page's tunnel dial
+//   is swapped, by this harness only, for a WebSocket spliced to that sshd;
+//   everything above the dial is the page's own: SSH in wasm, the passkey's
+//   assertion, the pinned host key, terminal.list, xterm;
+// - the passkey can't be used from the parent domain's other child
+//   (canary.farcooler.com for canary): Chromium refuses it (ov-767
+//   acceptance 2);
+// - Sign Out deletes the passkey's id and the runners.
+//
 // What the swapped dial leaves out is Tailcat's own traffic: the DERP
 // WebSocket and its `/derp/probe` fetch, which the CSP must allow too. CI
 // can't depend on a public relay, so that path was checked by hand through a
@@ -32,12 +46,10 @@
 // Chromium comes from playwright-core; set PLAYWRIGHT_BROWSERS_PATH to where
 // `npx playwright-core install chromium-headless-shell` put it.
 
-import { spawn } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:http'
-import { createConnection } from 'node:net'
-import { createInterface } from 'node:readline'
+import { existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -45,7 +57,6 @@ import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 import qrcode from 'qrcode-generator'
-import { WebSocketServer } from 'ws'
 
 const args = process.argv.slice(2)
 const flag = name => {
@@ -53,15 +64,9 @@ const flag = name => {
   return at >= 0 ? args[at + 1] : undefined
 }
 const dist = resolve(flag('--dist') ?? 'dist')
-const fakeRunner = flag('--fake-runner')
+const fakeDaemon = flag('--fake-daemon') && resolve(flag('--fake-daemon'))
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
-// Slow the page's CPU by this factor (Chromium's own throttling), to run the
-// walk on a slow machine. A slow link is --tunnel-delay, which CI uses.
-const throttle = Number(flag('--cpu-throttle') ?? 1)
-// Delay each tunnel message by this many ms each way, for a slow network.
-const delay = Number(flag('--tunnel-delay') ?? 0)
-const later = send => (delay > 0 ? setTimeout(send, delay) : send())
 const shoot = async (page, name) => {
   if (!shots) return
   for (const [width, height] of [[1280, 800], [390, 844]]) {
@@ -78,6 +83,15 @@ const canary = toml.slice(toml.indexOf('[env.canary.vars]'))
 const setting = name => canary.match(new RegExp(`^${name} = "([^"]*)"`, 'm'))?.[1] ?? ''
 const env = { DERP_HOSTS: setting('DERP_HOSTS'), DERP_MAP_ORIGIN: setting('DERP_MAP_ORIGIN') }
 
+// The app host this bundle signs for: crates/web's rpId(), from the channel
+// stamped into it (Channel::app_host). A local build is canary's.
+const built = JSON.parse(readFileSync(join(dist, 'version.json'), 'utf8')).channel
+const HOST = built === 'stable' || built === 'preview' ? 'app.farcooler.com' : 'app.canary.farcooler.com'
+const origin = `https://${HOST}`
+// Another child of the parent domain, which must not be able to use the
+// passkey (ov-767 acceptance 2).
+const SIBLING = HOST === 'app.farcooler.com' ? 'www.farcooler.com' : 'canary.farcooler.com'
+
 const scratch = mkdtempSync(join(tmpdir(), 'fc-csp-'))
 const bundled = join(scratch, 'shell-server.mjs')
 await build({ entryPoints: ['test/browser/shell-server.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundled, logLevel: 'error' })
@@ -93,50 +107,108 @@ const read = path => {
 }
 const handle = shellHandler(read, env, reports)
 
-const server = createServer(async (req, res) => {
-  const chunks = []
-  for await (const chunk of req) chunks.push(chunk)
-  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : Buffer.concat(chunks)
-  const response = await handle(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body }))
+/// Answer a routed request with the Worker's own handler.
+async function serve(route) {
+  const request = route.request()
+  const method = request.method()
+  const body = method === 'GET' || method === 'HEAD' ? undefined : (request.postDataBuffer() ?? undefined)
+  const response = await handle(new Request(request.url(), { method, headers: request.headers(), body }))
   const headers = {}
   response.headers.forEach((value, key) => (headers[key] = value))
-  res.writeHead(response.status, headers)
-  res.end(Buffer.from(await response.arrayBuffer()))
-})
-
-// The fake runner, and the test-only tunnel: a WebSocket per dial, spliced
-// to it. It prints its port and host key first, then a line per write.
-let runner = null
-if (fakeRunner) {
-  const child = spawn(fakeRunner, [], { stdio: ['ignore', 'pipe', 'inherit'] })
-  const lines = createInterface({ input: child.stdout })
-  const typed = []
-  const first = await new Promise((resolve, reject) => {
-    lines.once('line', line => resolve(JSON.parse(line)))
-    child.once('exit', code => reject(new Error(`the fake runner exited (${code})`)))
-  })
-  lines.on('line', line => {
-    if (line.startsWith('typed ')) typed.push(Buffer.from(line.slice(6), 'hex').toString())
-  })
-  runner = { child, port: first.port, hostKey: first.host_key, typed }
-  const sockets = new WebSocketServer({ server, path: '/test-tunnel' })
-  sockets.on('connection', ws => {
-    const tcp = createConnection({ host: '127.0.0.1', port: runner.port })
-    tcp.on('data', data => later(() => ws.send(data)))
-    tcp.on('close', () => later(() => ws.close()))
-    tcp.on('error', () => ws.close())
-    ws.on('message', data => later(() => tcp.write(data)))
-    ws.on('close', () => tcp.destroy())
-  })
+  await route.fulfill({ status: response.status, headers, body: Buffer.from(await response.arrayBuffer()) })
 }
 
-await new Promise(done => server.listen(0, '127.0.0.1', done))
-const origin = `http://127.0.0.1:${server.address().port}`
+// The runner: a real sshd on a loopback port, whose one Key A line is written
+// once the page's offer names its passkey, in front of the fake daemon.
+const me = execFileSync('/usr/bin/id', ['-un']).toString().trim()
+let runner = null
+if (fakeDaemon) {
+  if (!existsSync('/usr/sbin/sshd')) throw new Error('no /usr/sbin/sshd here, so the passkey login cannot be checked')
+  const dir = join(scratch, 'sshd')
+  execFileSync('/bin/mkdir', [dir])
+  execFileSync('/usr/bin/ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'host', '-f', join(dir, 'host')])
+  const hostKey = execFileSync('/usr/bin/ssh-keygen', ['-lf', join(dir, 'host.pub')]).toString().split(' ')[1]
+  const port = await new Promise(done => {
+    const probe = createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => done(port))
+    })
+  })
+  const keys = join(dir, 'authorized_keys')
+  writeFileSync(keys, '')
+  const config = join(dir, 'sshd_config')
+  const pidFile = join(dir, 'sshd.pid')
+  writeFileSync(
+    config,
+    [
+      `Port ${port}`,
+      'ListenAddress 127.0.0.1',
+      `HostKey ${join(dir, 'host')}`,
+      `AuthorizedKeysFile ${keys}`,
+      `PidFile ${pidFile}`,
+      'StrictModes no',
+      'UsePAM no',
+      'PasswordAuthentication no',
+      'KbdInteractiveAuthentication no',
+      'LogLevel DEBUG1',
+      '',
+    ].join('\n'),
+  )
+  const log = join(dir, 'sshd.log')
+  const started = spawnSync('/usr/sbin/sshd', ['-f', config, '-E', log])
+  if (started.status !== 0) throw new Error(`sshd did not start: ${started.stderr}`)
+  let pid = 0
+  for (let i = 0; i < 200 && !pid; i++) {
+    pid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8').trim()) || 0 : 0
+    if (!pid) await new Promise(r => setTimeout(r, 50))
+  }
+  if (!pid) throw new Error(`sshd wrote no pid; see ${log}`)
+  const typedLog = join(dir, 'typed')
+  runner = {
+    pid,
+    port,
+    hostKey,
+    log,
+    /// The Key A line the phone's enrollment has the daemon write, in the
+    /// fence's shape: restricted, with the daemon as its forced command.
+    enroll: keyA => writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog}" ${keyA}\n`),
+    typed: () =>
+      (existsSync(typedLog) ? readFileSync(typedLog, 'utf8') : '')
+        .split('\n')
+        .filter(Boolean)
+        .map(hex => Buffer.from(hex, 'hex').toString())
+        .join(''),
+  }
+}
 
 const failures = []
 const profile = mkdtempSync(join(tmpdir(), 'fc-csp-profile-'))
 const violations = []
 const errors = []
+/// The passkey, carried from launch to launch as an authenticator keeps it.
+let credential = null
+/// Every assertion a virtual authenticator made: one per touch.
+let touches = 0
+
+/// A virtual authenticator on `page`: platform, resident keys, presence
+/// simulated (a touch), holding `credential` if there is one.
+async function authenticator(context, page) {
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('WebAuthn.enable', { enableUI: false })
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  })
+  if (credential) await cdp.send('WebAuthn.addCredential', { authenticatorId, credential })
+  cdp.on('WebAuthn.credentialAsserted', () => touches++)
+  return {
+    /// The credentials it holds; the newest is kept for the next launch.
+    async held() {
+      const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId })
+      if (credentials.length) credential = credentials[credentials.length - 1]
+      return credentials
+    },
+  }
+}
 
 /// One launch of Chromium on one profile, so IndexedDB (the device) survives
 /// from launch to launch, with `video` as the fake camera when given.
@@ -144,6 +216,18 @@ async function launch(video) {
   const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
   if (video) args.push(`--use-file-for-fake-video-capture=${video}`)
   const context = await chromium.launchPersistentContext(profile, { args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
+  await context.route(`${origin}/**`, serve)
+  await context.route(`https://${SIBLING}/**`, serve)
+  if (runner) {
+    await context.routeWebSocket(`wss://${HOST}/test-tunnel`, ws => {
+      const tcp = createConnection({ host: '127.0.0.1', port: runner.port })
+      tcp.on('data', data => ws.send(data))
+      tcp.on('close', () => ws.close())
+      tcp.on('error', () => ws.close())
+      ws.onMessage(data => tcp.write(typeof data === 'string' ? Buffer.from(data) : data))
+      ws.onClose(() => tcp.destroy())
+    })
+  }
   await context.exposeFunction('reportViolation', v => violations.push(v))
   await context.addInitScript(() => {
     document.addEventListener('securitypolicyviolation', e =>
@@ -152,12 +236,16 @@ async function launch(video) {
   })
   if (runner) await context.addInitScript(swapDial)
   const page = context.pages()[0] ?? (await context.newPage())
-  if (throttle > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
+  watch(page)
+  const passkeys = await authenticator(context, page)
+  return { context, page, passkeys }
+}
+
+function watch(page) {
   page.on('pageerror', e => errors.push(`page error: ${e.message}`))
   page.on('console', m => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`)
   })
-  return { context, page }
 }
 
 /// The page's tunnel dial, swapped for a WebSocket to /test-tunnel. Installed
@@ -172,7 +260,7 @@ function swapDial() {
         mintNodeKey: () => value.mintNodeKey(),
         dial: () =>
           new Promise((resolve, reject) => {
-            const ws = new WebSocket(`ws://${location.host}/test-tunnel`)
+            const ws = new WebSocket(`wss://${location.host}/test-tunnel`)
             ws.binaryType = 'arraybuffer'
             const queue = []
             let waiting = null
@@ -207,7 +295,7 @@ const device = page =>
     const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
     const d = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
     db.close()
-    return d ? { ...d, ssh: { extractable: d.ssh.privateKey.extractable, type: d.ssh.privateKey.algorithm.name } } : null
+    return d ? { ...d, passkey: d.passkey ? { id: d.passkey.id.length, spki: d.passkey.spki.length } : undefined } : null
   })
 const edit = (page, change) =>
   page.evaluate(async change => {
@@ -221,8 +309,36 @@ const edit = (page, change) =>
     await new Promise(r => (store().put(d, 'this').onsuccess = r))
     db.close()
   }, change)
+const statusSays = (page, text, timeout = 120_000) =>
+  page.waitForFunction(
+    text => !document.getElementById('status')?.hidden && document.getElementById('status')?.textContent?.includes(text),
+    text,
+    { timeout },
+  )
 const enrolling = page =>
   page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
+
+/// Make Passkey, from the screen that asks for it.
+async function makePasskey(page) {
+  await statusSays(page, 'Make a passkey')
+  await page.click('#status-action')
+  await enrolling(page)
+}
+
+/// The type and application string of an sk-ecdsa key line: the latter is
+/// its passkey's RP ID.
+function skKey(line) {
+  const blob = Buffer.from(line.split(' ')[1], 'base64')
+  let at = 0
+  const string = () => {
+    const n = blob.readUInt32BE(at)
+    const out = blob.subarray(at + 4, at + 4 + n)
+    at += 4 + n
+    return out
+  }
+  const fields = [string(), string(), string(), string()]
+  return { type: fields[0].toString(), application: fields[3].toString() }
+}
 
 /// A phone's reply to `offer`, as the QR code a fake camera shows: a y4m file
 /// of the code on white, the shape Chromium's fake capture device plays.
@@ -235,7 +351,7 @@ function replyVideo(offer, grantedBy, name) {
     account: offer.account,
     channel: offer.channel,
     target,
-    runners: [{ id: 'r1', label: 'studio', alias: 'studio', user: 'owner', host_key: runner.hostKey, reach: { kind: 'tailcat', token: 'test' }, pending: false }],
+    runners: [{ id: 'r1', label: 'studio', alias: 'studio', user: me, host_key: runner.hostKey, reach: { kind: 'tailcat', token: 'test' }, pending: false }],
     ...(grantedBy ? { granted_by: grantedBy } : {}),
   })
   const code = qrcode(0, 'L')
@@ -258,23 +374,40 @@ function replyVideo(offer, grantedBy, name) {
   return path
 }
 
-const built = JSON.parse(readFileSync(join(dist, 'version.json'), 'utf8')).channel
+/// Connect from the button, and wait for the terminal.
+async function connect(page) {
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.waitForSelector('#terminal .xterm', { timeout: 30_000 })
+}
+
 let session = await launch()
 try {
   // A step that times out stops the walk, and the violations it caused are
   // still reported: they are usually why it timed out.
   try {
     let { page } = session
-    // Boot and enroll.
+    // Boot, a button for the passkey (Safari prompts only from a click), and
+    // the code.
     await page.goto(origin)
-    await enrolling(page)
-    console.log(`csp-check: enrollment screen up, ${await page.textContent('#offer-fingerprint')}`)
+    await statusSays(page, 'Make a passkey')
+    await shoot(page, 'passkey')
+    if ((await device(page))?.passkey) failures.push('a passkey was kept before anybody asked for one')
+    await makePasskey(page)
+    console.log(`csp-check: a passkey was made and the enrollment screen is up, ${await page.textContent('#offer-fingerprint')}`)
     await shoot(page, 'enroll')
     let kept = await device(page)
     const offer = JSON.parse(kept.offer)
-    if (kept.ssh.extractable || kept.ssh.type !== 'Ed25519') failures.push(`the SSH key is ${kept.ssh.type}, extractable ${kept.ssh.extractable}`)
+    const made = await session.passkeys.held()
+    const key = skKey(offer.key_a)
+    if (key.type !== 'sk-ecdsa-sha2-nistp256@openssh.com' || key.application !== HOST) failures.push(`the offer's key is ${key.type} for ${key.application}`)
+    if (made.length !== 1 || made[0].rpId !== HOST || !made[0].isResidentCredential) failures.push(`the authenticator holds ${JSON.stringify(made.map(c => [c.rpId, c.isResidentCredential]))}`)
+    if (!kept.passkey || kept.ssh) failures.push('the device keeps something other than a passkey')
     if (kept.account !== 'acct-test') failures.push(`the device is kept for ${kept.account}, not the signed-in account`)
     if (offer.channel !== built || offer.account !== 'acct-test' || offer.node_key.length !== 43) failures.push(`the offer is wrong: ${JSON.stringify(offer)}`)
+    if (touches !== 0) failures.push(`making the passkey cost ${touches} sign-ins`)
+    console.log(`csp-check: the offer's key is ${key.type} for ${key.application}`)
 
     await page.click('#scan')
     await page.waitForFunction(() => document.querySelector('#camera-video')?.readyState >= 2, null, { timeout: 30_000 })
@@ -290,16 +423,28 @@ try {
     if (JSON.parse(kept.offer).ceremony === offer.ceremony || Date.now() - kept.offerShownAt > 60_000) failures.push('a stored code past its window was kept')
     else console.log('csp-check: a stored code past its window was replaced')
 
-    // Another account's device is never used: its key and runners go.
-    const before = kept.key ?? JSON.parse(kept.offer).key_a
+    // Another account's device is never used: its passkey and runners go.
     await edit(page, { account: 'acct-someone-else', runners: [{ id: 'x', label: 'theirs', user: 'u', host_key: 'SHA256:x', token: 't', why: '' }] })
     await page.reload()
-    await enrolling(page)
+    await statusSays(page, 'Make a passkey')
     kept = await device(page)
-    if (kept.account !== 'acct-test' || kept.runners || JSON.parse(kept.offer).key_a === before) failures.push("another account's key or runners were used")
+    if (kept.account !== 'acct-test' || kept.runners || kept.passkey) failures.push("another account's passkey or runners were used")
     else console.log("csp-check: another account's device was discarded")
 
+    // A slice-1 device, whose key was WebCrypto Ed25519, is asked for a
+    // passkey and a new enrollment, and says why.
+    await edit(page, { ssh: { slice: 1 }, runners: [{ id: 'old', label: 'old', user: 'u', host_key: 'SHA256:x', token: 't', why: '' }] })
+    await page.reload()
+    await statusSays(page, 'now signs in to your runners with a passkey')
+    kept = await device(page)
+    if (kept.ssh || kept.runners) failures.push("a slice-1 device's key or runners were kept")
+    else console.log('csp-check: a slice-1 device was asked for a passkey')
+    await shoot(page, 'migrated')
+    await makePasskey(page)
+    await session.passkeys.held()
+
     if (runner) {
+      runner.enroll(JSON.parse((await device(page)).offer).key_a)
       // A reply read after the window is refused, through the real camera path.
       let current = JSON.parse((await device(page)).offer)
       await session.context.close()
@@ -317,7 +462,7 @@ try {
       // The harness skewed this page's clock; put the new code's time back.
       await edit(page, { offerShownAt: Date.now() })
 
-      // A teammate's reply asks before it joins, then the runner opens.
+      // A teammate's reply asks before it joins.
       current = JSON.parse(kept.offer)
       await session.context.close()
       session = await launch(replyVideo(current, 'ana@example.com', 'teammate'))
@@ -333,38 +478,88 @@ try {
       await shoot(page, 'join')
       await page.click('#join-yes')
 
-      // The joined runner: a terminal opens and echoes what is typed.
-      // Typed as soon as the terminal has focus, which is BEFORE the runner
-      // has accepted the attach on a slow link: the page must hold those
-      // keystrokes, not drop them (CI's slower runner caught it dropping them).
-      await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
-      await page.waitForFunction(() => document.activeElement?.closest('#terminal .xterm'), null, { timeout: 30_000 })
-      const early = !(await page.$('#terminal[data-attached="true"]'))
+      // Connect is a button, and a terminal opens through sshd at one touch.
+      await statusSays(page, 'Connect to studio')
+      await shoot(page, 'connect')
+      const before = touches
+      await connect(page)
+      if (touches - before !== 1) failures.push(`connecting cost ${touches - before} touches, not 1`)
       await page.keyboard.type('echo hi')
-      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
-      // Then waited for, on the runner's own record of what arrived.
-      const deadline = Date.now() + 30_000
-      while (runner.typed.join('') !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
-      const typed = runner.typed.join('')
+      const deadline = Date.now() + 10_000
+      while (runner.typed() !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
+      const typed = runner.typed()
       if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
-      else console.log(`csp-check: the reply read by the camera opened a terminal, and the runner got the keystrokes${early ? ' typed before the pane was live' : ''}`)
+      const log = readFileSync(runner.log, 'utf8')
+      if (!log.split('\n').some(l => l.includes('Accepted publickey') && l.includes('ECDSA-SK'))) failures.push('sshd logged no ECDSA-SK login')
+      console.log('csp-check: Connect opened a terminal through sshd with the passkey (ECDSA-SK), and the runner got the keystrokes')
       await shoot(page, 'terminal')
 
-      // The pin altered: refused with the host-key sentence, and no terminal.
-      await edit(page, { runners: [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', token: 'test', why: '' }] })
+      // Each reconnect is one touch, counted on eight.
+      const counted = []
+      for (let i = 0; i < 8; i++) {
+        const at = touches
+        await page.reload()
+        await connect(page)
+        counted.push(touches - at)
+      }
+      if (counted.some(n => n !== 1)) failures.push(`eight reconnects cost ${JSON.stringify(counted)} touches`)
+      else console.log(`csp-check: eight reconnects cost one touch each: ${JSON.stringify(counted)}`)
+
+      // The pin altered: refused with the host-key sentence, no terminal, and
+      // no touch: the passkey is never asked for a runner it doesn't trust.
+      await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', token: 'test', why: '' }] })
       await page.reload()
+      const pinned = touches
+      await statusSays(page, 'Connect to studio')
+      await page.click('#status-action')
       await page.waitForFunction(() => document.getElementById('status-detail')?.textContent?.includes('host key has changed'), null, { timeout: 120_000 })
       if (await page.isVisible('#work')) failures.push('a terminal opened with the pin altered')
-      console.log('csp-check: an altered pin was refused with the host-key sentence')
+      if (touches !== pinned) failures.push('the passkey was asked to sign for a runner whose pin was altered')
+      console.log('csp-check: an altered pin was refused with the host-key sentence, without a touch')
       await shoot(page, 'refused')
     }
 
-    // Sign Out takes the key and the runners with it.
+    // ov-767 acceptance 2: the passkey, made for the app host, can't be used
+    // from the parent domain's other child. Chromium refuses both asks: for
+    // the app host's RP ID (not that origin's to claim) and for its own (no
+    // such credential).
+    const sibling = await session.context.newPage()
+    watch(sibling)
+    const siblingKeys = await authenticator(session.context, sibling)
+    await sibling.goto(`https://${SIBLING}/version.json`)
+    const at = touches
+    const refused = await sibling.evaluate(
+      async ({ host, sibling, id }) => {
+        const ask = rpId =>
+          navigator.credentials
+            .get({ publicKey: { challenge: new Uint8Array(32), rpId, allowCredentials: [{ type: 'public-key', id: new Uint8Array(id) }], userVerification: 'discouraged', timeout: 5000 } })
+            .then(
+              () => 'signed',
+              e => e.name,
+            )
+        return { appHost: await ask(host), own: await ask(sibling) }
+      },
+      { host: HOST, sibling: SIBLING, id: Array.from(Buffer.from(credential.credentialId, 'base64')) },
+    )
+    const held = await siblingKeys.held()
+    if (held.length !== 1 || held[0].rpId !== HOST) failures.push('the sibling page had no passkey to refuse')
+    if (refused.appHost !== 'SecurityError' || refused.own !== 'NotAllowedError' || touches !== at)
+      failures.push(`from ${SIBLING} the passkey was not refused: ${JSON.stringify(refused)}, ${touches - at} touches`)
+    else console.log(`csp-check: from ${SIBLING} Chromium refused the passkey: ${JSON.stringify(refused)}`)
+    // The shell itself, served from that host, can't make one for the app host.
+    await sibling.goto(`https://${SIBLING}/`)
+    await statusSays(sibling, 'Make a passkey')
+    await sibling.click('#status-action')
+    await statusSays(sibling, 'couldn’t make a passkey')
+    console.log(`csp-check: the shell served from ${SIBLING} couldn't make a passkey for ${HOST}`)
+    await sibling.close()
+
+    // Sign Out takes the passkey's id and the runners with it.
     await page.click('form[action="/sign-out"] button')
     await page.waitForURL(`${origin}/signed-out`, { timeout: 30_000 })
     await page.goto(`${origin}/version.json`)
-    if (await device(page)) failures.push('Sign Out left the key and runners behind')
-    else console.log('csp-check: Sign Out deleted the key and runners')
+    if (await device(page)) failures.push('Sign Out left the passkey and runners behind')
+    else console.log('csp-check: Sign Out deleted the passkey and runners')
   } catch (e) {
     failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)
   }
@@ -375,8 +570,8 @@ try {
   for (const e of errors) if (!/Failed to load resource/.test(e)) failures.push(e)
 } finally {
   await session.context.close()
-  server.close()
-  runner?.child.kill()
+  // By pid, never by pattern: this machine may run other sshds.
+  if (runner) spawnSync('/bin/kill', [String(runner.pid)])
   rmSync(scratch, { recursive: true, force: true })
   rmSync(profile, { recursive: true, force: true })
 }

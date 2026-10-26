@@ -59,7 +59,8 @@ getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 [dev-dependencies]
 # The tests run natively against an in-process russh server: the pin, the
 # signer's encoding and the two-channel terminal (tests/). The same server on
-# a TCP port is examples/fake_runner.rs, for the browser check.
+# a TCP port was slice 1's fake runner; the browser check now puts a real
+# sshd in front of examples/fake_daemon.rs, since only sshd verifies a passkey.
 tokio = { version = "1", features = ["rt", "macros", "time", "io-util", "sync", "net"] }
 # A passkey in software for the real-sshd test: a P-256 key signing what an
 # authenticator signs.

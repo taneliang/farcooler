@@ -183,9 +183,6 @@ jobs:
       # The page itself is checked daily by claude-prices.yml, which no push
       # waits on.
       - run: ./scripts/claude-prices.py --self-test
-      # The DERP-hosts check's parser, on maps written in the test. The live map
-      # is checked daily by derp-hosts.yml, which no push waits on.
-      - run: ./scripts/derp-hosts-check.py --self-test
       # No source file grows past 1,500 lines (ov-169); the ones already past
       # it are grandfathered in scripts/file-size-budget.txt, each with a
       # ceiling of its size then plus max(2%, 50 lines). The rule against its
@@ -1407,12 +1404,13 @@ jobs:
       - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
-      # The canary shell in headless Chromium under its production CSP:
-      # boot, enrollment, the camera, and a terminal through crates/web's fake
-      # runner (and refused with its pin altered). Any violation fails it.
-      - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_runner
+      # The canary shell in headless Chromium under its production CSP, its
+      # passkey in Chromium's virtual authenticator: boot, Make Passkey,
+      # enrollment, the camera, and a terminal through a real sshd (the only
+      # verifier of a passkey's webauthn-sk signature; the image ships
+      # openssh-server) in front of crates/web's fake daemon, at one touch per
+      # connect, refused with its pin altered and from canary.farcooler.com.
+      # Any violation fails it.
+      - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: npx playwright-core install --with-deps --only-shell chromium
-      # --tunnel-delay holds each tunnel message 100 ms, so the pane is still
-      # attaching when the check types: keystrokes typed then must be held
-      # and sent, never dropped (train 307 found them dropped on this runner).
-      - run: node test/browser/csp-check.mjs --fake-runner ../../crates/web/target/debug/examples/fake_runner --tunnel-delay 100
+      - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon

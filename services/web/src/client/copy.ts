@@ -21,7 +21,9 @@ export function connectFailure(word: string, runner: string): string {
     case 'still_attaching':
       return `${runner} hasn’t opened this terminal yet, so that much typing couldn’t be held for it. Wait for the terminal, then type again.`
     case 'bad_key':
-      return "This browser couldn’t sign with its key. Reload the page and try again."
+      return "This browser’s passkey couldn’t sign in. Reload the page and try again."
+    case 'passkey_declined':
+      return `Far Cooler didn’t get your passkey, so it didn’t connect to ${runner}. Select Connect, then touch your passkey when your browser asks.`
     default:
       return `The connection to ${runner} didn’t work. Try again.`
   }
@@ -51,7 +53,14 @@ export function replyRefusal(word: string): string {
 }
 
 /// Why a granted runner can't be opened here.
-export function unreachable(why: string, runner: string): string {
+///
+/// A runner refuses a passkey when its OpenSSH is older than 8.4 (it doesn't
+/// offer `passkey_keys`, ov-765), and the reply can't say whether that or an
+/// unreachable runner is why (`RunnerEntry.pending` carries no cause), so a
+/// passkey's sentence names both. There is no fallback key (R-88).
+export function unreachable(why: string, runner: string, passkey = false): string {
+  if (why === 'pending' && passkey)
+    return `Your phone couldn’t add this browser’s passkey to ${runner}. Passkeys need OpenSSH 8.4 or later on the runner, so if ${runner}’s is older, update it. Otherwise, add this browser again while your phone can reach ${runner}.`
   return why === 'pending'
     ? `Your phone couldn’t add this browser’s key to ${runner}. Add this browser again while your phone can reach it.`
     : `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
