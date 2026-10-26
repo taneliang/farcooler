@@ -141,6 +141,42 @@ final class GlassUITests: XCTestCase {
         XCTAssertTrue(wait(10) { self.glass(app) == "live" }, "the field's glass stayed still after Remove: \(glass(app))")
     }
 
+    /// **Each photo, held, previews that photo** (ov-805). Two strips cut
+    /// from a screenshot (`-native-wide-photos`), filled into their squares,
+    /// were drawn about 100 pt past each side, and took touches there: the
+    /// right one's covered the whole of the left chip, so holding the left
+    /// photo previewed the right one. Each preview says which photo it is.
+    func testHoldingEachPhotoPreviewsThatPhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-native-agent-harness", "-native-wide-photos"]
+        app.launchDrawn()
+        XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 60), "the conversation never showed")
+        let chips = app.descendants(matching: .any).matching(identifier: "native-image-chip")
+        postPhoto()
+        XCTAssertTrue(wait(60) { chips.count == 1 }, "no chip for the first photo")
+        postPhoto()
+        XCTAssertTrue(wait(60) { chips.count == 2 }, "no chip for the second photo")
+        let badges = app.buttons.matching(identifier: "native-image-remove")
+        XCTAssertLessThan(badges.element(boundBy: 0).frame.midX, badges.element(boundBy: 1).frame.midX, "the chips aren't left to right")
+        for i in 0..<2 {
+            let photo = chips.element(boundBy: i).value as? String
+            XCTAssertNotNil(photo, "chip \(i + 1) doesn't say which photo it is")
+            // Where the photo is seen, from its remove badge, whose 44 pt
+            // target ends at the chip's top right corner; not from the chip's
+            // own frame, which reached as far as the photo's touches did. A
+            // point in its lower left, clear of the badge.
+            let badge = badges.element(boundBy: i).frame
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: badge.maxX - 45, dy: badge.minY + 45))
+                .press(forDuration: 1.2)
+            let preview = element(app, "native-image-preview")
+            XCTAssertTrue(preview.waitForExistence(timeout: 10), "holding photo \(i + 1) showed no preview")
+            XCTAssertEqual(preview.value as? String, photo, "holding photo \(i + 1) of 2 previewed another photo")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+            XCTAssertTrue(preview.waitForNonExistence(timeout: 10), "the preview stayed")
+        }
+    }
+
     /// **The field's glass comes back however the menu goes** (ov-792 review):
     /// it stands down while a held photo's menu is up, and answers a touch
     /// again once the menu is dismissed, and once the app has left the

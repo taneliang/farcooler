@@ -43,6 +43,8 @@ struct OutgoingImagePreview: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Photo Preview")
+        // The chip's value: which photo this is (ov-805).
+        .accessibilityValue(image.id.uuidString)
         .accessibilityIdentifier("native-image-preview")
     }
 

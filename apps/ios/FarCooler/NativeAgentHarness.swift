@@ -274,9 +274,9 @@ struct NativePhotoHarness: ViewModifier {
             }
     }
 
-    /// A small teal PNG.
+    /// A small teal PNG; with `-native-wide-photos`, a wide one.
     private nonisolated static func small() -> Data {
-        let size = CGSize(width: 64, height: 64)
+        let size = NativeHarnessRunner.wide ?? CGSize(width: 64, height: 64)
         return UIGraphicsImageRenderer(size: size).pngData { context in
             UIColor.systemTeal.setFill()  // style-exempt: a test photo's pixels, not UI
             context.fill(CGRect(origin: .zero, size: size))
@@ -787,10 +787,18 @@ final class NativeHarnessRunner: ObservableObject {
         return rows
     }
 
-    /// A 320 by 240 picture of a colour per `index`.
+    /// `-native-wide-photos` (ov-805): every photo the shape of a strip cut
+    /// from a phone's screenshot, over four times as wide as it is tall, as
+    /// the owner's were. Filled into a square chip or thumbnail, such a photo
+    /// is drawn far past either side of it.
+    nonisolated static var wide: CGSize? {
+        CommandLine.arguments.contains("-native-wide-photos") ? CGSize(width: 1080, height: 250) : nil
+    }
+
+    /// A 320 by 240 picture of a colour per `index` (or `wide`).
     private nonisolated static func picture(_ index: Int) -> Data {
         let colors: [UIColor] = [.systemBlue, .systemOrange, .systemGreen, .systemPurple, .systemYellow]
-        let size = CGSize(width: 320, height: 240)
+        let size = wide ?? CGSize(width: 320, height: 240)
         return UIGraphicsImageRenderer(size: size).pngData { context in
             colors[index % colors.count].setFill()
             context.fill(CGRect(origin: .zero, size: size))

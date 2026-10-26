@@ -355,6 +355,13 @@ struct NativeComposer: View {
         .frame(width: Self.chipSide, height: Self.chipSide)
         .surface(.inset, in: Self.chipShape)
         .clipShape(Self.chipShape)
+        // A touch lands on the chip only, not on the photo past it (ov-805).
+        // Filled into the square, a wide photo is drawn far beyond its sides,
+        // and the clip hides that without stopping it taking touches: a strip
+        // cut from a screenshot reached about 100 pt either side, over the
+        // whole of the chip to its left, so holding the left photo previewed
+        // the right one, drawn on top of it.
+        .contentShape(Self.chipShape)
         // Held, the photo as it will go, large, with Remove under it, as
         // Messages does with a photo waiting in its field (ov-792). Before
         // the remove badge, so the badge isn't lifted with it.
@@ -391,6 +398,8 @@ struct NativeComposer: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Photo")
+        // Which photo, for a held preview to be matched to its chip (ov-805).
+        .accessibilityValue(image.id.uuidString)
         .accessibilityIdentifier("native-image-chip")
     }
 
