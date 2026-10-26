@@ -1,0 +1,23 @@
+
+[38;5;231m⏺[39m On it.
+
+[38;5;246m✻[39m [38;5;246mWaiting for [1m3[0m[38;5;246m background agents to finish[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mSHELLS 2[39m
+
+[49m  [38;5;246mRan [1m2[0m[38;5;246m shell commands [39m
+
+[38;5;231m⏺[39m On it.
+
+[38;5;246m✻[39m [38;5;246mWaiting for [1m3[0m[38;5;246m background agents to finish[39m
+
+[38;5;244m───────────────────────────────────────────────────────────
+[39m❯ I think these glass round texts here are actually kinda
+  weird. Aren’t these usually pills, i.e. not a round
+  rect but the swipe to dismiss thing? Also could you
+  check whether the image away to dismiss works, since it
+  seemed off when I tried it on the phone earlier today
+  and I would like it fixed soon please.[7m [0m
+[38;5;244m───────────────────────────────────────────────────────────
+[39m  [38;5;246m⏸ manual mode on · [38;5;44m2 shells[39m
+

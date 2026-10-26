@@ -150,3 +150,29 @@ fn an_agent_glyph_above_the_mode_line_is_no_agent() {
     assert!(composer::printed(&said).contains("\n  ◯ general-purpose  Sleeper 1"), "the transcript row is there");
     assert_eq!(r.background_work("claude", &said), Background::Shells, "said in the transcript");
 }
+
+/// claude 2.1.309 between turns with three background agents and two
+/// background shells, at 59x23 (ov-808): with its box empty the agent rows
+/// show under the mode line; with a six-row message pasted in, claude drops
+/// the agent list to make room, and only the mode line's `· 2 shells` is
+/// left. Its registry said `busy` throughout, for the agents. So the screen
+/// alone reads Shells once the box holds the message, and the daemon's
+/// read-back before the Enter took that `busy` for a turn begun and left
+/// the owner's message in the box (`registry_busy`); it now keeps the kind
+/// the gate saw (`compose::still_between`).
+#[test]
+fn a_tall_box_on_a_short_pane_hides_the_agent_rows() {
+    let r = Registry::built_in();
+    let empty = include_str!("../captures/claude-2.1.309-agents-shells-empty-59x23-e.txt");
+    let pasted = include_str!("../captures/claude-2.1.309-agents-shells-owner-59x23-e.txt");
+    assert!(composer::printed(empty).contains("  ◯ general-purpose  Hang 0"));
+    assert!(!composer::printed(pasted).contains("◯"), "no agent row once the box is tall");
+    assert!(composer::printed(pasted).lines().any(|l| l.trim_end() == "  ⏸ manual mode on · 2 shells"));
+    assert!(matches!(composer::read("claude", pasted), Composer::Holds(t) if t.chars().count() > 300));
+    for (name, screen) in [("empty", empty), ("pasted", pasted)] {
+        assert_eq!(r.classify_main("claude", screen), Idle, "{name}");
+        assert_eq!(r.classify("claude", screen), Working, "{name}");
+    }
+    assert_eq!(r.background_work("claude", empty), Background::Agents);
+    assert_eq!(r.background_work("claude", pasted), Background::Shells, "the agents no longer show");
+}
