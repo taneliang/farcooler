@@ -251,6 +251,50 @@ async fn revoking_one_device_closes_the_others_sessions_instead_of_hanging_them(
     reach(&runner, &laptop).await;
 }
 
+/// A device that reaches its runner only through Tailcat hears that it was
+/// revoked (ov-820), over the tunnel the revocation then takes away.
+///
+/// Before ov-820 it couldn't: the rebuilt tunnel ignores its node key in
+/// silence, so it read `no_answer`, a runner that is asleep. Now the runner's
+/// session says `device_released` as its last frame, and `revoke` lets it
+/// through before the rebuild. Everything is the shipped path: the forced
+/// command's `farcoolerd --stdio` relays into this runner's daemon (in this
+/// process, on `FARCOOLER_HOME`'s socket), and `enrollment::revoke` closes
+/// the phone's session and rebuilds THIS process's tunnel, as a runner's does.
+/// The rebuild serves port 22, `Service::ssh_port`; nothing dials it after.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revoked_device_hears_it_was_released_through_the_tunnel() {
+    use farcooler_protocol::v1::event::Payload;
+    let _serial = SERIAL.lock().await;
+    let relay = derper::start().await;
+    let phone = Device::mint("phone-7", Scope::Read);
+    let laptop = Device::mint("laptop-2", Scope::Read);
+    let runner = Runner::start(&relay, &[&phone, &laptop]).await;
+    let service = runner.daemon().await;
+
+    let mut session = reach(&runner, &phone).await;
+    let mut client = speak(&mut session).await;
+    client.call(request("daemon.version")).await.expect("the phone's session answers through the daemon");
+
+    let began = Instant::now();
+    farcooler_daemon::enrollment::revoke(
+        &service,
+        &farcooler_protocol::v1::ClientRevoke { client_id: phone.client_id.clone() },
+    )
+    .await
+    .expect("client.revoke");
+    derper::note(&format!("the revoke, tunnel rebuild included, took {:?}", began.elapsed()));
+
+    let mut heard = false;
+    while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_secs(15), client.next_event()).await {
+        heard |= matches!(event.payload, Some(Payload::DeviceReleased(_)));
+        if heard {
+            break;
+        }
+    }
+    assert!(heard, "the revoked phone never heard it was released, over the tunnel it reached the runner by");
+}
+
 /// The cases that need every byte to go through the relay (ov-781).
 ///
 /// Two peers on one machine find a direct UDP path within a second, and then
@@ -1107,6 +1151,37 @@ impl Runner {
         write_fence(&self.authorized_keys, remaining);
         scaffold(&self.authorized_keys, &self.home(), &self.runtime(), &self.bin(), remaining);
         self.token = self.serve(remaining).await;
+    }
+
+    /// This runner's daemon, serving its `FARCOOLER_HOME` socket from this
+    /// process, so a forced `farcoolerd --stdio` relays into it rather than
+    /// opening a service of its own, and a revoke here closes that session.
+    async fn daemon(&self) -> std::sync::Arc<farcooler_daemon::service::Service> {
+        use farcooler_daemon::{rpc::RpcFactory, sessions::peer_from_preamble};
+        farcooler_daemon::service::stub_agents_in_this_process();
+        let service = std::sync::Arc::new(
+            farcooler_daemon::service::Service::open_in(self.runtime())
+                .await
+                .expect("this runner's service")
+                .enrolling_into(self.authorized_keys.clone()),
+        );
+        assert_eq!(service.tailcat_key(), self.tailcat_key, "the daemon would rebuild some other tunnel");
+        let server = farcooler_transport::UnixListenerServer::bind(&self.runtime().join("farcoolerd.sock"))
+            .expect("bind this runner's socket");
+        let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
+        let served = service.clone();
+        tokio::spawn(async move {
+            let _ = server
+                .serve(move |preamble| {
+                    let peer = peer_from_preamble(preamble.as_ref())?;
+                    Some((
+                        farcooler_transport::HandshakeConfig { daemon_version: "test".into() },
+                        RpcFactory::new(served.clone(), watcher.clone(), std::sync::Arc::new(tokio::sync::Notify::new()), peer),
+                    ))
+                })
+                .await;
+        });
+        service
     }
 
     fn home(&self) -> PathBuf {
