@@ -135,9 +135,28 @@ struct RunnerStatusRow: View {
         // one move that helps once they're added back.
         if connection.talk.removed {
             removed
+        } else if connection.accessRemoved {
+            noAccess
         } else {
             phaseContent
         }
+    }
+
+    /// The runner refuses this phone's key after letting it in (ov-818):
+    /// "You No Longer Have Access to This Runner", what it means, and Check
+    /// Again, which dials it now rather than at the next slow check. Held
+    /// through that dial, so the row doesn't flick to "Connecting…".
+    @ViewBuilder
+    private var noAccess: some View {
+        Text(RunnerTrouble.accessRemoved.headline(host.words))
+            .font(.subheadline.weight(.semibold))
+            .accessibilityIdentifier("runner-no-access")
+        Text(RunnerTrouble.accessRemoved.detail(message: "", words: host.words))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Button(RunnerTrouble.accessRemoved.nextMove.label, action: action(for: RunnerTrouble.accessRemoved.nextMove))
+            .font(.footnote)
     }
 
     /// "You Were Removed from This Runner", what it means, and Check Again,

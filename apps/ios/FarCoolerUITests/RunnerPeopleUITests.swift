@@ -115,6 +115,23 @@ final class RunnerPeopleUITests: XCTestCase {
         keep(app, "runner-removed", expecting: .shows(removed))
     }
 
+    /// A phone whose key the runner refuses after letting it in says it no
+    /// longer has access, and the runner's work leaves the screen (ov-818).
+    /// Light and Dark, with a long runner name.
+    func testARevokedPhoneSaysItHasNoAccess() {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication.phoneHarness(["-phone-revoked", "-phone-host-long", "-phone-appearance", appearance])
+            let noAccess = element(app, "runner-no-access")
+            XCTAssertTrue(noAccess.waitForExistence(timeout: 30), "no no-access row: \(app.debugDescription)")
+            XCTAssertEqual(noAccess.label, "You No Longer Have Access to This Runner")
+            XCTAssertTrue(app.buttons["Check Again"].firstMatch.exists, "no Check Again: \(app.debugDescription)")
+            XCTAssertFalse(app.buttons["Authorize This Device"].firstMatch.exists, "offered to authorize a revoked phone")
+            XCTAssertFalse(app.staticTexts["Billing"].firstMatch.exists, "the runner's work stayed on screen: \(app.debugDescription)")
+            keep(app, "runner-no-access-\(appearance)", expecting: .shows(noAccess))
+            app.terminate()
+        }
+    }
+
     func testARunnerNobodySharesSaysNothingAboutPeople() {
         let app = runnerSettings([])
         // The section the People one would sit above, drawn: the screen read.

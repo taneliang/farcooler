@@ -65,6 +65,14 @@ final class Connection: ObservableObject {
     /// what decides whether a runner's address is offered while it retries
     /// (ov-485, `RunnerRoutes.offer`). Nil once it connects.
     @Published private(set) var lastTrouble: Failure?
+    /// Whether the runner refuses this phone's key after letting it in
+    /// (ov-818): "You No Longer Have Access" on its row, through each slow
+    /// recheck's dial too, which is a `.reconnecting` that keeps the trouble.
+    var accessRemoved: Bool { lastTrouble == .accessRemoved && phase != .connected }
+    /// How this runner has answered this phone's key: see `KeyRefusals`.
+    /// Read for the runner when `start` is given a new one.
+    private var keyRefusals = KeyRefusals(admitted: false)
+    private var keyRefusalsRunner: UUID?
     @Published private(set) var fleet: Fleet = .empty
     /// Whom this phone talks to in each workspace: the orchestrator, or a
     /// member's own rep (ov-526).
@@ -394,6 +402,12 @@ final class Connection: ObservableObject {
         Reachability.shared.onShouldRetry(host.id.uuidString) { [weak self] in
             self?.reconnectNow()
         }
+        // Not again for the same runner: `retry` restarts it through here,
+        // and that mustn't forget the refusals it's counting (ov-818).
+        if keyRefusalsRunner != host.id {
+            keyRefusals = KeyRefusals.remembered(host.id.uuidString)
+            keyRefusalsRunner = host.id
+        }
 
         // The old key for a runner not moved to a new one yet (ov-569).
         guard let key = Identity.privateKey(for: host.id) else {
@@ -414,7 +428,17 @@ final class Connection: ObservableObject {
             try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
         } catch {
             dialEnded(dialed, connected: false)
-            if mine == attempt { phase = classify(error) }
+            guard mine == attempt else { return }
+            let next = readRefusals(classify(error))
+            // A runner that let this phone in is dialed again on its own, as
+            // a reconnect's is (ov-818): a cold start's refusal is where a
+            // removal is first met after a relaunch. Every other failure
+            // stays where a cold start has always left it.
+            if case .failed(let kind, _) = next, [.refusedThisTime, .accessRemoved].contains(kind) {
+                settle(next, attempt: 0)
+            } else {
+                phase = next
+            }
             return
         }
 
@@ -422,6 +446,7 @@ final class Connection: ObservableObject {
         guard mine == attempt else { return }
         phase = .connected
         lastTrouble = nil
+        letIn(host)
         registerTunnelKey(for: host)
         moveToNewKeyIfNeeded(for: host)
         // Whatever build answered before belongs to the previous link: a
@@ -625,6 +650,7 @@ final class Connection: ObservableObject {
         guard mine == self.attempt, case .reconnecting = phase else { return }
         phase = .connected
         lastTrouble = nil
+        letIn(host)
         registerTunnelKey(for: host)
         moveToNewKeyIfNeeded(for: host)
         // Before `refresh`, which reads it again on its first fleet. See
@@ -648,7 +674,11 @@ final class Connection: ObservableObject {
     /// difference between a screen that explains what to fix and one that
     /// spins forever over something retrying will never fix.
     private func retryOrGiveUp(on error: Error, attempt: Int) {
-        let next = classify(error)
+        settle(readRefusals(classify(error)), attempt: attempt)
+    }
+
+    /// `retryOrGiveUp`'s decision, for a failure already read.
+    private func settle(_ next: Phase, attempt: Int) {
         if case .failed(let kind, _) = next { lastTrouble = kind }
         guard case .failed(let kind, _) = next else {
             // The host key is unknown again, which is a question for a human
@@ -665,6 +695,11 @@ final class Connection: ObservableObject {
         switch kind.retry {
         case .never:
             phase = next
+        // The no-access screen stays up through the wait, rather than the
+        // "Reconnecting…" a slow `scheduleReconnect` would put there.
+        case .afterAWhile where kind == .accessRemoved:
+            phase = next
+            recheckSlowly()
         case .afterAWhile:
             // Kept at the same rung: `attempt` drives the fast schedule, means
             // nothing at this cadence, and letting it climb would leave a
@@ -672,6 +707,44 @@ final class Connection: ObservableObject {
             scheduleReconnect(attempt: attempt, after: Self.slowRetrySeconds)
         case .onTheBackoff:
             scheduleReconnect(attempt: attempt + 1, after: Self.backoff(attempt: attempt + 1))
+        }
+    }
+
+    /// A failed dial's phase, read against this phone's history with the
+    /// runner (ov-818): see `RunnerTrouble.reading`. A runner that has taken
+    /// this phone's access away takes its work off the screen with it.
+    private func readRefusals(_ next: Phase, at now: Date = Date()) -> Phase {
+        guard case .failed(let kind, let message) = next else { return next }
+        let read = kind.reading(&keyRefusals, at: now)
+        if read == .accessRemoved { forgetTeamWork() }
+        return .failed(read, message)
+    }
+
+    /// A dial got in: the runner accepts this phone's key, remembered across
+    /// launches. Written only when that's news.
+    private func letIn(_ host: Runner) {
+        guard !keyRefusals.admitted || keyRefusals.refusals > 0 else { return }
+        keyRefusals.letIn(host.id.uuidString)
+    }
+
+    /// Everything read from this runner, off the screen (ov-818): its
+    /// worktrees and panes, what they changed, and what needs you there.
+    private func forgetTeamWork() {
+        if hasFleet || !fleet.worktrees.isEmpty { (fleet, hasFleet) = (.empty, false) }
+        if !inbox.isEmpty { inbox = [:] }
+        if !needsYou.isEmpty { needsYou = [] }
+    }
+
+    /// Dials a runner that took this phone's access away again in five
+    /// minutes, from its no-access screen, so being added back is noticed
+    /// without a tap. Anything that dials sooner (Check Again, the network
+    /// returning, the app coming back) replaces it.
+    private func recheckSlowly() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.slowRetrySeconds))
+            guard !Task.isCancelled, let self, case .failed(.accessRemoved, _) = self.phase else { return }
+            self.reconnectNow()
         }
     }
 
@@ -2281,6 +2354,19 @@ final class Connection: ObservableObject {
     /// nothing in it is said about now (`isAnswering`). `PhoneHarness` only.
     func standInLinkLost() {
         fleetOnThisLink = false
+    }
+
+    /// A runner that let this phone in refusing its key on the backoff's
+    /// dials, through the same reading and settling a failed reconnect gets
+    /// (ov-818). `PhoneHarness` only.
+    func standInKeyRefused() {
+        keyRefusals.letIn()
+        let start = Date()
+        var next = Phase.failed(.keyRejected, "")
+        for offset in [0.0, 2, 6, 14] {
+            next = readRefusals(.failed(.keyRejected, "Permission denied"), at: start.addingTimeInterval(offset))
+        }
+        settle(next, attempt: 0)
     }
 
     /// The new link's build landing. `NativeAgentHarness` only.

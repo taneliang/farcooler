@@ -413,6 +413,10 @@ AGENTKIT_SOURCES = [
     # never executed. See
     # `RunnerTroubleTests`.
     "RunnerTrouble.swift",
+    # Whether a runner that refuses this phone's key took its access away or
+    # refused it for a moment (ov-818), which `RunnerTrouble.reading` reads.
+    # Here for `RunnerTrouble`'s reason. See `KeyRefusalsTests`.
+    "KeyRefusals.swift",
     # What the phone does about its link when the app comes back: a probe
     # with a short deadline, a dial at once for a drop it finds, and a new
     # link's reads together (ov-613). See `LinkRevivalTests`.
