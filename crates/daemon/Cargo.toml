@@ -167,3 +167,9 @@ farcooler-client.workspace = true
 # A database at an older schema, which only the store can write, so a test can
 # drive a migrated board through the daemon's own handlers.
 farcooler-store = { workspace = true, features = ["testing"] }
+# A browser's passkey, made in software, logging in through a real sshd
+# (`tests/a_real_sshd_admits_a_passkey.rs`, ov-765): russh is the SSH client
+# a browser runs, and p256 signs as the authenticator would. Both already in
+# the lock at these versions, through `farcooler-client`.
+russh = "0.62"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
