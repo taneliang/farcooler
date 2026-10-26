@@ -1,0 +1,68 @@
+# The web client (services/web, ov-764): Far Cooler in a browser, at
+# app.canary.farcooler.com for canary and, from slice 17 of the plan,
+# app.farcooler.com for stable.
+#
+#   workflow_dispatch → canary, from the commit it is run on
+#
+# BY HAND ONLY FOR NOW. The first deploy creates the Worker, its custom
+# domain's DNS record and its certificate, and app.canary.farcooler.com is two
+# levels deep, so Universal SSL doesn't cover it: someone has to watch that
+# first deploy and check the certificate
+# (`curl -v https://app.canary.farcooler.com/ 2>&1 | grep 'subject:'`).
+# Once that holds, a push to main deploys canary: add
+#
+#   push:
+#     branches: [main]
+#     paths: ['services/web/**', 'services/common/**', '.github/workflows/web.yml']
+#
+# and, when the client carries wasm, crates/web/**, crates/client/**,
+# crates/protocol/**, proto/** and crates/tailcat/go/**. Stable joins through
+# promote.yml in slice 17, with the build composed from the stable tag as
+# site.yml composes www.
+#
+# Authenticates wrangler as site.yml does: the CLOUDFLARE_API_TOKEN and
+# CLOUDFLARE_ACCOUNT_ID secrets, passed to the deploy step and no other.
+name: Web
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which web client to deploy
+        required: true
+        default: canary
+        type: choice
+        options: [canary]
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One deploy at a time, never cancelled halfway.
+    concurrency:
+      group: web-${{ inputs.environment }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx tsc --noEmit -p tsconfig.client.json
+      # Before the deploy, so a red suite or an oversized build never ships.
+      - run: npm test
+      - run: node scripts/size-gate.mjs --self-test
+      - run: ./build.sh --channel canary --build "$GITHUB_SHA"
+      - run: node scripts/size-gate.mjs dist
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --env canary

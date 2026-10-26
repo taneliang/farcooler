@@ -1322,3 +1322,34 @@ jobs:
       - run: npx wrangler deploy --dry-run --outdir /tmp/site-build
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
       - run: npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview
+
+  # The web client's Worker (services/web, ov-764): its tests, both builds and
+  # the size gate, on every push. Deploying is web.yml's.
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx tsc --noEmit -p tsconfig.client.json
+      # Inside workerd: the flag, the CSP, the host check and the API's CSRF
+      # checks each have a test that goes red without them.
+      - run: npm test
+      # The gate's own limits, proved against a build that breaks each one.
+      - run: node scripts/size-gate.mjs --self-test
+      - run: ./build.sh --channel stable --build "$GITHUB_SHA"
+      - run: node scripts/size-gate.mjs dist
+      - run: npx wrangler deploy --dry-run --outdir /tmp/web-build
+      - run: ./build.sh --channel canary --build "$GITHUB_SHA"
+      - run: node scripts/size-gate.mjs dist
+      - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary

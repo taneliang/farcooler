@@ -50,6 +50,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # scratch repository).
 SITE_ONLY = [
     r"services/site/.+",
+    # The web client's Worker and the session code it shares with the site
+    # (ov-764): TypeScript Workers that no app job builds or tests. Its wasm
+    # crates, when they come, live under crates/ and stay code.
+    r"services/web/.+",
+    r"services/common/.+",
+    r"\.github/workflows/web\.yml",
     r"docs/.+",
     r"[^/]+\.md",
     r"\.github/workflows/site\.yml",
@@ -132,6 +138,9 @@ def self_test():
     # Every alternative has a sample only it matches, so deleting one goes red.
     SAMPLES = [
         "services/site/src/index.ts",
+        "services/web/src/index.ts",
+        "services/common/session.ts",
+        ".github/workflows/web.yml",
         "docs/releasing.md",
         "docs/superpowers/specs/a/b.json",
         "README.md",
@@ -158,6 +167,7 @@ def self_test():
         "crates/daemon/assets/manager/SKILL.md", "crates/daemon/src/git.rs",
         "Cargo.toml", "Cargo.lock", "proto/farcooler.proto", "test/fixtures/a.json",
         "services/relay/src/lib.rs", "services/site-x/a.ts", "services/sitemap/a.ts", "services/site",
+        "services/web", "services/webx/a.ts", "crates/web/src/lib.rs", ".github/workflows/web.ymlx",
         "docs", "docsx/a.md", "mydocs/a.md", "scripts/docs/x.py", "scripts/copy-lint.py",
         "scripts/ci-changes.py", "scripts/site-proof-extra.py", "scripts/site-proofs/x",
         "scripts/manager-skill-pressure/scenarios.md",
