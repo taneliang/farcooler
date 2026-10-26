@@ -65,6 +65,29 @@ fn a_set_names_the_devices_it_released() {
     assert_eq!(store.member("bob").unwrap().devices, devices(&["phone-b"]));
 }
 
+/// What a sweep may revoke (ov-783): a device taken off a member's list, or
+/// one a removed member had. Never one bound to a member, the owner's (bound
+/// to nobody, never released), or one a member's device enrolled that's
+/// waiting on its first binding. Bound once and taken off again, that one is
+/// swept like any other.
+#[test]
+fn a_sweep_names_only_devices_taken_off_a_member() {
+    let (store, _, _) = board();
+    store.set_member("alice", "Alice", &devices(&["phone-a", "mac-a"])).unwrap();
+    store.set_member("bob", "Bob", &devices(&["phone-b"])).unwrap();
+    store.record_member_enrolled("pad-new", "alice").unwrap();
+    store.record_member_enrolled("pad-bound", "alice").unwrap();
+    assert_eq!(store.released_to_sweep().unwrap(), devices(&[]), "nothing taken off anyone yet");
+
+    store.set_member("bob", "Bob", &devices(&["phone-b", "pad-bound"])).unwrap();
+    store.set_member("alice", "Alice", &devices(&["phone-a"])).unwrap();
+    store.set_member("bob", "Bob", &devices(&["phone-b"])).unwrap();
+    store.set_member("carol", "Carol", &devices(&["phone-c"])).unwrap();
+    store.remove_member("carol").unwrap();
+    assert_eq!(store.released_to_sweep().unwrap(), devices(&["mac-a", "pad-bound", "phone-c"]));
+    assert!(store.device_released("pad-new").unwrap(), "waiting on its binding, and not swept");
+}
+
 /// A handle is a short lowercase word the runner doesn't keep for itself,
 /// and a name is one line.
 #[test]

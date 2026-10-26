@@ -243,6 +243,12 @@ impl Store {
             rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
         };
         let released: Vec<String> = had.into_iter().filter(|d| !devices.contains(d)).collect();
+        // A device bound to a member, or taken off one, is no longer waiting
+        // on its first binding (ov-719): who enrolled it stops mattering, and
+        // released again it's one `released_to_sweep` names (ov-783).
+        for device in devices.iter().chain(&released) {
+            tx.execute("DELETE FROM device_enrollers WHERE client_id = ?1", [device]).map_err(map_err)?;
+        }
         // A device left off the list is released, never the owner's again.
         tx.execute(
             "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
@@ -279,6 +285,24 @@ impl Store {
         self.conn()
             .query_row("SELECT EXISTS(SELECT 1 FROM released_devices WHERE client_id = ?1)", [client_id], |r| r.get(0))
             .map_err(map_err)
+    }
+
+    /// The released devices that must have no line and no session (ov-783):
+    /// each was a member's and was taken off their list, or went with them.
+    /// Not one a member's device enrolled that's waiting on its first binding
+    /// (`record_member_enrolled`): it's released too, and keeps its line.
+    /// Sorted.
+    pub fn released_to_sweep(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT r.client_id FROM released_devices r
+                 WHERE NOT EXISTS (SELECT 1 FROM device_enrollers e WHERE e.client_id = r.client_id)
+                 ORDER BY r.client_id",
+            )
+            .map_err(map_err)?;
+        let rows = stmt.query_map([], |r| r.get(0)).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
     }
 
     /// Whether any member has a rep anywhere: the cheap check before working
