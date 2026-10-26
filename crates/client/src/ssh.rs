@@ -216,15 +216,9 @@ impl Session {
         let verifier =
             Verifier { policy: destination.host_key.clone(), verdict: Arc::clone(&verdict) };
 
-        let config = Arc::new(Config {
-            // A phone sleeps and wakes; without keepalives a session that the
-            // network dropped hours ago looks alive until the first write.
-            keepalive_interval: Some(std::time::Duration::from_secs(30)),
-            keepalive_max: 3,
-            ..Config::default()
-        });
+        let config = config_for(&destination.reach);
 
-        let mut handle = match &destination.reach {
+        let handle = match &destination.reach {
             Reach::Direct { host, port } => {
                 match client::connect(config, (host.as_str(), *port), verifier).await {
                     Ok(handle) => handle,
@@ -265,6 +259,33 @@ impl Session {
             }
         };
 
+        Self::authenticate(handle, destination, key, &verdict).await
+    }
+
+    /// `open` over a stream the caller already holds, with the settings
+    /// `destination`'s reach picks: how the keepalive tests put a valve
+    /// between this client and an in-process server without a tunnel linked.
+    #[cfg(test)]
+    async fn open_over<S>(destination: &Destination, stream: S) -> Result<Self, SshError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let key = decode_key(&destination.private_key, destination.passphrase.as_deref())?;
+        let verdict = Arc::new(KeyVerdict::default());
+        let verifier =
+            Verifier { policy: destination.host_key.clone(), verdict: Arc::clone(&verdict) };
+        let handle = client::connect_stream(config_for(&destination.reach), stream, verifier)
+            .await
+            .map_err(|other| translate(other, destination, &verdict))?;
+        Self::authenticate(handle, destination, key, &verdict).await
+    }
+
+    async fn authenticate(
+        mut handle: Handle<Verifier>,
+        destination: &Destination,
+        key: ssh_key::PrivateKey,
+        verdict: &KeyVerdict,
+    ) -> Result<Self, SshError> {
         let authenticated = handle
             .authenticate_publickey(
                 &destination.user,
@@ -297,6 +318,26 @@ impl Session {
         channel.exec(true, command).await.map_err(|e| SshError::Exec(e.to_string()))?;
         Ok(Streams::new(channel))
     }
+}
+
+/// The client's settings for a connection on this reach: its keepalive.
+///
+/// A phone sleeps and wakes; without keepalives a session that the network
+/// dropped hours ago looks alive until the first write. How soon a quiet far
+/// end counts as gone is the reach's own (`Reach::liveness`, ov-781): two
+/// minutes on an address, as it always was, and nine seconds on the tunnel,
+/// whose TCP never sees a reset when a runner or a relay dies underneath it.
+///
+/// russh sends a probe only after `probe_after` with nothing received and
+/// counts any byte received as an answer, so a session carrying output sends
+/// none, and an idle direct one sends exactly what it sent before.
+fn config_for(reach: &Reach) -> Arc<Config> {
+    let liveness = reach.liveness();
+    Arc::new(Config {
+        keepalive_interval: Some(liveness.probe_after),
+        keepalive_max: liveness.unanswered,
+        ..Config::default()
+    })
 }
 
 /// Turn a russh handshake failure into the specific thing a person has to
@@ -541,6 +582,10 @@ impl AsyncRead for ChannelReader {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ssh_liveness_tests.rs"]
+mod liveness_tests;
 
 /// Load a key, for tests in sibling modules that need to prove one is usable.
 #[cfg(test)]
