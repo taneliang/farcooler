@@ -673,7 +673,7 @@ async fn a_long_turn_with_a_dialog(turn: Duration, timing: impl FnOnce(&mut crat
     assert_eq!(compose_promptly(&b, &agent, "what did they find").await.expect("queued"), Turn::During);
     tokio::time::sleep(turn * 2 / 5).await;
     si.show("menu").await;
-    tokio::time::sleep(turn / 10).await;
+    tokio::time::sleep(turn / 5).await;
     typed_marked(&b, &agent, "31").await;
     super::logs(&si, "ANSWERED 1").await;
     tokio::time::sleep(Duration::from_millis(500)).await;
