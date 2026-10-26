@@ -308,6 +308,10 @@ pub enum FleetEvent {
     Plan { workspace: Uuid },
     /// A page was written or removed (ov-282): re-read that slot if it's open.
     Pages { workspace: Uuid, slot: String, removed: bool },
+    /// The runner took this device's access away (ov-820): the last thing
+    /// its connection says before the runner closes it. Kept by the app for
+    /// that runner until a dial gets in again.
+    Released,
 }
 
 impl FleetEvent {
@@ -361,6 +365,7 @@ impl FleetEvent {
             // Already debounced on the runner, and coalesced again by the
             // FFI's queue, since the line carries nothing to tell two apart.
             Payload::NeedsYouChanged(_) => Some(FleetEvent::NeedsYou),
+            Payload::DeviceReleased(_) => Some(FleetEvent::Released),
             Payload::BoardReadsChanged(r) => Some(FleetEvent::Reads {
                 workspace: uuid_of(&r.workspace_id),
                 floor_ms: r.floor_ms,

@@ -163,4 +163,24 @@ pub trait Handler: Send + Sync + 'static {
     fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
         std::future::pending()
     }
+
+    /// The last frame to send when `closed` ends this connection, if any.
+    ///
+    /// The daemon says `device_released` here (ov-820): a device that reaches
+    /// its runner only through Tailcat is never refused, just ignored, so this
+    /// frame is the one way it learns its access was taken away. Sent to this
+    /// connection alone, once `closed` resolves, within `FAREWELL_DEADLINE`.
+    /// Never sent on any other ending.
+    ///
+    /// Defaulted to none, as `closed` is to never.
+    fn farewell(&self) -> Option<farcooler_protocol::v1::Event> {
+        None
+    }
+
+    /// The farewell was written, or couldn't be within the deadline.
+    ///
+    /// What the daemon waits on before it tears down a revoked device's
+    /// tunnel route, so the frame isn't cut off in flight. Called once, after
+    /// `farewell`, on a `closed` ending only, whether or not there was one.
+    fn farewell_said(&self) {}
 }

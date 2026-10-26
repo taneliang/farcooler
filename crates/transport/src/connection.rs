@@ -482,6 +482,7 @@ where
 
             _ = &mut closed => {
                 tracing::debug!(client = ?peer.client_id, "this connection was closed from above");
+                say_farewell(conn, handler).await;
                 break (Ok(()), Ending::Revoked);
             }
 
@@ -652,6 +653,42 @@ enum Ending {
 /// It exists for one that is waiting on something that will not come, which
 /// would otherwise keep a dead connection's task alive forever.
 pub const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How long a closed connection may take to write its farewell (ov-820).
+///
+/// One frame of a few bytes, written in microseconds to any reader that is
+/// reading. The bound is for one that isn't: a stalled device must not hold up
+/// the revocation that is closing it, which waits on `farewell_said`.
+pub const FAREWELL_DEADLINE: Duration = Duration::from_secs(1);
+
+/// Send `handler`'s farewell, if it has one, then say so, whatever came of it.
+///
+/// "Said" means on the wire, not queued: `send` only hands a frame to the
+/// writer, so this waits for the writer to have written everything queued,
+/// the farewell last. Only then can a daemon tear down the route under it.
+async fn say_farewell<R: AsyncRead + Unpin, H: Handler>(conn: &mut Connection<R>, handler: &H) {
+    if let Some(event) = handler.farewell() {
+        let written = conn.written.clone();
+        let said = async {
+            conn.send(&WireEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                message_id: ids::new_id(),
+                body: Some(wire_envelope::Body::Event(event)),
+            })
+            .await?;
+            // `notify_one` stores a permit, so a write that lands between the
+            // check and the wait is not missed.
+            while conn.queued_bytes() > 0 {
+                written.notified().await;
+            }
+            Ok::<(), ConnectionError>(())
+        };
+        if !matches!(tokio::time::timeout(FAREWELL_DEADLINE, said).await, Ok(Ok(()))) {
+            tracing::debug!("a closed connection's farewell could not be written");
+        }
+    }
+    handler.farewell_said();
+}
 
 /// One request, answered, and labeled with what the loop needs to file the
 /// answer: the lane to release, and the id to echo.

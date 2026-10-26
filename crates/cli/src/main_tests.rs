@@ -709,6 +709,8 @@ fn every_resource_a_client_reads_gets_a_line_rather_than_being_swept_up() {
         (Payload::BoardReadsChanged(Default::default()), "reads"),
         (Payload::PlanChanged(Default::default()), "plan"),
         (Payload::PagesChanged(Default::default()), "pages"),
+        // The runner's last word to a device it revoked (ov-820).
+        (Payload::DeviceReleased(farcooler_protocol::v1::Empty {}), "released"),
     ];
     for (payload, kind) in kinds {
         let line = event_json(payload)

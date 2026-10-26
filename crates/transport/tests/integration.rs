@@ -360,3 +360,80 @@ async fn a_handler_can_end_its_own_connection() {
     }
     assert_eq!(handler.inner.calls.load(Ordering::SeqCst), 1, "the second request was dispatched");
 }
+
+/// A closable handler with a last word (ov-820): what the daemon's handler
+/// is to a revoked device.
+#[derive(Clone)]
+struct FarewellHandler {
+    closable: ClosableHandler,
+    /// Closed by `farewell_said`, so the test can wait on it as the daemon does.
+    said: Arc<tokio::sync::Semaphore>,
+}
+
+impl Handler for FarewellHandler {
+    fn peer(&self) -> Peer {
+        self.closable.peer()
+    }
+
+    fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
+        self.closable.handle(req)
+    }
+
+    fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
+        self.closable.closed()
+    }
+
+    fn farewell(&self) -> Option<v1::Event> {
+        Some(v1::Event {
+            payload: Some(v1::event::Payload::DeviceReleased(v1::Empty {})),
+            ..Default::default()
+        })
+    }
+
+    fn farewell_said(&self) {
+        self.said.close();
+    }
+}
+
+/// A connection closed from above says its farewell before it ends, and
+/// only then says it has (ov-820).
+///
+/// A device that reaches its runner only through Tailcat learns it was
+/// revoked from this frame or not at all, so it has to be the last thing on
+/// the wire, ahead of the close, and `farewell_said` is what the daemon waits
+/// on before it tears down that device's route.
+#[tokio::test]
+async fn a_closed_connection_says_its_farewell_first() {
+    let dir = tempdir().unwrap();
+    let sock_path = dir.path().join("farcooler.sock");
+    let handler = FarewellHandler { closable: ClosableHandler::new(), said: Arc::new(tokio::sync::Semaphore::new(0)) };
+    let server = UnixListenerServer::bind(&sock_path).unwrap();
+    let server_handler = handler.clone();
+    tokio::spawn(async move {
+        let _ = server.serve(move |_| Some((handshake_cfg(), server_handler.clone()))).await;
+    });
+
+    let stream = UnixStream::connect(&sock_path).await.unwrap();
+    let (read_half, write_half) = stream.into_split();
+    let mut client = Connection::new(read_half, write_half);
+    client.client_handshake("itest", "0.1.0").await.unwrap();
+    client.send(&request_envelope("anything")).await.unwrap();
+    client.recv().await.expect("answered while the connection was open");
+    assert!(!handler.said.is_closed(), "a farewell was said before the connection was closed");
+
+    handler.closable.gate.close();
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), client.recv())
+        .await
+        .expect("the farewell never came")
+        .expect("the connection ended without a farewell");
+    match frame.body {
+        Some(wire_envelope::Body::Event(v1::Event { payload: Some(v1::event::Payload::DeviceReleased(_)), .. })) => {}
+        other => panic!("the last frame was not the farewell: {other:?}"),
+    }
+    assert!(client.recv().await.is_err(), "the connection went on after its farewell");
+    tokio::time::timeout(Duration::from_secs(5), handler.said.acquire())
+        .await
+        .expect("the handler was never told its farewell was said")
+        .expect_err("a closed semaphore");
+}

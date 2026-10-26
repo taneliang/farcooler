@@ -116,6 +116,8 @@ const EVENT_QUEUE_LIMIT: usize = 64;
 ///    nobody re-reads; dropping the newest would lose the most recent news.
 ///    Collapsing loses only the detail of WHICH thing moved, which no client
 ///    depends on, and it is the one outcome that cannot leave a client stale.
+///    The one notice that isn't a re-read, `released` (ov-820), is kept
+///    through it.
 ///
 /// The queue is deliberately not cleared when a session is replaced. A notice
 /// from the connection that just died still means "re-read", and the client
@@ -152,8 +154,15 @@ impl EventQueue {
             return;
         }
         if self.pending.len() >= EVENT_QUEUE_LIMIT {
+            // `released` isn't news to re-read, and no re-read stands for it
+            // (ov-820): it survives the collapse, after the resync.
+            let released = event_line(&crate::session::FleetEvent::Released);
+            let kept = notice == released || self.pending.contains(&released);
             self.pending.clear();
             self.pending.push_back(json!({ "event": "resync" }).to_string());
+            if kept {
+                self.pending.push_back(released);
+            }
             return;
         }
         self.pending.push_back(notice);
@@ -192,6 +201,7 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         FleetEvent::Fleet => json!({ "event": "fleet" }),
         FleetEvent::Resync => json!({ "event": "resync" }),
         FleetEvent::NeedsYou => json!({ "event": "needs_you" }),
+        FleetEvent::Released => json!({ "event": "released" }),
         FleetEvent::Plan { workspace } => json!({ "event": "plan", "workspace": workspace.to_string() }),
         // The slot and whether it went are on the line: a phone with that page
         // open re-reads it, or closes it.
@@ -3188,6 +3198,8 @@ mod concurrency_tests;
 mod health_tests;
 #[cfg(test)]
 mod link_revival_tests;
+#[cfg(test)]
+mod released_tests;
 mod subscribe;
 use subscribe::subscribe;
 

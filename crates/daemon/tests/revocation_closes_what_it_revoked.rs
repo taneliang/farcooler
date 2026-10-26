@@ -244,6 +244,46 @@ async fn revoke_answers_only_after_it_has_closed() {
     assert!(probe.is_closed(), "revoke answered before the phone's session was closed");
 }
 
+/// The revoked device hears it was released, as the last thing on its own
+/// connection, and the device nobody revoked hears nothing of it (ov-820).
+///
+/// A device that reaches this runner only through Tailcat can learn of its
+/// revocation no other way: the rebuilt tunnel ignores it in silence. So the
+/// frame has to be on the revoked connection before it ends, and the
+/// released device's broadcast filter (ov-758) must not be what decides it.
+#[tokio::test]
+async fn a_revoked_device_hears_it_was_released_and_a_bystander_does_not() {
+    use farcooler_protocol::v1::event::Payload;
+    let h = start().await;
+    let mut admin = connect(&h, None).await;
+    enroll(&mut admin, PHONE_KEY, "iPhone", "phone").await;
+    enroll(&mut admin, LAPTOP_KEY, "MacBook", "laptop").await;
+
+    let mut phone = connect(&h, Some("farcooler-session control phone\n")).await;
+    let mut laptop = connect(&h, Some("farcooler-session control laptop\n")).await;
+    phone.call(request("client.list")).await.expect("the phone starts connected");
+    laptop.call(request("client.list")).await.expect("the laptop starts connected");
+
+    revoke(&mut admin, "phone").await;
+
+    let wait = std::time::Duration::from_secs(10);
+    let mut heard = false;
+    while let Ok(Ok(event)) = tokio::time::timeout(wait, phone.next_event()).await {
+        heard |= matches!(event.payload, Some(Payload::DeviceReleased(_)));
+    }
+    assert!(heard, "the revoked phone's connection ended without saying it was released");
+    assert!(phone.has_ended(), "the revoked phone's connection is still open");
+
+    let quiet = std::time::Duration::from_millis(300);
+    while let Ok(Ok(event)) = tokio::time::timeout(quiet, laptop.next_event()).await {
+        assert!(
+            !matches!(event.payload, Some(Payload::DeviceReleased(_))),
+            "the laptop nobody revoked was told it was released"
+        );
+    }
+    laptop.call(request("client.list")).await.expect("the laptop is still connected");
+}
+
 /// The tunnel half of containment, where a revoked device's *route* lives.
 ///
 /// Deleting a line stops the next login and closes the sessions this daemon is
@@ -630,5 +670,69 @@ done
              copied at Start: {}",
             commands(&log)
         );
+    }
+    /// A revoked device's route is torn down only once its farewell is out
+    /// (ov-820): a Tailcat-only device hears `device_released` over that
+    /// route or never. The device here says its farewell 200 ms after its
+    /// session is closed, and the tunnel must still be as it was then.
+    #[tokio::test]
+    async fn the_tunnel_waits_for_the_revoked_devices_farewell() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", Some(NODE_B)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(matches!(outcome, TunnelOutcome::Serving(_)), "the fixture's own tunnel never started: {outcome:?}");
+        std::fs::write(&log, "").unwrap();
+
+        let phone = h.service.sessions().open(Some("phone".into()));
+        let watched = log.clone();
+        let saying = tokio::spawn(async move {
+            phone.closed().await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let rebuilt = commands(&watched).contains("serve");
+            phone.said_farewell();
+            rebuilt
+        });
+        revoke_directly(&h, "phone").await;
+
+        assert!(!saying.await.unwrap(), "the tunnel was rebuilt before the revoked device's farewell was out");
+        assert!(
+            commands(&log).contains(&format!("serve 22 {NODE_B}")),
+            "the tunnel was never rebuilt: {}",
+            commands(&log)
+        );
+    }
+
+    /// A device that never says its farewell doesn't hold the revocation:
+    /// the route goes at `FAREWELL_WAIT`.
+    #[tokio::test]
+    async fn a_silent_device_holds_the_tunnel_only_so_long() {
+        use farcooler_daemon::enrollment::{FAREWELL_IN_FLIGHT, FAREWELL_WAIT};
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", Some(NODE_B)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(matches!(outcome, TunnelOutcome::Serving(_)), "the fixture's own tunnel never started: {outcome:?}");
+        std::fs::write(&log, "").unwrap();
+
+        let _silent = h.service.sessions().open(Some("phone".into()));
+        let began = std::time::Instant::now();
+        revoke_directly(&h, "phone").await;
+        let took = began.elapsed();
+
+        assert!(took >= FAREWELL_WAIT, "the revocation didn't wait for the farewell at all: {took:?}");
+        assert!(
+            took < FAREWELL_WAIT + FAREWELL_IN_FLIGHT + std::time::Duration::from_secs(10),
+            "a silent device held the revocation: {took:?}"
+        );
+        assert!(commands(&log).contains(&format!("serve 22 {NODE_B}")), "the tunnel was never rebuilt: {}", commands(&log));
     }
 }

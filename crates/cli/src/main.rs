@@ -3355,6 +3355,11 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // A task notice the runner composed (ov-94): what the Mac posts when
         // the relay won't, under `notice_id`. See `notice_json`.
         farcooler_protocol::v1::event::Payload::Notice(n) => event_lines::notice_json(&n),
+        // The runner took this device's access away (ov-820), its last word
+        // before it closes the connection: the Mac stops on its no-access screen.
+        farcooler_protocol::v1::event::Payload::DeviceReleased(_) => serde_json::json!({
+            "kind": "released",
+        }),
         farcooler_protocol::v1::event::Payload::BoardReadsChanged(r) => event_lines::reads_event_json(&r),
         farcooler_protocol::v1::event::Payload::PlanChanged(p) => event_lines::plan_event_json(&p),
         farcooler_protocol::v1::event::Payload::PagesChanged(p) => event_lines::pages_event_json(&p),

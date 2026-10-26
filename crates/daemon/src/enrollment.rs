@@ -553,6 +553,36 @@ fn rerender_with_node_key(
     Ok(fence::Change::Write { entries: ours, foreign })
 }
 
+/// Before a revoked device's tunnel route is torn down, let the farewell its
+/// connections are saying (`device_released`, ov-820) reach it.
+///
+/// A device that reaches this runner only through Tailcat learns of its
+/// revocation from that frame or never: once the tunnel is rebuilt without
+/// its node key, Tailcat ignores it in silence. So this waits, up to
+/// [`FAREWELL_WAIT`], for each closed connection to have written its frame
+/// (or ended), then [`FAREWELL_IN_FLIGHT`] more, for the bytes to cross the
+/// `--stdio` relay, sshd and the tunnel before the route goes. Nothing at all
+/// when no connection was closed: a device that wasn't connected has nobody
+/// to tell.
+async fn let_the_farewells_through(closing: crate::sessions::Closing) {
+    if closing.count() == 0 {
+        return;
+    }
+    if !closing.said_within(FAREWELL_WAIT).await {
+        tracing::warn!("a revoked device's farewell wasn't written in time; rebuilding the tunnel anyway");
+    }
+    tokio::time::sleep(FAREWELL_IN_FLIGHT).await;
+}
+
+/// How long a revocation waits for its closed connections' farewells.
+/// `FAREWELL_DEADLINE` in transport bounds each one at a second; this is
+/// that, and room.
+pub const FAREWELL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How long a written farewell is given to leave the host before the tunnel
+/// under it is rebuilt.
+pub const FAREWELL_IN_FLIGHT: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// [`revoke`] for many devices at once (ov-783, the released devices'
 /// sweep): every line of each of `client_ids` that `still` admits, decided
 /// and taken out under one lock hold in ONE write, then each one's sessions
@@ -593,11 +623,14 @@ pub async fn revoke_many(
     })
     .await?;
     // After the write, for `revoke`'s reason: the file is the authority.
+    let mut closing = crate::sessions::Closing::none();
     for device in &revoked {
-        let closed = svc.sessions().close(device);
-        tracing::info!(client = %device, closed, "revoked a released device and closed its live sessions");
+        let closed = svc.sessions().closing(device);
+        tracing::info!(client = %device, closed = closed.count(), "revoked a released device and closed its live sessions");
+        closing = closing.and(closed);
     }
     if rebuild_tunnel && was_tunneled {
+        let_the_farewells_through(closing).await;
         let outcome = crate::allowlist::start_tunnel(svc).await;
         tracing::info!(?outcome, count = revoked.len(), "made this runner's tunnel match the file a sweep just wrote");
     }
@@ -721,8 +754,8 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     // Synchronous and complete when it returns: closing a session is a flag the
     // connection's next poll reads, not a request to something that might get
     // round to it.
-    let closed = svc.sessions().close(&closing);
-    tracing::info!(client = %closing, closed, "revoked a device and closed its live sessions");
+    let closed = svc.sessions().closing(&closing);
+    tracing::info!(client = %closing, closed = closed.count(), "revoked a device and closed its live sessions");
 
     // Then the tunnel route, and still before the answer.
     //
@@ -750,6 +783,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     // See its doc comment for the invariant, and `allowlist::withdraw` for why
     // an empty `serve` is safe on a runner with no identity file.
     if was_tunneled {
+        let_the_farewells_through(closed).await;
         let outcome = crate::allowlist::start_tunnel(svc).await;
         // "Rebuilt" is only true of `Serving`; the rest withdrew the tunnel
         // rather than rebuilding one, and a log line that says the wrong one is

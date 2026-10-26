@@ -61,6 +61,8 @@ pub struct Sessions {
 struct Live {
     client_id: Option<String>,
     gate: Arc<tokio::sync::Semaphore>,
+    /// Closed once the connection has said its farewell (ov-820), or ended.
+    said: Arc<tokio::sync::Semaphore>,
 }
 
 impl Sessions {
@@ -77,9 +79,10 @@ impl Sessions {
         // forever, so a connection cannot survive by being registered a moment
         // too late.
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let said = Arc::new(tokio::sync::Semaphore::new(0));
         let id = self.next.fetch_add(1, Ordering::Relaxed);
-        self.live.lock().unwrap().insert(id, Live { client_id, gate: gate.clone() });
-        Arc::new(Session { sessions: self.clone(), id, gate })
+        self.live.lock().unwrap().insert(id, Live { client_id, gate: gate.clone(), said: said.clone() });
+        Arc::new(Session { sessions: self.clone(), id, gate, said })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -92,15 +95,59 @@ impl Sessions {
     /// A connection with no client id is never matched, whatever is asked for.
     /// Those are the local callers, including the one doing the revoking.
     pub fn close(&self, client_id: &str) -> usize {
+        self.closing(client_id).count()
+    }
+
+    /// [`close`](Self::close), keeping what it takes to wait for each closed
+    /// connection's farewell (ov-820). A revocation that is about to tear
+    /// down a tunneled device's route waits on it first, so the
+    /// `device_released` frame isn't cut off on its way.
+    pub fn closing(&self, client_id: &str) -> Closing {
         let live = self.live.lock().unwrap();
-        let mut closed = 0;
+        let mut said = Vec::new();
         for session in live.values() {
             if session.client_id.as_deref() == Some(client_id) {
                 session.gate.close();
-                closed += 1;
+                said.push(session.said.clone());
             }
         }
-        closed
+        Closing { said }
+    }
+}
+
+/// Connections [`Sessions::closing`] closed, whose farewells can be waited on.
+#[must_use = "a closing that nobody waits on is `Sessions::close`"]
+pub struct Closing {
+    said: Vec<Arc<tokio::sync::Semaphore>>,
+}
+
+impl Closing {
+    /// How many connections were closed.
+    pub fn count(&self) -> usize {
+        self.said.len()
+    }
+
+    /// Wait until every closed connection has said its farewell or ended,
+    /// for `within` at most. Answers whether they all had.
+    pub async fn said_within(self, within: std::time::Duration) -> bool {
+        let all = async {
+            for said in &self.said {
+                // Closed is the only way it finishes, as with `gate`.
+                let _ = said.acquire().await;
+            }
+        };
+        tokio::time::timeout(within, all).await.is_ok()
+    }
+
+    /// Several devices' closings as one, waited on together.
+    pub fn and(mut self, other: Closing) -> Closing {
+        self.said.extend(other.said);
+        self
+    }
+
+    /// Nothing closed yet: what [`and`](Self::and) starts from.
+    pub fn none() -> Closing {
+        Closing { said: Vec::new() }
     }
 }
 
@@ -113,6 +160,7 @@ pub struct Session {
     sessions: Arc<Sessions>,
     id: u64,
     gate: Arc<tokio::sync::Semaphore>,
+    said: Arc<tokio::sync::Semaphore>,
 }
 
 impl Session {
@@ -130,10 +178,18 @@ impl Session {
     pub fn is_closed(&self) -> bool {
         self.gate.is_closed()
     }
+
+    /// This connection has said its farewell, or couldn't (ov-820): what
+    /// [`Closing::said_within`] waits for.
+    pub fn said_farewell(&self) {
+        self.said.close();
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // An ended connection has nothing left to say, so nobody waits on it.
+        self.said.close();
         // A poisoned lock would mean a panic inside `close`, which does nothing
         // that can panic. Ignored rather than propagated so a connection ending
         // never becomes a second panic during unwind.
@@ -195,6 +251,28 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(1), phone.closed())
             .await
             .expect("a waiter that arrived after the close never woke");
+    }
+
+    #[tokio::test]
+    async fn a_closing_waits_for_each_farewell_or_end() {
+        // What a revocation waits on before it tears down a tunneled
+        // device's route (ov-820): every closed connection's farewell, or
+        // its end, and no longer than it is told.
+        let sessions = Sessions::new();
+        let control = sessions.open(Some("phone".into()));
+        let events = sessions.open(Some("phone".into()));
+        let short = std::time::Duration::from_millis(50);
+
+        let closing = sessions.closing("phone");
+        assert_eq!(closing.count(), 2);
+        control.said_farewell();
+        assert!(!closing.said_within(short).await, "one connection had said nothing and it didn't wait");
+
+        let closing = sessions.closing("phone");
+        drop(events);
+        assert!(closing.said_within(short).await, "an ended connection and a said farewell were waited on still");
+        drop(control);
+        assert_eq!(sessions.closing("phone").count(), 0);
     }
 
     #[test]

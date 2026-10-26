@@ -1037,6 +1037,15 @@ message Event {
     // A client with that page open re-reads the slot; one without pages open
     // ignores it. Not `task_changed`: nothing about a task moved.
     PagesChanged pages_changed = 28;
+    // This runner has taken this device's access away (ov-820): it was
+    // revoked, or released from its member. The last frame on a connection
+    // the runner is closing for that reason, sent to that connection alone,
+    // never on the broadcast, and before a tunneled device's route is torn
+    // down. A device that reaches the runner only through Tailcat can learn it
+    // no other way: the rebuilt tunnel ignores it in silence, which looks the
+    // same as a runner that is asleep. A device offline at the time never gets
+    // it. A client keeps it for this runner until a dial gets in again.
+    Empty device_released = 29;
   }
 }
 

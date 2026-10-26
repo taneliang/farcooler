@@ -135,6 +135,37 @@ async fn k_swept_devices_rebuild_the_tunnel_once() {
     unsafe { std::env::remove_var("FARCOOLER_TUNNEL_HELPER") };
 }
 
+/// A swept device that's connected says its farewell (`device_released`,
+/// ov-820) before the one rebuild takes its route: it says it 200 ms after
+/// its session is closed, and the tunnel is still as it was then.
+#[tokio::test]
+async fn the_sweep_waits_for_a_connected_devices_farewell() {
+    let _serial = SERIAL.lock().await;
+    stop_any_tunnel();
+    let root = tempfile::tempdir().expect("a scratch root");
+    let log = root.path().join("commands");
+    fake_helper(root.path(), &log);
+    let service = a_runner_with_stale_lines(root.path()).await;
+    std::fs::write(&log, "").unwrap();
+
+    let connected = service.sessions().open(Some(BOBS[1].into()));
+    let watched = log.clone();
+    let saying = tokio::spawn(async move {
+        connected.closed().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let rebuilt = !serves(&watched).is_empty();
+        connected.said_farewell();
+        rebuilt
+    });
+    release_sweep::sweep(&service).await.expect("the sweep ran");
+
+    assert!(!saying.await.unwrap(), "the sweep rebuilt the tunnel before the swept device's farewell was out");
+    assert_eq!(serves(&log), [format!("serve 22 {}", NODES[3])], "one rebuild, admitting only the owner's device");
+
+    stop_any_tunnel();
+    unsafe { std::env::remove_var("FARCOOLER_TUNNEL_HELPER") };
+}
+
 /// The daemon's first tunnel admits none of the devices its start sweeps:
 /// the real `farcoolerd`, so it's `main`'s order that's under test.
 #[tokio::test]
