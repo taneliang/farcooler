@@ -227,6 +227,7 @@ private struct SurfaceModifier<S: Shape>: ViewModifier {
     let level: Surface
     let shape: S
     let content: Color
+    let interactive: Bool
     @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content view: Content) -> some View {
@@ -238,7 +239,7 @@ private struct SurfaceModifier<S: Shape>: ViewModifier {
         case .inset:
             view.background(Fill.inset(contrast), in: shape).overlay(edge)
         case .floating:
-            view.glassEffect(.regular, in: shape)
+            view.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         }
     }
 
@@ -279,10 +280,16 @@ extension View {
     /// The only way a view gets a background shape, fill, edge or glass. `fill`
     /// is for `.content` only: the Mac passes the theme-tinted document color,
     /// everyone else takes the platform's text background.
+    ///
+    /// `interactive` is for `.floating` only: glass that is itself a thing you
+    /// touch (a field, a card that is one tap target) and reacts like the
+    /// system's, scaling and lighting under the finger (ov-789). Never on a
+    /// `Button` with a style of its own, which already reacts: drawn on
+    /// interactive glass it reacts twice.
     public func surface<S: Shape>(
-        _ level: Surface, in shape: S, fill: Color = Surface.contentFill
+        _ level: Surface, in shape: S, fill: Color = Surface.contentFill, interactive: Bool = false
     ) -> some View {
-        modifier(SurfaceModifier(level: level, shape: shape, content: fill))
+        modifier(SurfaceModifier(level: level, shape: shape, content: fill, interactive: interactive))
     }
 }
 

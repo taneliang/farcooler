@@ -27,6 +27,8 @@ struct NativeComposer: View {
     /// The side of a button's target, the photo button's glass and the field
     /// at one line.
     static let targetSide: CGFloat = 44
+    /// The +'s label: the glass button style pads it to `targetSide`.
+    static let plusSide: CGFloat = 32
     /// The trailing action's capsule, 7 pt in from the field's edge on both
     /// axes, and so concentric with it (`Radius.controlBar`): Messages' Send
     /// measures 39 × 29 pt in a 42 pt field.
@@ -76,6 +78,8 @@ struct NativeComposer: View {
     @State private var fieldHeight = NativeComposerField.lineHeight
     @State private var picked: [PhotosPickerItem] = []
     @State private var stopArmed = false
+    /// A photo's held preview is up (`chip`).
+    @State private var previewing = false
     /// The screen's one margin (ov-611).
     @Environment(\.screenMargin) private var margin
 
@@ -129,8 +133,18 @@ struct NativeComposer: View {
         // above it, the box kept one height and its text and photos drew
         // over its edges (ov-614).
         .fixedSize(horizontal: false, vertical: true)
-        .surface(.floating, in: Self.shape)
+        // Clipped BEFORE the glass: the text and photos stay inside the
+        // field's shape, and the glass's own response to a press, which
+        // swells past that shape, isn't cut off by it.
         .clipShape(Self.shape)
+        // Interactive, as Messages' field is (ov-789): pressed or dragged, it
+        // swells and lights under the finger. The field itself is the thing
+        // touched; Send inside it keeps its own plain response.
+        //
+        // Not while a held photo's menu is up: the menu's Remove sits over
+        // the field, and interactive glass under it took the tap, so Remove
+        // did nothing (measured, GlassUITests).
+        .surface(.floating, in: Self.shape, interactive: !previewing)
         #if DEBUG
         // The surface's own edges, for the UI tests (ov-611, ov-614): a
         // container's frame is its children's, not its surface's.
@@ -191,7 +205,7 @@ struct NativeComposer: View {
                 .allowsHitTesting(false)
                 .accessibilityElement()
                 .accessibilityIdentifier("native-composer-probe")
-                .accessibilityValue("overwrote=\(probe.overwrites)")
+                .accessibilityValue("overwrote=\(probe.overwrites) \(probe.fade)")
         }
     }
     #endif
@@ -235,11 +249,14 @@ struct NativeComposer: View {
         ) {
             Image(systemName: "plus")
                 .font(.title3)
-                .frame(width: Self.targetSide, height: Self.targetSide)
-                .surface(.floating, in: Circle())
-                .contentShape(.circle)
+                .frame(width: Self.plusSide, height: Self.plusSide)
         }
-        .buttonStyle(.plain)
+        // The system's glass button, as Messages' + is (ov-789): its glass,
+        // its press and drag response, and its place in the composer's one
+        // glass container, rather than glass drawn under a plain button that
+        // never reacted.
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
         // A `PhotosPicker` tints its label with the app's accent, and a
         // foreground style on the label doesn't survive it (ov-404 review 1).
         .tint(.primary)
@@ -292,6 +309,18 @@ struct NativeComposer: View {
         .frame(width: Self.chipSide, height: Self.chipSide)
         .surface(.inset, in: Self.chipShape)
         .clipShape(Self.chipShape)
+        // Held, the photo as it will go, large, with Remove under it, as
+        // Messages does with a photo waiting in its field (ov-792). Before
+        // the remove badge, so the badge isn't lifted with it.
+        .contentShape(.contextMenuPreview, Self.chipShape)
+        .contextMenu {
+            Button("Remove", systemImage: "trash", role: .destructive) { model.detach(image.id) }
+                .accessibilityIdentifier("native-image-preview-remove")
+        } preview: {
+            OutgoingImagePreview(image: image)
+                .onAppear { previewing = true }
+                .onDisappear { previewing = false }
+        }
         .overlay(alignment: .topTrailing) {
             Button {
                 model.detach(image.id)
@@ -494,6 +523,9 @@ struct NativeComposerField: UIViewRepresentable {
         view.onPasteImages = onPasteImages
         view.offersTab = offersTab
         view.onTab = onTab
+        #if DEBUG
+        view.onFade = { NativeComposerProbe.shared.faded($0) }
+        #endif
         DispatchQueue.main.async { context.coordinator.report(view) }
         // A change of text size from outside the app (Control Center, Settings)
         // grows the field's lines before SwiftUI knows: measured again then, or
@@ -550,6 +582,12 @@ struct NativeComposerField: UIViewRepresentable {
             echo.typed(textView.text)
             parent.text = textView.text
             report(textView)
+        }
+
+        /// The caret's line may have moved into an edge's fade, or out of
+        /// it (`ComposerField.fade`).
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            textView.setNeedsLayout()
         }
 
         func report(_ textView: UITextView) {

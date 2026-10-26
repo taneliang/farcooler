@@ -132,9 +132,10 @@ struct GlassSurface: ViewModifier {
     /// reaction, and a button drawn on an interactive surface reacts twice.
     var interactive: Bool = false
 
+    /// AgentKit's floating surface, so this and the composer's glass are one
+    /// opinion (the composer never came through here).
     func body(content: Content) -> some View {
-        content.glassEffect(  // style-exempt: the one place the composer's glass is drawn, with its interactive variant
-            interactive ? .regular.interactive() : .regular, in: .rect(cornerRadius: radius))
+        content.surface(.floating, in: .rect(cornerRadius: radius), interactive: interactive)
     }
 }
 

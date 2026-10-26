@@ -253,6 +253,8 @@ SOURCES = [
     # lines, Stop and Send Now.
     "NativeComposer.swift",
     "NativeComposeModel.swift",
+    # A photo waiting in the composer, held: as it will be sent (ov-792).
+    "ComposerImagePreview.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).
     "NativeBringHere.swift",
     # The UI harnesses' clean start (ov-672).
