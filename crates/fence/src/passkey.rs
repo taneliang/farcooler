@@ -35,12 +35,10 @@ use farcooler_protocol::Channel;
 use crate::Grant;
 
 /// The RP ID a passkey's line may carry on a build of `channel`: the host
-/// that channel's web client is served from.
+/// that channel's web client is served from (`Channel::app_host`, the
+/// spelling the browser's client signs with too).
 pub fn app_host_for(channel: Channel) -> &'static str {
-    match channel {
-        Channel::Stable | Channel::Preview => "app.farcooler.com",
-        Channel::Canary | Channel::Local => "app.canary.farcooler.com",
-    }
+    channel.app_host()
 }
 
 /// This build's: `app_host_for(farcooler_protocol::CHANNEL)`.

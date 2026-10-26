@@ -95,6 +95,21 @@ impl Channel {
         }
     }
 
+    /// The host this channel's web client is served from, which is also the
+    /// RP ID of every passkey it makes (ov-765, ov-767). A local build is a
+    /// developer's, who works against canary, so it takes canary's.
+    ///
+    /// One spelling for the three places that must agree: the fence admits a
+    /// passkey line only for this host (`farcooler_fence::app_host_for`), the
+    /// browser makes and signs with its passkey for it (`crates/web`), and a
+    /// stable passkey can never sign for a canary page or the other way round.
+    pub fn app_host(self) -> &'static str {
+        match self {
+            Channel::Stable | Channel::Preview => "app.farcooler.com",
+            Channel::Canary | Channel::Local => "app.canary.farcooler.com",
+        }
+    }
+
     /// What this channel's CLI is called on disk. Same rule as the daemon's.
     pub fn cli_binary_name(self) -> &'static str {
         match self {
