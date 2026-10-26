@@ -323,6 +323,8 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
         "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it’s still in {agent}’s box."),
         "stayed_busy" => format!("Not sent: “{quoted}”. {agent} stayed busy, so it’s still in {agent}’s box."),
+        "interrupted" => format!("Not sent: “{quoted}”. {agent}’s turn was stopped, so it’s still in {agent}’s box."),
+        "runner_down" => format!("Not sent: “{quoted}”. The runner was stopped while it waited. Check the terminal."),
         "stayed_blocked" => format!("Not sent: “{quoted}”. {agent} was still asking you something, so the runner didn’t send it. Check the terminal."),
         "box_cleared" => format!("{agent}’s box was cleared while “{quoted}” waited, so the runner didn’t send it."),
         "unreadable" => format!("The runner couldn’t read {agent}’s screen while “{quoted}” waited, so it didn’t send it. Check the terminal."),

@@ -42,9 +42,13 @@
 //!
 //! **Given up.** A Stop pressed since the message was queued leaves it, as
 //! the person stopped the turn it waited on (Send Now is refused while the
-//! box holds anything, `interrupt::pressable`, so it never reaches here);
-//! so do the wait running out, the box changing, and the agent going. Each is logged as a paste left in the box, with its check, and the
-//! pane's rows say which, in words of its own (`held::why_not_sent`). A box
+//! box holds anything, `interrupt::pressable`, so it never reaches here).
+//! So does a turn claude's transcript says the person stopped some other
+//! way: a permission dialog answered No or Esc, which claude 2.1.309 ends
+//! as `[Request interrupted by user for tool use]`, or Esc typed straight
+//! in the terminal (ov-816 review, S1). So do the wait running out, the
+//! box changing, and the agent going. Each is logged as a paste left in the
+//! box, with its check, and the pane's rows say which, in words of its own (`held::why_not_sent`). A box
 //! that emptied, or a key typed, may be the message sent by hand, from the
 //! Mac or straight in tmux: claude's transcript is read for it first, and if
 //! it's there the Queued row is taken back for claude's own.
@@ -53,8 +57,10 @@
 //! from before it begins until it ends, so a runner restarted during it
 //! picks it up where it was (`resume_compose_waits`): sent meanwhile, its
 //! row is taken back; the same claude still there, the wait goes on, its
-//! deadline counted from when it was queued; another claude, or none, says
-//! so.
+//! deadline counted from when it was queued, or given up at once if that
+//! ran out while the runner was down; another claude, or none, says so. A
+//! wait begun since this start, before its first pump, is running already
+//! and isn't started twice.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -210,6 +216,10 @@ impl Watcher {
     /// (this module's docs, "Kept").
     pub(super) fn resume_compose_waits(&self) {
         for wait in self.service.store.compose_waits().unwrap_or_default() {
+            // Pended since this start, before its first pump: running already.
+            if self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).pending.contains_key(&wait.id) {
+                continue;
+            }
             let (Ok(kept), Ok(to)) = (serde_json::from_str::<Kept>(&wait.wait), self.service.store.get_terminal(wait.terminal)) else {
                 let _ = self.service.store.drop_compose_wait(wait.id);
                 continue;
@@ -273,6 +283,11 @@ impl Watcher {
         let Ok((preset, tty, pid)) = self.proven_agent(&to).await else { return Err(gone("not_running")) };
         if pid != kept.pid {
             return Err(gone("agent_restarted"));
+        }
+        // Its whole wait ran out while the runner was down: nothing was
+        // tried, and claude was never read.
+        if now_millis() - kept.queued_at >= i64::try_from(self.timing().turn_begun_wait.as_millis()).unwrap_or(i64::MAX) {
+            return Err(gone("runner_down"));
         }
         let Some(config) = registry_turn::config_of(pid).await else { return Err(gone("not_running")) };
         let proven = Proven { preset, tty, pid, turn: Turn::During, held: false, background: kept.background() };
@@ -368,6 +383,13 @@ impl Watcher {
                     idle_since = None;
                 }
                 Ok(None) if !quiet => idle_since = None,
+                // The turn it waited on ended as the person stopped it: a
+                // dialog answered No or Esc, or Esc typed straight in the
+                // terminal. As with Stop, it's theirs to send (ov-816 S1).
+                Ok(None) if mid_turn::interrupted_since(&p.confirm.transcript, p.confirm.from) => {
+                    left_in_box(&registry, &p.to, "interrupted", p.proven.background, None);
+                    return Err("interrupted");
+                }
                 Ok(None) => {
                     let first = *idle_since.get_or_insert_with(Instant::now);
                     if first.elapsed() >= timing.idle_twice {

@@ -29,7 +29,8 @@
 # logs PASTE, so a test never races it against the read-back).
 #
 # In menu or working-menu, a typed key is the dialog's answer: it logs
-# `ANSWERED <key>`, and the box keeps what it held (ov-816).
+# `ANSWERED <key>`, and the box keeps what it held (ov-816). `2` (No) or a
+# lone Esc refuses it: an interrupt record, and the mode back to idle.
 #
 # While working, Enter queues the box as the real agents do (ov-360): it
 # logs `QUEUED <box>`, draws it above the box as claude 2.1.290 or codex
@@ -393,6 +394,15 @@ sub draw {
     print "\e[H\e[2J" . join("\r\n", @rows);
 }
 
+# A permission dialog answered No or Esc, as claude 2.1.309 records it: the
+# tool's refusal, then the turn stopped, and back between turns (ov-816).
+sub dialog_refused {
+    record('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}');
+    open(my $f, '>', $control) or die;
+    print $f "idle";
+    close $f;
+}
+
 # Each queued message as the next turn's prompt, as claude runs its queue.
 sub run_queue {
     for my $q (@queued) {
@@ -520,6 +530,12 @@ while (1) {
                 push @said, $shown;
                 $composer = "";
             }
+        } elsif ($buf eq "\e" && ($mode eq 'menu' || $mode eq 'working-menu')) {
+            # Esc on a permission dialog: claude 2.1.309 ends the turn as the
+            # person stopping it, and keeps its box (ov-816).
+            $buf = "";
+            logit("ESC");
+            dialog_refused();
         } elsif ($buf eq "\e") {
             $buf = "";
             logit("ESC");
@@ -554,9 +570,10 @@ while (1) {
             $buf =~ s/^\e\[?[<?>]?[0-9;]*\$?[A-Za-z~]?//;
         } elsif ($mode eq 'menu' || $mode eq 'working-menu') {
             # A key on a dialog picks its option, and the box keeps what it
-            # held (ov-816).
+            # held (ov-816); `2`, No, stops the turn as Esc does.
             $buf =~ s/^(.)//s;
             logit("ANSWERED " . decode_utf8($1));
+            dialog_refused() if $1 eq '2';
         } else {
             $buf =~ s/^([^\e\r\x15\x19]+)// or $buf =~ s/^(.)//s;
             $killed = "";

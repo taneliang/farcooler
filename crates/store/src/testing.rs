@@ -64,6 +64,14 @@ pub fn backdate_compose_holds(store: &crate::Store, by_ms: i64) {
     store.conn().execute("UPDATE compose_holds SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
 }
 
+/// Rewrite every kept wait for an Enter (ov-816), as `change` makes it:
+/// a wait some other runner's claude, or an older start, left.
+pub fn rewrite_compose_waits(store: &crate::Store, change: impl Fn(&str) -> String) {
+    for wait in store.compose_waits().unwrap() {
+        store.conn().execute("UPDATE compose_waits SET wait = ?2 WHERE id = ?1", params![crate::models::uuid_blob(wait.id), change(&wait.wait)]).unwrap();
+    }
+}
+
 /// Mark every held composed message claimed, as a restart mid-typing leaves it.
 pub fn claim_compose_holds(store: &crate::Store) {
     store.conn().execute("UPDATE compose_holds SET claimed_at = 1", []).unwrap();

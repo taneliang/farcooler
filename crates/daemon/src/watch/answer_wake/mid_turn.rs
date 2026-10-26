@@ -429,6 +429,22 @@ pub(crate) fn tool_called_since(path: &Path, from: u64) -> bool {
     })
 }
 
+/// Whether claude's transcript at `path`, past byte `from`, records a turn
+/// the person stopped: Esc mid-turn (`[Request interrupted by user]`), or a
+/// permission dialog answered No or Esc (`[Request interrupted by user for
+/// tool use]`, measured on claude 2.1.309, ov-816).
+pub(crate) fn interrupted_since(path: &Path, from: u64) -> bool {
+    records(path, from).iter().filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("user")).any(|record| {
+        let content = record.get("message").and_then(|m| m.get("content"));
+        let says = |text: &str| text.starts_with("[Request interrupted by user");
+        match content {
+            Some(serde_json::Value::String(text)) => says(text),
+            Some(serde_json::Value::Array(blocks)) => blocks.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).any(says),
+            _ => false,
+        }
+    })
+}
+
 /// Whether `text` was queued in the last stretch before byte `from`. A
 /// record the stretch begins inside of fails to parse, and is skipped.
 pub(crate) fn enqueued_before(path: &Path, from: u64, text: &str) -> bool {

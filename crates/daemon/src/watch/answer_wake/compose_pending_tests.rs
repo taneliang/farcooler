@@ -709,3 +709,96 @@ async fn a_message_sent_during_a_long_turn_with_a_dialog_is_sent_when_it_ends() 
 async fn a_message_sent_during_a_five_minute_turn_with_a_dialog_is_sent_when_it_ends() {
     a_long_turn_with_a_dialog(Duration::from_secs(5 * 60), |_| {}).await;
 }
+
+// ---- ov-816 fix round 1 ----
+
+/// Review S1: a permission dialog answered No (`2`), or Esc, from Far
+/// Cooler's terminal ends claude's turn as the person stopping it (claude
+/// 2.1.309 records `[Request interrupted by user for tool use]`): the wait
+/// gives the message up, as after Stop, and never sends it once the
+/// person has been quiet for 3 s.
+async fn a_dialog_refused_gives_the_wait_up(key: &str) {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "working").await;
+    si.show("menu").await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    typed_marked(&b, &agent, key).await;
+    super::logs(&si, "MODE idle\n").await;
+    waits_over(&b).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    assert_eq!(not_sent(agent.id), ["Not sent: “what did they find”. Claude’s turn was stopped, so it’s still in Claude’s box."]);
+}
+
+#[tokio::test]
+async fn a_dialog_answered_no_gives_the_wait_up() {
+    a_dialog_refused_gives_the_wait_up("32").await;
+}
+
+#[tokio::test]
+async fn a_dialog_answered_esc_gives_the_wait_up() {
+    a_dialog_refused_gives_the_wait_up("1b").await;
+}
+
+/// Each kept wait's record, `field` set to `value`.
+fn kept_with(b: &Board, field: &str, value: i64) {
+    farcooler_store::testing::rewrite_compose_waits(&b.svc.store, |wait| {
+        let mut kept: serde_json::Value = serde_json::from_str(wait).unwrap();
+        kept[field] = value.into();
+        kept.to_string()
+    });
+}
+
+/// Review S2: a wait picked up after a restart against another claude in
+/// the pane (here, a kept pid that isn't the pane's claude's) is given up,
+/// unentered, and the rows say Claude restarted.
+#[tokio::test]
+async fn a_wait_resumed_against_another_claude_is_given_up() {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "shells-busy").await;
+    b.watcher.stop_waits_for_tests();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    kept_with(&b, "pid", i64::from(stand_in_pid(&si)) + 1);
+    si.show("shells").await;
+    b.watcher.spawn_pumps();
+    waits_over(&b).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    assert_eq!(not_sent(agent.id), ["Claude restarted while “what did they find” waited, so the runner didn’t send it. Check the terminal."]);
+}
+
+/// Review S2, N2: a wait whose whole time ran out while the runner was
+/// down is given up at once when it's picked up, unentered, and the rows
+/// say the runner was stopped, not that Claude stayed busy.
+#[tokio::test]
+async fn a_wait_whose_time_ran_out_while_the_runner_was_down_is_given_up() {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "shells-busy").await;
+    b.watcher.stop_waits_for_tests();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    kept_with(&b, "queued_at", farcooler_store::testing::now_millis() - 60_000);
+    si.show("shells").await;
+    b.watcher.spawn_pumps();
+    waits_over(&b).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    assert_eq!(not_sent(agent.id), ["Not sent: “what did they find”. The runner was stopped while it waited. Check the terminal."]);
+}
+
+/// Review S2: a picked-up wait's deadline counts from when the message was
+/// queued, not from the restart: nine of its ten seconds spent before, the
+/// turn still running, it's given up about a second later.
+#[tokio::test]
+async fn a_resumed_wait_keeps_the_deadline_it_was_queued_with() {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "shells-busy").await;
+    b.watcher.stop_waits_for_tests();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    kept_with(&b, "queued_at", farcooler_store::testing::now_millis() - 9_000);
+    let resumed = std::time::Instant::now();
+    b.watcher.spawn_pumps();
+    waits_over(&b).await;
+    assert!(resumed.elapsed() < Duration::from_secs(5), "waited {:?} past the restart", resumed.elapsed());
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    assert_eq!(not_sent(agent.id), ["Not sent: “what did they find”. Claude stayed busy, so it’s still in Claude’s box."]);
+}
