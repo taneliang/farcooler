@@ -59,8 +59,8 @@ ANALYTICS_TOKEN = "167c3ceefc5f495a8f3ee467d3825c0f"
 # WORKOS_CLIENT_ID, the one WorkOS client the apps and the web app share (a
 # client id is public). That client needs https://www.farcooler.com/app/callback
 # as a redirect URI and https://www.farcooler.com/app as a sign-out redirect.
-# No secret is needed: sign-in goes through the relay's own /v1/auth/token,
-# which holds the WorkOS API key.
+# Sign-in goes through the relay's own /v1/auth/token, which holds the WorkOS
+# API key. The one secret is VISITOR_SECRET, below.
 APP_RELAY_URL = "https://relay.farcooler.com"
 APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 
@@ -70,6 +70,17 @@ APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 # bucket of 30 a minute; this stops a single visitor emptying it with junk
 # callbacks or dead cookies. Ten a minute is far above one person signing in.
 # Declared like the relay's AUTH_LIMIT, in its own namespace.
+#
+# VISITOR_SECRET is required for /app to leave that shared bucket (ov-811). It
+# is a secret, not a var, set per channel to the same value as that channel's
+# relay's VISITOR_SECRET (services/relay/wrangler.toml):
+#   wrangler secret put VISITOR_SECRET                 (www, relay.farcooler.com)
+#   wrangler secret put VISITOR_SECRET --env preview   (relay-preview)
+#   wrangler secret put VISITOR_SECRET --env canary    (relay-canary)
+# With it, each /v1/auth call names the visitor, signed, and the relay limits
+# each visitor on its own (`visitorHeaders` in services/common/relay.ts).
+# Without it, every /app visitor shares the relay's one bucket for all of
+# Cloudflare's Worker traffic, which anyone's Worker can fill.
 [[unsafe.bindings]]
 name = "APP_AUTH_LIMIT"
 type = "ratelimit"
@@ -99,6 +110,7 @@ APP_RELAY_URL = "https://relay-preview.farcooler.com"
 APP_WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
 MARKETING_ORIGIN = "https://www.farcooler.com"
 
+# VISITOR_SECRET: required, as a secret (`--env preview`); see the top block.
 [[env.preview.unsafe.bindings]]
 name = "APP_AUTH_LIMIT"
 type = "ratelimit"
@@ -117,6 +129,7 @@ APP_RELAY_URL = "https://relay-canary.farcooler.com"
 APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
 MARKETING_ORIGIN = "https://www.farcooler.com"
 
+# VISITOR_SECRET: required, as a secret (`--env canary`); see the top block.
 [[env.canary.unsafe.bindings]]
 name = "APP_AUTH_LIMIT"
 type = "ratelimit"

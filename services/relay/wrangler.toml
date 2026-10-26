@@ -163,11 +163,13 @@ CHANNEL = "stable"
 #   FCM_SERVICE_ACCOUNT the Google service account JSON, for Android
 #   ANALYTICS_SALT      rotates monthly; see analytics.ts. Without it
 #                       the relay records no metrics and logs an error
-#   VISITOR_SECRET      optional; the same value as the web client Worker's
-#                       VISITOR_SECRET on this channel, so the auth limit keys
-#                       on each web visitor rather than on Cloudflare's address
-#                       (`visitorKey` in index.ts, ov-811). Without it every web
-#                       sign-in and refresh shares one bucket
+#   VISITOR_SECRET      the same value as VISITOR_SECRET on this channel's
+#                       web client Worker and site Worker (services/web and
+#                       services/site wrangler.toml), so the auth limit keys on
+#                       each web visitor rather than on Cloudflare's address
+#                       (`visitorKey` in index.ts, ov-811). Without it every
+#                       sign-in and refresh from those Workers shares one bucket
+#                       with every other Worker on Cloudflare
 #
 # Per environment, with `--env`:
 #   wrangler secret put APNS_TOPIC --env preview

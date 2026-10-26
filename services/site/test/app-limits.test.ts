@@ -124,3 +124,49 @@ describe('guards', () => {
     expect(html.match(/class="end">(\w+)</g)).toEqual(['class="end">Member<', 'class="end">Member<'])
   })
 })
+
+describe('naming the visitor to the relay (ov-811)', () => {
+  // The relay limits /v1/auth/* by address, and this Worker's address is
+  // Cloudflare's, shared with every other Worker. With VISITOR_SECRET it names
+  // each visitor, signed, so the relay limits them one by one. The MACs are the
+  // ones the relay's suite verifies (services/relay/test/visitor-limit.test.ts).
+  const ALICE = '2001:0db8:0001:0002::/64'
+  const ALICE_MAC = '9e080092fde7aae12e76d5e0773afeb413fd5ffbf740a0b03f1e00e3c60bd2bc'
+  const BOB = '203.0.113.7'
+  const BOB_MAC = '75bac095538e4692a2850ffe885d84e0011a3d6599197a0d686f28524bb36eb8'
+
+  function signed(): { path: string; visitor: string | null; mac: string | null }[] {
+    const sent: { path: string; visitor: string | null; mac: string | null }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers)
+        sent.push({ path: new URL(String(input)).pathname, visitor: headers.get('x-fc-visitor'), mac: headers.get('x-fc-visitor-mac') })
+        return Response.json({ error: 'unauthorized' }, { status: 401 })
+      }),
+    )
+    return sent
+  }
+
+  const pending = `__Host-fc_signin=${b64({ s: 'st', v: 've' })}`
+  const dead = `__Host-fc_session=${b64({ a: jwt({ sub: 'user_ME', exp: 1 }), r: 'dead' })}`
+
+  it('signs the visitor on sign-in and on refresh when it has the secret', async () => {
+    const env = { ...base, VISITOR_SECRET: 'test-visitor-secret' } as unknown as Env
+    const sent = signed()
+    await worker.fetch(from('2001:db8:1:2::abcd', '/app/callback?code=junk&state=st', pending), env)
+    await worker.fetch(from(BOB, '/app', dead), env)
+    expect(sent.filter(s => s.path.startsWith('/v1/auth/'))).toEqual([
+      { path: '/v1/auth/token', visitor: ALICE, mac: ALICE_MAC },
+      { path: '/v1/auth/refresh', visitor: BOB, mac: BOB_MAC },
+    ])
+  })
+
+  it('names no one without the secret', async () => {
+    const sent = signed()
+    await worker.fetch(from(BOB, '/app/callback?code=junk&state=st', pending), base as unknown as Env)
+    await worker.fetch(from(BOB, '/app', dead), base as unknown as Env)
+    expect(sent.filter(s => s.path.startsWith('/v1/auth/'))).toHaveLength(2)
+    expect(sent.every(s => s.visitor === null && s.mac === null)).toBe(true)
+  })
+})
