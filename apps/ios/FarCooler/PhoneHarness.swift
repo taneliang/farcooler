@@ -109,6 +109,9 @@ import SwiftUI
 //                            `role <handle> <role>`
 //   -phone-released          shared as above, and this phone's member was removed: `member.list`
 //                            says `(released)`, and the runner's row says so (ov-784)
+//   -phone-revoked           the runner let this phone in, then refused its key on four
+//                            dials over fourteen seconds: its row says this phone no longer
+//                            has access, and its work is gone (ov-818)
 //   -phone-long-record       bil-7's record is thirty-four notes as long as a real card's, its intent
 //                            long and its acceptance six lines, for measuring a fling (ov-791)
 //   -phone-big-board         Billing's board holds eight hundred more tasks, as a long-lived runner's
@@ -587,6 +590,8 @@ final class HarnessRunner {
             let refused = ClientCore.CoreError.rejected("not yours", word: "not-yours", what: "not_yours")
             _ = await connection.talk.noticeRemoval(after: refused, on: connection)
         }
+        // A revoked key, refused through the reading a failed dial gets (ov-818).
+        if CommandLine.arguments.contains("-phone-revoked") { connection.standInKeyRefused() }
     }
 
     // MARK: - What it has

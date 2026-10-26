@@ -115,6 +115,31 @@ final class RunnerPeopleUITests: XCTestCase {
         keep(app, "runner-removed", expecting: .shows(removed))
     }
 
+    /// A phone whose key the runner refuses after letting it in says it no
+    /// longer has access, and the runner's work leaves the screen (ov-818).
+    /// Light and Dark, with a long runner name.
+    func testARevokedPhoneSaysItHasNoAccess() {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication.phoneHarness(["-phone-revoked", "-phone-host-long", "-phone-appearance", appearance])
+            let noAccess = element(app, "runner-no-access")
+            XCTAssertTrue(noAccess.waitForExistence(timeout: 30), "no no-access row: \(app.debugDescription)")
+            XCTAssertEqual(noAccess.label, "You No Longer Have Access to This Runner")
+            XCTAssertTrue(app.buttons["Check Again"].firstMatch.exists, "no Check Again: \(app.debugDescription)")
+            // The owner's own runner, after Forget Old Key or a reset: their
+            // own way back stays on offer (review S2).
+            XCTAssertTrue(app.buttons["Authorize This Device"].firstMatch.exists, "no way back for the owner: \(app.debugDescription)")
+            XCTAssertTrue(app.buttons["Edit…"].firstMatch.exists, "the runner can't be edited: \(app.debugDescription)")
+            // Its own row says what happened; nothing under it says it isn't answering (review S5).
+            let caveat = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "isn’t answering")).firstMatch
+            XCTAssertFalse(caveat.exists, "Needs You says the revoked runner isn't answering: \(caveat.label)")
+            // The harness's runner has a decision and an ask waiting; with its
+            // work forgotten, nothing does.
+            XCTAssertTrue(app.staticTexts["Nothing Needs You"].firstMatch.exists, "the runner's work stayed on screen: \(app.debugDescription)")
+            keep(app, "runner-no-access-\(appearance)", expecting: .shows(noAccess))
+            app.terminate()
+        }
+    }
+
     func testARunnerNobodySharesSaysNothingAboutPeople() {
         let app = runnerSettings([])
         // The section the People one would sit above, drawn: the screen read.

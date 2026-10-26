@@ -237,6 +237,9 @@ final class TaskBoardStore: ObservableObject {
     /// them: it was deleted. A runner that lists none can't say.
     func isHeld(by clients: [String: DaemonClient]) -> Bool {
         guard clients.values.contains(where: { $0 === client }) else { return false }
+        // A runner that took this Mac's access away keeps nothing of its team
+        // on screen (ov-818).
+        guard !client.teamWorkForgotten else { return false }
         guard client.state == .connected, client.repositoriesListed else { return true }
         guard client.repositories.contains(where: { $0.id == repositoryID }) else { return false }
         guard !workspace.isImplicit, let listed = client.fleet.workspaces else { return true }

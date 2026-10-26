@@ -40,6 +40,9 @@ struct FleetPlaceholder: View {
         /// The runner removed this Mac's member from its team (ov-784): the
         /// runner, `""` for this Mac. It shows them none of its work.
         case removed(String)
+        /// The runner refuses this Mac's key, after letting it in before
+        /// (ov-818): the runner. Its work is gone from this Mac too.
+        case noAccess(String)
     }
 
     /// How long a restore waits before it says it's connecting: a runner
@@ -63,7 +66,8 @@ struct FleetPlaceholder: View {
     /// A window going back to a place on a runner still connecting says so,
     /// whatever else the fleet holds: that place is the one it opens; one
     /// that removed this Mac's member (`removedFrom`) says that instead,
-    /// whatever else is true. Until
+    /// whatever else is true, and so does one that refuses this Mac's key
+    /// after letting it in (`noAccessTo`, ov-818). Until
     /// the runner says what's wrong (`trouble`), or has been waited for past
     /// `connectingLimit`: then it's unreachable, with Try Again.
     ///
@@ -73,9 +77,10 @@ struct FleetPlaceholder: View {
     nonisolated static func phase(
         hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool,
         restoringOn runner: String? = nil, trouble: String? = nil, waited: TimeInterval = 0,
-        restoring: Bool = false, removedFrom: String? = nil
+        restoring: Bool = false, removedFrom: String? = nil, noAccessTo: String? = nil
     ) -> Phase {
         if let removedFrom { return .removed(removedFrom) }
+        if let noAccessTo { return .noAccess(noAccessTo) }
         if let runner {
             if trouble != nil || waited >= connectingLimit { return .unreachable(runner, reason: trouble) }
             return waited < connectingDelay ? .settling : .connecting(runner)
@@ -172,6 +177,12 @@ struct FleetPlaceholder: View {
     /// but says "This Runner" if it ever did.
     nonisolated static func removedTitle(_ runner: String) -> String {
         RunnerPeople.removedTitle(from: runner.isEmpty ? "" : ReadOnlyFolders.runnerName(runner))
+    }
+
+    /// The no-access state's title, by the runner's name (ov-818): "You No
+    /// Longer Have Access to studio".
+    nonisolated static func noAccessTitle(_ runner: String) -> String {
+        RunnerPeople.noAccessTitle(to: runner.isEmpty ? "" : ReadOnlyFolders.runnerName(runner))
     }
 
     /// Under either: what happens next, so waiting reads as waiting.
@@ -274,6 +285,19 @@ struct FleetPlaceholder: View {
                 }
             }
             .accessibilityIdentifier("runner-removed")
+        case .noAccess(let runner):
+            ContentUnavailableView {
+                Label(Self.noAccessTitle(runner), systemImage: "person.crop.circle.badge.xmark")
+            } description: {
+                Text(RunnerPeople.noAccessBody)
+            } actions: {
+                // Dials again now, rather than at the next slow check.
+                Button("Check Again", action: onTryAgain)
+                if let onShowNeedsYou {
+                    Button("Show Needs You Instead", action: onShowNeedsYou)
+                }
+            }
+            .accessibilityIdentifier("runner-no-access")
         case .chooseWorkspace:
             ContentUnavailableView {
                 EmptyStateTitle("No Workspace Selected", symbol: "square.stack.3d.up")

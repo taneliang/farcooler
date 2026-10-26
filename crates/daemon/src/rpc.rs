@@ -820,7 +820,12 @@ impl Rpc {
                 // Refresh before answering: a client asking about health wants
                 // the answer now, not the one cached at connect time.
                 svc.inventory.refresh().await;
-                Ok(result::Value::Host(wire::host(
+                // Which key this caller came in with (ov-818): its own line's.
+                let caller_key = match self.peer.client_id.as_deref() {
+                    Some(id) => crate::enrollment::key_of(svc, id).await.unwrap_or_default(),
+                    None => String::new(),
+                };
+                let mut host = wire::host(
                     &self.daemon_version,
                     svc.host_id,
                     &svc.inventory_snapshot(),
@@ -831,7 +836,9 @@ impl Rpc {
                     agents_found_now().await,
                     svc.read_only_folders(), scope,
                     svc.claude_key_exports_for(&self.peer),
-                )))
+                );
+                host.caller_key_fingerprint = caller_key;
+                Ok(result::Value::Host(host))
             }
 
             // Stop, so a differently-built daemon can take over.

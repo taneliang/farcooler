@@ -91,5 +91,17 @@ data class RunnerTeam(val members: List<Member>, val you: String) {
         const val REMOVED_BODY =
             "Someone who manages this runner removed you, so this device can’t see the runner’s work anymore. " +
                 "To come back, ask the runner’s owner to add you again."
+
+        /**
+         * A device whose key the runner now refuses, after letting it in before (ov-818): the removed row's sibling.
+         * It can't say "removed you", since the phone can't tell its member being removed from only this device being
+         * taken off the member's list; both revoke its key (ov-783). AgentKit's words.
+         */
+        const val NO_ACCESS_TITLE = "You no longer have access to this runner"
+        const val NO_ACCESS_BODY =
+            "This runner now refuses this device’s key, though it let it in before. That happens when someone " +
+                "who manages the runner removes you or this device. To come back, ask the runner’s owner to add " +
+                "this device again, or if the runner is yours, add it yourself. Far Cooler checks every few " +
+                "minutes and reconnects to the runner once this device is added back."
     }
 }

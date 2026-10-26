@@ -63,6 +63,16 @@ final class DaemonClient: ObservableObject {
     /// never becomes idle, without a runner.
     var commandRunnerForTesting: (@MainActor ([String]) async -> (data: Data?, message: String?))?
 
+    /// Whether this runner let this Mac in, and its refusals since, with
+    /// where that's remembered and the clock read: see `KeyRefusals` (ov-818).
+    var admissions: UserDefaults = .standard
+    lazy var keyRefusals = KeyRefusals.remembered(target, in: admissions)
+    var now: () -> Date = Date.init
+    /// The verbose dial that proves a refusal is the runner's (review S1);
+    /// `teamWorkForgotten` says nothing of the runner's team may stay held.
+    var refusalProbe: (String) async -> String = { await DaemonClient.probeRefusal($0) }
+    var teamWorkForgotten = false
+
     /// Cancels the retry loop rather than leaving it to run against a client
     /// nobody holds anymore.
     ///
@@ -162,7 +172,7 @@ final class DaemonClient: ObservableObject {
         state: HostState, build: DaemonBuild?, unreadable: Bool, remote: Bool
     ) -> DaemonSkew {
         switch state {
-        case .connecting, .reconnecting, .notInstalled, .removed:
+        case .connecting, .reconnecting, .notInstalled, .removed, .noAccess:
             return .unavailable
         case .unreachable(let reason):
             // The one flavor of unreachable that IS a version. `explain` in
@@ -227,30 +237,6 @@ final class DaemonClient: ObservableObject {
         return base * jitter
     }
 
-    /// Whether a failure names a runner that needs installing rather than
-    /// one that is merely unreachable right now.
-    ///
-    /// `crates/cli/src/remote.rs`'s `explain` produces this exact phrase when
-    /// ssh connects fine but nothing answers `farcoolerd --stdio` on the far
-    /// side, which from here is indistinguishable from "not installed" — and
-    /// is the CLI's own signal for it, not a guess. Local-only: the Mac
-    /// bundles and starts its own daemon, so a local failure is never "go
-    /// install this".
-    private func looksNotInstalled(_ message: String) -> Bool {
-        !target.isEmpty && message.localizedCaseInsensitiveContains("is far cooler installed")
-    }
-
-    /// Whether a failure names two sides speaking different protocol
-    /// versions.
-    ///
-    /// Same source as `looksNotInstalled`: `explain`'s other branch, for
-    /// `ClientError::VersionMismatch`. No amount of retrying updates the
-    /// older side, so this gets the same slow cadence as `notInstalled`
-    /// rather than the fast exponential one — see `scheduleRetry()`.
-    private func looksVersionMismatch(_ message: String) -> Bool {
-        !target.isEmpty && message.localizedCaseInsensitiveContains("update the older side")
-    }
-
     /// How long a runner that needs installing, or that speaks a different
     /// protocol version, waits between checks.
     ///
@@ -261,6 +247,12 @@ final class DaemonClient: ObservableObject {
     /// checking again — which would mean installing it later, or updating
     /// the older side, goes unnoticed until someone restarts the app.
     private let slowRetrySeconds: Double = 300
+
+    /// `forgetTeamWork`'s part that only this file may write (ov-818).
+    func forgetNeedsYou() {
+        if !needsYouRead.isEmpty { needsYouRead = [] }
+        if !boardNews.isEmpty { boardNews = [:] }
+    }
 
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
     /// failure paths cannot each schedule their own and race.
@@ -287,7 +279,7 @@ final class DaemonClient: ObservableObject {
 
         let wait: Double
         switch state {
-        case .notInstalled, .removed:
+        case _ where Self.waitsLong(state):
             // `attempt` resets rather than climbs here: it drives the fast
             // exponential schedule only, means nothing at this cadence, and
             // letting it grow would leave a later, genuinely transient
@@ -549,7 +541,7 @@ final class DaemonClient: ObservableObject {
                     // measured in minutes, not moments — showing
                     // "reconnecting" over that whole span would say less
                     // than what `refresh()` already determined.
-                    if [.notInstalled, .removed].contains(self.state) { return }
+                    if [.notInstalled, .removed, .noAccess].contains(self.state) { return }
                     if case .unreachable(let reason) = self.state, self.looksVersionMismatch(reason) {
                         return
                     }
@@ -818,6 +810,7 @@ final class DaemonClient: ObservableObject {
             WebPanes.shared.close(terminals: PaneBanner.closed(before: before, after: after))
             if read != fleet { fleet = read }
             if !hasLoaded { hasLoaded = true }
+            letIn()  // ov-818
             // Who's on this runner, when its panes changed (a rep started
             // elsewhere): whom the window talks to (ov-526).
             Task { await self.talk.load(self, panes: after) }
@@ -981,6 +974,7 @@ final class DaemonClient: ObservableObject {
         readOnlyFolders = ReadOnlyFolders.names(in: body, offered: daemonBuild?.can(.readOnlyFolders) == true)
         pushPaired = body["pushPaired"] as? Bool ?? false
         suggestThemesPrompt = body["suggestThemesPrompt"] as? String ?? ""
+        learnKey(body["keyFingerprint"] as? String)  // ov-818
     }
 
     /// Which agents this runner can start: every one from a runner that

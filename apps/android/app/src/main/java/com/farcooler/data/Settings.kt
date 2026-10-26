@@ -33,7 +33,7 @@ enum class TerminalFontChoice(val wire: String, val label: String) {
  * writing keys by hand: the terminal redraws from these on every frame, so what
  * matters is that a change is observable, not that it is transactional.
  */
-class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
+class Settings(context: Context) : com.farcooler.net.PaneViewMemory, com.farcooler.model.AdmittedRunners {
     private val preferences: SharedPreferences =
         context.applicationContext.getSharedPreferences("farcooler.settings", Context.MODE_PRIVATE)
 
@@ -266,6 +266,13 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
     }
 
     private fun draftKey(terminal: String) = "native.draft.$terminal"
+
+    /** Which runners have let this phone in, kept across launches (ov-818). See [com.farcooler.model.KeyRefusals]. */
+    override fun admitted(runner: String): Boolean = preferences.getBoolean("keyRefusals.admitted.$runner", false)
+
+    override fun remember(runner: String) {
+        preferences.edit().putBoolean("keyRefusals.admitted.$runner", true).apply()
+    }
 
     companion object {
         private const val KEY_WORKSPACE_TAB = "workspace.tab."
