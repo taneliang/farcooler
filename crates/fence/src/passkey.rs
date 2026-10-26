@@ -43,6 +43,12 @@ pub(crate) fn admits(key: &PublicKey, grant: Grant) -> bool {
     }
 }
 
+/// Whether the fence would write a Key A line for `key`: what a phone may
+/// certify as another device's Key A (`farcooler_client::device_keys`).
+pub fn admits_as_key_a(key: &PublicKey) -> bool {
+    admits(key, Grant::FarCooler)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

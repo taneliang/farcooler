@@ -43,7 +43,8 @@ pub const CERTIFY_NAMESPACE: &str = "farcooler-certify-v1";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DeviceKeyError {
     /// The private key isn't an unencrypted Ed25519 OpenSSH key, or a public
-    /// key to certify isn't an Ed25519 key.
+    /// key to certify isn't a key the fence enrolls as Key A (Ed25519, or a
+    /// browser's passkey for the app's host) or, for Key B, Ed25519.
     #[error("key")]
     Key,
     /// The account id is empty or has characters an account id never has.
@@ -146,7 +147,7 @@ pub fn certificate(
         return Err(DeviceKeyError::Node);
     }
     let key = ed25519_private(voucher)?;
-    let key_a = ed25519_fingerprint(key_a)?;
+    let key_a = key_a_fingerprint(key_a)?;
     let key_b = key_b.map(ed25519_fingerprint).transpose()?;
     if key_b.as_deref() == Some(key_a.as_str()) {
         return Err(DeviceKeyError::Key);
@@ -220,6 +221,17 @@ fn ed25519_private(text: &str) -> Result<PrivateKey, DeviceKeyError> {
         return Err(DeviceKeyError::Key);
     }
     Ok(key)
+}
+
+/// Key A to certify: Ed25519, or a browser's passkey for the app's own host
+/// (ov-765). Exactly what the fence would write a Key A line for, asked of
+/// the fence, so a phone never vouches for a key no runner would enroll.
+fn key_a_fingerprint(line: &str) -> Result<String, DeviceKeyError> {
+    let key = PublicKey::from_openssh(line.trim()).map_err(|_| DeviceKeyError::Key)?;
+    if !farcooler_fence::admits_as_key_a(&key) {
+        return Err(DeviceKeyError::Key);
+    }
+    Ok(key.fingerprint(HashAlg::Sha256).to_string())
 }
 
 fn ed25519_fingerprint(line: &str) -> Result<String, DeviceKeyError> {

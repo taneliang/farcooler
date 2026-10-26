@@ -30,7 +30,7 @@ pub use inventory::{inventory, inventory_of, Inventory, Listed, MAX_FILE_BYTES};
 mod rekey;
 pub use rekey::{rekey_statement, REKEY_NAMESPACE};
 mod passkey;
-pub use passkey::APPLICATIONS;
+pub use passkey::{admits_as_key_a, APPLICATIONS};
 
 use farcooler_protocol::v1::Scope;
 use rustix::fs::{AtFlags, FlockOperation, Mode, OFlags, RawMode};
