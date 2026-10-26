@@ -83,7 +83,8 @@ DERP_HOSTS = "tc301a.ipn.dev tc302a.ipn.dev tc303a.ipn.dev tc304a.ipn.dev"
 # and the relay on the same channel has the same value as its VISITOR_SECRET:
 # each /v1/auth call then names the visitor, signed (ov-811). Either side
 # without it, the relay keys on the address as before. Namespace ids are shared
-# across the account (scripts/migration-lint.py); 1001-1007 are taken.
+# across the account, so each is unique across the relay's, the site's and this
+# file (scripts/migration-lint.py).
 [[unsafe.bindings]]
 name = "APP_AUTH_LIMIT"
 type = "ratelimit"

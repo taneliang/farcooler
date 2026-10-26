@@ -169,6 +169,9 @@ export class Caller {
         return { kind: 'signed-out' }
       }
       if (response.status >= 500) return { kind: 'unreachable' }
+      // The relay's per-account limit on directory/me (ov-815), or any other
+      // route's: "wait a minute", not "unreachable".
+      if (response.status === 429) return { kind: 'limited' }
       if (!response.ok) {
         const said = await response.json<{ error?: unknown; reason?: unknown }>().catch(() => null)
         return {
