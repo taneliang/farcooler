@@ -79,6 +79,15 @@ impl Store {
 mod tests {
     use super::*;
 
+    /// The migration is the 53rd (0062) and `Welcome`.
+    #[test]
+    fn the_migration_is_welcome() {
+        let it = &crate::migrate::MIGRATIONS[52];
+        assert!(std::ptr::fn_addr_eq(it.0, migration_0062_compose_waits as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
+        assert_eq!(it.1, crate::compat::Older::Welcome);
+        assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 53);
+    }
+
     /// Kept in order, read back as written, dropped one by one, and gone
     /// with their pane.
     #[test]

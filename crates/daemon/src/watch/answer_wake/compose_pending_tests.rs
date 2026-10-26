@@ -407,7 +407,7 @@ async fn a_second_send_during_the_wait_is_held_behind_it() {
 async fn waiting_through(b: &Board, mode: &'static str) -> (Terminal, StandIn) {
     let (agent, si) = unfenceable_claude(b).await;
     quick_turns(b, &si);
-    b.watcher.with_timing(|t| (t.turn_begun_wait, t.compose_confirm) = (Duration::from_secs(10), Duration::from_secs(2)));
+    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(10));
     drop(hook_on_submit(b, &si));
     rows_open(b, agent.id);
     si.show("shells").await;
@@ -575,10 +575,13 @@ async fn the_gates_agents_are_not_trusted_past_their_time() {
 async fn a_box_cleared_mid_turn_is_said_at_once() {
     let b = board().await;
     let (agent, si) = waiting_through(&b, "working").await;
+    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(30));
     let began = std::time::Instant::now();
     si.show("working-cleared").await;
     waits_over(&b).await;
-    assert!(began.elapsed() < Duration::from_secs(5), "said only after {:?}", began.elapsed());
+    // The transcript is read for `compose_confirm` (5 s) first, in case it
+    // was sent by hand; the turn would run 30.
+    assert!(began.elapsed() < Duration::from_secs(12), "said only after {:?}", began.elapsed());
     assert!(enters(&si).is_empty(), "{}", si.log());
     let want = "Claude’s box was cleared while “what did they find” waited, so the runner didn’t send it.";
     assert_eq!(not_sent(agent.id), [want]);
