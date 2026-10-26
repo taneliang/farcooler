@@ -4,7 +4,7 @@
 /// token page script could read. Sign-in goes through the relay's own
 /// `/v1/auth/token` and `/v1/auth/refresh`, the routes the apps use: the relay
 /// has the WorkOS API key and creates the account, and this Worker needs no
-/// secret at all.
+/// secret at all. Shared by the site's /app and the web client (ov-764).
 
 import { expiresSoon, type Tokens } from './session'
 

@@ -29,7 +29,7 @@ name: Site
 on:
   push:
     branches: [main]
-    paths: ['services/site/**', '.github/workflows/site.yml']
+    paths: ['services/site/**', 'services/common/**', '.github/workflows/site.yml']
   workflow_dispatch:
     inputs:
       environment:
@@ -114,6 +114,14 @@ jobs:
           if [ -n "$TAG" ] && git cat-file -e "$TAG:services/site/wrangler.toml" 2>/dev/null; then
             rm -rf services/site
             git archive "$TAG" services/site | tar -x
+            # The session code both Workers share (ov-764) is the site's code
+            # too: it comes from the same tag, or www would run stable's pages
+            # on main's session. A tag from before the move has none, and its
+            # site imports none.
+            rm -rf services/common
+            if git cat-file -e "$TAG:services/common" 2>/dev/null; then
+              git archive "$TAG" services/common | tar -x
+            fi
             rm -rf services/site/public
             git archive "$page" services/site/public | tar -x
             echo "flags=" >> "$GITHUB_OUTPUT"

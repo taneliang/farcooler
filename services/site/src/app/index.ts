@@ -39,7 +39,7 @@ import {
   type Team,
   type Viewer,
 } from './pages'
-import { Caller, configured, exchange, visitorOf, withinLimit, type Answer, type AppEnv, type Configured } from './relay'
+import { Caller, configured, exchange, visitorOf, withinLimit, type Answer, type AppEnv, type Configured } from '../../../common/relay'
 import { redirect, respond } from './respond'
 import { auditFor, devicesFor, runnerFor, runnersFor } from './views'
 import {
@@ -57,9 +57,9 @@ import {
   SESSION_COOKIE,
   sessionCookie,
   signInCookie,
-} from './session'
+} from '../../../common/session'
 
-export type { AppEnv } from './relay'
+export type { AppEnv } from '../../../common/relay'
 
 /// Whether a path belongs to the web app.
 export function isApp(pathname: string): boolean {

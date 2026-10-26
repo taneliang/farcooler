@@ -21,7 +21,7 @@ import {
   type RunnerRow,
   type TeamRef,
 } from './runners'
-import type { Answer, Caller } from './relay'
+import type { Answer, Caller } from '../../../common/relay'
 
 export type Page = { status: number; html: string } | Exclude<Answer, { kind: 'ok' }>
 

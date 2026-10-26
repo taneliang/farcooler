@@ -17,9 +17,10 @@
 import { notAdminPage, refusedPage } from './manage'
 import { joinAlreadyPage, joinFailurePage } from './join'
 import { limitedPage, notFoundPage, signedOutEverywherePage, signInPage, unreachablePage, type Viewer } from './pages'
-import { Caller, visitorOf, type Answer, type Configured } from './relay'
+import { Caller, visitorOf, type Answer, type Configured } from '../../../common/relay'
 import { redirect, respond } from './respond'
-import { clearInvite, clearSession, clearSignIn, cookie, csrfMatches, inviteCookie, readJoin, readSession, SESSION_COOKIE, sessionCookie, sessionId } from './session'
+import { sameOrigin } from '../../../common/origin'
+import { clearInvite, clearSession, clearSignIn, cookie, csrfMatches, inviteCookie, readJoin, readSession, SESSION_COOKIE, sessionCookie, sessionId } from '../../../common/session'
 
 const TEAM = '([A-Za-z0-9-]{1,64})'
 const USER = '([A-Za-z0-9_-]{1,128})'
@@ -33,21 +34,6 @@ const ROUTES = {
   setRole: new RegExp(`^/app/teams/${TEAM}/members/${USER}/role$`),
   remove: new RegExp(`^/app/teams/${TEAM}/members/${USER}/remove$`),
   readmit: new RegExp(`^/app/teams/${TEAM}/members/${USER}/readmit$`),
-}
-
-/// Whether the request comes from this site's own pages.
-export function sameOrigin(request: Request, url: URL): boolean {
-  const site = request.headers.get('sec-fetch-site')
-  // A browser that says the request is cross-site is believed over a header
-  // that says otherwise.
-  if (site !== null && site !== 'same-origin') return false
-  const origin = request.headers.get('origin')
-  // A browser nulls the Origin of a post that sends no Referer, and of one from
-  // a sandboxed frame or a data: page. Only the browser's own word that the
-  // page is this site's tells the first from the others; a page can't forge it.
-  if (origin === 'null') return site === 'same-origin'
-  if (origin !== null) return origin === url.origin
-  return site === 'same-origin'
 }
 
 /// Where the refusal page sends the person: the page the form was on, when the

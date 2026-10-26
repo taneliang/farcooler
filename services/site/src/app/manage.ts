@@ -4,7 +4,7 @@
 /// page's button is a form that POSTs (`forms.ts`). No script. Every value
 /// that came from the directory goes through `text()`.
 
-import type { NewInvite } from './session'
+import type { NewInvite } from '../../../common/session'
 import { banner, CHEVRON, document, email, joinedOn, message, roleName, text, type Member, type Viewer } from './pages'
 
 export interface TeamInfo {

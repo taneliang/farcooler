@@ -1,4 +1,6 @@
-/// The web app's session: WorkOS's own tokens, kept in an HttpOnly cookie.
+/// The session for the site's /app and for the web client (services/web):
+/// WorkOS's own tokens, kept in an HttpOnly cookie. Shared by both Workers
+/// rather than copied, so a fix to one is a fix to both (ov-764).
 ///
 /// The cookie holds the access and refresh tokens WorkOS issued at sign-in,
 /// exactly as the apps hold them in the Keychain. Nothing here mints a session
@@ -12,9 +14,10 @@
 /// forged cookie gets nothing; a stolen one would be replayable sealed or not.
 /// HttpOnly keeps page script away from it. The `__Host-` prefix makes the
 /// browser refuse it unless it is `Secure`, has no `Domain` and has `Path=/`,
-/// so no other farcooler.com host (relay, updates) can set or shadow it. The
-/// cost of `Path=/` is that the browser also sends it with the marketing
-/// page's requests; only the routes under /app ever read it.
+/// so no other farcooler.com host (relay, updates) can set or shadow it, and
+/// each host's cookie is its own: www's session is not the web client's. On
+/// www the cost of `Path=/` is that the browser also sends it with the
+/// marketing page's requests; only the routes under /app ever read it.
 
 export const SESSION_COOKIE = '__Host-fc_session'
 /// The sign-in in flight: its state and PKCE verifier, read only by the callback.
