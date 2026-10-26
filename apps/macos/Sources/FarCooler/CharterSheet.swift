@@ -28,7 +28,9 @@ struct CharterSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 320, idealWidth: 520, minHeight: 240, idealHeight: 440)
+        .frame(minWidth: 320, idealWidth: 560, maxWidth: .infinity, minHeight: 240, idealHeight: 520, maxHeight: .infinity)
+        // Escape closes it, as Done does.
+        .onExitCommand { dismiss() }
         .task { reading = await load() }
     }
 
@@ -39,8 +41,8 @@ struct CharterSheet: View {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         case .text(let text)?:
             Self.page(text)
-        case .none?:
-            Self.note("No charter yet. The orchestrator writes one when you first talk to it.")
+        case .missing?:
+            Self.note("No charter yet. The orchestrator writes one when the lead first talks to it.")
         case .failed(let why)?:
             Self.note(why)
         }
@@ -50,7 +52,7 @@ struct CharterSheet: View {
     static func page(_ text: String) -> some View {
         ScrollView {
             Text(text)
-                .font(.callout)
+                .font(.system(.callout, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)

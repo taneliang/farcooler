@@ -113,17 +113,20 @@ struct OrchestratorMenu: View {
     var onStart: (OrchestratorHarness) -> Void = { _ in }
 
     var body: some View {
+        if canAct, seat == nil, !starts.isEmpty {
+            Menu("Start Orchestrator") {
+                ForEach(starts) { harness in Button(harness.title) { onStart(harness) } }
+            }
+        }
+        // Drawn with no orchestrator too (ov-178): Show Charter and Wake
+        // the Agent When You Answer are the workspace's, not the seat's.
+        ForEach(
+            Self.items(canAct: canAct, hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer),
+            id: \.self
+        ) { item in
+            menuItem(item)
+        }
         if canAct {
-            if seat == nil, !starts.isEmpty {
-                Menu("Start Orchestrator") {
-                    ForEach(starts) { harness in Button(harness.title) { onStart(harness) } }
-                }
-            }
-            // Drawn with no orchestrator too (ov-178): Show Charter and Wake
-            // the Agent When You Answer are the workspace's, not the seat's.
-            ForEach(Self.menu(hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer), id: \.self) { item in
-                menuItem(item)
-            }
             if let seat {
                 OrchestratorViewItem(terminal: seat.terminal, target: target)
             }
@@ -132,15 +135,22 @@ struct OrchestratorMenu: View {
                 Button("Restart", action: onRestart)
                 Button("Stop Being Orchestrator", action: onStepDown)
             }
-        } else if case .read? = charter {
-            // A member can't restart, replace or step down anyone's
-            // orchestrator, but every member reads the charter (ov-755).
-            Button(WorkspaceMenu.Item.showCharter.title, action: onReadCharter)
         }
     }
 }
 
 extension OrchestratorMenu {
+    /// What the menu draws: the workspace's items for a caller that can act,
+    /// and for one that can't (a member can't restart, replace or step down
+    /// anyone's orchestrator) only Show Charter, which every member reads
+    /// (ov-755) and which opens as a sheet on another machine's runner.
+    nonisolated static func items(
+        canAct: Bool, hasSeat: Bool, charter: CharterAccess?, wakeOnAnswer: Bool?
+    ) -> [WorkspaceMenu.Item] {
+        if canAct { return menu(hasSeat: hasSeat, charter: charter, wakeOnAnswer: wakeOnAnswer) }
+        return charter == .read ? [.showCharter] : []
+    }
+
     /// The workspace's items in the menu, in `WorkspaceMenu`'s
     /// order: Replace Orchestrator with one seated (starting one is the
     /// column's own placeholder's), Show Charter where this runner says

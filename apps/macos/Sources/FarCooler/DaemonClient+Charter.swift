@@ -63,7 +63,7 @@ enum CharterReading: Equatable {
     /// The charter, as written.
     case text(String)
     /// The workspace has none yet.
-    case none
+    case missing
     /// Why it couldn't be read, in a sentence.
     case failed(String)
 
@@ -74,7 +74,7 @@ enum CharterReading: Equatable {
             let text: String?
         }
         guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { return nil }
-        return answer.exists ? .text(answer.text ?? "") : .none
+        return answer.exists ? .text(answer.text ?? "") : .missing
     }
 
     /// The sentence for a read that failed: the runner's own refusal where
