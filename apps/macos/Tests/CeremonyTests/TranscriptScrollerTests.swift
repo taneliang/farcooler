@@ -19,8 +19,14 @@ extension NativeSelectionTests {
     struct TranscriptScrollerTests {
         typealias T = NativeAgentTests
 
+        /// Held until the test ends, which removes its image folder. Dropped at
+        /// once (`_ = try ConversationScrollTests()`), the folder went before the
+        /// first image was written, and the store made it again, for nothing to
+        /// remove (ov-803).
+        private let images: ScrollImages
+
         init() throws {
-            _ = try ConversationScrollTests()
+            images = try ScrollImages()
         }
 
         static func session(width: CGFloat = 720, rows: Int = RealSession.count, resizable: Bool = false) async throws
@@ -807,7 +813,8 @@ struct TranscriptScrollerCaptures {
         let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
             .appendingPathComponent("transcript-scroller")
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        _ = try ConversationScrollTests()
+        let images = try ScrollImages()
+        defer { withExtendedLifetime(images) {} }
         for dark in [false, true] {
             for style in [NSScroller.Style.overlay, .legacy] {
                 let (window, _, scroll) = try await ConversationScrollTests.session()
