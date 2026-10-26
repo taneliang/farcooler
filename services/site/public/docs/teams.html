@@ -47,7 +47,14 @@
 <p>Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work. It can read the plan, the tasks and Needs You, send messages and comments, and change the plan when its member asks. A change a rep makes carries its member’s name. Only its member, or you, can answer a rep’s questions.</p>
 <p>The plan belongs to the whole team. Anyone can change it, from their own devices or through their rep, and the orchestrator works from what it says.</p>
 <p>Every member can read a workspace’s charter, the rules its work is done by. On a Mac that isn’t the runner, Show Charter opens it in a sheet you can read but not change. The themes’ order is the team’s one ranking, so any member, or their rep, can move a theme with <code>farcooler plan theme move &lt;name&gt; --to &lt;n&gt;</code>. A device whose teammate was removed can’t read it, or anything else.</p>
-<p>A workspace’s lead can change its charter, and so can you. To let a teammate change every workspace’s charter, make them a Maintainer with <code>farcooler member role &lt;handle&gt; maintainer</code>; only you can. <code>farcooler member log</code> lists who changed whose role, who was added or removed, and who changed a charter.</p>
+<h2 id="roles">Roles</h2>
+<p>Everyone you add starts as a <b>Member</b>. To trust a teammate with the workspaces’ rules, make them a <b>Maintainer</b>: in the runner’s settings, People shows you a role beside each teammate, or run <code>farcooler member role &lt;handle&gt; maintainer</code>. Only you can give a role.</p>
+<ul>
+<li>A Maintainer can edit any workspace’s charter, rename a workspace, change its task prefix, and set its pull request size, cost line, nudge hours and Wake the Agent When You Answer.</li>
+<li>How a workspace lands, onto which branch, turning the nudge on and who leads it stay yours: each of those acts with your credentials.</li>
+<li>A workspace’s lead can change that workspace’s charter, and so can you. On a Mac that isn’t the runner, Show Charter has Edit for the three of you, and reads only for everyone else.</li>
+</ul>
+<p><code>farcooler member log</code> lists who changed whose role, who was added or removed, who changed a charter, who renamed a workspace or changed its prefix, and who handed on its lead. A teammate you remove sees “You were removed from this runner” on every app until you add them again.</p>
 
 <h2 id="logins">Logins</h2>
 <p>The orchestrator, and the agents it starts, run on the lead’s login. A teammate’s own panes and their rep run either on the runner’s shared login or on the teammate’s own. By default a teammate may use the runner’s login, which spends your account and quota, and a teammate who has signed in to Claude on the runner keeps using their own. Turn on Require Own Claude Account and a teammate’s Claude panes can’t open until they sign in.</p>
