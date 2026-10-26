@@ -1351,6 +1351,7 @@ func TestADeviceThatNeverAnswersTheHangUpCostsOnlyTheWait(t *testing.T) {
 
 	began := time.Now()
 	hangUpTunnels(200 * time.Millisecond)
+	stopRefusing(t)
 	if took := time.Since(began); took > time.Second {
 		t.Fatalf("hanging up on a silent device took %v, want about 200ms", took)
 	}
@@ -1432,6 +1433,106 @@ func waitForTunnels(t *testing.T, n int) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%d live tunnels, want %d", got, n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// stopRefusing undoes the refusal a bare hangUpTunnels leaves behind, which
+// stopServer would undo once the server was closed.
+func stopRefusing(t *testing.T) {
+	t.Helper()
+	tunnels.Lock()
+	tunnels.refusing = false
+	tunnels.Unlock()
+}
+
+// A device that is told early redials within a second or two, and while one
+// silent device holds the hang-up open that redial reaches the OLD server,
+// which is still up. Forwarding it would hand the device a connection that
+// dies, unannounced, when the server closes: the ov-762 freeze again. So a
+// connection accepted during the hang-up is ended at once, and the hang-up
+// waits for that device's answer too, before the close.
+func TestAConnectionArrivingDuringTheHangUpIsEndedNotForwarded(t *testing.T) {
+	sshdPort := listenLikeSshd(t)
+	silent, silentHandler := connectThroughOnTCP(t, sshdPort)
+	defer func() { silent.Close(); <-silentHandler }()
+	waitForTunnels(t, 1)
+
+	lateTold := make(chan struct{})
+	toldFirst := false
+	closed := make(chan struct{})
+	running := &tailcat.Server{}
+	defer restoreServerState(t, running, func(*tailcat.Server) error {
+		select {
+		case <-lateTold:
+			toldFirst = true
+		default:
+		}
+		close(closed)
+		return nil
+	})()
+
+	stopped := make(chan struct{})
+	go func() { mu.Lock(); stopServer(); mu.Unlock(); close(stopped) }()
+	waitForRefusing(t)
+
+	late, lateHandler := connectThroughOnTCP(t, sshdPort)
+	go func() {
+		readUntilEOF(late)
+		close(lateTold)
+		late.Close()
+	}()
+	<-closed
+	<-stopped
+	if !toldFirst {
+		t.Fatal("a connection accepted during the hang-up was not ended before the server closed")
+	}
+	<-lateHandler
+}
+
+// The hang-up waits for the device's own FIN, not merely for ours to be
+// queued: with the whole TCP stack in this process, a close that came sooner
+// could take the FIN with it. A device that answers 300 ms late must hold the
+// close back by 300 ms.
+func TestTheHangUpWaitsForTheDeviceToAnswer(t *testing.T) {
+	sshdPort := listenLikeSshd(t)
+	device, handler := connectThroughOnTCP(t, sshdPort)
+	const answersAfter = 300 * time.Millisecond
+	answered := make(chan time.Time, 1)
+	go func() {
+		readUntilEOF(device)
+		time.Sleep(answersAfter)
+		answered <- time.Now()
+		device.Close()
+	}()
+	waitForTunnels(t, 1)
+
+	var closedAt time.Time
+	defer restoreServerState(t, &tailcat.Server{}, func(*tailcat.Server) error {
+		closedAt = time.Now()
+		return nil
+	})()
+	stopServer()
+	at := <-answered
+	if closedAt.Before(at) {
+		t.Fatalf("the server closed %v before the device answered", at.Sub(closedAt))
+	}
+	<-handler
+}
+
+func waitForRefusing(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tunnels.Lock()
+		refusing := tunnels.refusing
+		tunnels.Unlock()
+		if refusing {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hang-up never started")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

@@ -5,6 +5,9 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
+
+	"github.com/tailscale/tailcat"
 )
 
 // run drives the helper over a scripted stdin and returns the reply lines.
@@ -120,5 +123,46 @@ func TestAnUnterminatedLastCommandIsStillRun(t *testing.T) {
 	}
 	if strings.TrimRight(out.String(), "\n") != errLine(syscall.ENOTCONN) {
 		t.Errorf("an unterminated command was dropped: %q", out.String())
+	}
+}
+
+// On Linux a revoke replaces the helper PROCESS, and the old one holds every
+// live tunnel: killed outright, it sends no FIN, and each surviving device
+// hangs until its keepalive gives up (ov-762). So the daemon asks it to stop
+// first, and stop has to hang the tunnels up before the server closes.
+func TestStopHangsUpTheHelpersTunnelsBeforeTheServerCloses(t *testing.T) {
+	sshdPort := listenLikeSshd(t)
+	device, handler := connectThroughOnTCP(t, sshdPort)
+	told := make(chan struct{})
+	go func() {
+		readUntilEOF(device)
+		close(told)
+		device.Close()
+	}()
+	waitForTunnels(t, 1)
+
+	toldFirst := false
+	defer restoreServerState(t, &tailcat.Server{}, func(*tailcat.Server) error {
+		select {
+		case <-told:
+			toldFirst = true
+		default:
+		}
+		return nil
+	})()
+
+	if got := run(t, "/nonexistent/key", "stop"); got[0] != "ok" {
+		t.Fatalf("stop answered %q", got[0])
+	}
+	if !toldFirst {
+		t.Fatal("the helper closed its server before telling the device")
+	}
+	if server != nil {
+		t.Fatal("the helper still has a server after stop")
+	}
+	select {
+	case <-handler:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the forward never ended")
 	}
 }

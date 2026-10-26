@@ -607,6 +607,10 @@ func pickRegionIn(ctx context.Context, dm *tailcfg.DERPMap) (tailcfg.DERPRegionI
 // A FIN through the old tunnel, before its netstack goes, instead reaches the
 // device's pump as an EOF, the session ends at once, and the redial takes
 // about 0.2 s.
+//
+// Revocation takes effect at the hang-up, not at the close: from that moment
+// the old server forwards nothing new to sshd, for the revoked device or any
+// other (see forward).
 func stopServer() {
 	if server == nil {
 		return
@@ -614,6 +618,11 @@ func stopServer() {
 	hangUpTunnels(drainTimeout)
 	closeServer(server)
 	server = nil
+	// The old server is gone, so nothing it could still forward exists; the
+	// next server starts accepting.
+	tunnels.Lock()
+	tunnels.refusing = false
+	tunnels.Unlock()
 }
 
 // tunnel is one device's connection that the running server is forwarding to
@@ -623,46 +632,60 @@ type tunnel struct {
 	// the forward then ends exactly as it does when sshd closes, with a FIN
 	// to the device.
 	local net.Conn
-	// over is closed when the forward has finished with the device's side.
-	over chan struct{}
 }
 
-// tunnels is every live forward, across servers: a forward that outlives its
-// server's hang-up deadline stays here until it ends, and the next hang-up
-// closing its sshd connection again does nothing.
+// tunnels is every live forward, across servers. A forward that outlives its
+// server's hang-up deadline stays here until the dead netstack errors its
+// reads, which is quick; until then the next hang-up closes its sshd
+// connection again, which does nothing, and may wait on it briefly.
 var tunnels = struct {
 	sync.Mutex
 	live map[*tunnel]struct{}
-}{live: map[*tunnel]struct{}{}}
+	// refusing is set for the length of a hang-up: a connection the old
+	// server accepts during it is ended at once rather than forwarded.
+	refusing bool
+	// changed is closed, and replaced, whenever a forward ends.
+	changed chan struct{}
+}{live: map[*tunnel]struct{}{}, changed: make(chan struct{})}
 
-// hangUpTunnels ends every live forward and waits, up to wait in all, for
-// each device to acknowledge.
+// hangUpTunnels ends every live forward, refuses new ones, and waits, up to
+// wait in all, for each device to acknowledge.
 //
 // The wait is the point. The whole TCP stack runs in this process, so a FIN
 // queued just before the server closes may never leave it; a forward ends
 // only once the device's own FIN has come back (see forward), which is proof
 // that ours arrived. A device that does not answer — asleep, or gone — costs
 // at most wait, and serve holds mu for it.
+//
+// It waits for the live set to EMPTY, not for a snapshot of it. A device told
+// early redials within a second or two, and that redial reaches this same
+// server, still up for the others' sake; forward refuses it, and the refusal's
+// FIN has to get out before the close as surely as the hang-up's did.
+//
+// Not upstream's Server.DrainTCP: that waits for every endpoint to reach
+// CLOSED, and a side that closes first parks in TIME-WAIT, so it would always
+// run out the clock.
 func hangUpTunnels(wait time.Duration) {
 	tunnels.Lock()
-	live := make([]*tunnel, 0, len(tunnels.live))
+	tunnels.refusing = true
 	for t := range tunnels.live {
-		live = append(live, t)
-	}
-	tunnels.Unlock()
-	if len(live) == 0 {
-		return
-	}
-	for _, t := range live {
 		t.local.Close()
 	}
+	tunnels.Unlock()
+
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
-	for _, t := range live {
+	for {
+		tunnels.Lock()
+		left, changed := len(tunnels.live), tunnels.changed
+		tunnels.Unlock()
+		if left == 0 {
+			return
+		}
 		select {
-		case <-t.over:
+		case <-changed:
 		case <-deadline.C:
-			log.Printf("tailcat: %d device(s) did not acknowledge the tunnel closing within %v", len(live), wait)
+			log.Printf("tailcat: %d device(s) did not acknowledge the tunnel closing within %v", left, wait)
 			return
 		}
 	}
@@ -675,17 +698,27 @@ func hangUpTunnels(wait time.Duration) {
 // by drainTimeout. A full Close would also send a FIN, but it would give
 // hangUpTunnels nothing to wait on: the device's FIN is the only sign this
 // side gets that its own arrived.
+//
+// During a hang-up it forwards nothing: the sshd side is closed before a byte
+// is copied, so the device gets the same FIN and redials the server that
+// replaces this one. Otherwise its connection would die with this server's
+// netstack, unannounced, and hang exactly as ov-762 did.
 func forward(c net.Conn, local net.Conn) {
-	t := &tunnel{local: local, over: make(chan struct{})}
+	t := &tunnel{local: local}
 	tunnels.Lock()
 	tunnels.live[t] = struct{}{}
+	refusing := tunnels.refusing
 	tunnels.Unlock()
 	defer func() {
 		tunnels.Lock()
 		delete(tunnels.live, t)
+		close(tunnels.changed)
+		tunnels.changed = make(chan struct{})
 		tunnels.Unlock()
-		close(t.over)
 	}()
+	if refusing {
+		local.Close()
+	}
 
 	deviceDone := make(chan struct{})
 	go func() {
@@ -696,10 +729,12 @@ func forward(c net.Conn, local net.Conn) {
 	}()
 	io.Copy(c, local)
 	if cw, ok := c.(interface{ CloseWrite() error }); ok && cw.CloseWrite() == nil {
+		drained := time.NewTimer(drainTimeout)
 		select {
 		case <-deviceDone:
-		case <-time.After(drainTimeout):
+		case <-drained.C:
 		}
+		drained.Stop()
 	}
 	c.Close()
 }

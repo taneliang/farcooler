@@ -67,8 +67,11 @@ func runHelper(keyPath string, in io.Reader, out io.Writer) error {
 		line, err := reader.ReadString('\n')
 		if line == "" && err != nil {
 			// EOF is how this program is asked to stop: the daemon exited, or
-			// closed the pipe on purpose. Not an error.
+			// closed the pipe on purpose. Not an error, and the tunnels are
+			// hung up on the way out exactly as `stop` would, so a daemon
+			// that exits does not leave its devices hanging either.
 			if err == io.EOF {
+				stop()
 				return nil
 			}
 			return err
@@ -84,11 +87,22 @@ func runHelper(keyPath string, in io.Reader, out io.Writer) error {
 		}
 		if err != nil {
 			if err == io.EOF {
+				stop()
 				return nil
 			}
 			return err
 		}
 	}
+}
+
+// stop hangs up every live tunnel and closes the server, under mu as serve
+// does. It is what the linked backend's serve does to the old server before it
+// builds a new one; on Linux the new server is a new PROCESS, so the old one
+// has to be told to do it before the daemon kills it (ov-762).
+func stop() {
+	mu.Lock()
+	defer mu.Unlock()
+	stopServer()
 }
 
 // handle runs one command and returns the line to answer with.
@@ -149,6 +163,21 @@ func handle(keyPath, line string) string {
 			return rc(n)
 		}
 		return "ok " + string(buf[:n])
+	// stop
+	//
+	// Hang up every live tunnel, then close the server. Asked by the daemon
+	// before it replaces this helper with another, because the helper that
+	// holds the tunnels is the only process that can send their FINs; one
+	// that is killed instead leaves every surviving device hanging until its
+	// keepalive gives up. Answered only once the server is closed, so the
+	// daemon knows this helper has stopped admitting before it starts the
+	// next one. Bounded by drainTimeout plus the close itself.
+	case "stop":
+		if len(fields) != 1 {
+			return errno(syscall.EINVAL)
+		}
+		stop()
+		return "ok"
 	// derpmap <url>
 	//
 	// Set before serving, never after: the URL is read when the server is
