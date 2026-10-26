@@ -192,10 +192,6 @@ final class ConversationScreenUITests: XCTestCase {
         }
     }
 
-    /// Every block on the owner's screen (the Now/Next and Agents cards, the
-    /// rows and the composer) stands on one horizontal margin (ov-611,
-    /// ov-619). The composer stood 4 pt wider than the rest.
-
     /// Every block on the owner's screen (the Now/Next and Agents cards and
     /// the rows) stands on one horizontal margin (ov-611, ov-619), and the
     /// composer at rest on Messages' inset (ov-804).
