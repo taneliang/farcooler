@@ -60,6 +60,7 @@ impl Sshd {
         // Fails loudly rather than skipping: an "ok" from a machine where
         // nothing ran would read as a pass.
         assert!(binary.exists(), "no /usr/sbin/sshd here, so nothing was tested");
+        // leak-exempt: crates/web is its own workspace without farcooler-core; Drop removes it.
         let dir = std::env::temp_dir().join(format!("fcw-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
