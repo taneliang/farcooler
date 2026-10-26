@@ -32,11 +32,17 @@ path = "src/lib.rs"
 # moved out of. A different `ssh-key` here would compile a SECOND copy of the
 # crate whose `PublicKey` is a different type from the daemon's, and the error
 # lands at the call site rather than here.
+#
+# One exception, on `ssh-key`: `ecdsa`, for a browser's passkey as Key A
+# (`src/passkey.rs`, ov-765). It only decodes a P-256 point, so it adds `sec1`
+# and no curve arithmetic. The daemon already had it through russh, so a
+# workspace build parsed passkey lines before this; `-p farcooler-fence` alone
+# did not, and that is the build the fence's own tests run in.
 [dependencies]
 farcooler-protocol.workspace = true
 rustix = { version = "1", features = ["fs", "process"] }
 sha2 = "0.10"
-ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc", "ecdsa"] }
 tracing.workspace = true
 
 [dev-dependencies]

@@ -29,6 +29,8 @@ mod inventory;
 pub use inventory::{inventory, inventory_of, Inventory, Listed, MAX_FILE_BYTES};
 mod rekey;
 pub use rekey::{rekey_statement, REKEY_NAMESPACE};
+mod passkey;
+pub use passkey::APPLICATIONS;
 
 use farcooler_protocol::v1::Scope;
 use rustix::fs::{AtFlags, FlockOperation, Mode, OFlags, RawMode};
@@ -379,7 +381,8 @@ fn flag<'a>(command: &'a str, name: &str) -> Option<&'a str> {
 pub enum Rejected {
     /// The received key was more than one line.
     MultiLine,
-    /// A key, but not one of an algorithm this enrolls.
+    /// A key, but not one this enrolls: not ed25519, and not a passkey for
+    /// the app's own host on a Key A line (`passkey`).
     Algorithm,
     /// Not a public key at all.
     Unparseable,
@@ -398,7 +401,7 @@ impl std::fmt::Display for Rejected {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::MultiLine => "more than one line",
-            Self::Algorithm => "not an ed25519 key",
+            Self::Algorithm => "not an ed25519 key or a Far Cooler passkey",
             Self::Unparseable => "not a public key",
             Self::ClientId => "not a usable client id",
             Self::Unscoped => "no scope",
@@ -486,7 +489,7 @@ fn forced_program() -> String {
 /// command on every connection — and nothing about that write is malformed, so
 /// it succeeds. Everything below rebuilds the line from decoded key material
 /// and strings this runner chose; the only thing that survives from `received`
-/// is 32 bytes of ed25519 point, re-encoded.
+/// is the decoded key (an ed25519 point, or a passkey's point and host), re-encoded.
 ///
 /// Two things about `ssh_key` that the design's first draft had backwards, and
 /// that are easy to get wrong again: `to_openssh()` ALREADY returns
@@ -554,7 +557,7 @@ pub fn render(
         tracing::debug!(error = %e, "a received key did not parse");
         Rejected::Unparseable
     })?;
-    if !matches!(parsed.algorithm(), ssh_key::Algorithm::Ed25519) {
+    if !passkey::admits(&parsed, grant) {
         return Err(Rejected::Algorithm);
     }
 
@@ -656,7 +659,7 @@ pub fn with_node_key(entry: &Entry, node_key: &str) -> Result<String, Rejected> 
         tracing::debug!(error = %e, "a line in the fence did not parse back as a key");
         Rejected::Unparseable
     })?;
-    if !matches!(parsed.algorithm(), ssh_key::Algorithm::Ed25519) {
+    if !passkey::admits(&parsed, Grant::FarCooler) {
         return Err(Rejected::Algorithm);
     }
     // The comment is carried through rather than rebuilt from a label: it is
