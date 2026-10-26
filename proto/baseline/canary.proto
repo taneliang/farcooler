@@ -1,4 +1,4 @@
-// Shipped by Canary at 6eaaf55686ecb0b1900ee21e9581fd46084d8233. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at beb8384729d0ae7effaf2a1448c07b31d7087532. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -6006,17 +6006,21 @@ message PeopleEvent {
   // Who made it: `user` for the owner, `member:<handle>` for a member,
   // `runner` for a revocation the daemon retried at its start (ov-783).
   string actor = 2;
-  // Whom it's about; empty for a charter edit, and for a revocation the
-  // runner retried for a device whose member it no longer knows.
+  // Whom it's about; empty for a charter edit, a rename or a new prefix,
+  // a lead handed back to the owner, and a revocation the runner retried
+  // for a device whose member it no longer knows. The new lead for `lead`.
   string handle = 3;
-  // The workspace, for a charter edit; empty otherwise.
+  // The workspace, for a charter edit, a rename, a new prefix or a lead
+  // handed on; empty otherwise.
   bytes workspace_id = 4;
   // `role`, `added`, `devices`, `revoked` (a device taken off a member's
   // list losing its key, ov-783), `revoke_failed` (its key still there, to
-  // be retried), `removed` or `charter`.
+  // be retried), `removed`, `charter`, or (ov-784) `rename`, `prefix` and
+  // `lead`. A client shows a kind it doesn't know by its word.
   string kind = 5;
-  // A JSON object: a role change's `from` and `to`, a device change's
-  // `devices`, a revocation's `device`, a charter edit's `sha256`.
+  // A JSON object: a role change's, rename's, prefix's or lead's `from`
+  // and `to` (`owner` for the owner's lead), a device change's `devices`,
+  // a revocation's `device`, a charter edit's `sha256`.
   string detail = 6;
 }
 
