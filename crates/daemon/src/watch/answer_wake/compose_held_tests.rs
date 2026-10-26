@@ -113,6 +113,97 @@ async fn a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn(
     assert!(!si.log().contains("QUEUED"), "{}", si.log());
 }
 
+/// claude 2.1.309 with its turn over and background shells running, no
+/// agent (`captures/claude-2.1.309-shells-*-59x41-e.txt`): its registry says
+/// `shell`, and once the box holds the message the mode line keeps only
+/// `· 2 shells`, with no `↓ to manage` and no agent rows. The owner's
+/// message, curly apostrophes and all, goes in at once, Sent. Before ov-795
+/// the read-back before the Enter saw no background work, took the
+/// registry's `shell` for a turn, and left it as `paste_left`.
+#[tokio::test]
+async fn a_claude_beside_background_shells_takes_a_message_as_its_next_turn() {
+    let b = board().await;
+    quick(&b);
+    let (agent, si) = idle_claude(&b).await;
+    si.show("shells").await;
+    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let _hook = hook_on_submit(&b, &si);
+    let text = "Btw to make things go faster, if there are multiple trains waiting to land, if it’s safe you can merge \
+                them into the same train. Otherwise you’ll have a million trains queueing unnecessarily. Please update \
+                the manager skill also with such best practices";
+    let turn = b.watcher.compose_into(agent.id, text, &[]).await;
+    assert_eq!(turn.expect("sent"), Turn::Between, "{}", si.log());
+    assert_eq!(si.submitted(), [text], "{}", si.log());
+}
+
+/// Beside the same shells, a box that holds more than the message still
+/// refuses: someone typing straight into the terminal after the paste,
+/// which leaves no input mark, puts more in the box before the Enter. The
+/// count says only that shells run, never what the box holds.
+#[tokio::test]
+async fn a_box_holding_more_than_the_message_beside_background_shells_still_refuses() {
+    let b = board().await;
+    quick(&b);
+    let (agent, si) = idle_claude(&b).await;
+    si.show("shells").await;
+    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let (svc, id) = (b.svc.clone(), agent.id);
+    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || {
+        // Off the test's runtime, which this hook blocks.
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                rt.block_on(async {
+                    let unmarked = crate::runtime::Runtime { marks: None, ..svc.runtime() };
+                    unmarked.send_bytes_hex(id, &" and mine".bytes().map(|c| format!("{c:02x}")).collect::<String>()).await.unwrap();
+                    for _ in 0..750 {
+                        if svc.screen(id).await.is_ok_and(|(screen, _, _)| screen.contains("find and mine")) {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    panic!("the typing never showed");
+                });
+            });
+        });
+    }));
+    let sink = Sink::default();
+    let refused = {
+        let _logging = tracing::subscriber::set_default(tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish());
+        b.watcher.compose_into(agent.id, "what did they find", &[]).await
+    };
+    assert!(matches!(refused, Err(DomainError::Conflict { what: "paste_left" })), "{refused:?}");
+    assert!(si.submitted().is_empty(), "{}", si.log());
+    // Which check left it, and the box's shape, never its text (ov-795).
+    let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+    assert!(logged.contains("a paste was left in the box") && logged.contains("not_shown"), "{logged}");
+    assert!(logged.contains("background=true") && logged.contains("held=\"holds\""), "{logged}");
+    assert!(!logged.contains("find"), "the text is never logged: {logged}");
+}
+
+/// A log sink for one test's subscriber.
+#[derive(Clone, Default)]
+struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Sink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
+    type Writer = Sink;
+    fn make_writer(&'a self) -> Sink {
+        self.clone()
+    }
+}
+
 /// A turn running beside background agents
 /// (`captures/claude-2.1.296-working-beside-background-agents-120x40-e.txt`)
 /// is a turn: the registry's busy is the turn's, and a call in flight holds
