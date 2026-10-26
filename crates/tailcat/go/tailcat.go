@@ -589,7 +589,8 @@ func pickRegionIn(ctx context.Context, dm *tailcfg.DERPMap) (tailcfg.DERPRegionI
 	return tailcat.PickBestRegion(ctx, dm)
 }
 
-// stopServer closes whatever server is running and forgets it.
+// stopServer closes whatever server is running and forgets it, after telling
+// every device with a live tunnel that the tunnel is ending.
 //
 // There is no way to withdraw one key from a live server: the allowlist is
 // copied into the backend at Start and consulted only when a client first
@@ -597,12 +598,110 @@ func pickRegionIn(ctx context.Context, dm *tailcfg.DERPMap) (tailcfg.DERPRegionI
 // Rebuilding the server is not merely the available way to revoke a route, it
 // is the only one that works — and it drops every live tunnel, not only the
 // revoked device's.
+//
+// The hang-up is what makes that drop a blip rather than a freeze (ov-762).
+// The replacement server has the same key and address but none of the old
+// one's WireGuard peers or TCP connections, and a device never re-registers on
+// its own, so a tunnel closed without a word just stops answering: measured,
+// a surviving device's session hung 119 s, until the ssh keepalive gave up.
+// A FIN through the old tunnel, before its netstack goes, instead reaches the
+// device's pump as an EOF, the session ends at once, and the redial takes
+// about 0.2 s.
 func stopServer() {
 	if server == nil {
 		return
 	}
+	hangUpTunnels(drainTimeout)
 	closeServer(server)
 	server = nil
+}
+
+// tunnel is one device's connection that the running server is forwarding to
+// sshd.
+type tunnel struct {
+	// local is the connection to sshd. Closing it is how a hang-up starts:
+	// the forward then ends exactly as it does when sshd closes, with a FIN
+	// to the device.
+	local net.Conn
+	// over is closed when the forward has finished with the device's side.
+	over chan struct{}
+}
+
+// tunnels is every live forward, across servers: a forward that outlives its
+// server's hang-up deadline stays here until it ends, and the next hang-up
+// closing its sshd connection again does nothing.
+var tunnels = struct {
+	sync.Mutex
+	live map[*tunnel]struct{}
+}{live: map[*tunnel]struct{}{}}
+
+// hangUpTunnels ends every live forward and waits, up to wait in all, for
+// each device to acknowledge.
+//
+// The wait is the point. The whole TCP stack runs in this process, so a FIN
+// queued just before the server closes may never leave it; a forward ends
+// only once the device's own FIN has come back (see forward), which is proof
+// that ours arrived. A device that does not answer — asleep, or gone — costs
+// at most wait, and serve holds mu for it.
+func hangUpTunnels(wait time.Duration) {
+	tunnels.Lock()
+	live := make([]*tunnel, 0, len(tunnels.live))
+	for t := range tunnels.live {
+		live = append(live, t)
+	}
+	tunnels.Unlock()
+	if len(live) == 0 {
+		return
+	}
+	for _, t := range live {
+		t.local.Close()
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	for _, t := range live {
+		select {
+		case <-t.over:
+		case <-deadline.C:
+			log.Printf("tailcat: %d device(s) did not acknowledge the tunnel closing within %v", len(live), wait)
+			return
+		}
+	}
+}
+
+// forward carries one device's connection to sshd and back, and ends it with
+// a FIN to the device whichever side finished first.
+//
+// It half-closes rather than closes, then waits for the device's FIN, bounded
+// by drainTimeout. A full Close would also send a FIN, but it would give
+// hangUpTunnels nothing to wait on: the device's FIN is the only sign this
+// side gets that its own arrived.
+func forward(c net.Conn, local net.Conn) {
+	t := &tunnel{local: local, over: make(chan struct{})}
+	tunnels.Lock()
+	tunnels.live[t] = struct{}{}
+	tunnels.Unlock()
+	defer func() {
+		tunnels.Lock()
+		delete(tunnels.live, t)
+		tunnels.Unlock()
+		close(t.over)
+	}()
+
+	deviceDone := make(chan struct{})
+	go func() {
+		defer recoverInGoroutine()
+		defer close(deviceDone)
+		io.Copy(local, c)
+		local.Close()
+	}()
+	io.Copy(c, local)
+	if cw, ok := c.(interface{ CloseWrite() error }); ok && cw.CloseWrite() == nil {
+		select {
+		case <-deviceDone:
+		case <-time.After(drainTimeout):
+		}
+	}
+	c.Close()
 }
 
 // serve replaces this runner's tunnel server.
@@ -618,6 +717,8 @@ func stopServer() {
 // including the part of the number that is not ours.
 //
 //	happy path            one Start, 170-450 ms measured
+//	devices connected     + the hang-up: one relay round trip when they
+//	                      answer, drainTimeout when one does not
 //	first start ever      + chooseRegion, bounded by regionPickTimeout
 //	pinned region gone    + a failed Start, a cached map read, our pick, and a
 //	                      second Start that runs a netcheck of ITS own
@@ -766,9 +867,7 @@ func newServer(id identity, sshPort uint16, allowed []key.NodePublic) *tailcat.S
 					c.Close()
 					return
 				}
-				go func() { io.Copy(local, c); local.Close() }()
-				io.Copy(c, local)
-				c.Close()
+				forward(c, local)
 			}
 		},
 	}

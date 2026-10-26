@@ -1296,3 +1296,143 @@ func TestAnEmptyDERPMapIsNotPassedThrough(t *testing.T) {
 		t.Fatalf("an empty setting became %q on the client", got)
 	}
 }
+
+// A revoke rebuilds the server, and the devices that were NOT revoked have to
+// hear about it (ov-762). Closing the old server silently left each of them
+// holding a tunnel nobody answered, for as long as the ssh keepalive took to
+// notice — 119 s, measured end to end. The device must see its connection end
+// BEFORE the server is closed, because once the server's netstack is gone
+// there is nothing left to send the FIN.
+//
+// The device here is a loopback TCP connection standing in for the tunnel's
+// far end, and it behaves as the client's pump does: on EOF it closes.
+func TestStoppingTheServerTellsEveryConnectedDeviceFirst(t *testing.T) {
+	sshdPort := listenLikeSshd(t)
+	device, handler := connectThroughOnTCP(t, sshdPort)
+
+	told := make(chan struct{})
+	go func() {
+		readUntilEOF(device)
+		close(told)
+		device.Close()
+	}()
+	waitForTunnels(t, 1)
+
+	toldFirst := false
+	running := &tailcat.Server{}
+	defer restoreServerState(t, running, func(*tailcat.Server) error {
+		select {
+		case <-told:
+			toldFirst = true
+		default:
+		}
+		return nil
+	})()
+
+	began := time.Now()
+	stopServer()
+	if !toldFirst {
+		t.Fatal("the server was closed before the device was told its tunnel was ending")
+	}
+	if took := time.Since(began); took >= drainTimeout {
+		t.Fatalf("stopping took %v; a device that answers at once should not cost the whole drain timeout", took)
+	}
+	<-handler
+	waitForTunnels(t, 0)
+}
+
+// A device that never answers the hang-up — a phone asleep with its tunnel
+// open — costs at most the wait, and serve holds mu for that wait.
+func TestADeviceThatNeverAnswersTheHangUpCostsOnlyTheWait(t *testing.T) {
+	sshdPort := listenLikeSshd(t)
+	device, handler := connectThroughOnTCP(t, sshdPort)
+	defer func() { device.Close(); <-handler }()
+	waitForTunnels(t, 1)
+
+	began := time.Now()
+	hangUpTunnels(200 * time.Millisecond)
+	if took := time.Since(began); took > time.Second {
+		t.Fatalf("hanging up on a silent device took %v, want about 200ms", took)
+	}
+	// It was still told: the FIN went out whether or not it answered.
+	device.SetReadDeadline(time.Now().Add(time.Second))
+	if n, err := device.Read(make([]byte, 1)); err == nil || n != 0 {
+		t.Fatalf("the silent device read %d bytes and err=%v, want EOF", n, err)
+	}
+}
+
+// listenLikeSshd stands in for sshd: it accepts and holds each connection
+// until the far side closes it.
+func listenLikeSshd(t *testing.T) uint16 {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { readUntilEOF(c); c.Close() }()
+		}
+	}()
+	return uint16(ln.Addr().(*net.TCPAddr).Port)
+}
+
+// connectThroughOnTCP runs the runner's real OnTCP handler on one end of a
+// loopback connection and returns the other end, the device's, with a channel
+// closed when the handler returns.
+func connectThroughOnTCP(t *testing.T, sshdPort uint16) (net.Conn, chan struct{}) {
+	t.Helper()
+	allowed, err := parseAllowed(keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := newServer(identity{priv: key.NewNode()}, sshdPort, allowed).OnTCP(tunnelPort)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	device, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnerSide, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { handle(runnerSide); close(done) }()
+	return device, done
+}
+
+func readUntilEOF(c net.Conn) {
+	buf := make([]byte, 512)
+	for {
+		if _, err := c.Read(buf); err != nil {
+			return
+		}
+	}
+}
+
+// waitForTunnels waits for the live forwards to number n.
+func waitForTunnels(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tunnels.Lock()
+		got := len(tunnels.live)
+		tunnels.Unlock()
+		if got == n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d live tunnels, want %d", got, n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
