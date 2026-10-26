@@ -76,4 +76,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case memberOwnLogins = "member_own_logins"
     case workspaceCharter = "workspace_charter"
     case boardThemeMove = "board_theme_move"
+    case memberRoles = "member_roles"
 }

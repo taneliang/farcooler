@@ -10,8 +10,9 @@ use farcooler_protocol::v1 as pb;
 use serde_json::{Value, json};
 
 /// `{members: [{handle, name, devices, reps, rep_panes: [{terminal,
-/// workspace}], account, email, claude_login}], claude_account, you}`, with
-/// `claude_login` as `claude_login_json` says. A rep's `workspace`
+/// workspace}], account, email, role, claude_login}], claude_account, you}`,
+/// with `claude_login` as `claude_login_json` says. `role` (ov-757) is
+/// `member` or `maintainer`, and "" from a runner before it. A rep's `workspace`
 /// is "" from a runner before ov-508 sent it, and `account` and `email` are ""
 /// for a member added by hand or from a runner before ov-525.
 ///
@@ -40,7 +41,7 @@ pub fn members_json(list: &pb::MemberList) -> Value {
                 .collect();
             let mut member = json!({
                 "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len(),
-                "rep_panes": panes, "account": m.account, "email": m.email,
+                "rep_panes": panes, "account": m.account, "email": m.email, "role": m.role,
             });
             if let Some(login) = &m.claude_login {
                 member["claude_login"] = claude_login_json(login);
@@ -98,6 +99,7 @@ mod tests {
                 rep_workspace_ids: vec![board.as_bytes().to_vec().into()],
                 account: "user_alice".into(),
                 email: "alice@example.com".into(),
+                role: "maintainer".into(),
                 claude_login: Some(pb::MemberClaudeLogin {
                     handle: "alice".into(),
                     state: pb::ClaudeLoginState::SignedIn as i32,
@@ -122,6 +124,7 @@ mod tests {
         assert_eq!(v["members"][0]["rep_panes"][1]["workspace"], "");
         assert_eq!((&v["members"][0]["account"], &v["members"][0]["email"]), (&json!("user_alice"), &json!("alice@example.com")));
         assert_eq!(v["members"][0]["claude_login"], json!({ "state": "signed_in", "email": "alice@claude.example" }));
+        assert_eq!(v["members"][0]["role"], "maintainer");
     }
 
     /// A removal's answer says what was wiped of the member's Claude login,

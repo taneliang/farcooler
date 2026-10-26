@@ -121,6 +121,21 @@ pub fn talks_to_orchestrator(store: &Store, person: &Person, workspace: Uuid) ->
     Ok(*person == Person::Owner || leads(store, person, workspace)?)
 }
 
+/// Whether `person` may edit `workspace`'s charter (`workspace.set_charter`,
+/// ov-757): the owner, the workspace's lead, or a Maintainer, who edits
+/// every workspace's. Never a released device. A member's ordinary role
+/// edits none, so with no roles given, only the owner and a lead do.
+pub fn may_edit_charter(store: &Store, person: &Person, workspace: Uuid) -> Result<bool> {
+    Ok(match person {
+        Person::Owner => true,
+        Person::Member(handle) => {
+            leads(store, person, workspace)?
+                || store.member_role(handle)? == farcooler_store::member_roles::Role::Maintainer
+        }
+        Person::Released => false,
+    })
+}
+
 /// Whether `person` may start `handle`'s rep (`rep.start`), and so wake it
 /// with a message: the owner starts anyone's, a member only their own,
 /// runner admin or not (ov-716 rule 3). A rep runs on its member's login
@@ -313,6 +328,10 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   (ov-716 rule 5, `refuse_someone_elses_lane`): a member typing into,
 ///   restarting, removing or recasting a lane pane on someone else's login
 ///   is refused `not_yours`.
+/// - **A charter is edited by the owner, its lead and a Maintainer**
+///   (ov-757, `may_edit_charter`): `workspace.set_charter` from any other
+///   member's device is refused `not_yours`. A role is the owner's alone to
+///   give (`member.set_role`, `Why::Grants`).
 /// - **Only the lead, and the owner, start the orchestrator** (ov-637):
 ///   `workspace.start_orchestrator`, or `terminal.set_role` making a pane
 ///   one (ov-716), from anyone else's device is `not_lead`.
@@ -402,6 +421,17 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         || enrolls_a_shell(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
         tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    // A charter is edited by the owner, its workspace's lead and a
+    // Maintainer (ov-757). A request naming no workspace is its handler's
+    // to refuse.
+    if peer.client_id.is_some()
+        && ruling_of(req) == Some(Ruling::Charter)
+        && let Some(workspace) = req.target_resource_id.as_deref().and_then(crate::wire::parse_id)
+        && !may_edit_charter(store, &person_of(store, peer)?, workspace)?
+    {
+        tracing::info!(method = %req.method, "refused: a charter edit from someone who neither leads nor maintains");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     if peer.client_id.is_some()
@@ -1133,3 +1163,7 @@ mod team_tests;
 #[cfg(test)]
 #[path = "people_rep_plan_tests.rs"]
 mod rep_plan_tests;
+
+#[cfg(test)]
+#[path = "people_roles_tests.rs"]
+mod roles_tests;

@@ -735,6 +735,12 @@ pub mod capability {
     /// `board_theme.move`. A CLI refuses `plan theme move` before sending,
     /// saying the runner needs an update.
     pub const BOARD_THEME_MOVE: &str = "board_theme_move";
+    /// Members' roles and the people log (ov-757): `Member.role` in
+    /// `member.list`, `member.set_role` (the owner's alone), `member.events`,
+    /// `WorkspaceCharter.sha256`, and `workspace.set_charter`, which the
+    /// owner, the workspace's lead or a Maintainer may call. An app offers
+    /// the role and the charter edit only on a runner with it.
+    pub const MEMBER_ROLES: &str = "member_roles";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -757,7 +763,7 @@ pub mod capability {
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
-            WORKSPACE_CHARTER, BOARD_THEME_MOVE,
+            WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1020,6 +1026,9 @@ pub mod method {
         ClaudeSignOut = "claude.sign_out" => CLAUDE_SIGN_IN,
         MemberSetOwnLogin = "member.set_own_login" => MEMBER_OWN_LOGINS,
         WorkspaceCharter = "workspace.charter" => WORKSPACE_CHARTER,
+        MemberSetRole = "member.set_role" => MEMBER_ROLES,
+        MemberEvents = "member.events" => MEMBER_ROLES,
+        WorkspaceSetCharter = "workspace.set_charter" => MEMBER_ROLES,
     }
 }
 

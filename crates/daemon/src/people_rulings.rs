@@ -49,6 +49,10 @@ pub enum Ruling {
     ByPayload,
     /// The workspace's lead's and the owner's (R-54, ov-637).
     Lead,
+    /// A workspace's charter, edited (ov-757): the owner's, the workspace's
+    /// lead's and a Maintainer's (`people::may_edit_charter`). A rep never
+    /// edits it (`rep_may`); it asks the orchestrator.
+    Charter,
     /// The owner's alone, refused `not_yours`, for the reason given.
     Owners(Why),
 }
@@ -63,6 +67,9 @@ pub enum Why {
     Reshapes,
     /// It deletes the owner's files (ov-716).
     Destroys,
+    /// It gives a member a role (ov-757): a member admin could otherwise
+    /// make themselves a Maintainer.
+    Grants,
 }
 
 /// The ruling on `method`. See `Ruling`.
@@ -97,6 +104,8 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::WorkspaceList
         | M::ClientList
         | M::MemberList
+        // Who changed what about the people here (ov-757).
+        | M::MemberEvents
         // The charter (ov-755): the owner, a member and a member's rep
         // (`rep_may`) read it.
         | M::WorkspaceCharter => Reads,
@@ -199,6 +208,8 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::WorkspaceStartOrchestrator => Lead,
 
+        M::WorkspaceSetCharter => Charter,
+
         M::PlanSet
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
@@ -217,6 +228,8 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::PageRemove => Plan,
 
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
+
+        M::MemberSetRole => Owners(Why::Grants),
 
         M::WorkspaceDelete
         | M::WorkspaceRename

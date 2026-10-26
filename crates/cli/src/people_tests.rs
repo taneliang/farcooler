@@ -22,7 +22,7 @@ fn a_list() -> pb::MemberList {
         members: vec![
             pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()], rep_workspace_ids: vec![crate::id_bytes(WS)], ..Default::default() },
             pb::Member { handle: "bob".into(), name: "Bob".into(), ..Default::default() },
-            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new(), account: "user_carol".into(), email: "carol@example.com".into(), claude_login: None },
+            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new(), account: "user_carol".into(), email: "carol@example.com".into(), claude_login: None, role: String::new() },
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),

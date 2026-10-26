@@ -1,9 +1,14 @@
 //! People's routes (ov-494): `member.list`, `member.set`, `member.remove` and
 //! `rep.start`, behind `representatives`, `member.connectors` (ov-586),
-//! behind `rep_connectors`, and `member.set_own_login` (ov-652), behind
-//! `member_own_logins`; Claude sign-in's (ov-584) go on to
+//! behind `rep_connectors`, `member.set_own_login` (ov-652), behind
+//! `member_own_logins`, and `member.set_role` and `member.events` (ov-757),
+//! behind `member_roles`; Claude sign-in's (ov-584) go on to
 //! `rpc_claude_sign_in`. The rules are in `people`, the
 //! records in `farcooler_store::people`, and a rep's start in `reps`.
+//!
+//! Each change to who's here goes to the people log (`member.events`): a
+//! member added, their devices changed, a member removed, a role given or
+//! taken, with who did it.
 //!
 //! Every answer about members carries the Claude account the runner uses,
 //! because joining a shared runner is joining that account (ov-479 D2), and
@@ -12,6 +17,8 @@
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, Scope, request, result};
 use farcooler_transport::Peer;
+
+use farcooler_store::member_roles::{NewPeopleEvent, Role};
 
 use crate::people::{Person, person_of};
 use crate::service::Service;
@@ -44,7 +51,18 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // them by QR says (ov-525). Stored as told: a runner admin's
             // word, like the name, and what offboarding will look them up by.
             let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
-            svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
+            let before = match svc.store.member(p.handle.trim()) {
+                Err(DomainError::NotFound) => None,
+                other => Some(other?),
+            };
+            let after = svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
+            match before {
+                None => log(svc, peer, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
+                Some(b) if b.devices != after.devices => {
+                    log(svc, peer, &after.handle, "devices", serde_json::json!({ "from": b.devices, "to": after.devices }))
+                }
+                Some(_) => {}
+            }
             svc.refresh_claude_key_exports();
             watcher.announce_fleet_changed();
             Ok(result::Value::MemberList(list(svc, peer)?))
@@ -104,6 +122,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // Keychain entry and its directory deleted. Gone from the store
             // first, so nothing can launch on it in between (`member_removal`).
             let removed = svc.wipe_login(login.as_deref(), &running).await;
+            log(svc, peer, handle, "removed", serde_json::json!({ "devices": member.devices }));
             watcher.announce_fleet_changed();
             crate::lead_change::publish_layouts(svc, watcher, &started).await;
             Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }))
@@ -129,6 +148,44 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
                 watcher.announce_fleet_changed();
             }
             Ok(result::Value::MemberList(list(svc, peer)?))
+        }
+        "member.set_role" => {
+            let Some(request::Payload::MemberSetRole(p)) = req.payload else { return Err(payload_missing()) };
+            let role = Role::parse(p.role.trim()).ok_or(DomainError::InvalidArgument { what: "role" })?;
+            // The owner's alone (`Why::Grants`, by the gate), and a person,
+            // never an agent in a pane, as lending a login is: the local
+            // socket is the owner's to the gate, and a role widens what a
+            // member's devices may do.
+            if caller_pid.and_then(|pid| crate::people::pane_of(svc, pid)).is_some() {
+                tracing::info!("refused: a role change from inside a pane");
+                return Err(DomainError::Conflict { what: "in_pane" });
+            }
+            if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+                tracing::info!("refused: a role change from a caller who isn't a person");
+                return Err(DomainError::Conflict { what: "person_only" });
+            }
+            let handle = p.handle.trim();
+            if svc.store.set_member_role(handle, role, &actor(svc, peer)?)? != role {
+                tracing::info!(handle, role = role.as_str(), "a member's role changed");
+                watcher.announce_fleet_changed();
+            }
+            Ok(result::Value::MemberList(list(svc, peer)?))
+        }
+        "member.events" => {
+            let events = svc.store.people_events(EVENTS_SHOWN)?;
+            Ok(result::Value::PeopleEventList(pb::PeopleEventList {
+                events: events
+                    .into_iter()
+                    .map(|e| pb::PeopleEvent {
+                        at_ms: e.at,
+                        actor: e.actor,
+                        handle: e.handle,
+                        workspace_id: e.workspace.map(id_bytes).unwrap_or_default(),
+                        kind: e.kind,
+                        detail: e.detail,
+                    })
+                    .collect(),
+            }))
         }
         "rep.start" => {
             let Some(request::Payload::RepStart(p)) = req.payload else { return Err(payload_missing()) };
@@ -197,6 +254,29 @@ async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
     failed
 }
 
+/// The most of the people log `member.events` answers, newest first.
+const EVENTS_SHOWN: u32 = 200;
+
+/// Who `peer` is, as the people log writes it: `member:<handle>`, or `user`
+/// for the owner.
+fn actor(svc: &Service, peer: &Peer) -> Result<String> {
+    Ok(match person_of(&svc.store, peer)? {
+        Person::Member(handle) => format!("member:{handle}"),
+        _ => "user".to_string(),
+    })
+}
+
+/// Add a change already made to the people log. A line that can't be
+/// written is logged and isn't the change failing.
+fn log(svc: &Service, peer: &Peer, handle: &str, kind: &str, detail: serde_json::Value) {
+    let written = actor(svc, peer).and_then(|actor| {
+        svc.store.record_people_event(NewPeopleEvent { actor: &actor, handle, workspace: None, kind, detail: &detail })
+    });
+    if let Err(e) = written {
+        tracing::warn!(handle, kind, error = %e.what(), "a change to the people here wasn't logged");
+    }
+}
+
 /// `MemberList.you` for a device that was a member's and is nobody's now: no
 /// handle can hold parentheses, so it's never mistaken for one.
 const RELEASED: &str = "(released)";
@@ -204,6 +284,7 @@ const RELEASED: &str = "(released)";
 /// Everyone on the runner, the account they share, and who's asking.
 fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
     let viewer = person_of(&svc.store, peer)?;
+    let roles = svc.store.member_roles()?;
     let members = svc
         .store
         .members()?
@@ -215,6 +296,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             let own = matches!(&viewer, Person::Owner) || matches!(&viewer, Person::Member(me) if *me == m.handle);
             let claude_login = Some(svc.member_claude_login(&m.handle, own));
             Ok(pb::Member {
+                role: roles.get(&m.handle).copied().unwrap_or_default().as_str().to_string(),
                 claude_login,
                 rep_terminal_ids: reps.iter().map(|r| id_bytes(r.terminal)).collect(),
                 rep_workspace_ids: reps.iter().map(|r| id_bytes(r.workspace)).collect(),

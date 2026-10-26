@@ -81,6 +81,15 @@ async fn a_teammates_phone_is_bound_with_their_account_and_sees_itself() {
     assert_eq!(call(&phone, set("bob", &["phone-b"], "user_bob", "")).await.err().as_deref(), Some("scope-denied:"));
     // One account is one member: the same person can't be added twice.
     assert_eq!(call(&admin, set("bob2", &[], "user_bob", "")).await.err().as_deref(), Some("resource-conflict:account_taken"));
+
+    // The people log (ov-757): Bob added, then his devices changed. Set
+    // again as he is, nothing more; a refused call, nothing at all.
+    call(&admin, set("bob", &[], "", "")).await.expect("his phone taken off");
+    call(&admin, set("bob", &[], "", "")).await.expect("nothing changed");
+    let log = svc.store.people_events(10).unwrap();
+    let kinds: Vec<(&str, &str, &str)> = log.iter().map(|e| (e.kind.as_str(), e.handle.as_str(), e.actor.as_str())).collect();
+    assert_eq!(kinds, [("devices", "bob", "user"), ("added", "bob", "user")]);
+    assert_eq!(log[0].detail, r#"{"from":["phone-b"],"to":[]}"#);
 }
 
 /// Removing a teammate still revokes their devices, so the account on the row
@@ -96,6 +105,10 @@ async fn removing_a_teammate_revokes_their_phone() {
         ..Default::default()
     };
     call(&admin, remove).await.expect("removed");
+    // And the people log has both, newest first (ov-757).
+    let kinds: Vec<(String, String)> = svc.store.people_events(10).unwrap().into_iter().map(|e| (e.kind, e.handle)).collect();
+    let said = |k: &str| (k.to_string(), "bob".to_string());
+    assert_eq!(kinds, [said("removed"), said("added")]);
     let left = crate::enrollment::list(&svc).await.unwrap();
     assert!(left.items.iter().all(|e| e.client_id != "phone-b"), "Bob's phone is still enrolled: {left:?}");
     assert!(svc.store.member("bob").is_err());

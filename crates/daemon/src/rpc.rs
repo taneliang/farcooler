@@ -528,6 +528,7 @@ fn scope_of(method: Method) -> Scope {
         // The charter's text: the team's rules, which every member reads
         // (ov-755). Whose to read is the gate's (`Ruling::Reads`).
         Method::WorkspaceCharter => Scope::Read,
+        Method::WorkspaceSetCharter => Scope::Control, // its lead's, a Maintainer's (ov-757)
         // The writes sit with the board writes and `worktree.create`: they
         // touch no git data and reveal no path, and an orchestrator has to
         // be able to split its own workstream for any of this to be
@@ -597,7 +598,8 @@ fn scope_of(method: Method) -> Scope {
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
         // own device, checked in `rpc_people` (ov-494).
         Method::MemberList | Method::ClaudeSignIn | Method::ClaudeSignInFinish | Method::ClaudeSignInCancel | Method::ClaudeSignOut => Scope::Read, // sign-in: theirs alone (`may_sign_in`, ov-584)
-        Method::MemberSet | Method::MemberRemove => Scope::HostAdmin,
+        Method::MemberSet | Method::MemberRemove | Method::MemberSetRole => Scope::HostAdmin, // a role: the owner's alone (ov-757)
+        Method::MemberEvents => Scope::Read,
         // Whether members may run on the owner's own logins: the owner's
         // account to lend, so the runner's admins' say alone (ov-652).
         Method::MemberSetOwnLogin => Scope::HostAdmin,
@@ -1975,7 +1977,7 @@ impl Rpc {
             }
 
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
-            "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
+            "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
@@ -1986,6 +1988,7 @@ impl Rpc {
             "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
             "workspace.charter" => crate::charter_read::handle(svc, &req), // ov-755
+            "workspace.set_charter" => crate::charter_write::handle(svc, &self.peer, req).await, // ov-757
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 

@@ -298,6 +298,12 @@ message Request {
     // `board_theme.move` (ov-755), behind `board_theme_move`: a theme to a
     // place in the ranking. 541-549 are its block, held by `reserved` below.
     BoardThemeMove board_theme_move = 540;
+    // `member.set_role` and `workspace.set_charter` (ov-757), behind
+    // `member_roles`: the owner makes a member a Maintainer, and the owner, a
+    // workspace's lead or a Maintainer edits its charter. `member.events`
+    // takes no payload. 552-559 are their block, held by `reserved` below.
+    MemberSetRole member_set_role = 550;
+    WorkspaceSetCharter workspace_set_charter = 551;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -337,6 +343,8 @@ message Request {
   reserved 531 to 539;
   // The rest of the theme move's block (ov-755).
   reserved 541 to 549;
+  // The rest of members' roles' block (ov-757).
+  reserved 552 to 559;
 }
 
 message Response {
@@ -487,6 +495,10 @@ message Result {
     // `workspace.charter` (ov-755), behind `workspace_charter`: the charter's
     // text. 541-549 are its block, held by `reserved` below.
     WorkspaceCharter workspace_charter = 540;
+    // `member.events` (ov-757), behind `member_roles`: the people log.
+    // `member.set_role` answers a `member_list`, and `workspace.set_charter`
+    // a `workspace_charter`. 551-559 are its block, held by `reserved` below.
+    PeopleEventList people_event_list = 550;
     // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
     WorktreeGrepResult worktree_grep_result = 480;
     // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
@@ -543,6 +555,8 @@ message Result {
   reserved 522 to 529;
   // The rest of the charter read's block (ov-755).
   reserved 541 to 549;
+  // The rest of the people log's block (ov-757).
+  reserved 551 to 559;
 }
 
 // ---------------------------------------------------------------------------
@@ -5162,6 +5176,10 @@ message Member {
   // Their own Claude login on this runner (ov-584). Absent from a runner
   // before it.
   MemberClaudeLogin claude_login = 8;
+  // Their role (ov-757): `member`, everyone's by default, or `maintainer`,
+  // who edits any workspace's charter. Only the owner changes it
+  // (`member.set_role`). Empty from a runner before `member_roles`.
+  string role = 9;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're
@@ -5915,6 +5933,54 @@ message WorkspaceCharter {
   // Whether the workspace has a charter yet: a new workspace's is the
   // orchestrator's to write when it is first talked to.
   bool exists = 2;
+  // The SHA-256 of the charter's bytes on disk, lowercase hex, or empty when
+  // there is none: what `workspace.set_charter` is given back as
+  // `expected_sha256`. Empty from a runner before `member_roles` (ov-757).
+  string sha256 = 3;
+}
+
+// `workspace.set_charter` (ov-757), at `control`, targeting a workspace:
+// replace its charter with `text`, whole. The owner, the workspace's lead and
+// a Maintainer may; anyone else is refused `not_yours`, a member's rep
+// `rep_messenger`. Refused `charter_changed` when the charter on disk is no
+// longer the one `expected_sha256` names (empty: there is none yet), so an
+// edit made meanwhile is never written over. Answers the charter as written.
+// Each edit goes to the people log. Behind `member_roles`.
+message WorkspaceSetCharter {
+  string text = 1;
+  string expected_sha256 = 2;
+}
+
+// `member.set_role` (ov-757), at `host_admin`: give a member a role,
+// `member` or `maintainer`. The owner's alone: a member admin is refused
+// `not_yours`, so nobody makes themselves a Maintainer. Each change goes to
+// the people log. Answers the member list. Behind `member_roles`.
+message MemberSetRole {
+  string handle = 1;
+  string role = 2;
+}
+
+// `member.events` (ov-757), at `read`: who changed what about the people on
+// the runner, newest first: a role given or taken, a member added, their
+// devices changed or removed, a charter edited through the runner.
+message PeopleEventList {
+  repeated PeopleEvent events = 1;
+}
+
+message PeopleEvent {
+  // Milliseconds since the epoch.
+  int64 at_ms = 1;
+  // Who made it: `user` for the owner, `member:<handle>` for a member.
+  string actor = 2;
+  // Whom it's about; empty for a charter edit.
+  string handle = 3;
+  // The workspace, for a charter edit; empty otherwise.
+  bytes workspace_id = 4;
+  // `role`, `added`, `devices`, `removed` or `charter`.
+  string kind = 5;
+  // A JSON object: a role change's `from` and `to`, a device change's
+  // `devices`, a charter edit's `sha256`.
+  string detail = 6;
 }
 
 message WorkspaceWriteCharter {

@@ -80,6 +80,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::RepositorySurvey(_) => "repository_survey",
         result::Value::CharterWritten(_) => "charter_written",
         result::Value::WorkspaceCharter(_) => "workspace_charter",
+        result::Value::PeopleEventList(_) => "people_event_list",
         result::Value::WorktreeGrepResult(_) => "worktree_grep_result",
         result::Value::AgentRowPage(_) => "agent_row_page",
         result::Value::AgentRowChanges(_) => "agent_row_changes",
