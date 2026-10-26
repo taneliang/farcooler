@@ -210,6 +210,17 @@ extension ContentView {
         return store.hosts.first { store.clients[$0]?.state == .removed }
     }
 
+    /// Whether a runner in `state` shows this Mac nothing of its team: it
+    /// removed this Mac's member, or took this Mac's access away (ov-818).
+    nonisolated static func shutOut(_ state: HostState?) -> Bool {
+        state == .removed || state == .noAccess
+    }
+
+    /// That runner's own screen, in place of whatever was open on it.
+    func placeholder(shutOutOf runner: String) -> some View {
+        placeholder(restoringOn: runner, waited: 0, restoring: false)
+    }
+
     /// The same for a runner that refuses this Mac's key after letting it in
     /// (ov-818).
     func noAccessTo(restoringOn runner: String?) -> String? {

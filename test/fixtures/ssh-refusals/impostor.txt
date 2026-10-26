@@ -1,0 +1,8 @@
+debug1: Server host key: ssh-ed25519 SHA256:wmlAgnlkpn7o0wdf+yMUX2RyeBSyiwuJR9Ulvxrt8Lo
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+Password authentication is disabled to avoid man-in-the-middle attacks.
+debug1: Authentications that can continue: publickey
+debug1: Offering public key: ~/.ssh/revoked ED25519 SHA256:GXr0aYtmcLgDEc2veRwu0VEX475UEN/n3nFeTP//P+o explicit
+debug1: Authentications that can continue: publickey
+debug1: No more authentication methods to try.
+e@127.0.0.1: Permission denied (publickey).

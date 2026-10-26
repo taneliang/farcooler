@@ -68,6 +68,10 @@ final class DaemonClient: ObservableObject {
     var admissions: UserDefaults = .standard
     lazy var keyRefusals = KeyRefusals.remembered(target, in: admissions)
     var now: () -> Date = Date.init
+    /// The verbose dial that proves a refusal is the runner's (review S1);
+    /// `teamWorkForgotten` says nothing of the runner's team may stay held.
+    var refusalProbe: (String) async -> String = DaemonClient.probeRefusal
+    var teamWorkForgotten = false
 
     /// Cancels the retry loop rather than leaving it to run against a client
     /// nobody holds anymore.
@@ -245,7 +249,10 @@ final class DaemonClient: ObservableObject {
     private let slowRetrySeconds: Double = 300
 
     /// `forgetTeamWork`'s part that only this file may write (ov-818).
-    func forgetNeedsYou() { if !needsYouRead.isEmpty { needsYouRead = [] } }
+    func forgetNeedsYou() {
+        if !needsYouRead.isEmpty { needsYouRead = [] }
+        if !boardNews.isEmpty { boardNews = [:] }
+    }
 
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
     /// failure paths cannot each schedule their own and race.

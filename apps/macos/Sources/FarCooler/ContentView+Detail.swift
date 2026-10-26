@@ -439,7 +439,12 @@ extension ContentView {
         // board is beside it are one view: going from one to the other keeps
         // the board, its scroll and its visit, and moves on the spring.
         case .workspace, .looseWorktree:
-            if let setup = charterSetup(for: selection) {
+            // A runner that removed this Mac or took its access away shows
+            // none of its team's boards, plans, tasks or panes: its own screen
+            // stands in for whatever was open there (ov-818).
+            if let host = selection?.host, Self.shutOut(store.clients[host]?.state) {
+                placeholder(shutOutOf: host)
+            } else if let setup = charterSetup(for: selection) {
                 // The first run's Reading and Charter screens (ov-519).
                 CharterSetupView(setup: setup).id(setup.id)
             } else if let scene = selection.flatMap(workspaceScene) {

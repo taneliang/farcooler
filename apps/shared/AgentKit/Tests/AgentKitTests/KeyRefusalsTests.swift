@@ -134,6 +134,56 @@ struct KeyRefusalsTests {
         #expect(KeyRefusals.isKeyRefusal("e@box: Permission denied (password,publickey,keyboard-interactive)."))
     }
 
+    // MARK: - Whose refusal it is, on the Mac (review S1)
+
+    /// Real `ssh -v` output from OpenSSH 10.3 against a scratch sshd, in
+    /// `test/fixtures/ssh-refusals`, reduced to its authentication lines.
+    static func sample(_ name: String) throws -> String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<6 { root.deleteLastPathComponent() }
+        return try String(
+            contentsOf: root.appendingPathComponent("test/fixtures/ssh-refusals/\(name).txt"), encoding: .utf8)
+    }
+
+    @Test(arguments: ["revoked", "revoked-agent-key"])
+    func theRunnerRefusingAnOfferedKeyUnderAKnownHostKeyIsProven(_ name: String) throws {
+        let verbose = try Self.sample(name)
+        #expect(KeyRefusals.isKeyRefusal(verbose))
+        #expect(KeyRefusals.isProvenKeyRefusal(verbose: verbose), "\(name)")
+    }
+
+    /// Each way to "Permission denied (publickey)" that isn't the runner
+    /// refusing the key, and the two failures that aren't refusals at all.
+    @Test(arguments: [
+        "agent-refused",  // the agent wouldn't sign: a locked agent, a confirm-each-use key
+        "agent-unanswered",  // a Touch ID or Secretive prompt nobody answered
+        "passphrase-no-agent",  // the server would take the key; nothing could unlock it
+        "bastion-refused",  // a ProxyJump bastion's own refusal
+        "impostor",  // a different host key, let through by StrictHostKeyChecking no
+        "host-key-changed",  // strict checking stopped at the host key
+        "penalized",  // sshd's PerSourcePenalties turned the source away
+        "admitted",  // it got in
+    ])
+    func everyOtherWayToARefusalIsNotProven(_ name: String) throws {
+        let verbose = try Self.sample(name)
+        #expect(!KeyRefusals.isProvenKeyRefusal(verbose: verbose), "\(name)")
+    }
+
+    /// The four that end in the same line the CLI shows are the ones that
+    /// matter: without the probe, each would have counted.
+    @Test(arguments: ["agent-refused", "agent-unanswered", "passphrase-no-agent", "bastion-refused", "impostor"])
+    func theFalsePositivesAllLookLikeARefusalToTheCLI(_ name: String) throws {
+        #expect(KeyRefusals.isKeyRefusal(try Self.sample(name)), "\(name)")
+    }
+
+    @Test func aProbeIsMadeAtMostEveryThirtySeconds() {
+        var refusals = KeyRefusals(admitted: true)
+        let first = refusals.mayProbe(at: Self.t0)
+        let tooSoon = refusals.mayProbe(at: Self.t0.addingTimeInterval(29))
+        let later = refusals.mayProbe(at: Self.t0.addingTimeInterval(30))
+        #expect(first && !tooSoon && later)
+    }
+
     @Test func otherRefusalsAndFailuresAreNot() {
         #expect(!KeyRefusals.isKeyRefusal("e@box: Permission denied (password)."))
         #expect(!KeyRefusals.isKeyRefusal("error: permission denied for control\ncode: scope-denied"))

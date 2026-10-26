@@ -13,9 +13,18 @@ import Foundation
 /// **What it reads.** Only this device's own history with the runner: whether
 /// the runner has let this device in before (``admitted``, kept across
 /// launches), and how many dials in a row it has refused since
-/// (``refusals``). A refusal comes after the runner proved its host key
-/// against the one this device pinned, so it's the runner's own answer, not
-/// a stranger's.
+/// (``refusals``).
+///
+/// **Whose refusal it is.** On the phones, the core checks the host key
+/// against the one this device pinned before it authenticates, so a refusal
+/// is the runner's own. **The Mac pins nothing for a runner at its address**
+/// (`SshConfig` pins only Tailcat's), and the CLI's ssh uses the owner's own
+/// config and agent, so "Permission denied (publickey)" there can just as well
+/// be an agent that wouldn't sign (a locked 1Password, a Touch ID prompt
+/// nobody answered), a passphrase key with no agent, a refusing ProxyJump
+/// bastion, or an impostor let through by `StrictHostKeyChecking no`. So the
+/// Mac settles only on a refusal ``isProvenKeyRefusal(verbose:)`` reads off a
+/// verbose probe it makes for the purpose (`DaemonClient.removal(after:)`).
 ///
 /// **What it tells a stranger: nothing.** The runner says nothing new. sshd
 /// refuses a revoked key in exactly the words it refuses any key it has
@@ -113,11 +122,55 @@ public struct KeyRefusals: Sendable, Equatable {
 
     static func key(_ runner: String) -> String { "keyRefusals.admitted.\(runner)" }
 
+    /// Whether a verbose (`ssh -v`) dial proves the runner itself refused
+    /// this device's key (ov-818, review S1): the host key matched the known
+    /// one under strict checking, a key was offered, and none was accepted.
+    ///
+    /// Each other way to the same "Permission denied (publickey)" leaves a
+    /// mark this refuses:
+    /// - a key the server accepted and then never got a signature for: an
+    ///   agent that refused or didn't answer (`Server accepts key`,
+    ///   `sign_and_send_pubkey`), or a passphrase key with no agent;
+    /// - a route through a proxy or a ProxyJump bastion, whose refusal may be
+    ///   the bastion's;
+    /// - a host key that didn't match, or that wasn't known at all.
+    ///
+    /// The samples it's held to are real OpenSSH 10.3 output, in
+    /// `test/fixtures/ssh-refusals`.
+    public static func isProvenKeyRefusal(verbose: String) -> Bool {
+        let lower = verbose.lowercased()
+        let disqualifying = [
+            "server accepts key", "sign_and_send_pubkey", "agent refused operation",
+            "communication with agent failed", "executing proxy command", "setting implicit proxycommand",
+            "remote host identification has changed", "host key verification failed",
+        ]
+        guard !disqualifying.contains(where: lower.contains) else { return false }
+        return lower.contains("is known and matches the") && lower.contains("offering public key")
+            && isKeyRefusal(verbose)
+    }
+
+    /// When the Mac last made its verbose probe, so it makes one at most
+    /// every ``probesEvery``: each is one more failed login on the runner,
+    /// and OpenSSH's `PerSourcePenalties` turns a source away once 15 s of
+    /// them have built up.
+    public private(set) var probedAt: Date?
+    public static let probesEvery: TimeInterval = 30
+
+    /// Whether a probe may be made at `now`, and if so, that it's being made.
+    public mutating func mayProbe(at now: Date) -> Bool {
+        if let probedAt, now.timeIntervalSince(probedAt) < Self.probesEvery { return false }
+        probedAt = now
+        return true
+    }
+
     /// Whether `stderr` from a command the Mac ran over `ssh` is sshd
     /// refusing this device's key: OpenSSH's "Permission denied (publickey)"
     /// or "(publickey,password)", the methods sshd offers in its order. The
     /// words are OpenSSH's own and have been for decades. A refusal that
     /// offers no public key method is not about this device's key.
+    ///
+    /// A candidate only: the agent, a passphrase or a bastion print the same
+    /// line. ``isProvenKeyRefusal(verbose:)`` is what settles it.
     public static func isKeyRefusal(_ stderr: String) -> Bool {
         stderr.lowercased().split(separator: "\n").contains { line in
             guard let open = line.range(of: "permission denied (") else { return false }

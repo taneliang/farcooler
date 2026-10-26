@@ -1,0 +1,7 @@
+debug1: Server host key: ssh-ed25519 SHA256:wmlAgnlkpn7o0wdf+yMUX2RyeBSyiwuJR9Ulvxrt8Lo
+debug1: Host '[127.0.0.1]:22818' is known and matches the ED25519 host key.
+debug1: Authentications that can continue: publickey
+debug1: Offering public key: ~/.ssh/revoked ED25519 SHA256:GXr0aYtmcLgDEc2veRwu0VEX475UEN/n3nFeTP//P+o explicit
+debug1: Authentications that can continue: publickey
+debug1: No more authentication methods to try.
+e@127.0.0.1: Permission denied (publickey).

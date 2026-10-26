@@ -1,0 +1,6 @@
+debug1: Server host key: ssh-ed25519 SHA256:wmlAgnlkpn7o0wdf+yMUX2RyeBSyiwuJR9Ulvxrt8Lo
+debug1: Host '[127.0.0.1]:22818' is known and matches the ED25519 host key.
+debug1: Authentications that can continue: publickey
+debug1: Offering public key: ~/.ssh/admitted ED25519 SHA256:L+FUm1ISP4h71h8/tMcyQkO6f8KqhMcOFcPru3/7eSY explicit
+debug1: Server accepts key: ~/.ssh/admitted ED25519 SHA256:L+FUm1ISP4h71h8/tMcyQkO6f8KqhMcOFcPru3/7eSY explicit
+Authenticated to 127.0.0.1 ([127.0.0.1]:22818) using "publickey".
