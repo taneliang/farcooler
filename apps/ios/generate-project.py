@@ -1198,6 +1198,9 @@ UI_TEST_SOURCES = [
     # The composer's fade and held photo, the cards held and tapped (ov-789,
     # ov-792, ov-794). Needs no runner.
     "GlassUITests.swift",
+    # The composer's gaps measured against Messages and Notes (ov-804),
+    # opt-in by its own switch.
+    "ComposerGapsCapturesUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

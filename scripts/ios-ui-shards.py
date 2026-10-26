@@ -178,7 +178,7 @@ LOCAL = {
 CAPTURE_SHARDS = {
     "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 870 + 434 s
     "captures2": ["PolishSweepUITests"],  # 1,001 s
-    "captures3": ["ConversationCapturesUITests", "GlassCapturesUITests"],  # 764 s, and four short launches
+    "captures3": ["ConversationCapturesUITests", "GlassCapturesUITests", "ComposerGapsCapturesUITests"],  # 764 s, and four short launches; the gaps skip without their own switch
 }
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
@@ -186,6 +186,7 @@ CAPTURES = {
     "ConversationCapturesUITests": "the iPhone conversation screen, light and dark, two type sizes (ov-611)",
     "NavigationCapturesUITests": "the iPhone's navigation, light and dark, two type sizes (ov-616)",
     "GlassCapturesUITests": "the composer and the cards' glass, held and opened, light and dark (ov-789)",
+    "ComposerGapsCapturesUITests": "the composer's gaps beside Messages' and Notes', keyboard down and up (ov-804)",
 }
 
 # The per-push smoke set (ov-534): the core flows, as few seconds as will show
