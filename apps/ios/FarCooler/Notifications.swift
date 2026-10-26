@@ -53,7 +53,7 @@ final class Notifier {
         if visibleTerminal == id { visibleTerminal = nil }
     }
 
-    private let presenter = ForegroundPresenter()
+    private let presenter = ForegroundPresenter.make()
     /// What was last announced per terminal, so a state that persists is
     /// announced once. The fleet is polled, so the same `done` arrives over and
     /// over; being told twice that the same agent finished is how people learn
@@ -191,23 +191,27 @@ final class Notifier {
 /// telling — which is right for a messaging app where the message is already on
 /// screen, and wrong here: the fleet is many agents and you can only look at
 /// one.
-private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelegate {
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        let subject = notification.request.content.threadIdentifier
-        let visible = await MainActor.run { Notifier.shared.visibleTerminal }
-        return subject == visible ? [] : [.banner, .sound]
+///
+/// A tapped notification: what it's about, a pane or a task, over the screens
+/// that lead to it (ruling 3, ov-183). Handed to `FleetView` through
+/// `NotificationTaps`, which routes it as it routes a card's link.
+///
+/// `NotificationReplies` is the delegate, and these are only what it does: it
+/// is the half that answers the center on the main thread, and a tap crashed
+/// the app while this file answered it from wherever an `async` method
+/// happened to finish (ov-787).
+@MainActor
+private enum ForegroundPresenter {
+    static func make() -> NotificationReplies {
+        NotificationReplies(present: present, respond: respond)
     }
 
-    /// A tapped notification: what it's about, a pane or a task, over the
-    /// screens that lead to it (ruling 3, ov-183). Handed to `FleetView`
-    /// through `NotificationTaps`, which routes it as it routes a card's link.
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+    private static func present(_ notification: UNNotification) -> UNNotificationPresentationOptions {
+        let subject = notification.request.content.threadIdentifier
+        return subject == Notifier.shared.visibleTerminal ? [] : [.banner, .sound]
+    }
+
+    private static func respond(_ response: UNNotificationResponse) async {
         let content = response.notification.request.content
         // A task decision's answer button (ov-94): written as the person,
         // through the runner the task is on, without opening the app.
@@ -222,7 +226,7 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
             let tap = Destination(userInfo: content.userInfo, thread: content.threadIdentifier)
         else { return }
-        await MainActor.run { NotificationTaps.shared.tap = tap }
+        NotificationTaps.shared.tap = tap
     }
 }
 

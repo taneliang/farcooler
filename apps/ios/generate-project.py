@@ -415,6 +415,10 @@ AGENTKIT_SOURCES = [
     # How a pane's banners are filed, so the next one replaces the last and a
     # closed pane's goes (ov-153). See `PaneBannerTests`.
     "PaneBanner.swift",
+    # The notification center's delegate, which answers the center on the
+    # main thread after the app's work is done; off it, a tap crashed the app
+    # (ov-787). See `NotificationRepliesTests`.
+    "NotificationReplies.swift",
     # The glance surfaces' color, their one state mark and their type scale, in
     # FOUR lists: this
     # one, `activity_build_ids`, `WATCH_AGENTKIT_SOURCES` and
