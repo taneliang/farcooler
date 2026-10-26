@@ -157,13 +157,28 @@ def is_swift(command):
     return any(os.path.basename(word) == "swift" for word in command)
 
 
+def is_strict():
+    """Whether a new system temp entry or plist fails the run, not just a note.
+
+    CI and FC_LEAK_STRICT=1 make it so. FC_LEAK_SHARED=1 says the Mac is shared
+    even though CI is set (scripts/lane-gate.py sets CI=true for the tests'
+    sake, and runs on a Mac where sibling lanes run Swift tests at the same
+    time, so their UUID-named leftovers land in the same folder, ov-802). An
+    explicit FC_LEAK_STRICT=1 still wins. The private TMPDIR arm is not
+    affected: nothing but this run can write there.
+    """
+    if os.environ.get("FC_LEAK_STRICT"):
+        return True
+    return bool(os.environ.get("CI")) and not os.environ.get("FC_LEAK_SHARED")
+
+
 def leaks(base, before, grace=GRACE_SECONDS, system=None):
     """(temp entries, new plists, whether the plists fail the run, new system temp entries) after `grace` seconds.
 
     `system` is (folder, names before) for a Swift run on macOS, else None.
     """
     deadline = time.time() + grace
-    strict = bool(os.environ.get("CI") or os.environ.get("FC_LEAK_STRICT"))
+    strict = is_strict()
     while True:
         temp, prefs = left_in(base), new_plists(before)
         sys_new = new_system_entries(*system) if system else []
@@ -376,6 +391,7 @@ def self_test():
     leave = f"open({plist!r},'w').close()"
     ci = os.environ.pop("CI", None)
     strict = os.environ.pop("FC_LEAK_STRICT", None)
+    shared = os.environ.pop("FC_LEAK_SHARED", None)
     case("a new UUID plist, on a Mac others share", leave, 0)
     os.remove(plist)
     os.environ["FC_LEAK_STRICT"] = "1"
@@ -387,8 +403,15 @@ def self_test():
     os.environ["CI"] = "1"
     case("a new UUID plist, on CI", leave, 1)
     os.remove(plist)
+    os.environ["FC_LEAK_SHARED"] = "1"
+    case("a new UUID plist, on CI but a shared Mac", leave, 0)
+    os.remove(plist)
+    os.environ["FC_LEAK_STRICT"] = "1"
+    case("a new UUID plist, shared Mac but strict asked for", leave, 1)
+    os.remove(plist)
+    del os.environ["FC_LEAK_STRICT"], os.environ["FC_LEAK_SHARED"]
     del os.environ["CI"]
-    for key, value in (("CI", ci), ("FC_LEAK_STRICT", strict)):
+    for key, value in (("CI", ci), ("FC_LEAK_STRICT", strict), ("FC_LEAK_SHARED", shared)):
         if value is not None:
             os.environ[key] = value
     # gh's device id no longer gets a pass (ov-552): a test daemon's gh is inert
@@ -439,6 +462,20 @@ def self_test():
         shutil.rmtree(leftover, ignore_errors=True)
         if rc != 0:
             failures.append("a Swift run's new system temp entry failed a shared Mac's run")
+        # CI=true with FC_LEAK_SHARED=1 (lane-gate on a busy Mac) is also a note,
+        # and FC_LEAK_STRICT=1 on top of it fails again.
+        for strict_on, want in ((False, 0), (True, 1)):
+            env_set = {"CI": "true", "FC_LEAK_SHARED": "1", **({"FC_LEAK_STRICT": "1"} if strict_on else {})}
+            os.environ.update(env_set)
+            rc = run([os.path.join(fake, "swift"), "test"], grace=0.5)
+            for k in env_set:
+                del os.environ[k]
+            shutil.rmtree(leftover, ignore_errors=True)
+            if (rc != 0) != bool(want):
+                failures.append(f"CI with FC_LEAK_SHARED{' and FC_LEAK_STRICT' if strict_on else ''}: exit {rc}, wanted {'non-zero' if want else 'zero'}")
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
 
     tree = os.path.join(scratch, "tree", "Tests", "XTests")
     os.makedirs(tree)

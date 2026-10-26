@@ -359,12 +359,48 @@ def count_tests(output):
     return ", ".join(parts)
 
 
-def java_home(version):
+def jdk_major(home):
+    """The major version of the JDK at `home`, read from its `release` file; 0 when it is not one."""
     try:
-        out = subprocess.run(["/usr/libexec/java_home", "-v", str(version)], capture_output=True, text=True)
-        return out.stdout.strip() if out.returncode == 0 else ""
+        text = (pathlib.Path(home) / "release").read_text()
     except OSError:
-        return ""
+        return 0
+    m = re.search(r'JAVA_VERSION="(?:1\.)?(\d+)', text)
+    return int(m.group(1)) if m else 0
+
+
+def jdk_candidates():
+    """Every JDK home this host has, best-known places first."""
+    homes = []
+    try:
+        out = subprocess.run(["/usr/libexec/java_home", "-V"], capture_output=True, text=True)
+        homes += re.findall(r"\s(/\S.*?/Home)\s*$", out.stderr + out.stdout, re.M)
+    except OSError:
+        pass
+    for prefix in ("/opt/homebrew/opt", "/usr/local/opt"):
+        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*/libexec/openjdk.jdk/Contents/Home"))
+        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*"))
+    homes += sorted(str(p) for p in pathlib.Path("/Library/Java/JavaVirtualMachines").glob("*/Contents/Home"))
+    homes += sorted(str(p) for p in pathlib.Path("/usr/lib/jvm").glob("*"))
+    return homes
+
+
+def java_home(version, homes=None):
+    """A JDK home whose major version is `version`, else the oldest one above it, else "".
+
+    `/usr/libexec/java_home -v 17` is not trusted: on this Mac, with only JDK 11
+    installed, it exits 0 and prints the JDK 11 path, so a gradle build ran on
+    11 and died (ov-802). Each candidate's own `release` file says what it is.
+    """
+    found = {}
+    for home in jdk_candidates() if homes is None else homes:
+        major = jdk_major(home)
+        if major and major not in found:
+            found[major] = home
+    if version in found:
+        return found[version]
+    newer = sorted(m for m in found if m > version)
+    return found[newer[0]] if newer else ""
 
 
 def job_env(job):
@@ -400,8 +436,87 @@ def run_step(step, repo, env, logdir, tmp):
     return done.returncode, secs, output, log
 
 
-def base_env(repo, tmp, ctx):
+NEXTEST_VERSION = re.search(r"cargo-nextest@([\d.]+)", (ROOT / ".github/workflows/ci.yml").read_text())
+NEXTEST_HINT = f"cargo install cargo-nextest --locked --version {NEXTEST_VERSION.group(1) if NEXTEST_VERSION else '<the version in ci.yml>'}"
+
+
+def blocker(step, repo, env):
+    """Why `step` cannot run on this host, or "" when it can.
+
+    A missing tool is a named FAIL row, never a crash and never a quiet pass.
+    cargo-nextest is the case that matters: `cargo test` is not a stand-in. CI's
+    `cargo nextest run --profile ci` runs one process per test, with the
+    test-groups in .config/nextest.toml that keep the tmux and file-event tests
+    from running beside each other; under `cargo test` a `static Mutex` that
+    nextest makes useless would hide the failures nextest finds, and the
+    gate would print green for a suite CI can still fail. So it says how to
+    install the pinned version and is red until then (ov-802).
+    """
+    path = env.get("PATH", "")
+    cwd = repo / step.cwd if step.cwd else repo
+    if not cwd.is_dir():
+        return f"working directory {step.cwd or cwd} does not exist (an earlier step should have made it)"
+    if re.search(r"\bcargo nextest\b", step.run) and not shutil.which("cargo-nextest", path=path):
+        return f"cargo-nextest is not installed; install it with: {NEXTEST_HINT}"
+    if re.search(r"(^|\s)\./gradlew\b", step.run):
+        home = env.get("JAVA_HOME", "")
+        if jdk_major(home) < 17:
+            return "gradle needs JDK 17 and this host has none; install it with: brew install openjdk@17"
+        if "captureJdk" in step.run and jdk_major(env.get("CAPTURE_JDK", "")) < 21:
+            return "the Android capture tests need JDK 21 and this host has none; install it with: brew install openjdk@21"
+    for tool, hint in (("go", "brew install go"), ("npm", "install Node"), ("swift", "install Xcode"), ("xcodebuild", "install Xcode"), ("cargo", "install Rust with rustup")):
+        if re.search(rf"(^|&&|\|\||[;|(])[ \t]*(?:\./)?{tool}[ \t]", step.run, re.M) and not shutil.which(tool, path=path):
+            return f"{tool} is not installed; {hint}"
+    return ""
+
+
+def run_step_safely(step, repo, env, logdir, tmp):
+    """(result, seconds, counts, ok, log, output) for one step; never raises.
+
+    A tool the host lacks, a directory a failed step never made, or anything
+    else this script trips over becomes that step's FAIL row, so the summary
+    table still prints for every step that did run (ov-802)."""
+    reason = blocker(step, repo, env)
+    if reason:
+        return f"FAIL: {reason}", 0.0, "", False, None, reason
+    try:
+        code, secs, output, log = run_step(step, repo, env, logdir, tmp)
+    except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
+        reason = f"lane-gate could not run it: {type(e).__name__}: {e}"
+        return f"FAIL: {reason}", 0.0, "", False, None, reason
+    result = "pass" if code == 0 else f"FAIL (exit {code})"
+    notes = leak_notes(output)
+    if notes:
+        result += f"; {notes}"
+    return result, secs, count_tests(output), code == 0, log, output
+
+
+LEAK_NOTE = re.compile(r"test-leak-check: note: (\d+) new (entries|plists) appeared")
+
+
+def leak_notes(output):
+    """What test-leak-check let pass because this Mac is shared, for the Result column.
+
+    It cannot say whose they are: a sibling lane's Swift tests leave the same
+    UUID-named folders. So the count is shown rather than dropped, and
+    --strict-leaks (on a quiet Mac) turns it back into a failure."""
+    found = LEAK_NOTE.findall(output)
+    if not found:
+        return ""
+    total = sum(int(n) for n, _ in found)
+    return f"leak note: {total} unattributed new temp/plist entries (siblings or this lane; see the log, or rerun with --strict-leaks)"
+
+
+def base_env(repo, tmp, ctx, strict_leaks=False):
     env = dict(os.environ)
+    # CI=true is for the tests' sake; the Mac is still shared with sibling lanes,
+    # whose UUID-named leftovers land in the same system temp folder as this
+    # lane's. test-leak-check makes those a note, shown in the Result column,
+    # unless the lane asks for strict (ov-802).
+    env.pop("FC_LEAK_STRICT", None)
+    env["FC_LEAK_SHARED"] = "1"
+    if strict_leaks:
+        env["FC_LEAK_STRICT"] = "1"
     env["PATH"] = os.path.expanduser("~/.cargo/bin") + os.pathsep + env.get("PATH", "")
     env.update({"RUNNER_TEMP": str(tmp), "RUNNER_OS": "macOS" if sys.platform == "darwin" else "Linux",
                 "GITHUB_SHA": ctx["github.sha"], "GITHUB_WORKSPACE": str(repo), "CI": "true"})
@@ -428,6 +543,7 @@ def main(argv):
     ap.add_argument("--skip", default="", help="comma-separated jobs to leave out")
     ap.add_argument("--log-dir", default="", help="where each step's full output goes (default: a new temp dir)")
     ap.add_argument("--no-load-wait", action="store_true", help="do not wait for the load average to fall")
+    ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -466,11 +582,26 @@ def main(argv):
 
     logdir = pathlib.Path(args.log_dir) if args.log_dir else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
     logdir.mkdir(parents=True, exist_ok=True)
-    rows, failed = [], False
+    rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
+    try:
+        failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
+    except BaseException as e:  # an interrupt or a bug still leaves a table of what ran
+        rows.append(("lane-gate", "(the gate itself)", f"FAIL: {type(e).__name__}: {e}", "", ""))
+        failed = True
+        raise
+    finally:
+        print_summary(rows, repo, args.base, logdir, failed)
+        shutil.rmtree(tmp, ignore_errors=True)
+    return 1 if failed else 0
+
+
+def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
+    """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
+    failed = False
     for j in chosen:
         if j in HEAVY and not args.no_load_wait:
             wait_for_load()
-        env = base_env(repo, tmp, ctx)
+        env = base_env(repo, tmp, ctx, args.strict_leaks)
         env.update(job_env(j))
         if j == "android" and ctx["steps.jdk21.outputs.path"]:
             env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
@@ -481,28 +612,30 @@ def main(argv):
                 print(f"  skip {s.label()}  ({s.skip})")
                 continue
             print(f"  run  {s.label()}", flush=True)
-            code, secs, output, log = run_step(s, repo, env, logdir, tmp)
-            counts = count_tests(output)
-            result = "pass" if code == 0 else f"FAIL (exit {code})"
+            # A step's own `env:` (CAPTURE_JDK among them) is part of what it needs.
+            result, secs, counts, ok, log, output = run_step_safely(s, repo, {**env, **s.env}, logdir, tmp)
             rows.append((j, s.label(), result, f"{secs:.0f}", counts))
-            if code != 0:
+            if not ok:
                 failed = True
-                tail = "\n".join(output.splitlines()[-15:])
-                print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
-                if j in ("rust", "swift", "swift-tests", "ios", "android", "web", "tunnel"):
-                    pass  # keep going: a lane wants every red thing in one pass
+                if log is None:
+                    print(f"  FAILED before it ran: {output}")
+                else:
+                    tail = "\n".join(output.splitlines()[-15:])
+                    print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
     if "ios" in chosen:
         rows.append(("ios", "iOS build and UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
+    return failed
 
+
+def print_summary(rows, repo, base, logdir, failed):
     print("\n## lane-gate summary\n")
-    print(f"Branch HEAD {subprocess.run(['git', '-C', str(repo), 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True).stdout.strip()} against {args.base}; logs in {logdir}\n")
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    print(f"Branch HEAD {head} against {base}; logs in {logdir}\n")
     print("| Job | Command | Result | Secs | Tests |")
     print("| --- | --- | --- | --- | --- |")
     for r in rows:
         print("| " + " | ".join(md(c) for c in r) + " |")
-    shutil.rmtree(tmp, ignore_errors=True)
-    print("\nlane-gate: FAILED" if failed else "\nlane-gate: all steps passed")
-    return 1 if failed else 0
+    print("\nlane-gate: FAILED" if failed else "\nlane-gate: all steps passed", flush=True)
 
 
 # ---------------------------------------------------------------- self-test
@@ -653,6 +786,88 @@ def self_test():
     expect("an XCTest total is counted", count_tests("Executed 17 tests, with 0 failures (0 unexpected) in 1.0 (1.1) seconds"), "17 xctest")
     expect("go packages are counted, a bare 'ok' line is not", count_tests("ok  \tpkg/a\t0.3s\nok  \tpkg/b\t(cached)\nok  \tpkg/c\t1.2s\nok something\n"), "2 go pkgs")
     expect("vitest is counted", count_tests(" Tests  42 passed (42)"), "42 vitest")
+
+    # A host missing a tool, a directory or a JDK is a named FAIL row, not a crash (ov-802).
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+
+        def fake_jdk(name, version):
+            (t / name).mkdir()
+            (t / name / "release").write_text(f'JAVA_VERSION="{version}"\n')
+            return str(t / name)
+
+        jdk11, jdk17, jdk21 = fake_jdk("j11", "11.0.12"), fake_jdk("j17", "17.0.9"), fake_jdk("j21", "21.0.1")
+        jdk8 = fake_jdk("j8", "1.8.0_292")
+        expect("jdk_major reads a release file", (jdk_major(jdk11), jdk_major(jdk8), jdk_major(str(t / "none"))), (11, 8, 0))
+        expect("JDK 17 is picked by its own version", java_home(17, [jdk11, jdk17, jdk21]), jdk17)
+        expect("only JDK 11 installed: no JDK 17 (java_home -v 17 said 11)", java_home(17, [jdk11]), "")
+        expect("a newer JDK stands in when there is no exact one", java_home(17, [jdk11, jdk21]), jdk21)
+        bindir = t / "bin"
+        bindir.mkdir()
+        empty = str(t / "empty")
+        (t / "empty").mkdir()
+        for tool in ("cargo-nextest", "cargo"):
+            (bindir / tool).write_text("#!/bin/sh\n")
+            (bindir / tool).chmod(0o755)
+        nextest = Step("rust", "n", "cargo nextest run --profile ci --workspace\n")
+        expect("nextest missing is named, with the install command",
+               "cargo-nextest is not installed" in blocker(nextest, t, {"PATH": empty}) and "cargo install cargo-nextest --locked --version" in blocker(nextest, t, {"PATH": empty}), True)
+        expect("nextest present: nothing blocks", blocker(nextest, t, {"PATH": str(bindir)}), "")
+        gradle = Step("android", "g", "./gradlew assembleDebug\n")
+        expect("gradle on JDK 11 is named", "JDK 17" in blocker(gradle, t, {"PATH": empty, "JAVA_HOME": jdk11}), True)
+        expect("gradle on JDK 17 is fine", blocker(gradle, t, {"PATH": empty, "JAVA_HOME": jdk17}), "")
+        capture = Step("android", "c", "./gradlew test \\\n  -Pfarcooler.captureJdk=$CAPTURE_JDK\n")
+        expect("the capture task on a JDK 17 is named", "JDK 21" in blocker(capture, t, {"PATH": empty, "JAVA_HOME": jdk17, "CAPTURE_JDK": jdk17}), True)
+        expect("the capture task on a JDK 21 is fine", blocker(capture, t, {"PATH": empty, "JAVA_HOME": jdk17, "CAPTURE_JDK": jdk21}), "")
+        goes = Step("tunnel", "go", "go test -count=1 ./...\n")
+        expect("go missing is named", "go is not installed" in blocker(goes, t, {"PATH": empty}), True)
+        expect("go in prose is not a command", blocker(Step("x", "y", "echo to go on\n"), t, {"PATH": empty}), "")
+
+        logs = t / "logs"
+        logs.mkdir()
+        gone = Step("android", "r", "true\n", cwd="apps/android/app/build/test-results/missing")
+        row = run_step_safely(gone, t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a missing working directory is a FAIL row, not a FileNotFoundError", (row[0].startswith("FAIL: working directory"), row[3]), (True, False))
+        row = run_step_safely(Step("x", "ok", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step that passes still passes", (row[0], row[3]), ("pass", True))
+        row = run_step_safely(Step("x", "bad", "exit 3\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step that fails says its exit code", row[0], "FAIL (exit 3)")
+        global run_step
+        real_run_step = run_step
+        run_step = lambda *a: (_ for _ in ()).throw(OSError("boom"))
+        try:
+            row = run_step_safely(Step("x", "boom", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        finally:
+            run_step = real_run_step
+        expect("an exception inside a step is that step's FAIL row", (row[0], row[3]), ("FAIL: lane-gate could not run it: OSError: boom", False))
+
+    expect("a leak note is carried into the Result column", "leak note: 3" in leak_notes("test-leak-check: note: 3 new entries appeared in /x"), True)
+    expect("no note, no addition", leak_notes("test-leak-check: the run left nothing"), "")
+    env = base_env(ROOT, pathlib.Path("/tmp"), ctx)
+    expect("the gate marks the Mac shared, so siblings' leftovers are a note", (env["FC_LEAK_SHARED"], env["CI"], "FC_LEAK_STRICT" in env), ("1", "true", False))
+    expect("--strict-leaks turns strict back on", base_env(ROOT, pathlib.Path("/tmp"), ctx, True).get("FC_LEAK_STRICT"), "1")
+
+    # The table prints even when running the jobs raises (the ov-800 crash printed none).
+    global run_jobs
+    real_run_jobs = run_jobs
+    def boom(chosen, plans, rows, *rest):
+        rows.append(("wire", "a step that ran", "pass", "1", ""))
+        raise RuntimeError("the gate tripped")
+    run_jobs = boom
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "wire", "--no-load-wait"])
+        failures.append("an exception in the run was swallowed")
+    except RuntimeError:
+        pass
+    finally:
+        run_jobs = real_run_jobs
+    text_out = out.getvalue()
+    expect("the summary table prints after an exception", ("## lane-gate summary" in text_out, "a step that ran" in text_out, "FAIL: RuntimeError: the gate tripped" in text_out, "lane-gate: FAILED" in text_out), (True, True, True, True))
 
     for failure in failures:
         print(f"lane-gate self-test: {failure}", file=sys.stderr)
