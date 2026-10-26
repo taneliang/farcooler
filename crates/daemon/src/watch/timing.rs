@@ -25,6 +25,9 @@ pub(crate) struct Timing {
     /// How long a compose waits out a turn claude began between its paste
     /// and its Enter (`compose::TURN_BEGUN_WAIT`).
     pub turn_begun_wait: Duration,
+    /// How far apart a waiting message's two reads between turns are before
+    /// its plain Enter (`compose::pending::IDLE_TWICE`).
+    pub idle_twice: Duration,
     /// How long after a key claude has to say it took it (`interrupt`'s
     /// `CONFIRM_SETTLES`).
     pub key_confirm: Duration,
@@ -67,6 +70,7 @@ impl Timing {
     pub(crate) const PRODUCTION: Timing = Timing {
         compose_confirm: super::answer_wake::compose::CONFIRM_SETTLES,
         turn_begun_wait: super::answer_wake::compose::TURN_BEGUN_WAIT,
+        idle_twice: super::answer_wake::compose::IDLE_TWICE,
         key_confirm: super::answer_wake::interrupt::CONFIRM_SETTLES,
         queue_settles: super::answer_wake::mid_turn::QUEUE_SETTLES,
         enter_deadline: super::answer_wake::mid_turn::ENTER_DEADLINE,
@@ -126,6 +130,7 @@ mod tests {
             Timing {
                 compose_confirm: s(5),
                 turn_begun_wait: s(30),
+                idle_twice: ms(300),
                 key_confirm: s(3),
                 queue_settles: s(3),
                 enter_deadline: s(2),

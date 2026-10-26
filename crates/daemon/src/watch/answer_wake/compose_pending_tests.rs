@@ -19,7 +19,7 @@ const WAIT: Duration = Duration::from_millis(1_500);
 /// Sends spaced sooner, a turn begun waited out for `WAIT`, and every fenced
 /// Enter said to `si`.
 fn quick_turns(b: &Board, si: &StandIn) {
-    b.watcher.with_timing(|t| (t.told_spacing, t.turn_begun_wait) = (crate::watch::Timing::SHORT, WAIT));
+    b.watcher.with_timing(|t| (t.told_spacing, t.turn_begun_wait, t.held_retry) = (crate::watch::Timing::SHORT, WAIT, Duration::from_millis(100)));
     b.watcher.mark_fence_in(PathBuf::from(format!("{}.fence", si.control.display())));
 }
 
@@ -178,7 +178,7 @@ async fn a_turn_drawn_with_no_fence_gets_no_enter_and_is_left() {
     let said = logs_line(&sink, "a paste was left in the box").await;
     assert!(said.contains("check=\"not_idle\"") && said.contains("gate=Shells"), "{said}");
     assert!(enters(&si).is_empty(), "{}", si.log());
-    assert!(not_sent(agent.id).iter().any(|n| n.contains("left in Claude’s box")), "{:?}", not_sent(agent.id));
+    assert!(not_sent(agent.id).iter().any(|n| n.contains("Claude stayed busy, so it’s still in Claude’s box")), "{:?}", not_sent(agent.id));
 }
 
 /// A turn begun with no fence to be had, its registry `busy` beside shells:
@@ -209,6 +209,7 @@ async fn a_turn_still_running_past_the_wait_leaves_the_paste() {
     let b = board().await;
     let (agent, si) = unfenceable_claude(&b).await;
     quick_turns(&b, &si);
+    rows_open(&b, agent.id);
     si.show("shells").await;
     b.screen_with(agent.id, "2 shells · ↓ to manage").await;
     let shower = si.clone();
@@ -221,6 +222,8 @@ async fn a_turn_still_running_past_the_wait_leaves_the_paste() {
     assert!(said.contains("registry_busy") && said.contains("background=Shells"), "{said}");
     assert!(!said.contains("find"), "the text is never logged: {said}");
     assert!(enters(&si).is_empty(), "{}", si.log());
+    let rows = not_sent(agent.id);
+    assert!(rows.iter().any(|n| n == "Not sent: “what did they find”. Claude stayed busy, so it’s still in Claude’s box."), "{rows:?}");
 }
 
 /// A `◯ ` in the message itself is no agent row: beside shells alone, a turn
@@ -247,12 +250,14 @@ async fn an_agent_glyph_in_the_message_is_no_background_agent() {
 /// Review S2: beside agents the gate saw, the registry can't say a turn
 /// runs, only the screen can. One frame that reads between turns mid-turn
 /// (here, a quarter second of it) is no turn's end: the plain Enter needs
-/// two reads `IDLE_TWICE` apart with nothing else between. No Enter.
+/// two reads `idle_twice` apart with nothing else between, a second here so
+/// a loaded runner's late sleep can't stretch the frame past it. No Enter.
 #[tokio::test]
 async fn one_stray_idle_frame_mid_turn_gets_no_enter() {
     let b = board().await;
     let (agent, si) = unfenceable_claude(&b).await;
     quick_turns(&b, &si);
+    b.watcher.with_timing(|t| (t.idle_twice, t.turn_begun_wait) = (Duration::from_secs(1), Duration::from_secs(3)));
     si.show("agents-shells").await;
     b.screen_with(agent.id, "◯ general-purpose").await;
     let shower = si.clone();
@@ -294,5 +299,92 @@ async fn stop_during_the_wait_acts_at_once_and_the_wait_gives_up_unentered() {
     assert!(said.contains("a paste was left in the box"), "{said}");
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(enters(&si).is_empty(), "{}", si.log());
-    assert!(not_sent(agent.id).iter().any(|n| n.contains("You stopped Claude")), "{:?}", not_sent(agent.id));
+    let rows = not_sent(agent.id);
+    assert!(rows.iter().any(|n| n == "Not sent: “what did they find”. You stopped Claude, so it’s still in Claude’s box."), "{rows:?}");
+}
+
+/// Type `keys` into `agent`'s pane straight, as someone at the terminal
+/// would, leaving no input mark.
+async fn typed_unmarked(b: &Board, agent: &Terminal, keys: &str) {
+    let unmarked = crate::runtime::Runtime { marks: None, ..b.svc.runtime() };
+    unmarked.send_bytes_hex(agent.id, &keys.bytes().map(|c| format!("{c:02x}")).collect::<String>()).await.unwrap();
+}
+
+/// A message waiting out a turn beside shells, with no fence to be had:
+/// answered Queued, and the pane's rows open.
+async fn waiting(b: &Board) -> (Terminal, StandIn) {
+    let (agent, si) = unfenceable_claude(b).await;
+    quick_turns(b, &si);
+    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(10));
+    rows_open(b, agent.id);
+    si.show("shells").await;
+    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
+    let shower = si.clone();
+    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("shells-busy")));
+    assert_eq!(compose_promptly(b, &agent, "what did they find").await.expect("queued"), Turn::During);
+    (agent, si)
+}
+
+/// Review F3: a key typed in Far Cooler's terminal while the message waits
+/// gives it up, unentered, and the rows say someone typed, never that it
+/// didn't land.
+#[tokio::test]
+async fn a_key_typed_during_the_wait_gives_it_up_as_typed() {
+    let b = board().await;
+    let (sink, _logging) = logging();
+    let (agent, si) = waiting(&b).await;
+    crate::runtime::mark_input(b.svc.root_dir(), agent.id);
+    let said = logs_line(&sink, "a paste was left in the box").await;
+    assert!(said.contains("check=\"typed\""), "{said}");
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    let rows = not_sent(agent.id);
+    let want = "Someone typed in Claude’s terminal while “what did they find” waited, so the runner didn’t send it. Check the terminal.";
+    assert!(rows.iter().any(|n| n == want), "{rows:?}");
+}
+
+/// Review F3: the box changed straight in the terminal while the message
+/// waits (no input mark): given up, unentered, as the box changing.
+#[tokio::test]
+async fn the_box_changing_during_the_wait_gives_it_up_as_changed() {
+    let b = board().await;
+    let (sink, _logging) = logging();
+    let (agent, si) = waiting(&b).await;
+    typed_unmarked(&b, &agent, " and mine").await;
+    let said = logs_line(&sink, "a paste was left in the box").await;
+    assert!(said.contains("check=\"not_shown\""), "{said}");
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    let rows = not_sent(agent.id);
+    let want = "Claude’s box changed while “what did they find” waited, so the runner didn’t send it. Check the terminal.";
+    assert!(rows.iter().any(|n| n == want), "{rows:?}");
+}
+
+/// Review F3: Send Now while the message waits is refused, as it is for any
+/// box holding text (`interrupt::pressable`), so it can't give the wait up
+/// or send it; the wait goes on and enters it once the turn ends.
+#[tokio::test]
+async fn send_now_during_the_wait_is_refused_and_the_wait_goes_on() {
+    let b = board().await;
+    let (agent, si) = waiting(&b).await;
+    let refused = b.watcher.press(agent.id, Key::SendNow).await;
+    assert!(matches!(refused, Err(DomainError::Conflict { what: "draft" })), "{refused:?}");
+    assert!(!si.log().contains("SENDNOW"), "{}", si.log());
+    si.show("shells").await;
+    super::logs(&si, "SUBMIT what did they find").await;
+    assert_eq!(enters(&si), ["ENTER"], "{}", si.log());
+    assert!(not_sent(agent.id).is_empty(), "{:?}", not_sent(agent.id));
+}
+
+/// Review F2: a second send while the first waits in the box is held behind
+/// it and answered Queued, never refused as a draft; once the turn ends the
+/// first is entered, then the second is typed and entered, in order.
+#[tokio::test]
+async fn a_second_send_during_the_wait_is_held_behind_it() {
+    let b = board().await;
+    let (agent, si) = waiting(&b).await;
+    let second = b.watcher.compose_into(agent.id, "and the second", &[]).await;
+    assert_eq!(second.expect("held"), Turn::During);
+    assert!(b.svc.store.holds_compose(agent.id).unwrap());
+    si.show("shells").await;
+    super::logs(&si, "SUBMIT and the second").await;
+    assert_eq!(si.submitted(), ["what did they find", "and the second"], "{}", si.log());
 }

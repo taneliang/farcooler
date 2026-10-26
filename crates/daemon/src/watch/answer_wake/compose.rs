@@ -82,6 +82,7 @@ use crate::watch::{Watcher, now_millis};
 pub(super) mod codex;
 pub(crate) mod held;
 mod pending;
+pub(crate) use pending::IDLE_TWICE;
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.

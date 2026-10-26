@@ -82,7 +82,7 @@ pub(crate) struct Tellers {
     resumed: bool,
     /// Panes whose composed message waits in the box for its Enter
     /// (`pending`): a send meanwhile is held behind it.
-    pub(super) pending: HashSet<Uuid>,
+    pub(super) pending: HashMap<Uuid, super::pending::Waiting>,
     /// When each pane's registry first read torn, in a run of tries that
     /// all did (`torn_for`).
     torn_since: HashMap<Uuid, Instant>,
@@ -310,7 +310,13 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "not_running" | "not_an_agent" => format!("Not sent: “{quoted}”. {agent} isn’t running in this pane anymore."),
         "paste_left" | "dialog" => format!("Not sent: “{quoted}”. It didn’t land as typed, so it was left in {agent}’s box."),
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
-        "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it was left in {agent}’s box."),
+        "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it’s still in {agent}’s box."),
+        "stayed_busy" => format!("Not sent: “{quoted}”. {agent} stayed busy, so it’s still in {agent}’s box."),
+        "typed" => format!("Someone typed in {agent}’s terminal while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
+        "box_changed" => format!("{agent}’s box changed while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
+        "dialog_opened" => format!("{agent} opened a dialog while “{quoted}” waited, so the runner didn’t send it. It’s still in {agent}’s box."),
+        "unchecked" => format!("The runner couldn’t tell whether {agent} was free, so “{quoted}” is still in {agent}’s box. Check the terminal."),
+        "enter_failed" => format!("“{quoted}” is in {agent}’s box, but the runner couldn’t press Return. Check the terminal."),
         "queued_unseen" => format!("{agent} took “{quoted}” into its queue but never showed it ran. Check the terminal before sending it again."),
         _ => format!("Not sent: “{quoted}”. The runner couldn’t type it."),
     }

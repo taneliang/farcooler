@@ -194,6 +194,9 @@ impl Watcher {
         let from = std::fs::metadata(&again.transcript).map(|m| m.len()).unwrap_or(0);
         let pressed_at = Instant::now();
         self.keys_pressed.lock().unwrap_or_else(|e| e.into_inner()).insert(to.id, pressed_at);
+        if key == Key::Interrupt {
+            self.stopped_while_waiting(to.id);
+        }
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         match tokio::time::timeout(KEY_DEADLINE, runtime.send_bytes_hex(to.id, key.hex())).await {
             Ok(Ok(())) => tokio::time::sleep(KEY_LANDS).await,
