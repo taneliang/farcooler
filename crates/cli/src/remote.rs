@@ -62,8 +62,9 @@ pub struct RemoteLink {
 /// unanswered probes end the session, so a dead host is noticed in about
 /// forty-five seconds instead of never.
 ///
-/// Fifteen seconds where `crates/client/src/ssh.rs` uses thirty: that path is
-/// the phone, which pays for every probe in radio wake-ups. A Mac on mains
+/// Fifteen seconds where `crates/client/src/ssh.rs` uses thirty on an address:
+/// that path is the phone, which pays for every probe in radio wake-ups (on
+/// the tunnel it probes every three, `Reach::liveness`). A Mac on mains
 /// power does not, and halving the detection time matters for a tool whose
 /// purpose is noticing when an agent needs you.
 ///

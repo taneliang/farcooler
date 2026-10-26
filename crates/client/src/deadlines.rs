@@ -24,8 +24,9 @@
 //! **One exception: the probe** (ov-613). A phone coming back to the
 //! foreground asks the runner the cheapest question there is
 //! (`daemon.version`, answered from memory), sent ahead of anything queued and
-//! given 2.5 seconds. Silence there IS the verdict: the keepalive takes 90 to
-//! 120 seconds to call a half-open link dead, and every ordinary call waits 30
+//! given 2.5 seconds. Silence there IS the verdict: on an address the
+//! keepalive takes 90 to 120 seconds to call a half-open link dead (on the
+//! tunnel, nine: `Reach::liveness`, ov-781), and every ordinary call waits 30
 //! seconds before even saying it is slow, so without this a phone back from a
 //! pocket shows "connected" over a frozen screen for two minutes. A probe that
 //! times out ends the session the way a dropped link does (`ends_the_link`).
