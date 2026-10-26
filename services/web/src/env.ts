@@ -8,10 +8,11 @@ export interface WebEnv extends AppEnv {
   /// The one host this Worker answers on, e.g. app.canary.farcooler.com.
   /// Empty answers nothing.
   APP_HOST?: string
-  /// Who gets the client: "" (no one), or "owner" (the ids in WEB_ACCOUNTS).
+  /// Who gets the client: "" (no one), "owner" (the ids in WEB_ACCOUNTS), or
+  /// "everyone" (any signed-in account). Any other value is no one.
   /// `admitted` in flag.ts reads both.
   WEB_CLIENT?: string
-  /// Account ids, separated by commas or spaces.
+  /// Account ids, separated by commas or spaces. Read only for "owner".
   WEB_ACCOUNTS?: string
   /// The origin the page fetches Tailcat's DERP map from.
   DERP_MAP_ORIGIN?: string

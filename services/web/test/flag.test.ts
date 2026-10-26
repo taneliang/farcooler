@@ -47,11 +47,33 @@ describe('the flag', () => {
     expect(calls).toEqual([])
   })
 
-  it('fails closed on any value but "owner", and on an empty account list', async () => {
-    for (const over of [{ WEB_CLIENT: 'Owner' }, { WEB_CLIENT: 'everyone' }, { WEB_CLIENT: 'owner ' }, { WEB_CLIENT: undefined }, { WEB_ACCOUNTS: '' }, { WEB_ACCOUNTS: ' , ' }]) {
+  it('fails closed on any value but "owner" and "everyone", and on an empty account list', async () => {
+    for (const over of [{ WEB_CLIENT: 'Owner' }, { WEB_CLIENT: 'Everyone' }, { WEB_CLIENT: 'everyone ' }, { WEB_CLIENT: ' everyone' }, { WEB_CLIENT: 'EVERYONE' }, { WEB_CLIENT: 'owner ' }, { WEB_CLIENT: undefined }, { WEB_ACCOUNTS: '' }, { WEB_ACCOUNTS: ' , ' }]) {
       relay()
       await notAvailable(await get('/', envWith(over), signedIn))
     }
+  })
+
+  it('admits any signed-in account for "everyone", listed or not, with an empty list too', async () => {
+    for (const accounts of ['', 'user_OWNER', 'user_SOMEONE_ELSE_ENTIRELY']) {
+      relay('user_STRANGER')
+      const res = await get('/', envWith({ WEB_CLIENT: 'everyone', WEB_ACCOUNTS: accounts }), signedIn)
+      expect(await res.text(), accounts).toBe(SHELL)
+    }
+  })
+
+  it('still requires sign-in for "everyone"', async () => {
+    const calls = relay()
+    const env = envWith({ WEB_CLIENT: 'everyone', WEB_ACCOUNTS: '' })
+    const html = await (await get('/', env)).text()
+    expect(html).toContain('href="/sign-in"')
+    expect(html).not.toMatch(/<script/i)
+    expect(calls).toEqual([])
+    // The API stays closed without a session, and for an account the relay can't name.
+    const api = { method: 'POST', headers: { 'x-fc': '1', origin: 'https://app.canary.farcooler.com' } }
+    expect((await get('/api/relay/directory/me', env, api)).status).not.toBe(200)
+    relay('')
+    await notAvailable(await get('/', env, signedIn))
   })
 
   it('reads the account list split on commas and spaces, and matches ids exactly', async () => {

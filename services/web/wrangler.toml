@@ -60,8 +60,9 @@ APP_RELAY_URL = "https://relay.farcooler.com"
 APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 # Who gets the client (src/flag.ts). "" is off: every visitor sees "Not
 # available yet", with no sign-in. "owner" admits the account ids listed in
-# WEB_ACCOUNTS, and no one else. Any other value is off. Stable stays off until
-# slice 17 of the plan.
+# WEB_ACCOUNTS, and no one else. "everyone" admits any signed-in account and
+# ignores WEB_ACCOUNTS. Any other value is off. Stable stays "" (config.test.ts
+# pins it) until slice 17 of the plan.
 WEB_CLIENT = ""
 WEB_ACCOUNTS = ""
 # Where the shell's CSP lets the page connect besides itself (src/headers.ts):
@@ -101,10 +102,11 @@ APP_RELAY_URL = "https://relay-canary.farcooler.com"
 # https://app.canary.farcooler.com/callback as a redirect URI and
 # https://app.canary.farcooler.com/ as a sign-out redirect.
 APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
-# Off until the terminal has had its security review (ov-764). Then "owner",
-# with the owner's canary account id (the `user.id` that relay-canary's
-# /v1/directory/me returns) here.
-WEB_CLIENT = ""
+# Everyone (ov-810, owner decision of Oct 26): any signed-in account gets the
+# client, and WEB_ACCOUNTS stays empty. To narrow it again, set "owner" and put
+# the account ids (the `user.id` that relay-canary's /v1/directory/me returns)
+# in WEB_ACCOUNTS.
+WEB_CLIENT = "everyone"
 WEB_ACCOUNTS = ""
 DERP_MAP_ORIGIN = "https://tailcat.dev"
 DERP_HOSTS = "tc301a.ipn.dev tc302a.ipn.dev tc303a.ipn.dev tc304a.ipn.dev"

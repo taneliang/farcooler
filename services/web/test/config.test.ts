@@ -62,6 +62,11 @@ describe("the web client's wrangler.toml", () => {
     expect(web.vars.production.WEB_ACCOUNTS).toBe('')
   })
 
+  it('opens canary to everyone, with no account list', () => {
+    expect(web.vars.canary.WEB_CLIENT).toBe('everyone')
+    expect(web.vars.canary.WEB_ACCOUNTS).toBe('')
+  })
+
   it("names Tailcat's relays one by one, never a wildcard over its domain", () => {
     for (const env of ['production', 'canary']) {
       const hosts = web.vars[env].DERP_HOSTS.split(/\s+/)
