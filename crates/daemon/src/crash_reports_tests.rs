@@ -186,6 +186,9 @@ async fn a_members_phone_is_refused() {
     assert!(cards(&r).is_empty());
 }
 
+/// One way to break a report, and the `what` it is refused with.
+type Breaks = Vec<(&'static str, Box<dyn Fn(&mut pb::CrashReport)>)>;
+
 /// **Nothing but a signature, and nothing that reads as more.** A message
 /// where the exception's name goes, a path, Markdown, a backtick fence, a
 /// newline, a bidi override or a zero-width character in any text field, a
@@ -195,7 +198,7 @@ async fn a_members_phone_is_refused() {
 #[tokio::test]
 async fn more_than_a_signature_is_refused() {
     let r = runner("git@github.com:taneliang/farcooler.git").await;
-    let cases: Vec<(&str, Box<dyn Fn(&mut pb::CrashReport)>)> = vec![
+    let cases: Breaks = vec![
         ("exception_name", Box::new(|c| c.exception_name = "NSInvalidArgumentException: the user typed this".into())),
         ("frames", Box::new(|c| c.frames[0].binary = "/private/var/containers/Bundle/Application/X/FarCooler".into())),
         ("frames", Box::new(|c| c.frames = vec![c.frames[0].clone(); MAX_FRAMES + 1])),
