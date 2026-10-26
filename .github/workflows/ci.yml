@@ -183,6 +183,9 @@ jobs:
       # The page itself is checked daily by claude-prices.yml, which no push
       # waits on.
       - run: ./scripts/claude-prices.py --self-test
+      # The DERP-hosts check's parser, on maps written in the test. The live map
+      # is checked daily by derp-hosts.yml, which no push waits on.
+      - run: ./scripts/derp-hosts-check.py --self-test
       # No source file grows past 1,500 lines (ov-169); the ones already past
       # it are grandfathered in scripts/file-size-budget.txt, each with a
       # ceiling of its size then plus max(2%, 50 lines). The rule against its
@@ -1385,9 +1388,25 @@ jobs:
       # Inside workerd: the flag, the CSP, the host check and the API's CSRF
       # checks each have a test that goes red without them.
       - run: npm test
-      # crates/web against an in-process SSH server: the pinned host key (an
-      # altered one is refused before any auth), the signer, the two-channel
-      # pane. Then the tunnel's browser half in a JS engine: one writer, in order.
+      # A real sshd, for crates/web's passkey test below and the browser check:
+      # only sshd verifies a passkey's webauthn-sk signature. The image ships
+      # openssh-server; this installs it if one ever doesn't.
+      - name: Make sure there is an sshd for the passkey login
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get -o Acquire::Retries=3 update
+            sudo apt-get -o Acquire::Retries=3 install -y openssh-server
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+      # crates/web: against an in-process SSH server, the pinned host key (an
+      # altered one is refused before any auth) and the two-channel pane;
+      # against the real sshd above, the passkey's login (ECDSA-SK, one touch
+      # per connect, a false or replayed signature refused); and the passkey's
+      # encoding against the relay's browser fixture. Then the tunnel's browser
+      # half in a JS engine: one writer, in order.
       - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
       - run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
         working-directory: crates/tailcat/go
@@ -1407,20 +1426,12 @@ jobs:
       # The canary shell in headless Chromium under its production CSP, its
       # passkey in Chromium's virtual authenticator: boot, Make Passkey,
       # enrollment, the camera, and a terminal through a real sshd (the only
-      # verifier of a passkey's webauthn-sk signature; the image ships
-      # openssh-server) in front of crates/web's fake daemon, at one touch per
-      # connect, refused with its pin altered and from canary.farcooler.com.
-      # Any violation fails it.
-      - name: Make sure there is an sshd for the passkey login
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          set -euo pipefail
-          if [ ! -x /usr/sbin/sshd ]; then
-            sudo apt-get -o Acquire::Retries=3 update
-            sudo apt-get -o Acquire::Retries=3 install -y openssh-server
-          fi
-          /usr/sbin/sshd -V 2>&1 | head -1
+      # verifier of a passkey's webauthn-sk signature) in front of crates/web's
+      # fake daemon, at one touch per connect, refused with its pin altered and
+      # from canary.farcooler.com. Any violation fails it.
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: npx playwright-core install --with-deps --only-shell chromium
-      - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon
+      # --tunnel-delay holds each tunnel message 100 ms, so the pane is still
+      # attaching when the check types: keystrokes typed then must be held
+      # and sent, never dropped (train 307 found them dropped on this runner).
+      - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100

@@ -3,7 +3,7 @@
 // failing on any violation (ov-764 acceptance 4), with its SSH key a passkey
 // held by Chromium's virtual authenticator (ov-767).
 //
-//   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR]
+//   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS]
 //
 // Serves dist/ (build.sh's output, with the real wasm) through
 // shell-server.ts, which uses the Worker's own header and asset code, at
@@ -68,6 +68,12 @@ const dist = resolve(flag('--dist') ?? 'dist')
 const fakeDaemon = flag('--fake-daemon') && resolve(flag('--fake-daemon'))
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
+// Slow the page's CPU by this factor (Chromium's own throttling), to run the
+// walk on a slow machine. A slow link is --tunnel-delay, which CI uses.
+const throttle = Number(flag('--cpu-throttle') ?? 1)
+// Delay each tunnel message by this many ms each way, for a slow network.
+const delay = Number(flag('--tunnel-delay') ?? 0)
+const later = send => (delay > 0 ? setTimeout(send, delay) : send())
 const shoot = async (page, name) => {
   if (!shots) return
   for (const [width, height] of [[1280, 800], [390, 844]]) {
@@ -237,10 +243,10 @@ async function launch(video) {
   if (runner) {
     await context.routeWebSocket(`wss://${HOST}/test-tunnel`, ws => {
       const tcp = createConnection({ host: '127.0.0.1', port: runner.port })
-      tcp.on('data', data => ws.send(data))
-      tcp.on('close', () => ws.close())
+      tcp.on('data', data => later(() => ws.send(data)))
+      tcp.on('close', () => later(() => ws.close()))
       tcp.on('error', () => ws.close())
-      ws.onMessage(data => tcp.write(typeof data === 'string' ? Buffer.from(data) : data))
+      ws.onMessage(data => later(() => tcp.write(typeof data === 'string' ? Buffer.from(data) : data)))
       ws.onClose(() => tcp.destroy())
     })
   }
@@ -252,6 +258,7 @@ async function launch(video) {
   })
   if (runner) await context.addInitScript(swapDial)
   const page = context.pages()[0] ?? (await context.newPage())
+  if (throttle > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
   watch(page)
   const passkeys = await authenticator(context, page)
   return { context, page, passkeys }
@@ -390,15 +397,14 @@ function replyVideo(offer, grantedBy, name) {
   return path
 }
 
-/// Connect from the button, and wait for the terminal.
-async function connect(page) {
+/// Connect from the button, and wait for the terminal to take focus, which it
+/// does as its attach starts; `live` waits for the runner to accept it too.
+async function connect(page, live = true) {
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
-  await page.waitForSelector('#terminal .xterm', { timeout: 30_000 })
-  // The pane takes focus once its stream is attached; a key typed before
-  // then has no pane to go to.
-  await page.waitForFunction(() => document.getElementById('terminal')?.contains(document.activeElement), null, { timeout: 120_000 })
+  await page.waitForFunction(() => document.activeElement?.closest('#terminal .xterm'), null, { timeout: 30_000 })
+  if (live) await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
 }
 
 let session = await launch()
@@ -501,17 +507,23 @@ try {
       // Connect is a button, and a terminal opens through sshd at one touch.
       await statusSays(page, 'Connect to studio')
       await shoot(page, 'connect')
+      // Typed as soon as the terminal has focus, which is BEFORE the runner
+      // has accepted the attach on a slow link: the page must hold those
+      // keystrokes, not drop them (CI's slower runner caught it dropping them).
       const before = touches
-      await connect(page)
+      await connect(page, false)
       if (touches - before !== 1) failures.push(`connecting cost ${touches - before} touches, not 1`)
+      const early = !(await page.$('#terminal[data-attached="true"]'))
       await page.keyboard.type('echo hi')
-      const deadline = Date.now() + 10_000
+      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+      // Then waited for, on the runner's own record of what arrived.
+      const deadline = Date.now() + 30_000
       while (runner.typed() !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
       const typed = runner.typed()
       if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
       const log = readFileSync(runner.log, 'utf8')
       if (!log.split('\n').some(l => l.includes('Accepted publickey') && l.includes('ECDSA-SK'))) failures.push('sshd logged no ECDSA-SK login')
-      console.log('csp-check: Connect opened a terminal through sshd with the passkey (ECDSA-SK), and the runner got the keystrokes')
+      console.log(`csp-check: Connect opened a terminal through sshd with the passkey (ECDSA-SK), and the runner got the keystrokes${early ? ' typed before the pane was live' : ''}`)
       await shoot(page, 'terminal')
 
       // Each reconnect is one touch, counted on eight.
