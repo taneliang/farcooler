@@ -6,7 +6,9 @@
 //! process has, and a host that never ignored it (a test runner, the Mac
 //! suite's `swiftpm-testing-helper`) is killed by the first write to a child
 //! that is gone. This test is its own process, and puts SIGPIPE back to its
-//! default first, so it is the host that does not ignore it.
+//! default first, so it is the host that does not ignore it. The pipe is
+//! macOS-only, like `farcooler_client::pipe` itself.
+#![cfg(target_os = "macos")]
 
 use farcooler_client::pipe::PipeStream;
 use tokio::io::AsyncWriteExt as _;
