@@ -154,7 +154,20 @@ struct BoardReadsKeeperTests {
         second.adopt(board: runner.board())
         await second.flush()
         #expect(runner.marks[Self.task] == Self.moved)
-        #expect(store.loadPending(host: Self.host, workspace: Self.ws).isEmpty)
+        #expect(await settles { store.loadPending(host: Self.host, workspace: Self.ws).isEmpty }, "the answer cleared what was owed")
+    }
+
+    /// Whether `condition` holds within two seconds, asked every 10 ms. For a
+    /// read of the defaults after `flush`: the keeper's code awaits every send
+    /// in order, so the clear is already written, and the read is what can lag
+    /// on a loaded machine. Failed once on main CI and never locally in 400
+    /// runs (ov-790).
+    private func settles(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
     }
 
     @Test func anyAnswerSettlesAMarkEvenOneTheRunnerSkipped() async {
