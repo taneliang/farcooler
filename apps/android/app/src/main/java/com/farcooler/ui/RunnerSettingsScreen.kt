@@ -55,11 +55,14 @@ import com.farcooler.model.HostHealth
 import com.farcooler.model.MemberOwnLogins
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
+import com.farcooler.model.RunnerTeam
 import com.farcooler.model.Trouble
 import com.farcooler.net.Connection
 import com.farcooler.net.memberOwnLogins
+import com.farcooler.net.runnerTeam
 import com.farcooler.net.setOwnLogin
 import com.farcooler.net.setProjector
+import com.farcooler.net.setRole
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleFor
@@ -103,6 +106,9 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
     // The switches for members' own logins, with who this phone is (ov-652).
     var ownLogins by remember { mutableStateOf<Pair<MemberOwnLogins, String>?>(null) }
     var changingOwnLogin by remember { mutableStateOf(false) }
+    // Who's on the runner and their roles, with the member whose role is on its way (ov-784).
+    var team by remember { mutableStateOf<RunnerTeam?>(null) }
+    var changingRole by remember { mutableStateOf<String?>(null) }
     // The section whose read is `Scope::HostAdmin` while this app enrolls at
     // `control`. Its own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
@@ -316,6 +322,26 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            // Who's on a shared runner, and for the owner a role picker on each (ov-784), as on the Mac and the
+            // iPhone.
+            val offersPeople = daemon?.can(Capability.REPRESENTATIVES) == true
+            LaunchedEffect(offersPeople) { if (offersPeople) team = connection.runnerTeam() }
+            team?.takeIf { it.isShared }?.let { people ->
+                Separator()
+                val picks = people.offersRoles(daemon?.can(Capability.MEMBER_ROLES) == true)
+                RunnerPeopleSection(people, changingRole, if (!picks) null else { handle, role ->
+                    changingRole = handle
+                    scope.launch {
+                        try {
+                            val updated = connection.setRole(handle, role)
+                            if (updated == null) failure = RunnerTeam.ROLE_NOT_SAVED else team = updated
+                        } finally {
+                            changingRole = null
+                        }
+                    }
+                })
             }
 
             // Whether members share this runner's logins (ov-652): on a shared

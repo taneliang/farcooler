@@ -502,6 +502,9 @@ class Connection(
     val core = ClientCore()
     val viewer = ViewerRead({ method, args -> core.call(method, args) }, link, scope + derived)
 
+    /** Whether the runner removed this phone's member (ov-784): see [RemovalRead]. */
+    val removal = RemovalRead({ method, args -> core.call(method, args) })
+
     /**
      * What a failed restart, hide, reorder or pane switch says, once each. The
      * root screen shows these in a snackbar (ov-180).
@@ -1234,6 +1237,7 @@ class Connection(
             val data = core.call("fleet")
             val fleet = Fleet.decode(data)
             _fleet.value = fleet
+            removal.landed()
             if (link == daemonBuild.link) steps.fleetLanded(first = _fleetRead.value != FleetRead.THIS_LINK)
             _fleetRead.value = FleetRead.THIS_LINK
             onFleet?.invoke(fleet)
@@ -1258,6 +1262,8 @@ class Connection(
                 // Not "Connecting…" for as long as every poll fails the same
                 // way: can't say, until one lands. See [FleetRead.FAILED].
                 _fleetRead.value = _fleetRead.value.failed()
+                // Removed from the team: none of its work stays on screen (ov-784).
+                if (removal.notice(e)) _fleet.value = Fleet.EMPTY
             }
             return
         }

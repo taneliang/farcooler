@@ -21,6 +21,7 @@ import com.farcooler.model.DirectRoute
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.NeedsYou
+import com.farcooler.model.RunnerTeam
 import com.farcooler.model.WorkspaceRow
 import com.farcooler.model.WorktreeScope
 import androidx.compose.foundation.lazy.LazyListScope
@@ -499,6 +500,15 @@ internal fun RunnerStatusRow(
 ) {
     val phase by connection.phase.collectAsStateWithLifecycle()
     val lastTrouble by connection.lastTrouble.collectAsStateWithLifecycle()
+    val removed by connection.removal.removed.collectAsStateWithLifecycle()
+    // Removed from the team (ov-784): connected, shown nothing, and said in place of everything else about it.
+    if (removed) {
+        RemovedRow(connection.host.displayLabel, showLabel) {
+            connection.removal.checkAgain()
+            onRetry()
+        }
+        return
+    }
     if (phase is Connection.Phase.Connected) return
 
     // One answer to the fingerprint question, as something to call. Wiring, and
@@ -1366,5 +1376,23 @@ internal fun DirectRouteQuestion(offer: DirectRoute.Offer?, onConnectDirectly: (
         TextButton(onClick = onConnectDirectly, modifier = Modifier.testTag("connect-directly")) {
             Text(DirectRoute.CONNECT_DIRECTLY, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+/**
+ * A runner that removed this phone's member from its team (ov-784): "You were removed from this runner", what it
+ * means, and Check again, which reads it afresh. In place of [RunnerStatusRow]'s words about it.
+ */
+@Composable
+internal fun RemovedRow(runner: String, showLabel: Boolean, onCheckAgain: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).testTag("runner-removed")) {
+        if (showLabel) Text(runner, style = MaterialTheme.typography.titleSmall)
+        Text(RunnerTeam.REMOVED_TITLE, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            RunnerTeam.REMOVED_BODY,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onCheckAgain) { Text("Check again") }
     }
 }
