@@ -84,16 +84,31 @@ extension DaemonClient {
     nonisolated static func probeRefusal(
         _ target: String, environment: [String: String] = CLI.environment, deadline: TimeInterval = probeDeadline
     ) async -> String {
+        await runProbe(target, environment: environment, deadline: deadline).stderr
+    }
+
+    /// One probe's stderr, and whether its deadline killed it.
+    struct ProbeRun: Sendable {
+        var stderr: String
+        var killed: Bool
+    }
+
+    /// The probe itself, `launch` being how `ssh` is found: `/usr/bin/env
+    /// ssh` on the PATH in `environment`, or what a test gives.
+    nonisolated static func runProbe(
+        _ target: String, environment: [String: String], deadline: TimeInterval,
+        launch: (program: String, leading: [String]) = ("/usr/bin/env", ["ssh"])
+    ) async -> ProbeRun {
         await Task.detached {
             let ssh = Process()
-            ssh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            ssh.arguments = ["ssh"] + probeArguments(target)
+            ssh.executableURL = URL(fileURLWithPath: launch.program)
+            ssh.arguments = launch.leading + probeArguments(target)
             ssh.environment = environment
             let err = Pipe()
             ssh.standardError = err
             ssh.standardOutput = FileHandle.nullDevice
             ssh.standardInput = FileHandle.nullDevice
-            guard (try? ssh.run()) != nil else { return "" }
+            guard (try? ssh.run()) != nil else { return ProbeRun(stderr: "", killed: false) }
             // By its own PID, and cancelled the moment it exits.
             let pid = ssh.processIdentifier
             let kill = DispatchWorkItem { Darwin.kill(pid, SIGKILL) }
@@ -103,7 +118,9 @@ extension DaemonClient {
             // Drained without waiting for every writer to close: a
             // ProxyCommand ssh started may still hold the pipe. `-v` writes a
             // few kilobytes, well inside a pipe's buffer.
-            return String(decoding: drain(err.fileHandleForReading.fileDescriptor), as: UTF8.self)
+            let stderr = String(decoding: drain(err.fileHandleForReading.fileDescriptor), as: UTF8.self)
+            let killed = ssh.terminationReason == .uncaughtSignal && ssh.terminationStatus == SIGKILL
+            return ProbeRun(stderr: stderr, killed: killed)
         }.value
     }
 

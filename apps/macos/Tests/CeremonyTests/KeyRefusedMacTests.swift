@@ -341,27 +341,58 @@ struct KeyRefusedMacTests {
         #expect(args.suffix(3) == ["--", "you@cosmo", "true"])
     }
 
+    /// A scratch folder for one test's fake ssh, gone after.
+    private func scratch() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fc818-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// The probe runs the `ssh` first on the PATH it's given (the login
-    /// shell's, as the CLI's is), and is killed by its PID at the deadline,
-    /// even with a child of its holding the pipe open (review 2 and 3).
-    @Test func theProbeRunsTheCLIsSshAndStopsAtItsDeadline() async throws {
-        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("fc818-\(UUID().uuidString.prefix(8))")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    /// shell's, as the CLI's is, review 2). No claim about time: the fake
+    /// answers at once, and the deadline is far off.
+    @Test func theProbeRunsTheSshOnThePathItIsGiven() async throws {
+        let bin = try scratch()
         defer { try? FileManager.default.removeItem(at: bin) }
         let ssh = bin.appendingPathComponent("ssh")
-        // Says which ssh it is, leaves a child holding stderr, then hangs.
-        try "#!/bin/sh\necho \"the CLI's ssh: $*\" >&2\n(sleep 12 >&2 &)\nexec sleep 12\n".write(
-            to: ssh, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\necho \"the CLI's ssh: $*\" >&2\n".write(to: ssh, atomically: true, encoding: .utf8)
         // fresh-script-exempt: what's on trial is that the probe finds `ssh` on the PATH it's given, as the CLI does
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ssh.path)
 
-        let started = Date()
-        let said = await DaemonClient.probeRefusal(
-            "you@cosmo", environment: ["PATH": bin.path + ":/usr/bin:/bin"], deadline: 1)
-        let took = Date().timeIntervalSince(started)
-        #expect(said.contains("the CLI's ssh: -v -n"), "\(said)")
-        #expect(said.contains("you@cosmo true"))
-        #expect(took < 9, "the probe outlived its deadline, or waited on its child: \(took) s")
+        let run = await DaemonClient.runProbe(
+            "you@cosmo", environment: ["PATH": bin.path + ":/usr/bin:/bin"], deadline: 120)
+        #expect(run.stderr.contains("the CLI's ssh: -v -n"), "\(run.stderr)")
+        #expect(run.stderr.contains("you@cosmo true"))
+        #expect(!run.killed)
+    }
+
+    /// A probe that doesn't finish is killed at its deadline by its PID, and
+    /// the probe doesn't wait on a child still holding its stderr (review 3).
+    /// Read off what happened, not the clock, so a loaded machine can't fail
+    /// it: the fake runs under `/bin/sh` (nothing freshly written is exec'd,
+    /// ov-551), hangs, and leaves a child of its own holding the pipe.
+    @Test func aProbeThatHangsIsKilledAndNotWaitedOn() async throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let child = dir.appendingPathComponent("child.pid")
+        let script = dir.appendingPathComponent("ssh.sh")
+        try """
+            echo "the fake ssh is up" >&2
+            sleep 60 >&2 &
+            echo $! > '\(child.path)'
+            exec sleep 60
+            """.write(to: script, atomically: true, encoding: .utf8)
+
+        let run = await DaemonClient.runProbe(
+            "you@cosmo", environment: ["PATH": "/usr/bin:/bin"], deadline: 5, launch: ("/bin/sh", [script.path]))
+
+        #expect(run.killed, "the deadline didn't kill it")
+        let childPid = (try? String(contentsOf: child, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let pid = try #require(childPid, "the fake never got going, so nothing held the pipe")
+        // Still alive: the probe came back without waiting for it.
+        #expect(kill(pid, 0) == 0, "the probe waited for the pipe's last writer")
+        kill(pid, SIGKILL)
+        #expect(run.stderr.contains("the fake ssh is up"), "\(run.stderr)")
     }
 
     @Test func theScreensSayNoAccessAndNameTheRunner() {

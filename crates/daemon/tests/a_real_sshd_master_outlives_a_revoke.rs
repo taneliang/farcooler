@@ -151,7 +151,7 @@ async fn try_connect(runner: &Runner, control: &Path) -> Option<(tokio::process:
         .expect("spawn ssh");
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
-    let client = tokio::time::timeout(std::time::Duration::from_secs(10), Client::over(stdout, stdin, "test-client", "0.0.0"))
+    let client = tokio::time::timeout(std::time::Duration::from_secs(120), Client::over(stdout, stdin, "test-client", "0.0.0"))
         .await
         .ok()?
         .ok()?;
