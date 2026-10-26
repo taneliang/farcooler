@@ -52,6 +52,12 @@ export interface Env extends PasskeyConfig {
   /// type so a `wrangler dev` without the binding still runs — see `withinRate`,
   /// which fails OPEN for exactly that reason and says so.
   AUTH_LIMIT?: RateLimit
+  /// A secret shared with the web client's Worker (its `VISITOR_SECRET`). That
+  /// Worker's calls all come from Cloudflare's addresses, so keyed on the
+  /// address its every visitor would share one `AUTH_LIMIT` bucket; with this
+  /// set it names each visitor and signs the name, and the limit keys on that
+  /// instead (`visitorKey`, ov-811). Unset, every caller is keyed on its address.
+  VISITOR_SECRET?: string
   /// Throttles `directory/devices/challenge` per account (ov-549): each mint is
   /// three D1 writes, and a session alone shouldn't be able to loop on it.
   /// Fails open when absent, like `AUTH_LIMIT`.
@@ -3350,7 +3356,8 @@ export { requireAccount, requireSession } from './session'
 /// Whether this caller may make another auth request.
 ///
 /// Keyed on the connecting IP, which is the only thing an unauthenticated
-/// caller has. Not a strong identity — a botnet has many — but it is what stops
+/// caller has, or on the visitor the web client's Worker signs for, whose own
+/// IP is Cloudflare's (`visitorKey`). Not a strong identity — a botnet has many — but it is what stops
 /// one client burning the WorkOS quota, which is the realistic failure.
 ///
 /// Fails OPEN when the binding is absent. A local `wrangler dev` has no rate
@@ -3361,9 +3368,31 @@ export { requireAccount, requireSession } from './session'
 /// guard.
 async function withinRate(request: Request, env: Env): Promise<boolean> {
   if (!env.AUTH_LIMIT) return true
-  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { success } = await env.AUTH_LIMIT.limit({ key: ip })
+  const key = (await visitorKey(request, env)) ?? request.headers.get('cf-connecting-ip') ?? 'unknown'
+  const { success } = await env.AUTH_LIMIT.limit({ key })
   return success
+}
+
+/// What the MAC covers before the visitor; services/common/relay.ts signs it.
+const VISITOR_CONTEXT = 'farcooler visitor v1\n'
+
+/// The visitor the web client's Worker names in `x-fc-visitor`, when
+/// `x-fc-visitor-mac` is that name's HMAC-SHA256 under `VISITOR_SECRET`; null
+/// otherwise, and the caller is keyed on its address as before.
+///
+/// Only a holder of the secret can choose a bucket: anyone else's header is
+/// ignored, so a forged one leaves them in their own address's bucket. The
+/// native apps send neither header. `crypto.subtle.verify` compares in
+/// constant time.
+export async function visitorKey(request: Request, env: Env): Promise<string | null> {
+  const secret = env.VISITOR_SECRET?.trim()
+  const visitor = request.headers.get('x-fc-visitor')
+  const mac = request.headers.get('x-fc-visitor-mac')
+  if (!secret || !visitor || !mac || visitor.length > 64 || !/^[0-9a-f]{64}$/.test(mac)) return null
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+  const bytes = new Uint8Array(mac.match(/../g)!.map(pair => parseInt(pair, 16)))
+  const good = await crypto.subtle.verify('HMAC', key, bytes, new TextEncoder().encode(`${VISITOR_CONTEXT}${visitor}`))
+  return good ? visitor : null
 }
 
 export async function sha256(text: string): Promise<string> {
