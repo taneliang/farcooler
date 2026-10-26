@@ -1,4 +1,4 @@
-// Shipped by Canary at 2cf32b6710cedf3b8b82e6c13186e0e6f4f6aa43. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 39401086d4c3756ea634db3b95eac046d8fc5179. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -5321,6 +5321,22 @@ message MemberSet {
   // member's never changes once set (`account_differs`).
   string account = 4;
   string email = 5;
+  // The devices the caller read as this member's (ov-786), from the
+  // `member.list` it built `client_ids` from: none for a member not there yet.
+  // When set, the write is refused as `resource-conflict: devices_changed`,
+  // writing nothing, unless their devices are still exactly these, checked in
+  // the same transaction as the write. So two admins adding a device to one
+  // member at once can't each take the other's off and revoke it: the second
+  // re-reads and sends again. Unset, the list is replaced as it stands (the
+  // last write wins), as from a client before `member_devices_read`, which a
+  // client that sets it names in the request.
+  MemberDevicesRead devices_read = 6;
+}
+
+// What a `member.set` caller read as the member's devices (ov-786). Compared
+// as a set: order and repeats don't matter.
+message MemberDevicesRead {
+  repeated string client_ids = 1;
 }
 
 // `member.remove`: their enrolled devices are revoked, and released (nobody's,
