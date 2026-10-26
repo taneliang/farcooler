@@ -372,14 +372,14 @@ def jdk_major(home):
 def jdk_candidates():
     """Every JDK home this host has, best-known places first."""
     homes = []
+    for prefix in ("/opt/homebrew/opt", "/usr/local/opt"):
+        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*/libexec/openjdk.jdk/Contents/Home"))
+        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*"))
     try:
         out = subprocess.run(["/usr/libexec/java_home", "-V"], capture_output=True, text=True)
         homes += re.findall(r"\s(/\S.*?/Home)\s*$", out.stderr + out.stdout, re.M)
     except OSError:
         pass
-    for prefix in ("/opt/homebrew/opt", "/usr/local/opt"):
-        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*/libexec/openjdk.jdk/Contents/Home"))
-        homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*"))
     homes += sorted(str(p) for p in pathlib.Path("/Library/Java/JavaVirtualMachines").glob("*/Contents/Home"))
     homes += sorted(str(p) for p in pathlib.Path("/usr/lib/jvm").glob("*"))
     return homes
@@ -485,7 +485,7 @@ def run_step_safely(step, repo, env, logdir, tmp):
         reason = f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     result = "pass" if code == 0 else f"FAIL (exit {code})"
-    notes = leak_notes(output)
+    notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
     if notes:
         result += f"; {notes}"
     return result, secs, count_tests(output), code == 0, log, output
@@ -833,6 +833,9 @@ def self_test():
         expect("a missing working directory is a FAIL row, not a FileNotFoundError", (row[0].startswith("FAIL: working directory"), row[3]), (True, False))
         row = run_step_safely(Step("x", "ok", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
         expect("a step that passes still passes", (row[0], row[3]), ("pass", True))
+        noisy = "echo 'test-leak-check: note: 2 new entries appeared in /x' >&2\n"
+        expect("a leak note shows in a real run's Result", "leak note" in run_step_safely(Step("x", "n", noisy), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], True)
+        expect("... and not in a self-test's", "leak note" in run_step_safely(Step("x", "n", noisy + "# --self-test\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], False)
         row = run_step_safely(Step("x", "bad", "exit 3\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
         expect("a step that fails says its exit code", row[0], "FAIL (exit 3)")
         global run_step
