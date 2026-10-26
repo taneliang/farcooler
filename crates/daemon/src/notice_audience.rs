@@ -32,6 +32,22 @@ pub fn admits(viewer: &Person, member: &str, author: &str) -> bool {
     }
 }
 
+/// Whether a connection from `peer` hears any event at all (ov-758): not
+/// from a released device, which reads nothing, still connected because it
+/// was taken off a member's list rather than removed, or enrolled by a
+/// member and not yet bound. One lookup by key, and none on the local
+/// socket. A store that can't be read tells it nothing.
+pub fn admits_device(store: &farcooler_store::Store, peer: &farcooler_transport::Peer) -> bool {
+    let Some(device) = peer.client_id.as_deref() else { return true };
+    match store.device_released(device) {
+        Ok(released) => !released,
+        Err(error) => {
+            tracing::warn!(%error, "could not tell whether a device was released, so it hears nothing");
+            false
+        }
+    }
+}
+
 /// Whether the connection whose device is `viewer`'s is told `event`, of
 /// the read state it carries (ov-740): a board's `board_reads_changed` goes
 /// to the person whose marks moved alone, so no client merges another

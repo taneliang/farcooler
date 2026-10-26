@@ -119,6 +119,8 @@ pub async fn write_charter(svc: &Service, req: pb::Request) -> Result<result::Va
     }
     let workspace = svc.store.get_workspace(id)?;
     let repo = svc.store.get_repository(workspace.repository_id)?;
+    // Never beside an edit (`charter_write`): one writer at a time.
+    let _one = crate::charter_write::EDITS.lock().await;
     // Main adopts a repository's `.farcooler/manager.md` here first, so a
     // charter the repository carries is never written over.
     let home = svc.ensure_workspace_home(&workspace).map_err(|e| {

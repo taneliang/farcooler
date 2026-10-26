@@ -135,6 +135,32 @@ async fn no_pane_gives_a_role() {
     assert_eq!(r.svc.store.member_role("bob").unwrap(), Role::Member);
 }
 
+/// A caller whose process chain can't be read (pid 0 here) is no person, so
+/// it gives no role either: `person_only`.
+#[tokio::test]
+async fn no_caller_who_isnt_a_person_gives_a_role() {
+    let r = runner().await;
+    let unknown = factory(&r.svc, LOCAL, Scope::HostAdmin).with_caller_pid(Some(0));
+    assert_eq!(call(&unknown, set_role("bob", "maintainer")).await.err().as_deref(), Some("resource-conflict:person_only"));
+    assert_eq!(r.svc.store.member_role("bob").unwrap(), Role::Member);
+}
+
+/// A charter edit from a member's pane on the local socket, which the gate
+/// lets through as the owner's, is logged as that member's, never the
+/// owner's (`caller_person`): Erin's agent, on her login.
+#[tokio::test]
+async fn a_members_pane_is_logged_as_that_member() {
+    let r = runner().await;
+    super::team_tests::on_logins_of(&r.svc, r.agent.id, "erin");
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the agent's pane").stamp.pid as i32;
+    let in_pane = factory(&r.svc, LOCAL, Scope::HostAdmin).with_caller_pid(Some(pid));
+    let expected = hash_now(&r).await;
+    call(&in_pane, set_charter(r.workspace, "## Who decides\nErin's agent.\n", &expected)).await.expect("the local socket passes the gate");
+    let log = r.svc.store.people_events(10).unwrap();
+    assert_eq!(log.iter().map(|e| (e.kind.as_str(), e.actor.as_str())).collect::<Vec<_>>(), [("charter", "member:erin")]);
+}
+
 /// Each role change is in the people log, with who made it, from and to,
 /// and `member.events` reads it to anyone on the runner at Read scope.
 #[tokio::test]
@@ -251,6 +277,9 @@ async fn an_edit_never_writes_over_one_made_meanwhile() {
     assert_eq!(charter_on_disk(&r).as_deref(), Some("## Edited in the file\n"));
     let now = hash_now(&r).await;
     assert_eq!(call(&owner, set_charter(r.workspace, " \n", &now)).await.err().as_deref(), Some("invalid-argument:charter_empty"));
+    let too_long = "x".repeat(256 * 1024 + 1);
+    assert_eq!(call(&owner, set_charter(r.workspace, &too_long, &now)).await.err().as_deref(), Some("invalid-argument:charter_too_long"));
+    assert_eq!(charter_on_disk(&r).as_deref(), Some("## Edited in the file\n"), "neither written");
     call(&owner, set_charter(r.workspace, "## Second\n", &now.to_uppercase())).await.expect("the hash in either case");
 
     let path = crate::workspace_home::charter_path(r.svc.root_dir(), r.workspace);

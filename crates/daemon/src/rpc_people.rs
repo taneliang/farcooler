@@ -57,9 +57,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             };
             let after = svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
             match before {
-                None => log(svc, peer, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
+                None => log(svc, peer, caller_pid, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
                 Some(b) if b.devices != after.devices => {
-                    log(svc, peer, &after.handle, "devices", serde_json::json!({ "from": b.devices, "to": after.devices }))
+                    log(svc, peer, caller_pid, &after.handle, "devices", serde_json::json!({ "from": b.devices, "to": after.devices }))
                 }
                 Some(_) => {}
             }
@@ -122,7 +122,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // Keychain entry and its directory deleted. Gone from the store
             // first, so nothing can launch on it in between (`member_removal`).
             let removed = svc.wipe_login(login.as_deref(), &running).await;
-            log(svc, peer, handle, "removed", serde_json::json!({ "devices": member.devices }));
+            log(svc, peer, caller_pid, handle, "removed", serde_json::json!({ "devices": member.devices }));
             watcher.announce_fleet_changed();
             crate::lead_change::publish_layouts(svc, watcher, &started).await;
             Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }))
@@ -165,7 +165,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
                 return Err(DomainError::Conflict { what: "person_only" });
             }
             let handle = p.handle.trim();
-            if svc.store.set_member_role(handle, role, &actor(svc, peer)?)? != role {
+            if svc.store.set_member_role(handle, role, &crate::caller_person::log_actor(svc, peer, caller_pid)?)? != role {
                 tracing::info!(handle, role = role.as_str(), "a member's role changed");
                 watcher.announce_fleet_changed();
             }
@@ -257,19 +257,11 @@ async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
 /// The most of the people log `member.events` answers, newest first.
 const EVENTS_SHOWN: u32 = 200;
 
-/// Who `peer` is, as the people log writes it: `member:<handle>`, or `user`
-/// for the owner.
-fn actor(svc: &Service, peer: &Peer) -> Result<String> {
-    Ok(match person_of(&svc.store, peer)? {
-        Person::Member(handle) => format!("member:{handle}"),
-        _ => "user".to_string(),
-    })
-}
-
-/// Add a change already made to the people log. A line that can't be
-/// written is logged and isn't the change failing.
-fn log(svc: &Service, peer: &Peer, handle: &str, kind: &str, detail: serde_json::Value) {
-    let written = actor(svc, peer).and_then(|actor| {
+/// Add a change already made to the people log, as the caller's person's
+/// (`caller_person::log_actor`). A line that can't be written is logged and
+/// isn't the change failing.
+fn log(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handle: &str, kind: &str, detail: serde_json::Value) {
+    let written = crate::caller_person::log_actor(svc, peer, caller_pid).and_then(|actor| {
         svc.store.record_people_event(NewPeopleEvent { actor: &actor, handle, workspace: None, kind, detail: &detail })
     });
     if let Err(e) = written {
@@ -284,6 +276,11 @@ const RELEASED: &str = "(released)";
 /// Everyone on the runner, the account they share, and who's asking.
 fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
     let viewer = person_of(&svc.store, peer)?;
+    // A released device learns that it was, and nothing else (ov-758): no
+    // member, no account, no logins.
+    if viewer == Person::Released {
+        return Ok(pb::MemberList { you: RELEASED.to_string(), ..Default::default() });
+    }
     let roles = svc.store.member_roles()?;
     let members = svc
         .store

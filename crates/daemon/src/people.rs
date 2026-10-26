@@ -315,7 +315,8 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// - **A released device does nothing** (ov-712, ov-758). A device whose
 ///   member was removed, or that was taken off their list, is nobody's:
 ///   every call is refused `not_yours`, its reads included (the plan, the
-///   board, Needs You). Removing a member also revokes their devices
+///   board, Needs You), but `member.list`, which tells it only that it was
+///   released. Removing a member also revokes their devices
 ///   (`member.remove`); this holds if one is still connected or comes back.
 /// - **The plan is everyone's** (`Ruling::Plan`, the owner, 24 Oct,
 ///   ov-736, reversing ov-637): a member's device changes the ranking, a
@@ -410,8 +411,10 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
     // A removed member's device is nobody's, the owner included (ov-712),
     // and reads nothing either (the owner, 25 Oct, ov-758): a removed
     // person no longer sees the team's plan, board or Needs You. Before
-    // ov-712 its writes said `user`, which reads as the owner's.
-    if peer.client_id.is_some() && person_of(store, peer)? == Person::Released {
+    // ov-712 its writes said `user`, which reads as the owner's. All it
+    // may learn is that it was released: `member.list` answers it that and
+    // nothing else (`rpc_people::list`), so its app can say so.
+    if peer.client_id.is_some() && req.method != "member.list" && person_of(store, peer)? == Person::Released {
         tracing::info!(method = %req.method, "refused: a released device");
         return Err(DomainError::NotYours { what: "not_yours" });
     }

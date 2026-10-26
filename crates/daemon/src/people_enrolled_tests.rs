@@ -135,7 +135,7 @@ async fn a_device_a_member_enrolls_does_nothing_until_it_is_bound() {
     assert_eq!(who(&svc, "phone-t"), Person::Released, "the owner's, before ov-719");
     let tess = factory(&svc, Some("phone-t"), Scope::Control);
     assert_eq!(call(&tess, a_card()).await.err().as_deref(), Some("not-yours:not_yours"), "it writes nothing");
-    let read = Request { method: "member.list".into(), ..Default::default() };
+    let read = Request { method: "needs_you.list".into(), ..Default::default() };
     assert_eq!(call(&tess, read).await.err().as_deref(), Some("not-yours:not_yours"), "nor reads (ov-758)");
     let shutdown = Request { method: "daemon.shutdown".into(), ..Default::default() };
     assert!(gate(&svc, &Peer { client_id: Some("phone-t".into()), scope: Scope::HostAdmin }, None, &shutdown).is_err());

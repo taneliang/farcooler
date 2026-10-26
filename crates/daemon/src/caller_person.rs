@@ -58,6 +58,18 @@ pub fn caller_person(svc: &Service, peer: &Peer, caller_pid: Option<i32>, pane: 
     caller_person_with(svc, peer, caller_pid, pane, |pid| crate::people::pane_of(svc, pid))
 }
 
+/// Who `peer`, a local caller at `caller_pid`, is, as the people log writes
+/// it (ov-757): `member:<handle>` for a member's device or a pane on their
+/// login, `released` for a pane on a removed member's, and `user` for the
+/// owner. Walked afresh: the log is written rarely.
+pub fn log_actor(svc: &Service, peer: &Peer, caller_pid: Option<i32>) -> Result<String> {
+    Ok(match caller_person(svc, peer, caller_pid, &OnceLock::new())? {
+        Person::Member(handle) => format!("member:{handle}"),
+        Person::Released => "released".to_string(),
+        Person::Owner => "user".to_string(),
+    })
+}
+
 /// `caller_person`, with the walk from a pid to its pane given.
 pub(crate) fn caller_person_with(
     svc: &Service,

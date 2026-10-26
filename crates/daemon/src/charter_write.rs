@@ -23,16 +23,16 @@ use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::Peer;
 
 use crate::charter_read::{self, MAX_BYTES};
-use crate::people::{Person, person_of};
 use crate::service::Service;
 use crate::workspace_home;
 
-/// One edit through the runner at a time, so a hash checked is the hash
+/// One charter write through the runner at a time, this edit or
+/// `workspace.write_charter`'s create, so a hash checked is the hash
 /// written over.
-static EDITS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static EDITS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// `workspace.set_charter`, targeting a workspace.
-pub async fn handle(svc: &Service, peer: &Peer, req: pb::Request) -> Result<result::Value> {
+pub async fn handle(svc: &Service, peer: &Peer, caller_pid: Option<i32>, req: pb::Request) -> Result<result::Value> {
     let id = req.target_resource_id.as_deref().and_then(crate::wire::parse_id).ok_or(DomainError::NotFound)?;
     let Some(request::Payload::WorkspaceSetCharter(p)) = req.payload else {
         return Err(DomainError::InvalidArgument { what: "payload" });
@@ -69,10 +69,9 @@ pub async fn handle(svc: &Service, peer: &Peer, req: pb::Request) -> Result<resu
         DomainError::OperationFailed
     })?;
     let written = charter_read::answer(Some(p.text.into_bytes()));
-    let actor = match person_of(&svc.store, peer)? {
-        Person::Member(handle) => format!("member:{handle}"),
-        _ => "user".to_string(),
-    };
+    // The caller's person, a member's pane on the local socket included
+    // (`caller_person`), so the log never credits the owner with it.
+    let actor = crate::caller_person::log_actor(svc, peer, caller_pid)?;
     let detail = serde_json::json!({ "sha256": written.sha256 });
     let event = farcooler_store::member_roles::NewPeopleEvent { actor: &actor, handle: "", workspace: Some(id), kind: "charter", detail: &detail };
     if let Err(e) = svc.store.record_people_event(event) {

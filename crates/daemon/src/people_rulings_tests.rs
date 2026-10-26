@@ -169,7 +169,7 @@ async fn a_released_device_spends_no_gh() {
 /// and a released one get: the owner's alone is refused a member's device
 /// `not_yours`, and everything else passes it (its own handler's or the pane
 /// rules' checks aside). A released device is refused every one, reads
-/// included (ov-758). A read is at Read scope, and Read scope is a read or
+/// included, but `member.list` (ov-758). A read is at Read scope, and Read scope is a read or
 /// the caller's own.
 #[tokio::test]
 async fn every_method_has_a_member_ruling_the_gate_keeps() {
@@ -186,7 +186,12 @@ async fn every_method_has_a_member_ruling_the_gate_keeps() {
             Ruling::Owners(_) => assert!(not_yours(&member), "{name}, the owner's: {member:?}"),
             _ => assert!(member.is_ok(), "{name}, {ruling:?}: {member:?}"),
         }
-        assert!(not_yours(&released), "{name}, {ruling:?}, from a released device: {released:?}");
+        // But `member.list`, which tells it only that it was released.
+        if *method == Method::MemberList {
+            assert!(released.is_ok(), "{released:?}");
+        } else {
+            assert!(not_yours(&released), "{name}, {ruling:?}, from a released device: {released:?}");
+        }
         let read_scope = crate::rpc::required_scope(name) == Some(Scope::Read);
         assert_eq!(ruling == Ruling::Reads, read_scope && ruling != Ruling::Own, "{name}: {ruling:?} at {:?}", crate::rpc::required_scope(name));
     }

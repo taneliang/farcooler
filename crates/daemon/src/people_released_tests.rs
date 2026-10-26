@@ -120,9 +120,10 @@ async fn a_released_device_writes_nothing_on_the_board() {
     assert!(r.svc.store.notes_for(r.task, None).unwrap().iter().all(|n| n.kind != farcooler_store::models::NoteKind::Comment), "no note");
 }
 
-/// Every method is refused a released device at the gate, whatever it
-/// carries, at any scope: no list of reads it keeps (ov-758). Before, the
-/// 27 `Ruling::Reads` methods passed.
+/// Every method but `member.list` is refused a released device at the gate,
+/// whatever it carries, at any scope (ov-758). Before, the 27
+/// `Ruling::Reads` methods passed. `member.list` answers it only that it
+/// was released (`a_released_device_learns_only_that_it_was`).
 #[tokio::test]
 async fn a_released_device_is_refused_every_call() {
     let r = runner().await;
@@ -130,7 +131,55 @@ async fn a_released_device_is_refused_every_call() {
         for method in Method::ALL {
             let req = Request { method: method.name().into(), ..Default::default() };
             let gated = gate(&r.svc, &Peer { client_id: RELEASED.map(str::to_string), scope }, None, &req);
-            assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{} at {scope:?}: {gated:?}", method.name());
+            if *method == Method::MemberList {
+                assert!(gated.is_ok(), "{gated:?}");
+            } else {
+                assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{} at {scope:?}: {gated:?}", method.name());
+            }
+        }
+    }
+}
+
+/// `member.list` tells a released device that it was, so its app can say
+/// so, and nothing else: no member, not the runner's Claude account, not
+/// the login switches. Bob's phone still reads them all.
+#[tokio::test]
+async fn a_released_device_learns_only_that_it_was() {
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    for scope in [Scope::Read, Scope::Control, Scope::HostAdmin] {
+        let released = RpcFactory::new(
+            r.svc.clone(),
+            crate::watch::Watcher::new(r.svc.clone()),
+            Arc::new(tokio::sync::Notify::new()),
+            Peer { client_id: RELEASED.map(str::to_string), scope },
+        );
+        let answer = released.handle(Request { method: "member.list".into(), ..Default::default() }).await;
+        let Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::MemberList(list)) })) = answer.outcome else {
+            panic!("an answer at {scope:?}: {answer:?}")
+        };
+        assert_eq!(list, pb::MemberList { you: "(released)".into(), ..Default::default() }, "at {scope:?}");
+    }
+    let bob = factory(&r.svc, BOB).handle(Request { method: "member.list".into(), ..Default::default() }).await;
+    let Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::MemberList(list)) })) = bob.outcome else { panic!("Bob's list") };
+    assert_eq!((list.you.as_str(), list.members.len()), ("bob", 1), "Bob reads the members");
+}
+
+/// A released device that is still connected hears no event: not a pane's
+/// title or question, a card, the plan. The owner's phone, Bob's and the
+/// local socket hear them.
+#[tokio::test]
+async fn a_released_device_hears_no_events() {
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    let events = [
+        pb::Event::default(),
+        pb::Event { payload: Some(pb::event::Payload::TaskChanged(Default::default())), ..Default::default() },
+    ];
+    for event in &events {
+        assert!(!factory(&r.svc, RELEASED).admits(event), "{event:?}");
+        for device in [OWNERS_PHONE, BOB, LOCAL] {
+            assert!(factory(&r.svc, device).admits(event), "{device:?} {event:?}");
         }
     }
 }
@@ -143,12 +192,11 @@ fn reads(r: &Runner) -> Vec<(&'static str, Option<request::Payload>)> {
         ("task.get", Some(request::Payload::TaskGet(pb::TaskGetRequest { task_id: id_bytes(r.task), ..Default::default() }))),
         ("plan.get", Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: ws(), ..Default::default() }))),
         ("needs_you.list", None),
-        ("member.list", None),
     ]
 }
 
 /// A removed member's phone reads nothing (ov-758): not the board, a card,
-/// the plan, Needs You or who's on the runner, at Read scope as at Control.
+/// the plan or Needs You, at Read scope as at Control.
 /// The same calls answer the owner's phone and Bob's, so it's the release
 /// that refuses them.
 #[tokio::test]

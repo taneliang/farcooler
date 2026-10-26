@@ -278,8 +278,10 @@ impl Handler for RpcFactory {
     /// (`caller_person`, walked once for the connection).
     /// And a board's read state only to the person whose it is (ov-740,
     /// `admits_reads`), by the same rule `workspace.mark_read` files it by.
+    /// And nothing to a released device (ov-758, `admits_device`).
     fn admits(&self, event: &farcooler_protocol::v1::Event) -> bool {
-        crate::notice_audience::admits_reads(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
+        crate::notice_audience::admits_device(&self.service.store, &self.peer)
+            && crate::notice_audience::admits_reads(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
             && crate::notice_audience::admits_event(event, || crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane))
     }
 
@@ -1988,7 +1990,7 @@ impl Rpc {
             "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
             "workspace.charter" => crate::charter_read::handle(svc, &req), // ov-755
-            "workspace.set_charter" => crate::charter_write::handle(svc, &self.peer, req).await, // ov-757
+            "workspace.set_charter" => crate::charter_write::handle(svc, &self.peer, self.caller_pid, req).await, // ov-757
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 
