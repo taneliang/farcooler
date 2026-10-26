@@ -52,9 +52,12 @@ final class ScrollHitchUITests: XCTestCase {
         fling(app, "conversation")
     }
 
-    /// The Task screen: bil-7 with forty long notes.
+    /// The Task screen: bil-7 with a real long card's notes, on a board of
+    /// eight hundred tasks.
     func testFlingTheTaskScreen() {
-        let app = XCUIApplication.phoneHarness(["-push-task", "bil-7", "-phone-long-record", "-frame-watch"])
+        let app = XCUIApplication.phoneHarness([
+            "-push-task", "bil-7", "-phone-long-record", "-phone-big-board", "-frame-watch",
+        ])
         XCTAssertTrue(app.descendants(matching: .any)["task-heading"].waitForExistence(timeout: 30), "no task")
         // The record is read after the screen shows.
         Thread.sleep(forTimeInterval: 3)

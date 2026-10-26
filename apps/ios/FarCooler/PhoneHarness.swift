@@ -103,8 +103,10 @@ import SwiftUI
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
 //                            and each turn is in `sent` as `own-login <harness> <on>`; add
 //                            -phone-own-logins-refused for a runner that refuses every turn
-//   -phone-long-record       bil-7's record is forty long notes, its intent long and its acceptance six
-//                            lines, for measuring a fling over a long card (ov-791)
+//   -phone-long-record       bil-7's record is thirty-four notes as long as a real card's, its intent
+//                            long and its acceptance six lines, for measuring a fling (ov-791)
+//   -phone-big-board         Billing's board holds eight hundred more tasks, as a long-lived runner's
+//                            does, so a task's key links are drawn from a real-sized index (ov-791)
 //   -phone-member-notes      bil-7's record written by people (ov-707): Alexandra's answer, the
 //                            owner's comment and Bob's; with -phone-shared, as a member's phone
 //                            (Bob's) or the owner's (-phone-rep-owner) reads it
@@ -1080,15 +1082,15 @@ final class HarnessRunner {
         ]
     }
 
-    /// `-phone-long-record` (ov-791): forty notes on bil-7, reports, comments
-    /// and decisions, many kilobytes each, as a long-lived card's are.
+    /// `-phone-long-record` (ov-791): thirty-four notes on bil-7, sized as a
+    /// real long card's are (`HarnessLongProse.noteSizes`, twice over).
     private var longNotes: [[String: Any]] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let kinds = ["finding", "comment", "decision", "comment"]
-        return (0..<40).map { n in
+        return (0..<34).map { n in
             [
                 "id": "note-long-\(n)", "kind": kinds[n % 4], "actor": n % 3 == 0 ? "user" : "manager",
-                "at": now - Int64(40 - n) * 900_000, "body": HarnessLongProse.note(n),
+                "at": now - Int64(34 - n) * 900_000, "body": HarnessLongProse.note(n),
             ]
         }
     }
@@ -1209,6 +1211,22 @@ final class HarnessRunner {
         ]
     }
 
+    /// `-phone-big-board`'s eight hundred tasks, or none.
+    private static func bigBoard(now: Int64) -> [[String: Any]] {
+        guard CommandLine.arguments.contains("-phone-big-board") else { return [] }
+        return (0..<800).map { (n: Int) -> [String: Any] in
+            let key: String = "bil-\(1_000 + n)"
+            let status: String = n % 9 == 0 ? "in_progress" : "done"
+            let since: Int64 = now - Int64(n) * 3_600_000
+            return [
+                "id": String(format: "0198f2c0-0000-7000-8000-%012x", 0x100000 + n), "key": key,
+                "title": "Old task \(n): tidy the invoice export", "status": status,
+                "status_since": since, "workspace": Self.billing,
+                "intent": "Keep bil-\(1_000 + (n + 1) % 800) working as it did.",
+            ]
+        }
+    }
+
     private func tasks(_ workspace: String?) -> [[String: Any]] {
         guard workspace == Self.billing, !CommandLine.arguments.contains("-phone-billing-blank")
         else { return [] }
@@ -1250,12 +1268,13 @@ final class HarnessRunner {
                 ],
             ]
         }
-        return startStates() + HarnessPlan.boardTasks(on: Self.billing) + [
+        let many = Self.bigBoard(now: now)
+        return many + startStates() + HarnessPlan.boardTasks(on: Self.billing) + [
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
                 "status": "needs_decision", "status_since": now - 600_000,
                 "intent": CommandLine.arguments.contains("-phone-long-record")
-                    ? String(HarnessLongProse.laneReport(1).prefix(2_500)) : "Invoices need a PDF.",
+                    ? String(HarnessLongProse.note(3).prefix(1_200)) : "Invoices need a PDF.",
                 "workspace": Self.billing,
                 "acceptance": CommandLine.arguments.contains("-phone-long-record")
                     ? (0..<6).map { ["id": "l\($0)", "text": "Line \($0): a **fling** over the record stays under one frame (ov-\(788 + $0))", "met": $0 % 2 == 0] }

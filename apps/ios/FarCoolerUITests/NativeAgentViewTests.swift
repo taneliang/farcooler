@@ -535,6 +535,13 @@ extension NativeAgentViewTests {
         XCTAssertTrue(report.waitForExistence(timeout: 30), "no report row")
         XCTAssertTrue(report.staticTexts["Report from review dead-layer removal"].exists, report.debugDescription)
         XCTAssertTrue(report.buttons["Show More"].exists, "a nine-line report doesn't fold")
+        // Folded, it draws only the start that shows (ov-788): its last
+        // line isn't drawn under the fold until Show More opens it.
+        let last = NSPredicate(format: "label CONTAINS 'Nothing of mine is still running'")
+        XCTAssertEqual(report.staticTexts.matching(last).count, 0, "the whole report is drawn under its fold")
+        report.buttons["Show More"].tap()
+        XCTAssertTrue(report.staticTexts.matching(last).firstMatch.waitForExistence(timeout: 10), "Show More didn't open it all")
+        report.buttons["Show Less"].tap()
         XCTAssertFalse(report.staticTexts["[Subagent hand-back]"].exists)
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'agent-message' OR label CONTAINS 'Subagent hand-back' OR label CONTAINS 'task-notification'"))
         XCTAssertEqual(message.count, 0, "raw XML is on screen: \(message.allElementsBoundByIndex.map(\.label))")

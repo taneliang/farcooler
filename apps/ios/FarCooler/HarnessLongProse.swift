@@ -48,16 +48,24 @@ enum HarnessLongProse {
         return out
     }
 
-    /// A card's note: a long report, a short comment or a status line, by `n`.
+    /// The sizes of a real long card's notes, in bytes, oldest first: ov-752's
+    /// seventeen (25 Oct), status lines among findings, decisions and
+    /// questions of up to 1.7 KB. Real notes are short: of 281 notes on
+    /// ov-740 to ov-791, the median was 44 bytes and the largest 1,751.
+    static let noteSizes = [34, 33, 392, 1_747, 40, 207, 1_060, 600, 385, 292, 380, 696, 40, 803, 40, 336, 40]
+
+    /// A card's note `n`, about `noteSizes`' size: a status line, or the
+    /// start of a report cut at a line.
     static func note(_ n: Int) -> String {
-        switch n % 4 {
-        case 0: laneReport(n)
-        case 1: "Owner, 25 Oct: \"Scrolling the Tasks view is also pretty jerky.\" Batched with ov-788 and ov-\(780 + n % 9)."
-        case 2: String(laneReport(n).prefix(3_000))
-        default:
-            "**Decision:** take the prefix fold (ov-788), and keep the open report selectable (ov-609).\n\n"
-                + "- Folded: lays out what shows.\n- Open: the whole report, as before.\n"
+        let size = noteSizes[n % noteSizes.count]
+        if size < 60 { return "moved from in_progress to needs_decision" }
+        let report = laneReport(n).split(separator: "\n", omittingEmptySubsequences: false).dropFirst(2)
+        var out = "**Owner, 25 Oct, decision \(n % 7 + 1):** all as recommended, after spike ov-\(750 + n % 40).\n\n"
+        for line in report {
+            if out.utf8.count + line.utf8.count >= size { break }
+            out += line + "\n"
         }
+        return out
     }
 }
 #endif
