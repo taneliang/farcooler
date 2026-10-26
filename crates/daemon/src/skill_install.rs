@@ -1115,7 +1115,9 @@ mod tests {
         // not be answered with SendMessage (ov-575): one line.
         // 319 once a UI card is told to be labeled `ui` and link before and
         // after captures, which pr-body pairs (ov-578): one line.
-        assert!(lines <= 319, "{lines} lines");
+        // 330 once it ranks themes itself and records a person's move as a
+        // ruling (ov-759): a Defaults bullet, a check-in bullet, a tiebreaker.
+        assert!(lines <= 330, "{lines} lines");
     }
 
     #[test]

@@ -223,8 +223,8 @@ fn the_owners_conventions_ship_as_defaults() {
             "On unless the charter says `Initiative: off`",
             "Rank work by the themes' order",
             "one or two high-confidence next steps as cards labeled `initiative`",
-            "each a `plan ruling add` the owner can reverse; suggest the rest with options",
-            "Never ahead of the owner's own asks, unless it unblocks them",
+            "each a `plan ruling add` the person who asked can reverse; suggest the rest with options",
+            "Never ahead of anyone's own asks, unless it unblocks them",
             "No merge commits: rebase, or rebase and squash",
             "noted waived (why) or split (to which card)",
         ] {
@@ -320,5 +320,34 @@ fn every_brief_wants_each_new_test_seen_failing() {
         let third = section(&prose(h), "3. Dispatch");
         let brief = third.find("A brief names the gates").unwrap_or_else(|| panic!("{h:?}: {third}"));
         assert!(third[brief..].contains("wants each new test seen failing"), "{h:?}: {}", &third[brief..]);
+    }
+}
+
+/// The orchestrator keeps the theme order itself (ov-759): a sane default,
+/// re-ranked as things change, a person's move kept and recorded naming them,
+/// ties to the lead, people from `member list`, and no roster asked for. A
+/// check-in reads the plan's history first.
+#[test]
+fn the_orchestrator_ranks_themes_and_records_overrides() {
+    for h in ALL {
+        let body = prose(h);
+        let defaults = section(&body, "Defaults");
+        for rule in [
+            "**Theme order.** You keep it.",
+            "who is waiting, what is blocked, what is urgent",
+            "`plan theme move <name> --to <n>`",
+            "A person's own move is an override: keep it, and record it with `plan ruling add`, naming them",
+            "the workspace's lead decides unless the charter says otherwise",
+            "People come from `farcooler member list`, not the charter",
+            "A rule you learn about this team becomes a ruling",
+        ] {
+            assert!(defaults.contains(rule), "{h:?} lacks {rule:?}: {defaults}");
+        }
+        let check = section(&body, "5. Check in");
+        assert!(check.contains("read the plan's history since your last turn"), "{h:?}: {check}");
+        let interview = section(&body, "The interview");
+        assert!(interview.contains("Ties between people go to the lead") && interview.contains("Don't ask for a roster"), "{h:?}: {interview}");
+        assert!(!interview.contains("## Team"), "{h:?}: the owner rejected a roster");
+        assert!(!body.contains("the owner is who you answer to"), "{h:?}");
     }
 }
