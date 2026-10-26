@@ -11,12 +11,12 @@ use crate::service::Service;
 
 const BOBS_PHONE: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER phone";
 
-fn factory(svc: &Arc<Service>, client_id: Option<&str>, scope: Scope) -> crate::rpc::RpcFactory {
+pub(crate) fn factory(svc: &Arc<Service>, client_id: Option<&str>, scope: Scope) -> crate::rpc::RpcFactory {
     let peer = Peer { client_id: client_id.map(str::to_string), scope };
     crate::rpc::RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer)
 }
 
-async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Result<pb::result::Value, String> {
+pub(crate) async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Result<pb::result::Value, String> {
     use farcooler_transport::Handler as _;
     match factory.handle(req).await.outcome {
         Some(response::Outcome::Result(r)) => Ok(r.value.expect("a value")),
@@ -25,7 +25,7 @@ async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Re
     }
 }
 
-fn set(handle: &str, devices: &[&str], account: &str, email: &str) -> Request {
+pub(crate) fn set(handle: &str, devices: &[&str], account: &str, email: &str) -> Request {
     Request {
         method: "member.set".into(),
         payload: Some(request::Payload::MemberSet(pb::MemberSet {
@@ -41,7 +41,7 @@ fn set(handle: &str, devices: &[&str], account: &str, email: &str) -> Request {
 
 /// A service on a scratch root whose `authorized_keys` this test can see,
 /// with Bob's phone enrolled at Control, as the Mac's ceremony leaves it.
-async fn with_bobs_phone_enrolled() -> (tempfile::TempDir, Arc<Service>) {
+pub(crate) async fn with_bobs_phone_enrolled() -> (tempfile::TempDir, Arc<Service>) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     std::fs::create_dir_all(&state).unwrap();
@@ -119,7 +119,7 @@ async fn removing_a_teammate_revokes_their_phone() {
 }
 
 /// Enroll `key` as `client_id`, at Control, with no tunnel.
-async fn enroll(svc: &Service, key: &str, client_id: &str) {
+pub(crate) async fn enroll(svc: &Service, key: &str, client_id: &str) {
     let enroll = pb::ClientEnroll {
         public_key: key.into(),
         label: client_id.into(),
@@ -162,12 +162,12 @@ async fn a_device_taken_off_a_members_list_is_revoked_and_cut_off() {
     assert_eq!((log[0].kind.as_str(), log[0].handle.as_str(), log[0].actor.as_str()), ("revoked", "bob", "user"));
     assert_eq!(log[0].detail, r#"{"device":"pad-b"}"#);
 
-    // A device taken off and bound again at once, before its revoke, is
+    // A device taken off and bound again at once, before the sweep, is
     // someone's and keeps its line: what's revoked is what's still released.
     let (_, released) = svc.store.set_member_releasing("bob", "Bob", &[], Default::default()).unwrap();
     assert_eq!(released, ["phone-b".to_string()]);
     svc.store.set_member("alice", "Alice", &["phone-a".to_string(), "phone-b".to_string()]).unwrap();
-    let admin_peer = Peer { client_id: None, scope: Scope::HostAdmin };
-    assert!(super::revoke_released(&svc, &admin_peer, None, "bob", &released).await.is_none());
+    let swept = crate::release_sweep::sweep(&svc).await.unwrap();
+    assert!(swept.revoked.is_empty() && swept.failed.is_empty(), "{swept:?}");
     assert!(enrolled(&svc).contains("phone-b") && !phone.is_closed(), "a device bound again was revoked");
 }

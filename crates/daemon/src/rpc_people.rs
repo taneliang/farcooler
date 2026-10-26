@@ -65,12 +65,16 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             }
             // A device taken off their list loses its access too, as on
             // `member.remove` (ov-783): released, it reads nothing, but its
-            // key would still log in and its open sessions keep running.
-            let failed = revoke_released(svc, peer, caller_pid, &after.handle, &released).await;
+            // key would still log in and its open sessions keep running. So
+            // moving a device to someone else is enrolling it again. The
+            // sweep revokes it, and retries any an earlier revoke left.
+            let failed = sweep_logged(svc, peer, caller_pid, &after.handle, &released).await;
             svc.refresh_claude_key_exports();
             watcher.announce_fleet_changed();
             // The list is changed either way; a key left in `authorized_keys`
-            // is said, not answered with a cheerful list.
+            // is said, not answered with a cheerful list. Which device is in
+            // the people log (`revoke_failed`): an error carries only words
+            // from the runner's source, never a caller's id.
             if let Some(err) = failed {
                 return Err(err);
             }
@@ -132,6 +136,11 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // first, so nothing can launch on it in between (`member_removal`).
             let removed = svc.wipe_login(login.as_deref(), &running).await;
             log(svc, peer, caller_pid, handle, "removed", serde_json::json!({ "devices": member.devices }));
+            // Anything a revoke left, theirs or from before (ov-783). They're
+            // gone either way, so a failure is logged, not answered.
+            if let Some(err) = sweep_logged(svc, peer, caller_pid, handle, &member.devices).await {
+                tracing::error!(?err, "a released device still has a line after a member's removal");
+            }
             watcher.announce_fleet_changed();
             crate::lead_change::publish_layouts(svc, watcher, &started).await;
             Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }))
@@ -263,32 +272,25 @@ async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
     failed
 }
 
-/// Revoke each device a `member.set` took off `handle`'s list, all of them
-/// whatever any one does, and log each revocation as `revoked` (ov-783). Only
-/// one still released when its turn comes: a device bound again meanwhile is
-/// someone's, and kept. A device with no line is done (`NotFound`). The first
-/// other failure, if any.
-async fn revoke_released(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handle: &str, released: &[String]) -> Option<DomainError> {
-    let mut failed = None;
-    for device in released {
-        match svc.store.device_released(device) {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(err) => {
-                failed.get_or_insert(err);
-                continue;
-            }
-        }
-        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await {
-            Ok(_) => log(svc, peer, caller_pid, handle, "revoked", serde_json::json!({ "device": device })),
-            Err(DomainError::NotFound) => {}
-            Err(err) => {
-                tracing::error!(device = %device, ?err, "revoking a device taken off a member's list failed");
-                failed.get_or_insert(err);
-            }
-        }
+/// The released devices' sweep (`release_sweep`), each revocation and each
+/// failure in the people log as the caller's, about `handle` for a device
+/// that was one of `theirs` and about nobody otherwise (ov-783). The first
+/// failure, if any: a line still there, or nothing tried at all.
+async fn sweep_logged(svc: &Service, peer: &Peer, caller_pid: Option<i32>, handle: &str, theirs: &[String]) -> Option<DomainError> {
+    let swept = match crate::release_sweep::sweep(svc).await {
+        Ok(swept) => swept,
+        Err(err) => return Some(err),
+    };
+    let about = |device: &str| if theirs.iter().any(|t| t == device) { handle } else { "" };
+    for device in &swept.revoked {
+        log(svc, peer, caller_pid, about(device), "revoked", serde_json::json!({ "device": device }));
     }
-    failed
+    let mut first = None;
+    for (device, err) in swept.failed {
+        log(svc, peer, caller_pid, about(&device), "revoke_failed", serde_json::json!({ "device": device }));
+        first.get_or_insert(err);
+    }
+    first
 }
 
 /// The most of the people log `member.events` answers, newest first.
@@ -359,4 +361,4 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
 
 #[cfg(test)]
 #[path = "rpc_people_tests.rs"]
-mod tests;
+pub(crate) mod tests;
