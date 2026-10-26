@@ -6,6 +6,8 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1402,6 +1404,7 @@ internal fun DirectRouteQuestion(offer: DirectRoute.Offer?, onConnectDirectly: (
  * Beside it, Connect this device (this device's own key, the drawer's words) and Edit, for a runner that's this
  * person's own and refuses a key they forgot or reset (review S2). The headline outranks the runner's name.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun NoAccessRow(
     runner: String,
@@ -1420,7 +1423,8 @@ internal fun NoAccessRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row {
+        // Wraps: three buttons don't fit a 320 dp phone on one line.
+        FlowRow {
             TextButton(onClick = onCheckAgain) { Text("Check again") }
             if (onAuthorize != null) TextButton(onClick = onAuthorize) { Text("Connect this device") }
             if (onEdit != null) TextButton(onClick = onEdit) { Text("Edit") }
