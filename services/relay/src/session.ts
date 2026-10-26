@@ -3,9 +3,10 @@
 import { json, type Env } from './index'
 import { verifySession, type Session } from './workos'
 
-/// The signed-in account, or the response to send instead.
-export async function requireAccount(request: Request, env: Env): Promise<string | Response> {
-  const session = await requireSession(request, env)
+/// The signed-in account, or the response to send instead. `limit`, when
+/// given, is `requireSession`'s.
+export async function requireAccount(request: Request, env: Env, limit?: RateLimit): Promise<string | Response> {
+  const session = await requireSession(request, env, limit)
   return session instanceof Response ? session : session.userId
 }
 
@@ -31,12 +32,19 @@ export const IAT_MARGIN_MS = 2000
 ///
 /// This and `workos.ts` are the only files that call `verifySession`: a route
 /// that verified a token itself would skip both tests.
-export async function requireSession(request: Request, env: Env): Promise<Session | Response> {
+///
+/// `limit`, when a route passes one, is a per-account rate limit, keyed on the
+/// verified `sub` and spent before any D1 read: a refused call costs the
+/// signature check and nothing else (ov-815). Keyed on the account, so one
+/// account's loop spends its own budget and no one else's. Open when the
+/// binding is absent, as `AUTH_LIMIT` is (`withinRate` says why).
+export async function requireSession(request: Request, env: Env, limit?: RateLimit): Promise<Session | Response> {
   const header = request.headers.get('authorization') ?? ''
   if (!header.startsWith('Bearer ')) return json({ error: 'unauthorized' }, 401)
 
   const session = await verifySession(header.slice(7), env)
   if (!session) return json({ error: 'unauthorized' }, 401)
+  if (limit && !(await limit.limit({ key: session.userId })).success) return json({ error: 'slow down' }, 429)
 
   // First sight of an account creates it. There is no signup step to get wrong
   // and no window where someone is authenticated but has nowhere to be stored.

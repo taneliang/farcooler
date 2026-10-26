@@ -15,8 +15,10 @@ export const TEAM_ROLES: readonly TeamRole[] = ['admin', 'member', 'billing']
 /// routes never read a team, and shouldn't pay two writes a request for one.
 /// Nothing outside the directory can see a team, so making it on first sight
 /// of the directory is the same as making it at sign-in.
-export async function requireUser(request: Request, env: Env): Promise<string | Response> {
-  const account = await requireAccount(request, env)
+///
+/// `limit`, when given, is `requireSession`'s: spent before the writes here.
+export async function requireUser(request: Request, env: Env, limit?: RateLimit): Promise<string | Response> {
+  const account = await requireAccount(request, env, limit)
   if (account instanceof Response) return account
   const now = Date.now()
   await env.DB.batch([

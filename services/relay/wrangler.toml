@@ -200,6 +200,22 @@ type = "ratelimit"
 namespace_id = "1011"
 simple = { limit = 10, period = 60 }
 
+# Per-account throttle on directory/me (ov-815), keyed on the verified account
+# id and spent before any D1 read (`requireSession`). The web client's Worker
+# calls it twice per page load (the Worker's GET / and the page's own
+# /api/relay/directory/me), the site's /app once per page, and each native app
+# a few times per launch or sheet, all counted together for one account.
+# Someone reloading the web app every two seconds for a whole minute makes 60
+# calls, and opening every app at once adds about a dozen more; 120 a minute is
+# twice that. Past it is a loop, not a person, and a looping account still costs
+# only two calls a second. Namespace ids are shared across the Cloudflare
+# account (scripts/migration-lint.py): 1021-1024, one per channel.
+[[unsafe.bindings]]
+name = "DIRECTORY_ME_LIMIT"
+type = "ratelimit"
+namespace_id = "1021"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # preview
 #
@@ -252,6 +268,13 @@ type = "ratelimit"
 namespace_id = "1012"
 simple = { limit = 10, period = 60 }
 
+# Per-account throttle on directory/me (ov-815); the stable block says why 120.
+[[env.preview.unsafe.bindings]]
+name = "DIRECTORY_ME_LIMIT"
+type = "ratelimit"
+namespace_id = "1022"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # canary
 #
@@ -299,6 +322,13 @@ type = "ratelimit"
 namespace_id = "1014"
 simple = { limit = 10, period = 60 }
 
+# Per-account throttle on directory/me (ov-815); the stable block says why 120.
+[[env.canary.unsafe.bindings]]
+name = "DIRECTORY_ME_LIMIT"
+type = "ratelimit"
+namespace_id = "1024"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # local
 #
@@ -344,3 +374,10 @@ name = "DEVICE_CHALLENGE_LIMIT"
 type = "ratelimit"
 namespace_id = "1013"
 simple = { limit = 10, period = 60 }
+
+# Per-account throttle on directory/me (ov-815); the stable block says why 120.
+[[env.local.unsafe.bindings]]
+name = "DIRECTORY_ME_LIMIT"
+type = "ratelimit"
+namespace_id = "1023"
+simple = { limit = 120, period = 60 }

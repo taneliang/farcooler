@@ -12,7 +12,7 @@ import { holds, TRUST_RESET_HOLD_MS, type HoldRow } from './hold'
 
 /// Who the caller is: their teams with their role in each, and their devices.
 export async function me(request: Request, env: Env): Promise<Response> {
-  const account = await requireUser(request, env)
+  const account = await requireUser(request, env, env.DIRECTORY_ME_LIMIT)
   if (account instanceof Response) return account
 
   const [who, teams, devices, confirmed] = await env.DB.batch([

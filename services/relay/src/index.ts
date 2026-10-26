@@ -64,6 +64,10 @@ export interface Env extends PasskeyConfig {
   /// three D1 writes, and a session alone shouldn't be able to loop on it.
   /// Fails open when absent, like `AUTH_LIMIT`.
   DEVICE_CHALLENGE_LIMIT?: RateLimit
+  /// Throttles `directory/me` per account (ov-815), before its D1 reads: the
+  /// web client's Worker calls it on every page load and API call. Fails open
+  /// when absent, like `AUTH_LIMIT`.
+  DIRECTORY_ME_LIMIT?: RateLimit
   METRICS: Metrics
   WORKOS_CLIENT_ID: string
   /// The `iss` this environment's tokens must carry. Required, not optional:
