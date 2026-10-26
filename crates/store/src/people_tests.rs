@@ -46,6 +46,25 @@ fn a_member_holds_their_devices_and_no_one_elses() {
     assert_eq!(names, [("alice".to_string(), devices(&["phone-a"])), ("bob".to_string(), devices(&["mac-a"]))]);
 }
 
+/// A set answers with exactly the devices it took off this member's list
+/// (ov-783): not one kept, not one added, not another member's, and nothing
+/// when a set is refused.
+#[test]
+fn a_set_names_the_devices_it_released() {
+    let (store, _, _) = board();
+    let set = |h: &str, d: &[&str]| store.set_member_releasing(h, h, &devices(d), Directory::default());
+    assert_eq!(set("alice", &["phone-a", "mac-a", "pad-a"]).unwrap().1, devices(&[]), "a new member released nothing");
+    set("bob", &["phone-b"]).unwrap();
+    let (alice, released) = set("alice", &["phone-a", "watch-a"]).unwrap();
+    assert_eq!(alice.devices, devices(&["phone-a", "watch-a"]));
+    assert_eq!(released, devices(&["mac-a", "pad-a"]));
+    assert!(set("alice", &["phone-b"]).is_err(), "Bob's phone is his");
+    assert_eq!(store.member("alice").unwrap().devices, devices(&["phone-a", "watch-a"]), "a refused set releases nothing");
+    assert_eq!(set("alice", &[" watch-a ", "phone-a"]).unwrap().1, devices(&[]), "the same list, trimmed");
+    assert_eq!(set("alice", &[]).unwrap().1, devices(&["phone-a", "watch-a"]));
+    assert_eq!(store.member("bob").unwrap().devices, devices(&["phone-b"]));
+}
+
 /// A handle is a short lowercase word the runner doesn't keep for itself,
 /// and a name is one line.
 #[test]

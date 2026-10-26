@@ -170,6 +170,14 @@ impl Store {
     /// account never changes once set: refused as `account_taken` and
     /// `account_differs`, writing nothing. An empty field keeps what's there.
     pub fn set_member_in(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<Member> {
+        self.set_member_releasing(handle, name, devices, who).map(|(member, _)| member)
+    }
+
+    /// [`Store::set_member_in`], answering too with the devices this call
+    /// released: theirs before it and not after, read in the same
+    /// transaction, so a concurrent change to their list can't add one or
+    /// hide one (ov-783). Sorted. The caller revokes them.
+    pub fn set_member_releasing(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<(Member, Vec<String>)> {
         let (account, email) = (who.account.trim(), who.email.trim());
         // Printable and short: both are only ever compared and shown.
         let printable = |s: &str, max: usize| s.len() <= max && !s.chars().any(|c| c.is_control() || c.is_whitespace());
@@ -229,6 +237,12 @@ impl Store {
             params![handle, name, now_millis(), some(account), some(email)],
         )
         .map_err(map_err)?;
+        let had: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT client_id FROM member_devices WHERE handle = ?1 ORDER BY client_id").map_err(map_err)?;
+            let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
+            rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
+        };
+        let released: Vec<String> = had.into_iter().filter(|d| !devices.contains(d)).collect();
         // A device left off the list is released, never the owner's again.
         tx.execute(
             "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
@@ -245,7 +259,7 @@ impl Store {
             .query_row("SELECT account, email FROM members WHERE handle = ?1", [handle], |r| Ok((r.get(0)?, r.get(1)?)))
             .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
-        Ok(Member { handle: handle.to_string(), name: name.to_string(), devices, account, email })
+        Ok((Member { handle: handle.to_string(), name: name.to_string(), devices, account, email }, released))
     }
 
     /// Remove `handle`: their devices are released (nobody's, never the
