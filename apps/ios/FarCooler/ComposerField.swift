@@ -56,8 +56,46 @@ final class ComposerField: UITextView {
         didSet { setNeedsLayout() }
     }
 
+    /// The width the text was last laid out at, and whether it was scrolled
+    /// to its end then.
+    private var laidOutWidth: CGFloat = 0
+    private var atEnd = true
+    /// The width changed while the text was at its end, and nothing has
+    /// moved it since: the end is held in view while the text wraps again,
+    /// which can finish a layout or two after the width changed.
+    private var holdsEnd = false
+
+    /// Whether the last line is in view, to the point.
+    private var showsEnd: Bool { contentOffset.y + bounds.height >= contentSize.height - 1 }
+
+    private func keepEnd() {
+        guard holdsEnd else { return }
+        if isTracking {
+            holdsEnd = false
+        } else if !showsEnd {
+            setContentOffset(CGPoint(x: contentOffset.x, y: max(contentSize.height - bounds.height, 0)), animated: false)
+        }
+    }
+
+    override var contentSize: CGSize {
+        didSet { keepEnd() }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        // The caret decides what's in view from here.
+        holdsEnd = false
+        return super.becomeFirstResponder()
+    }
+
     override func layoutSubviews() {
+        // A field scrolled to its end stays there when its width changes: the
+        // bar narrows as the keyboard goes down (ov-804), the draft wraps
+        // onto more lines, and the end of it went out of view below.
+        if bounds.width != laidOutWidth, laidOutWidth > 0, atEnd { holdsEnd = true }
         super.layoutSubviews()
+        keepEnd()
+        laidOutWidth = bounds.width
+        atEnd = showsEnd
         let caret = self.caret
         let now = ComposerFade.edges(
             offset: contentOffset.y, height: bounds.height, content: contentSize.height,

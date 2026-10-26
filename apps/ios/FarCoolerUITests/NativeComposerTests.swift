@@ -436,16 +436,19 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertEqual(said(app, "pressed"), "", "the second tap pressed Stop: \(harness(app))")
     }
 
-    /// ov-677: the photo button is its own 44 pt circle outside the box, on
-    /// its left, its foot on the box's foot, as Messages' + is.
+    /// ov-677: the photo button is its own circle outside the box, on its
+    /// left, its foot on the box's foot, as Messages' + is; and as in
+    /// Messages, 40 pt, the field's own height at one line (ov-804: it stood
+    /// 46 pt beside a 44 pt field).
     func testThePhotoButtonSitsOutsideTheBox() {
         let app = launch()
         let attach = element(app, "native-attach"), surface = element(app, "native-composer-surface")
         XCTAssertTrue(attach.waitForExistence(timeout: 60), "no photo button")
         let button = attach.frame, box = surface.frame
         XCTAssertLessThanOrEqual(button.maxX, box.minX + 0.5, "the photo button at \(button) is inside the box \(box)")
-        XCTAssertGreaterThanOrEqual(button.width, 44, "the photo button is \(button.width) pt wide")
-        XCTAssertGreaterThanOrEqual(button.height, 44, "the photo button is \(button.height) pt tall")
+        XCTAssertEqual(button.width, 40, accuracy: 0.5, "the photo button is \(button.width) pt wide")
+        XCTAssertEqual(button.height, 40, accuracy: 0.5, "the photo button is \(button.height) pt tall")
+        XCTAssertEqual(box.height, 40, accuracy: 0.5, "the field is \(box.height) pt tall at one line")
         XCTAssertEqual(button.maxY, box.maxY, accuracy: 0.5, "the photo button's foot isn't the box's")
         XCTAssertEqual(box.minX - button.maxX, 12, accuracy: 0.5, "the gap between them")
         // The text starts close to the box's edge, as in Messages.
@@ -458,6 +461,70 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertEqual(attach.frame.maxY, surface.frame.maxY, accuracy: 0.5, "the photo button left the text's row")
         let chip = element(app, "native-image-chip").frame
         XCTAssertTrue(surface.frame.contains(chip), "the photo at \(chip) isn't inside the box \(surface.frame)")
+    }
+
+    /// ov-804: the bar floats as Messages' does. With the keyboard down it
+    /// stands 28 pt in from the screen's sides and foot; with it up it widens
+    /// to the screen's margin and sits 16 pt over the keyboard. The + is
+    /// never taller than the field in either.
+    func testTheBarStandsWhereMessagesDoes() {
+        let app = launch()
+        let attach = element(app, "native-attach"), surface = element(app, "native-composer-surface")
+        XCTAssertTrue(attach.waitForExistence(timeout: 60), "no photo button")
+        let window = app.windows.firstMatch.frame
+        Thread.sleep(forTimeInterval: 1)
+        // At rest.
+        var button = attach.frame, box = surface.frame
+        XCTAssertEqual(button.minX, 28, accuracy: 0.5, "at rest the + starts \(button.minX) pt in")
+        XCTAssertEqual(window.maxX - box.maxX, 28, accuracy: 0.5, "at rest the field ends \(window.maxX - box.maxX) pt in")
+        XCTAssertEqual(window.maxY - box.maxY, 28, accuracy: 0.5, "at rest the bar stands \(window.maxY - box.maxY) pt off the foot")
+        XCTAssertEqual(box.minX - button.maxX, 12, accuracy: 0.5, "at rest the gap is \(box.minX - button.maxX)")
+        XCTAssertLessThanOrEqual(button.height, box.height + 0.5, "at rest the + is taller than the field")
+        // With the keyboard up: the screen's margin, 16 pt or 20 on the
+        // largest iPhones, and the keyboard's height as UIKit gave it.
+        _ = focusField(app)
+        let keyboard: () -> CGFloat = {
+            let probe = self.element(app, "native-transcript").value as? String ?? ""
+            guard let range = probe.range(of: "kb=") else { return 0 }
+            return CGFloat(Int(probe[range.upperBound...].prefix { $0.isNumber }) ?? 0)
+        }
+        XCTAssertTrue(wait(10) { keyboard() > 0 }, "no onscreen keyboard to sit over")
+        let margin: CGFloat = window.width >= 430 ? 20 : 16
+        XCTAssertTrue(wait(5) { abs(attach.frame.minX - margin) < 0.5 }, "raised, the + starts \(attach.frame.minX) pt in")
+        Thread.sleep(forTimeInterval: 1)
+        button = attach.frame
+        box = surface.frame
+        XCTAssertEqual(window.maxX - box.maxX, margin, accuracy: 0.5, "raised, the field ends \(window.maxX - box.maxX) pt in")
+        let over = window.maxY - keyboard() - box.maxY
+        XCTAssertEqual(over, 16, accuracy: 0.5, "raised, the bar sits \(over) pt over the keyboard")
+        XCTAssertEqual(box.minX - button.maxX, 12, accuracy: 0.5, "raised, the gap is \(box.minX - button.maxX)")
+        XCTAssertLessThanOrEqual(button.height, box.height + 0.5, "raised, the + is taller than the field")
+    }
+
+    /// ov-804: a long draft scrolled to its end stays at its end when the
+    /// keyboard goes down. The bar narrows then, the draft wraps onto more
+    /// lines, and its last lines went out of view under a fade.
+    func testALongDraftKeepsItsEndInViewAsTheBarNarrows() {
+        let app = launch()
+        let field = focusField(app)
+        let lines = [
+            "Before you land it, check the composer at both widths.", "The gaps should match Messages,",
+            "with the keyboard down and up,", "and the + no taller than the field when the draft wraps across lines.",
+            "One more line to scroll,", "and the last one, which has to stay in view.",
+        ]
+        app.typeText(lines.joined(separator: "\n"))
+        holdsTyped(app, field, "stay in view.")
+        let probe = element(app, "native-composer-probe")
+        XCTAssertTrue(wait(10) { (probe.value as? String ?? "").contains("fade=above ") }, "typed to the end, the field isn't at its end: \(harness(app))")
+        // Down, by a drag down the conversation, as a reader puts it away.
+        let transcript = element(app, "native-transcript")
+        let from = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 400)))
+        XCTAssertTrue(wait(10) { field.value(forKey: "hasKeyboardFocus") as? Bool != true }, "the keyboard stayed up")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(
+            (probe.value as? String ?? "").contains("fade=above "),
+            "the bar narrowed and the draft's end went out of view: \(harness(app))")
     }
 
     /// Under a dialog the registry says Waiting, and an Esc would answer it

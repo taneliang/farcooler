@@ -422,6 +422,10 @@ struct NativeAgentView: View {
     /// its inset, never changing the sum, so their sizes can't feed back.
     @State private var underBars: CGFloat = 0
     @State private var keyboard: CGFloat = 0
+    /// A docked keyboard is up: the composer's bar widens and moves to sit
+    /// over it (ov-804). Set in the keyboard's own animation, so the bar's
+    /// change goes with it rather than jumping at its start.
+    @State private var raised = false
     /// The window this view is in, for the keyboard's overlap.
     @State private var hostWindow = WindowReader.Holder()
 
@@ -613,7 +617,7 @@ struct NativeAgentView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             // The agents at work are the Agents card's (ov-619), over the
             // conversation, not a tray under it.
-            NativeComposer(model: model, showTerminal: showTerminal, room: room)
+            NativeComposer(model: model, showTerminal: showTerminal, room: room, raised: raised)
         }
         .environment(\.promptImages, model.promptImages)
         // A long press on a word selects it, with handles (ov-609).
@@ -639,6 +643,9 @@ struct NativeAgentView: View {
             let docked = frame.maxY >= window.bounds.maxY - 1
             keyboard = docked ? max(window.bounds.maxY - frame.minY, 0) : 0
             settleRoom()
+            if (keyboard > 0) != raised {
+                withAnimation(KeyboardMotion.animation(note)) { raised = keyboard > 0 }
+            }
         }
     }
 
@@ -646,7 +653,7 @@ struct NativeAgentView: View {
     /// What the list says of itself, for the UI tests.
     private var probe: String {
         let store = model.store
-        let head = "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
+        let head = "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) kb=\(Int(keyboard)) "
         let jumps = "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop)) gap=\(Int(shownGap)) "
         let hold = "inset=\(Int(place.inset)) hold=\(store.heldCount)/\(place.probe) trace=\(place.trace.joined(separator: ",")) "
         let resized = "resized=\(NativeScrollProbe.resizes.joined(separator: ",")) "

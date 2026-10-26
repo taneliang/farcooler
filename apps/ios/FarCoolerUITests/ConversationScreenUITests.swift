@@ -195,6 +195,10 @@ final class ConversationScreenUITests: XCTestCase {
     /// Every block on the owner's screen (the Now/Next and Agents cards, the
     /// rows and the composer) stands on one horizontal margin (ov-611,
     /// ov-619). The composer stood 4 pt wider than the rest.
+
+    /// Every block on the owner's screen (the Now/Next and Agents cards and
+    /// the rows) stands on one horizontal margin (ov-611, ov-619), and the
+    /// composer at rest on Messages' inset (ov-804).
     func testEveryBlockSharesOneMargin() {
         let app = XCUIApplication.phoneHarness(
             ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"])
@@ -212,10 +216,13 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue(margin == 16 || margin == 20, "the cards' margin is \(margin), not the system's")
         XCTAssertEqual(width - agents.frame.maxX, margin, accuracy: 0.5, "the Agents card ends \(width - agents.frame.maxX) from the edge")
         // The photo button leads the composer, outside its box (ov-677).
+        // The one exception to the margin: with the keyboard down the
+        // composer floats 28 pt in, as Messages' bar does (ov-804); with it
+        // up it stands on the margin (`testTheBarStandsWhereMessagesDoes`).
         let attach = element(app, "native-attach")
         let box = composer.frame, start = attach.exists ? attach.frame.minX : box.minX
-        XCTAssertEqual(start, margin, accuracy: 0.5, "the composer starts at \(start), not \(margin)")
-        XCTAssertEqual(width - box.maxX, margin, accuracy: 0.5, "the composer ends \(width - box.maxX) from the edge")
+        XCTAssertEqual(start, 28, accuracy: 0.5, "the composer starts at \(start), not 28")
+        XCTAssertEqual(width - box.maxX, 28, accuracy: 0.5, "the composer ends \(width - box.maxX) from the edge")
         // A reply's words start on the same line.
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'native-row-prose'")).firstMatch
         XCTAssertTrue(reply.exists, "no reply on screen to measure")

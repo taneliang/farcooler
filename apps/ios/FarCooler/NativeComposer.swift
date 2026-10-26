@@ -22,16 +22,25 @@ struct NativeComposer: View {
     /// composer grows with its text to a share of it, then scrolls inside,
     /// so it never pushes its own buttons under the keyboard.
     var room: CGFloat = .infinity
+    /// The keyboard is up (ov-804): the bar widens to the screen's margin and
+    /// sits `FloatingBar.aboveKeyboard` over the keyboard; down, it stands
+    /// `FloatingBar.restingInset` in from the sides and the foot, as
+    /// Messages' does. Changed in the keyboard's own animation.
+    var raised = false
     @Environment(\.dynamicTypeSize) private var type
 
-    /// The side of a button's target, the photo button's glass and the field
-    /// at one line.
-    static let targetSide: CGFloat = 44
-    /// The +'s label: the glass button style pads it to `targetSide`.
-    static let plusSide: CGFloat = 32
-    /// The trailing action's capsule, 7 pt in from the field's edge on both
+    /// The side of the photo button's glass, of the trailing action's target
+    /// and of the field at one line: Messages' 40 pt (ov-804), so the + never
+    /// stands taller than the field beside it.
+    static let side = FloatingBar.control
+    /// What the system's glass button style pads a circle's label by on each
+    /// side (measured: a 32 pt label drew a 46 pt circle, on iOS 26.5 and 27).
+    static let glassPadding: CGFloat = 7
+    /// The +'s label: the glass button style pads it to `side`.
+    static let plusSide = side - 2 * glassPadding
+    /// The trailing action's capsule, 5 pt in from the field's edge on both
     /// axes, and so concentric with it (`Radius.controlBar`): Messages' Send
-    /// measures 39 × 29 pt in a 42 pt field.
+    /// measures 39 × 29 pt in its 40 pt field.
     static let actionSize = CGSize(width: 38, height: 30)
 
     /// A capsule at one line, keeping those corners as it grows.
@@ -44,7 +53,7 @@ struct NativeComposer: View {
     private var tallestField: CGFloat {
         let six = NativeComposerField.font.lineHeight * NativeComposerField.mostLines + 2 * NativeComposerField.inset
         let photos: CGFloat = model.images.isEmpty ? 0 : Self.chipSide + 2 * Spacing.group
-        let share = room * Self.roomShare - photos - 2 * Spacing.group
+        let share = room * Self.roomShare - photos - 2 * textPadding
         let two = NativeComposerField.font.lineHeight * 2 + 2 * NativeComposerField.inset
         return max(min(six, share), two)
     }
@@ -87,6 +96,26 @@ struct NativeComposer: View {
     @Environment(\.scenePhase) private var scenePhase
     /// The screen's one margin (ov-611).
     @Environment(\.screenMargin) private var margin
+    /// The home indicator's safe area, which the resting bar reaches into.
+    @Environment(\.screenFoot) private var screenFoot
+
+    /// Only an iPhone's bar floats as Messages' does; an iPad's keeps the
+    /// screen's margin and the 8 pt rhythm.
+    private var floats: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+    /// From the screen's sides to the + and to the field's far edge.
+    private var sides: CGFloat { floats && !raised ? FloatingBar.restingInset : margin }
+    /// From the bar's foot to the safe area under it: the keyboard's top when
+    /// it's up, or the home indicator's safe area, which the resting bar
+    /// reaches into (a negative padding) to stand `restingInset` off the foot.
+    private var foot: CGFloat {
+        guard floats else { return Spacing.group }
+        return raised ? FloatingBar.aboveKeyboard : FloatingBar.restingInset - screenFoot
+    }
+    /// Above and below the text view inside the field, at least. One line
+    /// of body text makes a 28 pt text view, centered in the field's 40 pt
+    /// with 6 pt over and under it; grown, the text view is this far from
+    /// the field's edges, and its own 2 pt inset makes the text 6 pt again.
+    private let textPadding = Spacing.tight
 
     private var action: Action? { Action.showing(hasContent: model.hasContent, offersStop: model.offersStop) }
 
@@ -98,17 +127,18 @@ struct NativeComposer: View {
             // The photo button and the field as one family of glass, spaced
             // closer than the gap between them so they never blend at rest.
             FloatingGroup(spacing: Spacing.group) {
-                HStack(alignment: .bottom, spacing: Spacing.inset) {
+                HStack(alignment: .bottom, spacing: FloatingBar.gap) {
                     // The glyphs stop growing at the largest standard size: in
-                    // a 44 pt target an accessibility-size glyph ran into the
-                    // text beside it (review 1). Their labels still scale.
+                    // the + an accessibility-size glyph ran into the text
+                    // beside it (review 1). Their labels still scale.
                     if model.rich { attachButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
                     box
                 }
             }
         }
-        .padding(.horizontal, margin)
-        .padding(.vertical, Spacing.group)
+        .padding(.horizontal, sides)
+        .padding(.top, Spacing.group)
+        .padding(.bottom, foot)
         .onChange(of: model.images) { _, images in
             if let held = previewing, !images.contains(where: { $0.id == held }) { previewing = nil }
         }
@@ -194,10 +224,10 @@ struct NativeComposer: View {
                     .accessibilityIdentifier(model.hint == nil ? "native-placeholder" : "native-hint")
             }
         }
-        // One line centered in the field's 44 pt, so it and the trailing
-        // action share a middle; grown, 10 pt from the edge to the text.
-        .padding(.vertical, Spacing.group)
-        .frame(minHeight: Self.targetSide, alignment: .center)
+        // One line centered in the field's 40 pt, so it and the trailing
+        // action share a middle.
+        .padding(.vertical, textPadding)
+        .frame(minHeight: Self.side, alignment: .center)
         .overlay(alignment: .leading) { suggestionButton }
         #if DEBUG
         .overlay(alignment: .topTrailing) { FieldProbe(still: previewing != nil) }
@@ -395,7 +425,7 @@ struct NativeComposer: View {
                         stop ? AnyShapeStyle(Self.stopFill) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
                         in: .capsule)
                 }
-                .frame(width: Self.targetSide, height: Self.targetSide)
+                .frame(width: Self.side, height: Self.side)
                 .contentShape(.rect)
         }
         // Stop's 0.5 s guard: disabled, but not dimmed (`.plain` dimmed it to

@@ -26,11 +26,11 @@ public enum Radius {
     public static let medium: CGFloat = 10
     /// A free-floating surface: the palette, quick create, a banner, a tip.
     public static let large: CGFloat = 16
-    /// A 44 pt field that holds a control (the iPhone's composer, laid out
-    /// like Messages, ov-677): a capsule at one line that keeps those corners
-    /// as it grows, concentric with the 30 pt Send capsule 7 pt in from its
-    /// edge (15 + 7).
-    public static let controlBar: CGFloat = 22
+    /// A field that holds a control (the iPhone's composer, laid out like
+    /// Messages, ov-677): a capsule at one line (`FloatingBar.control`, 40 pt)
+    /// that keeps those corners as it grows, concentric with the 30 pt Send
+    /// capsule 5 pt in from its edge (15 + 5).
+    public static let controlBar: CGFloat = FloatingBar.control / 2
 
     /// The radius of a shape nested `padding` points inside a container whose
     /// corner is `outer`: the outer radius minus the padding, never below
@@ -78,6 +78,38 @@ public enum Spacing {
     public static let inset: CGFloat = 12
     /// Above a section heading. This is what replaces a separator line.
     public static let section: CGFloat = 16
+}
+
+// MARK: - Floating bars
+
+/// A bar of glass controls floating at the foot of an iPhone screen: a round
+/// button beside a field, as Messages lays out its + and message field and
+/// as the system's searchable bottom toolbar lays out Contacts' search and +
+/// on iOS 26 and 27 (ov-804). Measured on iPhone 17e, 17 and 17 Pro Max
+/// (390, 402 and 440 pt): the same at every width. The measurements are in
+/// `.claude/agent/reports/ov-804/`.
+///
+/// The bar has two places. At rest (keyboard down) it stands in from the
+/// screen's sides and foot by one inset, clear of the screen's rounded
+/// corners ("use a capsule with extra margin to create space near the
+/// screen edge", WWDC25 "Get to know the new design system"). With the
+/// keyboard up it widens to the screen's own margin and sits a fixed gap
+/// above the keyboard. It moves between the two with the keyboard.
+public enum FloatingBar {
+    /// The round button's side and the field's height at one line: Messages'
+    /// + is 40 × 40 pt and its field 40.3 pt, so neither stands taller than
+    /// the other.
+    public static let control: CGFloat = 40
+    /// Between the round button and the field: 12 pt in Messages and in the
+    /// searchable toolbar, at rest and with the keyboard up.
+    public static let gap: CGFloat = Spacing.inset
+    /// At rest, from the screen's sides, and from its foot to the bar's foot:
+    /// 28 pt on every iPhone. The foot reaches 6 pt into the home indicator's
+    /// 34 pt safe area.
+    public static let restingInset: CGFloat = 28
+    /// With the keyboard up, from the bar's foot to the keyboard's top. The
+    /// sides are the screen's margin then (16 pt, 20 on the largest).
+    public static let aboveKeyboard: CGFloat = Spacing.section
 }
 
 // MARK: - Fills and selection
