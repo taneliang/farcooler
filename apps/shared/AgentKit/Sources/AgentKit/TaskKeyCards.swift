@@ -161,6 +161,7 @@ public final class TaskKeyCardCache {
 
     private struct Inputs: Equatable {
         var runner: String
+        var version: [Int]?
         var boards: [String: TaskBoardModel]
         var plans: [String: PlanModel]
         var notes: [String: [TaskNoteRow]]
@@ -170,11 +171,18 @@ public final class TaskKeyCardCache {
 
     /// The cards for these reads: the last ones built, when the reads are the
     /// same.
+    ///
+    /// `version`, where the caller keeps one, stands for the boards and the
+    /// plans: a number that moves whenever either does (ov-791). Compared in
+    /// their place, it spares walking every task on every pass, which a
+    /// board read again had made of each comparison.
     public func cards(
         runner: String, boards: [String: TaskBoardModel], plans: [String: PlanModel] = [:],
-        notes: [String: [TaskNoteRow]] = [:]
+        notes: [String: [TaskNoteRow]] = [:], version: [Int]? = nil
     ) -> TaskKeyCards {
-        let next = Inputs(runner: runner, boards: boards, plans: plans, notes: notes)
+        let next = Inputs(
+            runner: runner, version: version, boards: version == nil ? boards : [:],
+            plans: version == nil ? plans : [:], notes: notes)
         if next == inputs { return built }
         inputs = next
         built = TaskKeyCards(runner: runner, boards: boards, plans: plans, notes: notes)

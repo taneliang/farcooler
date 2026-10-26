@@ -22,6 +22,7 @@ public final class TaskKeyIndexCache {
     private struct Inputs: Equatable {
         var runner: String
         var workspaces: [WorkspaceSummary]
+        var version: Int?
         var boards: [String: TaskBoardModel]
     }
 
@@ -30,10 +31,15 @@ public final class TaskKeyIndexCache {
     /// The index for these reads: the last one built while they're the
     /// same, and while what they link is the same, though a task on them
     /// moved.
-    public func index(runner: String, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel])
-        -> TaskKeyIndex
-    {
-        let next = Inputs(runner: runner, workspaces: workspaces, boards: boards)
+    ///
+    /// `version`, where the caller keeps one, is a number that moves
+    /// whenever the boards do, compared in their place: a board read again
+    /// is a new dictionary, which compared deeply on every pass walked
+    /// every task until it next moved.
+    public func index(
+        runner: String, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel], version: Int? = nil
+    ) -> TaskKeyIndex {
+        let next = Inputs(runner: runner, workspaces: workspaces, version: version, boards: version == nil ? boards : [:])
         if next == inputs { return built }
         inputs = next
         let made = TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)

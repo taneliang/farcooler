@@ -354,11 +354,12 @@ extension TaskKeyLinker {
     @MainActor
     static func phone(
         runner: String?, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel],
-        cards: TaskKeyCards = .empty, indexes: TaskKeyIndexCache? = nil, open: (@MainActor (PhoneRoute) -> Void)?
+        cards: TaskKeyCards = .empty, indexes: TaskKeyIndexCache? = nil, boardsVersion: Int? = nil,
+        open: (@MainActor (PhoneRoute) -> Void)?
     ) -> TaskKeyLinker {
         guard let runner, let open else { return .none }
         let index =
-            indexes?.index(runner: runner, workspaces: workspaces, boards: boards)
+            indexes?.index(runner: runner, workspaces: workspaces, boards: boards, version: boardsVersion)
             ?? TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)
         return TaskKeyLinker(index: index, cards: cards) { open($0.phoneRoute) }
     }

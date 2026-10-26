@@ -61,6 +61,30 @@ import Testing
         #expect(cache.builds == 4)
     }
 
+    /// Given the boards' version, the cache compares it, not the boards:
+    /// the same version is the last index, whatever is passed; a new one is
+    /// read (ov-791).
+    @Test func aVersionStandsForTheBoards() {
+        let cache = TaskKeyIndexCache()
+        _ = cache.index(runner: "R1", workspaces: [Self.main], boards: Self.boards(10), version: 1)
+        let same = cache.index(runner: "R1", workspaces: [Self.main], boards: Self.boards(11), version: 1)
+        #expect(same.targets["ov-10"] == nil, "the same version read the boards again")
+        let next = cache.index(runner: "R1", workspaces: [Self.main], boards: Self.boards(11), version: 2)
+        #expect(next.targets["ov-10"] != nil)
+        #expect(cache.builds == 2)
+    }
+
+    /// The card cache too, its version standing for the boards and plans.
+    @Test func aVersionStandsForTheCardsReads() {
+        let cache = TaskKeyCardCache()
+        _ = cache.cards(runner: "R1", boards: Self.boards(10), version: [1, 1])
+        _ = cache.cards(runner: "R1", boards: Self.boards(10, moved: 2), version: [1, 1])
+        #expect(cache.builds == 1)
+        _ = cache.cards(runner: "R1", boards: Self.boards(10, moved: 2), version: [2, 1])
+        _ = cache.cards(runner: "R1", boards: Self.boards(10, moved: 2), version: [2, 2])
+        #expect(cache.builds == 3)
+    }
+
     /// The phone's linker takes its index from the cache it's given.
     @Test func thePhonesLinkerUsesTheCache() {
         let cache = TaskKeyIndexCache()

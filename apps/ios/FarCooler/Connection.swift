@@ -1283,7 +1283,9 @@ final class Connection: ObservableObject {
     /// through a dropped link and a failed read, on the
     /// same terms as `fleet` and `inbox` — a Needs Decision count that vanished
     /// every time the Wi-Fi blinked would be a count nobody could trust.
-    @Published private(set) var boards: [String: TaskBoardModel] = [:]
+    @Published private(set) var boards: [String: TaskBoardModel] = [:] { didSet { boardsVersion &+= 1 } }
+    /// Moves whenever `boards` does: what a cache compares in their place (ov-791).
+    private(set) var boardsVersion = 0
 
     /// Boards, by workspace id, whose last read failed. The workspace's list
     /// keeps the last good board; the board itself says it could not read.
