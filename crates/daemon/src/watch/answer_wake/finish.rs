@@ -102,7 +102,7 @@ impl Watcher {
                 Some(witness) => Some(witness.pasted_at(pasted)),
                 // No hook was ever heard from it (ov-711): claude's own
                 // registry may still say it's between turns.
-                None if turn == Turn::Between && self.between_unhooked(to, preset, pid, pasted, text).await => None,
+                None if turn == Turn::Between && self.between_unhooked(to, &proven, pasted, text).await => None,
                 None => return Pass::Waiting(Held::Busy),
             },
             (false, Turn::Between) => None,
@@ -208,7 +208,7 @@ impl Watcher {
         }
     }
 
-    /// Whether claude in `to`, `pid`, that no hook was ever heard from, so
+    /// Whether claude in `to`, `proven`'s, that no hook was ever heard from, so
     /// none can vouch for a fenced Enter, is proven between turns by what
     /// `type_into`'s own between-turns Enter rests on (`still_between`):
     /// nobody typed since the paste at `pasted`, a fresh capture reads Idle
@@ -222,14 +222,15 @@ impl Watcher {
     /// pasted to it was never finished, idle or not, and at the give-up was
     /// left typed in its box, where it sat for sixteen hours and kept every
     /// later notice out (`Held::Draft`).
-    async fn between_unhooked(&self, to: &Terminal, preset: &str, pid: i32, pasted: i64, text: &str) -> bool {
+    async fn between_unhooked(&self, to: &Terminal, proven: &super::Proven, pasted: i64, text: &str) -> bool {
+        let pid = proven.pid;
         let session = super::registry_turn::config_of(pid).await.and_then(|config| super::mid_turn::transcript_in(&config, pid));
         let Some((session, _)) = session else { return false };
         let asks = self.service.hooks().asks();
         if asks.hooked(&session) || asks.is_holding(to.id) {
             return false;
         }
-        self.still_between(to, preset, pid, pasted, &composer::drawn::Expected::plain(text), false).await.is_ok()
+        self.still_between(to, proven, pasted, &composer::drawn::Expected::plain(text), false).await.is_ok()
     }
 }
 

@@ -16,6 +16,10 @@
 # turn running beside them; shells, claude 2.1.309 between turns with two
 # background shells and no agent, its registry `shell`, ov-795; shells-busy,
 # the same screen with the registry `busy`, a turn begun before its spinner;
+# agents-shells, claude 2.1.309 between turns with background agents and
+# shells on a short pane, its registry busy for the agents, the agent rows
+# drawn only while the box is empty, as a tall box leaves them no room
+# (ov-808);
 # working-cleared, working with its box emptied, as
 # a person clearing a draft leaves it), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
@@ -192,7 +196,7 @@ sub status_of {
     my ($m) = @_;
     return "waiting" if $m eq 'working-waiting';
     return "shell" if $m eq 'shells';
-    return "busy" if $m eq 'shells-busy';
+    return "busy" if $m eq 'shells-busy' || $m eq 'agents-shells';
     return "busy" if $m eq 'working-menu' || $m eq 'background' || (working($m) && $m ne 'working-lagging');
     return $m eq 'menu' ? "waiting" : "idle";
 }
@@ -321,6 +325,7 @@ sub draw {
             push @rows, "✻ Pondering… (3s)" if working($mode) && $mode ne 'working-hidden';
             push @rows, "✻ Waiting for 2 background agents to finish", "" if $mode eq 'background';
             push @rows, "✻ Worked for 3s · done 11:08 PM · 2 shells still running", "" if $mode =~ /^shells(-busy)?$/;
+            push @rows, "✻ Waiting for 2 background agents to finish", "" if $mode eq 'agents-shells';
             if (defined(my $hl = highlighted())) {
                 for my $c (@commands) {
                     my $name = $c->[1] ne '' ? "$c->[0] ($c->[1])" : $c->[0];
@@ -342,10 +347,10 @@ sub draw {
                 : $mode eq 'background' ? "  ⏸ manual mode on · ? for shortcuts · ← for agents · ↓ to manage"
                 # claude 2.1.309 keeps its shells' count, and drops the hint,
                 # once its box holds something (ov-795).
-                : $mode =~ /^shells(-busy)?$/ ? "  ⏸ manual mode on · 2 shells" . ($composer eq "" ? " · ↓ to manage" : "")
+                : $mode =~ /^(agents-)?shells(-busy)?$/ ? "  ⏸ manual mode on · 2 shells" . ($composer eq "" ? " · ↓ to manage" : "")
                 : "  ⏸ manual mode on · ? for shortcuts";
             push @rows, "", "  ⏺ main", map { "  ◯ general-purpose  Sleeper $_" . (" " x 40) . "19s · ↓ 23 tokens" } 1, 2
-                if $mode =~ /background$/;
+                if $mode =~ /background$/ || ($mode eq 'agents-shells' && $composer eq "");
         }
     } elsif ($agent eq 'cursor') {
         # cursor-agent 2026.08.11's screens (`captures/cursor-*.txt`, R-47):

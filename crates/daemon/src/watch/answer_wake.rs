@@ -688,7 +688,7 @@ impl Watcher {
         // read-back waits, marked pasted, for the fenced Enter (`finish`).
         if preset == "claude"
             && witness.is_none()
-            && self.still_between(to, preset, proven.pid, started, &composer::drawn::Expected::plain(text), true).await.is_err()
+            && self.still_between(to, &proven, started, &composer::drawn::Expected::plain(text), true).await.is_err()
         {
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
                 return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));

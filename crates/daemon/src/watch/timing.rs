@@ -22,6 +22,9 @@ pub(crate) struct Timing {
     /// claude's hook or transcript, or codex's rollout (`compose`'s
     /// `CONFIRM_SETTLES`).
     pub compose_confirm: Duration,
+    /// How long a compose waits out a turn claude began between its paste
+    /// and its Enter (`compose::TURN_BEGUN_WAIT`).
+    pub turn_begun_wait: Duration,
     /// How long after a key claude has to say it took it (`interrupt`'s
     /// `CONFIRM_SETTLES`).
     pub key_confirm: Duration,
@@ -63,6 +66,7 @@ impl Timing {
     /// What the daemon runs with: each constant as its module defines it.
     pub(crate) const PRODUCTION: Timing = Timing {
         compose_confirm: super::answer_wake::compose::CONFIRM_SETTLES,
+        turn_begun_wait: super::answer_wake::compose::TURN_BEGUN_WAIT,
         key_confirm: super::answer_wake::interrupt::CONFIRM_SETTLES,
         queue_settles: super::answer_wake::mid_turn::QUEUE_SETTLES,
         enter_deadline: super::answer_wake::mid_turn::ENTER_DEADLINE,
@@ -121,6 +125,7 @@ mod tests {
             Timing::PRODUCTION,
             Timing {
                 compose_confirm: s(5),
+                turn_begun_wait: s(30),
                 key_confirm: s(3),
                 queue_settles: s(3),
                 enter_deadline: s(2),

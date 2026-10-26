@@ -89,6 +89,13 @@ pub(crate) const MOST_IMAGES: usize = crate::pastes::staged::MOST_IMAGES;
 /// How long after the Enter claude has to say it took the message.
 pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
 
+/// How long a compose whose claude began a turn between the paste and the
+/// Enter waits for a fenced Enter or the turn's end before it leaves the
+/// message in the box (`enter_between`, ov-808): a short turn's worth, as a
+/// background shell finishing starts one, inside what a phone waits for its
+/// answer.
+pub(crate) const TURN_BEGUN_WAIT: Duration = Duration::from_secs(30);
+
 /// claude 2.1.290's own commands that aren't prompts: each opens a panel or
 /// acts at once, and none reaches `UserPromptSubmit`, so none could be
 /// confirmed. Read from the CLI's command table (`type:"local"` and
@@ -399,8 +406,7 @@ impl Watcher {
                 if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     run();
                 }
-                self.still_between(to, preset, proven.pid, started, &expected, false).await?;
-                runtime.send_bytes_hex(to.id, "0d").await?
+                self.enter_between(to, &proven, started, &expected, &submitted).await?
             }
             Some(witness) => {
                 let witness = witness.clone().pasted_at(started);
@@ -474,38 +480,95 @@ impl Watcher {
     /// `expected`; and claude's registry still says idle, or with `unlisted`,
     /// says nothing at all (an answer's claude that has no registry, as the
     /// gate allows). Anything else leaves the text in the box: `paste_left`,
-    /// logged with which check it was (`left_in_box`).
-    pub(super) async fn still_between(&self, to: &Terminal, preset: &str, pid: i32, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
-        let left = DomainError::Conflict { what: "paste_left" };
+    /// logged with which check it was (`left_in_box`). `proven` is the
+    /// gate's: the agent, and the background work it saw (`between_or_why`).
+    pub(super) async fn still_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
+        match self.between_or_why(to, proven, started, expected, unlisted).await? {
+            None => Ok(()),
+            Some(left) => Err(left.logged(&self.service.registry(), to, proven.preset)),
+        }
+    }
+
+    /// `still_between`'s checks, unlogged: `None` between turns, else the
+    /// one that refused.
+    ///
+    /// Background agents keep claude's registry busy between turns, so
+    /// beside them `busy` is no turn (ov-468); beside shells alone it is one
+    /// (ov-795). Which work runs is read off the screen, and the agents are
+    /// told by their rows under the box, which claude 2.1.309 drops once a
+    /// tall box leaves them no room: three agents and two shells at 59x23,
+    /// a six-row message pasted in, leave only the mode line's `· 2 shells`,
+    /// the registry `busy` for the agents throughout (ov-808,
+    /// `captures/claude-2.1.309-agents-shells-*-59x23-e.txt`). So agents the
+    /// gate saw (`proven.background`) still count when the screen no longer
+    /// shows them. Gone, they leave the registry `shell` or `idle`, never
+    /// `busy`, but for a turn begun the moment they ended, which the screen
+    /// reads Idle only until its spinner is drawn: the same window a registry
+    /// read `idle` has before any between-turns Enter.
+    async fn between_or_why(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<Option<Left>> {
+        let (preset, pid, seen) = (proven.preset, proven.pid, proven.background);
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-            left_in_box(&self.service.registry(), to, "typed", None);
-            return Err(left);
+            return Ok(Some(Left { check: "typed", screen: None, turn: false }));
         }
         let (screen, _, _) = self.service.screen(to.id).await?;
         let registry = self.service.registry();
         // Background agents keep claude's registry busy between turns: the
-        // screen still showing them is what says that's all it is (ov-468).
+        // screen still showing them, or the gate having seen them, is what
+        // says that's all it is (ov-468, ov-808).
         let main = registry.classify_main(preset, &screen);
-        let background = if main == AgentActivity::Idle { registry.background_work(preset, &screen) } else { Background::None };
-        let check = if main != AgentActivity::Idle {
-            Some("not_idle")
+        let background = match main {
+            AgentActivity::Idle if seen == Background::Agents => Background::Agents,
+            AgentActivity::Idle => registry.background_work(preset, &screen),
+            _ => Background::None,
+        };
+        let (check, turn) = if main != AgentActivity::Idle {
+            ("not_idle", main == AgentActivity::Working)
         } else if !expected.shown_on(preset, &screen) {
-            Some("not_shown")
+            ("not_shown", false)
         } else {
             match registry_turn::said_beside_of(pid, background).await {
-                registry_turn::Said::Idle => None,
-                registry_turn::Said::Nothing if unlisted => None,
-                registry_turn::Said::Nothing => Some("registry_none"),
-                registry_turn::Said::NotIdle if background != Background::None => Some("registry_busy"),
-                registry_turn::Said::NotIdle => Some("registry_busy_no_background"),
-                registry_turn::Said::Torn => Some("registry_torn"),
+                registry_turn::Said::Idle => return Ok(None),
+                registry_turn::Said::Nothing if unlisted => return Ok(None),
+                registry_turn::Said::Nothing => ("registry_none", false),
+                registry_turn::Said::NotIdle if background != Background::None => ("registry_busy", true),
+                registry_turn::Said::NotIdle => ("registry_busy_no_background", true),
+                registry_turn::Said::Torn => ("registry_torn", false),
             }
         };
-        if let Some(check) = check {
-            left_in_box(&registry, to, check, Some((preset, &screen)));
-            return Err(left);
+        Ok(Some(Left { check, screen: Some(screen), turn }))
+    }
+
+    /// The between-turns Enter for a compose, past `between_or_why`. A turn
+    /// claude began since the gate (its registry `busy` with no agents seen,
+    /// or its spinner drawn) no longer leaves the message in the box (ov-808):
+    /// claude queues a message entered mid-turn, so it goes in as a mid-turn
+    /// send does, under the fence (`mid_turn`) once the session's hooks give
+    /// a witness, or between turns once the turn is over, whichever comes
+    /// first within `turn_begun_wait`, the box read back each time. Never
+    /// with no fence into a turn running: a dialog drawn as the key lands
+    /// would take it as Yes. A claude no hook was heard from (the owner's
+    /// orchestrator, ov-711) can only wait for the turn's end; one still
+    /// running at the bound leaves the message, as does any other check.
+    async fn enter_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, submitted: &str) -> Result<()> {
+        let deadline = tokio::time::Instant::now() + self.timing().turn_begun_wait;
+        loop {
+            let Some(left) = self.between_or_why(to, proven, started, expected, false).await? else {
+                let runtime = Runtime { marks: None, ..self.service.runtime() };
+                return runtime.send_bytes_hex(to.id, "0d").await;
+            };
+            if !left.turn || tokio::time::Instant::now() >= deadline {
+                return Err(left.logged(&self.service.registry(), to, proven.preset));
+            }
+            if let Some(witness) = self.witness(proven, to, submitted).await {
+                let witness = witness.pasted_at(started);
+                return self.enter_expecting(to, proven.preset, &witness, expected).await.map_err(|no| match no {
+                    mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
+                    mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
+                    mid_turn::NoEnter::Failed => DomainError::OperationFailed,
+                });
+            }
+            tokio::time::sleep(PASTE_POLL).await;
         }
-        Ok(())
     }
 
     /// Write `composed`'s images to the runner's paste directory, which a
@@ -625,6 +688,25 @@ fn left_in_box(registry: &farcooler_core::activity::Registry, to: &Terminal, che
         rows = screen.lines().count(),
         "a paste was left in the box"
     );
+}
+
+/// Why `between_or_why` would leave a paste in the box.
+pub(super) struct Left {
+    /// The check that refused it (`left_in_box`).
+    check: &'static str,
+    /// The screen it read, if it got that far.
+    screen: Option<String>,
+    /// A turn may have begun since the gate: claude would queue the message
+    /// (`enter_between`).
+    turn: bool,
+}
+
+impl Left {
+    /// Log it (`left_in_box`) and refuse as `paste_left`.
+    fn logged(&self, registry: &farcooler_core::activity::Registry, to: &Terminal, preset: &str) -> DomainError {
+        left_in_box(registry, to, self.check, self.screen.as_deref().map(|screen| (preset, screen)));
+        DomainError::Conflict { what: "paste_left" }
+    }
 }
 
 /// A compose's written images whose paths nothing has pasted yet: deleted

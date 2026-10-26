@@ -183,51 +183,6 @@ async fn a_box_holding_more_than_the_message_beside_background_shells_still_refu
     assert!(!logged.contains("find"), "the text is never logged: {logged}");
 }
 
-/// Beside shells alone claude's registry says `shell`, never `busy`: a
-/// `busy` there is a turn begun, its spinner perhaps not drawn yet. One
-/// that begins between the paste and the Enter leaves the message in the
-/// box, by the registry, though the screen still reads between turns
-/// (ov-795 review). Only background agents keep `busy` between turns.
-#[tokio::test]
-async fn a_turn_begun_beside_background_shells_leaves_the_paste() {
-    let b = board().await;
-    quick(&b);
-    let (agent, si) = idle_claude(&b).await;
-    si.show("shells").await;
-    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
-    b.doing(agent.id, AgentActivity::Working).await;
-    let shower = si.clone();
-    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("shells-busy")));
-    let sink = Sink::default();
-    let refused = {
-        let _logging = tracing::subscriber::set_default(tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish());
-        b.watcher.compose_into(agent.id, "what did they find", &[]).await
-    };
-    assert!(matches!(refused, Err(DomainError::Conflict { what: "paste_left" })), "{refused:?}");
-    assert!(si.submitted().is_empty(), "{}", si.log());
-    let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
-    assert!(logged.contains("registry_busy") && logged.contains("background=Shells"), "{logged}");
-}
-
-/// A `◯ ` in the message itself is no agent row: beside shells alone, with
-/// the box holding `◯ general-purpose …`, a turn begun before the Enter
-/// still leaves the paste by the registry's `busy`. Only rows under the
-/// mode line say agents run (ov-795 re-review).
-#[tokio::test]
-async fn an_agent_glyph_in_the_message_is_no_background_agent() {
-    let b = board().await;
-    quick(&b);
-    let (agent, si) = idle_claude(&b).await;
-    si.show("shells").await;
-    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
-    b.doing(agent.id, AgentActivity::Working).await;
-    let shower = si.clone();
-    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("shells-busy")));
-    let refused = b.watcher.compose_into(agent.id, "◯ general-purpose  Sleeper 1 is it done", &[]).await;
-    assert!(matches!(refused, Err(DomainError::Conflict { what: "paste_left" })), "{refused:?}");
-    assert!(si.submitted().is_empty(), "{}", si.log());
-}
-
 /// The same `busy` beside shells alone, seen at the gate: a turn, so the
 /// message is held for its end, never typed into it.
 #[tokio::test]
@@ -247,7 +202,7 @@ async fn a_busy_registry_beside_background_shells_holds_the_message() {
 
 /// A log sink for one test's subscriber.
 #[derive(Clone, Default)]
-struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+pub(super) struct Sink(pub(super) Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl std::io::Write for Sink {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
