@@ -88,6 +88,13 @@ pub(crate) fn migration_0050_member_accounts(tx: &rusqlite::Transaction) -> rusq
 
 /// [`Store::remove_member`]'s writes, in the caller's transaction.
 pub(crate) fn remove_member_in(tx: &rusqlite::Transaction, handle: &str) -> Result<()> {
+    // Their devices are no longer waiting on a first binding, whatever an
+    // ov-719 build recorded: released now, they're swept (ov-783).
+    tx.execute(
+        "DELETE FROM device_enrollers WHERE client_id IN (SELECT client_id FROM member_devices WHERE handle = ?1)",
+        [handle],
+    )
+    .map_err(map_err)?;
     tx.execute(
         "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
         [handle],
@@ -290,14 +297,16 @@ impl Store {
     /// The released devices that must have no line and no session (ov-783):
     /// each was a member's and was taken off their list, or went with them.
     /// Not one a member's device enrolled that's waiting on its first binding
-    /// (`record_member_enrolled`): it's released too, and keeps its line.
-    /// Sorted.
+    /// (`record_member_enrolled`): it's released too, and keeps its line. And
+    /// never one bound to a member, whatever an older build or a hand edit
+    /// left in `released_devices`. Sorted.
     pub fn released_to_sweep(&self) -> Result<Vec<String>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
                 "SELECT r.client_id FROM released_devices r
                  WHERE NOT EXISTS (SELECT 1 FROM device_enrollers e WHERE e.client_id = r.client_id)
+                   AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = r.client_id)
                  ORDER BY r.client_id",
             )
             .map_err(map_err)?;

@@ -86,6 +86,18 @@ fn a_sweep_names_only_devices_taken_off_a_member() {
     store.remove_member("carol").unwrap();
     assert_eq!(store.released_to_sweep().unwrap(), devices(&["mac-a", "pad-bound", "phone-c"]));
     assert!(store.device_released("pad-new").unwrap(), "waiting on its binding, and not swept");
+
+    // A device bound under an ov-719 build kept its enroller's row; removing
+    // the member it's bound to still makes it one to sweep.
+    store.record_member_enrolled("pad-old", "alice").unwrap();
+    store.conn().execute("DELETE FROM released_devices WHERE client_id = 'pad-old'", []).unwrap();
+    store.conn().execute("INSERT INTO member_devices (client_id, handle) VALUES ('pad-old', 'bob')", []).unwrap();
+    store.remove_member("bob").unwrap();
+    assert!(store.released_to_sweep().unwrap().contains(&"pad-old".to_string()), "a removed member's device is swept");
+
+    // And never a device bound to a member, whatever `released_devices` says.
+    store.conn().execute("INSERT INTO released_devices (client_id) VALUES ('phone-a')", []).unwrap();
+    assert!(!store.released_to_sweep().unwrap().contains(&"phone-a".to_string()), "Alice's own phone");
 }
 
 /// A handle is a short lowercase word the runner doesn't keep for itself,
