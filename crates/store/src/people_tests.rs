@@ -244,7 +244,7 @@ fn a_set_built_from_a_stale_read_is_refused() {
     assert_eq!(store.member("bob").unwrap().devices, devices(&["mac-1", "phone-b"]), "a stale set writes nothing");
     assert!(!store.device_released("mac-1").unwrap(), "and releases nothing");
     // Read again, sent again: nothing taken off.
-    let (bob, released) = set(&["phone-b", "mac-1", "mac-2"], &[" mac-1", "phone-b", "phone-b"]).unwrap();
+    let (bob, released) = set(&["phone-b", "mac-1", "mac-2"], &["phone-b", " mac-1", "phone-b"]).unwrap();
     assert_eq!((bob.devices, released), (devices(&["mac-1", "mac-2", "phone-b"]), devices(&[])));
     // A read with one too many is stale too, and a new member read as having
     // one doesn't exist yet.
