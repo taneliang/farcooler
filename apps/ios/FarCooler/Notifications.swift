@@ -185,21 +185,14 @@ final class Notifier {
 }
 
 
-/// Shows banners while the app is open, except for the pane being looked at.
-///
-/// Without a delegate, iOS decides that an app in the foreground does not need
-/// telling — which is right for a messaging app where the message is already on
-/// screen, and wrong here: the fleet is many agents and you can only look at
-/// one.
-///
-/// A tapped notification: what it's about, a pane or a task, over the screens
-/// that lead to it (ruling 3, ov-183). Handed to `FleetView` through
-/// `NotificationTaps`, which routes it as it routes a card's link.
-///
-/// `NotificationReplies` is the delegate, and these are only what it does: it
-/// is the half that answers the center on the main thread, and a tap crashed
-/// the app while this file answered it from wherever an `async` method
-/// happened to finish (ov-787).
+/// What the app does with a notification, handed to `NotificationReplies`,
+/// the delegate that answers the center on the main thread (a tap crashed the
+/// app while the answer came from a background thread, ov-787). A banner shows
+/// while the app is open unless it is about the pane being read, since iOS
+/// would otherwise hide every banner from an app in the foreground and you can
+/// only read one agent at a time; a tap goes to its pane or task through
+/// `NotificationTaps`, which routes it as it routes a card's link (ruling 3,
+/// ov-183).
 @MainActor
 private enum ForegroundPresenter {
     static func make() -> NotificationReplies {

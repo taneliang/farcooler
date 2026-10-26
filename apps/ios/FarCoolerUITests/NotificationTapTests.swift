@@ -55,8 +55,9 @@ final class NotificationTapTests: XCTestCase {
         banner.tap()
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "the tap didn't open the app")
-        // The crash came about half a second after the tap launched the app;
-        // a few seconds is past every handler a tap starts.
+        // Waits on the app ending, and returns the moment it does. Staying
+        // open has no event to wait on, so a passing run spends the whole five
+        // seconds; the crash came about half a second after the tap.
         _ = app.wait(for: .notRunning, timeout: 5)
         XCTAssertEqual(app.state, .runningForeground, "the app closed after a notification was tapped")
     }
