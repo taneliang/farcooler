@@ -40,6 +40,8 @@ import UIKit
 ///   by nothing.
 /// - `-native-polish` (ov-452): the page ends on a scheduled task's turn, a
 ///   run of two calls with their input and result, a task list and a reply.
+/// - `-native-bubbles` (ov-809): the page ends on the person's messages of
+///   four sizes (`bubbleMessages`), for the bubble's width.
 /// - `-native-harness-file <path>` (ov-474): the page is the rows of that
 ///   file (`test/fixtures/agent-rows-harness.json`, written by the client
 ///   core's boundary from a redacted real transcript): a subagent's report,
@@ -697,6 +699,7 @@ final class NativeHarnessRunner: ObservableObject {
             rows += Self.imageRows(now: now)
         }
         if CommandLine.arguments.contains("-native-agents") { rows += Self.agentRows(now: now) }
+        if CommandLine.arguments.contains("-native-bubbles") { rows += Self.bubbleRows() }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 
@@ -708,6 +711,21 @@ final class NativeHarnessRunner: ObservableObject {
             let page = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return page["rows"] as? [[String: Any]]
+    }
+
+    /// `-native-bubbles`' rows (ov-809): the person's messages of every size,
+    /// a word, a line, a few lines and one that wraps past its cap, each a
+    /// bubble that should be as wide as its words. They end the page, so the
+    /// screen opens on them.
+    static let bubbleMessages = [
+        "Thanks.", "Is the web interface ready btw", "Two things:\nfirst the lexer\nthen the parser, please",
+        String(repeating: "Fold this where it wraps past the bubble. ", count: 5),
+    ]
+
+    private static func bubbleRows() -> [[String: Any]] {
+        bubbleMessages.enumerated().map { n, text in
+            row("turn:b\(n)", ord: UInt64(60 + n), rev: UInt64(60 + n), kind: ["Turn": turn(text, origin: "Typed")])
+        }
     }
 
     /// `-native-polish`'s rows (ov-452), as the owner's own check-in came.

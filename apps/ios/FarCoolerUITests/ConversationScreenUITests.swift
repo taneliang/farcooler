@@ -99,6 +99,41 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertGreaterThan(prompt.frame.minX, column.width * 0.2, "the bubble isn't at the trailing edge: \(prompt.frame) \(row.frame)")
     }
 
+    /// The person's messages of four sizes, each bubble as wide as its words
+    /// (ov-809): a word, a line and a few lines are narrower than a long
+    /// message's cap, and the longer the words, the wider the bubble. The
+    /// bubble was as wide as its cap whatever it said. `-native-bubbles`.
+    func testYourBubbleHugsItsWords() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-native-agent-harness", "-native-bubbles"]
+        app.launchDrawn()
+        XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60), "the conversation never showed")
+        let starts = ["Thanks.", "Is the web interface", "Two things:", "Fold this where"]
+        let bubbles = starts.map {
+            app.descendants(matching: .any).matching(identifier: "native-prompt")
+                .matching(NSPredicate(format: "label BEGINSWITH %@", $0)).firstMatch
+        }
+        for (bubble, start) in zip(bubbles, starts) {
+            XCTAssertTrue(bubble.waitForExistence(timeout: 30), "no bubble for \"\(start)\": \(app.debugDescription)")
+        }
+        let widths = bubbles.map { $0.frame.width }
+        let column = app.windows.firstMatch.frame.width
+        shoot("bubbles", expecting: .shows(bubbles[3], "the four bubbles, the long one last"))
+        // The cap is three quarters of the column; the long message fills it.
+        XCTAssertLessThanOrEqual(widths[3], column * 0.75, "the long bubble is past its cap: \(widths)")
+        XCTAssertGreaterThan(widths[3], column * 0.6, "the long bubble doesn't fill its cap: \(widths)")
+        // A word is far from it and a few short lines are short of it. A
+        // line is as wide as its words, which on the narrowest phones are
+        // the cap's: it must not be wider than the few lines' bubble.
+        XCTAssertLessThan(widths[0], column * 0.3, "a word's bubble is wide: \(widths)")
+        XCTAssertLessThanOrEqual(widths[1], widths[3], "a line's bubble is wider than the cap's: \(widths)")
+        XCTAssertLessThan(widths[2], widths[3] - 20, "a few lines' bubble is as wide as the cap: \(widths)")
+        XCTAssertLessThan(widths[0], widths[1], "a word's bubble is no narrower than a line's: \(widths)")
+        // Every bubble at the trailing edge, whatever its width.
+        let edges = bubbles.map { $0.frame.maxX }
+        XCTAssertLessThan((edges.max() ?? 0) - (edges.min() ?? 0), 1.5, "the bubbles don't share a trailing edge: \(edges)")
+    }
+
     /// Every block on the owner's screen (the Now/Next and Agents cards, the
     /// rows and the composer) stands on one horizontal margin (ov-611,
     /// ov-619). The composer stood 4 pt wider than the rest.
