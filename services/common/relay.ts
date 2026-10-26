@@ -7,6 +7,7 @@
 /// secret at all. Shared by the site's /app and the web client (ov-764).
 
 import { expiresSoon, type Tokens } from './session'
+import { VISITOR_CONTEXT } from './visitor'
 
 export interface AppEnv {
   /// The relay the web app reads, e.g. https://relay.farcooler.com. Empty
@@ -91,8 +92,6 @@ export async function visitorHeaders(env: AppEnv, visitor?: string): Promise<Rec
   return { 'x-fc-visitor': visitor, 'x-fc-visitor-mac': hex }
 }
 
-/// What the MAC covers before the visitor, so it signs nothing else.
-export const VISITOR_CONTEXT = 'farcooler visitor v1\n'
 
 class Limited extends Error {}
 

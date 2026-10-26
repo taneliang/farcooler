@@ -12,6 +12,7 @@
 /// the secret, and a secret in a repo that is about to be open source — or in an
 /// app bundle anyone can unzip — is not a secret.
 
+import { VISITOR_CONTEXT } from '../../common/visitor'
 import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { directory, DIRECTORY_PREFIX } from './directory'
@@ -52,11 +53,12 @@ export interface Env extends PasskeyConfig {
   /// type so a `wrangler dev` without the binding still runs — see `withinRate`,
   /// which fails OPEN for exactly that reason and says so.
   AUTH_LIMIT?: RateLimit
-  /// A secret shared with the web client's Worker (its `VISITOR_SECRET`). That
-  /// Worker's calls all come from Cloudflare's addresses, so keyed on the
-  /// address its every visitor would share one `AUTH_LIMIT` bucket; with this
-  /// set it names each visitor and signs the name, and the limit keys on that
-  /// instead (`visitorKey`, ov-811). Unset, every caller is keyed on its address.
+  /// A secret shared with the web client's Worker and the site's (each one's
+  /// `VISITOR_SECRET`). Their calls all come from Cloudflare's addresses, so
+  /// keyed on the address their every visitor would share one `AUTH_LIMIT`
+  /// bucket; with this set they name each visitor and sign the name, and the
+  /// limit keys on that instead (`visitorKey`, ov-811). Unset, every caller is
+  /// keyed on its address.
   VISITOR_SECRET?: string
   /// Throttles `directory/devices/challenge` per account (ov-549): each mint is
   /// three D1 writes, and a session alone shouldn't be able to loop on it.
@@ -3356,9 +3358,10 @@ export { requireAccount, requireSession } from './session'
 /// Whether this caller may make another auth request.
 ///
 /// Keyed on the connecting IP, which is the only thing an unauthenticated
-/// caller has, or on the visitor the web client's Worker signs for, whose own
-/// IP is Cloudflare's (`visitorKey`). Not a strong identity — a botnet has many — but it is what stops
-/// one client burning the WorkOS quota, which is the realistic failure.
+/// caller has, or on the visitor the web or site Worker signs for, whose own
+/// IP is Cloudflare's (`visitorKey`). Not a strong identity — a botnet has
+/// many — but it is what stops one client burning the WorkOS quota, which is
+/// the realistic failure.
 ///
 /// Fails OPEN when the binding is absent. A local `wrangler dev` has no rate
 /// limiter, and a relay that refused every sign-in because a binding was
@@ -3373,10 +3376,7 @@ async function withinRate(request: Request, env: Env): Promise<boolean> {
   return success
 }
 
-/// What the MAC covers before the visitor; services/common/relay.ts signs it.
-const VISITOR_CONTEXT = 'farcooler visitor v1\n'
-
-/// The visitor the web client's Worker names in `x-fc-visitor`, when
+/// The visitor the web or site Worker names in `x-fc-visitor`, when
 /// `x-fc-visitor-mac` is that name's HMAC-SHA256 under `VISITOR_SECRET`; null
 /// otherwise, and the caller is keyed on its address as before.
 ///
