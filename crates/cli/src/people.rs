@@ -27,7 +27,9 @@ pub(crate) enum MemberCmd {
     /// The devices are the ids `farcooler client list` shows, and each must
     /// be enrolled here. A device never named for anyone is the owner's, so a
     /// teammate's devices must be named here before the runner treats them as
-    /// that teammate. One left off the list is nobody's, never the owner's.
+    /// that teammate. One left off the list loses its key here and is
+    /// disconnected, and is nobody's, never the owner's: to give it to
+    /// someone else, enroll it again.
     Add {
         /// What commands call them: a lowercase letter, then letters, digits or `-`.
         handle: String,
