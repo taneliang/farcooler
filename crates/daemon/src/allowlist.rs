@@ -202,10 +202,10 @@ async fn withdraw(key_path: PathBuf, ssh_port: u16) {
 /// `serve`, which includes up to two 15-second region-pick budgets plus two
 /// `Start` attempts, plus up to 2 more seconds hanging up the old server's
 /// live tunnels before it closes (ov-762; on the helper backend, up to 5
-/// before a helper that will not stop is killed). Both run on the blocking pool so a slow tunnel start
-/// never stalls the runtime workers serving this daemon's Unix socket. The
-/// `authorized_keys` read runs there too, for the same reason
-/// `enrollment.rs`'s file work does.
+/// before a helper that will not stop is killed). Both run on the blocking
+/// pool so a slow tunnel start never stalls the runtime workers serving this
+/// daemon's Unix socket. The `authorized_keys` read runs there too, for the
+/// same reason `enrollment.rs`'s file work does.
 ///
 /// Callers must not `.await` this inline before the daemon binds its Unix
 /// socket: the same 30-50 seconds happens before this runner is reachable at

@@ -100,7 +100,9 @@ impl Drop for Helper {
 ///
 /// The helper's own bound is `drainTimeout` in `tailcat.go` (2 s) plus closing
 /// its server; this is that with room to spare, and it exists only for a helper
-/// that is wedged or too old to know `stop`. Shorter under test so the
+/// that is wedged or too old to know `stop`. A close that runs past it is
+/// killed midway, which costs nothing: the FINs went out before the close
+/// began. Shorter under test so the
 /// wedged-helper test does not wait out the production number.
 const STOP_WITHIN: Duration =
     if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(5) };

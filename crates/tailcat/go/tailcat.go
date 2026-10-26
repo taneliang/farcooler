@@ -662,6 +662,11 @@ var tunnels = struct {
 // server, still up for the others' sake; forward refuses it, and the refusal's
 // FIN has to get out before the close as surely as the hang-up's did.
 //
+// What is left: a connection accepted just before the hang-up began whose
+// forward has not registered by the time the live set empties or the deadline
+// fires. That is the width of one sshd dial on loopback; its device gets no
+// FIN and falls back on its keepalive.
+//
 // Not upstream's Server.DrainTCP: that waits for every endpoint to reach
 // CLOSED, and a side that closes first parks in TIME-WAIT, so it would always
 // run out the clock.
@@ -691,6 +696,14 @@ func hangUpTunnels(wait time.Duration) {
 	}
 }
 
+// hangingUp reports whether a hang-up is under way, during which the server
+// accepts nothing (see OnTCP in newServer).
+func hangingUp() bool {
+	tunnels.Lock()
+	defer tunnels.Unlock()
+	return tunnels.refusing
+}
+
 // forward carries one device's connection to sshd and back, and ends it with
 // a FIN to the device whichever side finished first.
 //
@@ -702,7 +715,9 @@ func hangUpTunnels(wait time.Duration) {
 // During a hang-up it forwards nothing: the sshd side is closed before a byte
 // is copied, so the device gets the same FIN and redials the server that
 // replaces this one. Otherwise its connection would die with this server's
-// netstack, unannounced, and hang exactly as ov-762 did.
+// netstack, unannounced, and hang exactly as ov-762 did. OnTCP already refuses
+// a SYN that arrives during a hang-up; this is for one accepted just before it
+// began, whose forward registers just after.
 func forward(c net.Conn, local net.Conn) {
 	t := &tunnel{local: local}
 	tunnels.Lock()
@@ -893,6 +908,13 @@ func newServer(id identity, sshPort uint16, allowed []key.NodePublic) *tailcat.S
 		OnTCP: func(port uint16) func(net.Conn) {
 			if port != tunnelPort {
 				return nil // no handler is a RST
+			}
+			if hangingUp() {
+				// A RST at the SYN: nothing accepted, so nothing to dial,
+				// forward, or wait for, and no FIN that could die with this
+				// server's netstack. The device redials, and reaches the
+				// server that replaces this one.
+				return nil
 			}
 			return func(c net.Conn) {
 				// The port the client asked for is a name, not an address.

@@ -69,7 +69,11 @@ func runHelper(keyPath string, in io.Reader, out io.Writer) error {
 			// EOF is how this program is asked to stop: the daemon exited, or
 			// closed the pipe on purpose. Not an error, and the tunnels are
 			// hung up on the way out exactly as `stop` would, so a daemon
-			// that exits does not leave its devices hanging either.
+			// that exits does not leave its devices hanging either. On a
+			// restart this helper is still on the relay for that drain, up
+			// to drainTimeout plus the close, beside the new daemon's helper
+			// under the same node key; it accepts nothing meanwhile, since a
+			// hang-up refuses every new connection.
 			if err == io.EOF {
 				stop()
 				return nil
