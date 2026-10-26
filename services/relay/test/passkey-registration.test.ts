@@ -182,6 +182,7 @@ describe('a passkey registering as Key A (ov-766)', () => {
       { origin: `http://${RP_ID}` },
       { crossOrigin: true },
       { signatureOrigin: 'https://farcooler.com' },
+      { topOrigin: 'https://evil.example' },
     ]) {
       expect(await as('alice', 'devices/register', await proven('alice', passkey, tweak))).toEqual({
         status: 403,
@@ -196,9 +197,15 @@ describe('a passkey registering as Key A (ov-766)', () => {
     expect(answer).toEqual({ status: 403, body: { error: 'proofA' } })
   })
 
-  it('refuses flags no assertion carries, and an mpint with a spare zero', async () => {
+  it('refuses flags no assertion carries, an mpint with a spare zero, and bytes after the signature', async () => {
     const passkey = await makePasskey(RP_ID)
-    for (const tweak of [{ flags: 0x41 }, { flags: 0x81 }, { paddedR: true }]) {
+    for (const tweak of [
+      { flags: 0x41 },
+      { flags: 0x81 },
+      { paddedR: true },
+      { trailing: new Uint8Array([0]) },
+      { format: 'sk' as const, trailing: new Uint8Array([0]) },
+    ]) {
       expect(await as('alice', 'devices/register', await proven('alice', passkey, tweak))).toEqual({
         status: 403,
         body: { error: 'proofA' },

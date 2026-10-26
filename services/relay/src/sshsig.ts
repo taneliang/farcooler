@@ -209,7 +209,8 @@ async function verifyPasskey(key: PublicKey, rpId: string, signatureBlob: Uint8A
   if (!signature.done()) return false
 
   // A touch every time: a passkey that signs with nobody there proves only
-  // that something can reach the authenticator.
+  // that something can reach the authenticator. User verification is not
+  // required, as OpenSSH's default (the fence could add verify-required later).
   if ((flags[0] & FLAG_UP) === 0) return false
   if ((flags[0] & FLAG_AT) !== 0) return false
   if (((flags[0] & FLAG_ED) !== 0) !== (extensions.length !== 0)) return false

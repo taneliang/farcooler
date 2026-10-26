@@ -71,6 +71,10 @@ export interface PasskeyTweak {
   /// Another application to hash into authenticatorData, as an authenticator
   /// asked by a page on another RP ID would.
   application?: string
+  /// clientDataJSON's topOrigin, which a browser writes only in an iframe.
+  topOrigin?: string
+  /// Bytes after the signature's last field.
+  trailing?: Uint8Array
   /// The signature's own origin field alone, with clientDataJSON's left be.
   signatureOrigin?: string
   /// mpint r with a superfluous leading zero byte. The signer signs again
@@ -116,7 +120,7 @@ export async function makePasskey(rpId: string, comment = 'passkey'): Promise<Te
       const origin = tweak.origin ?? `https://${rpId}`
       const challenge = toBase64(tweak.challenge ?? data).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
       const clientData = text(
-        `{"type":"${tweak.type ?? 'webauthn.get'}","challenge":"${challenge}","origin":"${origin}","crossOrigin":${tweak.crossOrigin ?? false}}`,
+        `{"type":"${tweak.type ?? 'webauthn.get'}","challenge":"${challenge}","origin":"${origin}","crossOrigin":${tweak.crossOrigin ?? false}${tweak.topOrigin ? `,"topOrigin":"${tweak.topOrigin}"` : ''}}`,
       )
       const webauthn = (tweak.format ?? 'webauthn') === 'webauthn'
       const authenticatorData = concat(await sha256(text(tweak.application ?? rpId)), flags, counter)
@@ -126,7 +130,7 @@ export async function makePasskey(rpId: string, comment = 'passkey'): Promise<Te
         raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, signed))
       }
       const ecdsa = concat(mpint(raw.subarray(0, 32), tweak.paddedR ?? false), mpint(raw.subarray(32), false))
-      const signature = webauthn
+      const fields = webauthn
         ? concat(
             sshString(text('webauthn-sk-ecdsa-sha2-nistp256@openssh.com')),
             sshString(ecdsa),
@@ -137,6 +141,7 @@ export async function makePasskey(rpId: string, comment = 'passkey'): Promise<Te
             sshString(new Uint8Array()),
           )
         : concat(sshString(text(name)), sshString(ecdsa), flags, counter)
+      const signature = concat(fields, tweak.trailing ?? new Uint8Array())
       const out = concat(
         text('SSHSIG'),
         new Uint8Array([0, 0, 0, 1]),
