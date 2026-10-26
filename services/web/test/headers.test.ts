@@ -75,7 +75,7 @@ describe('every response', () => {
       expect(res.headers.get('permissions-policy')).toBe(
         'camera=(self), publickey-credentials-create=(self), publickey-credentials-get=(self), microphone=(), geolocation=()',
       )
-      expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(res.headers.get('referrer-policy')).toBe('same-origin')
       expect(res.headers.get('strict-transport-security')).toBe('max-age=31536000')
       expect(res.headers.get('x-content-type-options')).toBe('nosniff')
       // No COEP: nothing uses threads (plan-763 §1).

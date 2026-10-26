@@ -70,7 +70,6 @@ async function home(request: Request, url: URL, env: Configured & WebEnv): Promi
     const stale = cookie(request, SESSION_COOKIE) === null ? [] : [clearSession()]
     return page(signInPage(), 200, {}, stale)
   }
-  if (!tokens.csrf) tokens.csrf = newCsrf()
   const caller = new Caller(env, tokens, visitorOf(request))
   const me = await caller.directory('me')
   if (caller.signedOut || me.kind === 'signed-out') return page(signInPage(), 200, {}, [clearSession()])

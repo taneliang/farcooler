@@ -15,11 +15,12 @@ export const BASE_HEADERS: Record<string, string> = {
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy':
     'camera=(self), publickey-credentials-create=(self), publickey-credentials-get=(self), microphone=(), geolocation=()',
-  // Nothing on this origin is linked to from it, and a URL here can carry
-  // nothing anyone else should see. A form post then sends `Origin: null`;
-  // `sameOrigin` (services/common/origin.ts) accepts that only alongside the
-  // browser's own `Sec-Fetch-Site: same-origin`.
-  'referrer-policy': 'no-referrer',
+  // Nothing leaves the origin in a Referer, as on www. Not no-referrer: under
+  // no-referrer a browser serializes the Origin of this page's own POSTs, a
+  // fetch() as well as a form, as `null` (Fetch, "serialize a request
+  // origin"), and the API's exact-Origin check and Sign Out would refuse the
+  // shell itself (ov-602 found this on www; test/browser/ checks it in Chromium).
+  'referrer-policy': 'same-origin',
   'strict-transport-security': 'max-age=31536000',
   'x-content-type-options': 'nosniff',
 }

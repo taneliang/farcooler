@@ -30,6 +30,14 @@ describe('the client files', () => {
     expect((await get('/a/app.0123456789abcdef.js', envWith(), { method: 'POST' })).status).toBe(405)
   })
 
+  it('serves every file under a CSP that runs nothing, so an SVG opened as a page is inert', async () => {
+    for (const path of ['/a/icon.0123456789abcdef.svg', '/a/app.0123456789abcdef.js', '/a/tailcat.0123456789abcdef.wasm']) {
+      const res = await get(path, envWith())
+      expect(res.status, path).toBe(200)
+      expect(res.headers.get('content-security-policy'), path).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    }
+  })
+
   it('serves the files whether or not the flag is on: they are public code', async () => {
     expect((await get('/a/app.0123456789abcdef.js', envWith({ WEB_CLIENT: '' }))).status).toBe(200)
   })
@@ -58,6 +66,15 @@ describe('/csp', () => {
         const res = await get('/csp', envWith(), { method: 'POST', body, headers: { 'content-type': 'application/reports+json' } })
         expect(res.status).toBe(204)
       }
+      // Over 16 KiB, by its header or by what arrives, is read no further and logs nothing.
+      const big = JSON.stringify([{ body: { effectiveDirective: 'img-src', blockedURL: 'https://big.example/' + 'x'.repeat(17 * 1024) } }])
+      expect((await get('/csp', envWith(), { method: 'POST', body: big })).status).toBe(204)
+      const stream = new ReadableStream({
+        pull(c) {
+          c.enqueue(new TextEncoder().encode('x'.repeat(4096)))
+        },
+      })
+      expect((await get('/csp', envWith(), { method: 'POST', body: stream, duplex: 'half' } as RequestInit)).status).toBe(204)
       expect(log.mock.calls.map(c => c.join(' '))).toEqual(['csp connect-src derp9.example.net', 'csp style-src-elem inline', 'csp script-src-elem eval'])
     } finally {
       log.mockRestore()

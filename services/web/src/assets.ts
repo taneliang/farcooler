@@ -25,6 +25,9 @@ const TYPES: Record<string, string> = {
 }
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
+/// On every file, so one opened directly as a document (an SVG with a script
+/// in it) runs nothing on the origin that holds a Control key.
+const FILE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 
 export function isAsset(path: string): boolean {
   return HASHED.test(path)
@@ -38,7 +41,7 @@ export async function asset(assets: Fetcher, url: URL, method: string): Promise<
   const stored = kind === 'wasm' ? `${url.pathname}.br` : url.pathname
   const upstream = await assets.fetch(new URL(stored, url.origin), { method: method === 'HEAD' ? 'HEAD' : 'GET' })
   if (upstream.status !== 200) return null
-  const headers: Record<string, string> = { 'cache-control': IMMUTABLE, 'content-type': TYPES[kind] }
+  const headers: Record<string, string> = { 'cache-control': IMMUTABLE, 'content-type': TYPES[kind], 'content-security-policy': FILE_CSP }
   if (kind !== 'wasm') return withHeaders(upstream.body, 200, headers)
   return new Response(upstream.body, {
     status: 200,

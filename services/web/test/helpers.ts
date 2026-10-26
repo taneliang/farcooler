@@ -24,6 +24,7 @@ export const FILES: Record<string, BodyInit> = {
   '/version.json': '{"build":"abc","channel":"canary","files":{}}',
   '/a/app.0123456789abcdef.js': JS,
   '/a/tailcat.0123456789abcdef.wasm.br': WASM,
+  '/a/icon.0123456789abcdef.svg': '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
 }
 
 export const ASSETS = {

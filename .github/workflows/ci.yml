@@ -37,13 +37,14 @@ env:
 jobs:
   # Does this push change anything but the website and docs? (ov-507)
   #
-  # A push that touches only services/site/, docs/, a root-level .md or the
-  # site-proof files runs none of the app jobs below: Swift, Rust, Android, iOS
-  # and the UI shards were 32 minutes of macOS time for the daily site-proof
-  # refresh. They `needs:` this job and test its output with `!cancelled()` and
-  # `!= 'false'`, so anything else (this job failing, an empty output) runs
-  # them, and a skipped job reports as passed, so the run still ends green.
-  # The lints in `wire`, the tunnel, the relay and the site job always run.
+  # A push that touches only services/site/, services/web/, services/common/,
+  # docs/, a root-level .md or the site-proof files runs none of the app jobs
+  # below: Swift, Rust, Android, iOS and the UI shards were 32 minutes of macOS
+  # time for the daily site-proof refresh. They `needs:` this job and test its
+  # output with `!cancelled()` and `!= 'false'`, so anything else (this job
+  # failing, an empty output) runs them, and a skipped job reports as passed,
+  # so the run still ends green. The lints in `wire`, the tunnel, the relay,
+  # the site and the web jobs always run.
   #
   # Judged against the nearest green CI run on main, not `before`, exactly as
   # `ios-ui-plan` does: a code push whose run was cancelled or went red must
