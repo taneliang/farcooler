@@ -241,6 +241,9 @@ SOURCES = [
     "NativeAgentTray.swift",
     # A busy live conversation for the harness: streaming, settles, resets (ov-626).
     "NativeLiveHarness.swift",
+    # Long reports and notes, and a fling that measures its frames (ov-788).
+    "HarnessLongProse.swift",
+    "FrameWatch.swift",
     # Older rows loading above keep the reader's place (ov-629).
     "NativePlaceHold.swift",
     # A held ask answered from its row (ov-370).
@@ -1167,6 +1170,8 @@ UI_TEST_SOURCES = [
     "ConversationScreenUITests.swift",
     # A reader scrolled up stays put (ov-626). Needs no runner.
     "ConversationScrollUITests.swift",
+    # A fling over a long conversation and a long card, timed (ov-788, ov-791).
+    "ScrollHitchUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

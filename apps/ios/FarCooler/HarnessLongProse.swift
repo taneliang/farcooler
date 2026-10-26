@@ -1,0 +1,63 @@
+#if DEBUG
+import Foundation
+
+/// Long Markdown as agents really write it (ov-788, ov-791): a lane's
+/// report and a card's notes run to many kilobytes of headings, lists,
+/// tables, code and `ov-N` keys. The harnesses' own text is a line or two,
+/// which a fling never notices, so `-native-long-reports` and
+/// `-phone-long-record` draw these instead, for measuring a fling over them.
+enum HarnessLongProse {
+    /// A lane's report, about 11 KB, different for each `n`.
+    static func laneReport(_ n: Int) -> String {
+        var out = "## Lane ios-\(700 + n % 90): the transcript keeps its place (ov-\(600 + n % 180))\n\n"
+        out += "**Commits**\n\n"
+        for c in 0..<5 {
+            out += "- `\(String(format: "%07x", 0x1a2b3c4 &+ n &* 977 &+ c &* 131))` ios: a row above the screen is measured once, not twice (ov-\(610 + c))\n"
+        }
+        for section in 0..<4 {
+            out += "\n### Finding \(section + 1): what the profile showed\n\n"
+            out += "The fling over a long session measured **\(14 + (n + section) % 9) hitches** over one frame, the worst "
+                + "\(40 + (n * 7 + section) % 60) ms, in `NativeAgentView.swift:\(400 + section * 37)`. Every one of them lands when a "
+                + "row comes into view for the first time: its body runs, its `MarkdownText` is parsed, and its height is measured "
+                + "before the frame can commit. See ov-\(626 + section) and ov-675 for the earlier rounds, and "
+                + "[the Instruments guide](https://developer.apple.com/documentation/xcode/analyzing-hitches-in-your-app) for the method.\n\n"
+            out += "A second paragraph says what was ruled out. The image decode is already off the main thread (ov-629), "
+                + "the diff of the rows is linear in what changed, and the relative-time formatter is cached. What remained was "
+                + "text layout: *every* line of a folded report, measured to learn that it folds.\n\n"
+            out += "| Frame | Self (ms) | Share |\n|---|---:|---:|\n"
+            for row in 0..<6 {
+                out += "| `TextLayout.measure` step \(row) of finding \(section) | \(12 - row).\(n % 10) | \(30 - row * 4)% |\n"
+            }
+            out += "\n```swift\n"
+            for line in 0..<14 {
+                out += "        let height\(line) = layout.measure(text, width: proposal.width ?? 320) // \(section).\(line)\n"
+            }
+            out += "```\n\n"
+            for item in 0..<5 {
+                out += "- Point \(item + 1): the row is \(3 + item) screens below the fold, so its guess is wrong by "
+                    + "\(item * 37 + 12) pt until it is built (ov-\(700 + item)).\n"
+                out += "  - Nested: `onGeometryChange` reports it on the next pass, which moves every row under it.\n"
+            }
+            out += "\n> Measured on an iPhone 17 simulator at 120 Hz; the device was quieter but the order of costs was the same.\n"
+        }
+        out += "\n### Tests\n\n"
+        for t in 1...6 {
+            out += "\(t). `ConversationScrollUITests.testStep\(t)`: passed, and red with the fix reverted (\(t * 3) assertions).\n"
+        }
+        out += "\n---\n\nLeft open: nothing that blocks the train. The full report is in `.claude/agent/reports/ios-\(700 + n % 90)/`.\n"
+        return out
+    }
+
+    /// A card's note: a long report, a short comment or a status line, by `n`.
+    static func note(_ n: Int) -> String {
+        switch n % 4 {
+        case 0: laneReport(n)
+        case 1: "Owner, 25 Oct: \"Scrolling the Tasks view is also pretty jerky.\" Batched with ov-788 and ov-\(780 + n % 9)."
+        case 2: String(laneReport(n).prefix(3_000))
+        default:
+            "**Decision:** take the prefix fold (ov-788), and keep the open report selectable (ov-609).\n\n"
+                + "- Folded: lays out what shows.\n- Open: the whole report, as before.\n"
+        }
+    }
+}
+#endif

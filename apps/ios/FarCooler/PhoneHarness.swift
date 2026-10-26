@@ -103,6 +103,8 @@ import SwiftUI
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
 //                            and each turn is in `sent` as `own-login <harness> <on>`; add
 //                            -phone-own-logins-refused for a runner that refuses every turn
+//   -phone-long-record       bil-7's record is forty long notes, its intent long and its acceptance six
+//                            lines, for measuring a fling over a long card (ov-791)
 //   -phone-member-notes      bil-7's record written by people (ov-707): Alexandra's answer, the
 //                            owner's comment and Bob's; with -phone-shared, as a member's phone
 //                            (Bob's) or the owner's (-phone-rep-owner) reads it
@@ -730,6 +732,9 @@ final class HarnessRunner {
             return try json(readState())
         case "task.get" where CommandLine.arguments.contains("-phone-task-fails"):
             throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+        case "task.get" where CommandLine.arguments.contains("-phone-long-record"):
+            guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
+            return try json(["notes": [question] + longNotes])
         case "task.get" where CommandLine.arguments.contains("-phone-member-notes"):
             guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
             return try json(["notes": [question] + membersNotes])
@@ -1075,6 +1080,19 @@ final class HarnessRunner {
         ]
     }
 
+    /// `-phone-long-record` (ov-791): forty notes on bil-7, reports, comments
+    /// and decisions, many kilobytes each, as a long-lived card's are.
+    private var longNotes: [[String: Any]] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let kinds = ["finding", "comment", "decision", "comment"]
+        return (0..<40).map { n in
+            [
+                "id": "note-long-\(n)", "kind": kinds[n % 4], "actor": n % 3 == 0 ? "user" : "manager",
+                "at": now - Int64(40 - n) * 900_000, "body": HarnessLongProse.note(n),
+            ]
+        }
+    }
+
     /// `-phone-member-notes` (ov-707): bil-7 answered by Alexandra, a member,
     /// then a comment from the owner and one from Bob, the member this phone
     /// is unless it's the owner's (`-phone-rep-owner`).
@@ -1236,7 +1254,12 @@ final class HarnessRunner {
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
                 "status": "needs_decision", "status_since": now - 600_000,
-                "intent": "Invoices need a PDF.", "workspace": Self.billing,
+                "intent": CommandLine.arguments.contains("-phone-long-record")
+                    ? String(HarnessLongProse.laneReport(1).prefix(2_500)) : "Invoices need a PDF.",
+                "workspace": Self.billing,
+                "acceptance": CommandLine.arguments.contains("-phone-long-record")
+                    ? (0..<6).map { ["id": "l\($0)", "text": "Line \($0): a **fling** over the record stays under one frame (ov-\(788 + $0))", "met": $0 % 2 == 0] }
+                    : [[String: Any]](),
             ],
             [
                 "id": Self.agentTask, "key": "bil-9", "title": "Invoice PDF export",

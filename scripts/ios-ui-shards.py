@@ -156,6 +156,7 @@ LOCAL = {
     "TerminalPermissionTests": "needs the demo runner",
     "TerminalPasteTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",
+    "ScrollHitchUITests": "a measurement, not a gate: a simulator's frame times follow the machine's load (ov-788)",
 }
 
 # Capture tools, run by nightly.yml's `captures` job with

@@ -154,7 +154,11 @@ enum RealSession {
                 + "\n\n```swift\nposition.scrollTo(id: Self.end, anchor: .bottom)\nlet y = geometry.contentOffset.y\n```\n\nThat is all for this step."
             kind = ["Prose": ["text": text, "conclusion": false]]
         case 6:
-            let body = (0..<8).map { "Line \($0) of the report: the lane ran its tests, read the files and wrote what it saw." }.joined(separator: "\n\n")
+            // `-native-long-reports` (ov-788): as long as a lane's real ones.
+            let body =
+                CommandLine.arguments.contains("-native-long-reports")
+                ? HarnessLongProse.laneReport(n)
+                : (0..<8).map { "Line \($0) of the report: the lane ran its tests, read the files and wrote what it saw." }.joined(separator: "\n\n")
             kind = ["Turn": [
                 "prompt": body, "origin": "Notification", "background_running": 0, "started_ms": 1, "ended_ms": 2, "outcome": "Finished",
                 "harness": ["kind": "Report", "title": "", "body": body, "source": "Review lane \(n)"],
