@@ -182,6 +182,8 @@ SOURCES = [
     # A teammate's phone asking before it joins (ov-525), for the UI suite.
     # DEBUG only.
     "TeammateJoinHarness.swift",
+    # A real notification to tap, for the UI suite (ov-787). DEBUG only.
+    "NotificationTapHarness.swift",
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
@@ -1032,6 +1034,10 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
 ]
 
 UI_TEST_SOURCES = [
+    # Tapping a notification opens the app and it stays open, from closed
+    # and from the background (ov-787). Needs no runner:
+    # `-notification-tap-harness`.
+    "NotificationTapTests.swift",
     # Not a test: the one way the suite drives a key row's Hide Keyboard key.
     # Waits for the key to be tappable and fails, rather than skipping, when
     # the keyboard will not go. See its own note.

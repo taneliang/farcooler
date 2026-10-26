@@ -119,6 +119,7 @@ SHARDS = {
         "TalkToRepUITests",  # 243 s; -phone-harness -phone-rep (ov-526)
         "TerminalLigatureTests",  # 9 s; -terminal-ligature
         "ActionFailureTests",  # 93 s; -phone-harness
+        "NotificationTapTests",  # untimed, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
     ],
     "phone3": [
         "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)

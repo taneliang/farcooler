@@ -277,6 +277,9 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
             WatchLinkHost.shared.acceptAnswersFromGlances()
             Notifier.shared.listen()
         }
+        #if DEBUG
+        NotificationTapHarness.scheduleIfRequested()
+        #endif
         return true
     }
 
