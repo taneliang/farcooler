@@ -53,6 +53,7 @@ import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { brotliDecompressSync } from 'node:zlib'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
@@ -112,10 +113,23 @@ async function serve(route) {
   const request = route.request()
   const method = request.method()
   const body = method === 'GET' || method === 'HEAD' ? undefined : (request.postDataBuffer() ?? undefined)
-  const response = await handle(new Request(request.url(), { method, headers: request.headers(), body }))
+  let response = await handle(new Request(request.url(), { method, headers: request.headers(), body }))
+  // Chromium takes a fulfilled redirect to the network, where these hosts
+  // don't resolve, so the one redirect the shell makes (Sign Out's 303) is
+  // followed here.
+  if (response.status === 303) response = await handle(new Request(new URL(response.headers.get('location'), request.url()), { headers: request.headers() }))
   const headers = {}
   response.headers.forEach((value, key) => (headers[key] = value))
-  await route.fulfill({ status: response.status, headers, body: Buffer.from(await response.arrayBuffer()) })
+  let bytes = Buffer.from(await response.arrayBuffer())
+  // A fulfilled body reaches the page as given, never decoded, so the
+  // Worker's brotli (each .wasm, served with content-encoding: br) is
+  // undone here, where a network stack would.
+  if (headers['content-encoding'] === 'br') {
+    bytes = brotliDecompressSync(bytes)
+    delete headers['content-encoding']
+    delete headers['content-length']
+  }
+  await route.fulfill({ status: response.status, headers, body: bytes })
 }
 
 // The runner: a real sshd on a loopback port, whose one Key A line is written
@@ -556,7 +570,7 @@ try {
 
     // Sign Out takes the passkey's id and the runners with it.
     await page.click('form[action="/sign-out"] button')
-    await page.waitForURL(`${origin}/signed-out`, { timeout: 30_000 })
+    await page.waitForFunction(() => document.body?.innerText === 'signed out', null, { timeout: 30_000 })
     await page.goto(`${origin}/version.json`)
     if (await device(page)) failures.push('Sign Out left the passkey and runners behind')
     else console.log('csp-check: Sign Out deleted the passkey and runners')
