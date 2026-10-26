@@ -87,7 +87,7 @@ public struct CrashSignature: Codable, Equatable, Sendable {
                 break
             }
             let name = String(binary.split(separator: "/").last ?? "")
-            walked.append(Frame(binary: clipped(name, 128), offset: UInt64(max(0, offset)), symbol: "", depth: walked.count, own: name == ownBinary))
+            walked.append(Frame(binary: binaryName(name), offset: UInt64(max(0, offset)), symbol: "", depth: walked.count, own: name == ownBinary))
             frame = (f["subFrames"] as? [[String: Any]])?.first
         }
         guard !walked.isEmpty else { return nil }
@@ -104,9 +104,9 @@ public struct CrashSignature: Codable, Equatable, Sendable {
             signal: number(meta["signal"]).map { Int($0) },
             exceptionName: className(reason?["exceptionName"] as? String),
             frames: frames,
-            appVersion: clipped(meta["appVersion"] as? String ?? "", 64),
-            appBuild: clipped(meta["appBuildVersion"] as? String ?? "", 64),
-            os: clipped(meta["osVersion"] as? String ?? "", 128))
+            appVersion: versionText(meta["appVersion"] as? String ?? "", 64),
+            appBuild: versionText(meta["appBuildVersion"] as? String ?? "", 64),
+            os: versionText(meta["osVersion"] as? String ?? "", 128))
     }
 
     /// What `crash.report` is sent: these keys and no others.
@@ -122,9 +122,25 @@ public struct CrashSignature: Codable, Equatable, Sendable {
         (value as? NSNumber)?.int64Value
     }
 
-    /// `text` with no control characters, at most `max` long.
-    private static func clipped(_ text: String, _ max: Int) -> String {
-        String(text.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(max).map(Character.init))
+    /// `text` in the runner's character set for `set`, at most `max` long:
+    /// what isn't in it goes, so a report is never refused for a character,
+    /// and nothing that could read as Markdown, a fence or a direction
+    /// change reaches a card (`crash_reports::checked`).
+    private static func kept(_ text: String, _ set: String, _ max: Int) -> String {
+        let allowed = Set(set.unicodeScalars)
+        let scalars = text.unicodeScalars.filter { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || allowed.contains($0)) }
+        return String(String.UnicodeScalarView(scalars.prefix(max))).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// A binary's file name: letters, digits, `.`, `_`, `+`, `-`, spaces.
+    static func binaryName(_ text: String) -> String {
+        let name = kept(text, "._+- ", 128)
+        return name.isEmpty ? "unknown" : name
+    }
+
+    /// A version, build or OS: letters, digits, spaces, `.`, `_`, `(`, `)`, `,`, `-`.
+    static func versionText(_ text: String, _ max: Int) -> String {
+        kept(text, " ._(),-", max)
     }
 
     /// An exception's name when it reads as a class name, else nothing: a
@@ -169,5 +185,27 @@ public struct CrashOutbox: Codable, Equatable, Sendable {
     /// goes only to the owner's own runner.
     public static func mayReport(runnerTakesCrashes: Bool, you: String?) -> Bool {
         runnerTakesCrashes && you == ""
+    }
+
+    /// What a refusal of one signature means for it.
+    public enum Refused: Equatable, Sendable {
+        /// It never will be taken: let it go.
+        case drop
+        /// This runner won't take any (it says the phone isn't its owner's,
+        /// or the phone's grant is too low): stop asking it until the app is
+        /// next launched, and keep the signature for another runner.
+        case notThisRunner
+        /// Try it again on a later poll.
+        case later
+    }
+
+    /// `word` is the refusal's machine word, nil when the phone refused it
+    /// before sending.
+    public static func refused(word: String?) -> Refused {
+        switch word {
+        case nil, "invalid-argument": .drop
+        case "not-yours", "scope-denied", "capability-unsupported": .notThisRunner
+        default: .later
+        }
     }
 }

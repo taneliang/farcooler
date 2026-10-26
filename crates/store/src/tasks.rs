@@ -152,7 +152,7 @@ pub(crate) fn claim_task_key_prefix(conn: &Connection, repo: &[u8], name: &str) 
 ///
 /// A plain aggregate query always returns exactly one row, even when nothing
 /// matches: it is `MAX` that comes back NULL, not the row that goes missing.
-fn next_key_under(conn: &Connection, prefix: &str) -> rusqlite::Result<String> {
+pub(crate) fn next_key_under(conn: &Connection, prefix: &str) -> rusqlite::Result<String> {
     let max: Option<i64> = conn.query_row(
         "SELECT MAX(n) FROM (
              SELECT CAST(SUBSTR(key, LENGTH(?1) + 2) AS INTEGER) AS n

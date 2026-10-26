@@ -51,7 +51,7 @@ mod compose_holds;
 pub mod people;
 mod device_enrollers;
 pub use compose_holds::ComposeHold;
-pub use crash_signatures::CrashRecord;
+pub use crash_signatures::{CrashFiling, CrashRecord};
 mod subagent_notes;
 mod web_panes;
 pub mod waits;

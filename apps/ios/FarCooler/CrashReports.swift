@@ -21,6 +21,9 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber {
     private static let key = "crash.outbox"
     private var outbox: CrashOutbox
     private var sending = false
+    /// Runners that said they won't take a crash from this phone, by id,
+    /// asked no more until the next launch.
+    private var notTaking: Set<String> = []
 
     private override init() {
         let saved = UserDefaults.standard.data(forKey: Self.key)
@@ -61,7 +64,8 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber {
     /// Send what's waiting to `connection`'s runner, if it is the owner's.
     /// Called on every poll; does nothing when nothing waits.
     func send(through connection: Connection) async {
-        guard !sending, !outbox.waiting.isEmpty,
+        let runner = connection.host?.id.uuidString ?? ""
+        guard !sending, !outbox.waiting.isEmpty, !notTaking.contains(runner),
             CrashOutbox.mayReport(runnerTakesCrashes: connection.daemon?.can(.crashReports) == true, you: connection.talk.people?.you)
         else { return }
         sending = true
@@ -70,13 +74,20 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber {
             do {
                 _ = try await connection.rpc("crash.report", signature.wire)
                 outbox.remove(signature)
-            } catch let ClientCore.CoreError.rejected(_, word, _) where word == nil || word == "invalid-argument" {
-                // Refused for what it is, here or by the runner: it never
-                // will be taken, so it isn't kept to be tried forever.
-                outbox.remove(signature)
+            } catch let ClientCore.CoreError.rejected(_, word, _) {
+                switch CrashOutbox.refused(word: word) {
+                case .drop:
+                    // Refused for what it is: it never will be taken, so it
+                    // isn't kept to be tried forever.
+                    outbox.remove(signature)
+                case .notThisRunner:
+                    notTaking.insert(runner)
+                    return
+                case .later:
+                    return
+                }
             } catch {
-                // The link, or a runner that isn't taking them after all:
-                // kept for the next poll or another runner.
+                // The link: kept for the next poll or another runner.
                 break
             }
             save()

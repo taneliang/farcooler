@@ -6044,9 +6044,12 @@ message CharterWritten {
 // signature and nothing else: no exception message, no thread name, no call
 // tree, nothing a person typed. The owner's alone (`not_yours` from a
 // member's device, refused from a rep), and a phone sends it only to a
-// runner that says the phone is its owner's. The runner keeps each signature
-// once, with a count, and files a card for a new one on Far Cooler's own
-// board when the runner has one. Answers `CrashRecorded`.
+// runner that says the phone is its owner's. Every text field has a strict
+// character set, refused `invalid_argument` otherwise, so nothing reads as
+// more than a name on a card. The runner keeps each signature once, with a
+// count, and files a card for a new one on Far Cooler's own board when the
+// runner has one; past ten new signatures a day it counts and files nothing.
+// Answers `CrashRecorded`.
 message CrashReport {
   // `crash` or `hang`.
   string kind = 1;
@@ -6062,7 +6065,8 @@ message CrashReport {
   // app's own binary if none of those is. At most 16.
   repeated CrashFrame frames = 6;
   // The app's version and build that crashed, and the OS it ran on, as
-  // MetricKit says them: `1.4`, `1093`, `iPhone OS 26.1 (23B85)`.
+  // MetricKit says them: `1.4`, `1093`, `iPhone OS 26.1 (23B85)`. ASCII
+  // letters, digits, spaces, `.`, `_`, `(`, `)`, `,` and `-`.
   string app_version = 7;
   string app_build = 8;
   string os = 9;
@@ -6070,11 +6074,13 @@ message CrashReport {
 
 // One frame of a crash signature.
 message CrashFrame {
-  // The binary's file name, `FarCooler` or `UIKitCore`, never a path.
+  // The binary's file name, `FarCooler` or `libc++abi.dylib`, never a path:
+  // ASCII letters, digits, `.`, `_`, `+`, `-` and inner spaces.
   string binary = 1;
   // The offset into the binary's text segment.
   uint64 offset = 2;
-  // A symbol, when the report carried one. Empty otherwise.
+  // A symbol. Always empty for now: MetricKit's frames carry none, and the
+  // runner refuses one until a source that has them is reviewed.
   string symbol = 3;
   // Where in the stack it was: 0 is the top.
   uint32 depth = 4;
@@ -6083,8 +6089,8 @@ message CrashFrame {
 }
 
 // What `crash.report` kept: how many times this signature has been reported,
-// this one included, and the key of the card it is on (`ov-812`), or empty
-// when the runner filed none.
+// this one included (past the day's cap, how many have overflowed), and the
+// key of the card it is on (`ov-812`), or empty when the runner filed none.
 message CrashRecorded {
   uint32 count = 1;
   string task_key = 2;

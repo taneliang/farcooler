@@ -3,9 +3,11 @@
 //!
 //! The phone's MetricKit hands it each diagnostic on the launch after, and
 //! the phone sends the signature and nothing else (`AgentKit`'s
-//! `CrashSignature`). This end refuses anything that could carry more: an
-//! exception name that isn't a name in code, a binary that is a path, more
-//! frames than a signature has, and text with control characters in it.
+//! `CrashSignature`). This end refuses anything that could carry more, and
+//! anything that could read as more than a name once it is on a card the
+//! coordinator reads (the ov-797 review): each text field has a strict
+//! character set (`checked`), so no backtick, newline, Markdown or bidi
+//! character reaches a title or a fenced note.
 //!
 //! **Where it shows: a card on the board, not Needs You.** Needs You is what
 //! a person must act on now, and it pushes; a crash is work for an agent to
@@ -13,18 +15,22 @@
 //! where that work is dispatched from, and the coordinator reads the board
 //! at every check-in. So a new signature files one card, labeled `found` and
 //! `crash`, with its frames in a Finding note; a repeat raises the count in
-//! the card's intent and adds nothing; a repeat on a newer build after the
-//! card was closed adds one Finding note, because the fix didn't hold.
+//! the card's intent and adds nothing; a repeat from another build after the
+//! card was closed adds one Finding note with that build's frames, because
+//! the fix didn't hold. At most `DAILY_CAP` new signatures a day are kept;
+//! past it reports count on one overflow row and file nothing.
 //!
 //! The card goes on Far Cooler's own board: the Main workspace of a
-//! repository whose origin is a `farcooler` repository. A runner with none
-//! keeps the count and files nothing, since nobody there can fix the app.
+//! repository whose origin is a `farcooler` repository, the one at the
+//! first path when there are several. A runner with none keeps the count and
+//! files nothing, since nobody there can fix the app.
 
 use std::sync::Mutex;
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, request, result};
-use farcooler_store::models::{Actor, NoteKind, Task, TaskStatus, TaskUpdate, Workspace};
+use farcooler_store::CrashFiling;
+use farcooler_store::models::{Actor, Workspace};
 use serde_json::json;
 
 use crate::service::Service;
@@ -35,13 +41,16 @@ use crate::watch::Watcher;
 pub const MAX_FRAMES: usize = 16;
 /// The labels on a crash's card.
 pub const LABELS: [&str; 2] = ["found", "crash"];
+/// New signatures a runner keeps, and files cards for, in a day.
+pub const DAILY_CAP: u32 = 10;
 /// The longest a card's title gets (`docs`' ticket titles: 60 at most).
 const MAX_TITLE: usize = 60;
 
 /// One report at a time, so two of a new signature file one card.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
-/// `crash.report`: count the report, and file or raise its card.
+/// `crash.report`: count the report, and file or raise its card, in one
+/// store transaction (`Store::record_crash`).
 pub fn handle(svc: &Service, watcher: &Watcher, req: pb::Request) -> Result<result::Value> {
     let Some(request::Payload::CrashReport(report)) = req.payload else {
         return Err(DomainError::InvalidArgument { what: "payload" });
@@ -49,19 +58,29 @@ pub fn handle(svc: &Service, watcher: &Watcher, req: pb::Request) -> Result<resu
     checked(&report)?;
     let digest = signature(&report);
     let detail = detail(&report).to_string();
+    let title = title(&report);
+    let labels: Vec<String> = LABELS.iter().map(|l| l.to_string()).collect();
+    let finding = finding(&report, &digest);
+    let again = again(&report);
+    let intent = |count: u32| intent(&report, count);
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let record = svc.store.record_crash(&digest, &detail, &report.app_build)?;
-    let task = match record.task.and_then(|id| svc.store.get_task(id).ok()) {
-        Some(task) => Some(raise(svc, &report, &task, record.count, record.previous_build.as_deref())?),
-        None => match board(svc)? {
-            Some(board) => {
-                let task = file(svc, &board, &report, &digest, record.count)?;
-                svc.store.set_crash_task(&digest, task.id)?;
-                Some(task)
-            }
-            None => None,
-        },
-    };
+    let board = board(svc)?;
+    let record = svc.store.record_crash(&CrashFiling {
+        signature: &digest,
+        detail: &detail,
+        build: &report.app_build,
+        daily_cap: DAILY_CAP,
+        board: board.map(|b| b.id),
+        title: &title,
+        labels: &labels,
+        finding: &finding,
+        intent: &intent,
+        again: &again,
+    })?;
+    if record.over_cap {
+        tracing::warn!(signature = %&digest[..12], overflow = record.count, "crash reported past the day's cap: counted, nothing filed");
+    }
+    let task = record.task.map(|id| svc.store.get_task(id)).transpose()?;
     if let Some(task) = &task {
         watcher.announce_task_changed(task, None, Actor::Runner);
     }
@@ -72,7 +91,9 @@ pub fn handle(svc: &Service, watcher: &Watcher, req: pb::Request) -> Result<resu
     }))
 }
 
-/// Refuse a report that carries more than a signature, or isn't one.
+/// Refuse a report that carries more than a signature, or isn't one. Every
+/// text field has a character set that can't carry a message, a path,
+/// Markdown, a newline or a bidi control, so what reaches a card is a name.
 pub fn checked(report: &pb::CrashReport) -> Result<()> {
     if !matches!(report.kind.as_str(), "crash" | "hang") {
         return Err(DomainError::InvalidArgument { what: "kind" });
@@ -81,40 +102,51 @@ pub fn checked(report: &pb::CrashReport) -> Result<()> {
         return Err(DomainError::InvalidArgument { what: "frames" });
     }
     for frame in &report.frames {
-        let binary = &frame.binary;
-        if binary.is_empty() || binary.contains('/') || !plain(binary, 128) || !plain(&frame.symbol, 256) {
+        // MetricKit's frames have no symbol, and the phone sends none.
+        if !binary_name(&frame.binary) || !frame.symbol.is_empty() {
             return Err(DomainError::InvalidArgument { what: "frames" });
         }
     }
     // A class name, never a message: letters, digits, `_`, `.` and `$`.
     let name = &report.exception_name;
-    if name.chars().count() > 128 || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$')) {
+    if name.len() > 128 || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$')) {
         return Err(DomainError::InvalidArgument { what: "exception_name" });
     }
-    if !plain(&report.app_version, 64) || !plain(&report.app_build, 64) || !plain(&report.os, 128) {
+    if !version_text(&report.app_version, 64) || !version_text(&report.app_build, 64) || !version_text(&report.os, 128) {
         return Err(DomainError::InvalidArgument { what: "build" });
     }
     Ok(())
 }
 
-/// At most `max` characters, none of them a control character.
-fn plain(text: &str, max: usize) -> bool {
-    text.chars().count() <= max && !text.chars().any(char::is_control)
+/// A binary's file name: `FarCooler`, `libc++abi.dylib`, `Far Cooler`.
+/// ASCII letters, digits, `.`, `_`, `+`, `-` and inner spaces, 1 to 128.
+pub fn binary_name(text: &str) -> bool {
+    (1..=128).contains(&text.len())
+        && text.trim() == text
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-' | ' '))
 }
 
-/// What makes two reports one: the kind, the exception, and the frames. Not
-/// the build or the OS, so the same crash on a newer OS is a repeat; the
-/// frames' offsets move with each build of the app's own binary, though, so
-/// a fix shipped and a crash in the same place after it is a new signature.
+/// A version, build or OS as MetricKit says them: `1.4`, `1093`,
+/// `iPhone OS 26.1 (23B85)`. ASCII letters, digits, spaces and `.`, `_`,
+/// `(`, `)`, `,`, `-`, at most `max`.
+pub fn version_text(text: &str, max: usize) -> bool {
+    text.len() <= max && text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '(' | ')' | ',' | '-'))
+}
+
+/// What makes two reports one: the kind, the exception, and the frames'
+/// binaries in order, the app's own among them. Not offsets, which move with
+/// every build of the app's binary, and not the build or OS: the same crash
+/// on the next build is a repeat, which is what lets a closed card hear that
+/// its fix didn't hold. The offsets are in the card's Finding notes.
 pub fn signature(report: &pb::CrashReport) -> String {
-    let frames: Vec<_> = report.frames.iter().map(|f| json!([f.binary, f.offset, f.symbol, f.depth])).collect();
+    let binaries: Vec<&str> = report.frames.iter().map(|f| f.binary.as_str()).collect();
     let key = json!([
         report.kind,
         report.exception_type,
         report.exception_code,
         report.signal,
         report.exception_name,
-        frames,
+        binaries,
     ]);
     crate::charter_read::sha256_hex(key.to_string().as_bytes())
 }
@@ -136,15 +168,19 @@ fn detail(report: &pb::CrashReport) -> serde_json::Value {
     })
 }
 
-/// Far Cooler's own board on this runner: the Main workspace of the first
-/// repository whose origin's last path part is `farcooler`.
+/// Far Cooler's own board on this runner: the Main workspace of the
+/// repository whose origin's last path part is `farcooler`, the one whose
+/// checkout sorts first when there are several, so the same board every time.
 fn board(svc: &Service) -> Result<Option<Workspace>> {
+    let mut found = Vec::new();
     for workspace in svc.store.list_workspaces(None)? {
-        if workspace.is_main && is_farcooler(&svc.store.get_repository(workspace.repository_id)?.remote_summary) {
-            return Ok(Some(workspace));
+        let repository = svc.store.get_repository(workspace.repository_id)?;
+        if workspace.is_main && is_farcooler(&repository.remote_summary) {
+            found.push((repository.canonical_git_dir, workspace));
         }
     }
-    Ok(None)
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(found.into_iter().next().map(|(_, w)| w))
 }
 
 /// Whether `remote` (an origin URL) is a `farcooler` repository:
@@ -154,47 +190,14 @@ pub fn is_farcooler(remote: &str) -> bool {
     last.trim_end_matches(".git").eq_ignore_ascii_case("farcooler")
 }
 
-/// A new card for `report` on `board`, with its frames in a Finding note.
-fn file(svc: &Service, board: &Workspace, report: &pb::CrashReport, digest: &str, count: u32) -> Result<Task> {
-    let made = svc.store.create_task(board.id, &title(report), Actor::Runner)?;
-    let update = TaskUpdate {
-        title: made.title.clone(),
-        intent: intent(report, count),
-        acceptance: Vec::new(),
-        constraints: Vec::new(),
-        labels: LABELS.iter().map(|l| l.to_string()).collect(),
-        worktree_id: None,
-    };
-    let task = svc.store.fill_in_new_task(made.id, made.resource_version, &update)?;
-    svc.store.add_note(task.id, NoteKind::Finding, Actor::Runner, &finding(report, digest), json!({}))?;
-    Ok(task)
-}
-
-/// A repeat on `task`'s signature: the count in its intent, and a Finding
-/// note when it was closed and this is a newer build than the last report's.
-fn raise(svc: &Service, report: &pb::CrashReport, task: &Task, count: u32, previous_build: Option<&str>) -> Result<Task> {
-    if matches!(task.status, TaskStatus::Done | TaskStatus::Cancelled) && previous_build != Some(report.app_build.as_str()) {
-        let body = format!(
-            "Crashed again on {} after this card was closed: the fix didn’t hold, or this is another bug with the same frames.",
-            build_line(report)
-        );
-        svc.store.add_note(task.id, NoteKind::Finding, Actor::Runner, &body, json!({}))?;
-    }
-    let update = TaskUpdate {
-        title: task.title.clone(),
-        intent: intent(report, count),
-        acceptance: task.acceptance.clone(),
-        constraints: task.constraints.clone(),
-        labels: task.labels.clone(),
-        worktree_id: task.worktree_id,
-    };
-    match svc.store.update_task(task.id, task.resource_version, &update) {
-        Ok(task) => Ok(task),
-        // Someone revised the card meanwhile: theirs stands, and the count
-        // is in the store for the next report.
-        Err(DomainError::Conflict { .. }) => svc.store.get_task(task.id),
-        Err(e) => Err(e),
-    }
+/// The Finding a closed card gets when its crash comes back from another
+/// build: that build, and its frames.
+fn again(report: &pb::CrashReport) -> String {
+    format!(
+        "Crashed again on {} after this card was closed: the fix didn’t hold, or this is another bug in the same place.\n\n```\n{}\n```",
+        build_line(report),
+        frames_block(report)
+    )
 }
 
 /// The card's title: "iOS: crashes with SIGSEGV in FarCooler at +0x1f2e",
@@ -295,23 +298,28 @@ pub fn intent(report: &pb::CrashReport, count: u32) -> String {
     )
 }
 
-/// The first finding: the frames, top first, and where the report came from.
-fn finding(report: &pb::CrashReport, digest: &str) -> String {
-    let frames: Vec<String> = report
+/// The frames, one a line, top first: `11  FarCooler +0x403fcc  (the app)`.
+/// Safe inside a fence: a binary's name has no backtick (`binary_name`).
+fn frames_block(report: &pb::CrashReport) -> String {
+    let lines: Vec<String> = report
         .frames
         .iter()
         .map(|f| {
-            let symbol = if f.symbol.is_empty() { String::new() } else { format!(" {}", f.symbol) };
             let own = if f.own { "  (the app)" } else { "" };
-            format!("{:<3} {} +{:#x}{symbol}{own}", f.depth, f.binary, f.offset)
+            format!("{:<3} {} +{:#x}{own}", f.depth, f.binary, f.offset)
         })
         .collect();
+    lines.join("\n")
+}
+
+/// The first finding: the frames, top first, and where the report came from.
+fn finding(report: &pb::CrashReport, digest: &str) -> String {
     format!(
         "First reported on {}. Signature {}.\n\n```\n{}\n```\n\nOffsets are into each binary’s text segment; \
-         symbolicate the app's own against that build's dSYM.",
+         symbolicate the app’s own against that build’s dSYM.",
         build_line(report),
         &digest[..12],
-        frames.join("\n")
+        frames_block(report)
     )
 }
 

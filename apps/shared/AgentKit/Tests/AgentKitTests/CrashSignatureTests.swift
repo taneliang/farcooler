@@ -104,4 +104,25 @@ struct CrashSignatureTests {
         let kept = try JSONDecoder().decode(CrashOutbox.self, from: JSONEncoder().encode(box))
         #expect(kept == box)
     }
+
+    @Test("What the phone sends is inside the runner's character sets, so no field reads as Markdown, a fence or a direction change")
+    func insideTheRunnersCharacterSets() {
+        #expect(CrashSignature.binaryName("libc++abi.dylib") == "libc++abi.dylib")
+        #expect(CrashSignature.binaryName("Far Cooler") == "Far Cooler")
+        #expect(CrashSignature.binaryName("Far`Cooler\u{202E}\u{200B}**\n") == "FarCooler")
+        #expect(CrashSignature.binaryName("```") == "unknown", "never empty: the runner refuses an empty name")
+        #expect(CrashSignature.versionText("iPhone OS 26.1 (23B85)", 128) == "iPhone OS 26.1 (23B85)")
+        #expect(CrashSignature.versionText("1.4 [x](y)`*\n", 64) == "1.4 x(y)")
+        #expect(CrashSignature.versionText(String(repeating: "9", count: 80), 64).count == 64)
+    }
+
+    @Test("A refusal drops the signature, stops asking that runner, or waits, by its word")
+    func whatARefusalMeans() {
+        #expect(CrashOutbox.refused(word: nil) == .drop, "the FFI refused it before sending")
+        #expect(CrashOutbox.refused(word: "invalid-argument") == .drop)
+        #expect(CrashOutbox.refused(word: "not-yours") == .notThisRunner)
+        #expect(CrashOutbox.refused(word: "scope-denied") == .notThisRunner)
+        #expect(CrashOutbox.refused(word: "capability-unsupported") == .notThisRunner)
+        #expect(CrashOutbox.refused(word: "operation-failed") == .later)
+    }
 }
