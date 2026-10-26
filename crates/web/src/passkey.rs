@@ -14,6 +14,16 @@
 //! `Channel::app_host`). Never the parent `farcooler.com`: a passkey scoped
 //! there could be asked to sign by any page on any `*.farcooler.com` host.
 //!
+//! **Nothing else may ever be served under the app host.** A browser lets a
+//! page on any host beneath the RP ID (`*.app.canary.farcooler.com`) use this
+//! passkey, and a `/.well-known/webauthn` related-origins file on the app host
+//! would extend it to whatever origins that file names. sshd doesn't check the
+//! origin, only the RP ID's hash, so either would let another page sign in to
+//! every runner this browser can reach. Today nothing serves either: the
+//! Worker routes the exact host only, and a test holds `/.well-known/webauthn`
+//! to a 404 (`services/web/test/headers.test.ts`). Never add a subdomain under
+//! an app host, or that file.
+//!
 //! **What an assertion must say before it is sent** ([`signature_blob`]). sshd
 //! checks the signature against its own copy of the signed data and the
 //! line's application, so a wrong assertion would only fail there. These are

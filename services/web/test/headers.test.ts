@@ -94,3 +94,17 @@ describe('every response', () => {
     }
   })
 })
+
+// A browser lets a page on any host under the RP ID, or any origin a
+// `/.well-known/webauthn` file on it names, ask the passkey to sign, and
+// sshd checks only the RP ID's hash (crates/web/src/passkey.rs). So the app
+// host serves no such file, signed in or not (ov-767 review).
+describe('the passkey related-origins file', () => {
+  it('is never served', async () => {
+    relay()
+    for (const init of [{}, { headers: { cookie: SESSION } }]) {
+      const res = await get('/.well-known/webauthn', envWith(), init)
+      expect(res.status).toBe(404)
+    }
+  })
+})

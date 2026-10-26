@@ -84,8 +84,18 @@ export const forgetDevice = () => transact('readwrite', store => store.delete(KE
 /// (slice 1's WebCrypto Ed25519 key): `migrated` says so, and the page asks
 /// for a passkey and a new enrollment. Its old line on a runner admits nobody
 /// once the key is deleted, and can be removed from Far Cooler's device list.
+///
+/// A record that can't be read back at all (a slice-1 CryptoKey a newer
+/// browser won't restore, say) is deleted too, rather than leaving the page
+/// stuck on it: what it held can't be used anyway.
 export async function loadDevice(account: string, mintNodeKey: () => { priv: string; pub: string }): Promise<{ device: Device; migrated: boolean }> {
-  const kept = (await readDevice()) as (Device & { ssh?: unknown }) | undefined
+  let kept: (Device & { ssh?: unknown }) | undefined
+  try {
+    kept = (await readDevice()) as (Device & { ssh?: unknown }) | undefined
+  } catch {
+    await forgetDevice()
+    kept = undefined
+  }
   if (kept && kept.account === account && !kept.ssh) return { device: kept, migrated: false }
   if (kept) await forgetDevice()
   const node = mintNodeKey()
@@ -107,8 +117,18 @@ function declined(e: unknown): boolean {
 
 const bytes = (n: number) => crypto.getRandomValues(new Uint8Array(n))
 
+/// The passkey's WebAuthn user handle for `account`: the same bytes every
+/// time, so an authenticator replaces this account's earlier Far Cooler
+/// passkey on this host rather than keeping one per enrollment. A hash, so the
+/// relay's account id isn't handed to the authenticator as it is.
+export async function userHandle(account: string): Promise<Uint8Array> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`farcooler-web passkey ${account}`))
+  return new Uint8Array(digest).slice(0, 32)
+}
+
 /// Make this browser's passkey, for `rpId` (crates/web's `rpId()`, this
-/// build's app host, never `location`). Call it from a click: Safari shows no
+/// build's app host, never `location`), under `user` (`userHandle`, worked
+/// out beforehand so nothing is awaited between the click and the prompt). Call it from a click: Safari shows no
 /// prompt otherwise. Throws `declined`, or `no_passkey` when the browser can't
 /// make an ES256 passkey or won't say its public key.
 ///
@@ -117,13 +137,13 @@ const bytes = (n: number) => crypto.getRandomValues(new Uint8Array(n))
 /// - `userVerification: 'discouraged'`: one touch, no PIN or face (R-89). sshd
 ///   checks presence, which every assertion carries, not verification.
 /// - ES256 only: the one algorithm OpenSSH's sk keys have.
-export async function makePasskey(rpId: string, email: string): Promise<Passkey> {
+export async function makePasskey(rpId: string, user: Uint8Array, email: string): Promise<Passkey> {
   let credential: PublicKeyCredential
   try {
     credential = (await navigator.credentials.create({
       publicKey: {
         rp: { id: rpId, name: 'Far Cooler' },
-        user: { id: bytes(16), name: email || 'Far Cooler', displayName: email || 'Far Cooler' },
+        user: { id: user as Uint8Array<ArrayBuffer>, name: email || 'Far Cooler', displayName: email || 'Far Cooler' },
         challenge: bytes(32),
         pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
         authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'discouraged' },

@@ -24,7 +24,8 @@
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, passkeyKeyLine, rpId, type WebRunner } from 'fc-web'
 
 import { connectFailure, joinDetail, joinTitle, replyRefusal, unreachable } from './copy'
-import { assertWith, canUsePasskeys, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
+import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
+import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat } from './tunnel'
@@ -61,14 +62,18 @@ function show(screen: string): void {
   for (const id of SCREENS) $(id).toggleAttribute('hidden', id !== screen)
 }
 
-/// A full-page message, with at most one button.
-function status(title: string, detail = '', action?: { label: string; run: () => void }): void {
+/// A full-page message, with at most one button, and Cancel when `cancel`
+/// is given.
+function status(title: string, detail = '', action?: { label: string; run: () => void }, cancel?: () => void): void {
   $('status-title').textContent = title
   $('status-detail').textContent = detail
   const button = $<HTMLButtonElement>('status-action')
   button.hidden = !action
   button.onclick = action ? () => action.run() : null
   if (action) button.textContent = action.label
+  const quit = $<HTMLButtonElement>('status-cancel')
+  quit.hidden = !cancel
+  quit.onclick = cancel ? () => cancel() : null
   show('status')
 }
 
@@ -85,6 +90,8 @@ interface Session {
   /// The passkey's OpenSSH line, once there is a passkey.
   keyLine: string
   email: string
+  /// The passkey's user handle for this account (`userHandle`).
+  user: Uint8Array
   tailcat: Tailcat
 }
 
@@ -100,7 +107,7 @@ function passkeyScreen(session: Session, migrated: boolean, notice = ''): void {
     {
       label: 'Make Passkey',
       run: () =>
-        void makePasskey(rpId(), session.email).then(
+        void makePasskey(rpId(), session.user, session.email).then(
           async passkey => {
             session.device.passkey = passkey
             await saveDevice(session.device)
@@ -279,7 +286,8 @@ async function work(session: Session): Promise<void> {
 /// Connect click still counts. If the browser refused to prompt (Safari, once
 /// the dial and the handshake outlasted that click) or the person dismissed
 /// the prompt, a Use Passkey button asks again, with the call made inside its
-/// click. Either way one touch signs.
+/// click, until Cancel or its window closes (`askToUsePasskey`). Either way
+/// one touch signs.
 function signIn(session: Session, label: string): (challenge: Uint8Array) => Promise<Signed> {
   const passkey = session.device.passkey as Passkey
   const rp = rpId()
@@ -289,14 +297,24 @@ function signIn(session: Session, label: string): (challenge: Uint8Array) => Pro
     } catch (e) {
       if ((e as Error).message !== 'declined') throw e
     }
-    return await new Promise<Signed>((resolve, reject) =>
-      status(`Sign in to ${label}`, 'Select Use Passkey, then touch your passkey.', {
-        label: 'Use Passkey',
-        run: () => {
-          status(`Connecting to ${label}…`)
-          assertWith(passkey, rp, challenge).then(resolve, reject)
-        },
-      }),
+    return await askToUsePasskey(
+      (use, cancel) =>
+        status(
+          `Sign in to ${label}`,
+          'Select Use Passkey, then touch your passkey.',
+          {
+            label: 'Use Passkey',
+            run: () => {
+              status(`Connecting to ${label}…`)
+              use()
+            },
+          },
+          () => {
+            status(`Connecting to ${label}…`)
+            cancel()
+          },
+        ),
+      () => assertWith(passkey, rp, challenge),
     )
   }
 }
@@ -432,7 +450,7 @@ async function boot(): Promise<void> {
   }
   const { device, migrated } = kept
   const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
-  const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, tailcat }
+  const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, user: await userHandle(account), tailcat }
   if (!device.passkey) passkeyScreen(session, migrated)
   else if (device.runners?.length) void work(session)
   else void enroll(session)

@@ -257,6 +257,7 @@ async function launch(video) {
     )
   })
   if (runner) await context.addInitScript(swapDial)
+  if (runner) await context.addInitScript(refusable)
   const page = context.pages()[0] ?? (await context.newPage())
   if (throttle > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
   watch(page)
@@ -310,6 +311,18 @@ function swapDial() {
       }
     },
   })
+}
+
+/// `navigator.credentials.get`, made to refuse once as Safari does without a
+/// fresh click (NotAllowedError, no prompt) when the page sets
+/// `__fcRefuseOnce`. Installed before the page's own script runs.
+function refusable() {
+  const real = navigator.credentials.get.bind(navigator.credentials)
+  navigator.credentials.get = options => {
+    if (!globalThis.__fcRefuseOnce) return real(options)
+    globalThis.__fcRefuseOnce = false
+    return Promise.reject(new DOMException('refused without a click', 'NotAllowedError'))
+  }
 }
 
 /// The stored device, or an edit to it, through the page's own IndexedDB.
@@ -468,6 +481,10 @@ try {
     await makePasskey(page)
     await session.passkeys.held((await device(page)).passkey.id)
     if (!credential) failures.push("the authenticator doesn't hold the device's passkey")
+    // The same account's passkey has the same user handle every time, so an
+    // authenticator replaces it rather than keeping one per enrollment.
+    else if (credential.userHandle !== made[0].userHandle) failures.push('a second passkey for the same account has a new user handle')
+    else console.log('csp-check: the same account made its passkey under the same user handle')
 
     if (runner) {
       runner.enroll(JSON.parse((await device(page)).offer).key_a)
@@ -536,6 +553,31 @@ try {
       }
       if (counted.some(n => n !== 1)) failures.push(`eight reconnects cost ${JSON.stringify(counted)} touches`)
       else console.log(`csp-check: eight reconnects cost one touch each: ${JSON.stringify(counted)}`)
+
+      // A browser that refuses to prompt (Safari, once the handshake outlasted
+      // the Connect click) gets Use Passkey, whose click signs at one touch.
+      await page.reload()
+      await statusSays(page, 'Connect to studio')
+      await page.evaluate(() => (globalThis.__fcRefuseOnce = true))
+      let at = touches
+      await page.click('#status-action')
+      await statusSays(page, 'Sign in to studio')
+      await shoot(page, 'use-passkey')
+      await page.click('#status-action')
+      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+      if (touches - at !== 1) failures.push(`Use Passkey cost ${touches - at} touches, not 1`)
+      else console.log('csp-check: a refused prompt offered Use Passkey, which signed at one touch')
+      // Its Cancel ends the attempt with the declined sentence and no touch.
+      await page.reload()
+      await statusSays(page, 'Connect to studio')
+      await page.evaluate(() => (globalThis.__fcRefuseOnce = true))
+      at = touches
+      await page.click('#status-action')
+      await statusSays(page, 'Sign in to studio')
+      await page.click('#status-cancel')
+      await statusSays(page, 'didn’t get your passkey')
+      if (touches !== at) failures.push('Cancel on Use Passkey spent a touch')
+      else console.log('csp-check: Cancel on Use Passkey ended the attempt without a touch')
 
       // The pin altered: refused with the host-key sentence, no terminal, and
       // no touch: the passkey is never asked for a runner it doesn't trust.
