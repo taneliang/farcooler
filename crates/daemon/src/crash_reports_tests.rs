@@ -123,18 +123,27 @@ async fn a_signature_is_kept_once_and_a_repeat_counts() {
     assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "a repeat adds no note");
 }
 
-/// The same crash on a newer OS or build, its app frames at other offsets
-/// as a new build's are, is a repeat; frames through other binaries are a
-/// signature of their own, and their own card.
+/// **One signature, several places.** The same shape of crash with the
+/// app's frames at other offsets, on the same build or a newer one, is the
+/// same card, which gains one Finding with that report's frames ("same
+/// shape, another place"); the same place again adds nothing. Frames
+/// through other binaries are a signature of their own, and their own card.
 #[tokio::test]
-async fn the_build_and_os_are_not_the_signature() {
+async fn same_shape_elsewhere_is_a_finding_on_the_same_card() {
     let r = runner("https://github.com/someone/FarCooler").await;
-    call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
-    let mut newer = report_of(&fixture());
-    newer.os = "iPhone OS 26.2 (23C5)".into();
-    newer.app_build = "1094".into();
-    newer.frames.iter_mut().filter(|f| f.own).for_each(|f| f.offset += 0x120);
-    assert_eq!(call(&r, OWNERS_PHONE, newer).await.unwrap().count, 2);
+    let key = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap().task_key;
+    let card = cards(&r).into_iter().find(|t| t.key == key).unwrap();
+    let mut elsewhere = report_of(&fixture());
+    elsewhere.os = "iPhone OS 26.2 (23C5)".into();
+    elsewhere.frames.iter_mut().filter(|f| f.own).for_each(|f| f.offset += 0x120);
+    for n in [2, 3] {
+        let again = call(&r, OWNERS_PHONE, elsewhere.clone()).await.unwrap();
+        assert_eq!((again.count, again.task_key.as_str()), (n, key.as_str()));
+    }
+    let findings = r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
+    assert_eq!(findings.len(), 2, "one for the new place, none for its repeat: {findings:?}");
+    assert!(findings[1].body.starts_with("Same shape, another place"), "{}", findings[1].body);
+    assert!(findings[1].body.contains("FarCooler +0x4040ec"), "{}", findings[1].body);
     let mut other = report_of(&fixture());
     other.frames[9].binary = "UIKitCore".into();
     let other = call(&r, OWNERS_PHONE, other).await.unwrap();
@@ -142,18 +151,18 @@ async fn the_build_and_os_are_not_the_signature() {
     assert_eq!(cards(&r).len(), 2);
 }
 
-/// A closed card hears of a repeat from a newer build once, as a Finding
-/// with that build's frames: the fix didn't hold. A repeat on the same build
-/// says nothing more. The newer build's app frames are elsewhere, as a real
-/// rebuild's are, and it is still the same card.
+/// A closed card hears its signature came back from a new place once, as a
+/// Finding with that build's frames, worded as what happened ("came back on
+/// build X"), never as a verdict on the fix. The same place again says
+/// nothing more, and it is still the same card.
 #[tokio::test]
-async fn a_repeat_after_closing_on_a_newer_build_is_a_finding() {
+async fn a_signature_back_on_a_closed_card_is_a_finding() {
     let r = runner("git@github.com:taneliang/farcooler.git").await;
     let key = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap().task_key;
     let card = cards(&r).into_iter().find(|t| t.key == key).unwrap();
     r.svc.store.set_task_status(card.id, TaskStatus::Done, farcooler_store::models::Actor::User).unwrap();
     call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
-    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "the same build");
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "the same place");
     let mut newer = report_of(&fixture());
     newer.app_build = "1100".into();
     newer.frames.iter_mut().filter(|f| f.own).for_each(|f| f.offset = 0x500000);
@@ -161,9 +170,27 @@ async fn a_repeat_after_closing_on_a_newer_build_is_a_finding() {
     call(&r, OWNERS_PHONE, newer).await.unwrap();
     let findings = r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
     assert_eq!(findings.len(), 2, "{findings:?}");
-    assert!(findings[1].body.contains("1.4 (1100)"), "{}", findings[1].body);
+    assert!(findings[1].body.starts_with("A crash with this signature came back on 1.4 (1100)"), "{}", findings[1].body);
+    assert!(!findings[1].body.contains("fix"), "{}", findings[1].body);
     assert!(findings[1].body.contains("FarCooler +0x500000"), "{}", findings[1].body);
     assert_eq!(cards(&r).len(), 1);
+}
+
+/// At most three of the runner's Findings land on one card a day, the first
+/// one included, however many new places report: devices on alternating
+/// builds can't fill a card.
+#[tokio::test]
+async fn new_places_add_at_most_three_findings_a_day() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    let key = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap().task_key;
+    let card = cards(&r).into_iter().find(|t| t.key == key).unwrap();
+    for build in 2000..2006 {
+        let mut report = report_of(&fixture());
+        report.app_build = build.to_string();
+        call(&r, OWNERS_PHONE, report).await.unwrap();
+    }
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 3);
+    assert_eq!(r.svc.store.crash_signatures().unwrap()[0].2, 7, "every report still counts");
 }
 
 /// A runner that isn't working on Far Cooler counts and files nothing.

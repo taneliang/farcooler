@@ -15,10 +15,13 @@
 //! where that work is dispatched from, and the coordinator reads the board
 //! at every check-in. So a new signature files one card, labeled `found` and
 //! `crash`, with its frames in a Finding note; a repeat raises the count in
-//! the card's intent and adds nothing; a repeat from another build after the
-//! card was closed adds one Finding note with that build's frames, because
-//! the fix didn't hold. At most `DAILY_CAP` new signatures a day are kept;
-//! past it reports count on one overflow row and file nothing.
+//! the card's intent. The signature is coarse (`signature`), so a repeat
+//! from a place the card hasn't seen, a build and app frame offsets not
+//! reported before, adds one Finding with its frames: "same shape, another
+//! place" while the card is open, "came back on build X" once it is closed.
+//! The store caps those at `FINDINGS_PER_DAY` a card. At most `DAILY_CAP` new
+//! signatures a day are kept; past it reports count on one overflow row and
+//! file nothing.
 //!
 //! The card goes on Far Cooler's own board: the Main workspace of a
 //! repository whose origin is a `farcooler` repository, the one at the
@@ -62,6 +65,8 @@ pub fn handle(svc: &Service, watcher: &Watcher, req: pb::Request) -> Result<resu
     let labels: Vec<String> = LABELS.iter().map(|l| l.to_string()).collect();
     let finding = finding(&report, &digest);
     let again = again(&report);
+    let elsewhere = elsewhere(&report);
+    let place = place(&report);
     let intent = |count: u32| intent(&report, count);
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let board = board(svc)?;
@@ -69,12 +74,14 @@ pub fn handle(svc: &Service, watcher: &Watcher, req: pb::Request) -> Result<resu
         signature: &digest,
         detail: &detail,
         build: &report.app_build,
+        place: &place,
         daily_cap: DAILY_CAP,
         board: board.map(|b| b.id),
         title: &title,
         labels: &labels,
         finding: &finding,
         intent: &intent,
+        elsewhere: &elsewhere,
         again: &again,
     })?;
     if record.over_cap {
@@ -136,8 +143,12 @@ pub fn version_text(text: &str, max: usize) -> bool {
 /// What makes two reports one: the kind, the exception, and the frames'
 /// binaries in order, the app's own among them. Not offsets, which move with
 /// every build of the app's binary, and not the build or OS: the same crash
-/// on the next build is a repeat, which is what lets a closed card hear that
-/// its fix didn't hold. The offsets are in the card's Finding notes.
+/// on the next build is a repeat, so a closed card hears it came back.
+///
+/// Coarse on purpose (the owner's ruling on the ov-797 re-review): two bugs
+/// that crash the same way, an `NSInvalidArgumentException` raised from two
+/// places, share it. What tells them apart is `place`, and a new place adds
+/// a Finding with its frames rather than a card.
 pub fn signature(report: &pb::CrashReport) -> String {
     let binaries: Vec<&str> = report.frames.iter().map(|f| f.binary.as_str()).collect();
     let key = json!([
@@ -190,11 +201,31 @@ pub fn is_farcooler(remote: &str) -> bool {
     last.trim_end_matches(".git").eq_ignore_ascii_case("farcooler")
 }
 
-/// The Finding a closed card gets when its crash comes back from another
-/// build: that build, and its frames.
+/// Where a report came from, for telling one place in the app from
+/// another under one coarse signature: its build, and the offsets of its
+/// frames in the app's own binary. `1093:0x403fcc,0x403d40`.
+pub fn place(report: &pb::CrashReport) -> String {
+    let own: Vec<String> = report.frames.iter().filter(|f| f.own).map(|f| format!("{:#x}", f.offset)).collect();
+    format!("{}:{}", report.app_build, own.join(","))
+}
+
+/// The Finding a closed card gets when its signature comes back from a new
+/// place: that build, and its frames. It says what happened, not why: the
+/// signature is coarse, so it may be the same bug or another one that
+/// crashes the same way.
 fn again(report: &pb::CrashReport) -> String {
     format!(
-        "Crashed again on {} after this card was closed: the fix didn’t hold, or this is another bug in the same place.\n\n```\n{}\n```",
+        "A crash with this signature came back on {} after this card was closed.\n\n```\n{}\n```",
+        build_line(report),
+        frames_block(report)
+    )
+}
+
+/// The Finding an open card gets for a report from a new place: the same
+/// shape of crash with the app's frames elsewhere, which may be another bug.
+fn elsewhere(report: &pb::CrashReport) -> String {
+    format!(
+        "Same shape, another place: reported on {} with the app’s frames at other offsets.\n\n```\n{}\n```",
         build_line(report),
         frames_block(report)
     )
@@ -275,7 +306,8 @@ pub fn intent(report: &pb::CrashReport, count: u32) -> String {
     let what = if report.kind == "hang" { "hung" } else { "crashed" };
     let mut how = Vec::new();
     if !report.exception_name.is_empty() {
-        how.push(format!("an uncaught {}", report.exception_name));
+        // In a code span, so a `_` in the name is never emphasis.
+        how.push(format!("an uncaught `{}`", report.exception_name));
     }
     if let Some(signal) = report.signal {
         how.push(signal_name(signal).map_or_else(|| format!("signal {signal}"), str::to_string));

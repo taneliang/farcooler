@@ -15,6 +15,14 @@
 //! **At most `daily_cap` new signatures a day.** Past it a report counts on
 //! one `OVERFLOW` row and files nothing, so no caller, the owner's phone or a
 //! process on the runner, can fill a board with cards.
+//!
+//! **One signature, several places.** The signature is coarse (the daemon
+//! keys it on the exception and the frames' binaries), so two bugs that
+//! crash the same way share a row. Each report also names its `place`, the
+//! build and the app's own frames' offsets, and a place the row hasn't seen
+//! adds one Finding with that report's frames to its card: "same shape,
+//! another place" while it is open, "came back" once it is closed. At most
+//! `FINDINGS_PER_DAY` of the runner's Findings land on one card a day.
 
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
@@ -45,7 +53,10 @@ pub(crate) fn migration_0061_crash_signatures(tx: &rusqlite::Transaction) -> rus
              last_build TEXT NOT NULL,
              -- The card filed for it, if any. No key into tasks: the record
              -- outlives a card deleted.
-             task_id BLOB
+             task_id BLOB,
+             -- Every place it was reported from, JSON: the build and the
+             -- app's own frames' offsets, as the daemon spells them.
+             places TEXT NOT NULL DEFAULT '[]'
          );",
     )
 }
@@ -56,12 +67,19 @@ pub const OVERFLOW: &str = "overflow";
 /// How long the cap's day is.
 const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
 
+/// The most Findings the runner adds to one crash card in a day, the first
+/// one included.
+pub const FINDINGS_PER_DAY: i64 = 3;
+
 /// One report, and what to file for it.
 pub struct CrashFiling<'a> {
     pub signature: &'a str,
     /// The signature as JSON, kept with a new row.
     pub detail: &'a str,
     pub build: &'a str,
+    /// Where it was reported from: its build and the app's own frames'
+    /// offsets. A place the row hasn't seen adds a Finding.
+    pub place: &'a str,
     /// New signatures allowed in a day.
     pub daily_cap: u32,
     /// The board a new signature's card goes on; none files no card.
@@ -72,8 +90,9 @@ pub struct CrashFiling<'a> {
     pub finding: &'a str,
     /// The card's intent at a count.
     pub intent: &'a dyn Fn(u32) -> String,
-    /// The Finding a closed card gets when the report is from another build
-    /// than the last one.
+    /// The Finding an open card gets for a report from a new place.
+    pub elsewhere: &'a str,
+    /// The Finding a closed card gets for a report from a new place.
     pub again: &'a str,
 }
 
@@ -100,7 +119,7 @@ impl Store {
         let now = now_millis();
         let before: Option<(String, Option<Vec<u8>>)> = tx
             .query_row(
-                "SELECT last_build, task_id FROM crash_signatures WHERE signature = ?1",
+                "SELECT places, task_id FROM crash_signatures WHERE signature = ?1",
                 [f.signature],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -121,10 +140,21 @@ impl Store {
             }
         }
         let count = bump(&tx, f.signature, f.detail, f.build, now)?;
-        let (previous_build, card) = match before {
-            Some((build, task)) => (Some(build), task.and_then(|b| Uuid::from_slice(&b).ok())),
-            None => (None, None),
+        let (mut places, card): (Vec<String>, _) = match before {
+            Some((places, task)) => {
+                (serde_json::from_str(&places).unwrap_or_default(), task.and_then(|b| Uuid::from_slice(&b).ok()))
+            }
+            None => (Vec::new(), None),
         };
+        let new_place = !places.iter().any(|p| p == f.place);
+        if new_place {
+            places.push(f.place.to_string());
+            tx.execute(
+                "UPDATE crash_signatures SET places = ?2 WHERE signature = ?1",
+                params![f.signature, serde_json::to_string(&places).unwrap_or_else(|_| "[]".into())],
+            )
+            .map_err(map_err)?;
+        }
         let status: Option<String> = match card {
             Some(task) => tx
                 .query_row("SELECT status FROM tasks WHERE id = ?1", [uuid_blob(task)], |r| r.get(0))
@@ -135,8 +165,9 @@ impl Store {
         let task = match (card, status) {
             (Some(task), Some(status)) => {
                 let closed = status == TaskStatus::Done.as_str() || status == TaskStatus::Cancelled.as_str();
-                if closed && previous_build.as_deref() != Some(f.build) {
-                    insert_note(&tx, task, NoteKind::Finding, Actor::Runner, f.again, &json!({}), None)?;
+                if new_place && findings_today(&tx, task, now)? < FINDINGS_PER_DAY {
+                    let body = if closed { f.again } else { f.elsewhere };
+                    insert_note(&tx, task, NoteKind::Finding, Actor::Runner, body, &json!({}), None)?;
                 }
                 tx.execute(
                     "UPDATE tasks SET intent = ?2, edited_at = ?3, resource_version = resource_version + 1 WHERE id = ?1",
@@ -187,6 +218,16 @@ fn bump(tx: &rusqlite::Transaction, signature: &str, detail: &str, build: &str, 
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
 }
 
+/// The runner's Findings on `task` in the day before `now`.
+fn findings_today(tx: &rusqlite::Transaction, task: Uuid, now: i64) -> Result<i64> {
+    tx.query_row(
+        "SELECT COUNT(*) FROM task_notes WHERE task_id = ?1 AND kind = ?2 AND actor = ?3 AND at > ?4",
+        params![uuid_blob(task), NoteKind::Finding.as_str(), Actor::Runner.to_string(), now - DAY_MILLIS],
+        |r| r.get(0),
+    )
+    .map_err(map_err)
+}
+
 /// A new card on `board` for `f`, its Created and Finding notes, and the
 /// row's link to it, inside the report's transaction. In Backlog, as
 /// `create_task` files one.
@@ -234,12 +275,14 @@ mod tests {
             signature,
             detail: "{\"first\":true}",
             build,
+            place: build,
             daily_cap: 3,
             board,
             title: "iOS: crashes",
             labels: &[],
             finding: "frames",
             intent,
+            elsewhere: "elsewhere",
             again: "again",
         }
     }
@@ -277,6 +320,18 @@ mod tests {
         let names: Vec<String> = s.crash_signatures().unwrap().into_iter().map(|r| r.0).collect();
         assert!(!names.contains(&"d".to_string()) && names.contains(&OVERFLOW.to_string()), "{names:?}");
         assert_eq!(names.len(), 4);
+    }
+
+    /// **A failed write keeps nothing.** A card that can't be filed (its board
+    /// is gone) fails the report, and neither the row nor its count is kept,
+    /// so the phone's retry counts it once.
+    #[test]
+    fn a_failed_write_keeps_nothing() {
+        let s = Store::open_in_memory().unwrap();
+        let intent = |n: u32| format!("seen {n}");
+        let err = s.record_crash(&filing("aa", "1", Some(Uuid::now_v7()), &intent)).unwrap_err();
+        assert!(matches!(err, DomainError::NotFound), "{err:?}");
+        assert!(s.crash_signatures().unwrap().is_empty());
     }
 
     /// The migration is the 52nd (0061) and `Welcome`.
