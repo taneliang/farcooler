@@ -22,15 +22,51 @@
 //! could be words typed into the box, and the row under the box's closing
 //! rule can't be.
 
+//!
+//! **Which work.** The kind matters to a caller trusting claude's registry
+//! beside it: claude keeps the registry `busy` while background agents run,
+//! but writes `shell` for shells alone, so beside shells alone `busy` is a
+//! turn running (`Background::Shells`, ov-795 review). Agents are told by
+//! their `◯` rows, which every agent capture here has; the tray hint or a
+//! count with no row is shells or monitors.
+//!
+//! **Known gaps, failing safe.** The count is read on the row right under the
+//! box, so a row claude or vim puts there first (`-- INSERT --`, a long
+//! paste's `paste again to expand`) hides it: beside shells alone the box
+//! then reads no background work, and a send is left as `paste_left`.
+
 use super::{Registry, footer_text};
+
+/// The background work a claude footer shows (`Registry::background_work`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Background {
+    /// None shows.
+    None,
+    /// Shells or monitors, and no agent row: claude's registry says `shell`
+    /// for these, never `busy`.
+    Shells,
+    /// Background agents, by their `◯` rows: claude's registry says `busy`
+    /// while they run, the turn over.
+    Agents,
+}
 
 impl Registry {
     /// Whether the agent's footer shows background work still running.
     pub fn background_running(&self, command: &str, screen: &str) -> bool {
-        let Some(rules) = self.identify(command, screen) else { return false };
+        self.background_work(command, screen) != Background::None
+    }
+
+    /// Which background work the agent's footer shows (this module's docs).
+    pub fn background_work(&self, command: &str, screen: &str) -> Background {
+        let Some(rules) = self.identify(command, screen) else { return Background::None };
         let footer = footer_text(screen, rules.footer_lines);
-        rules.background.iter().any(|needle| footer.contains(needle.as_str()))
-            || (rules.preset == "claude" && crate::composer::claude_mode_line(screen).is_some_and(|line| counts_background(&line)))
+        let running = rules.background.iter().any(|needle| footer.contains(needle.as_str()))
+            || (rules.preset == "claude" && crate::composer::claude_mode_line(screen).is_some_and(|line| counts_background(&line)));
+        match running {
+            false => Background::None,
+            true if footer.contains("◯ ") => Background::Agents,
+            true => Background::Shells,
+        }
     }
 }
 

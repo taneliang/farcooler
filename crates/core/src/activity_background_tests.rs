@@ -96,7 +96,10 @@ fn background_shells_still_count_once_the_box_holds_a_message() {
         assert!(r.background_running("claude", screen), "{name}");
         assert_eq!(r.classify_main("claude", screen), Idle, "{name}");
         assert_eq!(r.classify("claude", screen), Working, "{name}");
+        assert_eq!(r.background_work("claude", screen), Background::Shells, "{name}: shells, no agent row");
     }
+    assert_eq!(r.background_work("claude", WAITING), Background::Agents);
+    assert_eq!(r.background_work("claude", WAITING_DRAFT), Background::Agents);
     let owner = "Btw to make things go faster, if there are multiple trains waiting to land, if it’s safe you can merge \
                  them into the same train. Otherwise you’ll have a million trains queueing unnecessarily. Please update \
                  the manager skill also with such best practices";
