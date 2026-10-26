@@ -44,6 +44,8 @@ fn every_capture_classifies_as_it_was_read() {
         ("claude-2.1.301-scrolled-two-lines-40x45-e.txt", "claude", Idle),
         ("claude-2.1.301-scrolled-working-700-40x24-e.txt", "claude", Working),
         ("claude-2.1.301-whole-500-40x45-e.txt", "claude", Idle),
+        ("claude-2.1.309-shells-empty-59x41-e.txt", "claude", Working),
+        ("claude-2.1.309-shells-owner-59x41-e.txt", "claude", Working),
         ("claude-after-a-keyboard-yes.txt", "claude", Working),
         ("claude-asking.txt", "claude", Blocked),
         ("claude-background-agent-main-idle-40col.txt", "claude", Working),

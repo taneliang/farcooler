@@ -262,6 +262,15 @@ pub(crate) fn claude_rows(screen: &str) -> Option<usize> {
     claude_box_at(&lines).map(|(start, end)| end - start)
 }
 
+/// claude's mode line on `screen`, printed: the first row under the rule
+/// that closes its box, which nothing typed into the box can reach; `None`
+/// where `read` finds no box (ov-795).
+pub(crate) fn claude_mode_line(screen: &str) -> Option<String> {
+    let lines: Vec<Vec<(char, bool)>> = screen.lines().map(cells).collect();
+    let (_, end) = claude_box_at(&lines)?;
+    lines.get(end + 1).map(|row| text(row))
+}
+
 /// Where claude's box sits in `lines`: the prompt line and the row of the
 /// rule that closes it.
 fn claude_box_at(lines: &[Vec<(char, bool)>]) -> Option<(usize, usize)> {
