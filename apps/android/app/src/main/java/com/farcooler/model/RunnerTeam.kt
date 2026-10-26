@@ -83,10 +83,13 @@ data class RunnerTeam(val members: List<Member>, val you: String) {
         const val ROLE_NOT_SAVED =
             "The runner didn’t change that role. Check that this device is still the owner’s, then try again."
 
-        /** A device whose member was removed from the runner. */
+        /**
+         * A device whose member was removed from the runner. It names nobody: the owner or any runner admin may have
+         * done it. The owner can always add them back, so they're who to ask. AgentKit's words.
+         */
         const val REMOVED_TITLE = "You were removed from this runner"
         const val REMOVED_BODY =
-            "The runner’s owner took you off the team, so this device can’t see its work anymore. " +
-                "To come back, ask them to add you again."
+            "Someone who manages this runner removed you, so this device can’t see the runner’s work anymore. " +
+                "To come back, ask the runner’s owner to add you again."
     }
 }

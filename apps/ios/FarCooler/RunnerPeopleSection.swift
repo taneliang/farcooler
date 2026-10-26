@@ -21,11 +21,6 @@ struct RunnerPeopleSection: View {
             }
             ForEach(people.members) { member in
                 row(member)
-                // The owner's picker, on a line of its own under the member:
-                // beside a long name on a phone it would squeeze both.
-                if let setRole {
-                    RolePicker(member: member, setRole: setRole)
-                }
             }
         } header: {
             Text("People")
@@ -72,8 +67,13 @@ struct RunnerPeopleSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // The owner's picker, in the member's own row (ov-784): the name
+            // takes what's left and wraps, so the choice stays with whose it is.
+            if let setRole {
+                RolePicker(member: member, setRole: setRole)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: setRole == nil ? .combine : .contain)
         .accessibilityIdentifier("runner-person-\(member.handle)")
     }
 }
@@ -100,7 +100,9 @@ private struct RolePicker: View {
         } label: {
             Text(RunnerPeople.roleLabel)
         }
+        .labelsHidden()
         .pickerStyle(.menu)
+        .fixedSize()
         .disabled(choosing != nil)
         .accessibilityLabel("\(member.name)’s \(RunnerPeople.roleLabel.lowercased())")
         .accessibilityIdentifier("runner-person-role-\(member.handle)")

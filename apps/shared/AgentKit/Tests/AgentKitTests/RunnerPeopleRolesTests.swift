@@ -67,6 +67,9 @@ struct RunnerPeopleRolesTests {
         #expect(released.isReleased && !released.isMember && !released.isOwner)
         #expect(try !#require(RunnerPeople(json: Self.listed(you: "bob"))).isReleased)
         #expect(RunnerPeople.removedTitle == "You Were Removed from This Runner")
+        #expect(RunnerPeople.removedTitle(from: "studio") == "You Were Removed from studio")
+        #expect(RunnerPeople.removedTitle(from: "") == RunnerPeople.removedTitle)
+        #expect(!RunnerPeople.removedBody.contains("owner took"), "anyone who manages the runner may have done it")
     }
 
     @Test("A Maintainer's row says so where no picker does, and a member's row doesn't")

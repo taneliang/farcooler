@@ -72,9 +72,17 @@ extension RunnerPeople {
     public static let roleNotSaved = "The runner didn’t change that role. Check that this device is still the owner’s, then try again."
 
     /// A device whose member was removed from the runner: the screen in
-    /// place of the runner's work, on every app.
+    /// place of the runner's work, on every app. It names nobody: the owner
+    /// or any runner admin may have done it (`member.remove` is a runner
+    /// admin's). The owner can always add them back, so they're who to ask.
     public static let removedTitle = "You Were Removed from This Runner"
     public static let removedBody =
-        "The runner’s owner took you off the team, so this device can’t see its work anymore. "
-        + "To come back, ask them to add you again."
+        "Someone who manages this runner removed you, so this device can’t see the runner’s work anymore. "
+        + "To come back, ask the runner’s owner to add you again."
+
+    /// The title where several runners may be on screen: "You Were Removed
+    /// from studio".
+    public static func removedTitle(from runner: String) -> String {
+        runner.isEmpty ? removedTitle : "You Were Removed from \(runner)"
+    }
 }

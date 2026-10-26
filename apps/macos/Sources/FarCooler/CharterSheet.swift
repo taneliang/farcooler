@@ -32,6 +32,8 @@ struct CharterSheet: View {
     @State private var saving = false
     /// Why the last save didn't land.
     @State private var failure: String?
+    /// Asking before a changed draft is thrown away.
+    @State private var confirmingDiscard = false
     @Environment(\.dismiss) private var dismiss
 
     /// Who may change a charter, said under the title so a reader knows whom
@@ -61,8 +63,16 @@ struct CharterSheet: View {
         .padding(20)
         .frame(minWidth: 320, idealWidth: 560, maxWidth: .infinity, minHeight: 240, idealHeight: 520, maxHeight: .infinity)
         // Escape leaves an edit, or closes the sheet, as Cancel and Done do.
+        // A changed draft is asked about first: one keypress shouldn't lose
+        // a long edit.
         .onExitCommand {
-            if draft != nil { cancelEdit() } else { dismiss() }
+            if draft != nil { leaveEdit() } else { dismiss() }
+        }
+        .confirmationDialog("Discard Your Changes?", isPresented: $confirmingDiscard) {
+            Button("Discard Changes", role: .destructive, action: cancelEdit)
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("Your edit to \(workspace.name)’s charter hasn’t been saved.")
         }
         .task {
             reading = await load()
@@ -102,7 +112,7 @@ struct CharterSheet: View {
         HStack {
             Spacer()
             if draft != nil {
-                Button("Cancel", action: cancelEdit)
+                Button("Cancel", action: leaveEdit)
                     .disabled(saving)
                 Button(saving ? "Saving…" : "Save") { Task { await commit() } }
                     .keyboardShortcut(.defaultAction)
@@ -140,6 +150,19 @@ struct CharterSheet: View {
     private func beginEdit() {
         failure = nil
         if case .text(let text, _)? = reading { draft = text } else { draft = "" }
+    }
+
+    /// Whether the draft differs from what was read: what leaving an edit
+    /// asks about.
+    static func isChanged(draft: String?, was reading: CharterReading?) -> Bool {
+        guard let draft else { return false }
+        if case .text(let text, _)? = reading { return draft != text }
+        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Cancel or Escape: leave at once when nothing changed, else ask.
+    private func leaveEdit() {
+        if Self.isChanged(draft: draft, was: reading) { confirmingDiscard = true } else { cancelEdit() }
     }
 
     private func cancelEdit() {

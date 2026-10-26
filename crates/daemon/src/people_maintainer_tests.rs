@@ -209,3 +209,27 @@ async fn renames_and_lead_changes_are_in_the_people_log() {
         "newest first"
     );
 }
+
+/// Only the owner gives a role (R-85): Carol, a Maintainer whose phone is a
+/// runner admin's, is refused `member.set_role` `not_yours`, for herself and
+/// for Bob, and nothing changes or is logged.
+#[tokio::test]
+async fn a_maintainer_gives_no_role() {
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    let before = r.svc.store.people_events(10).unwrap().len();
+    for (handle, role) in [("bob", "maintainer"), ("carol", "member")] {
+        let req = Request {
+            method: "member.set_role".into(),
+            payload: Some(request::Payload::MemberSetRole(pb::MemberSetRole { handle: handle.into(), role: role.into() })),
+            ..Default::default()
+        };
+        let Some(response::Outcome::Error(e)) = factory(&r.svc, CAROL, Scope::HostAdmin).handle(req).await.outcome else {
+            panic!("Carol set {handle}'s role")
+        };
+        assert_eq!(format!("{}:{}", farcooler_core::error::word_for(e.code), e.what), NOT_YOURS, "{handle}");
+    }
+    assert_eq!(r.svc.store.member_role("bob").unwrap(), Role::Member);
+    assert_eq!(r.svc.store.member_role("carol").unwrap(), Role::Maintainer);
+    assert_eq!(r.svc.store.people_events(10).unwrap().len(), before, "nothing logged");
+}

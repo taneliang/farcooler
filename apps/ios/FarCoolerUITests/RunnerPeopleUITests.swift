@@ -80,6 +80,23 @@ final class RunnerPeopleUITests: XCTestCase {
         XCTAssertTrue(sent(app).contains("role bob maintainer"), "\(sent(app))")
     }
 
+    /// The owner's People with each member's picker in their own row, long
+    /// names, in Light and Dark (ov-784 review 4).
+    func testRolePickerCaptures() {
+        for appearance in ["light", "dark"] {
+            let app = runnerSettings(["-phone-roles", "-phone-rep-owner", "-phone-rep-long", "-phone-appearance", appearance])
+            let picker = element(app, "runner-person-role-bob")
+            XCTAssertTrue(app.reveal(picker), "no role picker for Bob: \(app.debugDescription)")
+            let alexandra = element(app, "runner-person-role-alexandra")
+            XCTAssertTrue(alexandra.exists, "no role picker for Alexandra")
+            // The picker sits in its member's row: level with the name, not below it.
+            let row = element(app, "runner-person-alexandra")
+            XCTAssertTrue(alexandra.frame.minY < row.frame.maxY && alexandra.frame.maxY > row.frame.minY, "Alexandra's picker isn't in her row: \(alexandra.frame) vs \(row.frame)")
+            keep(app, "runner-people-roles-\(appearance)", expecting: .shows(picker))
+            app.terminate()
+        }
+    }
+
     /// A member's phone sees who is a Maintainer and no picker.
     func testAMemberSeesRolesAndNoPicker() {
         let app = runnerSettings(["-phone-roles"])

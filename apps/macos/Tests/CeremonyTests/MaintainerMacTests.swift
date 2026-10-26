@@ -29,6 +29,23 @@ struct MaintainerMacTests {
         #expect(CharterSheet.canSave(draft: "## Who decides\n", was: .missing))
     }
 
+    @Test("Leaving an edit asks only when the draft changed")
+    func leavingAsksWhenChanged() {
+        let read = CharterReading.text("## A\n", sha256: "ab")
+        #expect(!CharterSheet.isChanged(draft: "## A\n", was: read))
+        #expect(CharterSheet.isChanged(draft: "## A\nmore\n", was: read))
+        #expect(!CharterSheet.isChanged(draft: " ", was: .missing), "nothing written yet")
+        #expect(CharterSheet.isChanged(draft: "## New\n", was: .missing))
+        #expect(!CharterSheet.isChanged(draft: nil, was: read), "not editing")
+    }
+
+    @Test("The removed screen names the runner")
+    func theRemovedScreenNamesTheRunner() {
+        #expect(FleetPlaceholder.removedTitle("studio").hasPrefix("You Were Removed from "))
+        #expect(FleetPlaceholder.removedTitle("studio") != RunnerPeople.removedTitle)
+        #expect(FleetPlaceholder.removedTitle("") == RunnerPeople.removedTitle)
+    }
+
     @Test("The edit is sent from a file, with the hash it was made to, and the hash comes back with the answer")
     func theEditAndItsHash() {
         #expect(

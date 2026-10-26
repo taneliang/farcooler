@@ -167,6 +167,13 @@ struct FleetPlaceholder: View {
         "Can’t Reach \(ReadOnlyFolders.runnerName(runner))"
     }
 
+    /// The removed state's title, by the runner's name (ov-784): "You Were
+    /// Removed from studio". This Mac's own runner never removes its owner,
+    /// but says "This Runner" if it ever did.
+    nonisolated static func removedTitle(_ runner: String) -> String {
+        RunnerPeople.removedTitle(from: runner.isEmpty ? "" : ReadOnlyFolders.runnerName(runner))
+    }
+
     /// Under either: what happens next, so waiting reads as waiting.
     static let connectingCopy = "This window goes back to where you left it once the runner answers."
 
@@ -254,9 +261,9 @@ struct FleetPlaceholder: View {
                     Button("Show Needs You Instead", action: onShowNeedsYou)
                 }
             }
-        case .removed:
+        case .removed(let runner):
             ContentUnavailableView {
-                Label(RunnerPeople.removedTitle, systemImage: "person.crop.circle.badge.xmark")
+                Label(Self.removedTitle(runner), systemImage: "person.crop.circle.badge.xmark")
             } description: {
                 Text(RunnerPeople.removedBody)
             } actions: {
