@@ -70,6 +70,9 @@ pub enum Why {
     /// It gives a member a role (ov-757): a member admin could otherwise
     /// make themselves a Maintainer.
     Grants,
+    /// It reports the owner's own device's crash (ov-797): a member's phone
+    /// sends none, and the runner files none from one.
+    OwnersDevice,
 }
 
 /// The ruling on `method`. See `Ruling`.
@@ -230,6 +233,8 @@ pub fn member_ruling(method: M) -> Ruling {
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
 
         M::MemberSetRole => Owners(Why::Grants),
+
+        M::CrashReport => Owners(Why::OwnersDevice),
 
         M::WorkspaceDelete
         | M::WorkspaceRename

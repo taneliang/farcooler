@@ -772,6 +772,11 @@ pub mod capability {
     /// on an existing payload, so a client that sets it names this in the
     /// request; one that reads it absent sends none, and the last write wins.
     pub const MEMBER_DEVICES_READ: &str = "member_devices_read";
+    /// A crash's signature from the owner's own phone (ov-797):
+    /// `crash.report`, which the runner keeps once per signature with a count
+    /// and files on Far Cooler's own board. A phone sends nothing to a runner
+    /// without it, and keeps what it has for one that has it.
+    pub const CRASH_REPORTS: &str = "crash_reports";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -795,7 +800,7 @@ pub mod capability {
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
-            MEMBER_DEVICES_READ,
+            MEMBER_DEVICES_READ, CRASH_REPORTS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1076,6 +1081,7 @@ pub mod method {
         MemberSetRole = "member.set_role" => MEMBER_ROLES,
         MemberEvents = "member.events" => MEMBER_ROLES,
         WorkspaceSetCharter = "workspace.set_charter" => MEMBER_ROLES,
+        CrashReport = "crash.report" => CRASH_REPORTS,
     }
 }
 

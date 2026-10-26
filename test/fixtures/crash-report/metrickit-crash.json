@@ -1,0 +1,189 @@
+{
+  "version": "1.0.0",
+  "callStackTree": {
+    "callStackPerThread": true,
+    "callStacks": [
+      {
+        "threadAttributed": false,
+        "threadName": "SENTINEL-OTHER-THREAD",
+        "callStackRootFrames": [
+          {
+            "binaryUUID": "SENTINEL-OTHER-UUID",
+            "offsetIntoBinaryTextSegment": 5000,
+            "sampleCount": 1,
+            "binaryName": "libsystem_kernel.dylib",
+            "address": 6442455944,
+            "subFrames": []
+          }
+        ]
+      },
+      {
+        "threadAttributed": true,
+        "threadName": "SENTINEL-THREAD-NAME",
+        "callStackRootFrames": [
+          {
+            "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0000",
+            "offsetIntoBinaryTextSegment": 37128,
+            "sampleCount": 1,
+            "binaryName": "libsystem_kernel.dylib",
+            "address": 6442488072,
+            "subFrames": [
+              {
+                "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0001",
+                "offsetIntoBinaryTextSegment": 28780,
+                "sampleCount": 1,
+                "binaryName": "libsystem_pthread.dylib",
+                "address": 6442479724,
+                "subFrames": [
+                  {
+                    "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0002",
+                    "offsetIntoBinaryTextSegment": 476032,
+                    "sampleCount": 1,
+                    "binaryName": "libsystem_c.dylib",
+                    "address": 6442926976,
+                    "subFrames": [
+                      {
+                        "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0003",
+                        "offsetIntoBinaryTextSegment": 77580,
+                        "sampleCount": 1,
+                        "binaryName": "libc++abi.dylib",
+                        "address": 6442528524,
+                        "subFrames": [
+                          {
+                            "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0004",
+                            "offsetIntoBinaryTextSegment": 14600,
+                            "sampleCount": 1,
+                            "binaryName": "libc++abi.dylib",
+                            "address": 6442465544,
+                            "subFrames": [
+                              {
+                                "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0005",
+                                "offsetIntoBinaryTextSegment": 115352,
+                                "sampleCount": 1,
+                                "binaryName": "libobjc.A.dylib",
+                                "address": 6442566296,
+                                "subFrames": [
+                                  {
+                                    "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0006",
+                                    "offsetIntoBinaryTextSegment": 75324,
+                                    "sampleCount": 1,
+                                    "binaryName": "libc++abi.dylib",
+                                    "address": 6442526268,
+                                    "subFrames": [
+                                      {
+                                        "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0007",
+                                        "offsetIntoBinaryTextSegment": 75228,
+                                        "sampleCount": 1,
+                                        "binaryName": "libc++abi.dylib",
+                                        "address": 6442526172,
+                                        "subFrames": [
+                                          {
+                                            "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0008",
+                                            "offsetIntoBinaryTextSegment": 234412,
+                                            "sampleCount": 1,
+                                            "binaryName": "libobjc.A.dylib",
+                                            "address": 6442685356,
+                                            "subFrames": [
+                                              {
+                                                "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0009",
+                                                "offsetIntoBinaryTextSegment": 1032144,
+                                                "sampleCount": 1,
+                                                "binaryName": "CoreFoundation",
+                                                "address": 6443483088,
+                                                "subFrames": [
+                                                  {
+                                                    "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0010",
+                                                    "offsetIntoBinaryTextSegment": 215940,
+                                                    "sampleCount": 1,
+                                                    "binaryName": "CoreFoundation",
+                                                    "address": 6442666884,
+                                                    "subFrames": [
+                                                      {
+                                                        "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0011",
+                                                        "offsetIntoBinaryTextSegment": 4210636,
+                                                        "sampleCount": 1,
+                                                        "binaryName": "FarCooler",
+                                                        "address": 6446661580,
+                                                        "subFrames": [
+                                                          {
+                                                            "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0012",
+                                                            "offsetIntoBinaryTextSegment": 4209984,
+                                                            "sampleCount": 1,
+                                                            "binaryName": "FarCooler",
+                                                            "address": 6446660928,
+                                                            "subFrames": [
+                                                              {
+                                                                "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0013",
+                                                                "offsetIntoBinaryTextSegment": 9182736,
+                                                                "sampleCount": 1,
+                                                                "binaryName": "SwiftUICore",
+                                                                "address": 6451633680,
+                                                                "subFrames": [
+                                                                  {
+                                                                    "binaryUUID": "8E2D6B6C-1F00-3A55-9C4A-SENTINEL0014",
+                                                                    "offsetIntoBinaryTextSegment": 2210304,
+                                                                    "sampleCount": 1,
+                                                                    "binaryName": "UIKitCore",
+                                                                    "address": 6444661248,
+                                                                    "subFrames": []
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "diagnosticMetaData": {
+    "appBuildVersion": "1093",
+    "appVersion": "1.4",
+    "regionFormat": "SENTINEL-REGION",
+    "exceptionType": 10,
+    "osVersion": "iPhone OS 26.1 (23B85)",
+    "deviceType": "SENTINEL-DEVICE",
+    "exceptionCode": 0,
+    "signal": 6,
+    "platformArchitecture": "arm64e",
+    "terminationReason": "SENTINEL-TERMINATION-REASON",
+    "virtualMemoryRegionInfo": "SENTINEL-VM-REGION",
+    "bundleIdentifier": "SENTINEL-BUNDLE",
+    "pid": 4242,
+    "lowPowerModeEnabled": false,
+    "isTestFlightApp": false,
+    "exceptionReason": {
+      "composedMessage": "SENTINEL-COMPOSED-MESSAGE: what the user typed",
+      "formatString": "SENTINEL-FORMAT %@",
+      "arguments": [
+        "SENTINEL-ARGUMENT"
+      ],
+      "exceptionType": "NSException",
+      "className": "SENTINEL-CLASS",
+      "exceptionName": "NSInvalidArgumentException"
+    }
+  }
+}

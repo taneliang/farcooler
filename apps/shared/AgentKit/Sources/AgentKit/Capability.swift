@@ -79,4 +79,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case memberRoles = "member_roles"
     case passkeyKeys = "passkey_keys"
     case memberDevicesRead = "member_devices_read"
+    case crashReports = "crash_reports"
 }

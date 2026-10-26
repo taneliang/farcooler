@@ -1,0 +1,89 @@
+{
+  "kind": "crash",
+  "exception_type": 10,
+  "exception_code": 0,
+  "signal": 6,
+  "exception_name": "NSInvalidArgumentException",
+  "frames": [
+    {
+      "binary": "libsystem_kernel.dylib",
+      "offset": 37128,
+      "symbol": "",
+      "depth": 0,
+      "own": false
+    },
+    {
+      "binary": "libsystem_pthread.dylib",
+      "offset": 28780,
+      "symbol": "",
+      "depth": 1,
+      "own": false
+    },
+    {
+      "binary": "libsystem_c.dylib",
+      "offset": 476032,
+      "symbol": "",
+      "depth": 2,
+      "own": false
+    },
+    {
+      "binary": "libc++abi.dylib",
+      "offset": 77580,
+      "symbol": "",
+      "depth": 3,
+      "own": false
+    },
+    {
+      "binary": "libc++abi.dylib",
+      "offset": 14600,
+      "symbol": "",
+      "depth": 4,
+      "own": false
+    },
+    {
+      "binary": "libobjc.A.dylib",
+      "offset": 115352,
+      "symbol": "",
+      "depth": 5,
+      "own": false
+    },
+    {
+      "binary": "libc++abi.dylib",
+      "offset": 75324,
+      "symbol": "",
+      "depth": 6,
+      "own": false
+    },
+    {
+      "binary": "libc++abi.dylib",
+      "offset": 75228,
+      "symbol": "",
+      "depth": 7,
+      "own": false
+    },
+    {
+      "binary": "libobjc.A.dylib",
+      "offset": 234412,
+      "symbol": "",
+      "depth": 8,
+      "own": false
+    },
+    {
+      "binary": "CoreFoundation",
+      "offset": 1032144,
+      "symbol": "",
+      "depth": 9,
+      "own": false
+    },
+    {
+      "binary": "FarCooler",
+      "offset": 4210636,
+      "symbol": "",
+      "depth": 11,
+      "own": true
+    }
+  ],
+  "app_version": "1.4",
+  "app_build": "1093",
+  "os": "iPhone OS 26.1 (23B85)"
+}

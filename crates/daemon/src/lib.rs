@@ -108,6 +108,7 @@ pub mod charter_draft;
 pub mod survey;
 pub mod survey_ops;
 pub mod charter_read;
+pub mod crash_reports;
 pub mod charter_write;
 pub mod survey_read;
 pub(crate) mod board_reads_ops;

@@ -1,0 +1,228 @@
+//! `crash.report` (ov-797) through `Rpc`, where a phone reaches it: a
+//! signature is kept once with a count, filed as one card on Far Cooler's own
+//! board, and refused from anyone but the owner or when it carries more than
+//! a signature.
+
+use std::sync::Arc;
+
+use farcooler_protocol::v1::{self as pb, Request, Scope, response, result};
+use farcooler_store::models::{NoteKind, TaskStatus};
+use farcooler_transport::Peer;
+use serde_json::Value;
+
+use super::*;
+use crate::rpc::RpcFactory;
+use crate::test_support::ScratchDir;
+
+const OWNERS_PHONE: Option<&str> = Some("phone-o");
+const BOBS_PHONE: Option<&str> = Some("phone-b");
+
+struct Runner {
+    _dir: ScratchDir,
+    svc: Arc<Service>,
+    repo: uuid::Uuid,
+}
+
+/// A runner whose one repository's origin is `remote`, and Bob, a member.
+async fn runner(remote: &str) -> Runner {
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let r = svc.store.get_repository(repo).unwrap();
+    svc.store.update_repository(repo, r.resource_version, &r.display_name, &r.canonical_git_dir, remote).unwrap();
+    svc.store.ensure_main_workspace(repo).unwrap();
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    Runner { _dir: dir, svc, repo }
+}
+
+/// The signature the phone's test reads out of MetricKit's JSON
+/// (`CrashSignatureTests`), as it would reach the wire.
+fn fixture() -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/crash-report/signature.json");
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// `args` as the wire's payload, as the phone's FFI builds it.
+fn report_of(args: &Value) -> pb::CrashReport {
+    let text = |k: &str| args[k].as_str().unwrap_or_default().to_string();
+    pb::CrashReport {
+        kind: text("kind"),
+        exception_type: args["exception_type"].as_i64().map(|v| v as i32),
+        exception_code: args["exception_code"].as_i64(),
+        signal: args["signal"].as_i64().map(|v| v as i32),
+        exception_name: text("exception_name"),
+        frames: args["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| pb::CrashFrame {
+                binary: f["binary"].as_str().unwrap().into(),
+                offset: f["offset"].as_u64().unwrap(),
+                symbol: f["symbol"].as_str().unwrap_or_default().into(),
+                depth: f["depth"].as_u64().unwrap() as u32,
+                own: f["own"].as_bool().unwrap_or_default(),
+            })
+            .collect(),
+        app_version: text("app_version"),
+        app_build: text("app_build"),
+        os: text("os"),
+    }
+}
+
+fn request(report: pb::CrashReport) -> Request {
+    let mut req = farcooler_transport::request("crash.report");
+    req.payload = Some(pb::request::Payload::CrashReport(report));
+    req
+}
+
+/// The answer, or the refusal as `<code word>:<what>`.
+async fn call(r: &Runner, device: Option<&str>, report: pb::CrashReport) -> std::result::Result<pb::CrashRecorded, String> {
+    use farcooler_transport::Handler as _;
+    let peer = Peer { client_id: device.map(str::to_string), scope: Scope::Control };
+    let rpc = RpcFactory::new(r.svc.clone(), Watcher::new(r.svc.clone()), Arc::new(tokio::sync::Notify::new()), peer);
+    match rpc.handle(request(report)).await.outcome {
+        Some(response::Outcome::Result(pb::Result { value: Some(result::Value::CrashRecorded(c)) })) => Ok(c),
+        Some(response::Outcome::Error(e)) => Err(format!("{}:{}", farcooler_core::error::word_for(e.code), e.what)),
+        other => panic!("not an answer: {other:?}"),
+    }
+}
+
+fn cards(r: &Runner) -> Vec<farcooler_store::models::Task> {
+    let board = r.svc.store.main_workspace(r.repo).unwrap().id;
+    r.svc.store.list_tasks(farcooler_store::TaskScope::Workspace(board), None).unwrap()
+}
+
+/// **The fixture round-trips to a stored signature, and a repeat is a
+/// count.** The signature the phone reads out of MetricKit's JSON is kept as
+/// sent, once; the first report files one card on Far Cooler's board,
+/// labeled, with the frames in a Finding note; the second raises the count in
+/// the card's intent and adds no card and no note.
+#[tokio::test]
+async fn a_signature_is_kept_once_and_a_repeat_counts() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    let first = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
+    assert_eq!(first.count, 1);
+    let stored = r.svc.store.crash_signatures().unwrap();
+    assert_eq!(stored.len(), 1);
+    let detail: Value = serde_json::from_str(&stored[0].1).unwrap();
+    assert_eq!(detail, fixture(), "what's kept is what was sent");
+
+    let card = cards(&r).into_iter().find(|t| t.key == first.task_key).expect("a card");
+    assert_eq!(card.title, "iOS: crashes with NSInvalidArgumentException in FarCooler");
+    assert_eq!(card.labels, ["found", "crash"]);
+    assert_eq!(card.status, TaskStatus::Backlog);
+    assert!(card.intent.contains("Seen once"), "{}", card.intent);
+    let findings = r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
+    assert_eq!(findings.len(), 1);
+    assert!(findings[0].body.contains("11  FarCooler +0x403fcc  (the app)"), "{}", findings[0].body);
+
+    let again = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
+    assert_eq!((again.count, again.task_key.as_str()), (2, first.task_key.as_str()));
+    assert_eq!(r.svc.store.crash_signatures().unwrap()[0].2, 2);
+    assert_eq!(cards(&r).len(), 1, "one card for one signature");
+    let card = r.svc.store.get_task(card.id).unwrap();
+    assert!(card.intent.contains("Seen 2 times"), "{}", card.intent);
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "a repeat adds no note");
+}
+
+/// The same frames on a newer OS or build are a repeat; other frames are a
+/// signature of their own, and their own card.
+#[tokio::test]
+async fn the_build_and_os_are_not_the_signature() {
+    let r = runner("https://github.com/someone/FarCooler").await;
+    call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
+    let mut newer = report_of(&fixture());
+    newer.os = "iPhone OS 26.2 (23C5)".into();
+    newer.app_build = "1094".into();
+    assert_eq!(call(&r, OWNERS_PHONE, newer).await.unwrap().count, 2);
+    let mut other = report_of(&fixture());
+    other.frames[0].offset += 4;
+    let other = call(&r, OWNERS_PHONE, other).await.unwrap();
+    assert_eq!(other.count, 1);
+    assert_eq!(cards(&r).len(), 2);
+}
+
+/// A closed card hears of a repeat on a newer build once, as a Finding: the
+/// fix didn't hold. A repeat on the same build says nothing more.
+#[tokio::test]
+async fn a_repeat_after_closing_on_a_newer_build_is_a_finding() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    let key = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap().task_key;
+    let card = cards(&r).into_iter().find(|t| t.key == key).unwrap();
+    r.svc.store.set_task_status(card.id, TaskStatus::Done, farcooler_store::models::Actor::User).unwrap();
+    call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "the same build");
+    let mut newer = report_of(&fixture());
+    newer.app_build = "1100".into();
+    call(&r, OWNERS_PHONE, newer.clone()).await.unwrap();
+    call(&r, OWNERS_PHONE, newer).await.unwrap();
+    let findings = r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
+    assert_eq!(findings.len(), 2, "{findings:?}");
+    assert!(findings[1].body.contains("1.4 (1100)"), "{}", findings[1].body);
+}
+
+/// A runner that isn't working on Far Cooler counts and files nothing.
+#[tokio::test]
+async fn without_far_coolers_board_nothing_is_filed() {
+    let r = runner("git@github.com:acme/billing.git").await;
+    let kept = call(&r, OWNERS_PHONE, report_of(&fixture())).await.unwrap();
+    assert_eq!((kept.count, kept.task_key.as_str()), (1, ""));
+    assert!(cards(&r).is_empty());
+    assert_eq!(r.svc.store.crash_signatures().unwrap().len(), 1);
+}
+
+/// **Only the owner's own device.** A member's phone is refused before
+/// anything is kept: its crashes are not the owner's to hear of.
+#[tokio::test]
+async fn a_members_phone_is_refused() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    assert_eq!(call(&r, BOBS_PHONE, report_of(&fixture())).await.unwrap_err(), "not-yours:not_yours");
+    assert!(r.svc.store.crash_signatures().unwrap().is_empty());
+    assert!(cards(&r).is_empty());
+}
+
+/// **Nothing but a signature.** A message where the exception's name goes, a
+/// path for a binary, more frames than a signature has, a control character,
+/// or a kind that isn't one is refused, and nothing is kept.
+#[tokio::test]
+async fn more_than_a_signature_is_refused() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    let cases: Vec<(&str, Box<dyn Fn(&mut pb::CrashReport)>)> = vec![
+        ("exception_name", Box::new(|c| c.exception_name = "NSInvalidArgumentException: the user typed this".into())),
+        ("frames", Box::new(|c| c.frames[0].binary = "/private/var/containers/Bundle/Application/X/FarCooler".into())),
+        ("frames", Box::new(|c| c.frames = vec![c.frames[0].clone(); MAX_FRAMES + 1])),
+        ("frames", Box::new(|c| c.frames.clear())),
+        ("frames", Box::new(|c| c.frames[0].symbol = "x".repeat(257))),
+        ("build", Box::new(|c| c.os = "iPhone OS 26.1\nthe user typed this".into())),
+        ("kind", Box::new(|c| c.kind = "log".into())),
+    ];
+    for (what, break_it) in cases {
+        let mut report = report_of(&fixture());
+        break_it(&mut report);
+        assert_eq!(call(&r, OWNERS_PHONE, report).await.unwrap_err(), format!("invalid-argument:{what}"));
+    }
+    assert!(r.svc.store.crash_signatures().unwrap().is_empty());
+}
+
+/// Far Cooler's own repository, however its origin is spelled; no other.
+#[test]
+fn far_coolers_repository_is_known_by_its_name() {
+    for yes in ["git@github.com:taneliang/farcooler.git", "https://github.com/x/FarCooler", "https://github.com/x/farcooler/"] {
+        assert!(is_farcooler(yes), "{yes}");
+    }
+    for no in ["git@github.com:taneliang/farcooler-site.git", "(no remote)", "", "https://github.com/farcooler/app.git"] {
+        assert!(!is_farcooler(no), "{no}");
+    }
+}
+
+/// A title fits the board's 60 characters, giving up the offset first.
+#[test]
+fn a_title_fits() {
+    let mut report = report_of(&fixture());
+    report.exception_name.clear();
+    assert_eq!(title(&report), "iOS: crashes with SIGABRT in FarCooler at +0x403fcc");
+    report.kind = "hang".into();
+    report.signal = None;
+    report.exception_type = None;
+    assert_eq!(title(&report), "iOS: hangs in FarCooler at +0x403fcc");
+    report.exception_name = "A".repeat(60);
+    assert!(title(&report).chars().count() <= 60);
+}

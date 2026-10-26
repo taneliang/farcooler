@@ -36,6 +36,7 @@ mod members;
 mod node_key;
 mod rekey;
 mod pr_actions;
+mod crash_report;
 mod notice_task;
 mod pages;
 mod plan;

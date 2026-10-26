@@ -152,6 +152,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         Method::MemberSetRole | Method::MemberEvents | Method::WorkspaceSetCharter => None,
         // A rep's search, through the CLI in its pane (ov-555).
         Method::WorktreeGrep => None,
+        // A crash's signature from the owner's own phone (ov-797).
+        Method::CrashReport => Some(method.name()),
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

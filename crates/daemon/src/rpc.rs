@@ -601,6 +601,10 @@ fn scope_of(method: Method) -> Scope {
         // own device, checked in `rpc_people` (ov-494).
         Method::MemberList | Method::ClaudeSignIn | Method::ClaudeSignInFinish | Method::ClaudeSignInCancel | Method::ClaudeSignOut => Scope::Read, // sign-in: theirs alone (`may_sign_in`, ov-584)
         Method::MemberSet | Method::MemberRemove | Method::MemberSetRole => Scope::HostAdmin, // a role: the owner's alone (ov-757)
+        // A crash's signature from the owner's own phone (ov-797): a board
+        // write in the runner's own words, at the board writes' scope. The
+        // owner's alone (`people_rulings`).
+        Method::CrashReport => Scope::Control,
         Method::MemberEvents => Scope::Read,
         // Whether members may run on the owner's own logins: the owner's
         // account to lend, so the runner's admins' say alone (ov-652).
@@ -1991,6 +1995,7 @@ impl Rpc {
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
             "workspace.charter" => crate::charter_read::handle(svc, &req), // ov-755
             "workspace.set_charter" => crate::charter_write::handle(svc, &self.peer, self.caller_pid, req).await, // ov-757
+            "crash.report" => crate::crash_reports::handle(svc, &self.watcher, req), // ov-797
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 
