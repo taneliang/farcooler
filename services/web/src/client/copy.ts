@@ -18,6 +18,8 @@ export function connectFailure(word: string, runner: string): string {
       return "Far Cooler can’t reach its rendezvous service. Check your connection, then try again."
     case 'runner_too_old':
       return `${runner} needs a newer Far Cooler to show terminals here. Update it, then try again.`
+    case 'still_attaching':
+      return `${runner} hasn’t opened this terminal yet, so that much typing couldn’t be held for it. Wait for the terminal, then type again.`
     case 'bad_key':
       return "This browser couldn’t sign with its key. Reload the page and try again."
     default:

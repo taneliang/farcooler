@@ -2,7 +2,7 @@
 // The client shell in headless Chromium, under the CSP production sends,
 // failing on any violation (ov-764 acceptance 4).
 //
-//   node test/browser/csp-check.mjs [--dist dist] [--fake-runner BINARY] [--screenshots DIR]
+//   node test/browser/csp-check.mjs [--dist dist] [--fake-runner BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS]
 //
 // Serves dist/ (build.sh's output, with the real wasm) through
 // shell-server.ts, which uses the Worker's own header and asset code, and
@@ -56,6 +56,12 @@ const dist = resolve(flag('--dist') ?? 'dist')
 const fakeRunner = flag('--fake-runner')
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
+// Slow the page's CPU by this factor (Chromium's own throttling), to run the
+// walk on a slow machine. A slow link is --tunnel-delay, which CI uses.
+const throttle = Number(flag('--cpu-throttle') ?? 1)
+// Delay each tunnel message by this many ms each way, for a slow network.
+const delay = Number(flag('--tunnel-delay') ?? 0)
+const later = send => (delay > 0 ? setTimeout(send, delay) : send())
 const shoot = async (page, name) => {
   if (!shots) return
   for (const [width, height] of [[1280, 800], [390, 844]]) {
@@ -116,10 +122,10 @@ if (fakeRunner) {
   const sockets = new WebSocketServer({ server, path: '/test-tunnel' })
   sockets.on('connection', ws => {
     const tcp = createConnection({ host: '127.0.0.1', port: runner.port })
-    tcp.on('data', data => ws.send(data))
-    tcp.on('close', () => ws.close())
+    tcp.on('data', data => later(() => ws.send(data)))
+    tcp.on('close', () => later(() => ws.close()))
     tcp.on('error', () => ws.close())
-    ws.on('message', data => tcp.write(data))
+    ws.on('message', data => later(() => tcp.write(data)))
     ws.on('close', () => tcp.destroy())
   })
 }
@@ -146,6 +152,7 @@ async function launch(video) {
   })
   if (runner) await context.addInitScript(swapDial)
   const page = context.pages()[0] ?? (await context.newPage())
+  if (throttle > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
   page.on('pageerror', e => errors.push(`page error: ${e.message}`))
   page.on('console', m => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`)
@@ -327,14 +334,20 @@ try {
       await page.click('#join-yes')
 
       // The joined runner: a terminal opens and echoes what is typed.
+      // Typed as soon as the terminal has focus, which is BEFORE the runner
+      // has accepted the attach on a slow link: the page must hold those
+      // keystrokes, not drop them (CI's slower runner caught it dropping them).
       await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
-      await page.waitForSelector('#terminal .xterm', { timeout: 30_000 })
+      await page.waitForFunction(() => document.activeElement?.closest('#terminal .xterm'), null, { timeout: 30_000 })
+      const early = !(await page.$('#terminal[data-attached="true"]'))
       await page.keyboard.type('echo hi')
-      const deadline = Date.now() + 10_000
+      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+      // Then waited for, on the runner's own record of what arrived.
+      const deadline = Date.now() + 30_000
       while (runner.typed.join('') !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
       const typed = runner.typed.join('')
       if (typed !== 'echo hi') failures.push(`the runner got ${JSON.stringify(typed)}, not "echo hi"`)
-      console.log('csp-check: the reply read by the camera opened a terminal, and the runner got the keystrokes')
+      else console.log(`csp-check: the reply read by the camera opened a terminal, and the runner got the keystrokes${early ? ' typed before the pane was live' : ''}`)
       await shoot(page, 'terminal')
 
       // The pin altered: refused with the host-key sentence, and no terminal.

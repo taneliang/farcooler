@@ -1409,4 +1409,7 @@ jobs:
       # runner (and refused with its pin altered). Any violation fails it.
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_runner
       - run: npx playwright-core install --with-deps --only-shell chromium
-      - run: node test/browser/csp-check.mjs --fake-runner ../../crates/web/target/debug/examples/fake_runner
+      # --tunnel-delay holds each tunnel message 100 ms, so the pane is still
+      # attaching when the check types: keystrokes typed then must be held
+      # and sent, never dropped (train 307 found them dropped on this runner).
+      - run: node test/browser/csp-check.mjs --fake-runner ../../crates/web/target/debug/examples/fake_runner --tunnel-delay 100
