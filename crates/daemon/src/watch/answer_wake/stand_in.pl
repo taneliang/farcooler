@@ -28,6 +28,9 @@
 # then <mode>: menu, working, working-hidden…, drawn in the same pass that
 # logs PASTE, so a test never races it against the read-back).
 #
+# In menu or working-menu, a typed key is the dialog's answer: it logs
+# `ANSWERED <key>`, and the box keeps what it held (ov-816).
+#
 # While working, Enter queues the box as the real agents do (ov-360): it
 # logs `QUEUED <box>`, draws it above the box as claude 2.1.290 or codex
 # 0.153.4 does, and submits it when the mode next turns idle. A claude
@@ -549,6 +552,11 @@ while (1) {
             # An escape that isn't a paste: drop it whole, a mouse report
             # (`ESC [ < 0 ; 41 ; 13 M`) or a reply (`ESC [ ? 6 c`) too.
             $buf =~ s/^\e\[?[<?>]?[0-9;]*\$?[A-Za-z~]?//;
+        } elsif ($mode eq 'menu' || $mode eq 'working-menu') {
+            # A key on a dialog picks its option, and the box keeps what it
+            # held (ov-816).
+            $buf =~ s/^(.)//s;
+            logit("ANSWERED " . decode_utf8($1));
         } else {
             $buf =~ s/^([^\e\r\x15\x19]+)// or $buf =~ s/^(.)//s;
             $killed = "";

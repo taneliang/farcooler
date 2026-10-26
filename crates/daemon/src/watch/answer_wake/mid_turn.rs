@@ -194,7 +194,17 @@ impl Watcher {
             return None;
         }
         let config = config_dir(&process_env(proven.pid).await?)?;
-        let (session, path) = transcript_in(&config, proven.pid)?;
+        self.witness_in(&config, proven, to, text)
+    }
+
+    /// `witness`, with claude's config directory already found: a wait that
+    /// tries again and again reads the process's environment once
+    /// (`compose::pending`, ov-816).
+    pub(super) fn witness_in(&self, config: &Path, proven: &Proven, to: &Terminal, text: &str) -> Option<Witness> {
+        if proven.preset != "claude" {
+            return None;
+        }
+        let (session, path) = transcript_in(config, proven.pid)?;
         let asks = self.service.hooks().asks();
         if !asks.quiet_mid_turn(&session) || asks.is_holding(to.id) {
             return None;
@@ -335,6 +345,8 @@ pub(crate) fn config_dir(env: &[(String, String)]) -> Option<PathBuf> {
 /// a space in it is read only up to the space there, so a config directory
 /// named that way isn't found, and the agent isn't typed into mid-turn.
 pub(super) async fn process_env(pid: i32) -> Option<Vec<(String, String)>> {
+    #[cfg(test)]
+    env_read(pid);
     if let Ok(raw) = std::fs::read(format!("/proc/{pid}/environ")) {
         return Some(pairs(raw.split(|b| *b == 0).map(|v| String::from_utf8_lossy(v).into_owned())));
     }
@@ -349,6 +361,22 @@ pub(super) async fn process_env(pid: i32) -> Option<Vec<(String, String)>> {
     }
     let line = String::from_utf8_lossy(&out.stdout).into_owned();
     Some(pairs(line.split_whitespace().map(str::to_string)))
+}
+
+/// How many times each pid's environment was read, for a test that a wait
+/// reads it once (`compose::pending`, ov-816).
+#[cfg(test)]
+static ENV_READS: std::sync::Mutex<Option<std::collections::HashMap<i32, usize>>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn env_read(pid: i32) {
+    *ENV_READS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).entry(pid).or_default() += 1;
+}
+
+/// How many times `pid`'s environment has been read (`ENV_READS`).
+#[cfg(test)]
+pub(crate) fn env_reads(pid: i32) -> usize {
+    ENV_READS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&pid).copied()).unwrap_or(0)
 }
 
 pub(crate) fn pairs(words: impl Iterator<Item = String>) -> Vec<(String, String)> {

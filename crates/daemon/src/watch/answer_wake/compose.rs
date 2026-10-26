@@ -82,7 +82,9 @@ use crate::watch::{Watcher, now_millis};
 pub(super) mod codex;
 pub(crate) mod held;
 mod pending;
-pub(crate) use pending::IDLE_TWICE;
+pub(crate) use pending::{AGENTS_TRUSTED_FOR, IDLE_TWICE, SLOW_POLL, SLOWS_AFTER};
+#[cfg(test)]
+pub(crate) use pending::tries;
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.
@@ -96,10 +98,12 @@ pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
 
 /// How long a composed message whose claude began a turn between the paste
 /// and the Enter waits for a fenced Enter or the turn's end before it's left
-/// in the box (`pending`, ov-808): a short turn's worth, as a background
-/// shell finishing starts one. Nothing waits on it: the send was answered
-/// Queued, and the box is taken only for each try.
-pub(crate) const TURN_BEGUN_WAIT: Duration = Duration::from_secs(30);
+/// in the box (`pending`, ov-808): a long turn's worth, as the owner's
+/// orchestrator runs with no hooks, so no fence (ov-816). Nothing waits on
+/// it: the send was answered Queued, the box is taken only for each try, a
+/// dialog is waited out, the reads slow after `SLOWS_AFTER`, and the gate's
+/// agents are trusted only for `AGENTS_TRUSTED_FOR`.
+pub(crate) const TURN_BEGUN_WAIT: Duration = Duration::from_secs(10 * 60);
 
 /// claude 2.1.290's own commands that aren't prompts: each opens a panel or
 /// acts at once, and none reaches `UserPromptSubmit`, so none could be
@@ -350,7 +354,7 @@ impl Watcher {
         // whether a turn runs, which the screen can miss: after a long paste
         // claude's footer says `paste again to expand`, working or not, and
         // the screen reads idle (`claude-2.1.290-working-queued-long-paste`).
-        let (session, transcript, busy) = match session_of(proven.pid, proven.background).await {
+        let (session, transcript, busy, config) = match session_of(proven.pid, proven.background).await {
             Ok(found) => found,
             // Nothing is typed yet: a held message tries again (`held::TORN`).
             Err(Gone::Torn) => return Err(DomainError::Conflict { what: held::TORN }),
@@ -376,6 +380,9 @@ impl Watcher {
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let started = now_millis();
         let mut expected = Expected::default();
+        // What went in after the images, in order: a wait kept across a
+        // restart draws `expected` again from these (`pending`).
+        let mut pastes = Vec::new();
         let mut held = Composer::Empty;
         let mut first = true;
         let mut paste = |text: String| {
@@ -395,12 +402,14 @@ impl Watcher {
         if let Some(name) = &composed.command {
             paste(name.clone()).await?;
             expected = expected.then_paste(name);
+            pastes.push(name.clone());
             self.shown(to, &proven, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
         }
         if !composed.text.is_empty() {
             let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
             paste(text.clone()).await?;
             expected = expected.then_paste(&text);
+            pastes.push(text);
             self.shown(to, &proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let submitted = composed.submitted(&placeholders);
@@ -415,7 +424,8 @@ impl Watcher {
                 if let Entered::Pending(left) = self.enter_between(to, &proven, started, &expected, &submitted).await? {
                     let confirm = Confirm { session, transcript, from, queued_before, since, submitted };
                     let echo = pending::echo(placeholders.len(), raw);
-                    self.pend_enter(pending::Pending { to: to.clone(), proven, started, expected, confirm, echo, left });
+                    let drawn = pending::Drawn { images: paths.len(), pastes };
+                    self.pend_enter(pending::Pending { to: to.clone(), proven, started, expected, confirm, echo, left, config, queued_at: now_millis(), drawn });
                     return Ok(Turn::During);
                 }
             }
@@ -494,7 +504,7 @@ impl Watcher {
     /// logged with which check it was (`left_in_box`). `proven` is the
     /// gate's: the agent, and the background work it saw (`between_or_why`).
     pub(super) async fn still_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
-        match self.between_or_why(to, proven, started, expected, unlisted).await? {
+        match self.between_or_why(to, proven, started, expected, unlisted, None).await? {
             None => Ok(()),
             Some(left) => Err(left.logged(&self.service.registry(), to, proven)),
         }
@@ -519,11 +529,23 @@ impl Watcher {
     /// (a dialog it says is up before the screen draws it) reads as a turn
     /// too, and is waited out rather than left at once: neither Enter can
     /// take a dialog, as the plain one needs the registry idle and the
-    /// fenced one's box check reads the dialog (`NoEnter::Dialog`).
-    async fn between_or_why(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, unlisted: bool) -> Result<Option<Left>> {
+    /// fenced one's box check reads the dialog (`NoEnter::Dialog`). A dialog
+    /// drawn is waited out as well (`Left::dialog`, ov-816).
+    ///
+    /// `config` is claude's config directory when the caller has it already
+    /// (`pending` keeps it for the wait); else it's read from the process.
+    async fn between_or_why(
+        &self,
+        to: &Terminal,
+        proven: &super::Proven,
+        started: i64,
+        expected: &Expected,
+        unlisted: bool,
+        config: Option<&std::path::Path>,
+    ) -> Result<Option<Left>> {
         let (preset, pid, seen) = (proven.preset, proven.pid, proven.background);
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-            return Ok(Some(Left { check: "typed", screen: None, turn: false }));
+            return Ok(Some(Left { check: "typed", screen: None, turn: false, dialog: false }));
         }
         let (screen, _, _) = self.service.screen(to.id).await?;
         let registry = self.service.registry();
@@ -536,12 +558,17 @@ impl Watcher {
             AgentActivity::Idle => registry.background_work(preset, &screen),
             _ => Background::None,
         };
+        let dialog = main == AgentActivity::Blocked;
         let (check, turn) = if main != AgentActivity::Idle {
-            ("not_idle", main == AgentActivity::Working)
+            ("not_idle", main == AgentActivity::Working || dialog)
         } else if !expected.shown_on(preset, &screen) {
             ("not_shown", false)
         } else {
-            match registry_turn::said_beside_of(pid, background).await {
+            let said = match config {
+                Some(config) => registry_turn::said_beside(config, pid, background),
+                None => registry_turn::said_beside_of(pid, background).await,
+            };
+            match said {
                 registry_turn::Said::Idle => return Ok(None),
                 registry_turn::Said::Nothing if unlisted => return Ok(None),
                 registry_turn::Said::Nothing => ("registry_none", false),
@@ -550,7 +577,7 @@ impl Watcher {
                 registry_turn::Said::Torn => ("registry_torn", false),
             }
         };
-        Ok(Some(Left { check, screen: Some(screen), turn }))
+        Ok(Some(Left { check, screen: Some(screen), turn, dialog }))
     }
 
     /// The between-turns Enter for a compose, past `between_or_why`, tried
@@ -563,13 +590,18 @@ impl Watcher {
     /// claude no hook is heard from, as the owner's orchestrator, ov-711),
     /// `Entered::Pending`: the send is answered Queued and the Enter waits
     /// out the turn off the lock (`pending`). Never with no fence into a turn
-    /// running: a dialog drawn as the key lands would take it as Yes.
+    /// running: a dialog drawn as the key lands would take it as Yes. A
+    /// dialog drawn already is waited out the same way, never fenced: the
+    /// fenced Enter's own box check would refuse it (ov-816).
     async fn enter_between(&self, to: &Terminal, proven: &super::Proven, started: i64, expected: &Expected, submitted: &str) -> Result<Entered> {
-        let Some(left) = self.between_or_why(to, proven, started, expected, false).await? else {
+        let Some(left) = self.between_or_why(to, proven, started, expected, false, None).await? else {
             let runtime = Runtime { marks: None, ..self.service.runtime() };
             runtime.send_bytes_hex(to.id, "0d").await?;
             return Ok(Entered::Now);
         };
+        if left.dialog {
+            return Ok(Entered::Pending(left));
+        }
         if !left.turn {
             return Err(left.logged(&self.service.registry(), to, proven));
         }
@@ -738,6 +770,10 @@ pub(super) struct Left {
     /// A turn may have begun since the gate: claude would queue the message
     /// (`enter_between`).
     turn: bool,
+    /// A dialog is drawn (`AgentActivity::Blocked`): waited out, as a turn
+    /// is, but never with a fenced Enter, which would only refuse it, and a
+    /// key typed meanwhile may be its answer (`pending`, ov-816).
+    dialog: bool,
 }
 
 impl Left {
@@ -774,7 +810,9 @@ struct Confirm {
     submitted: String,
 }
 
-/// claude's session and transcript, from its process (`mid_turn`), and
+/// claude's session and transcript, from its process (`mid_turn`), its
+/// config directory, which a wait keeps rather than read again (`pending`),
+/// and
 /// whether its registry says anything but idle (`registry_turn`): `busy`,
 /// `shell`, no status; with `background` work beside a main loop between
 /// turns, `busy` and `shell` are that work's (`said_beside`). `Gone` without
@@ -782,7 +820,7 @@ struct Confirm {
 /// `procStart` check, so a stale file is nothing; `Torn` for a file that is
 /// there but doesn't parse, which is claude mid-write more often than gone
 /// (ov-645).
-async fn session_of(pid: i32, background: Background) -> std::result::Result<(String, PathBuf, bool), Gone> {
+async fn session_of(pid: i32, background: Background) -> std::result::Result<(String, PathBuf, bool, PathBuf), Gone> {
     let config = registry_turn::config_of(pid).await.ok_or(Gone::Nothing)?;
     let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,
@@ -791,7 +829,7 @@ async fn session_of(pid: i32, background: Background) -> std::result::Result<(St
         registry_turn::Said::Nothing => return Err(Gone::Nothing),
     };
     let (session, transcript) = mid_turn::transcript_in(&config, pid).ok_or(Gone::Nothing)?;
-    Ok((session, transcript, not_idle))
+    Ok((session, transcript, not_idle, config))
 }
 
 /// Why `session_of` found no session.

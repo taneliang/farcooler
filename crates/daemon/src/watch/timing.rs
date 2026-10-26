@@ -28,6 +28,15 @@ pub(crate) struct Timing {
     /// How far apart a waiting message's two reads between turns are before
     /// its plain Enter (`compose::pending::IDLE_TWICE`).
     pub idle_twice: Duration,
+    /// How long a waiting message reads the pane every `PASTE_POLL` before
+    /// it reads it every `wait_poll` (`compose::pending::SLOWS_AFTER`).
+    pub wait_slows_after: Duration,
+    /// How often a waiting message reads the pane once it has slowed
+    /// (`compose::pending::SLOW_POLL`).
+    pub wait_poll: Duration,
+    /// How long a waiting message trusts the background agents its gate saw
+    /// (`compose::pending::AGENTS_TRUSTED_FOR`).
+    pub carry_agents_for: Duration,
     /// How long after a key claude has to say it took it (`interrupt`'s
     /// `CONFIRM_SETTLES`).
     pub key_confirm: Duration,
@@ -71,6 +80,9 @@ impl Timing {
         compose_confirm: super::answer_wake::compose::CONFIRM_SETTLES,
         turn_begun_wait: super::answer_wake::compose::TURN_BEGUN_WAIT,
         idle_twice: super::answer_wake::compose::IDLE_TWICE,
+        wait_slows_after: super::answer_wake::compose::SLOWS_AFTER,
+        wait_poll: super::answer_wake::compose::SLOW_POLL,
+        carry_agents_for: super::answer_wake::compose::AGENTS_TRUSTED_FOR,
         key_confirm: super::answer_wake::interrupt::CONFIRM_SETTLES,
         queue_settles: super::answer_wake::mid_turn::QUEUE_SETTLES,
         enter_deadline: super::answer_wake::mid_turn::ENTER_DEADLINE,
@@ -129,8 +141,11 @@ mod tests {
             Timing::PRODUCTION,
             Timing {
                 compose_confirm: s(5),
-                turn_begun_wait: s(30),
+                turn_begun_wait: s(10 * 60),
                 idle_twice: ms(300),
+                wait_slows_after: s(30),
+                wait_poll: s(1),
+                carry_agents_for: s(30),
                 key_confirm: s(3),
                 queue_settles: s(3),
                 enter_deadline: s(2),

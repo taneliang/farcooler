@@ -94,6 +94,14 @@ pub(crate) struct Tellers {
 
 pub(crate) type HeldComposes = std::sync::Mutex<Tellers>;
 
+#[cfg(test)]
+impl Tellers {
+    /// As a fresh start: the next pump resumes what the store keeps.
+    pub(super) fn forget_resumed_for_tests(&mut self) {
+        self.resumed = false;
+    }
+}
+
 impl Watcher {
     /// `compose_checked`, or, when it says to wait or messages are already
     /// held for `id`, the message held and answered Queued (`Turn::During`).
@@ -155,11 +163,14 @@ impl Watcher {
     }
 
     /// Once, after a start: a teller for every pane with messages kept
-    /// held across the restart.
+    /// held across the restart, and every wait for an Enter kept
+    /// (`pending::resume_compose_waits`).
     pub(crate) fn resume_held_composes(&self) {
         if std::mem::replace(&mut self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).resumed, true) {
             return;
         }
+        // Waits first: a held message for the same pane waits behind one.
+        self.resume_compose_waits();
         for id in self.service.store.compose_hold_terminals().unwrap_or_default() {
             self.start_teller(id);
         }
@@ -312,9 +323,12 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
         "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it’s still in {agent}’s box."),
         "stayed_busy" => format!("Not sent: “{quoted}”. {agent} stayed busy, so it’s still in {agent}’s box."),
+        "stayed_blocked" => format!("Not sent: “{quoted}”. {agent} was still asking you something, so the runner didn’t send it. Check the terminal."),
+        "box_cleared" => format!("{agent}’s box was cleared while “{quoted}” waited, so the runner didn’t send it."),
+        "unreadable" => format!("The runner couldn’t read {agent}’s screen while “{quoted}” waited, so it didn’t send it. Check the terminal."),
+        "agent_restarted" => format!("{agent} restarted while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
         "typed" => format!("Someone typed in {agent}’s terminal while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
         "box_changed" => format!("{agent}’s box changed while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
-        "dialog_opened" => format!("{agent} opened a dialog while “{quoted}” waited, so the runner didn’t send it. It’s still in {agent}’s box."),
         "unchecked" => format!("The runner couldn’t tell whether {agent} was free, so “{quoted}” is still in {agent}’s box. Check the terminal."),
         "enter_failed" => format!("“{quoted}” is in {agent}’s box, but the runner couldn’t press Return. Check the terminal."),
         "queued_unseen" => format!("{agent} took “{quoted}” into its queue but never showed it ran. Check the terminal before sending it again."),
