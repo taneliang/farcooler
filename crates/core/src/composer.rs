@@ -271,6 +271,16 @@ pub(crate) fn claude_mode_line(screen: &str) -> Option<String> {
     lines.get(end + 1).map(|row| text(row))
 }
 
+/// Whether `screen` shows claude's background-agent list: a row under the
+/// rule that closes its box, past the mode line, of `  ◯ ` and an agent, as
+/// claude 2.1.296 and 2.1.309 draw each running agent. A `◯ ` typed into
+/// the box or said in the transcript is above that rule, never one
+/// (ov-795 re-review).
+pub(crate) fn claude_agent_rows(screen: &str) -> bool {
+    let lines: Vec<Vec<(char, bool)>> = screen.lines().map(cells).collect();
+    claude_box_at(&lines).is_some_and(|(_, end)| lines.iter().skip(end + 2).any(|row| text(row).starts_with("  ◯ ")))
+}
+
 /// Where claude's box sits in `lines`: the prompt line and the row of the
 /// rule that closes it.
 fn claude_box_at(lines: &[Vec<(char, bool)>]) -> Option<(usize, usize)> {

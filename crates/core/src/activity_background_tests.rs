@@ -135,3 +135,18 @@ fn only_the_mode_lines_own_count_is_background_work() {
         assert_eq!(r.background_running("claude", &line), counts, "{rest}");
     }
 }
+
+/// Agents are told by their rows under the mode line only: a `◯ ` row typed
+/// into the box, or one in the transcript above it, beside shells alone is
+/// still shells (ov-795 re-review).
+#[test]
+fn an_agent_glyph_above_the_mode_line_is_no_agent() {
+    let r = Registry::built_in();
+    let pasted = include_str!("../captures/claude-2.1.309-shells-owner-59x41-e.txt");
+    let typed = pasted.replacen("❯\u{a0}Btw to make", "❯\u{a0}◯ general-purpose  Sleeper 1", 1);
+    assert!(matches!(composer::read("claude", &typed), Composer::Holds(h) if h.starts_with("◯ general-purpose")));
+    assert_eq!(r.background_work("claude", &typed), Background::Shells, "typed into the box");
+    let said = pasted.replacen("\x1b[38;5;246mRan \x1b[1m7\x1b[0m\x1b[38;5;246m shell commands \x1b[39m", "◯ general-purpose  Sleeper 1", 1);
+    assert!(composer::printed(&said).contains("\n  ◯ general-purpose  Sleeper 1"), "the transcript row is there");
+    assert_eq!(r.background_work("claude", &said), Background::Shells, "said in the transcript");
+}

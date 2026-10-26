@@ -209,6 +209,25 @@ async fn a_turn_begun_beside_background_shells_leaves_the_paste() {
     assert!(logged.contains("registry_busy") && logged.contains("background=Shells"), "{logged}");
 }
 
+/// A `◯ ` in the message itself is no agent row: beside shells alone, with
+/// the box holding `◯ general-purpose …`, a turn begun before the Enter
+/// still leaves the paste by the registry's `busy`. Only rows under the
+/// mode line say agents run (ov-795 re-review).
+#[tokio::test]
+async fn an_agent_glyph_in_the_message_is_no_background_agent() {
+    let b = board().await;
+    quick(&b);
+    let (agent, si) = idle_claude(&b).await;
+    si.show("shells").await;
+    b.screen_with(agent.id, "2 shells · ↓ to manage").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let shower = si.clone();
+    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("shells-busy")));
+    let refused = b.watcher.compose_into(agent.id, "◯ general-purpose  Sleeper 1 is it done", &[]).await;
+    assert!(matches!(refused, Err(DomainError::Conflict { what: "paste_left" })), "{refused:?}");
+    assert!(si.submitted().is_empty(), "{}", si.log());
+}
+
 /// The same `busy` beside shells alone, seen at the gate: a turn, so the
 /// message is held for its end, never typed into it.
 #[tokio::test]

@@ -27,7 +27,9 @@
 //! beside it: claude keeps the registry `busy` while background agents run,
 //! but writes `shell` for shells alone, so beside shells alone `busy` is a
 //! turn running (`Background::Shells`, ov-795 review). Agents are told by
-//! their `◯` rows, which every agent capture here has; the tray hint or a
+//! their `◯` rows under the box's mode line (`composer::claude_agent_rows`),
+//! which every agent capture here has, never by a `◯ ` anywhere in the
+//! footer, which takes in the box and the transcript; the tray hint or a
 //! count with no row is shells or monitors.
 //!
 //! **Known gaps, failing safe.** The count is read on the row right under the
@@ -64,7 +66,7 @@ impl Registry {
             || (rules.preset == "claude" && crate::composer::claude_mode_line(screen).is_some_and(|line| counts_background(&line)));
         match running {
             false => Background::None,
-            true if footer.contains("◯ ") => Background::Agents,
+            true if rules.preset == "claude" && crate::composer::claude_agent_rows(screen) => Background::Agents,
             true => Background::Shells,
         }
     }
