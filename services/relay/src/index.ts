@@ -26,6 +26,7 @@ import { pulseTurns } from './pulse-turns'
 import { pruneSessionsSeen } from './session-prune'
 import { totalOf, type Machine } from './needs-total'
 import { requireAccount } from './session'
+import { type PasskeyConfig } from './sshsig'
 import { endSessionOf, signOutEverywhere } from './signout'
 import {
   ACTIVITY_VERSION,
@@ -44,7 +45,7 @@ export type { Machine }
 
 export { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET }
 
-export interface Env {
+export interface Env extends PasskeyConfig {
   DB: D1Database
   /// Cloudflare's rate-limiting binding, guarding the two routes that spend the
   /// relay's WorkOS API key on an anonymous caller's behalf. Optional in the
@@ -73,11 +74,6 @@ export interface Env {
   /// above belongs to it. Set per environment in wrangler.toml; absent on a
   /// deployment made before this check, which is only ever the stable one.
   CHANNEL?: string
-  /// The RP ID a passkey must carry to be a device's Key A: this channel's
-  /// web app host, exactly (`app.canary.farcooler.com`), never a parent
-  /// domain (ov-766). Absent on a channel with no web app, which then refuses
-  /// every passkey and takes Ed25519 keys alone.
-  PASSKEY_RP_ID?: string
   FCM_SERVICE_ACCOUNT: string
   /// `"1"` to give a team's admins each member's vouched-for Key A in
   /// `teams/members`, which turns on the teammate rule's key match (ov-549,

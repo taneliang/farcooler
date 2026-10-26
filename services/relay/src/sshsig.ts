@@ -22,6 +22,15 @@
 /// by any page on any `*.farcooler.com` host, including www, which loads a
 /// third-party beacon script.
 
+/// The part of the relay's `Env` that decides which passkeys it takes.
+export interface PasskeyConfig {
+  /// The RP ID a passkey must carry to be a device's Key A: this channel's
+  /// web app host, exactly (`app.canary.farcooler.com`), never a parent
+  /// domain (ov-766). Absent on a channel with no web app, which then refuses
+  /// every passkey and takes Ed25519 keys alone.
+  PASSKEY_RP_ID?: string
+}
+
 export interface PublicKey {
   /// `ssh-ed25519 AAAA…` or `sk-ecdsa-sha2-nistp256@openssh.com AAAA…`, with
   /// no comment. A comment is free text from the device and the directory has
