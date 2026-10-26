@@ -1,0 +1,4 @@
+node_modules/
+.wrangler/
+# build.sh's output: what wrangler uploads as the Worker's assets.
+dist/

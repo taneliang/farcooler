@@ -1,0 +1,114 @@
+# The web client (ov-752, ov-764): Far Cooler in a browser, one Worker per
+# channel, on a host of its own.
+#
+# The top level is production, app.farcooler.com, reading relay.farcooler.com,
+# as in services/site/wrangler.toml and services/relay/wrangler.toml, so
+# `wrangler deploy` with no --env still means stable. [env.canary] below is the
+# same code at app.canary.farcooler.com, reading relay-canary. How each one
+# deploys is in .github/workflows/web.yml.
+#
+# Its own Worker, not routes on farcooler-site: that Worker serves the
+# marketing page, with its analytics beacon, from one [assets] directory, and
+# ships on a cadence of its own (site.yml). A page on this origin can only ever
+# come from this Worker's assets, which is the origin's main defense
+# (.claude/agent/reports/ov-752/plan-763.md §1).
+#
+# The hosts are Workers custom domains: the zone is already on this account,
+# and wrangler creates the DNS record and certificate on the first deploy.
+name = "farcooler-web"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+# No second origin. Without these two, `<name>.<account>.workers.dev` and each
+# version's preview URL would serve the same app, and its session cookie, on a
+# host the CSP and the passkey RP ID were never written for. Inherited by
+# [env.canary]; test/config.test.ts checks both. The Worker also refuses any
+# host but APP_HOST (src/index.ts), in case either is ever turned back on.
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "app.farcooler.com", custom_domain = true }]
+
+# build.sh's output: index.html (the client shell, which the Worker hands out
+# only to a signed-in account the flag admits), version.json, and the hashed
+# files under a/. A wasm module is here only as its .br (the raw Go module is
+# over the 25 MiB a single asset may be); src/assets.ts serves it with
+# `content-encoding: br`.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# No invocation log: it records each request's URL. Console logs stay on, and
+# the Worker writes only the CSP reports' directive and blocked host
+# (src/csp-report.ts). Inherited by [env.canary].
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = false
+
+[vars]
+# The one host this Worker answers on; any other gets a bare 404.
+APP_HOST = "app.farcooler.com"
+# The relay this channel signs in through and reads, and that relay's
+# WORKOS_CLIENT_ID (services/relay/wrangler.toml), the client the apps share.
+# That client needs https://app.farcooler.com/callback as a redirect URI and
+# https://app.farcooler.com/ as a sign-out redirect before the flag opens here.
+APP_RELAY_URL = "https://relay.farcooler.com"
+APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
+# Who gets the client (src/flag.ts). "" is off: every visitor sees "Not
+# available yet", with no sign-in. "owner" admits the account ids listed in
+# WEB_ACCOUNTS, and no one else. Any other value is off. Stable stays off until
+# slice 17 of the plan.
+WEB_CLIENT = ""
+WEB_ACCOUNTS = ""
+# Where the shell's CSP lets the page connect besides itself (src/headers.ts):
+# Tailcat's DERP map, and the relays that map lists (tc301a-tc304a.ipn.dev). A
+# runner on a map of its own needs its relays added here; the CSP violation
+# report is how we hear about one.
+DERP_MAP_ORIGIN = "https://tailcat.dev"
+DERP_HOSTS = "*.ipn.dev"
+
+# The limit on sign-in and refresh per visitor, for the reason the site gives
+# for its own (services/site/wrangler.toml): every call from this Worker reaches
+# the relay from Cloudflare's addresses, in one bucket. Namespace ids are shared
+# across the account (scripts/migration-lint.py); 1001-1007 are taken.
+[[unsafe.bindings]]
+name = "APP_AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1008"
+simple = { limit = 10, period = 60 }
+
+# ---------------------------------------------------------------------------
+# canary: app.canary.farcooler.com, reading relay-canary, built from main.
+#
+# Like the site's environments, it repeats every var and binding: wrangler
+# inherits `main`, `routes`, `workers_dev`, `preview_urls`, `[assets]` and
+# `[observability]`, but not `vars` or `unsafe.bindings`. It declares its own
+# routes, or it would inherit app.farcooler.com.
+# ---------------------------------------------------------------------------
+[env.canary]
+name = "farcooler-web-canary"
+routes = [{ pattern = "app.canary.farcooler.com", custom_domain = true }]
+
+[env.canary.vars]
+APP_HOST = "app.canary.farcooler.com"
+APP_RELAY_URL = "https://relay-canary.farcooler.com"
+# The canary relay's WORKOS_CLIENT_ID. It needs
+# https://app.canary.farcooler.com/callback as a redirect URI and
+# https://app.canary.farcooler.com/ as a sign-out redirect.
+APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
+# Off until the terminal lands. Then "owner", with the owner's canary account
+# id (the `user.id` that relay-canary's /v1/directory/me returns) here.
+WEB_CLIENT = ""
+WEB_ACCOUNTS = ""
+DERP_MAP_ORIGIN = "https://tailcat.dev"
+DERP_HOSTS = "*.ipn.dev"
+
+[[env.canary.unsafe.bindings]]
+name = "APP_AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1009"
+simple = { limit = 10, period = 60 }

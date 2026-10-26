@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Far Cooler</title>
+<link rel="stylesheet" href="{{app.css}}">
+<script type="module" src="{{app.js}}"></script>
+</head>
+<body>
+<header class="bar">
+  <span class="title">Far Cooler</span>
+  <span class="who" id="who"></span>
+  <form method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
+</header>
+<div class="update" id="update" hidden>
+  <span>A newer version of Far Cooler is ready.</span>
+  <button id="reload" type="button">Reload</button>
+</div>
+<main class="empty">
+  <h1>Your terminals will open here</h1>
+  <p>This browser isn't enrolled with a runner yet. Enrolling with your phone comes in the next update.</p>
+</main>
+</body>
+</html>
