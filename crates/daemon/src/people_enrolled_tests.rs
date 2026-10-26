@@ -1,5 +1,5 @@
 //! A device a member's device enrolls (ov-719, ov-716 review finding 1):
-//! nobody's, so it only reads, until a runner admin binds it to a member;
+//! nobody's, so it does nothing (ov-758), until a runner admin binds it to a member;
 //! never a shell; revoked with the member who enrolled it while still
 //! unbound; and a member admin neither binds nor revokes the owner's. The
 //! teammate enrollment a member admin's Mac runs (`TeammateEnrollment`)
@@ -120,11 +120,11 @@ async fn enrolled(svc: &Service) -> Vec<(String, bool)> {
 
 /// Before ov-719, a device Bob's Mac enrolled was bound to nobody, so it
 /// was the owner's: the plan, the daemon, the owner's posts. Now it's
-/// nobody's, and reads, until a runner admin binds it; then it's its
-/// member's. A device the owner enrolls, from the local socket or their
-/// own phone, is still the owner's.
+/// nobody's until a runner admin binds it, and as nobody's it reads nothing
+/// either (ov-758); then it's its member's. A device the owner enrolls, from
+/// the local socket or their own phone, is still the owner's.
 #[tokio::test]
-async fn a_device_a_member_enrolls_only_reads_until_it_is_bound() {
+async fn a_device_a_member_enrolls_does_nothing_until_it_is_bound() {
     let (_dir, svc) = runner().await;
     let bob = bobs_mac(&svc);
     let Ok(pb::result::Value::ClientEnroll(done)) = call(&bob, enroll(KEY_TESS, "phone-t", Scope::Control, false)).await
@@ -136,7 +136,7 @@ async fn a_device_a_member_enrolls_only_reads_until_it_is_bound() {
     let tess = factory(&svc, Some("phone-t"), Scope::Control);
     assert_eq!(call(&tess, a_card()).await.err().as_deref(), Some("not-yours:not_yours"), "it writes nothing");
     let read = Request { method: "member.list".into(), ..Default::default() };
-    assert!(call(&tess, read.clone()).await.is_ok(), "it reads");
+    assert_eq!(call(&tess, read).await.err().as_deref(), Some("not-yours:not_yours"), "nor reads (ov-758)");
     let shutdown = Request { method: "daemon.shutdown".into(), ..Default::default() };
     assert!(gate(&svc, &Peer { client_id: Some("phone-t".into()), scope: Scope::HostAdmin }, None, &shutdown).is_err());
 

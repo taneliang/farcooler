@@ -1,7 +1,8 @@
-//! A released device writes nothing (ov-712): a device whose member was
-//! removed is nobody's, so it isn't the owner either, and every call above
-//! Read from it is refused `not_yours`. Its reads still answer. Through `Rpc`,
-//! where a client reaches it.
+//! A released device does nothing (ov-712, ov-758): a device whose member
+//! was removed is nobody's, so it isn't the owner either, and every call
+//! from it is refused `not_yours`, its reads included (the owner, 25 Oct: a
+//! removed person no longer sees the team's plan, board or Needs You).
+//! Through `Rpc`, where a client reaches it.
 
 use std::sync::Arc;
 
@@ -119,71 +120,56 @@ async fn a_released_device_writes_nothing_on_the_board() {
     assert!(r.svc.store.notes_for(r.task, None).unwrap().iter().all(|n| n.kind != farcooler_store::models::NoteKind::Comment), "no note");
 }
 
-/// What a released device may call, named one by one (ov-716, the ov-712
-/// review's M1): the reads, and nothing that writes, its own line and Claude
-/// login included. Not derived from the scope table or `reads_only`, so a
-/// method added at Read scope that does more than read fails here until
-/// someone decides a released device may call it.
-const RELEASED_MAY: [Method; 27] = [
-    Method::HostGet,
-    Method::HostHealth,
-    Method::DaemonVersion,
-    Method::ThemeList,
-    Method::RepositoryList,
-    Method::WorktreeList,
-    Method::TerminalList,
-    Method::BranchList,
-    Method::LayoutList,
-    Method::ChangesInbox,
-    Method::StackGet,
-    Method::NeedsYouList,
-    Method::ReportGet,
-    Method::UsageReport,
-    Method::UsageTask,
-    Method::TaskList,
-    Method::TaskGet,
-    Method::TaskGetByKey,
-    Method::TaskSearch,
-    Method::PlanGet,
-    Method::PlanEvents,
-    Method::PageList,
-    Method::PageGet,
-    Method::PageStats,
-    Method::WorkspaceList,
-    Method::ClientList,
-    Method::MemberList,
-];
-
-/// Every method but `RELEASED_MAY` is refused a released device at the
-/// gate, whatever it carries, at any scope.
+/// Every method is refused a released device at the gate, whatever it
+/// carries, at any scope: no list of reads it keeps (ov-758). Before, the
+/// 27 `Ruling::Reads` methods passed.
 #[tokio::test]
-async fn a_released_device_is_refused_every_write() {
+async fn a_released_device_is_refused_every_call() {
     let r = runner().await;
-    for method in Method::ALL {
-        let req = Request { method: method.name().into(), ..Default::default() };
-        let gated = gate(&r.svc, &Peer { client_id: RELEASED.map(str::to_string), scope: Scope::HostAdmin }, None, &req);
-        if RELEASED_MAY.contains(method) {
-            assert!(gated.is_ok(), "{} is a read: {gated:?}", method.name());
-        } else {
-            assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{}: {gated:?}", method.name());
+    for scope in [Scope::Read, Scope::Control, Scope::HostAdmin] {
+        for method in Method::ALL {
+            let req = Request { method: method.name().into(), ..Default::default() };
+            let gated = gate(&r.svc, &Peer { client_id: RELEASED.map(str::to_string), scope }, None, &req);
+            assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{} at {scope:?}: {gated:?}", method.name());
         }
     }
 }
 
-/// Its reads still answer: the board, a card, the plan, who's on the runner.
-#[tokio::test]
-async fn a_released_device_still_reads() {
-    let r = runner().await;
-    let released = factory(&r.svc, RELEASED);
+/// The reads a team's work is seen by, each with a real payload.
+fn reads(r: &Runner) -> Vec<(&'static str, Option<request::Payload>)> {
     let ws = || id_bytes(r.workspace);
-    let reads = [
+    vec![
         ("task.list", Some(request::Payload::TaskList(pb::TaskListRequest { workspace_id: Some(ws()), ..Default::default() }))),
         ("task.get", Some(request::Payload::TaskGet(pb::TaskGetRequest { task_id: id_bytes(r.task), ..Default::default() }))),
         ("plan.get", Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: ws(), ..Default::default() }))),
+        ("needs_you.list", None),
         ("member.list", None),
-    ];
-    for (method, payload) in reads {
-        assert_eq!(call(&released, method, payload).await, Ok(()), "{method}");
+    ]
+}
+
+/// A removed member's phone reads nothing (ov-758): not the board, a card,
+/// the plan, Needs You or who's on the runner, at Read scope as at Control.
+/// The same calls answer the owner's phone and Bob's, so it's the release
+/// that refuses them.
+#[tokio::test]
+async fn a_released_device_reads_nothing() {
+    let r = runner().await;
+    for scope in [Scope::Read, Scope::Control] {
+        let released = RpcFactory::new(
+            r.svc.clone(),
+            crate::watch::Watcher::new(r.svc.clone()),
+            Arc::new(tokio::sync::Notify::new()),
+            Peer { client_id: RELEASED.map(str::to_string), scope },
+        );
+        for (method, payload) in reads(&r) {
+            assert_eq!(call(&released, method, payload).await, Err(NOT_YOURS.into()), "{method} at {scope:?}");
+        }
+    }
+    for device in [OWNERS_PHONE, BOB] {
+        let rpc = factory(&r.svc, device);
+        for (method, payload) in reads(&r) {
+            assert_eq!(call(&rpc, method, payload).await, Ok(()), "{device:?} {method}");
+        }
     }
 }
 

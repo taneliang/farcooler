@@ -86,8 +86,8 @@ pub fn person_of(store: &Store, peer: &Peer) -> Result<Person> {
 /// on ov-716 rule 1): what's read on a board, which worktrees are reviewed,
 /// which panes are seen and watched. Per person, so a member opening a card
 /// or a pane clears nothing for the owner. The owner's are where they always
-/// were; a released device has none (`None`), and its writes are refused
-/// before they get here.
+/// were; a released device has none (`None`), and its calls are refused
+/// before they get here (ov-758).
 ///
 /// Whose marks a call reads and writes is its caller's person
 /// (`caller_person`, ov-747): a device's own, and on the local socket its
@@ -297,9 +297,10 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   member, or revoking one, from a member's device is refused
 ///   `not_yours` (`touches_the_owners_device`). A device a member's device
 ///   enrolls is released until bound (`client.enroll`), so it never is one.
-/// - **A released device only reads** (ov-712). A device whose member
-///   was removed is nobody's: every call but a `Ruling::Reads` is refused
-///   `not_yours`. Removing a member also revokes their devices
+/// - **A released device does nothing** (ov-712, ov-758). A device whose
+///   member was removed, or that was taken off their list, is nobody's:
+///   every call is refused `not_yours`, its reads included (the plan, the
+///   board, Needs You). Removing a member also revokes their devices
 ///   (`member.remove`); this holds if one is still connected or comes back.
 /// - **The plan is everyone's** (`Ruling::Plan`, the owner, 24 Oct,
 ///   ov-736, reversing ov-637): a member's device changes the ranking, a
@@ -387,11 +388,12 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
-    // A removed member's device is nobody's, the owner included (ov-712):
-    // it reads, and writes nothing. Before, its writes said `user`, which
-    // reads as the owner's, and told nobody.
-    if peer.client_id.is_some() && !reads_only(req) && person_of(store, peer)? == Person::Released {
-        tracing::info!(method = %req.method, "refused: a released device writing");
+    // A removed member's device is nobody's, the owner included (ov-712),
+    // and reads nothing either (the owner, 25 Oct, ov-758): a removed
+    // person no longer sees the team's plan, board or Needs You. Before
+    // ov-712 its writes said `user`, which reads as the owner's.
+    if peer.client_id.is_some() && person_of(store, peer)? == Person::Released {
+        tracing::info!(method = %req.method, "refused: a released device");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     let owners = matches!(ruling_of(req), Some(Ruling::Owners(_)))
@@ -476,14 +478,6 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
 /// know (refused before the gate, by scope).
 fn ruling_of(req: &Request) -> Option<Ruling> {
     farcooler_protocol::method::Method::parse(&req.method).map(member_ruling)
-}
-
-/// Whether `req` only reads (ov-712): `Ruling::Reads`, a method at Read
-/// scope that writes nothing, not even the caller's own line or Claude login
-/// (a node key, a re-key, a sign-in, which are `Ruling::Own`). What a
-/// released device may still call.
-fn reads_only(req: &Request) -> bool {
-    ruling_of(req) == Some(Ruling::Reads)
 }
 
 /// Whether `req` changes the plan layer (`Ruling::Plan`): the ranking, a
@@ -630,9 +624,9 @@ fn touches_the_owners_device(store: &Store, req: &Request) -> Result<bool> {
 /// Whether `peer`'s `stack.get` may start the `gh` fill that read does when
 /// the cache is empty (`review_ops::fill_prs_in_background`, ov-716). The
 /// owner's and a member's may: members read everything, and the fill only
-/// reads, once a minute a repository at most. A released device reads
-/// what's cached and spends nothing of the owner's. A store that can't be
-/// read starts none.
+/// reads, once a minute a repository at most. A released device's read is
+/// refused at the gate (ov-758), and would spend nothing of the owner's
+/// here if it weren't. A store that can't be read starts none.
 pub fn may_fill_prs(store: &Store, peer: &Peer) -> bool {
     peer.client_id.is_none() || person_of(store, peer).is_ok_and(|p| p != Person::Released)
 }

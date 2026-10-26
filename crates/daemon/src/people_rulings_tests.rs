@@ -142,8 +142,8 @@ async fn a_member_admin_lends_no_owners_login() {
     assert!(gate(&r.svc, &peer(OWNERS_PHONE, Scope::HostAdmin), None, &own_login(false)).is_ok(), "the owner lends");
 }
 
-/// A released device reads the stack, and spends nothing of the owner's on
-/// it: its `stack.get` starts no `gh` fill (ov-712 review M1). A member's
+/// A released device spends nothing of the owner's: its `stack.get` is
+/// refused (ov-758) and starts no `gh` fill (ov-712 review M1). A member's
 /// does, as the owner's does: members read everything (ov-637), and the
 /// fill only reads, once a minute a repository at most.
 #[tokio::test]
@@ -154,7 +154,7 @@ async fn a_released_device_spends_no_gh() {
         ..Default::default()
     };
     let r = runner().await;
-    assert_eq!(refused(&factory(&r.svc, RELEASED, Scope::Read), get(&r)).await, None, "it reads");
+    assert_eq!(refused(&factory(&r.svc, RELEASED, Scope::Read), get(&r)).await.as_deref(), Some("not-yours:not_yours"), "it reads nothing");
     assert!(r.svc.claim_pr_fill(r.repo), "no fill was started for it");
 
     let r = runner().await;
@@ -166,18 +166,14 @@ async fn a_released_device_spends_no_gh() {
 /// keeps it (ov-716). `member_ruling` is a match on `Method` with no
 /// wildcard, so a method added to the table doesn't compile until it has one;
 /// this checks each ruling is what a member's device, at the highest scope,
-/// and a released one get: the owner's alone is refused both `not_yours`,
-/// a read passes both, and everything else passes a member's device (its
-/// own handler's or the pane rules' checks aside) and is refused a released
-/// one. A read is at Read scope, and Read scope is a read or the caller's own,
-/// but for the reads a removed member may not make (`HELD_FROM_THE_REMOVED`).
+/// and a released one get: the owner's alone is refused a member's device
+/// `not_yours`, and everything else passes it (its own handler's or the pane
+/// rules' checks aside). A released device is refused every one, reads
+/// included (ov-758). A read is at Read scope, and Read scope is a read or
+/// the caller's own.
 #[tokio::test]
 async fn every_method_has_a_member_ruling_the_gate_keeps() {
     use farcooler_protocol::method::Method;
-    /// Reads at Read scope that a removed member's device is still refused,
-    /// by the owner's ruling (ov-753): the charter, which is the team's.
-    /// Anything else at Read scope is `Ruling::Reads`.
-    const HELD_FROM_THE_REMOVED: &[Method] = &[Method::WorkspaceCharter];
     let r = runner().await;
     let not_yours = |g: &Result<()>| matches!(g, Err(DomainError::NotYours { what: "not_yours" }));
     for method in Method::ALL {
@@ -190,12 +186,8 @@ async fn every_method_has_a_member_ruling_the_gate_keeps() {
             Ruling::Owners(_) => assert!(not_yours(&member), "{name}, the owner's: {member:?}"),
             _ => assert!(member.is_ok(), "{name}, {ruling:?}: {member:?}"),
         }
-        match ruling {
-            Ruling::Reads => assert!(released.is_ok(), "{name} is a read: {released:?}"),
-            _ => assert!(not_yours(&released), "{name}, {ruling:?}, from a released device: {released:?}"),
-        }
+        assert!(not_yours(&released), "{name}, {ruling:?}, from a released device: {released:?}");
         let read_scope = crate::rpc::required_scope(name) == Some(Scope::Read);
-        let held = HELD_FROM_THE_REMOVED.contains(method);
-        assert_eq!(ruling == Ruling::Reads, read_scope && ruling != Ruling::Own && !held, "{name}: {ruling:?} at {:?}", crate::rpc::required_scope(name));
+        assert_eq!(ruling == Ruling::Reads, read_scope && ruling != Ruling::Own, "{name}: {ruling:?} at {:?}", crate::rpc::required_scope(name));
     }
 }

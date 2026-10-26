@@ -5,11 +5,11 @@
 //! (`people`). Before this, a device a member admin enrolled was exactly
 //! that: one call gave a member's device a second device with the owner's
 //! say, which outlived the member's removal. So a device a member's device
-//! enrolls is released (nobody's, reads only) from the moment it's written
-//! until a runner admin binds it to a member (`Store::set_member_in` takes
-//! it off `released_devices`), and its enroller is kept here, so removing
-//! that member revokes and releases what they enrolled and nobody was bound
-//! to.
+//! enrolls is released (nobody's, and refused every call, ov-758) from the
+//! moment it's written until a runner admin binds it to a member
+//! (`Store::set_member_in` takes it off `released_devices`), and its
+//! enroller is kept here, so removing that member revokes and releases what
+//! they enrolled and nobody was bound to.
 //!
 //! The owner's enrollments, from the local socket or the owner's own
 //! device, are never recorded: they're the owner's, as before.

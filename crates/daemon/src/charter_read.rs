@@ -1,7 +1,7 @@
 //! `workspace.charter` (ov-755): a workspace's charter text, for anyone on
 //! the runner. The charter is the lead's to write and everyone's to read, so
 //! a member knows the rules the team's work is done by. Who may ask is the
-//! gate's (`Ruling::Members`: the owner, a member, a member's rep; not a
+//! gate's (`Ruling::Reads`: the owner, a member, a member's rep; not a
 //! device whose member was removed); what is read here is the file, whatever
 //! the asker's scope, since its text carries no path.
 

@@ -432,8 +432,8 @@ fn charter_of(value: std::result::Result<Option<result::Value>, String>) -> (boo
 /// Every person on the runner reads a workspace's charter (ov-755): the
 /// owner's phone and the local socket, a member's phone, and a member's rep
 /// from its pane, at Read scope. A device whose member was removed does not
-/// (ov-753), though it still reads the plan. And a workspace with no
-/// charter yet answers that, not an error.
+/// (ov-753), as it reads nothing (ov-758). And a workspace with no charter
+/// yet answers that, not an error.
 #[tokio::test]
 async fn everyone_on_the_runner_but_a_removed_member_reads_the_charter() {
     let r = runner().await;
@@ -455,12 +455,6 @@ async fn everyone_on_the_runner_but_a_removed_member_reads_the_charter() {
         let refused = call(&factory(&r.svc, RELEASED, scope), charter_request(r.workspace)).await;
         assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "a removed member's phone at {scope:?}");
     }
-    let plan = Request {
-        method: "plan.get".into(),
-        payload: Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id_bytes(r.workspace), include_closed: false })),
-        ..Default::default()
-    };
-    assert!(call(&factory(&r.svc, RELEASED, Scope::Read), plan).await.is_ok(), "the plan is still read: a separate card");
     assert_eq!(call(&nobody, Request { target_resource_id: None, ..charter_request(r.workspace) }).await.err().as_deref(), Some("not-found:"));
 }
 

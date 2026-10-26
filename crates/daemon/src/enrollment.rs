@@ -92,8 +92,8 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 
 /// What `client.enroll` from a member's device runs before a line is written
 /// (ov-719): `Store::record_member_enrolled`, so the device is nobody's, and
-/// reads only, until a runner admin binds it. Handed the device id the line
-/// will carry.
+/// refused every call (ov-758), until a runner admin binds it. Handed the
+/// device id the line will carry.
 pub type MemberEnrolled = Box<dyn FnOnce(&str) -> Result<()> + Send>;
 
 /// [`enroll`], by a member's device when `by_member` is given (ov-719).

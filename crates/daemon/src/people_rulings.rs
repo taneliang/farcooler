@@ -9,8 +9,9 @@ use farcooler_protocol::method::Method as M;
 /// A member's device's say over one method, and a released device's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ruling {
-    /// A read at Read scope. Members read everything (ov-637), and a
-    /// released device still reads (ov-712): the one ruling it's allowed.
+    /// A read at Read scope. Members read everything (ov-637). A released
+    /// device reads nothing (the owner, 25 Oct, ov-758): every call from
+    /// one is refused, this ruling's included.
     Reads,
     /// The caller's own line, login, rep or connectors only, checked by the
     /// handler (`may_sign_in`, `may_start_rep`, `may_set_connectors`, the
@@ -95,13 +96,10 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::PageStats
         | M::WorkspaceList
         | M::ClientList
-        | M::MemberList => Reads,
-
-        // A read at Read scope that a removed member's device is refused
-        // (ov-755, ov-753): the charter is the team's, and Reads is the one
-        // ruling a released device keeps. The owner, a member and a member's
-        // rep (`rep_may`) read it.
-        M::WorkspaceCharter => Members,
+        | M::MemberList
+        // The charter (ov-755): the owner, a member and a member's rep
+        // (`rep_may`) read it.
+        | M::WorkspaceCharter => Reads,
 
         M::ClientSetNodeKey
         | M::ClientRekey

@@ -526,7 +526,7 @@ fn scope_of(method: Method) -> Scope {
         // converter, as everywhere.
         Method::WorkspaceList => Scope::Read,
         // The charter's text: the team's rules, which every member reads
-        // (ov-755). Whose to read is the gate's (`Ruling::Members`).
+        // (ov-755). Whose to read is the gate's (`Ruling::Reads`).
         Method::WorkspaceCharter => Scope::Read,
         // The writes sit with the board writes and `worktree.create`: they
         // touch no git data and reveal no path, and an orchestrator has to
