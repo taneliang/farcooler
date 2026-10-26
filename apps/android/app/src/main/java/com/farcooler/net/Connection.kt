@@ -1,10 +1,6 @@
 package com.farcooler.net
 
 import com.farcooler.model.Capability
-import com.farcooler.model.AdmittedRunners
-import com.farcooler.model.InMemoryAdmittedRunners
-import com.farcooler.model.KeyRefusals
-import com.farcooler.model.reading
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.FleetRead
 import com.farcooler.model.given
@@ -112,8 +108,6 @@ class Connection(
     private val scope: CoroutineScope,
     /** Where this phone keeps what it has read, until the runner keeps it (ov-113). */
     boardReadsStore: com.farcooler.model.BoardReadsStore = com.farcooler.model.InMemoryBoardReads(),
-    /** Which runners have let this phone in, across launches (ov-818). `Settings` on a phone. */
-    private val admissions: AdmittedRunners = InMemoryAdmittedRunners(),
 ) : ChangesSource, com.farcooler.notify.VisibleTerminalSink {
 
     sealed interface Phase {
@@ -291,18 +285,6 @@ class Connection(
          */
         TUNNEL_UNSPECIFIED("io"),
 
-        /**
-         * A runner that let this phone in before refused its key, short of [KeyRefusals]' settling (ov-818). Possibly
-         * passing, so dialed again on the backoff. Never the core's word: [reading] makes it out of [KEY_REJECTED].
-         */
-        REFUSED_THIS_TIME,
-
-        /**
-         * A runner that let this phone in before has refused its key until it settled (ov-818): this phone's access
-         * was taken away. Checked again slowly, and its team's work leaves the screen.
-         */
-        ACCESS_REMOVED,
-
         OTHER;
 
         /**
@@ -332,13 +314,10 @@ class Connection(
                 // seconds, forever, for an answer that cannot change.
                 TUNNEL_NOT_IN_THIS_BUILD -> Retry.NEVER
 
-                // Slowly, not never: being added back has nobody to tap anything on this phone, and fast, a revoked
-                // key is a refused login on the runner every thirty seconds.
-                DAEMON_MISSING, ACCESS_REMOVED -> Retry.AFTER_A_WHILE
+                DAEMON_MISSING -> Retry.AFTER_A_WHILE
 
                 UNREACHABLE, STOPPED, OTHER,
                 TUNNEL_NO_ANSWER, TUNNEL_RENDEZVOUS, TUNNEL_UNSPECIFIED,
-                REFUSED_THIS_TIME,
                 -> Retry.ON_THE_BACKOFF
             }
 
@@ -795,12 +774,6 @@ class Connection(
     private val _lastTrouble = MutableStateFlow<Failure?>(null)
     val lastTrouble: StateFlow<Failure?> = _lastTrouble.asStateFlow()
 
-    /** How this runner has answered this phone's key: see [KeyRefusals]. */
-    private val keyRefusals = KeyRefusals(admissions.admitted(host.id))
-
-    /** The clock [keyRefusals] reads. A test moves its own. */
-    internal var nowMs: () -> Long = System::currentTimeMillis
-
     /**
      * Which connection attempt is current.
      *
@@ -957,12 +930,7 @@ class Connection(
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             steps.dialEnded(dialed, connected = false)
-            if (mine != attempt) return
-            val next = readRefusals(classify(e))
-            // A runner that let this phone in is dialed again on its own, as a reconnect's is (ov-818): a cold
-            // start's refusal is where a removal is first met after a relaunch. Every other failure stays where a
-            // cold start has always left it.
-            if (next is Phase.Failed && next.kind in AFTER_ADMISSION) settle(next, 0) else _phase.value = next
+            if (mine == attempt) _phase.value = classify(e)
             return
         }
         steps.dialEnded(dialed, connected = true)
@@ -971,7 +939,6 @@ class Connection(
         linkCameUp()
         _phase.value = Phase.Connected
         _lastTrouble.value = null
-        letIn()
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
         boardReads.ledger.linkCameUp()
@@ -1097,7 +1064,6 @@ class Connection(
         linkCameUp()
         _phase.value = Phase.Connected
         _lastTrouble.value = null
-        letIn()
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         _reconnects.value += 1
@@ -1119,10 +1085,8 @@ class Connection(
      * It is the difference between a screen that explains what to fix and one
      * that spins forever over something retrying will never fix.
      */
-    private fun retryOrGiveUp(error: Exception, attempt: Int) = settle(readRefusals(classify(error)), attempt)
-
-    /** [retryOrGiveUp]'s decision, for a failure already read. */
-    private fun settle(next: Phase, attempt: Int) {
+    private fun retryOrGiveUp(error: Exception, attempt: Int) {
+        val next = classify(error)
         if (next !is Phase.Failed) {
             // The host key is unknown again, which is a question for a human
             // and not something to retry past.
@@ -1131,13 +1095,6 @@ class Connection(
         }
         _lastTrouble.value = next.kind
 
-        // The no-access row stays up through the slow wait, rather than the "Reconnecting…" a slow
-        // [scheduleReconnect] would put there (ov-818).
-        if (next.kind == Failure.ACCESS_REMOVED) {
-            _phase.value = next
-            recheckSlowly()
-            return
-        }
         // Which of the three, per failure, is [Failure.retry] — a table a JVM
         // unit test reads, rather than a `when` in here, which nothing can
         // build. What is left here is only the mechanism for each.
@@ -1151,55 +1108,6 @@ class Connection(
 
             Retry.ON_THE_BACKOFF -> scheduleReconnect(attempt + 1, LinkRevival.backoffMs(attempt + 1))
         }
-    }
-
-    /**
-     * A failed dial's phase, read against this phone's history with the runner (ov-818): see [reading]. A runner
-     * that has taken this phone's access away takes its work off the screen with it.
-     */
-    private fun readRefusals(next: Phase): Phase {
-        if (next !is Phase.Failed) return next
-        val read = next.kind.reading(keyRefusals, nowMs())
-        if (read == Failure.ACCESS_REMOVED) forgetTeamWork()
-        return Phase.Failed(next.message, read)
-    }
-
-    /** A dial got in: the runner accepts this phone's key, remembered across launches. Written only when news. */
-    private fun letIn() {
-        if (keyRefusals.admitted && keyRefusals.refusals == 0) return
-        keyRefusals.letIn()
-        admissions.remember(host.id)
-    }
-
-    /** Everything read from this runner, off the screen (ov-818): its worktrees, what they changed, what needs you. */
-    private fun forgetTeamWork() {
-        _fleet.value = Fleet.EMPTY
-        _inbox.value = emptyMap()
-        _needsYou.value = RunnerNeedsYou(emptyList(), derived = false)
-        _repositories.value = emptyList()
-        // The glances and notifications are ov-820's.
-    }
-
-    /**
-     * Dials a runner that took this phone's access away again in five minutes, from its no-access row, so being added
-     * back is noticed without a tap. Anything that dials sooner replaces it.
-     */
-    private fun recheckSlowly() {
-        reconnector?.cancel()
-        reconnector = scope.launch {
-            delay(SLOW_RETRY_MS)
-            val now = _phase.value
-            if (now is Phase.Failed && now.kind == Failure.ACCESS_REMOVED) reconnectNow()
-        }
-    }
-
-    /**
-     * Whether the runner refuses this phone's key after letting it in (ov-818): the no-access row, held through each
-     * slow recheck's dial, which is a [Phase.Reconnecting] that keeps the trouble.
-     */
-    val accessRemoved: StateFlow<Boolean> by lazy {
-        combine(_phase, _lastTrouble) { phase, trouble -> trouble == Failure.ACCESS_REMOVED && phase !is Phase.Connected }
-            .stateIn(scope + derived, SharingStarted.Eagerly, false)
     }
 
     /**
@@ -1910,6 +1818,140 @@ class Connection(
         data class Refused(val message: String?, val word: String? = null) : RemoveOutcome
     }
 
+    /**
+     * Remove a worktree. **The most destructive thing this app can ask for.**
+     *
+     * `confirm` must be the worktree's exact name, unless the worktree is
+     * clean, in which case it may be empty.
+     *
+     * ## What the far end refuses, and where
+     *
+     * Worth having written down here, because the caller has to refuse some of
+     * it FIRST — a refusal that lands after somebody has typed a worktree's name
+     * into a destructive confirmation is a refusal that came too late to be
+     * useful, which is the whole of `07e75e8`.
+     *
+     * 1. **Scope.** `worktree.remove` is `Scope::HostAdmin`
+     *    (`crates/daemon/src/rpc.rs`), and a phone enrolled through the ceremony
+     *    holds `control`. That refusal cannot be predicted from this side — a key
+     *    added to `authorized_keys` by hand carries no scope line and reads as
+     *    host_admin, so two phones with identical settings can get different
+     *    answers — so it is REPORTED rather than pre-empted, and the runner's own
+     *    words go in a box.
+     * 2. **The main checkout**, twice: the `is_main_checkout` flag, and then a
+     *    canonicalized path comparison that deliberately does not trust the flag
+     *    (`Service::remove_worktree`). Both run before any terminal is stopped and
+     *    before any directory is touched. The caller keeps the door shut on
+     *    [Worktree.isMainCheckout] anyway, so nobody is walked through a
+     *    ceremony that could never have succeeded.
+     * 3. **An untrustworthy tmux inventory**, which is refused outright — and
+     *    this is the one that arrives in the WORST order. The confirmation gate
+     *    is in `rpc.rs` and this check is in `service.rs` underneath it, so on a
+     *    dirty worktree the daemon demands the typed name first and only then
+     *    says tmux is unreachable. The caller checks [Fleet.runtimeHealthy] before
+     *    it offers the button.
+     * 4. **A dirty worktree with the wrong name typed**, which is [RemoveOutcome.NeedsTypedName].
+     *
+     * Past all four it closes every terminal in the worktree — not a reason to
+     * refuse, since closing them is part of what was asked for — then runs
+     * `git worktree remove --force` and deletes the worktree row. **The branch
+     * survives, and so does everything committed on it.**
+     */
+    suspend fun removeWorktree(worktree: Worktree, confirm: String): RemoveOutcome {
+        val data = try {
+            core.call(
+                "worktree.remove",
+                args("worktree" to worktree.id, "confirm" to confirm),
+            )
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            // Refreshed even on a refusal: several of the refusals above are
+            // about state this phone is holding a stale copy of, and the fleet
+            // it draws behind the failure should be the current one.
+            refresh()
+            return RemoveOutcome.Refused(e.message, e.refusalWord)
+        }
+        refresh()
+        return if (data["confirmationRequired"]?.jsonPrimitive?.booleanOrNull == true) {
+            RemoveOutcome.NeedsTypedName
+        } else {
+            RemoveOutcome.Removed
+        }
+    }
+
+    /**
+     * Create a worktree and branch, with a terminal already in it.
+     *
+     * [name] names the worktree's directory. The wire key is still `task`, which
+     * is what it was called when a worktree carried a typed-out task alongside
+     * its directory; renaming the key would strand every shipped app for nothing.
+     *
+     * `terminal` names what runs there; empty means none, which is what a caller
+     * about to create its own agent terminal wants. A shell here, because a
+     * worktree with nothing running in it is a directory.
+     *
+     * [adopt] takes an EXISTING branch over instead of creating one, and it is a
+     * different operation rather than a flag on the same one: `rpc.rs` routes it
+     * to `Service::adopt_branch`, which checks the branch out into a new
+     * worktree instead of forking from HEAD.
+     *
+     * That makes [name] dead on this path. `adopt_branch` ignores it and names
+     * the worktree after the branch's last segment, so callers pass the branch
+     * in both places rather than sending something the runner will throw away —
+     * which is what the CLI and iOS both do. [branch] must already exist, on
+     * this repository or on exactly one of its remotes.
+     *
+     * False for every caller that predates it, and absent from an older client,
+     * which `crates/client/src/ffi.rs` reads as false: the behavior
+     * `worktree.create` always had.
+     *
+     * [workspace] claims the new worktree for that workspace; null leaves it
+     * to the runner, which claims it for Main.
+     */
+    suspend fun createWorktree(
+        repository: String,
+        name: String,
+        branch: String,
+        terminal: String = "shell",
+        adopt: Boolean = false,
+        workspace: String? = null,
+    ): String {
+        val pairs = mutableListOf<Pair<String, Any>>(
+            "repository" to repository,
+            "task" to name,
+            "branch" to branch,
+            "base" to "",
+            "terminal" to terminal,
+            "adopt" to adopt,
+        )
+        // Claimed for the workspace whose screen made it (ruling 8). Absent,
+        // as from the drawer, is the repository's Main — what it always was.
+        // Never for an implicit workspace, whose id is the repository's.
+        if (workspace != null) pairs += "workspace" to workspace
+        val data = core.call("worktree.create", args(*pairs.toTypedArray()))
+        return data["id"]?.jsonPrimitive?.contentOrNull
+            ?: throw com.farcooler.core.CoreException("The runner created a worktree but didn’t name it.")
+    }
+
+    suspend fun createTerminal(worktree: String, title: String, preset: String): String {
+        val data = core.call(
+            "terminal.create",
+            args("worktree" to worktree, "title" to title, "preset" to preset),
+        )
+        return data["id"]?.jsonPrimitive?.contentOrNull
+            ?: throw com.farcooler.core.CoreException("The runner started a terminal but didn’t name it.")
+    }
+
+    /**
+     * Send exact bytes to a terminal. [hex] must already be lowercase hex —
+     * this does no encoding of its own, because the caller that exists needs
+     * the sentence and the carriage return sent as two separate calls, not two
+     * strings joined into one payload here.
+     */
+    suspend fun writeRaw(terminal: String, hex: String) {
+        core.call("terminal.write", args("terminal" to terminal, "hex" to hex))
+    }
+
     // ---- changes ----
     //
     // The review surface, reachable from a phone at last. **Every one of these
@@ -2219,9 +2261,6 @@ class Connection(
          * installing it later should be noticed without relaunching the app.
          */
         private const val SLOW_RETRY_MS = 300_000L
-
-        /** The failures from a runner that let this phone in before, which a cold start dials again (ov-818). */
-        private val AFTER_ADMISSION = setOf(Failure.REFUSED_THIS_TIME, Failure.ACCESS_REMOVED)
 
         /** What one `client.enroll` sends. See [CallArgs.enrollArgs]. */
         fun enrollArgs(publicKey: String, label: String, clientId: String, nodeKey: String): JsonObject =

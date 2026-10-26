@@ -300,7 +300,7 @@ final class RoutePrompt {
             asked.insert(target)
             waiting.append(.init(target: target, address: offer.address, name: routes.name(of: target)))
             schedule()
-        case .connecting, .reconnecting, .notInstalled, .removed, .noAccess:
+        case .connecting, .reconnecting, .notInstalled, .removed:
             return
         }
     }

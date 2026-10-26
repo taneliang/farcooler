@@ -210,25 +210,6 @@ extension ContentView {
         return store.hosts.first { store.clients[$0]?.state == .removed }
     }
 
-    /// Whether a runner in `state` shows this Mac nothing of its team: it
-    /// removed this Mac's member, or took this Mac's access away (ov-818).
-    nonisolated static func shutOut(_ state: HostState?) -> Bool {
-        state == .removed || state == .noAccess
-    }
-
-    /// That runner's own screen, in place of whatever was open on it.
-    func placeholder(shutOutOf runner: String) -> some View {
-        placeholder(restoringOn: runner, waited: 0, restoring: false)
-    }
-
-    /// The same for a runner that refuses this Mac's key after letting it in
-    /// (ov-818).
-    func noAccessTo(restoringOn runner: String?) -> String? {
-        if let runner { return store.clients[runner]?.state == .noAccess ? runner : nil }
-        guard store.fleet.worktrees.isEmpty else { return nil }
-        return store.hosts.first { store.clients[$0]?.state == .noAccess }
-    }
-
     private func placeholder(restoringOn runner: String?, waited: TimeInterval, restoring: Bool) -> some View {
         let local = store.clients[""]
         let (step, agents) = macStep()
@@ -237,7 +218,7 @@ extension ContentView {
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
                 localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty,
                 restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited, restoring: restoring,
-                removedFrom: removedFrom(restoringOn: runner), noAccessTo: noAccessTo(restoringOn: runner)),
+                removedFrom: removedFrom(restoringOn: runner)),
             onShowNeedsYou: { selection = .needsYou },
             onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }

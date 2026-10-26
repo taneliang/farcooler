@@ -35,14 +35,3 @@ fn a_runner_on_another_commit_never_matches() {
     assert!(!matches_for(&format!("{other}{dirty}")));
     assert!(!matches_for(&format!("0.1.0 (canary {other}{dirty})")));
 }
-
-/// The key the runner says this caller came in with (ov-818), for the Mac to
-/// remember; null when the runner names none.
-#[test]
-fn the_runner_named_key_reaches_the_mac() {
-    let counts = || StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
-    let named = farcooler_protocol::v1::Host { caller_key_fingerprint: "SHA256:abc".into(), ..Default::default() };
-    assert_eq!(status_json(&named, &[], counts())["keyFingerprint"], "SHA256:abc");
-    let none = farcooler_protocol::v1::Host::default();
-    assert!(status_json(&none, &[], counts())["keyFingerprint"].is_null());
-}

@@ -76,23 +76,4 @@ struct MaintainerSpecimenTests {
             }
         }
     }
-
-    /// A runner that refuses this Mac's key after letting it in (ov-818).
-    @Test("Write the no-access screen")
-    func noAccessScreen() async throws {
-        for width in [480.0, 720.0] {
-            for dark in [false, true] {
-                try await Self.write(
-                    FleetPlaceholder(
-                        phase: .noAccess("platform-builds-eu-west-staging.example-corporation.internal"),
-                        onShowNeedsYou: {},
-                        welcome: WelcomeSetup(
-                            model: WelcomeModel(home: "/nowhere", scan: { [] }), step: .ready([.claude]),
-                            agents: HarnessAvailability(agentsFound: ["claude"]), register: { _ in nil },
-                            onCheckAgain: {}, onAnotherRunner: nil),
-                        onNewWorktree: {}, onTryAgain: {}),
-                    "no-access", width: width, height: 460, dark: dark)
-            }
-        }
-    }
 }

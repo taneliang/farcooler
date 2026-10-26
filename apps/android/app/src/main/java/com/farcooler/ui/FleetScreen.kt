@@ -6,8 +6,6 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -499,8 +497,6 @@ internal fun RunnerStatusRow(
     alternative: Reach? = null,
     /** Move it to its address because a person said so; null offers nothing. */
     onConnectDirectly: (() -> Unit)? = null,
-    /** This device's key and the line to paste, for a runner that's this person's own (ov-818). */
-    onAuthorize: (() -> Unit)? = null,
 ) {
     val phase by connection.phase.collectAsStateWithLifecycle()
     val lastTrouble by connection.lastTrouble.collectAsStateWithLifecycle()
@@ -511,12 +507,6 @@ internal fun RunnerStatusRow(
             connection.removal.checkAgain()
             onRetry()
         }
-        return
-    }
-    // Its key refused after letting this phone in (ov-818), held through each recheck's dial.
-    val accessRemoved by connection.accessRemoved.collectAsStateWithLifecycle()
-    if (accessRemoved) {
-        NoAccessRow(connection.host.displayLabel, showLabel, onCheckAgain = onReconnectNow, onAuthorize = onAuthorize, onEdit = onEdit)
         return
     }
     if (phase is Connection.Phase.Connected) return
@@ -704,9 +694,6 @@ internal fun failureHeadline(kind: Connection.Failure, runner: Runner): String =
     Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD -> "No Tailcat in this build"
     Connection.Failure.TUNNEL_UNSPECIFIED -> "Tailcat didn’t connect"
 
-    Connection.Failure.REFUSED_THIS_TIME -> "Key not accepted"
-    Connection.Failure.ACCESS_REMOVED -> RunnerTeam.NO_ACCESS_TITLE
-
     Connection.Failure.OTHER -> "Can’t connect"
 }
 
@@ -725,7 +712,7 @@ internal fun failureHeadline(kind: Connection.Failure, runner: Runner): String =
  * are stored. An `else` here is what would let a kind added later pass the
  * core's own text through instead, silently, which is exactly how
  * `cannot open the tunnel: no_answer` used to reach a screen. Naming all
- * fifteen makes a sixteenth a compile error.
+ * thirteen makes a fourteenth a compile error.
  *
  * Takes the [Runner] rather than the [Connection] for [failureHeadline]'s
  * reason: so a test can read this copy back.
@@ -780,11 +767,6 @@ internal fun failureDetail(
     // so a guess here would send somebody to fix something that was never the
     // problem.
     Connection.Failure.TUNNEL_UNSPECIFIED -> "Tailcat couldn’t connect."
-
-    Connection.Failure.REFUSED_THIS_TIME ->
-        runner.reach.detail(runner.user) + " refused this device’s key, though it let it in before."
-
-    Connection.Failure.ACCESS_REMOVED -> RunnerTeam.NO_ACCESS_BODY
 
     // The undiagnosed arm, and the only one where `message` is whatever came
     // back rather than something written to be read. Those words go in a
@@ -1393,41 +1375,6 @@ internal fun DirectRouteQuestion(offer: DirectRoute.Offer?, onConnectDirectly: (
         )
         TextButton(onClick = onConnectDirectly, modifier = Modifier.testTag("connect-directly")) {
             Text(DirectRoute.CONNECT_DIRECTLY, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-/**
- * A runner that refuses this phone's key after letting it in (ov-818): "You no longer have access to this runner",
- * what it means, and Check again, which dials it now rather than at the next slow check. [RemovedRow]'s sibling.
- *
- * Beside it, Connect this device (this device's own key, the drawer's words) and Edit, for a runner that's this
- * person's own and refuses a key they forgot or reset (review S2). The headline outranks the runner's name.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun NoAccessRow(
-    runner: String,
-    showLabel: Boolean,
-    onCheckAgain: () -> Unit,
-    onAuthorize: (() -> Unit)? = null,
-    onEdit: (() -> Unit)? = null,
-) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).testTag("runner-no-access")) {
-        if (showLabel) {
-            Text(runner, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text(RunnerTeam.NO_ACCESS_TITLE, style = MaterialTheme.typography.titleSmall)
-        Text(
-            RunnerTeam.NO_ACCESS_BODY,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // Wraps: three buttons don't fit a 320 dp phone on one line.
-        FlowRow {
-            TextButton(onClick = onCheckAgain) { Text("Check again") }
-            if (onAuthorize != null) TextButton(onClick = onAuthorize) { Text("Connect this device") }
-            if (onEdit != null) TextButton(onClick = onEdit) { Text("Edit") }
         }
     }
 }

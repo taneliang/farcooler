@@ -67,8 +67,6 @@ object DirectRoute {
         Connection.Failure.NO_IDENTITY,
         Connection.Failure.KEY_NOT_TRUSTED,
         Connection.Failure.OTHER,
-        Connection.Failure.REFUSED_THIS_TIME,
-        Connection.Failure.ACCESS_REMOVED,
         -> false
     }
 

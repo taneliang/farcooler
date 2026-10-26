@@ -317,8 +317,6 @@ enum ActionCopy {
             return "Far Cooler isn’t installed on that runner yet."
         case .removed:
             return RunnerPeople.removedBody
-        case .noAccess:
-            return RunnerPeople.noAccessBody
         case .unreachable(let why):
             log.error("refused, runner unreachable: \(why, privacy: .private)")
             return "That runner can’t be reached right now. Far Cooler will keep trying."

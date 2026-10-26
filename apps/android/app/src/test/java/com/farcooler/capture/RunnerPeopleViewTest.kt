@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import com.farcooler.model.RunnerTeam
 import com.farcooler.ui.FarCoolerTheme
-import com.farcooler.ui.NoAccessRow
 import com.farcooler.ui.RemovedRow
 import com.farcooler.ui.RunnerPeopleSection
 import org.junit.Assert.assertEquals
@@ -128,19 +127,6 @@ class RunnerPeopleViewTest {
         assertEquals(0, asked)
     }
 
-    @Test
-    fun `a revoked phone says it has no access, and Check again dials`() {
-        var asked = 0
-        shown({ NoAccessRow(longRunner, showLabel = true, onCheckAgain = { asked += 1 }, onAuthorize = {}, onEdit = {}) }) { root, said ->
-            assertTrue(said.toString(), RunnerTeam.NO_ACCESS_TITLE in said)
-            assertTrue(said.toString(), RunnerTeam.NO_ACCESS_BODY in said)
-            // The owner's own runner keeps its way back (review S2).
-            for (button in listOf("Check again", "Connect this device", "Edit")) assertTrue(said.toString(), button in said)
-            assertNotNull(tagged(root, "runner-no-access"))
-        }
-        assertEquals(0, asked)
-    }
-
     private fun screen(content: @androidx.compose.runtime.Composable () -> Unit) = @androidx.compose.runtime.Composable {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) { content() }
     }
@@ -150,8 +136,4 @@ class RunnerPeopleViewTest {
     @Test fun peopleMember() = Capture.both("people-roles-member", content = screen { RunnerPeopleSection(team.copy(you = "bob"), null, null) })
 
     @Test fun removed() = Capture.both("runner-removed", content = screen { RemovedRow(longRunner, showLabel = true) {} })
-
-    @Test fun noAccess() = Capture.both(
-        "runner-no-access", content = screen { NoAccessRow(longRunner, showLabel = true, onCheckAgain = {}, onAuthorize = {}, onEdit = {}) },
-    )
 }

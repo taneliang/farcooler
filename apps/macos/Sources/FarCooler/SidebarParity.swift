@@ -273,8 +273,6 @@ enum RunnerStatusItem {
         case notInstalled
         /// It removed this Mac's member from its team (ov-784).
         case removed
-        /// It refuses this Mac's key, after letting it in before (ov-818).
-        case noAccess
     }
 
     struct Trouble: Equatable {
@@ -325,7 +323,6 @@ enum RunnerStatusItem {
         case .reconnecting, .unreachable: return .offline
         case .notInstalled: return .notInstalled
         case .removed: return .removed
-        case .noAccess: return .noAccess
         case .connected: return .noTmux
         }
     }
@@ -341,7 +338,6 @@ enum RunnerStatusItem {
             case .noTmux: return "tmux unavailable on \(name)"
             case .notInstalled: return "Far Cooler isn’t on \(name)"
             case .removed: return "Removed from \(name)"
-            case .noAccess: return "No access to \(name)"
             }
         }
         if troubles.count > 1 {
@@ -413,7 +409,6 @@ enum RunnerStatusItem {
         case .noTmux: return "tmux unavailable"
         case .notInstalled: return "Far Cooler isn’t installed"
         case .removed: return "you were removed"
-        case .noAccess: return "no access"
         }
     }
 }

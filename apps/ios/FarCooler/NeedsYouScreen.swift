@@ -303,12 +303,9 @@ struct NeedsYouScreen: View {
         }
     }
 
-    /// The runners that haven't answered what needs them, by name. Not one
-    /// that removed this phone or took its access away: its own row says so,
-    /// and "isn't answering" under it would say otherwise (ov-818).
+    /// The runners that haven't answered what needs them, by name.
     private var unanswered: [String] {
-        fleet.runners.filter { !$0.connection.shutsThisPhoneOut }
-            .filter { !$0.connection.needsYouRead || !$0.connection.isAnswering }
+        fleet.runners.filter { !$0.connection.needsYouRead || !$0.connection.isAnswering }
             .map(\.host.label)
     }
 

@@ -140,9 +140,6 @@ pub fn host(
         // The names the owner's shell startup files export, or none: the
         // caller passes them for the owner alone (ov-651).
         rc_claude_keys,
-        // Whose key this caller came in with: `host.get` fills it for the
-        // caller's own line (ov-818). Empty here.
-        caller_key_fingerprint: String::new(),
     }
 }
 

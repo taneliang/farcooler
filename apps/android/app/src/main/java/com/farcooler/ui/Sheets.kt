@@ -52,10 +52,7 @@ import com.farcooler.model.Trouble
 import com.farcooler.model.Worktree
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.Connection
-import com.farcooler.net.createTerminal
-import com.farcooler.net.createWorktree
 import com.farcooler.net.rethrowIfCancellation
-import com.farcooler.net.writeRaw
 import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleAfter
 import kotlinx.coroutines.delay

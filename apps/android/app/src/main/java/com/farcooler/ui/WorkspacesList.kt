@@ -55,8 +55,6 @@ fun rememberNeedsYouRunners(connections: List<Connection>): List<Pair<Connection
             val fleet by connection.fleet.collectAsStateWithLifecycle()
             val repositories by connection.repositories.collectAsStateWithLifecycle()
             val link by connection.link.collectAsStateWithLifecycle()
-            val accessRemoved by connection.accessRemoved.collectAsStateWithLifecycle()
-            val removed by connection.removal.removed.collectAsStateWithLifecycle()
             connection to NeedsYouRunner(
                 hostId = connection.host.id,
                 label = connection.host.displayLabel,
@@ -64,7 +62,6 @@ fun rememberNeedsYouRunners(connections: List<Connection>): List<Pair<Connection
                 fleet = fleet,
                 repositories = repositories,
                 answering = link == RunnerLink.ANSWERING,
-                shutOut = accessRemoved || removed,
             )
         }
     }
