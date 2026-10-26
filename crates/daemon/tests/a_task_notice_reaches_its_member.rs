@@ -40,8 +40,10 @@ fn a_decision(h: &Harness, repo: &Repo, title: &str, handle: Option<&str>) -> St
 
 /// Whose task each `notice` the connection `peer` is told of was, when
 /// Alice's, Bob's and nobody's task each wait on a decision. Carol was a
-/// member and has been removed, so her phone is nobody's now. Sorted.
-async fn told(peer: Peer) -> Vec<String> {
+/// member and has been removed, so her phone is nobody's now. Sorted. And
+/// whether the connection heard the fleet event sent after them: a released
+/// device hears no event at all (ov-758), so it is waited for only `quiet`.
+async fn told(peer: Peer, quiet: Duration) -> (Vec<String>, bool) {
     let h = start_as(peer).await;
     let store = &h.service.store;
     let directory = |account| Directory { account, email: "" };
@@ -67,33 +69,35 @@ async fn told(peer: Peer) -> Vec<String> {
     }
     h.watcher.announce_fleet_changed();
     let mut seen = Vec::new();
-    loop {
-        let e = tokio::time::timeout(WAIT, listener.next_event()).await.expect("the flush arrived").expect("an event");
-        match e.payload {
+    let flushed = loop {
+        let Ok(e) = tokio::time::timeout(quiet, listener.next_event()).await else { break false };
+        match e.expect("an event").payload {
             Some(event::Payload::Notice(n)) => seen.push(whose.get(&n.task_key).cloned().unwrap_or(n.task_key)),
-            Some(event::Payload::FleetChanged(_)) => break,
+            Some(event::Payload::FleetChanged(_)) => break true,
             _ => {}
         }
-    }
+    };
     seen.sort();
-    seen
+    (seen, flushed)
 }
 
 #[tokio::test]
 async fn a_member_is_told_of_their_own_task_alone() {
-    let seen = told(Peer { client_id: Some("alice-phone".into()), scope: Scope::Control }).await;
-    assert_eq!(seen, vec!["Alice's".to_string()]);
+    let seen = told(Peer { client_id: Some("alice-phone".into()), scope: Scope::Control }, WAIT).await;
+    assert_eq!(seen, (vec!["Alice's".to_string()], true));
 }
 
 #[tokio::test]
 async fn the_owner_is_told_of_every_task() {
-    let seen = told(Peer { client_id: None, scope: Scope::Control }).await;
-    assert_eq!(seen, vec!["Alice's".to_string(), "Bob's".into(), "Nobody's".into()]);
+    let seen = told(Peer { client_id: None, scope: Scope::Control }, WAIT).await;
+    assert_eq!(seen, (vec!["Alice's".to_string(), "Bob's".into(), "Nobody's".into()], true));
 }
 
-/// A device that was a removed member's is never the owner's, and hears nothing.
+/// A device that was a removed member's is never the owner's, and hears
+/// nothing: no notice, and since ov-758 no event of any kind, the fleet's
+/// included.
 #[tokio::test]
 async fn a_removed_members_device_is_told_of_nothing() {
-    let seen = told(Peer { client_id: Some("carol-phone".into()), scope: Scope::Control }).await;
-    assert_eq!(seen, Vec::<String>::new());
+    let seen = told(Peer { client_id: Some("carol-phone".into()), scope: Scope::Control }, Duration::from_secs(2)).await;
+    assert_eq!(seen, (Vec::<String>::new(), false));
 }
