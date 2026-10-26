@@ -95,6 +95,11 @@ struct PhonePlanList<Top: View>: View {
     @State private var composing = false
     @State private var fromBranch = false
     @State private var moveFailure: ActionFailure?
+    /// Whether a screen is pushed over this one, and the tree it last drew
+    /// (ov-791): covered, it keeps that tree rather than building it again
+    /// on every board move, a dropped frame each in the screen on top.
+    @State private var covered = false
+    @State private var held = HeldTree()
     @Environment(\.phoneNavigator) private var navigator
 
     init(
@@ -113,7 +118,7 @@ struct PhonePlanList<Top: View>: View {
     }
 
     var body: some View {
-        let root = PhoneTree.root(connection.oneTree(summary, filter: .open, narrow: narrow))
+        let root = tree
         List {
             top()
             if inSheet {
@@ -168,6 +173,8 @@ struct PhonePlanList<Top: View>: View {
             PlanFilter.remember(chosen, runner: place.runner, workspace: place.workspace)
         }
         .task { await connection.readTree(summary) }
+        .onAppear { covered = false }
+        .onDisappear { covered = true }
         .refreshable {
             _ = await connection.readBoard(summary)
             if connection.keepsPlan { await connection.readPlan(summary) }
@@ -177,6 +184,15 @@ struct PhonePlanList<Top: View>: View {
         .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
         // The tree's and the plan's keys preview their tasks (ov-299).
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
+    }
+
+    /// The tree under its filter: the one last drawn while covered, else
+    /// built from what's read.
+    private var tree: (work: [OneTreeNode], below: [OneTreeNode]) {
+        if covered, let kept = held.root { return kept }
+        let made = PhoneTree.root(connection.oneTree(summary, filter: .open, narrow: narrow))
+        held.root = made
+        return made
     }
 
     /// "All Done  94 ›" and "All Canceled", the board's History pages
@@ -318,4 +334,10 @@ struct ChipFlow: Layout {
         }
         return out
     }
+}
+
+/// `PhonePlanList`'s last tree, kept by reference: written as it's drawn,
+/// read while the list is covered, and never a reason to draw again.
+final class HeldTree {
+    var root: (work: [OneTreeNode], below: [OneTreeNode])?
 }
