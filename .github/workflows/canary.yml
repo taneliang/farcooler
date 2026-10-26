@@ -471,6 +471,170 @@ jobs:
             exit "$altool_status"
           fi
 
+  # The Android canary, to Google Play's internal testing track (ov-814).
+  #
+  # The Play counterpart of the iOS job above: nobody presses anything, and a
+  # build on main reaches the owner's phone, which auto-updates from Play with
+  # no USB debugging and no sideloading.
+  #
+  # IT SKIPS UNTIL IT CAN WORK, VISIBLY. Two things have to exist before Play
+  # accepts an upload at all: the app has to have had its first bundle uploaded
+  # BY HAND (the Play Developer API refuses a package that has never had one),
+  # and the five secrets below have to be set. `vars.CANARY_PLAY` is the owner's
+  # statement that both are done, gated through `vars` for the reason the iOS
+  # job gives (the `secrets` context is unavailable in an `if`). The first step
+  # reads it and the secrets, writes a notice naming what is missing, and every
+  # later step runs only when it says ready. A job-level `if` would skip with no
+  # words at all, which is how a missing upload goes unnoticed for a month.
+  #
+  # SECRETS, each handed only to the step that uses it:
+  #   ANDROID_UPLOAD_KEYSTORE_B64      the upload keystore, base64    (Build)
+  #   ANDROID_UPLOAD_STORE_PASSWORD                                   (Build)
+  #   ANDROID_UPLOAD_KEY_ALIAS                                        (Build)
+  #   ANDROID_UPLOAD_KEY_PASSWORD                                     (Build)
+  #   PLAY_SERVICE_ACCOUNT_JSON        service account with release   (Upload)
+  #   GOOGLE_SERVICES_JSON_CANARY      optional, Firebase push        (Firebase)
+  #
+  # THE UPLOAD ACTION is r0adkll/upload-google-play, pinned to the commit of
+  # v1.1.5. Gradle Play Publisher was the alternative; it is a Gradle plugin, so
+  # it would put a third-party plugin and the service account's reach inside
+  # every build of the app, including the unsigned compile check in ci.yml, for
+  # one upload a push. This is a single step that sees the service account JSON
+  # and nothing else, and a pin by SHA means a moved tag cannot change what runs
+  # with that credential.
+  #
+  # versionCode IS THE iOS BUILD NUMBER: `git rev-list --count HEAD` through
+  # scripts/version.sh, from a full clone of the commit CI passed. Play refuses
+  # a versionCode it has already seen or one below the highest, and the group
+  # below cancels an older build still running when a newer commit arrives, so
+  # an older one cannot land last.
+  android:
+    name: Android (Play internal testing)
+    runs-on: ubuntu-latest
+    needs: [wire, plan, quiet]
+    timeout-minutes: 45
+    concurrency:
+      group: canary-android
+      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
+    if: needs.plan.outputs.build == 'true'
+    # Booleans only, so a step's `if` can read them; the values stay in
+    # `secrets.*` on the step that needs them.
+    env:
+      PLAY_ENABLED: ${{ vars.CANARY_PLAY }}
+      HAS_UPLOAD_KEYSTORE: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_B64 != '' }}
+      HAS_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD != '' }}
+      HAS_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS != '' }}
+      HAS_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD != '' }}
+      HAS_PLAY_SERVICE_ACCOUNT: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      HAS_GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON_CANARY != '' }}
+    steps:
+      - name: Check the Play upload is set up
+        id: gate
+        run: |
+          missing=""
+          [ "$HAS_UPLOAD_KEYSTORE" = true ] || missing="$missing ANDROID_UPLOAD_KEYSTORE_B64"
+          [ "$HAS_UPLOAD_STORE_PASSWORD" = true ] || missing="$missing ANDROID_UPLOAD_STORE_PASSWORD"
+          [ "$HAS_UPLOAD_KEY_ALIAS" = true ] || missing="$missing ANDROID_UPLOAD_KEY_ALIAS"
+          [ "$HAS_UPLOAD_KEY_PASSWORD" = true ] || missing="$missing ANDROID_UPLOAD_KEY_PASSWORD"
+          [ "$HAS_PLAY_SERVICE_ACCOUNT" = true ] || missing="$missing PLAY_SERVICE_ACCOUNT_JSON"
+          if [ "$PLAY_ENABLED" != true ]; then
+            echo "::notice title=Android canary skipped::The repository variable CANARY_PLAY is not 'true'. Set it after the first bundle has been uploaded to Play by hand (apps/android/README.md, Play internal testing)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$missing" ]; then
+            echo "::warning title=Android canary skipped::CANARY_PLAY is set but these secrets are missing:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          # The build number is the commit count; a shallow clone makes it 1
+          # and version.sh refuses one outright.
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        if: steps.gate.outputs.ready == 'true'
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.gate.outputs.ready == 'true'
+      # The same NDK ci.yml's Android job pins.
+      - name: Install the NDK
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'ndk;29.0.14206865' 'platforms;android-37.1' 'build-tools;37.0.0'
+      - uses: actions/setup-go@v5
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
+      - name: Build the Rust core and the tunnel for Android
+        if: steps.gate.outputs.ready == 'true'
+        run: ./scripts/build-android-libs.sh
+      # Firebase push, when the owner has added the canary project's config.
+      # Without it the build is complete and push is unavailable, which is the
+      # shape build.gradle.kts documents.
+      - name: Write google-services.json
+        if: steps.gate.outputs.ready == 'true' && env.HAS_GOOGLE_SERVICES == 'true'
+        env:
+          GOOGLE_SERVICES_JSON_CANARY: ${{ secrets.GOOGLE_SERVICES_JSON_CANARY }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON_CANARY" > apps/android/app/google-services.json
+      - name: The WorkOS client id for this channel
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          LOCAL_WORKOS_CLIENT_ID: ${{ vars.LOCAL_WORKOS_CLIENT_ID }}
+          CANARY_WORKOS_CLIENT_ID: ${{ vars.CANARY_WORKOS_CLIENT_ID }}
+          PREVIEW_WORKOS_CLIENT_ID: ${{ vars.PREVIEW_WORKOS_CLIENT_ID }}
+          STABLE_WORKOS_CLIENT_ID: ${{ vars.STABLE_WORKOS_CLIENT_ID }}
+        run: ./scripts/workos-client-id.sh
+      # `-Pfarcooler.sign=true` makes Gradle sign with the upload key and fail
+      # naming anything missing; `bundleRelease` refuses to run without it.
+      - name: Build the signed release bundle
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: apps/android
+        env:
+          ANDROID_UPLOAD_KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_B64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ./gradlew bundleRelease -Pfarcooler.sign=true \
+            "-Pfarcooler.workosClientId=${FARCOOLER_WORKOS_CLIENT_ID:-}"
+      # Upload only what is verifiably signed: the bundle must carry a
+      # certificate, and the application id and version code are logged so a
+      # run says what it sent.
+      - name: Check the bundle is signed
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          aab=apps/android/app/build/outputs/bundle/release/app-release.aab
+          [ -f "$aab" ] || { echo "::error::no bundle at $aab"; exit 1; }
+          jarsigner -verify -certs "$aab" | tee "$RUNNER_TEMP/jarsigner.log"
+          grep -q 'jar verified' "$RUNNER_TEMP/jarsigner.log" || { echo "::error::the bundle is not signed"; exit 1; }
+          echo "versionCode $(./scripts/version.sh build), channel $(./scripts/version.sh channel)"
+      # The only step that sees the service account. scripts/canary-shipped.py
+      # is not taught about this job: Play is not part of the wire baseline.
+      - name: Upload to Play internal testing
+        if: steps.gate.outputs.ready == 'true'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.farcooler.android.canary
+          releaseFiles: apps/android/app/build/outputs/bundle/release/app-release.aab
+          mappingFile: apps/android/app/build/outputs/mapping/release/mapping.txt
+          track: internal
+          status: completed
+
   # The Mac app, as a disk image you can actually install.
   #
   # It has no TestFlight — a Developer ID app is distributed directly — and it is
