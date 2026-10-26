@@ -34,6 +34,7 @@ pub(crate) fn set(handle: &str, devices: &[&str], account: &str, email: &str) ->
             client_ids: devices.iter().map(|d| d.to_string()).collect(),
             account: account.into(),
             email: email.into(),
+            devices_read: None,
         })),
         ..Default::default()
     }
@@ -164,10 +165,79 @@ async fn a_device_taken_off_a_members_list_is_revoked_and_cut_off() {
 
     // A device taken off and bound again at once, before the sweep, is
     // someone's and keeps its line: what's revoked is what's still released.
-    let (_, released) = svc.store.set_member_releasing("bob", "Bob", &[], Default::default()).unwrap();
+    let (_, released) = svc.store.set_member_releasing("bob", "Bob", &[], Default::default(), None).unwrap();
     assert_eq!(released, ["phone-b".to_string()]);
     svc.store.set_member("alice", "Alice", &["phone-a".to_string(), "phone-b".to_string()]).unwrap();
     let swept = crate::release_sweep::sweep(&svc).await.unwrap();
     assert!(swept.revoked.is_empty() && swept.failed.is_empty(), "{swept:?}");
     assert!(enrolled(&svc).contains("phone-b") && !phone.is_closed(), "a device bound again was revoked");
+}
+
+/// `set`, saying it read `read` as the member's devices (ov-786), and naming
+/// the capability as a client does.
+fn set_after_reading(handle: &str, devices: &[&str], read: &[&str]) -> Request {
+    let mut req = set(handle, devices, "", "");
+    let Some(request::Payload::MemberSet(p)) = req.payload.as_mut() else { unreachable!() };
+    p.devices_read = Some(pb::MemberDevicesRead { client_ids: read.iter().map(|d| d.to_string()).collect() });
+    req.required_capabilities.push(farcooler_protocol::capability::MEMBER_DEVICES_READ.into());
+    req
+}
+
+/// Two admins add a device to Bob at once, each from the same read of his
+/// list (ov-786). One is bound; the other is refused as `devices_changed`,
+/// with nothing written or revoked, and sent again from a fresh read it binds
+/// its device too. Every device keeps its line and its session.
+#[tokio::test]
+async fn two_adds_from_one_read_never_revoke_each_others_device() {
+    let (_dir, svc) = with_bobs_phone_enrolled().await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi mac1", "mac-1").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz mac2", "mac-2").await;
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    call(&admin, set_after_reading("bob", &["phone-b"], &[])).await.expect("Bob added, read as nobody");
+    let open = |d: &str| svc.sessions().open(Some(d.to_string()));
+    let sessions = [("phone-b", open("phone-b")), ("mac-1", open("mac-1")), ("mac-2", open("mac-2"))];
+
+    let (one, two) = tokio::join!(
+        call(&admin, set_after_reading("bob", &["phone-b", "mac-1"], &["phone-b"])),
+        call(&admin, set_after_reading("bob", &["phone-b", "mac-2"], &["phone-b"])),
+    );
+    let (won, lost, refused) = match (one, two) {
+        (Ok(_), Err(e)) => ("mac-1", "mac-2", e),
+        (Err(e), Ok(_)) => ("mac-2", "mac-1", e),
+        other => panic!("not exactly one refused: {other:?}"),
+    };
+    assert_eq!(refused, "resource-conflict:devices_changed");
+    let bound = svc.store.member("bob").unwrap().devices;
+    assert!(bound.len() == 2 && bound.iter().any(|d| d == won) && !bound.iter().any(|d| d == lost), "the refused set wrote: {bound:?}");
+
+    let read = svc.store.member("bob").unwrap().devices;
+    let read: Vec<&str> = read.iter().map(String::as_str).collect();
+    call(&admin, set_after_reading("bob", &["phone-b", won, lost], &read)).await.expect("sent again from a fresh read");
+    let mut bob = svc.store.member("bob").unwrap().devices;
+    bob.sort();
+    assert_eq!(bob, ["mac-1", "mac-2", "phone-b"]);
+    let keys = std::fs::read_to_string(svc.authorized_keys()).unwrap();
+    for (device, session) in &sessions {
+        assert!(keys.contains(device), "{device} lost its line:\n{keys}");
+        assert!(!session.is_closed(), "{device}'s session was closed");
+    }
+    assert!(svc.store.people_events(50).unwrap().iter().all(|e| e.kind != "revoked"), "something was revoked");
+}
+
+/// A client from before `member_devices_read` sends no read, and the last
+/// write wins as it always did: two adds from one read leave the second's
+/// device, and the first's is taken off and revoked (ov-783). What a newer
+/// client's read prevents, and why the Mac sends one.
+#[tokio::test]
+async fn an_older_clients_set_is_still_the_last_write() {
+    let (_dir, svc) = with_bobs_phone_enrolled().await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi mac1", "mac-1").await;
+    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz mac2", "mac-2").await;
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    call(&admin, set("bob", &["phone-b"], "", "")).await.expect("Bob added");
+    call(&admin, set("bob", &["phone-b", "mac-1"], "", "")).await.expect("the first add");
+    call(&admin, set("bob", &["phone-b", "mac-2"], "", "")).await.expect("the second, from the same read");
+    assert_eq!(svc.store.member("bob").unwrap().devices, ["mac-2", "phone-b"]);
+    let keys = std::fs::read_to_string(svc.authorized_keys()).unwrap();
+    assert!(!keys.contains("mac-1") && keys.contains("mac-2"), "{keys}");
 }

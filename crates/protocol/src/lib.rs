@@ -766,6 +766,12 @@ pub mod capability {
     /// could never log in with it. A client that reads it absent says the
     /// runner needs OpenSSH 8.4 or newer, and offers no other key (R-88).
     pub const PASSKEY_KEYS: &str = "passkey_keys";
+    /// `MemberSet.devices_read` (ov-786): a `member.set` refused as
+    /// `devices_changed` when the member's devices aren't what its caller
+    /// read, so two concurrent adds can't revoke each other's device. A field
+    /// on an existing payload, so a client that sets it names this in the
+    /// request; one that reads it absent sends none, and the last write wins.
+    pub const MEMBER_DEVICES_READ: &str = "member_devices_read";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -789,6 +795,7 @@ pub mod capability {
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
+            MEMBER_DEVICES_READ,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever

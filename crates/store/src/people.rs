@@ -177,14 +177,27 @@ impl Store {
     /// account never changes once set: refused as `account_taken` and
     /// `account_differs`, writing nothing. An empty field keeps what's there.
     pub fn set_member_in(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<Member> {
-        self.set_member_releasing(handle, name, devices, who).map(|(member, _)| member)
+        self.set_member_releasing(handle, name, devices, who, None).map(|(member, _)| member)
     }
 
     /// [`Store::set_member_in`], answering too with the devices this call
     /// released: theirs before it and not after, read in the same
     /// transaction, so a concurrent change to their list can't add one or
     /// hide one (ov-783). Sorted. The caller revokes them.
-    pub fn set_member_releasing(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<(Member, Vec<String>)> {
+    ///
+    /// With `read`, the devices the caller read as theirs, it's refused as
+    /// `devices_changed`, writing nothing, unless their devices are exactly
+    /// those, as a set, in this transaction (ov-786): a list built from an
+    /// older read would release a device added since. A member not here yet
+    /// has none. Without it, the list is replaced whatever it was.
+    pub fn set_member_releasing(
+        &self,
+        handle: &str,
+        name: &str,
+        devices: &[String],
+        who: Directory,
+        read: Option<&[String]>,
+    ) -> Result<(Member, Vec<String>)> {
         let (account, email) = (who.account.trim(), who.email.trim());
         // Printable and short: both are only ever compared and shown.
         let printable = |s: &str, max: usize| s.len() <= max && !s.chars().any(|c| c.is_control() || c.is_whitespace());
@@ -210,6 +223,19 @@ impl Store {
         devices.dedup();
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        let had: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT client_id FROM member_devices WHERE handle = ?1 ORDER BY client_id").map_err(map_err)?;
+            let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
+            rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
+        };
+        if let Some(read) = read {
+            let mut read: Vec<&str> = read.iter().map(|d| d.trim()).filter(|d| !d.is_empty()).collect();
+            read.sort_unstable();
+            read.dedup();
+            if read != had {
+                return Err(DomainError::Conflict { what: "devices_changed" });
+            }
+        }
         for device in &devices {
             let holder: Option<String> = tx
                 .query_row("SELECT handle FROM member_devices WHERE client_id = ?1", [device], |r| r.get(0))
@@ -244,11 +270,6 @@ impl Store {
             params![handle, name, now_millis(), some(account), some(email)],
         )
         .map_err(map_err)?;
-        let had: Vec<String> = {
-            let mut stmt = tx.prepare("SELECT client_id FROM member_devices WHERE handle = ?1 ORDER BY client_id").map_err(map_err)?;
-            let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
-            rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
-        };
         let released: Vec<String> = had.into_iter().filter(|d| !devices.contains(d)).collect();
         // A device bound to a member, or taken off one, is no longer waiting
         // on its first binding (ov-719): who enrolled it stops mattering, and

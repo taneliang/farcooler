@@ -84,6 +84,7 @@ fn set(handle: &str, devices: &[&str]) -> Request {
             client_ids: devices.iter().map(|d| d.to_string()).collect(),
             account: String::new(),
             email: String::new(),
+            devices_read: None,
         })),
         ..Default::default()
     }

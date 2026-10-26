@@ -52,7 +52,7 @@ fn a_member_holds_their_devices_and_no_one_elses() {
 #[test]
 fn a_set_names_the_devices_it_released() {
     let (store, _, _) = board();
-    let set = |h: &str, d: &[&str]| store.set_member_releasing(h, h, &devices(d), Directory::default());
+    let set = |h: &str, d: &[&str]| store.set_member_releasing(h, h, &devices(d), Directory::default(), None);
     assert_eq!(set("alice", &["phone-a", "mac-a", "pad-a"]).unwrap().1, devices(&[]), "a new member released nothing");
     set("bob", &["phone-b"]).unwrap();
     let (alice, released) = set("alice", &["phone-a", "watch-a"]).unwrap();
@@ -223,4 +223,35 @@ fn members_from_before_accounts_migrate_without_one() {
     assert_eq!(accounts, vec![("alice".to_string(), None), ("bob".to_string(), None)]);
     // Two members with no account are not one account twice.
     conn.execute("INSERT INTO members (handle, name, created_at) VALUES ('carol', 'Carol', 3)", []).unwrap();
+}
+
+/// A set that says what it read (ov-786) is refused as `devices_changed`,
+/// writing and releasing nothing, once the member's devices aren't exactly
+/// that: two adds built from one read can't each take the other's device off.
+/// Read as a set, trimmed; a member not here yet has none.
+#[test]
+fn a_set_built_from_a_stale_read_is_refused() {
+    let (store, _, _) = board();
+    let set = |d: &[&str], read: &[&str]| {
+        let read = devices(read);
+        store.set_member_releasing("bob", "Bob", &devices(d), Directory::default(), Some(&read))
+    };
+    assert_eq!(set(&["phone-b"], &[]).unwrap().1, devices(&[]), "a new member, read as having none");
+    // Two adds that both read Bob with his phone.
+    assert_eq!(set(&["phone-b", "mac-1"], &["phone-b"]).unwrap().1, devices(&[]));
+    let stale = set(&["phone-b", "mac-2"], &["phone-b"]);
+    assert!(matches!(stale, Err(DomainError::Conflict { what: "devices_changed" })), "{stale:?}");
+    assert_eq!(store.member("bob").unwrap().devices, devices(&["mac-1", "phone-b"]), "a stale set writes nothing");
+    assert!(!store.device_released("mac-1").unwrap(), "and releases nothing");
+    // Read again, sent again: nothing taken off.
+    let (bob, released) = set(&["phone-b", "mac-1", "mac-2"], &[" mac-1", "phone-b", "phone-b"]).unwrap();
+    assert_eq!((bob.devices, released), (devices(&["mac-1", "mac-2", "phone-b"]), devices(&[])));
+    // A read with one too many is stale too, and a new member read as having
+    // one doesn't exist yet.
+    assert!(set(&["phone-b"], &["mac-1", "mac-2", "phone-b", "pad-b"]).is_err());
+    let carol = store.set_member_releasing("carol", "Carol", &devices(&["c"]), Directory::default(), Some(&devices(&["c"])));
+    assert!(matches!(carol, Err(DomainError::Conflict { what: "devices_changed" })), "{carol:?}");
+    // Without a read, the last write wins, as it always did.
+    let (_, released) = store.set_member_releasing("bob", "Bob", &devices(&["phone-b"]), Directory::default(), None).unwrap();
+    assert_eq!(released, devices(&["mac-1", "mac-2"]));
 }
