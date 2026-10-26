@@ -103,6 +103,12 @@ import SwiftUI
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
 //                            and each turn is in `sent` as `own-login <harness> <on>`; add
 //                            -phone-own-logins-refused for a runner that refuses every turn
+//   -phone-roles             a shared runner with roles (ov-784): Alexandra a Maintainer, Bob a
+//                            member, `member_roles` advertised; with -phone-rep-owner People offers
+//                            the owner's role picker, and each choice is in `sent` as
+//                            `role <handle> <role>`
+//   -phone-released          shared as above, and this phone's member was removed: `member.list`
+//                            says `(released)`, and the runner's row says so (ov-784)
 //   -phone-long-record       bil-7's record is thirty-four notes as long as a real card's, its intent
 //                            long and its acceptance six lines, for measuring a fling (ov-791)
 //   -phone-big-board         Billing's board holds eight hundred more tasks, as a long-lived runner's
@@ -483,6 +489,8 @@ final class HarnessRunner {
         ? "stopped_working" : "none"
     /// `-phone-own-logins`: which agents need each member's own account.
     private var ownLoginSwitches: [String: Bool] = ["claude": false, "codex": true, "cursor": false]
+    /// Each member's role under `-phone-roles` (ov-784).
+    private var roles: [String: String] = ["alexandra": "maintainer", "bob": "member"]
     private var claudeEmail: String {
         Self.repLong ? "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com" : "bob@claude.example"
     }
@@ -561,7 +569,8 @@ final class HarnessRunner {
                         + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])
                         + (Self.nativeOrchestrator && CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
                         + (Self.claudeSignIn ? ["claude_sign_in"] : [])
-                        + (Self.ownLogins ? ["member_own_logins"] : [])),
+                        + (Self.ownLogins ? ["member_own_logins"] : [])
+                        + (Self.roles ? ["member_roles"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -572,6 +581,12 @@ final class HarnessRunner {
             runner: Self.host.id.uuidString)
         await connection.loadNeedsYou()
         await connection.loadBoards()
+        // A removed phone's fleet read is refused as someone else's, which is
+        // what asks who it is (ov-784).
+        if Self.released {
+            let refused = ClientCore.CoreError.rejected("not yours", word: "not-yours", what: "not_yours")
+            _ = await connection.talk.noticeRemoval(after: refused, on: connection)
+        }
     }
 
     // MARK: - What it has
@@ -579,6 +594,7 @@ final class HarnessRunner {
     /// `-phone-shared`: see the launch arguments above.
     static var shared: Bool {
         CommandLine.arguments.contains("-phone-shared") || CommandLine.arguments.contains("-phone-rep") || claudeSignIn
+            || roles || released
     }
 
     /// The owner's own phone: `you` is empty.
@@ -588,6 +604,12 @@ final class HarnessRunner {
 
     /// `-phone-claude`: see the launch arguments above.
     static var claudeSignIn: Bool { CommandLine.arguments.contains("-phone-claude") }
+
+    /// `-phone-roles`: see the launch arguments above.
+    static var roles: Bool { CommandLine.arguments.contains("-phone-roles") }
+
+    /// `-phone-released`: see the launch arguments above.
+    static var released: Bool { CommandLine.arguments.contains("-phone-released") }
 
     /// `-phone-own-logins`: see the launch arguments above.
     static var ownLogins: Bool { CommandLine.arguments.contains("-phone-own-logins") }
@@ -707,6 +729,12 @@ final class HarnessRunner {
     private func ownLoginsJSON() -> [String: Any] {
         guard Self.ownLogins else { return [:] }
         return ["own_logins": ownLoginSwitches.merging(["may_change": Self.ownerPhone]) { $1 }]
+    }
+
+    /// A member's `role` under `-phone-roles`, or nothing (ov-784).
+    private func roleJSON(of handle: String) -> [String: Any] {
+        guard Self.roles, let role = roles[handle] else { return [:] }
+        return ["role": role]
     }
 
     // MARK: - How it answers
@@ -923,7 +951,7 @@ final class HarnessRunner {
                         "handle": "alexandra", "name": "Alexandra Montgomery-Fitzgerald of the Platform Team",
                         "devices": ["phone-a"], "reps": 2,
                         "rep_panes": [rep("r1", Self.main), rep("r2", Self.billing)],
-                    ].merging(claudeLogin(of: "alexandra")) { $1 },
+                    ].merging(claudeLogin(of: "alexandra")) { $1 }.merging(roleJSON(of: "alexandra")) { $1 },
                     [
                         "handle": "bob", "name": "Bob", "devices": ["phone-b"],
                         // Added by QR as a teammate (ov-525): his directory
@@ -934,12 +962,19 @@ final class HarnessRunner {
                             : "bob@example.com",
                         "reps": repState == .none ? 0 : 1,
                         "rep_panes": repState == .none ? [] : [rep(Self.bobsRep, Self.billing)],
-                    ].merging(claudeLogin(of: "bob")) { $1 },
+                    ].merging(claudeLogin(of: "bob")) { $1 }.merging(roleJSON(of: "bob")) { $1 },
                 ],
                 "claude_account": Self.repLong
                     ? "platform-team-shared-account@example-corporation.com" : "alice@example.com",
-                "you": Self.ownerPhone ? "" : "bob",
+                "you": Self.released ? "(released)" : Self.ownerPhone ? "" : "bob",
             ].merging(ownLoginsJSON()) { $1 })
+        case "member.set_role" where Self.roles:
+            guard Self.ownerPhone, let handle = args["handle"] as? String, let role = args["role"] as? String else {
+                throw ClientCore.CoreError.rejected("not yours", word: "not-yours", what: "not_yours")
+            }
+            sent.append("role \(handle) \(role)")
+            roles[handle] = role
+            return try await answer("member.list", [:])
         case "member.set_own_login" where Self.ownLogins:
             guard Self.ownerPhone, !CommandLine.arguments.contains("-phone-own-logins-refused"),
                 let harness = args["harness"] as? String, let on = args["on"] as? Bool

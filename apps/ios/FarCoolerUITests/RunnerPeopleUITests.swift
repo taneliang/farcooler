@@ -59,6 +59,45 @@ final class RunnerPeopleUITests: XCTestCase {
         keep(app, "runner-people-long", expecting: .reads(bob, "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"))
     }
 
+    private func sent(_ app: XCUIApplication) -> [String] {
+        (element(app, "harness-sent").value as? String).map { $0.split(separator: "\n").map(String.init) } ?? []
+    }
+
+    /// The owner's phone offers a role on each member, and choosing one asks
+    /// the runner by handle (ov-784).
+    func testTheOwnerSetsAMembersRole() {
+        let app = runnerSettings(["-phone-roles", "-phone-rep-owner"])
+        let picker = element(app, "runner-person-role-bob")
+        XCTAssertTrue(app.reveal(picker), "no role picker for Bob: \(app.debugDescription)")
+        XCTAssertTrue(element(app, "runner-person-role-alexandra").exists, "no role picker for Alexandra")
+        keep(app, "runner-people-roles", expecting: .shows(picker))
+        picker.tap()
+        let maintainer = app.buttons["Maintainer"].firstMatch
+        XCTAssertTrue(maintainer.waitForExistence(timeout: 10), "no Maintainer in the menu: \(app.debugDescription)")
+        maintainer.tap()
+        let deadline = Date().addingTimeInterval(10)
+        while !sent(app).contains("role bob maintainer"), Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+        XCTAssertTrue(sent(app).contains("role bob maintainer"), "\(sent(app))")
+    }
+
+    /// A member's phone sees who is a Maintainer and no picker.
+    func testAMemberSeesRolesAndNoPicker() {
+        let app = runnerSettings(["-phone-roles"])
+        let alexandra = element(app, "runner-person-alexandra")
+        XCTAssertTrue(app.reveal(alexandra), "no row for Alexandra: \(app.debugDescription)")
+        XCTAssertTrue(alexandra.label.contains("Maintainer"), alexandra.label)
+        XCTAssertFalse(element(app, "runner-person-role-bob").exists, "a member is offered a picker")
+    }
+
+    /// A removed member's phone says so on its runner's row (ov-784).
+    func testARemovedPhoneIsToldSo() {
+        let app = XCUIApplication.phoneHarness(["-phone-released"])
+        let removed = element(app, "runner-removed")
+        XCTAssertTrue(removed.waitForExistence(timeout: 30), "no removed row: \(app.debugDescription)")
+        XCTAssertEqual(removed.label, "You Were Removed from This Runner")
+        keep(app, "runner-removed", expecting: .shows(removed))
+    }
+
     func testARunnerNobodySharesSaysNothingAboutPeople() {
         let app = runnerSettings([])
         // The section the People one would sit above, drawn: the screen read.
