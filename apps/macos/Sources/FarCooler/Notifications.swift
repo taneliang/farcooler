@@ -15,7 +15,7 @@ import UserNotifications
 /// makes a future push notification or Live Activity a delivery change rather
 /// than a rethink.
 @MainActor
-final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+final class Notifier: NSObject {
     static let shared = Notifier()
     /// Where a click goes to be opened: the app's one opener, or a test's
     /// own, which no window another test hosts registers with.
@@ -87,33 +87,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return thread
     }
 
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
+    /// How a banner that arrives while the app is open is shown.
+    ///
+    /// Run on the main actor by `NotificationReplies`, which answers the
+    /// center from there (ov-793).
+    func present(_ notification: UNNotification) -> UNNotificationPresentationOptions {
         let content = notification.request.content
         // A task notice has no pane to be on screen: it banners, and the
         // runner's coalescing is what keeps that to one per burst.
         guard let terminalID = Self.terminalID(userInfo: content.userInfo, thread: content.threadIdentifier) else {
             return content.interruptionLevel == .passive ? [.banner, .list] : [.banner, .list, .sound]
         }
-        return await MainActor.run {
-            Self.presentation(terminalID: terminalID, watching: watching, presence: .live)
-        }
+        return Self.presentation(terminalID: terminalID, watching: watching, presence: .live)
     }
 
     /// A notification's button, or a click on it.
     ///
-    /// Read here, off the main actor, into what `respond` and `click` act on:
-    /// the notification's `userInfo` can't cross to them. A task notice's
-    /// buttons answer it; a click on anything else, an agent's banner, a
-    /// failed command's, a relay push or a legacy decision, opens what it's
-    /// about, as a task notice's click does (ov-183).
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
-    ) async {
+    /// A task notice's buttons answer it; a click on anything else, an
+    /// agent's banner, a failed command's, a relay push or a legacy decision,
+    /// opens what it's about, as a task notice's click does (ov-183).
+    func answer(_ response: UNNotificationResponse) async {
         let content = response.notification.request.content
         let info = content.userInfo
-        let thread = content.threadIdentifier
         let typed = (response as? UNTextInputNotificationResponse)?.userText
         if let notice = TaskNotice(userInfo: info) {
             await respond(
@@ -121,13 +116,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 action: response.actionIdentifier, typed: typed)
             return
         }
-        // Built here, off the main actor: `userInfo` isn't Sendable, the open is.
-        guard let open = DestinationOpen(
-            userInfo: info, thread: thread, action: response.actionIdentifier, now: Date())
-        else { return }
-        let opener = opener
-        await MainActor.run { opener.request(open) }
+        click(userInfo: info, thread: content.threadIdentifier, action: response.actionIdentifier)
     }
+
+    /// The delegate the center is given: it answers on the main thread, after
+    /// the work above, which the `async` delegate methods this replaced did
+    /// not (ov-787, ov-793). Kept here because the center holds its delegate
+    /// weakly.
+    private(set) lazy var replies = NotificationReplies(
+        present: { [unowned self] in self.present($0) },
+        respond: { [unowned self] in await self.answer($0) })
 
     /// A click on a notification that isn't a task notice: open what it's
     /// about, once its runner is connected (`DestinationOpener`).
@@ -163,7 +161,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// set by then, and the window's `requestAuthorization` comes later.
     func becomeDelegate() {
         guard Self.canNotify else { return }
-        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().delegate = replies
     }
 
     /// Send `answer` to `notice`'s task, or say it wasn't sent.
