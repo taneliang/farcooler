@@ -4,6 +4,8 @@
 #
 #   ./scripts/tunnel-e2e.sh
 #   ./scripts/tunnel-e2e.sh a_revoked_device        # one test by name
+#   ./scripts/tunnel-e2e.sh over_the_relay_only::an_idle --ignored
+#                                                   # the relay's byte count
 #
 # ## When CI runs this
 #
@@ -123,5 +125,26 @@ echo "==> the test"
 # `--nocapture` because the interesting failure is a dial that spends thirty
 # seconds arriving at the wrong reason, and the harness prints what it measured
 # as it goes.
-exec cargo test -p farcooler-daemon --features tailcat \
-  --test a_real_tunnel_carries_the_scope -- --nocapture "$@"
+#
+# Two passes. `over_the_relay_only::` holds the tests that freeze the relay
+# (ov-781), and they need `TS_DEBUG_ALWAYS_USE_DERP=1`: without it two peers
+# on one machine go direct over UDP and a frozen relay freezes nothing. Go
+# reads it once at startup, so it is one process per setting, and the rest of
+# the file keeps running without it, as it always has. A run naming tests
+# takes the pass its names belong to.
+TEST=(cargo test -p farcooler-daemon --features tailcat
+  --test a_real_tunnel_carries_the_scope -- --nocapture)
+RELAY_ONLY=over_the_relay_only::
+case "$*" in
+  "")
+    "${TEST[@]}" --skip "$RELAY_ONLY"
+    echo "==> the relay-only pass"
+    TS_DEBUG_ALWAYS_USE_DERP=1 exec "${TEST[@]}" "$RELAY_ONLY"
+    ;;
+  *over_the_relay_only*)
+    TS_DEBUG_ALWAYS_USE_DERP=1 exec "${TEST[@]}" "$@"
+    ;;
+  *)
+    exec "${TEST[@]}" --skip "$RELAY_ONLY" "$@"
+    ;;
+esac
