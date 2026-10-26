@@ -99,6 +99,42 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertGreaterThan(prompt.frame.minX, column.width * 0.2, "the bubble isn't at the trailing edge: \(prompt.frame) \(row.frame)")
     }
 
+    /// The blue bubble's extent along the screen row through each message's
+    /// words, in points, as pixels say it: the element a message's
+    /// identifier lands on is its text, not the bubble around it.
+    private func bubbleExtents(_ app: XCUIApplication, _ messages: [XCUIElement]) -> [(left: CGFloat, right: CGFloat)] {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return [] }
+        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let drew = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        guard drew else { return [] }
+        return messages.map { message in
+            let row = min(max(Int(message.frame.midY * scale), 0), image.height - 1)
+            var left = Int.max, right = -1
+            for x in 0..<image.width {
+                let at = (row * image.width + x) * 4
+                let (r, g, b) = (Int(pixels[at]), Int(pixels[at + 1]), Int(pixels[at + 2]))
+                if b > r + 60 && b > g + 30 { left = min(left, x); right = max(right, x) }
+            }
+            return (CGFloat(left) / scale, CGFloat(right + 1) / scale)
+        }
+    }
+
+    private func bubbleWidths(_ app: XCUIApplication, _ messages: [XCUIElement]) -> [CGFloat] {
+        bubbleExtents(app, messages).map { $0.right - $0.left }
+    }
+
+    private func bubbleEdges(_ app: XCUIApplication, _ messages: [XCUIElement]) -> [CGFloat] {
+        bubbleExtents(app, messages).map { $0.right }
+    }
+
     /// The person's messages of four sizes, each bubble as wide as its words
     /// (ov-809): a word, a line and a few lines are narrower than a long
     /// message's cap, and the longer the words, the wider the bubble. The
@@ -116,7 +152,8 @@ final class ConversationScreenUITests: XCTestCase {
         for (bubble, start) in zip(bubbles, starts) {
             XCTAssertTrue(bubble.waitForExistence(timeout: 30), "no bubble for \"\(start)\": \(app.debugDescription)")
         }
-        var widths = bubbles.map { $0.frame.width }
+        var widths = bubbleWidths(app, bubbles)
+        XCTAssertEqual(widths.count, 4, "the screen couldn't be read")
         let firstWidths = widths
         let column = app.windows.firstMatch.frame.width
         shoot("bubbles", expecting: .shows(bubbles[3], "the four bubbles, the long one last"))
@@ -131,7 +168,7 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertLessThan(widths[2], widths[3] - 20, "a few lines' bubble is as wide as the cap: \(widths)")
         XCTAssertLessThan(widths[0], widths[1], "a word's bubble is no narrower than a line's: \(widths)")
         // Every bubble at the trailing edge, whatever its width.
-        let edges = bubbles.map { $0.frame.maxX }
+        let edges = bubbleEdges(app, bubbles)
         XCTAssertLessThan((edges.max() ?? 0) - (edges.min() ?? 0), 1.5, "the bubbles don't share a trailing edge: \(edges)")
 
         // Scrolled up through thirty long paragraphs and back, the views the
@@ -148,7 +185,7 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue(wait(10) { bubbles.allSatisfy { $0.exists } }, "the bubbles never came back: \(app.debugDescription)")
         Thread.sleep(forTimeInterval: 1)
         shoot("bubbles-after-scroll", expecting: .shows(bubbles[3], "the four bubbles again"))
-        widths = bubbles.map { $0.frame.width }
+        widths = bubbleWidths(app, bubbles)
         let again = widths.map { Int($0.rounded()) }
         let first = firstWidths.map { Int($0.rounded()) }
         XCTAssertEqual(again, first, "scrolling away and back changed the bubbles' widths")
