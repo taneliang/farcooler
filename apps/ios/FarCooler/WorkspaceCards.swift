@@ -21,7 +21,9 @@ import SwiftUI
 // both are one glass container, so Agents comes out of and goes back into
 // Now/Next as one piece; held, each shows a live preview with its quick
 // actions (`WorkspaceCardMenus`); and a tap grows its sheet out of the card
-// (`PhoneZoom`) rather than sliding one up from the foot of the screen.
+// (`PhoneZoom`) rather than sliding one up from the foot of the screen. The
+// glass is the button's own (`GlassCardStyle`), so a hold lifts the card
+// whole.
 
 struct WorkspaceCards: View {
     @ObservedObject var connection: Connection
@@ -164,15 +166,9 @@ struct WorkspaceCards: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
-        // The glass answers the press; the words don't dim under it too.
-        .buttonStyle(GlassCardStyle())
-        // The sheet's source, then the menu, then the glass: the order is
-        // measured, not taste. With the source outside the glass the Plan
-        // grew from the middle of the screen, its source never found (frames
-        // of the tap); with the menu between the glass and the source, a
-        // hold never showed the menu and its release was taken as a tap
-        // (GlassUITests).
-        .zoomSource(PhoneZoom.plan(place), in: zoom)
+        // The glass and the sheet's source, inside the button; the menu on it
+        // (`GlassCardStyle`).
+        .buttonStyle(GlassCardStyle(glassID: "plan", in: glass, zoomID: PhoneZoom.plan(place), zoom: zoom))
         .contentShape(.contextMenuPreview, .floating)
         .contextMenu {
             Button("Open Plan", systemImage: "list.bullet.rectangle") { navigator?.openPlan(place) }
@@ -184,8 +180,6 @@ struct WorkspaceCards: View {
         } preview: {
             PlanCardPreview(connection: connection, summary: summary, strip: strip)
         }
-        .surface(.floating, in: .floating, interactive: true)
-        .glassEffectID("plan", in: glass)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(strip.isEmpty && strip.band == nil ? "Plan" : strip.bandAccessibilityLabel)
         .accessibilityHint("Shows the plan")
@@ -254,17 +248,13 @@ struct WorkspaceCards: View {
             .frame(maxWidth: wide ? .infinity : nil, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(GlassCardStyle())
-        // Inside the glass, as Now/Next's (`nowNext`).
-        .zoomSource(PhoneZoom.agents(place), in: zoom)
+        .buttonStyle(GlassCardStyle(glassID: "agents", in: glass, zoomID: PhoneZoom.agents(place), zoom: zoom))
         .contentShape(.contextMenuPreview, .floating)
         .contextMenu {
             AgentsCardActions(agents: agents, showAll: { navigator?.openAgents(place) }, navigator: navigator)
         } preview: {
             AgentsCardPreview(agents: agents, answering: connection.isAnswering)
         }
-        .surface(.floating, in: .floating, interactive: true)
-        .glassEffectID("agents", in: glass)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(agents.summary)
         .accessibilityValue("\(agents.count)")
@@ -274,8 +264,44 @@ struct WorkspaceCards: View {
     }
 }
 
-/// A card's press, left to its interactive glass: `.plain` dimmed the words
-/// under a finger as the glass swelled, two answers to one touch.
+/// A card's glass, and its press left to that glass: `.plain` dimmed the
+/// words under a finger as the glass swelled, two answers to one touch.
+///
+/// The glass is drawn here, inside the button, with the sheet's zoom source
+/// under it, and the card's context menu goes on the button, outside the
+/// glass: the order is measured, not taste (ov-805, frames of a hold read
+/// from a screen recording).
+/// - The menu inside the glass: a hold made the words jump right. The glass
+///   swells about its middle, and the words with it; as the menu took them
+///   for its lift they were redrawn about 7 pt to the right, as if swollen
+///   from their leading edge, and stayed there for the hold.
+/// - The glass on the button from outside, as a modifier, with the menu
+///   outside that: a hold never showed the menu, and its release was a tap
+///   (ov-794).
+/// - The zoom source outside the glass: the sheet grew from the middle of
+///   the screen, its source never found (ov-794).
+///
+/// Drawn by the style, the glass is the button's own, as `.glass` draws it,
+/// and the menu lifts the whole card.
 private struct GlassCardStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { configuration.label }
+    /// The card's glass, for Agents to morph out of Now/Next.
+    let glassID: String
+    let glass: Namespace.ID
+    /// The sheet the card opens, to grow out of it (`PhoneZoom`).
+    let zoomID: String
+    let zoom: Namespace.ID?
+
+    init(glassID: String, in glass: Namespace.ID, zoomID: String, zoom: Namespace.ID?) {
+        self.glassID = glassID
+        self.glass = glass
+        self.zoomID = zoomID
+        self.zoom = zoom
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .zoomSource(zoomID, in: zoom)
+            .surface(.floating, in: .floating, interactive: true)
+            .glassEffectID(glassID, in: glass)
+    }
 }
