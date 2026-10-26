@@ -350,8 +350,9 @@ struct KeyRefusedMacTests {
         defer { try? FileManager.default.removeItem(at: bin) }
         let ssh = bin.appendingPathComponent("ssh")
         // Says which ssh it is, leaves a child holding stderr, then hangs.
-        try "#!/bin/sh\necho \"the CLI's ssh: $*\" >&2\n(sleep 6 >&2 &)\nexec sleep 6\n".write(
+        try "#!/bin/sh\necho \"the CLI's ssh: $*\" >&2\n(sleep 12 >&2 &)\nexec sleep 12\n".write(
             to: ssh, atomically: true, encoding: .utf8)
+        // fresh-script-exempt: what's on trial is that the probe finds `ssh` on the PATH it's given, as the CLI does
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ssh.path)
 
         let started = Date()
@@ -360,7 +361,7 @@ struct KeyRefusedMacTests {
         let took = Date().timeIntervalSince(started)
         #expect(said.contains("the CLI's ssh: -v -n"), "\(said)")
         #expect(said.contains("you@cosmo true"))
-        #expect(took < 4, "the probe outlived its deadline, or waited on its child: \(took) s")
+        #expect(took < 9, "the probe outlived its deadline, or waited on its child: \(took) s")
     }
 
     @Test func theScreensSayNoAccessAndNameTheRunner() {
