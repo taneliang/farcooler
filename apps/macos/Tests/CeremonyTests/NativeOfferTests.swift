@@ -137,40 +137,43 @@ struct NativeOfferTests {
             _ = await ProcessRunner.run("/usr/bin/git", ["-C", demo] + args, deadline: 30)
         }
         let cli = try #require(PaneHeaderProgramTests.cli)
-        func farcooler(_ args: [String]) async -> (out: Data, err: String) {
+        func farcooler(_ args: [String]) async -> ProcessRunner.Result {
             var environment = ProcessInfo.processInfo.environment
             ScratchDaemon.isolate(&environment, home: home + "/h")
-            let ran = await ProcessRunner.run(cli, args, environment: environment, deadline: 60)
-            return (ran.stdout, String(decoding: ran.stderr, as: UTF8.self))
+            return await ProcessRunner.run(cli, args, environment: environment, deadline: 60)
         }
-        _ = await farcooler(["--json", "daemon", "ensure"])
         func tearDown() async { await ScratchDaemon.stop(cli: cli, farcoolerHome: home + "/h") }
         do {
-            _ = await farcooler(["root", "add", home + "/repos"])
-            _ = await farcooler(["repo", "register", demo])
+            // Each setup call must answer: one that timed out or failed left
+            // stdout empty, and the next step then failed with "Unable to
+            // parse empty data" and none of the CLI's reason (ov-801).
+            try await farcooler(["--json", "daemon", "ensure"]).mustSucceed("daemon ensure")
+            try await farcooler(["root", "add", home + "/repos"]).mustSucceed("root add")
+            try await farcooler(["repo", "register", demo]).mustSucceed("repo register")
             let made = await farcooler(["--json", "worktree", "create", "demo", "wt1", "--branch", "wt1", "--fork-only"])
-            let worktree = try #require(
-                (try JSONSerialization.jsonObject(with: made.out) as? [String: Any])?["short"] as? String, "\(made.err)")
+            let worktree = try #require(try made.jsonObject("worktree create")["short"] as? String)
             let created = await farcooler(["--json", "terminal", "create", worktree])
-            let terminal = try #require(
-                (try JSONSerialization.jsonObject(with: created.out) as? [String: Any])?["id"] as? String, "\(created.err)")
-            _ = await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"])
+            let terminal = try #require(try created.jsonObject("terminal create")["id"] as? String)
+            try await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"]).mustSucceed("terminal send")
             // Until it says claude, not until it says anything: the runner
             // says "" for the shell the pane starts as, and on a slow host
             // (CI's VM) the first sample lands before the shell has read the
             // typed line. Stopping on that "" read a shell, not the detection.
             var listed: Terminal?
+            var lastList = "no list yet"
             for _ in 0..<60 {
                 let list = await farcooler(["--json", "worktree", "list"])
-                let fleet = try JSONDecoder().decode(Fleet.self, from: list.out)
-                listed = fleet.worktrees.flatMap(\.terminals).first { $0.id == terminal }
+                lastList = list.account
+                if let fleet = try? list.decoded(Fleet.self, "worktree list") {
+                    listed = fleet.worktrees.flatMap(\.terminals).first { $0.id == terminal }
+                }
                 if listed?.runningAgent == "claude" { break }
                 try await Task.sleep(for: .milliseconds(500))
             }
             let pane = try #require(listed)
             #expect(
                 pane.runningAgent == "claude",
-                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing")")
+                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing"); last list: \(lastList)")
             #expect(pane.program == "shell")
             #expect(Self.agents().offers(pane, target: ""))
         } catch {

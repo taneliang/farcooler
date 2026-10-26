@@ -50,3 +50,49 @@ enum ScratchDaemon {
         for pid in await holders() { kill(pid, SIGKILL) }
     }
 }
+
+/// What a real-CLI test says when a call did not answer (ov-801).
+///
+/// A call that fails prints its reason on stderr and nothing on stdout, so a
+/// test that decodes stdout alone reports "Unable to parse empty data" and
+/// hides the CLI's own sentence. This is that sentence, with how the child
+/// ended.
+extension ProcessRunner.Result {
+    /// How the call ended and what it printed, for a failure message.
+    var account: String {
+        var how = "exited \(status)"
+        if let launchFailure { how = "never started (\(launchFailure))" }
+        if timedOut { how = "was killed at its deadline" }
+        if cancelled { how = "was cancelled" }
+        let err = String(decoding: stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let out = String(decoding: stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return "the CLI \(how); stderr: \(err.isEmpty ? "(empty)" : err); stdout: \(out.isEmpty ? "(empty)" : String(out.prefix(500)))"
+    }
+
+    /// Stdout as a JSON object, or an error that carries `account`.
+    func jsonObject(_ what: String) throws -> [String: Any] {
+        guard succeeded, let object = try? JSONSerialization.jsonObject(with: stdout) as? [String: Any] else {
+            throw RealCLIFailure(message: "\(what): \(account)")
+        }
+        return object
+    }
+
+    /// Stdout decoded as `T`, or an error that carries `account`.
+    func decoded<T: Decodable>(_ type: T.Type, _ what: String) throws -> T {
+        guard succeeded, let value = try? JSONDecoder().decode(T.self, from: stdout) else {
+            throw RealCLIFailure(message: "\(what): \(account)")
+        }
+        return value
+    }
+
+    /// Fails unless the call succeeded, saying why not.
+    func mustSucceed(_ what: String) throws {
+        guard succeeded else { throw RealCLIFailure(message: "\(what): \(account)") }
+    }
+}
+
+/// A real-CLI call that did not answer, in the CLI's own words.
+struct RealCLIFailure: Error, CustomStringConvertible {
+    var message: String
+    var description: String { message }
+}

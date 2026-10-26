@@ -44,11 +44,10 @@ struct PaneHeaderProgramTests {
                 .contains { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    private func farcooler(_ args: [String], home: String) async -> (ok: Bool, out: Data, err: String) {
+    private func farcooler(_ args: [String], home: String) async -> ProcessRunner.Result {
         var environment = ProcessInfo.processInfo.environment
         ScratchDaemon.isolate(&environment, home: home + "/h")
-        let ran = await ProcessRunner.run(Self.cli!, args, environment: environment, deadline: 60)
-        return (ran.succeeded, ran.stdout, String(decoding: ran.stderr, as: UTF8.self))
+        return await ProcessRunner.run(Self.cli!, args, environment: environment, deadline: 60)
     }
 
     /// The real CLI's bytes, through the Mac's own decoder: a shell whose title
@@ -64,31 +63,34 @@ struct PaneHeaderProgramTests {
         for args in [["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]] {
             _ = await ProcessRunner.run("/usr/bin/git", ["-C", demo] + args, deadline: 30)
         }
-        _ = await farcooler(["--json", "daemon", "ensure"], home: home)
         func tearDown() async { await ScratchDaemon.stop(cli: Self.cli!, farcoolerHome: home + "/h") }
         do {
-            _ = await farcooler(["root", "add", home + "/repos"], home: home)
-            _ = await farcooler(["repo", "register", demo], home: home)
+            // Each setup call must answer, and says why when it doesn't (ov-801).
+            try await farcooler(["--json", "daemon", "ensure"], home: home).mustSucceed("daemon ensure")
+            try await farcooler(["root", "add", home + "/repos"], home: home).mustSucceed("root add")
+            try await farcooler(["repo", "register", demo], home: home).mustSucceed("repo register")
             let made = await farcooler(["--json", "worktree", "create", "demo", "wt1", "--branch", "wt1", "--fork-only"], home: home)
-            let worktree = try #require(
-                (try JSONSerialization.jsonObject(with: made.out) as? [String: Any])?["short"] as? String, "\(made.err)")
+            let worktree = try #require(try made.jsonObject("worktree create")["short"] as? String)
             let created = await farcooler(["--json", "terminal", "create", worktree], home: home)
-            let terminal = try #require(
-                (try JSONSerialization.jsonObject(with: created.out) as? [String: Any])?["id"] as? String, "\(created.err)")
+            let terminal = try #require(try created.jsonObject("terminal create")["id"] as? String)
             // What Claude Code does to its pane: a title from its session.
-            _ = await farcooler(
+            try await farcooler(
                 ["terminal", "send", terminal, "printf '\\033]2;\\342\\234\\263 Fix the login bug\\007'; sleep 600\r"],
-                home: home)
+                home: home
+            ).mustSucceed("terminal send")
             var listed: Terminal?
+            var lastList = "no list yet"
             for _ in 0..<40 {
                 let list = await farcooler(["--json", "worktree", "list"], home: home)
-                let fleet = try JSONDecoder().decode(Fleet.self, from: list.out)
-                listed = fleet.worktrees.flatMap(\.terminals).first { $0.id == terminal }
+                lastList = list.account
+                if let fleet = try? list.decoded(Fleet.self, "worktree list") {
+                    listed = fleet.worktrees.flatMap(\.terminals).first { $0.id == terminal }
+                }
                 if listed?.preset.contains("login") == true { break }
                 try await Task.sleep(for: .milliseconds(500))
             }
             let pane = try #require(listed)
-            #expect(pane.preset.contains("login"), "the runner never read the title: \(pane.preset)")
+            #expect(pane.preset.contains("login"), "the runner never read the title: \(pane.preset); last list: \(lastList)")
             #expect(pane.program == "shell", "the CLI's list doesn't say what was launched")
             #expect(pane.headerName == "shell")
         } catch {

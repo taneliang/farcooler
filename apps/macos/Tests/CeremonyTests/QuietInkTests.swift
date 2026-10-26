@@ -157,7 +157,7 @@ struct QuietInkTests {
         await ScratchDaemon.stop(cli: cli, farcoolerHome: home + "/h")
         try? FileManager.default.removeItem(atPath: home)
         struct Reply: Decodable { var themes: [Theme] }
-        let reply = try JSONDecoder().decode(Reply.self, from: ran.stdout)
+        let reply = try ran.decoded(Reply.self, "theme list")
         try #require(reply.themes.count >= 11, "the CLI listed \(reply.themes.count) themes")
         return reply.themes
     }
