@@ -139,15 +139,14 @@ mod tests {
     /// comment.
     #[test]
     fn a_passkey_for_this_channels_host_renders_as_key_a() {
-        for host in [app_host()] {
-            let line = key_a(&sk(host)).unwrap_or_else(|r| panic!("{host}: {r:?}"));
-            assert!(line.starts_with("restrict,command=\""), "{line}");
-            assert!(line.contains(" sk-ecdsa-sha2-nistp256@openssh.com AAAA"), "{line}");
-            assert!(!line.contains("webauthn@browser"), "the received comment survived: {line}");
-            // `restrict` without `no-touch-required`: sshd demands the
-            // authenticator's user-presence flag on every signature.
-            assert!(!line.contains("no-touch-required"), "{line}");
-        }
+        let host = app_host();
+        let line = key_a(&sk(host)).unwrap_or_else(|r| panic!("{host}: {r:?}"));
+        assert!(line.starts_with("restrict,command=\""), "{line}");
+        assert!(line.contains(" sk-ecdsa-sha2-nistp256@openssh.com AAAA"), "{line}");
+        assert!(!line.contains("webauthn@browser"), "the received comment survived: {line}");
+        // `restrict` without `no-touch-required`: sshd demands the
+        // authenticator's user-presence flag on every signature.
+        assert!(!line.contains("no-touch-required"), "{line}");
     }
 
     /// The line reads back as ours, with its id and scope, so `client.list`
