@@ -81,8 +81,30 @@ impl PipeStream {
         let mut child = command.spawn()?;
         let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
         let stdin = child.stdin.take().ok_or_else(|| std::io::Error::other("no stdin"))?;
+        no_sigpipe(&stdin);
         Ok(Self { stdout, stdin, _child: child })
     }
+}
+
+/// Make a write to `stdin` fail with `EPIPE` once the child is gone, rather
+/// than raise SIGPIPE in this process (ov-800).
+///
+/// A Rust binary starts with SIGPIPE ignored, but this core is linked into the
+/// Mac and iOS apps as a static library and inherits the host's disposition.
+/// The Mac app ignores it at launch; its test runner does not, and a stand-in
+/// CLI that exits without reading made the first SSH banner write kill the
+/// whole suite with signal 13. Per-descriptor, so it holds in any host.
+fn no_sigpipe(stdin: &ChildStdin) {
+    #[cfg(target_vendor = "apple")]
+    {
+        use std::os::fd::AsRawFd as _;
+        // `F_SETNOSIGPIPE` from <fcntl.h>; the libc crate does not export it.
+        const F_SETNOSIGPIPE: libc::c_int = 73;
+        // SAFETY: `fcntl` on a descriptor this value owns.
+        unsafe { libc::fcntl(stdin.as_raw_fd(), F_SETNOSIGPIPE, 1) };
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    let _ = stdin;
 }
 
 impl AsyncRead for PipeStream {
