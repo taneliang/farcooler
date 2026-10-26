@@ -5,6 +5,7 @@
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use farcooler_protocol::v1::{self as pb, Scope};
 
@@ -162,4 +163,36 @@ async fn a_sweep_revokes_every_device_in_one_write() {
         assert!(!lines(&svc).contains(&format!("--client {device} ")), "{device} still has a line");
     }
     assert!(lines(&svc).contains("--client phone-o "), "the owner's phone lost its line");
+}
+
+/// Something holding the fence's lock doesn't keep the daemon from starting:
+/// the start sweep gives up waiting after its limit, and finishes in the
+/// background once the lock is free.
+#[tokio::test]
+async fn a_held_fence_lock_doesnt_hold_up_the_start() {
+    let (_dir, svc) = with_bobs_phone_enrolled().await;
+    // Taken off in the store alone, as a build from before ov-783 left it.
+    svc.store.set_member("bob", "Bob", &["phone-b".into()]).unwrap();
+    svc.store.set_member("bob", "Bob", &[]).unwrap();
+    let mut lock = svc.authorized_keys().as_os_str().to_owned();
+    lock.push(".farcooler-lock");
+    let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&lock).unwrap();
+    rustix::fs::flock(&held, rustix::fs::FlockOperation::LockExclusive).unwrap();
+
+    let began = std::time::Instant::now();
+    sweep_at_start_within(&svc, Duration::from_millis(200)).await;
+    assert!(began.elapsed() < Duration::from_secs(5), "the start waited {:?} on the lock", began.elapsed());
+    assert!(lines(&svc).contains("--client phone-b "), "nothing could be written while the lock was held");
+
+    drop(held);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while lines(&svc).contains("--client phone-b ") && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!lines(&svc).contains("--client phone-b "), "the sweep never finished once the lock was free");
+    while svc.store.people_events(1).unwrap().first().is_none_or(|e| e.kind != "revoked") && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let log = svc.store.people_events(1).unwrap();
+    assert_eq!((log[0].kind.as_str(), log[0].actor.as_str()), ("revoked", RUNNER));
 }

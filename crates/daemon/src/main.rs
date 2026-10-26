@@ -230,7 +230,8 @@ async fn run() -> Result<(), i32> {
     // A released device a failed revoke left a line for is cut off (ov-783),
     // before the tunnel below reads the file, so the first tunnel never
     // admits its node key. Awaited: one store read and one file write at
-    // most, with no tunnel to rebuild yet.
+    // most, with no tunnel to rebuild yet, and never past
+    // `release_sweep::START_LIMIT` (the fence's lock has no timeout).
     farcooler_daemon::release_sweep::sweep_at_start(&service).await;
     // A pane still in chat mode from the build before moves to its TUI at
     // its next idle (ov-376).

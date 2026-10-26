@@ -16,6 +16,9 @@
 //! member's device enrolled that's waiting on its first binding (ov-719):
 //! that one is released and keeps its line until a runner admin binds it.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use farcooler_core::{DomainError, Result};
 
 use crate::service::Service;
@@ -75,8 +78,40 @@ async fn sweep_with(svc: &Service, rebuild_tunnel: bool) -> Result<Swept> {
 /// first tunnel is built from, so that tunnel never admits a swept device's
 /// node key. Nothing to rebuild, so it's one store read and one file write at
 /// most. Each revocation goes to the people log as the runner's own.
-pub async fn sweep_at_start(svc: &Service) {
-    let swept = match sweep_with(svc, false).await {
+///
+/// Waited for [`START_LIMIT`] at most: the write takes the fence's lock,
+/// which has no timeout, and something else holding it must not keep the
+/// daemon from starting. Past that the sweep goes on in the background, and
+/// rebuilds the tunnel once it lands, since the tunnel may have started from
+/// the file before it.
+pub async fn sweep_at_start(svc: &Arc<Service>) {
+    sweep_at_start_within(svc, START_LIMIT).await;
+}
+
+/// How long the daemon's start waits for its sweep.
+pub const START_LIMIT: Duration = Duration::from_secs(10);
+
+/// [`sweep_at_start`], waiting `limit` at most.
+pub async fn sweep_at_start_within(svc: &Arc<Service>, limit: Duration) {
+    let sweeping = svc.clone();
+    let mut sweep = Box::pin(async move { sweep_with(&sweeping, false).await });
+    match tokio::time::timeout(limit, &mut sweep).await {
+        Ok(swept) => record_start(svc, swept, false).await,
+        Err(_) => {
+            tracing::warn!(?limit, "the released devices' sweep is waiting on the fence's lock; starting without it");
+            let svc = svc.clone();
+            tokio::spawn(async move {
+                let swept = sweep.await;
+                record_start(&svc, swept, true).await;
+            });
+        }
+    }
+}
+
+/// Log what a start sweep did, and rebuild the tunnel when it revoked
+/// something after the tunnel may have started (`late`).
+async fn record_start(svc: &Service, swept: Result<Swept>, late: bool) {
+    let swept = match swept {
         Ok(swept) => swept,
         Err(err) => {
             tracing::error!(?err, "the released devices' sweep couldn't read what to sweep");
@@ -89,6 +124,10 @@ pub async fn sweep_at_start(svc: &Service) {
     }
     for (device, _) in &swept.failed {
         record(svc, RUNNER, device, "revoke_failed");
+    }
+    if late && !swept.revoked.is_empty() {
+        let outcome = crate::allowlist::start_tunnel(svc).await;
+        tracing::info!(?outcome, "made this runner's tunnel match the file a late start sweep wrote");
     }
 }
 
