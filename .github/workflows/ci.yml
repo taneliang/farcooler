@@ -597,6 +597,11 @@ jobs:
       # process, and a fake helper records the commands it was given tagged
       # with its own pid, so two servers are two numbers in a file.
       - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+      # The released devices' sweep (ov-783): K devices revoked in one tunnel
+      # rebuild, and a daemon's first tunnel built only after its start sweep.
+      # Both are counts of what a fake helper heard, so a default build, which
+      # links no tunnel, can't see either.
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once
       # `FARCOOLER_DERP_MAP` end to end, and it is here for the same reason as
       # the three lines above: a default build's `serve` refuses every call, so
       # nothing is spawned and nothing is told anything, and "did the runner's
