@@ -215,6 +215,9 @@ SOURCES = [
     # A member's Talk: their own rep in the orchestrator's place (ov-526).
     "TalkSeats.swift",
     "RepSeat.swift",
+    # MetricKit's crashes and hangs, sent as signatures to the owner's own
+    # runner on the launch after (ov-797). The reading is `CrashSignature`.
+    "CrashReports.swift",
     "ThemeEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
@@ -717,6 +720,9 @@ AGENTKIT_SOURCES = [
     "PlanPrStage.swift",
     # A phone marks a lane's pull request ready and replies to a review thread (ov-317).
     "PhonePrActions.swift",
+    # A crash's signature out of MetricKit's JSON, and the outbox that keeps it
+    # for the owner's runner (ov-797). See `CrashSignatureTests`.
+    "CrashSignature.swift",
     "PlanReading.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",

@@ -269,9 +269,13 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
             WatchLinkHost.shared.start()
             WatchLinkHost.shared.acceptAnswersFromGlances()
             Notifier.shared.listen()
+            // MetricKit's last-launch crashes go to whoever is subscribed
+            // now, so before any scene (ov-797).
+            CrashReports.shared.start()
         }
         #if DEBUG
         NotificationTapHarness.scheduleIfRequested()
+        CrashReports.crashIfAsked()
         #endif
         return true
     }

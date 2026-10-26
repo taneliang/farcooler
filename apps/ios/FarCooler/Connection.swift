@@ -960,6 +960,9 @@ final class Connection: ObservableObject {
             // Who this phone talks to, once the runner says it has people,
             // and again when its panes change (a rep started elsewhere).
             await talk.load(self, panes: Set(fleet.worktrees.flatMap { $0.terminals.map(\.id) }))
+            // Crashes waiting for the owner's runner, once this one has
+            // said it is (ov-797).
+            await CrashReports.shared.send(through: self)
 
             // One more poll has landed.
             //
