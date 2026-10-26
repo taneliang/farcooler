@@ -56,6 +56,76 @@ val releaseChannel = versionScript("channel").ifEmpty { "local" }
 val authScheme = versionScript("scheme").ifEmpty { "farcooler" }
 val displayVersion = versionScript("display").ifEmpty { marketingVersion }
 
+// The upload key (ov-814), read only when `-Pfarcooler.sign=true`.
+//
+// Google Play App Signing holds the key users' phones verify; this is the
+// separate UPLOAD key that proves a bundle came from CI. Google can reset it if
+// it is lost, which is why it is the only signing key that ever touches CI.
+//
+// Gated on an explicit property rather than on the secrets being present, for
+// the failure that matters: a gate that asked "are the secrets here?" would
+// quietly build an unsigned bundle when one went missing, and that bundle looks
+// exactly like a good one until Play rejects it. With the property set, every
+// missing value is a build error that names it. Without it, `assembleRelease`
+// stays the unsigned compile check CI's Android job runs and needs no secrets.
+//
+// Each value comes from the environment (CI) or a Gradle property (a developer
+// with `~/.gradle/gradle.properties`), the environment first. The keystore is
+// either a file path or base64 of the file, since an Actions secret is text.
+val signRelease = project.findProperty("farcooler.sign") == "true"
+
+fun uploadSetting(env: String, property: String): String? =
+    (System.getenv(env)?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty(property) as String?)?.takeIf { it.isNotBlank() })
+
+/// The upload keystore as a file, or null when neither form was given.
+fun uploadKeystore(): File? {
+    uploadSetting("ANDROID_UPLOAD_KEYSTORE", "farcooler.upload.keystore")?.let { return file(it) }
+    val encoded = uploadSetting("ANDROID_UPLOAD_KEYSTORE_B64", "farcooler.upload.keystoreB64")
+        ?: return null
+    val out = layout.buildDirectory.file("upload-keystore.jks").get().asFile
+    out.parentFile.mkdirs()
+    out.writeBytes(java.util.Base64.getMimeDecoder().decode(encoded))
+    return out
+}
+
+if (signRelease) {
+    val keystore = uploadKeystore()
+    val storePassword = uploadSetting("ANDROID_UPLOAD_STORE_PASSWORD", "farcooler.upload.storePassword")
+    val keyAlias = uploadSetting("ANDROID_UPLOAD_KEY_ALIAS", "farcooler.upload.keyAlias")
+    val keyPassword = uploadSetting("ANDROID_UPLOAD_KEY_PASSWORD", "farcooler.upload.keyPassword")
+    val missing = listOfNotNull(
+        "ANDROID_UPLOAD_KEYSTORE_B64 (or ANDROID_UPLOAD_KEYSTORE, a path)".takeIf { keystore == null },
+        "ANDROID_UPLOAD_STORE_PASSWORD".takeIf { storePassword == null },
+        "ANDROID_UPLOAD_KEY_ALIAS".takeIf { keyAlias == null },
+        "ANDROID_UPLOAD_KEY_PASSWORD".takeIf { keyPassword == null },
+    )
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "-Pfarcooler.sign=true needs the upload key, and these are missing: " +
+                missing.joinToString(", ") +
+                ". Refusing to build a release bundle that is unsigned or signed with the wrong key."
+        )
+    }
+    if (!keystore!!.isFile) {
+        throw GradleException("The upload keystore ${keystore.path} does not exist.")
+    }
+}
+
+// A release bundle is what gets uploaded, so it is never built unsigned.
+// `assembleRelease` (the compile check) is untouched.
+tasks.matching { it.name == "bundleRelease" }.configureEach {
+    doFirst {
+        if (!signRelease) {
+            throw GradleException(
+                "bundleRelease builds the bundle that is uploaded to Google Play, so it must be " +
+                    "signed with the upload key: pass -Pfarcooler.sign=true and set the " +
+                    "ANDROID_UPLOAD_* values (see apps/android/README.md)."
+            )
+        }
+    }
+}
+
 // The terminal's typeface, staged rather than copied into this app.
 //
 // `apps/ios/FarCooler/Fonts` already has these two files in git, and they are
@@ -166,8 +236,20 @@ android {
         }
     }
 
+    signingConfigs {
+        if (signRelease) {
+            create("upload") {
+                storeFile = uploadKeystore()
+                storePassword = uploadSetting("ANDROID_UPLOAD_STORE_PASSWORD", "farcooler.upload.storePassword")
+                keyAlias = uploadSetting("ANDROID_UPLOAD_KEY_ALIAS", "farcooler.upload.keyAlias")
+                keyPassword = uploadSetting("ANDROID_UPLOAD_KEY_PASSWORD", "farcooler.upload.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (signRelease) signingConfig = signingConfigs.getByName("upload")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
