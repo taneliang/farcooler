@@ -299,6 +299,10 @@ struct NativeComposer: View {
         // never reacted.
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
+        // Laid out at the glass's own size: on iOS 26.5 the style also takes
+        // 5 pt of room on each side of the circle, which put the + 5 pt in
+        // from its place and 17 pt from the field (measured, ov-804).
+        .frame(width: Self.side, height: Self.side)
         // A `PhotosPicker` tints its label with the app's accent, and a
         // foreground style on the label doesn't survive it (ov-404 review 1).
         .tint(.primary)
