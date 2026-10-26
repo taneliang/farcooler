@@ -199,12 +199,29 @@ enum RunnerTrouble: Equatable {
     /// ``KeyRefusals/settlesOver``, then ``accessRemoved``. Every other kind, and a
     /// refusal from a runner that never let it in, is itself. Counts the
     /// refusal into `refusals`.
+    ///
+    /// A runner that said it released this device (``KeyRefusals/released``,
+    /// ov-820) has taken its access away, so any failure to reach it is
+    /// ``accessRemoved`` until a dial gets in: a Tailcat-only device only
+    /// ever meets `no_answer` after its revoke. Not this device's own
+    /// trouble (no key, no node key, a person who stopped waiting or didn't
+    /// trust a key), and not a changed host key, which says something else.
     func reading(_ refusals: inout KeyRefusals, at now: Date = Date()) -> RunnerTrouble {
+        if refusals.released, meansTheRunnerIsGone { return .accessRemoved }
         guard self == .keyRejected else { return self }
         switch refusals.refused(at: now) {
         case .stranger: return .keyRejected
         case .passing: return .refusedThisTime
         case .revoked: return .accessRemoved
+        }
+    }
+
+    /// A failure to reach the runner or be let in by it, which a released
+    /// device reads as the release (ov-820).
+    var meansTheRunnerIsGone: Bool {
+        switch self {
+        case .keyRejected, .unreachable, .tunnelFailed, .refusedThisTime, .accessRemoved, .other: return true
+        case .hostKeyChanged, .daemonMissing, .noIdentity, .noNodeKey, .keyNotTrusted, .stopped: return false
         }
     }
 

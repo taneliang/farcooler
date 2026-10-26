@@ -118,6 +118,46 @@ struct KeyRefusalsTests {
         #expect(refusals.refusals == 1)
     }
 
+    // MARK: - What the runner said (ov-820)
+
+    /// A Tailcat-only device is never refused after its revoke, only
+    /// ignored: once the runner has said `released`, every failure to reach
+    /// it is the no-access screen, from the first dial, checked slowly.
+    @Test func aReleasedDeviceReadsEveryFailureToReachTheRunnerAsNoAccess() throws {
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
+        var refusals = KeyRefusals.remembered("studio", in: defaults)
+        refusals.letIn("studio", in: defaults)
+        refusals.release("studio", in: defaults)
+        for gone in [RunnerTrouble.tunnelFailed(.noAnswer), .tunnelFailed(.unspecified), .unreachable, .keyRejected, .other] {
+            let kind = gone.reading(&refusals)
+            #expect(kind == .accessRemoved, "\(gone)")
+            #expect(kind.retry == .afterAWhile)
+        }
+        // This device's own trouble, or a different host key, isn't the release.
+        for own in [RunnerTrouble.noNodeKey, .noIdentity, .hostKeyChanged, .stopped] {
+            #expect(own.reading(&refusals) == own)
+        }
+        // Not released: a tunnel that doesn't answer is a runner that may be asleep.
+        var unsaid = KeyRefusals(admitted: true)
+        #expect(RunnerTrouble.tunnelFailed(.noAnswer).reading(&unsaid) == .tunnelFailed(.noAnswer))
+    }
+
+    /// Kept for that runner across launches, and gone when a dial gets in:
+    /// a device that's added back reconnects on its next slow check.
+    @Test func aReleaseIsRememberedUntilADialGetsIn() throws {
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
+        var refusals = KeyRefusals.remembered("studio", in: defaults)
+        refusals.release("studio", in: defaults)
+        #expect(KeyRefusals.remembered("studio", in: defaults).released)
+        #expect(!KeyRefusals.remembered("other", in: defaults).released)
+
+        var relaunched = KeyRefusals.remembered("studio", in: defaults)
+        relaunched.letIn("studio", in: defaults)
+        #expect(!relaunched.released)
+        #expect(!KeyRefusals.remembered("studio", in: defaults).released)
+        #expect(RunnerTrouble.tunnelFailed(.noAnswer).reading(&relaunched) == .tunnelFailed(.noAnswer))
+    }
+
     @Test func theNoAccessScreenSaysWhatHappenedAndWhatToDo() {
         let words = RunnerTrouble.Words(name: "studio", reachDetail: "e@studio", port: 22)
         #expect(RunnerTrouble.accessRemoved.headline(words) == RunnerPeople.noAccessTitle)

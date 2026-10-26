@@ -86,10 +86,31 @@ public struct KeyRefusals: Sendable, Equatable {
     /// A dial got in: the runner accepts this device.
     public mutating func letIn() {
         admitted = true
+        released = false
         refusals = 0
         firstRefusal = nil
         lastRefusal = nil
     }
+
+    /// The runner said it took this device's access away (ov-820): the
+    /// `released` notice, its connection's last frame before the runner
+    /// closed it. Kept across launches until a dial gets in.
+    ///
+    /// What a device that reaches the runner only through Tailcat has to go
+    /// on: after the revoke, the tunnel ignores it in silence, so it is never
+    /// refused, and every dial ends `no_answer`. Read by
+    /// `RunnerTrouble.reading`, which takes any failure to reach the runner
+    /// as ``Verdict/revoked`` while this holds. A device offline when it was
+    /// revoked never hears it, and reads a runner that isn't answering.
+    public private(set) var released = false
+
+    /// The runner said so: remembered for `runner` in `defaults`.
+    public mutating func release(_ runner: String, in defaults: UserDefaults = .standard) {
+        released = true
+        defaults.set(true, forKey: Self.releasedKey(runner))
+    }
+
+    static func releasedKey(_ runner: String) -> String { "keyRefusals.released.\(runner)" }
 
     /// A dial was refused: what that means now.
     public mutating func refused(at now: Date = Date()) -> Verdict {
@@ -115,6 +136,7 @@ public struct KeyRefusals: Sendable, Equatable {
     public static func remembered(_ runner: String, in defaults: UserDefaults = .standard) -> KeyRefusals {
         var refusals = KeyRefusals(admitted: defaults.bool(forKey: key(runner)))
         refusals.key = defaults.string(forKey: keyKey(runner))
+        refusals.released = defaults.bool(forKey: releasedKey(runner))
         return refusals
     }
 
@@ -122,6 +144,7 @@ public struct KeyRefusals: Sendable, Equatable {
     public mutating func letIn(_ runner: String, in defaults: UserDefaults = .standard) {
         letIn()
         defaults.set(true, forKey: Self.key(runner))
+        defaults.removeObject(forKey: Self.releasedKey(runner))
     }
 
     static func key(_ runner: String) -> String { "keyRefusals.admitted.\(runner)" }
