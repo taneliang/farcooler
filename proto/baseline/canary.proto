@@ -1,4 +1,4 @@
-// Shipped by Canary at 691d6c61f75f4d57441e22fbfe058dfa7424c695. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 88ff0a072767a718a78562c9d468e48f100463ca. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -296,6 +296,9 @@ message Request {
     // members sign in to an agent with their own account. 531-539 are its
     // block, held by `reserved` below.
     MemberOwnLoginSet member_own_login_set = 530;
+    // `board_theme.move` (ov-755), behind `board_theme_move`: a theme to a
+    // place in the ranking. 541-549 are its block, held by `reserved` below.
+    BoardThemeMove board_theme_move = 540;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -333,6 +336,8 @@ message Request {
   reserved 524 to 529;
   // The rest of members' own logins' block (ov-652).
   reserved 531 to 539;
+  // The rest of the theme move's block (ov-755).
+  reserved 541 to 549;
 }
 
 message Response {
@@ -480,6 +485,9 @@ message Result {
     // `workspace.write_charter`: what it wrote.
     RepositorySurvey repository_survey = 470;
     CharterWritten charter_written = 471;
+    // `workspace.charter` (ov-755), behind `workspace_charter`: the charter's
+    // text. 541-549 are its block, held by `reserved` below.
+    WorkspaceCharter workspace_charter = 540;
     // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
     WorktreeGrepResult worktree_grep_result = 480;
     // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
@@ -534,6 +542,8 @@ message Result {
   reserved 511 to 519;
   // The rest of Claude sign-in's block (ov-584).
   reserved 522 to 529;
+  // The rest of the charter read's block (ov-755).
+  reserved 541 to 549;
 }
 
 // ---------------------------------------------------------------------------
@@ -4903,6 +4913,15 @@ message BoardThemeUpdate {
   optional uint64 budget_tokens = 10;
 }
 
+// `board_theme.move`, at `control`: put a theme at place `to` of the
+// workspace's ranking, 1 being first. The themes are renumbered 1, 2, 3 in one
+// write, with one event naming `actor`. Answers the moved theme.
+message BoardThemeMove {
+  bytes theme_id = 1;
+  uint32 to = 2;
+  string actor = 3;
+}
+
 // `board_theme.cards`, at `control`.
 message BoardThemeCards {
   bytes theme_id = 1;
@@ -5886,6 +5905,17 @@ message SurveyGitHub {
 message SurveyFile {
   string path = 1;
   uint32 lines = 2;
+}
+
+// `workspace.charter` (ov-755), at `read`, targeting a workspace and carrying
+// no payload: the charter's text, for the owner, a member, or a member's rep.
+// A device whose member was removed is refused. Behind `workspace_charter`.
+message WorkspaceCharter {
+  // The charter as written. Empty when `exists` is false.
+  string text = 1;
+  // Whether the workspace has a charter yet: a new workspace's is the
+  // orchestrator's to write when it is first talked to.
+  bool exists = 2;
 }
 
 message WorkspaceWriteCharter {
