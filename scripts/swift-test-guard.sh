@@ -15,6 +15,14 @@ floor_file="$1"
 [ "${2:-}" = "--" ] || { echo "usage: swift-test-guard.sh <floor-file> -- <command...>" >&2; exit 2; }
 shift 2
 
+# The test process must not die from SIGPIPE (ov-800). Test runners leave it at
+# its default, so a write to a child that has exited (a stand-in CLI that never
+# reads its stdin) killed swiftpm-testing-helper with signal 13 and stopped the
+# whole suite. The core now refuses the signal itself (crates/client/src/pipe.rs),
+# and this is the backstop for any writer that does not: an ignored signal stays
+# ignored through exec, so the write fails with EPIPE and that test reports it.
+trap '' PIPE
+
 log="$(mktemp -t farcooler-swift-test)"
 trap 'rm -f "$log"' EXIT
 

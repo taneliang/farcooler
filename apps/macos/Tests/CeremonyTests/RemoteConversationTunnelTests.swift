@@ -41,6 +41,8 @@ struct RemoteConversationTunnelTests {
 
     /// A scratch directory under `/tmp/fc-t`, short for the socket paths.
     static func scratch() throws -> URL {
+        // A stand-in CLI exits without reading its stdin; the write to it must fail, not signal (ov-800).
+        signal(SIGPIPE, SIG_IGN)
         let url = URL(fileURLWithPath: "/tmp/fc-t/rct-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
