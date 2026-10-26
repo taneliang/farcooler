@@ -208,6 +208,16 @@ push:
 | `./scripts/copy-lint.py` | A count in parentheses in any app's copy. |
 | `./scripts/visual-tokens-lint.py` | A hand-drawn radius, rule, shadow, material or fill in a Mac or AgentKit view, where a design token exists. |
 
+To run the CI jobs your change reaches, in one pass, with the same wrappers
+(`test-leak-check`, `tmux-leak-check`, `swift-test-guard`, `nextest --profile
+ci`), use `./scripts/lane-gate.py`. It reads the commands out of
+`.github/workflows/ci.yml`, picks the jobs from the paths you changed against
+`origin/main`, and prints a table (job, command, result, seconds, test counts)
+to paste into a report. `--dry-run` prints the plan, `--only` and `--skip` pick
+jobs, and it exits non-zero if any step fails. It leaves the iOS build and UI
+smoke to `./scripts/ios-ui-tests.sh`, and the web job's Linux downloads to CI;
+both are listed in its output.
+
 `./scripts/install-git-hooks.sh` installs a `commit-msg` hook that runs the
 doc comment check on every commit. A doc comment you moved on purpose takes a
 `Doc-Comment-Check: moved` trailer in the commit message.

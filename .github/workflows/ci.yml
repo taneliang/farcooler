@@ -139,6 +139,7 @@ jobs:
       # the code paths it must never swallow, and the green-base rule against a
       # scratch repository.
       - run: ./scripts/ci-changes.py --self-test
+      - run: ./scripts/lane-gate.py --self-test
       - run: ./scripts/notarytool-retry.sh --self-test
       # What version.sh answers decides where a daemon installs — its runtime
       # directory, database, tmux server and binary name — so a wrong channel is

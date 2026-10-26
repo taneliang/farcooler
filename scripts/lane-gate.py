@@ -339,7 +339,7 @@ COUNTS = [
     (re.compile(r"Test run with (\d+) tests?"), "swift-testing", 1),
     (re.compile(r"Tests\s+(\d+) passed"), "vitest", 1),
     (re.compile(r"UI tests that ran: (\d+) in"), "ui", 1),
-    (re.compile(r"^ok\s+\S+", re.M), "go pkgs", 0),
+    (re.compile(r"^ok\s+\S+\s+[\d.]+s", re.M), "go pkgs", 0),
 ]
 
 
@@ -651,6 +651,7 @@ def self_test():
 
     expect("a nextest summary is counted", count_tests("     Summary [  12.3s] 1234 tests run: 1230 passed, 4 skipped"), "1230 nextest")
     expect("an XCTest total is counted", count_tests("Executed 17 tests, with 0 failures (0 unexpected) in 1.0 (1.1) seconds"), "17 xctest")
+    expect("go packages are counted, a bare 'ok' line is not", count_tests("ok  \tpkg/a\t0.3s\nok  \tpkg/b\t(cached)\nok  \tpkg/c\t1.2s\nok something\n"), "2 go pkgs")
     expect("vitest is counted", count_tests(" Tests  42 passed (42)"), "42 vitest")
 
     for failure in failures:
