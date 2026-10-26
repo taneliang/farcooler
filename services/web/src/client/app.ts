@@ -15,10 +15,10 @@
 /// never markup: the CSP's Trusted Types (`require-trusted-types-for
 /// 'script'`) refuse an HTML string sink outright.
 
-import init, { acceptReply, connect, fingerprint, makeOffer, publicKeyLine, type WebRunner } from 'fc-web'
+import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, publicKeyLine, type WebRunner } from 'fc-web'
 
-import { connectFailure, replyRefusal, unreachable } from './copy'
-import { type Device, type Granted, loadDevice, publicKeyBytes, saveDevice, signer } from './device'
+import { connectFailure, joinDetail, joinTitle, replyRefusal, unreachable } from './copy'
+import { type Device, forgetDevice, type Granted, loadDevice, publicKeyBytes, saveDevice, signer } from './device'
 import { drawCode, scan } from './qr'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat } from './tunnel'
@@ -49,7 +49,7 @@ async function checkVersion(): Promise<void> {
   $('update').removeAttribute('hidden')
 }
 
-const SCREENS = ['status', 'enroll', 'work']
+const SCREENS = ['status', 'enroll', 'join', 'work']
 
 function show(screen: string): void {
   for (const id of SCREENS) $(id).toggleAttribute('hidden', id !== screen)
@@ -80,29 +80,48 @@ interface Session {
   tailcat: Tailcat
 }
 
+/// The timer that retires the code on screen when it expires.
+let retiring = 0
+
 // MARK: Enrolling
 
-async function enroll(session: Session): Promise<void> {
+/// Show this browser's code, and read the phone's reply to it.
+///
+/// A code is answerable for the ceremony's window (two minutes) from when it
+/// went up, as on every other device: the reply leg carries no proof of who
+/// wrote it, and everything a forged reply must echo is printed in the code. So
+/// a stored code past the window is discarded for a new one, a code on screen
+/// is replaced when it expires, and a reply that comes later is refused in
+/// wasm (`acceptReply`).
+async function enroll(session: Session, notice = ''): Promise<void> {
   const { device } = session
+  clearTimeout(retiring)
+  if (device.offer && offerIsStale(device.offerShownAt ?? 0)) {
+    delete device.offer
+    delete device.offerShownAt
+  }
   if (!device.offer) {
-    const me = await relay('directory/me').catch(() => null)
-    const account = typeof me?.user?.id === 'string' ? me.user.id : null
-    if (!account) {
-      status("Far Cooler couldn’t check your account", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
-      return
-    }
-    device.offer = makeOffer(deviceName(), account, session.keyLine, device.nodePub)
+    device.offer = makeOffer(deviceName(), device.account, session.keyLine, device.nodePub)
+    device.offerShownAt = Date.now()
     await saveDevice(device)
   }
 
   drawCode($<HTMLCanvasElement>('offer-code'), device.offer)
   $('offer-fingerprint').textContent = `This browser’s key: ${fingerprint(session.keyLine) ?? ''}`
   const note = $('enroll-note')
-  note.hidden = true
+  note.textContent = notice
+  note.hidden = notice === ''
   show('enroll')
+  // Replaced on time, unless the camera is open: a reply read then is judged
+  // by the window anyway, and a new code mid-scan would only confuse.
+  retiring = window.setTimeout(() => {
+    if ($('enroll').hidden || !$('camera').hidden) return
+    void enroll(session, 'That code expired, so here’s a new one. Scan it with your phone, then scan its reply within two minutes.')
+  }, Math.max(0, (device.offerShownAt ?? 0) + freshnessMs() - Date.now()) + 500)
 
   $<HTMLButtonElement>('start-over').onclick = async () => {
     delete device.offer
+    delete device.offerShownAt
     await saveDevice(device)
     void enroll(session)
   }
@@ -133,20 +152,60 @@ async function enroll(session: Session): Promise<void> {
 
 async function takeReply(session: Session, reply: string): Promise<void> {
   const { device } = session
-  let runners: Granted[]
+  let taken: { granted_by: string | null; runners: Granted[] }
   try {
-    runners = JSON.parse(acceptReply(reply, device.offer ?? '', !device.offer)) as Granted[]
+    taken = JSON.parse(acceptReply(reply, device.offer ?? '', !device.offer, device.offerShownAt ?? 0))
   } catch (e) {
+    const word = (e as Error).message
+    if (word === 'stale') {
+      // Too late for this code, and so for any reply to it: a new one.
+      delete device.offer
+      delete device.offerShownAt
+      await saveDevice(device)
+      void enroll(session, replyRefusal(word))
+      return
+    }
     const note = $('enroll-note')
-    note.textContent = replyRefusal((e as Error).message)
+    note.textContent = replyRefusal(word)
     note.hidden = false
     return
   }
   // Taken: the offer is spent, so a second reply to it is refused.
+  clearTimeout(retiring)
   delete device.offer
-  device.runners = runners
+  delete device.offerShownAt
+  await saveDevice(device)
+  if (taken.granted_by) {
+    confirmJoin(session, taken.granted_by, taken.runners)
+    return
+  }
+  device.runners = taken.runners
   await saveDevice(device)
   void work(session)
+}
+
+/// Another account's runners: asked about, never joined silently, as a phone
+/// asks (apps/ios/FarCooler/Ceremony/JoinView.swift, TeammateJoinPrompt).
+function confirmJoin(session: Session, from: string, runners: Granted[]): void {
+  $('join-title').textContent = joinTitle(runners.map(r => r.label))
+  $('join-detail').textContent = joinDetail(from)
+  const list = $('join-runners')
+  list.replaceChildren(
+    ...(runners.length > 1
+      ? runners.map(r => {
+          const item = document.createElement('li')
+          item.textContent = r.label
+          return item
+        })
+      : []),
+  )
+  show('join')
+  $<HTMLButtonElement>('join-yes').onclick = async () => {
+    session.device.runners = runners
+    await saveDevice(session.device)
+    void work(session)
+  }
+  $<HTMLButtonElement>('join-no').onclick = () => void enroll(session)
 }
 
 // MARK: Working
@@ -240,22 +299,41 @@ async function addAgain(session: Session): Promise<void> {
   shown = null
   delete session.device.runners
   delete session.device.offer
+  delete session.device.offerShownAt
   await saveDevice(session.device)
   void enroll(session)
 }
 
 // MARK: Boot
 
-async function showWho(): Promise<void> {
-  const me = await relay('directory/me').catch(() => null)
-  const email = typeof me?.user?.email === 'string' ? me.user.email : null
-  if (email) $('who').textContent = email
+/// Sign Out takes this browser's key and runners with it, before the form
+/// posts. The Worker's answer also clears the origin's storage
+/// (`Clear-Site-Data`), which covers a sign-out this page didn't run.
+function signOutForgets(): void {
+  const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
+  if (!form) return
+  form.addEventListener('submit', event => {
+    event.preventDefault()
+    void forgetDevice()
+      .catch(() => {})
+      .finally(() => form.submit())
+  })
 }
 
 async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
   window.addEventListener('focus', () => void checkVersion())
-  void showWho()
+  signOutForgets()
+
+  // Which account is signed in decides which device this browser may use, so
+  // nothing starts without it.
+  const me = await relay('directory/me').catch(() => null)
+  const account = typeof me?.user?.id === 'string' && me.user.id ? (me.user.id as string) : null
+  if (typeof me?.user?.email === 'string') $('who').textContent = me.user.email
+  if (!account) {
+    status("Far Cooler couldn’t check your account", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
+    return
+  }
 
   let tailcat: Tailcat
   try {
@@ -267,7 +345,7 @@ async function boot(): Promise<void> {
 
   let device: Device
   try {
-    device = await loadDevice(() => tailcat.mintNodeKey())
+    device = await loadDevice(account, () => tailcat.mintNodeKey())
   } catch (e) {
     status(
       'This browser can’t hold a Far Cooler key',

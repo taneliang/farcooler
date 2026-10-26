@@ -1127,9 +1127,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_accept(
     capacity: usize,
 ) -> usize {
     guarded(0, || {
-        use crate::ceremony::{
-            CeremonyError, accept_manifest, decode_offer, encode_manifest, still_fresh,
-        };
+        use crate::ceremony::{CeremonyError, decode_offer, encode_manifest, take_reply};
 
         let malformed =
             |what: &str| refusal(&CeremonyError::Malformed(what.to_string()));
@@ -1143,14 +1141,10 @@ pub unsafe extern "C" fn farcooler_client_ceremony_accept(
 
         let answer = decode_offer(&expecting_json)
             .and_then(|expecting| {
-                // The order matters: a second reply is refused before anything
-                // else is considered, and a stale one before the payload is
-                // read, so neither depends on the scan being well-formed.
-                if already_taken {
-                    return Err(CeremonyError::AlreadyTaken);
-                }
-                still_fresh(std::time::Duration::from_millis(held_ms))?;
-                accept_manifest(&encoded, &expecting, already_taken)
+                // The order is take_reply's: a second reply, then a stale one,
+                // then the reply itself, so neither of the first two depends on
+                // the scan being well-formed.
+                take_reply(&encoded, &expecting, already_taken, std::time::Duration::from_millis(held_ms))
             })
             .map(|m| encode_manifest(&m));
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)

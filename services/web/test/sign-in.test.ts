@@ -51,6 +51,15 @@ describe('sign-out', () => {
     expect(to.searchParams.get('session_id')).toBe('session_01ABC')
     expect(to.searchParams.get('return_to')).toBe(`${ORIGIN}/`)
     expect(res.headers.getSetCookie()).toContain('__Host-fc_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0')
+    // The browser's key and runners go with the account that signed out.
+    expect(res.headers.get('clear-site-data')).toBe('"storage"')
+  })
+
+  it('clears storage even with no session to end at WorkOS', async () => {
+    const res = await get('/sign-out', envWith(), { method: 'POST', headers: { origin: ORIGIN } })
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('/')
+    expect(res.headers.get('clear-site-data')).toBe('"storage"')
   })
 
   it("accepts the Origin: null a no-referrer form sends, only with the browser's same-origin word", async () => {
@@ -65,6 +74,7 @@ describe('sign-out', () => {
       const res = await get('/sign-out', envWith(), { method: 'POST', headers: { cookie: SESSION, ...headers } })
       expect(res.status).toBe(403)
       expect(res.headers.getSetCookie()).toEqual([])
+      expect(res.headers.get('clear-site-data')).toBeNull()
     }
   })
 

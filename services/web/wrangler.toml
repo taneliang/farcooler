@@ -65,11 +65,12 @@ APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 WEB_CLIENT = ""
 WEB_ACCOUNTS = ""
 # Where the shell's CSP lets the page connect besides itself (src/headers.ts):
-# Tailcat's DERP map, and the relays that map lists (tc301a-tc304a.ipn.dev). A
-# runner on a map of its own needs its relays added here; the CSP violation
-# report is how we hear about one.
+# Tailcat's DERP map, and the relays that map lists, by name rather than
+# *.ipn.dev so the page trusts four hosts and not a third party's whole domain
+# (ov-764 review). A relay added to the map, or a runner on a map of its own,
+# needs its host added here; the CSP violation report is how we hear about one.
 DERP_MAP_ORIGIN = "https://tailcat.dev"
-DERP_HOSTS = "*.ipn.dev"
+DERP_HOSTS = "tc301a.ipn.dev tc302a.ipn.dev tc303a.ipn.dev tc304a.ipn.dev"
 
 # The limit on sign-in and refresh per visitor, for the reason the site gives
 # for its own (services/site/wrangler.toml): every call from this Worker reaches
@@ -106,7 +107,7 @@ APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
 WEB_CLIENT = ""
 WEB_ACCOUNTS = ""
 DERP_MAP_ORIGIN = "https://tailcat.dev"
-DERP_HOSTS = "*.ipn.dev"
+DERP_HOSTS = "tc301a.ipn.dev tc302a.ipn.dev tc303a.ipn.dev tc304a.ipn.dev"
 
 [[env.canary.unsafe.bindings]]
 name = "APP_AUTH_LIMIT"

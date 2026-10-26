@@ -44,7 +44,7 @@ export function envWith(over: Partial<WebEnv> = {}): WebEnv {
     WEB_CLIENT: 'owner',
     WEB_ACCOUNTS: OWNER,
     DERP_MAP_ORIGIN: 'https://tailcat.dev',
-    DERP_HOSTS: '*.ipn.dev',
+    DERP_HOSTS: 'tc301a.ipn.dev tc302a.ipn.dev',
     ...over,
   }
 }

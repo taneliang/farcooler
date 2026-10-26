@@ -113,14 +113,31 @@ pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str) -> Str
     farcooler_ceremony::encode_offer(&enroll::offer(name, account, key_a, node_key))
 }
 
-/// Take the phone's reply to the offer this browser showed. Answers the
-/// granted runners as JSON (`enroll::Granted`), each with its pinned host key,
-/// or refuses with the ceremony's word.
+/// Take the phone's reply to the offer this browser showed at `shown_at_ms`.
+/// Answers `enroll::Taken` as JSON — who granted it when it isn't this
+/// account, and the runners, each with its pinned host key — or refuses with
+/// the ceremony's word (`stale` past the window).
+///
+/// "Now" is read here, not passed in, so the page cannot leave the window out.
 #[wasm_bindgen(js_name = acceptReply)]
-pub fn accept_reply(reply: &str, offer: &str, already_taken: bool) -> Result<String, JsValue> {
+pub fn accept_reply(reply: &str, offer: &str, already_taken: bool, shown_at_ms: f64) -> Result<String, JsValue> {
     let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
-    let manifest = enroll::accept(reply, &offer, already_taken).map_err(|e| failure(e.code(), &e.to_string()))?;
-    serde_json::to_string(&enroll::granted(&manifest)).map_err(|e| failure("malformed", &e.to_string()))
+    let manifest = enroll::accept(reply, &offer, already_taken, shown_at_ms, js_sys::Date::now())
+        .map_err(|e| failure(e.code(), &e.to_string()))?;
+    serde_json::to_string(&enroll::taken(&manifest)).map_err(|e| failure("malformed", &e.to_string()))
+}
+
+/// The ceremony's window in milliseconds, so the page can retire a code on
+/// time without a second spelling of the number.
+#[wasm_bindgen(js_name = freshnessMs)]
+pub fn freshness_ms() -> f64 {
+    farcooler_ceremony::FRESHNESS.as_millis() as f64
+}
+
+/// Whether a code shown at `shown_at_ms` is past the ceremony's window.
+#[wasm_bindgen(js_name = offerIsStale)]
+pub fn offer_is_stale(shown_at_ms: f64) -> bool {
+    enroll::offer_is_stale(shown_at_ms, js_sys::Date::now())
 }
 
 /// WebCrypto's raw Ed25519 public key as the OpenSSH line an offer carries.

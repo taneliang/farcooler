@@ -32,6 +32,11 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
       reports.csp.push(await request.text())
       return new Response(null, { status: 204 })
     }
+    // Signing out ends at the sign-in page. What the page deletes before it
+    // posts here is what the check looks for; the Worker's own Clear-Site-Data
+    // is vitest's (test/sign-in.test.ts).
+    if (path === '/sign-out' && request.method === 'POST') return new Response(null, { status: 303, headers: { location: '/signed-out' } })
+    if (path === '/signed-out') return withHeaders('signed out', 200, { 'content-type': 'text/plain' })
     if (path === '/api/relay/directory/me') {
       return withHeaders(JSON.stringify({ user: { id: 'acct-test', email: 'owner@example.com' } }), 200, { 'content-type': 'application/json' })
     }

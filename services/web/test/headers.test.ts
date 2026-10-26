@@ -27,7 +27,7 @@ describe("the shell's CSP", () => {
       'style-src': "'self'",
       'img-src': "'self' data: blob:",
       'font-src': "'self'",
-      'connect-src': "'self' https://tailcat.dev https://*.ipn.dev wss://*.ipn.dev",
+      'connect-src': "'self' https://tailcat.dev https://tc301a.ipn.dev wss://tc301a.ipn.dev https://tc302a.ipn.dev wss://tc302a.ipn.dev",
       'worker-src': "'self'",
       'manifest-src': "'self'",
       'form-action': "'self' https://api.workos.com",

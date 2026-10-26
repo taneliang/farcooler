@@ -132,13 +132,22 @@ async function finishSignIn(request: Request, url: URL, env: Configured): Promis
 
 /// Forget the session here, then end it at WorkOS too, so the next Sign In
 /// asks again. A post from another site is refused before anything is cleared.
+///
+/// It also clears this origin's storage (`Clear-Site-Data: "storage"`): the
+/// browser's SSH key and its runners belong to the account that signed out, and
+/// the next person to sign in on this browser must not inherit them. The page
+/// deletes them itself before it posts here; this covers a sign-out the page
+/// didn't run (ov-764 review).
 function signOut(request: Request, url: URL): Response {
   if (!sameOrigin(request, url)) return withHeaders(null, 403)
   const cleared = [clearSession(), clearSignIn()]
   const tokens = readSession(request)
   const sid = tokens ? sessionId(tokens.access) : null
-  if (!sid) return redirect('/', cleared)
-  const logout = new URL('https://api.workos.com/user_management/sessions/logout')
-  logout.search = new URLSearchParams({ session_id: sid, return_to: `${url.origin}/` }).toString()
-  return redirect(logout.toString(), cleared)
+  let to = '/'
+  if (sid) {
+    const logout = new URL('https://api.workos.com/user_management/sessions/logout')
+    logout.search = new URLSearchParams({ session_id: sid, return_to: `${url.origin}/` }).toString()
+    to = logout.toString()
+  }
+  return withHeaders(null, 303, { 'cache-control': 'no-store', location: to, 'clear-site-data': '"storage"' }, cleared)
 }

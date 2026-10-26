@@ -64,7 +64,7 @@ fn granted_runner(host_key: &str) -> enroll::Granted {
         pending: false,
     };
     let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&offer, vec![entry]));
-    let manifest = enroll::accept(&reply, &offer, false).expect("the browser accepts its own reply");
+    let manifest = enroll::accept(&reply, &offer, false, 0.0, 0.0).expect("the browser accepts its own reply");
     enroll::granted(&manifest).remove(0)
 }
 
@@ -205,7 +205,7 @@ fn only_a_written_tunneled_runner_is_dialable_from_a_browser() {
             entry("address", Reach::Direct { host: "box.local".into(), port: 22 }, false),
         ],
     ));
-    let granted = enroll::granted(&enroll::accept(&reply, &offer, false).unwrap());
+    let granted = enroll::granted(&enroll::accept(&reply, &offer, false, 0.0, 0.0).unwrap());
     let why: Vec<(&str, &str, &str)> =
         granted.iter().map(|g| (g.id.as_str(), g.token.as_str(), g.why.as_str())).collect();
     assert_eq!(

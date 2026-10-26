@@ -62,6 +62,13 @@ describe("the web client's wrangler.toml", () => {
     expect(web.vars.production.WEB_ACCOUNTS).toBe('')
   })
 
+  it("names Tailcat's relays one by one, never a wildcard over its domain", () => {
+    for (const env of ['production', 'canary']) {
+      const hosts = web.vars[env].DERP_HOSTS.split(/\s+/)
+      expect(hosts, env).toEqual(['tc301a.ipn.dev', 'tc302a.ipn.dev', 'tc303a.ipn.dev', 'tc304a.ipn.dev'])
+    }
+  })
+
   it('gives each rate limit a namespace no other Worker holds', () => {
     const mine = namespaces(webToml)
     expect(mine).toHaveLength(2)

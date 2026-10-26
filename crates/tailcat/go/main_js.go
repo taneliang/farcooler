@@ -167,7 +167,9 @@ func jsConn(conn *clientConn) js.Value {
 		})
 	}))
 	api.Set("write", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		if len(args) < 1 {
+		// Anything but a Uint8Array is refused rather than read: a panic in a
+		// js.FuncOf callback takes the module down.
+		if len(args) < 1 || !args[0].InstanceOf(js.Global().Get("Uint8Array")) {
 			return nil
 		}
 		b := make([]byte, args[0].Get("length").Int())

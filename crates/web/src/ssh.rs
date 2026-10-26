@@ -7,7 +7,10 @@
 //! **The host key is pinned, never learned.** The enrollment reply carries each
 //! runner's `SHA256:` fingerprint beside its route (`RunnerEntry.host_key`),
 //! and the handshake is refused before authentication unless the key the
-//! runner presents prints to exactly that string. There is no first-use
+//! runner presents prints to exactly that string. That is the first key
+//! exchange's key: russh 0.62 does not re-check a key a rekey presents, as the
+//! native client's verifier doesn't either, so only the peer already
+//! authenticated by the pin could change it. There is no first-use
 //! acceptance and no prompt: a browser has no earlier connection to compare
 //! with, and the reply is the only statement anybody made about this runner.
 

@@ -37,6 +37,8 @@ export function replyRefusal(word: string): string {
       return 'That reply answers a different code. Scan the reply your phone shows for the code on this page.'
     case 'wrong_account':
       return 'That reply belongs to a different account. Sign in to Far Cooler on your phone with the account this browser uses.'
+    case 'stale':
+      return 'That reply came after this browser’s code expired. Here’s a new code: scan it with your phone, then scan its reply within two minutes.'
     case 'already_taken':
       return 'This browser already took a reply for this code. Select Start Over to add it again.'
     case 'no_tunnel':
@@ -51,4 +53,15 @@ export function unreachable(why: string, runner: string): string {
   return why === 'pending'
     ? `Your phone couldn’t add this browser’s key to ${runner}. Add this browser again while your phone can reach it.`
     : `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
+}
+
+/// The headline for joining a teammate's runners, as the phone words it
+/// (CeremonyStore.joinTitle): one runner by name, or several.
+export function joinTitle(labels: string[]): string {
+  return labels.length === 1 ? `Join Your Teammate’s Runner “${labels[0]}”?` : 'Join Your Teammate’s Runners?'
+}
+
+/// What joining means, under it (CeremonyStore.joinDetail).
+export function joinDetail(from: string): string {
+  return `This code says ${from} added this device to their runners. Work there runs on the Claude account signed in on each runner, so its usage and limits are shared. Join only if you were adding this device with them just now.`
 }

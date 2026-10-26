@@ -27,6 +27,9 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .steps li { margin-bottom: 12px; }
 .note { margin: 16px 0 0; padding: 10px 14px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--rule); overflow-wrap: anywhere; }
 .actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+.actions.centered { justify-content: center; }
+.join-runners { list-style: none; margin: 0 0 8px; padding: 0; }
+.join-runners li { padding: 2px 0; overflow-wrap: anywhere; }
 .camera { margin-top: 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .camera video { width: 100%; max-width: 480px; border-radius: 12px; background: #000; }
 .camera p { margin: 0; color: var(--text-2); }

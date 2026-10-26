@@ -8,9 +8,11 @@ declare module 'fc-web' {
   export default function init(options: { module_or_path: string }): Promise<unknown>
   /// The offer this browser shows, as the JSON its code carries.
   export function makeOffer(name: string, account: string, keyA: string, nodeKey: string): string
-  /// The granted runners as JSON (`Granted[]`), or throws an Error whose
-  /// message is the ceremony's word.
-  export function acceptReply(reply: string, offer: string, alreadyTaken: boolean): string
+  /// `{granted_by, runners}` as JSON, or throws an Error whose message is the
+  /// ceremony's word (`stale` once the code is past the window).
+  export function acceptReply(reply: string, offer: string, alreadyTaken: boolean, shownAtMs: number): string
+  export function offerIsStale(shownAtMs: number): boolean
+  export function freshnessMs(): number
   export function publicKeyLine(raw: Uint8Array, comment: string): string
   export function fingerprint(publicKey: string): string | undefined
   export function connect(

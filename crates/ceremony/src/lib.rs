@@ -446,6 +446,31 @@ pub fn still_fresh(held_for: Duration) -> Result<(), CeremonyError> {
     if held_for > FRESHNESS { Err(CeremonyError::Stale) } else { Ok(()) }
 }
 
+/// Take a reply on the new device's side: the whole leg-two check, in its order.
+///
+/// A second reply is refused before anything else is considered, a stale one
+/// before the payload is read, and only then is the reply itself judged by
+/// [`accept_manifest`]. `held_for` is the new device's own time since its code
+/// went up.
+///
+/// One function rather than three calls at each entry point: the FFI used to
+/// spell this order out, and the browser's first build called
+/// `accept_manifest` alone and so had no freshness window at all (ov-764 fix
+/// round 1). A rule a platform can forget to invoke ships unenforced on the one
+/// that forgets it.
+pub fn take_reply(
+    encoded: &str,
+    expecting: &Offer,
+    already_taken: bool,
+    held_for: Duration,
+) -> Result<Manifest, CeremonyError> {
+    if already_taken {
+        return Err(CeremonyError::AlreadyTaken);
+    }
+    still_fresh(held_for)?;
+    accept_manifest(encoded, expecting, already_taken)
+}
+
 /// Take a reply, or refuse it.
 ///
 /// Every rule the design's security argument rests on is here, in this order:
@@ -1391,6 +1416,24 @@ mod tests {
             still_fresh(FRESHNESS + Duration::from_secs(1)),
             Err(CeremonyError::Stale)
         ));
+    }
+
+    /// The new device's whole leg two: a reply that arrives after the window
+    /// is refused even though everything in it is right, and a second reply is
+    /// refused before freshness is even asked.
+    #[test]
+    fn a_reply_taken_after_the_window_is_refused_however_right_it_is() {
+        let o = offer("Browser", "acct-1", KEY_A, None);
+        let reply = encode_manifest(&manifest(&o, vec![a_runner()]));
+        assert!(take_reply(&reply, &o, false, FRESHNESS).is_ok());
+        assert_eq!(
+            take_reply(&reply, &o, false, FRESHNESS + Duration::from_millis(1)),
+            Err(CeremonyError::Stale)
+        );
+        assert_eq!(
+            take_reply(&reply, &o, true, FRESHNESS * 10),
+            Err(CeremonyError::AlreadyTaken)
+        );
     }
 
     /// A timestamp inside the code buys nothing, because nothing reads it.
