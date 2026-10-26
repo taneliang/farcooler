@@ -193,6 +193,24 @@ async fn new_places_add_at_most_three_findings_a_day() {
     assert_eq!(r.svc.store.crash_signatures().unwrap()[0].2, 7, "every report still counts");
 }
 
+/// A report with no frame in the app's own binary (a hang parked in the
+/// system) has its build alone for a place: a repeat on that build adds no
+/// Finding, and the same frames on another build add one.
+#[tokio::test]
+async fn a_report_with_no_app_frames_is_placed_by_its_build() {
+    let r = runner("git@github.com:taneliang/farcooler.git").await;
+    let mut system = report_of(&fixture());
+    system.frames.retain(|f| !f.own);
+    assert_eq!(place(&system), "1093:");
+    let key = call(&r, OWNERS_PHONE, system.clone()).await.unwrap().task_key;
+    let card = cards(&r).into_iter().find(|t| t.key == key).unwrap();
+    assert_eq!(call(&r, OWNERS_PHONE, system.clone()).await.unwrap().count, 2);
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 1, "the same build");
+    system.app_build = "1094".into();
+    assert_eq!(call(&r, OWNERS_PHONE, system).await.unwrap().task_key, key);
+    assert_eq!(r.svc.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap().len(), 2, "another build");
+}
+
 /// A runner that isn't working on Far Cooler counts and files nothing.
 #[tokio::test]
 async fn without_far_coolers_board_nothing_is_filed() {

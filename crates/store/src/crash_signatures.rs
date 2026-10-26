@@ -71,6 +71,10 @@ const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
 /// one included.
 pub const FINDINGS_PER_DAY: i64 = 3;
 
+/// The most places a row keeps. Past it the oldest goes, so a place not
+/// reported for a long while may add a Finding again.
+pub const MAX_PLACES: usize = 50;
+
 /// One report, and what to file for it.
 pub struct CrashFiling<'a> {
     pub signature: &'a str,
@@ -111,12 +115,22 @@ pub struct CrashRecord {
 impl Store {
     /// Count one report and file what it needs, in one transaction: a new
     /// row and card for a new signature (inside the day's cap), or one more
-    /// on the row there and its card's intent, with a Finding when the card
-    /// was closed and this is another build.
+    /// on the row there and its card's intent. A report from a place the row
+    /// hasn't kept adds one Finding with its frames (`elsewhere` on an open
+    /// card, `again` on a closed one) while the card has had fewer than
+    /// `FINDINGS_PER_DAY` of the runner's Findings in the last day, and the
+    /// place is kept only when that Finding is written: a place turned away
+    /// by the cap gets its Finding from its next report after the cap frees.
+    /// A new card's first Finding keeps its report's place the same way.
     pub fn record_crash(&self, f: &CrashFiling<'_>) -> Result<CrashRecord> {
+        self.record_crash_at(f, now_millis())
+    }
+
+    /// `record_crash` with the clock given, so a test can step past a day.
+    /// Notes are still written at the real time.
+    pub(crate) fn record_crash_at(&self, f: &CrashFiling<'_>, now: i64) -> Result<CrashRecord> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        let now = now_millis();
         let before: Option<(String, Option<Vec<u8>>)> = tx
             .query_row(
                 "SELECT places, task_id FROM crash_signatures WHERE signature = ?1",
@@ -147,14 +161,6 @@ impl Store {
             None => (Vec::new(), None),
         };
         let new_place = !places.iter().any(|p| p == f.place);
-        if new_place {
-            places.push(f.place.to_string());
-            tx.execute(
-                "UPDATE crash_signatures SET places = ?2 WHERE signature = ?1",
-                params![f.signature, serde_json::to_string(&places).unwrap_or_else(|_| "[]".into())],
-            )
-            .map_err(map_err)?;
-        }
         let status: Option<String> = match card {
             Some(task) => tx
                 .query_row("SELECT status FROM tasks WHERE id = ?1", [uuid_blob(task)], |r| r.get(0))
@@ -168,6 +174,7 @@ impl Store {
                 if new_place && findings_today(&tx, task, now)? < FINDINGS_PER_DAY {
                     let body = if closed { f.again } else { f.elsewhere };
                     insert_note(&tx, task, NoteKind::Finding, Actor::Runner, body, &json!({}), None)?;
+                    keep_place(&tx, f, &mut places)?;
                 }
                 tx.execute(
                     "UPDATE tasks SET intent = ?2, edited_at = ?3, resource_version = resource_version + 1 WHERE id = ?1",
@@ -178,7 +185,11 @@ impl Store {
             }
             // A new signature, or a card that was deleted: file one.
             _ => match f.board {
-                Some(board) => Some(file_in(&tx, f, board, count, now)?),
+                Some(board) => {
+                    let task = file_in(&tx, f, board, count, now)?;
+                    keep_place(&tx, f, &mut places)?;
+                    Some(task)
+                }
                 None => None,
             },
         };
@@ -216,6 +227,20 @@ fn bump(tx: &rusqlite::Transaction, signature: &str, detail: &str, build: &str, 
         .query_row("SELECT count FROM crash_signatures WHERE signature = ?1", [signature], |r| r.get(0))
         .map_err(map_err)?;
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
+}
+
+/// Keep `f`'s place among `places`, the oldest dropped past `MAX_PLACES`.
+fn keep_place(tx: &rusqlite::Transaction, f: &CrashFiling<'_>, places: &mut Vec<String>) -> Result<()> {
+    places.push(f.place.to_string());
+    if places.len() > MAX_PLACES {
+        places.drain(..places.len() - MAX_PLACES);
+    }
+    tx.execute(
+        "UPDATE crash_signatures SET places = ?2 WHERE signature = ?1",
+        params![f.signature, serde_json::to_string(&places).unwrap_or_else(|_| "[]".into())],
+    )
+    .map_err(map_err)?;
+    Ok(())
 }
 
 /// The runner's Findings on `task` in the day before `now`.
@@ -320,6 +345,109 @@ mod tests {
         let names: Vec<String> = s.crash_signatures().unwrap().into_iter().map(|r| r.0).collect();
         assert!(!names.contains(&"d".to_string()) && names.contains(&OVERFLOW.to_string()), "{names:?}");
         assert_eq!(names.len(), 4);
+    }
+
+    fn places(s: &Store, signature: &str) -> Vec<String> {
+        let raw: String = s
+            .conn()
+            .query_row("SELECT places FROM crash_signatures WHERE signature = ?1", [signature], |r| r.get(0))
+            .unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    fn findings(s: &Store, task: Uuid) -> usize {
+        s.notes_for(task, Some(NoteKind::Finding)).unwrap().len()
+    }
+
+    /// A runner's Finding on `task`, written `ago` milliseconds back.
+    /// `insert_note_with_at_for_test` writes as `user`, and the cap counts
+    /// only the runner's, so this writes the row itself.
+    fn runner_finding_at(s: &Store, task: Uuid, at: i64) {
+        s.conn()
+            .execute(
+                "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra) VALUES (?1, ?2, 'finding', 'runner', ?3, 'old', '{}')",
+                params![uuid_blob(Uuid::now_v7()), uuid_blob(task), at],
+            )
+            .unwrap();
+    }
+
+    /// A board to file on.
+    fn board(s: &Store) -> Uuid {
+        let repo = s.register_repository_for_test("app");
+        s.ensure_main_workspace(repo).unwrap().id
+    }
+
+    /// **A place turned away by the cap isn't kept**, so its frames aren't
+    /// lost: once the day's Findings age out, its next report gets its
+    /// Finding. A place kept is never noted twice.
+    #[test]
+    fn a_capped_place_gets_its_finding_once_the_cap_frees() {
+        let s = Store::open_in_memory().unwrap();
+        let board = board(&s);
+        let intent = |n: u32| format!("seen {n}");
+        let now = now_millis();
+        let at_time = |place: &'static str, now: i64| {
+            let mut f = filing("aa", "1", Some(board), &intent);
+            f.place = place;
+            s.record_crash_at(&f, now).unwrap()
+        };
+        let at = |place: &'static str| at_time(place, now);
+        let task = at("p0").task.unwrap();
+        at("p1");
+        at("p2");
+        assert_eq!(findings(&s, task), 3);
+        at("p3");
+        assert_eq!(findings(&s, task), 3, "capped");
+        assert_eq!(places(&s, "aa"), ["p0", "p1", "p2"], "the capped place isn't kept");
+        let tomorrow = now + DAY_MILLIS + 1_000;
+        at_time("p3", tomorrow);
+        assert_eq!(findings(&s, task), 4, "the cap freed: p3's Finding at last");
+        at_time("p3", tomorrow);
+        assert_eq!(findings(&s, task), 4, "kept now, so noted once");
+        assert_eq!(places(&s, "aa"), ["p0", "p1", "p2", "p3"]);
+    }
+
+    /// **The cap's day is 24 hours.** A runner Finding older than a day
+    /// doesn't count; one inside it does.
+    #[test]
+    fn findings_older_than_a_day_do_not_count() {
+        let s = Store::open_in_memory().unwrap();
+        let board = board(&s);
+        let intent = |n: u32| format!("seen {n}");
+        let task = s.record_crash(&filing("aa", "first", Some(board), &intent)).unwrap().task.unwrap();
+        let now = now_millis();
+        runner_finding_at(&s, task, now - DAY_MILLIS - 60_000);
+        runner_finding_at(&s, task, now - DAY_MILLIS - 120_000);
+        let mut f = filing("aa", "1", Some(board), &intent);
+        f.place = "second";
+        s.record_crash(&f).unwrap();
+        assert_eq!(findings(&s, task), 4, "two old ones don't count against today's three");
+        runner_finding_at(&s, task, now - DAY_MILLIS + 60_000);
+        f.place = "third";
+        s.record_crash(&f).unwrap();
+        assert_eq!(findings(&s, task), 5, "the first, second and the inside-the-day one make three: third is turned away");
+    }
+
+    /// A row keeps at most `MAX_PLACES` places, the oldest going first.
+    #[test]
+    fn places_are_bounded() {
+        let s = Store::open_in_memory().unwrap();
+        let board = board(&s);
+        let intent = |n: u32| format!("seen {n}");
+        let names: Vec<String> = (0..MAX_PLACES + 5).map(|n| format!("p{n}")).collect();
+        let task = s.record_crash(&filing("aa", "first", Some(board), &intent)).unwrap().task.unwrap();
+        // A day apart, so the Finding cap never turns one away.
+        let start = now_millis();
+        for (n, name) in names.iter().enumerate() {
+            let mut f = filing("aa", "1", Some(board), &intent);
+            f.place = name;
+            s.record_crash_at(&f, start + (n as i64 + 1) * (DAY_MILLIS + 1_000)).unwrap();
+        }
+        assert_eq!(findings(&s, task), names.len() + 1);
+        let kept = places(&s, "aa");
+        assert_eq!(kept.len(), MAX_PLACES);
+        assert_eq!(kept.last(), names.last());
+        assert_eq!(kept.first().map(String::as_str), Some("p5"));
     }
 
     /// **A failed write keeps nothing.** A card that can't be filed (its board
