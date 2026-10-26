@@ -62,15 +62,22 @@ final class ComposerField: UITextView {
     private var atEnd = true
     /// The width changed while the text was at its end, and nothing has
     /// moved it since: the end is held in view while the text wraps again,
-    /// which can finish a layout or two after the width changed.
+    /// which can finish a layout or two after the width changed. Not while a
+    /// caret elsewhere decides what's in view: holding the end took ⌘↑ back
+    /// down to it (GlassUITests).
     private var holdsEnd = false
 
     /// Whether the last line is in view, to the point.
     private var showsEnd: Bool { contentOffset.y + bounds.height >= contentSize.height - 1 }
 
+    /// No caret, or one at the end of the text.
+    private var caretAtEnd: Bool {
+        !isFirstResponder || selectedRange.location >= (text as NSString).length
+    }
+
     private func keepEnd() {
         guard holdsEnd else { return }
-        if isTracking {
+        if isTracking || !caretAtEnd {
             holdsEnd = false
         } else if !showsEnd {
             setContentOffset(CGPoint(x: contentOffset.x, y: max(contentSize.height - bounds.height, 0)), animated: false)
@@ -91,7 +98,7 @@ final class ComposerField: UITextView {
         // A field scrolled to its end stays there when its width changes: the
         // bar narrows as the keyboard goes down (ov-804), the draft wraps
         // onto more lines, and the end of it went out of view below.
-        if bounds.width != laidOutWidth, laidOutWidth > 0, atEnd { holdsEnd = true }
+        if bounds.width != laidOutWidth, laidOutWidth > 0, atEnd, caretAtEnd { holdsEnd = true }
         super.layoutSubviews()
         keepEnd()
         laidOutWidth = bounds.width
