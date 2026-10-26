@@ -46,7 +46,7 @@ def git(*args, cwd=ROOT):
 
 def declarations(rev, suite, cwd=ROOT):
     """Test declarations under `suite` at `rev` (None: the working tree)."""
-    args = ["grep", "-hE", DECL] + ([rev] if rev else []) + ["--", suite]
+    args = ["grep", "-h"] + ([] if rev else ["--untracked"]) + ["-E", DECL] + ([rev] if rev else []) + ["--", suite]
     r = git(*args, cwd=cwd)
     return len(r.stdout.splitlines())
 
