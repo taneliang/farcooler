@@ -215,10 +215,12 @@ async function authenticator(context, page) {
   if (credential) await cdp.send('WebAuthn.addCredential', { authenticatorId, credential })
   cdp.on('WebAuthn.credentialAsserted', () => touches++)
   return {
-    /// The credentials it holds; the newest is kept for the next launch.
-    async held() {
+    /// The credentials it holds. The one whose id is `keep` (the device's
+    /// passkey, base64) is carried to the next launch: getCredentials has no
+    /// order, and an old one carried instead signs nothing.
+    async held(keep) {
       const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId })
-      if (credentials.length) credential = credentials[credentials.length - 1]
+      if (keep) credential = credentials.find(c => c.credentialId === keep) ?? null
       return credentials
     },
   }
@@ -309,7 +311,7 @@ const device = page =>
     const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
     const d = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
     db.close()
-    return d ? { ...d, passkey: d.passkey ? { id: d.passkey.id.length, spki: d.passkey.spki.length } : undefined } : null
+    return d ? { ...d, passkey: d.passkey ? { id: btoa(String.fromCharCode(...d.passkey.id)), spki: d.passkey.spki.length } : undefined } : null
   })
 const edit = (page, change) =>
   page.evaluate(async change => {
@@ -394,6 +396,9 @@ async function connect(page) {
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
   await page.waitForSelector('#terminal .xterm', { timeout: 30_000 })
+  // The pane takes focus once its stream is attached; a key typed before
+  // then has no pane to go to.
+  await page.waitForFunction(() => document.getElementById('terminal')?.contains(document.activeElement), null, { timeout: 120_000 })
 }
 
 let session = await launch()
@@ -413,7 +418,7 @@ try {
     await shoot(page, 'enroll')
     let kept = await device(page)
     const offer = JSON.parse(kept.offer)
-    const made = await session.passkeys.held()
+    const made = await session.passkeys.held(kept.passkey?.id)
     const key = skKey(offer.key_a)
     if (key.type !== 'sk-ecdsa-sha2-nistp256@openssh.com' || key.application !== HOST) failures.push(`the offer's key is ${key.type} for ${key.application}`)
     if (made.length !== 1 || made[0].rpId !== HOST || !made[0].isResidentCredential) failures.push(`the authenticator holds ${JSON.stringify(made.map(c => [c.rpId, c.isResidentCredential]))}`)
@@ -455,7 +460,8 @@ try {
     else console.log('csp-check: a slice-1 device was asked for a passkey')
     await shoot(page, 'migrated')
     await makePasskey(page)
-    await session.passkeys.held()
+    await session.passkeys.held((await device(page)).passkey.id)
+    if (!credential) failures.push("the authenticator doesn't hold the device's passkey")
 
     if (runner) {
       runner.enroll(JSON.parse((await device(page)).offer).key_a)
@@ -555,7 +561,7 @@ try {
       },
       { host: HOST, sibling: SIBLING, id: Array.from(Buffer.from(credential.credentialId, 'base64')) },
     )
-    const held = await siblingKeys.held()
+    const held = await siblingKeys.held(credential.credentialId)
     if (held.length !== 1 || held[0].rpId !== HOST) failures.push('the sibling page had no passkey to refuse')
     if (refused.appHost !== 'SecurityError' || refused.own !== 'NotAllowedError' || touches !== at)
       failures.push(`from ${SIBLING} the passkey was not refused: ${JSON.stringify(refused)}, ${touches - at} touches`)

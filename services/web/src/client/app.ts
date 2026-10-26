@@ -274,20 +274,20 @@ async function work(session: Session): Promise<void> {
   status(`Connect to ${target.label}`, 'You’ll touch your passkey to sign in.', { label: 'Connect', run: () => void connectTo(session, target) })
 }
 
-/// The passkey's signature over the SSH login's data. Straight away while the
-/// Connect click still counts as a gesture; otherwise from a button, with the
-/// call made inside its click, which is what Safari requires.
+/// The passkey's signature over the SSH login's data: asked for straight
+/// away, which Chrome, Edge and Firefox allow whenever, and Safari while the
+/// Connect click still counts. If the browser refused to prompt (Safari, once
+/// the dial and the handshake outlasted that click) or the person dismissed
+/// the prompt, a Use Passkey button asks again, with the call made inside its
+/// click. Either way one touch signs.
 function signIn(session: Session, label: string): (challenge: Uint8Array) => Promise<Signed> {
   const passkey = session.device.passkey as Passkey
   const rp = rpId()
   return async challenge => {
-    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation
-    if (!activation || activation.isActive) {
-      try {
-        return await assertWith(passkey, rp, challenge)
-      } catch (e) {
-        if ((e as Error).message !== 'declined') throw e
-      }
+    try {
+      return await assertWith(passkey, rp, challenge)
+    } catch (e) {
+      if ((e as Error).message !== 'declined') throw e
     }
     return await new Promise<Signed>((resolve, reject) =>
       status(`Sign in to ${label}`, 'Select Use Passkey, then touch your passkey.', {
