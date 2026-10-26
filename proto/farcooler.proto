@@ -231,9 +231,6 @@ message Request {
     // through `plan.get`'s `Plan.rulings`, so only the writes are here.
     RulingAdd ruling_add = 180;
     RulingSet ruling_set = 181;
-    // `board_theme.move` (ov-755), behind `board_theme_move`: a theme to a
-    // place in the ranking. Takes 182 from the rulings' block.
-    BoardThemeMove board_theme_move = 182;
     // Trains (ov-309), the plan layer's batches of lanes landing together,
     // behind `board_trains`. Experimental with the layer: 190-199 are theirs,
     // the rest held by `reserved` below. Read through `plan.get`'s
@@ -298,13 +295,16 @@ message Request {
     // members sign in to an agent with their own account. 531-539 are its
     // block, held by `reserved` below.
     MemberOwnLoginSet member_own_login_set = 530;
+    // `board_theme.move` (ov-755), behind `board_theme_move`: a theme to a
+    // place in the ranking. 541-549 are its block, held by `reserved` below.
+    BoardThemeMove board_theme_move = 540;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
   reserved "set_pane_mode", "agent_set_mode", "agent_set_model", "agent_set_config",
       "agent_edit_queued", "agent_cancel_queued", "agent_steer_queued", "adapter";
   // The rest of rulings' block, kept for them (review 1005a L1).
-  reserved 183 to 189;
+  reserved 182 to 189;
   // The rest of trains' block.
   reserved 192 to 199;
   // The rest of the owner's marks' block (ov-333).
@@ -335,6 +335,8 @@ message Request {
   reserved 524 to 529;
   // The rest of members' own logins' block (ov-652).
   reserved 531 to 539;
+  // The rest of the theme move's block (ov-755).
+  reserved 541 to 549;
 }
 
 message Response {
@@ -483,8 +485,8 @@ message Result {
     RepositorySurvey repository_survey = 470;
     CharterWritten charter_written = 471;
     // `workspace.charter` (ov-755), behind `workspace_charter`: the charter's
-    // text.
-    WorkspaceCharter workspace_charter = 472;
+    // text. 541-549 are its block, held by `reserved` below.
+    WorkspaceCharter workspace_charter = 540;
     // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
     WorktreeGrepResult worktree_grep_result = 480;
     // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
@@ -528,7 +530,7 @@ message Result {
   // The rest of people's block (ov-494).
   reserved 462 to 469;
   // The rest of the repository survey's block (ov-519).
-  reserved 473 to 479;
+  reserved 472 to 479;
   // The rest of the rep search's block (ov-555).
   reserved 481 to 489;
   // The rest of the phone re-key's block (ov-569).
@@ -539,6 +541,8 @@ message Result {
   reserved 511 to 519;
   // The rest of Claude sign-in's block (ov-584).
   reserved 522 to 529;
+  // The rest of the charter read's block (ov-755).
+  reserved 541 to 549;
 }
 
 // ---------------------------------------------------------------------------

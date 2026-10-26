@@ -57,15 +57,14 @@ struct CharterSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
         }
-        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
+        .surface(.inset, in: .control)
         .accessibilityIdentifier("charter-text")
     }
 
     static func note(_ sentence: String) -> some View {
         Text(sentence)
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

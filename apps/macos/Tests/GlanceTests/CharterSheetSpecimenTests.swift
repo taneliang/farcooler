@@ -11,7 +11,7 @@ import Testing
 @MainActor
 struct CharterSheetSpecimenTests {
     @Test("Write the charter sheets")
-    func writeSheets() throws {
+    func writeSheets() async throws {
         let workspace = WorkspaceSummary(
             id: "w", name: "Billing and Invoicing", taskPrefix: "bil", isMain: false, ordinal: 1, repository: "r")
         let long = (1...40).map { "## Section \($0)\nThe lead decides what always goes to the owner, and everything else is the orchestrator’s call, written down here so a new member reads the same rules as everyone else.\n" }
@@ -30,7 +30,7 @@ struct CharterSheetSpecimenTests {
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                 host.frame = CGRect(origin: .zero, size: CGSize(width: width, height: height))
                 host.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                try? await Task.sleep(for: .milliseconds(300))
                 let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: rep)
                 let png = try #require(rep.representation(using: .png, properties: [:]))
