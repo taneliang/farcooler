@@ -12,9 +12,9 @@
 /// - `POST /v1/ceremony/reply`, `{ceremony, account, sealed}`. The poster is
 ///   signed in as `account`, the offer's account, or is its teammate by
 ///   `TEAMMATE_RULE` below. The body is at most `REPLY_MAX` bytes. Each poster
-///   gets one reply per ceremony (a second gets 409), and one ceremony and
-///   account holds at most `REPLIES_MAX`, so nobody's junk post can take the
-///   slot from the real one.
+///   gets one reply per ceremony (a second gets 409). The account's own
+///   post always gets in, and its teammates share `REPLIES_MAX - 1` slots, so
+///   nobody's junk post can take the slot from the account's own phone.
 /// - `GET /v1/ceremony/reply/<ceremony>`. Only the offer's account may read,
 ///   and it gets every reply for it, each with who posted it, and the read
 ///   deletes them all. After `REPLY_TTL_MS` a reply is gone. Every refusal is
@@ -46,7 +46,8 @@ import { json, type Env } from './index'
 export const REPLY_MAX = 4096
 
 /// How many replies one ceremony and account holds, and so the most one read
-/// returns. One per poster: the account itself and up to three teammates.
+/// returns. One per poster: the account itself, always let in, and up to three
+/// teammates.
 export const REPLIES_MAX = 4
 
 /// How long a reply waits to be read: the ceremony's `FRESHNESS`, 120 s, the
@@ -114,16 +115,19 @@ async function postReply(request: Request, env: Env): Promise<Response> {
 
   if (!(await mayPostFor(env, poster, account))) return json({ error: 'forbidden' }, 403)
 
-  // One reply per poster and ceremony, and at most REPLIES_MAX live ones for
-  // this ceremony and account. A poster's own reply that has outlived its
-  // window, and not yet been swept, is replaced: nobody can read it any more.
+  // One reply per poster and ceremony. The account's own post is always let
+  // in; its teammates share the other REPLIES_MAX - 1 slots, counting the
+  // live replies of teammates other than this poster. So teammates can never
+  // fill the slots against the account's own phone, and a read holds at most
+  // REPLIES_MAX. A poster's own reply that has outlived its window, and not
+  // yet been swept, is replaced: nobody can read it any more.
   const now = Date.now()
   const cutoff = now - REPLY_TTL_MS
   const written = await env.DB.prepare(
     `INSERT INTO ceremony_replies (ceremony, account_id, posted_by, sealed, created_at)
      SELECT ?1, ?2, ?3, ?4, ?5
-     WHERE (SELECT COUNT(*) FROM ceremony_replies
-            WHERE ceremony = ?1 AND account_id = ?2 AND posted_by != ?3 AND created_at >= ?6) < ?7
+     WHERE ?3 = ?2 OR (SELECT COUNT(*) FROM ceremony_replies
+            WHERE ceremony = ?1 AND account_id = ?2 AND posted_by NOT IN (?2, ?3) AND created_at >= ?6) < ?7 - 1
      ON CONFLICT (ceremony, posted_by) DO UPDATE SET account_id = ?2, sealed = ?4, created_at = ?5
      WHERE ceremony_replies.created_at < ?6`,
   )

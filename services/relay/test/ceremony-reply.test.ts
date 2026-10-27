@@ -187,6 +187,25 @@ describe('the sealed ceremony reply', () => {
     expect(replies).toHaveLength(2)
   })
 
+  it('always lets the account’s own reply in: teammates hold three slots, and the owner the fourth', async () => {
+    // Four teammates post first. Nothing is displaced: the fourth is refused,
+    // because three slots are theirs and the fourth is kept for the owner.
+    const mates = ['m1', 'm2', 'm3', 'm4', 'm5']
+    await team('team_1', [...mates.map(m => [m, 'member'] as [string, 'member']), [ALICE, 'member']])
+    for (const [i, mate] of mates.slice(0, 4).entries()) {
+      const answer = await post(mate, { ceremony: CEREMONY, account: ALICE, sealed: junk(i + 1) })
+      expect(answer.status, mate).toBe(i < 3 ? 200 : 409)
+    }
+    expect((await post(ALICE)).status).toBe(200)
+    // And a fifth teammate, after the owner, is still refused.
+    expect((await post('m5', { ceremony: CEREMONY, account: ALICE, sealed: junk(5) })).status).toBe(409)
+
+    const replies = (await take(ALICE)).body.replies
+    expect(replies).toHaveLength(4)
+    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE })
+    expect(replies.map((r: { posted_by: string }) => r.posted_by).sort()).toEqual([ALICE, 'm1', 'm2', 'm3'])
+  })
+
   it('holds at most four replies for one ceremony and account', async () => {
     expect(REPLIES_MAX).toBe(4)
     const mates = ['m1', 'm2', 'm3', 'm4']
