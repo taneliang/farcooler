@@ -68,6 +68,10 @@ export function unreachable(why: string, runner: string, cause = ''): string {
       return `Far Cooler on ${runner} is too old to add devices. Update it, then add this browser again.`
     case 'not_allowed':
       return `${runner} didn’t let your phone add devices. Update Far Cooler on ${runner}, or add this browser from your Mac.`
+    case 'not_owner':
+      return `Only ${runner}’s owner can add devices to it. Ask them to add this browser.`
+    case 'read_only':
+      return `Your phone can only view ${runner}, so it can’t add devices there. Add this browser from your Mac.`
     case 'not_connected':
       return `Your phone wasn’t connected to ${runner}. Open Far Cooler on your phone and wait for ${runner} to connect, then add this browser again.`
     case 'failed':

@@ -2058,8 +2058,11 @@ final class Connection: ObservableObject {
         /// That runner's Far Cooler is older than device enrollment. Nothing
         /// was written, and no amount of retrying writes it.
         case tooOld
-        /// Refused `scope-denied`: a runner from before ov-828, or a `read` phone.
+        /// Refused `scope-denied`: a runner from before ov-828.
         case notAllowed
+        /// Not this phone's to grant: a member's phone (`not-yours`), or this
+        /// phone narrowed to `read` there.
+        case notOwner, readOnly
         /// A passkey, on a runner without `passkey_keys` (OpenSSH before 8.4).
         case noPasskeys
         /// Nothing was written, and the reason is not knowable from here: a
@@ -2150,7 +2153,7 @@ final class Connection: ObservableObject {
                     "nodeKey": nodeKey,
                 ])
         } catch {
-            return .refused(error)
+            return .refused(error, readOnly: daemon.grantedScope == "read")
         }
         let reply = try? JSONSerialization.jsonObject(with: answered) as? [String: Any]
         return .written(tunnel: reply?["connBlob"] as? String ?? "")

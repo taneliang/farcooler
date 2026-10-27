@@ -231,7 +231,8 @@ pub struct RunnerEntry {
     /// what not to add and what to say: see `Joined` in each `JoinView.swift`.
     pub pending: bool,
     /// Why `pending`, when the granting device knows (ov-828): `too_old`,
-    /// `no_passkeys`, `not_allowed`, `not_connected` or `failed`. Shown, never
+    /// `no_passkeys`, `not_allowed`, `not_owner`, `read_only`, `not_connected`
+    /// or `failed`. Shown, never
     /// trusted; absent from older builds, and the first thing [`fit`] gives up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_why: Option<String>,

@@ -939,6 +939,13 @@ final class CeremonyStore: ObservableObject {
             return "Far Cooler on \(old.label) is too old to add devices. "
                 + "Update it there, then add this device again."
         }
+        if let refused = granting.first(where: { outcomes[$0.id] == .notOwner }) {
+            return "Only \(refused.label)’s owner can add devices to it. Ask them to add this device."
+        }
+        if let refused = granting.first(where: { outcomes[$0.id] == .readOnly }) {
+            return "This iPhone can only view \(refused.label), so it can’t add devices there. "
+                + "Add the device from your Mac."
+        }
         if let refused = granting.first(where: { outcomes[$0.id] == .notAllowed }) {
             return "\(refused.label) didn’t let this iPhone add devices. "
                 + "Update Far Cooler on \(refused.label), or add the device from your Mac."
@@ -1073,14 +1080,21 @@ extension Connection.Enrollment {
         case .written: return nil
         case .tooOld: return "too_old"
         case .notAllowed: return "not_allowed"
+        case .notOwner: return "not_owner"
+        case .readOnly: return "read_only"
         case .noPasskeys: return "no_passkeys"
         case .couldNotWrite: return "failed"
         }
     }
 
-    /// What a refused `client.enroll` means, by the runner's word.
-    static func refused(_ error: Error) -> Self {
-        if case .rejected(_, "scope-denied", _)? = error as? ClientCore.CoreError { return .notAllowed }
-        return .couldNotWrite
+    /// What a refused `client.enroll` means, by the runner's word, and by
+    /// whether this phone holds only `read` there, which the runner refuses
+    /// with the same word an older runner does.
+    static func refused(_ error: Error, readOnly: Bool) -> Self {
+        switch error as? ClientCore.CoreError {
+        case .rejected(_, "not-yours", _)?: return .notOwner
+        case .rejected(_, "scope-denied", _)?: return readOnly ? .readOnly : .notAllowed
+        default: return .couldNotWrite
+        }
     }
 }

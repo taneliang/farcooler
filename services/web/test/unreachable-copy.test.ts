@@ -7,12 +7,12 @@ import { describe, expect, it } from 'vitest'
 
 import { unreachable } from '../src/client/copy'
 
-const CAUSES = ['too_old', 'no_passkeys', 'not_allowed', 'not_connected', 'failed']
+const CAUSES = ['too_old', 'no_passkeys', 'not_allowed', 'not_owner', 'read_only', 'not_connected', 'failed']
 
 describe('unreachable', () => {
   it('names OpenSSH only when the phone said the runner lacks passkeys', () => {
     expect(unreachable('pending', 'Cosmo', 'no_passkeys')).toContain('OpenSSH')
-    for (const cause of ['', 'too_old', 'not_allowed', 'not_connected', 'failed', 'something new'])
+    for (const cause of ['', 'too_old', 'not_allowed', 'not_owner', 'read_only', 'not_connected', 'failed', 'something new'])
       expect(unreachable('pending', 'Cosmo', cause), cause).not.toContain('OpenSSH')
   })
 
@@ -25,6 +25,12 @@ describe('unreachable', () => {
   it('tells a runner the phone couldn’t reach from one that refused', () => {
     expect(unreachable('pending', 'Cosmo', 'not_connected')).toContain('wasn’t connected')
     expect(unreachable('pending', 'Cosmo', 'not_allowed')).toContain('didn’t let your phone add devices')
+  })
+
+  it('sends a member or a view-only phone to who can add the browser, not to an update', () => {
+    for (const cause of ['not_owner', 'read_only']) expect(unreachable('pending', 'Cosmo', cause), cause).not.toContain('Update')
+    expect(unreachable('pending', 'Cosmo', 'not_owner')).toContain('owner')
+    expect(unreachable('pending', 'Cosmo', 'read_only')).toContain('Mac')
   })
 
   it('keeps the address-only sentence for a runner with no tunnel', () => {

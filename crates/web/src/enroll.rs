@@ -90,7 +90,7 @@ pub struct Granted {
 
 /// The reasons a phone gives for a runner it couldn't add this browser to
 /// (`RunnerEntry::pending_why`).
-pub const CAUSES: [&str; 5] = ["too_old", "no_passkeys", "not_allowed", "not_connected", "failed"];
+pub const CAUSES: [&str; 7] = ["too_old", "no_passkeys", "not_allowed", "not_owner", "read_only", "not_connected", "failed"];
 
 /// Every runner in a reply, with whether and how this browser reaches it.
 pub fn granted(manifest: &Manifest) -> Vec<Granted> {
