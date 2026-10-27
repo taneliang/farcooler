@@ -124,6 +124,24 @@ struct DeviceKeyRegistrationTests {
         #expect(await registration.registerIfNeeded(account: "user_alice", directory: relay.client) == .success(.trusted))
     }
 
+    /// The owner's phone, Oct 26 (ov-828): the relay refused the session's
+    /// refresh token, so registration failed `refreshRefused`. Nothing of that
+    /// failure is kept: the sign-in after it registers again, and so does the
+    /// next launch's ask for the same account.
+    @Test("A registration the refresh refused is tried again after signing in, with nothing stale kept")
+    func aRefusedRefreshKeepsNothingStale() async {
+        let relay = Relay()
+        relay.challenge = .failure(.refreshRefused)
+        let registration = registration(Signer())
+        #expect(await registration.registerIfNeeded(account: "user_alice", directory: relay.client) == .failure(.account(.refreshRefused)))
+        #expect(registration.state == nil)
+        // Signed out and back in, as the owner did: the session refreshes now.
+        relay.challenge = .success(DirectoryReply(status: 200, body: ["challenge": Self.challenge, "expiresAt": 1]))
+        #expect(await registration.registerAgain(account: "user_alice", directory: relay.client) == .success(.trusted))
+        #expect(registration.state == .trusted)
+        #expect(relay.sent.map(\.path).filter { $0.hasSuffix("/register") }.count == 1)
+    }
+
     @Test("Each answer the relay can give comes to a state or a failure, never a guess")
     func answers() async {
         let cases: [(Result<DirectoryReply, AccountError>, Result<DirectoryReply, AccountError>?, Result<DeviceKeyState, DirectoryFailure>)] = [
