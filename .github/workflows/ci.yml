@@ -1363,7 +1363,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/web
+          # The repo's own workspace too, for the client core's wasm32 check
+          # below: one crate tree, built for one target.
+          workspaces: |
+            crates/web
+            .
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
@@ -1384,6 +1388,18 @@ jobs:
           tar xzf bn.tgz
           echo "WASM_BINDGEN=$PWD/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
           echo "WASM_OPT=$PWD/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
+      # The client core a browser runs (ov-768): farcooler-client at its web
+      # feature, russh on ring, for the browser's target. Then its resolved
+      # tree, held to neither aws-lc (C a page cannot build) nor mio (tokio's
+      # sockets), each of which one feature on one dependency brings back
+      # without a compile error on a desktop; the self-test first, so a
+      # checker that cannot fail is caught before it is trusted.
+      - run: cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown
+        working-directory: .
+      - run: ./scripts/web-client-tree-check.py --self-test
+        working-directory: .
+      - run: ./scripts/web-client-tree-check.py
+        working-directory: .
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
       # Inside workerd: the flag, the CSP, the host check and the API's CSRF

@@ -24,7 +24,7 @@ crate-type = ["staticlib", "rlib"]
 # page already authenticated over a stream it dialed, and the page's task
 # queue and clock (`farcooler_transport::rt`). It builds for
 # wasm32-unknown-unknown, where aws-lc's C and tokio's mio cannot, and CI
-# holds that tree to neither (scripts/web-client-tree-check.sh).
+# holds that tree to neither (scripts/web-client-tree-check.py).
 #
 # The two can be built together, which is what `--workspace` lints with
 # `--all-features` would do, but nothing ships that way.
