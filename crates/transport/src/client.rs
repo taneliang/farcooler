@@ -750,6 +750,7 @@ pub fn request(method: &str) -> Request {
         // `Request.required_capabilities` in the proto for why that is on the
         // envelope rather than checked at each call site.
         required_capabilities: Vec::new(),
+        accepts: Vec::new(),
         payload: Some(farcooler_protocol::v1::request::Payload::Empty(
             farcooler_protocol::v1::Empty {},
         )),

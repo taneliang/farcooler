@@ -28,7 +28,7 @@ extension ContentView {
             groups: WorkspaceNumbers.groups(in: store.fleet),
             current: scene.flatMap { s in s.board.map { (s.host, $0) } },
             waiting: { place in WorkspaceCounts.count(for: place.workspace, host: place.host, in: store.needsYou) },
-            showsHosts: showHosts, needsYou: store.needsYou.count, offersNewWorkspace: !workspaceRepositories.isEmpty,
+            showsHosts: showHosts, needsYou: store.needsYou.countedTotal, offersNewWorkspace: !workspaceRepositories.isEmpty,
             status: store.reading.sentence, statusTrouble: store.reading.isTrouble, troubled: store.unhealthyHosts,
             folders: ReadOnlyFolders.groups(store.hosts.map { ($0, store.clients[$0]?.readOnlyFolders ?? []) }))
         return WorkspaceSwitcherButton(
@@ -125,7 +125,7 @@ extension ContentView {
             switcherTitle: switcher.title, switcherRepository: switcher.repository,
             editor: detailWorktree != nil, changes: changesToolbarState != nil, files: filesToolbarState != nil,
             trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts),
-            needsYou: store.needsYou.count, backForward: selection != nil)
+            needsYou: store.needsYou.countedTotal, backForward: selection != nil)
     }
 
     /// What the status area's parts do, by the routes the window already

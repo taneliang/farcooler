@@ -58,7 +58,7 @@ extension ContentView {
         }
         guard
             let decided = SelectionMemory.launch(
-                needsYou: store.needsYou.count, settled: store.needsYouSettled, in: store.fleet)
+                needsYou: store.needsYou.countedTotal, settled: store.needsYouSettled, in: store.fleet)
         else { return }
         launched = true
         selection = decided

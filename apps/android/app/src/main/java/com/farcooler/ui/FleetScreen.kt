@@ -136,9 +136,10 @@ fun FleetDrawer(
                     ListItem(
                         headlineContent = { Text("Needs you") },
                         trailingContent = {
-                            if (rows.isNotEmpty()) {
+                            val counted = rows.count { it.entry.item.isCounted }
+                            if (counted > 0) {
                                 Text(
-                                    "${rows.size}",
+                                    "$counted",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontFamily = FontFamily.Monospace,
                                     color = glanceColor(GlancePalette.amber),

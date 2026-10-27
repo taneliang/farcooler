@@ -37,8 +37,13 @@ fn rpc(r: &Runner, device: Option<&str>) -> RpcFactory {
 }
 
 async fn call(rpc: &RpcFactory, method: &str, payload: Option<request::Payload>) -> Option<result::Value> {
+    call_accepting(rpc, method, payload, &[]).await
+}
+
+async fn call_accepting(rpc: &RpcFactory, method: &str, payload: Option<request::Payload>, accepts: &[&str]) -> Option<result::Value> {
     use farcooler_transport::Handler as _;
-    match rpc.handle(Request { method: method.into(), payload, ..Default::default() }).await.outcome {
+    let accepts = accepts.iter().map(|a| a.to_string()).collect();
+    match rpc.handle(Request { method: method.into(), payload, accepts, ..Default::default() }).await.outcome {
         Some(response::Outcome::Result(r)) => r.value,
         other => panic!("{method}: {other:?}"),
     }
@@ -59,9 +64,13 @@ async fn keep_all(r: &Runner, device: Option<&str>) {
     call(&rpc(r, device), "ruling.keep_all", Some(request::Payload::RulingKeepAll(all))).await;
 }
 
-/// What `device`'s Needs You says as FYIs.
+/// What `device`'s Needs You says as FYIs, to a client that places them.
 async fn fyis(r: &Runner, device: Option<&str>) -> Vec<String> {
-    match call(&rpc(r, device), "needs_you.list", None).await {
+    fyis_for(r, device, &[farcooler_protocol::accepts::NEEDS_YOU_FYI]).await
+}
+
+async fn fyis_for(r: &Runner, device: Option<&str>, accepts: &[&str]) -> Vec<String> {
+    match call_accepting(&rpc(r, device), "needs_you.list", None, accepts).await {
         Some(result::Value::NeedsYouList(l)) => l.items.into_iter().filter(|i| i.kind() == NeedsYouKind::Fyi).map(|i| i.question).collect(),
         other => panic!("{other:?}"),
     }
@@ -102,4 +111,17 @@ async fn a_members_keep_tells_the_lead_and_the_leads_own_tells_no_one() {
     assert_eq!(fyis(&r, ALICE).await.len(), 1, "Alice leads now");
     keep(&r, ALICE, open_ruling(&r, "Alice's own call")).await;
     assert_eq!(fyis(&r, ALICE).await.len(), 1, "the lead's own Keep adds nothing");
+}
+
+/// A client that doesn't name `needs_you_fyi` is sent no FYI, though the same
+/// owner's list from a client that does has one: a shipped app can't hide a
+/// kind it has never heard of.
+#[tokio::test]
+async fn a_client_that_does_not_ask_for_fyis_gets_none() {
+    let r = runner().await;
+    let ruling = open_ruling(&r, "Round half to even");
+    keep(&r, BOB, ruling).await;
+    assert_eq!(fyis(&r, OWNER).await.len(), 1, "a client that accepts them");
+    assert!(fyis_for(&r, OWNER, &[]).await.is_empty(), "an older client");
+    assert!(fyis_for(&r, OWNER, &["something_else"]).await.is_empty(), "a client that accepts another thing");
 }

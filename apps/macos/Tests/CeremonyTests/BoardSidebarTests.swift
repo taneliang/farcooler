@@ -812,6 +812,16 @@ struct BoardSidebarTests {
         #expect(WorkspaceCounts.waiting(columnCount: 2, decisions: 1, listRead: true, listServed: true) == 1)
     }
 
+    /// An FYI is a row in the list and no part of a workspace's count (ov-756).
+    @Test("A workspace row does not count an FYI")
+    func aWorkspaceRowDoesNotCountAnFyi() {
+        let fyi = NeedsYouItem(
+            id: "fyi:kept", kind: .fyi, rank: 1, since: nil, workspaceID: Self.billing,
+            repositoryID: Self.repoA, question: "Bob kept R-84: Ship")
+        #expect(WorkspaceCounts.count(for: Self.summary(Self.billing, "Billing"), host: "", in: [fyi]) == 0)
+        #expect([fyi].countedTotal == 0)
+    }
+
     /// A workspace row's count is the items counted under it, on its runner,
     /// not its terminals wanting attention: an ask and a decision about one
     /// task are one item. An implicit workspace counts its repository's

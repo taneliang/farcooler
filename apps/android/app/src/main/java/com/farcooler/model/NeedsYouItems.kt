@@ -153,6 +153,9 @@ data class NeedsYouItem(
 ) {
     val kindValue: NeedsYouKind get() = NeedsYouKind.parse(kind)
 
+    /** Whether it adds to a count or breaks the all-clear: an FYI is read, not acted on (ov-756). */
+    val isCounted: Boolean get() = kindValue != NeedsYouKind.FYI
+
     val alsoValues: List<NeedsYouKind> get() = also.map(NeedsYouKind::parse)
 
     /** Someone else's: filed under Everyone Else (ov-633). */
@@ -228,7 +231,7 @@ object NeedsYouItems {
      * in [NeedsYouItem.also] is one thing to do, and counts once.
      */
     fun count(items: List<RunnerNeedsYouItem>, hostId: String, workspaceId: String?): Int =
-        items.count { it.hostId == hostId && it.item.workspaceId == workspaceId }
+        items.count { it.hostId == hostId && it.item.workspaceId == workspaceId && it.item.isCounted }
 
     /**
      * What a runner without `needs_you` still says (spec §2.6): its blocked

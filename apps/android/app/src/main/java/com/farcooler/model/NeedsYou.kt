@@ -173,7 +173,7 @@ object NeedsYou {
      * checking instead. With no runners at all, there's nothing to check.
      */
     fun nothingNeedsYou(runners: List<NeedsYouRunner>, rows: List<NeedsYouRow>): Boolean =
-        rows.isEmpty() && (runners.isEmpty() || runners.any { it.reading != null })
+        rows.none { it.entry.item.isCounted } && (runners.isEmpty() || runners.any { it.reading != null })
 
     /**
      * The runners whose items may not all be here, by name: no list read
@@ -222,7 +222,7 @@ object NeedsYou {
      */
     fun workspaces(runner: NeedsYouRunner, items: List<RunnerNeedsYouItem>): List<RepositoryWorkspaces> {
         val fleet = runner.fleet
-        val mine = items.filter { it.hostId == runner.hostId }.map { it.item }
+        val mine = items.filter { it.hostId == runner.hostId && it.item.isCounted }.map { it.item }
         val groups = WorkspaceGrouping.groups(fleet).toMutableList()
         // A repository the runner has registered and nothing lives in yet
         // still has its board, and so its row.

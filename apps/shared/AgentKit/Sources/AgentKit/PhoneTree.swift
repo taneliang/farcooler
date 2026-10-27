@@ -76,7 +76,8 @@ enum PhoneTree {
     /// Whether `item` is `summary`'s: an implicit board's are its
     /// repository's that name no workspace (`RunnerBoards.decisions`).
     static func mine(_ summary: WorkspaceSummary, _ item: NeedsYouItem) -> Bool {
-        summary.isImplicit
+        guard item.isCounted else { return false }
+        return summary.isImplicit
             ? item.workspaceID == nil && item.repositoryID == summary.id : item.workspaceID == summary.id
     }
 

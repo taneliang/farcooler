@@ -1558,6 +1558,11 @@ impl Session {
     ) -> Result<Pending, SessionError> {
         let mut request = farcooler_transport::request(method);
         request.required_capabilities = required;
+        // This build places an FYI (ov-756): the list is the one thing it adds
+        // to, so the one method that says so.
+        if method == "needs_you.list" {
+            request.accepts = vec![farcooler_protocol::accepts::NEEDS_YOU_FYI.to_string()];
+        }
         if let Some(id) = target {
             request.target_resource_id = Some(bytes::Bytes::copy_from_slice(id.as_bytes()));
         }

@@ -90,6 +90,7 @@ fn request_envelope(method: &str) -> WireEnvelope {
             expected_lease_generation: None,
             idempotency_key: None,
             required_capabilities: Vec::new(),
+            accepts: Vec::new(),
             payload: Some(v1::request::Payload::Empty(v1::Empty {})),
         })),
     }

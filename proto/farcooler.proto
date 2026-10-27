@@ -78,6 +78,17 @@ message Request {
   // some thirty of those, and a check that can be forgotten at any one of them
   // leaves the silence exactly where it was.
   repeated string required_capabilities = 7;
+  // What THIS CLIENT understands of an answer, by name (ov-756).
+  //
+  // The opposite direction from `required_capabilities`: that one makes a
+  // daemon refuse a request it cannot serve; this one lets a daemon add to an
+  // answer only a client that says it can place the addition. A daemon sends
+  // a new kind of Needs You item (`needs_you_fyi`) to a client that names it
+  // and leaves it out for one that doesn't, because a shipped app cannot hide
+  // a kind it has never heard of and would draw it as a dead "Needs you" row.
+  // A daemon that predates the field drops it, which is what an old daemon
+  // would have done anyway: nothing is added.
+  repeated string accepts = 8;
 
   oneof payload {
     Empty empty = 20;
@@ -4232,10 +4243,12 @@ enum NeedsYouKind {
   // released device's and the runner-wide count never have it. Ranks with
   // BLOCKED.
   NEEDS_YOU_KIND_CLAUDE_LOGIN = 7;
-  // A quiet notice, not an ask (ov-756): a member kept a ruling, or Kept All,
-  // and the workspace's lead is told who kept what. No actions, the lowest
-  // rank, and only the lead's list has it; the runner-wide count and every
-  // push leave it out. An app that doesn't know it files it last as `unknown`.
+  // A quiet notice, not an ask (ov-756): a member kept a ruling, or used Keep
+  // All, and the workspace's lead is told who kept what. No actions and the
+  // lowest rank. Only the lead's list has it, whoever leads when it is read (a
+  // lead handed to someone else moves it with the lead), and only for a
+  // client whose request `accepts` `needs_you_fyi`. The runner-wide count and
+  // every push leave it out, and apps leave it out of their own counts.
   NEEDS_YOU_KIND_FYI = 8;
 }
 

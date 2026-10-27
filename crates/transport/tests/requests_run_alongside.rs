@@ -98,6 +98,7 @@ fn envelope(method: &str, target: Option<&'static [u8]>, payload: v1::request::P
             expected_lease_generation: None,
             idempotency_key: None,
             required_capabilities: Vec::new(),
+            accepts: Vec::new(),
             payload: Some(payload),
         })),
     };

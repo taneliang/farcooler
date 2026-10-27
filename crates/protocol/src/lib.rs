@@ -224,6 +224,15 @@ pub const CHANNEL: Channel = Channel::from_str_or_local_const(env!("FARCOOLER_CH
 /// and `DaemonVersion.capabilities` from it, and the CLI reports it. A second
 /// copy is exactly the drift this exists to prevent.
 ///
+/// What a client says it understands of an answer (`Request.accepts`,
+/// ov-756). Not a daemon capability: a daemon adds to an answer only for a
+/// client that names the addition here.
+pub mod accepts {
+    /// `NeedsYouKind::Fyi` items in `needs_you.list`: a client that can place
+    /// one, with no button, outside its counts.
+    pub const NEEDS_YOU_FYI: &str = "needs_you_fyi";
+}
+
 /// Named per user-visible FEATURE, not per method. A client asks "does this
 /// runner do stacks", never "does it implement stack.set_parent".
 pub mod capability {

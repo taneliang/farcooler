@@ -138,3 +138,38 @@ fn it_ages_out_and_ranks_last() {
 }
 
 const TIER_SPAN_FOR_TEST: u32 = 100_000_000;
+
+/// Each board has its own lead: one Keep by Bob is Alice's to hear of on the
+/// board she leads and the owner's on the board nobody leads, and a board is
+/// told only about its own rulings.
+#[test]
+fn each_boards_lead_hears_of_that_boards_keeps() {
+    let other = Uuid::from_u128(8);
+    let mut elsewhere = ruling(2, "Elsewhere", "member:bob", NOW_MS - 10);
+    elsewhere.workspace_id = other;
+    let keeps = group(
+        vec![ruling(1, "Here", "member:bob", NOW_MS - 10), elsewhere],
+        |workspace| (workspace == ws()).then(|| "alice".to_string()),
+        names,
+    );
+    let mut input = inputs(keeps, Some(Person::Member("alice".into())));
+    input.workspaces.insert(other, "Ops".into());
+    let alices = seen(&input);
+    assert_eq!(alices.len(), 1);
+    assert!(alices[0].question.contains("R-1"), "{}", alices[0].question);
+    input.viewer = Some(Person::Owner);
+    let owners = seen(&input);
+    assert_eq!(owners.len(), 1);
+    assert!(owners[0].question.contains("R-2"), "{}", owners[0].question);
+    assert_eq!(owners[0].workspace_name, "Ops");
+}
+
+/// A peer below Control scope keeps the sentence: it names a member and a
+/// ruling, board text Read may already see, and offers nothing to hide.
+#[test]
+fn a_read_peer_keeps_the_fyi_sentence() {
+    let item = seen(&inputs(bobs_keep(None), Some(Person::Owner))).remove(0);
+    let redacted = crate::needs_you::redact_below_control(item.clone());
+    assert_eq!(redacted.question, item.question);
+    assert_eq!(redacted.kind(), NeedsYouKind::Fyi);
+}

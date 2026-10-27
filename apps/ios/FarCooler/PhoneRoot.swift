@@ -501,7 +501,7 @@ struct PhoneRoot: View {
         switch PhoneLaunch.decide(
             fleet.needsYouReadings, elapsed: Date().timeIntervalSince(navigator.began),
             moved: navigator.moved, linking: false,
-            itemCount: fleet.needsYou.count, last: lastWorkspace,
+            itemCount: fleet.needsYou.countedTotal, last: lastWorkspace,
             exists: { fleet.connection(for: $0)?.workspace($0.workspace) != nil })
         {
         case .wait:

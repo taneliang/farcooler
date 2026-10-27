@@ -157,6 +157,10 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     /// The subject's other, less urgent signals. Informational: an item with
     /// `also` is still one item, and counts once.
     public var also: [NeedsYouKind]
+    /// Whether it adds to a count or breaks the all-clear. An FYI (a member
+    /// kept a ruling, ov-756) is read and never acted on, so it is a row in
+    /// the list and nothing more.
+    public var isCounted: Bool { kind != .fyi }
     /// Where it sorts: smaller first. `Terminal.rank`'s scale, a tier per kind
     /// and then the oldest first, and a duration rather than a clock reading,
     /// which is what lets two runners' items be compared at all.
@@ -337,14 +341,18 @@ extension Collection where Element == NeedsYouItem {
     /// A workspace id is a runner's uuid, so this needs no runner to tell two
     /// workspaces apart.
     public func count(in workspaceID: String) -> Int {
-        filter { $0.workspaceID == workspaceID }.count
+        filter { $0.workspaceID == workspaceID && $0.isCounted }.count
     }
 
     /// How many items with no workspace belong to `repositoryID`: its
     /// Unclaimed group's count.
     public func unclaimedCount(inRepository repositoryID: String) -> Int {
-        filter { $0.workspaceID == nil && $0.repositoryID == repositoryID }.count
+        filter { $0.workspaceID == nil && $0.repositoryID == repositoryID && $0.isCounted }.count
     }
+
+    /// How many items count toward a total, a badge or the all-clear: every
+    /// one but an FYI, which is read and never acted on (ov-756).
+    public var countedTotal: Int { filter(\.isCounted).count }
 }
 
 // MARK: - Whose an item is

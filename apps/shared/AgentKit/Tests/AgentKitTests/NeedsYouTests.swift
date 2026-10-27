@@ -369,6 +369,24 @@ func thePullRequestKindsSortBetweenADecisionAndALocalReview() {
     #expect(merged.map(\.itemID) == ["ask", "blocked", "decision", "pr-thread", "pr-review", "review"])
 }
 
+/// A member's Keep reaches the lead as an FYI (ov-756): a row, never a count.
+@Test("An FYI is placed last and adds to no count")
+func anFyiIsPlacedLastAndAddsToNoCount() throws {
+    let tier: UInt32 = 100_000_000
+    let billing = "01000000-0000-7000-8000-000000000001"
+    let fyi = NeedsYouItem(
+        id: "fyi:kept", kind: .fyi, rank: 6 * tier, since: nil, workspaceID: billing, question: "Bob kept R-84: Ship")
+    let ask = NeedsYouItem(id: "ask", kind: .ask, rank: 5, since: nil, workspaceID: billing, question: "q")
+    let decoded = try JSONDecoder().decode(NeedsYouKind.self, from: Data("\"fyi\"".utf8))
+    #expect(decoded == .fyi)
+    #expect(NeedsYou.merge(["a": [fyi, ask]]).map(\.itemID) == ["ask", "fyi:kept"])
+    #expect([fyi, ask].count(in: billing) == 1)
+    #expect([fyi].count(in: billing) == 0)
+    #expect([fyi, ask].countedTotal == 1)
+    #expect([fyi].countedTotal == 0)
+    #expect(WidgetItemRow(fyi).status == "done")
+}
+
 @Test("The pull-request kinds decode by their wire words, and an item may carry a link")
 func thePullRequestKindsDecodeByTheirWireWords() throws {
     let json = Data(

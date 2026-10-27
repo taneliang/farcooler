@@ -269,7 +269,7 @@ enum WorkspaceCounts {
     }
 
     private static func counted(_ item: NeedsYouItem, under workspace: WorkspaceSummary, host: String) -> Bool {
-        guard item.runner == host else { return false }
+        guard item.runner == host, item.isCounted else { return false }
         if workspace.isImplicit { return item.workspaceID == nil && item.repositoryID == workspace.id }
         return item.workspaceID == workspace.id
     }

@@ -294,7 +294,7 @@ struct ContentView: View {
         .toolbar {
             TrailingToolbar(
                 troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts,
-                updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.count,
+                updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.countedTotal,
                 needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
                 perform: { perform($0) })
         }

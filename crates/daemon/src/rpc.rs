@@ -1885,6 +1885,7 @@ impl Rpc {
                 let viewer = crate::caller_person::caller_person(svc, &self.peer, self.caller_pid, &self.caller_pane)?;
                 self.watcher.observed_as(&viewer, &mut inputs.observed); // the owner's look isn't theirs (ov-744)
                 inputs.viewer = Some(viewer);
+                crate::needs_you::kept::only_for_clients_that_accept_it(&mut inputs, &req.accepts);
                 crate::needs_you::with_people(&svc.store, &mut inputs)?;
                 let mut items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now());
                 if !satisfies(self.peer.scope, Scope::Control) {

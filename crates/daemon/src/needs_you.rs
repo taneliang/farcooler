@@ -238,9 +238,12 @@ pub async fn gather(
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
     inputs.kept = kept::group(
-        // A runner without the rulings table (the plan layer off) has none; a
-        // failed read must not take the whole list down for a quiet notice.
-        svc.store.member_kept_rulings_since(since).unwrap_or_default(),
+        // A failed read (the plan layer off, a busy database) must not take
+        // the whole list down for a quiet notice: log it, send no FYI.
+        svc.store.member_kept_rulings_since(since).unwrap_or_else(|e| {
+            tracing::debug!(error = %e, "kept rulings unreadable; no FYI this read");
+            Vec::new()
+        }),
         |workspace| svc.store.workspace_lead(workspace).ok().flatten(),
         |handle| svc.store.member_name(handle).ok().flatten(),
     );

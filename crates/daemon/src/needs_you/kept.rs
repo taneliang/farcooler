@@ -116,6 +116,14 @@ fn item(keep: &Kept, workspace_name: &str, now_ms: i64) -> pb::NeedsYouItem {
     }
 }
 
+/// Leave the FYIs out of `inputs` unless the client's request `accepts` them:
+/// a shipped app can't hide a kind it has never heard of.
+pub(crate) fn only_for_clients_that_accept_it(inputs: &mut Inputs, accepts: &[String]) {
+    if !accepts.iter().any(|a| a == farcooler_protocol::accepts::NEEDS_YOU_FYI) {
+        inputs.kept.clear();
+    }
+}
+
 /// The FYIs `inputs.viewer` is to see: the lead's, and no one else's.
 pub(super) fn items(inputs: &Inputs, now_ms: i64) -> Vec<pb::NeedsYouItem> {
     let leads = |keep: &Kept| match (&inputs.viewer, &keep.lead) {
