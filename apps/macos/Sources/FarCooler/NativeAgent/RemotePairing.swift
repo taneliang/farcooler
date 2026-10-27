@@ -62,6 +62,9 @@ final class RemotePairing: ObservableObject {
 
     /// Each remote runner's state, by target, as of the last try.
     @Published private(set) var states: [String: State] = [:]
+    /// Runners a Pair is on its way to, from the click until its connect
+    /// ends (ov-830): Settings and the pane's note say so meanwhile.
+    @Published private(set) var pairing: Set<String> = []
 
     /// How the CLI runs. The real one in the app; a test passes its own.
     var cli: ([String]) async -> CLI.Result = { await CLI.run($0) }
@@ -117,6 +120,7 @@ final class RemotePairing: ObservableObject {
     /// checks it, the record and cancellation before it writes a line or a
     /// record. A line an abandoned connect wrote anyway is taken back off.
     func connect(target: String) async -> Outcome {
+        defer { pairing.remove(target) }
         let generation = generations[target, default: 0]
         // Said before anything that could fail would hide it behind a
         // passing sentence (and a Try Again that isn't Pair Again).
@@ -156,7 +160,7 @@ final class RemotePairing: ObservableObject {
 
         switch await open(reach, privateKey: privateKey, pin: pin) {
         case .connected(let core, let offered):
-            return await settle(target, generation, core, offered)
+            return await settle(target, generation, core, offered, clientID: clientID)
         case .rejected:
             guard current(target, generation) else { return .unavailable }
             // Revoked: a key this Mac paired, refused. Never re-paired here.
@@ -180,7 +184,7 @@ final class RemotePairing: ObservableObject {
             }
             // Recorded only once a connect proves the line (`settle`).
             guard case .connected(let core, let offered) = await open(reach, privateKey: privateKey, pin: pin) else { return .unreachable }
-            return await settle(target, generation, core, offered)
+            return await settle(target, generation, core, offered, clientID: clientID)
         case .failed:
             return .unreachable
         }
@@ -226,6 +230,7 @@ final class RemotePairing: ObservableObject {
         record[target] = nil
         states[target] = nil
         consentToPair(target)
+        pairing.insert(target)
     }
 
     /// The person's word to pair `target`, leaving whatever stopped it in
@@ -289,10 +294,10 @@ final class RemotePairing: ObservableObject {
     /// before ov-830 with its projector setting off: its panes say it needs
     /// an update, and nothing turns that setting on for it.
     private func settle(
-        _ target: String, _ generation: Int, _ core: RunnerCore, _ offered: Set<String>
+        _ target: String, _ generation: Int, _ core: RunnerCore, _ offered: Set<String>, clientID: String
     ) async -> Outcome {
         guard current(target, generation) else { return .unavailable }
-        record[target] = key.clientID
+        record[target] = clientID
         states[target] = .paired
         return .connected(core, offered)
     }

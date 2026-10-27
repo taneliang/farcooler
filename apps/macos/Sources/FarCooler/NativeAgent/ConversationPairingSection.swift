@@ -48,7 +48,7 @@ struct ConversationPairingSection: View {
             case .unavailable?:
                 Button("Try Again") { native.retry(target) }
             case nil:
-                Button("Pair") { native.pairAgain(target) }
+                PairButton(target: target, pairing: pairing) { native.pairAgain(target) }
             }
         } label: {
             Text(target)
@@ -59,7 +59,7 @@ struct ConversationPairingSection: View {
     /// What the key can do, said plainly, beside the Pair that consents to
     /// it: `control` runs commands.
     static let footer =
-        "This Mac adds a key of its own, kept in the Keychain, to each runner. With it, anyone using Far Cooler "
+        "Pair adds a key of this Mac’s own, kept in the Keychain, to that runner. With it, anyone using Far Cooler "
         + "on this Mac can read and reply to Claude there, and create terminals and run commands, as with a paired phone."
 
     static func status(_ state: RemotePairing.State?) -> String {
@@ -78,6 +78,27 @@ struct ConversationPairingSection: View {
         Task {
             trouble = await native.unpair(target)
             working = nil
+        }
+    }
+}
+
+/// Pair, for a runner never paired here, and while it pairs a spinner that
+/// says so (ov-830): in Settings > Devices and in a pane's note.
+struct PairButton: View {
+    let target: String
+    @ObservedObject var pairing: RemotePairing
+    let pair: () -> Void
+
+    var body: some View {
+        if pairing.pairing.contains(target) {
+            HStack(spacing: Spacing.group) {
+                ProgressView().controlSize(.small)
+                Text("Pairing…")
+            }
+            .identified("native-pairing")
+        } else {
+            Button("Pair", action: pair)
+                .identified("native-pair")
         }
     }
 }

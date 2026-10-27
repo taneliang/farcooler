@@ -47,7 +47,7 @@ extension AgentConversation {
             case .runnerNeedsUpdate: return "This runner needs an update to show the conversation."
             case .notAnAgent: return "This isn’t a Claude or Codex pane."
             case .notRunning: return "The agent in this pane isn’t running."
-            case .pairingNeeded: return "Pairing needed. Pair this runner in Settings, under Devices."
+            case .pairingNeeded: return "Pair this runner in Settings, under Devices, to read its conversations here."
             case .unreachable: return "Far Cooler can’t reach this runner right now."
             case .said(let words): return words
             }

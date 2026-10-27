@@ -159,8 +159,13 @@ extension ContentView {
                 errorBanner = "No pane to switch — select a terminal first."
                 return
             }
-            if !NativeAgents.shared.toggleView(of: target, target: store.client(for: worktree)?.target ?? "") {
-                errorBanner = "This pane has no conversation view. It’s for Claude in a terminal on this Mac, with the setting on in Settings."
+            let runner = store.client(for: worktree)?.target ?? ""
+            if !NativeAgents.shared.toggleView(of: target, target: runner) {
+                // Why, by the check that failed (ov-830): a runner's or a
+                // pairing's reason says what to do; any other pane says what
+                // the view is for.
+                errorBanner = NativeSwitchReason.shown(NativeAgents.shared.unavailable(target, target: runner))?.note
+                    ?? "This pane has no conversation view. It’s for Claude or Codex running in a terminal."
             }
 
         case .help:

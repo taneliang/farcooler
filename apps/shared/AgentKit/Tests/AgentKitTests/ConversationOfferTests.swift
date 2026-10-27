@@ -32,6 +32,8 @@ import Testing
         #expect(AgentConversation.Unavailable.pairingNeeded.check == "Pairing")
         #expect(AgentConversation.Unavailable.said("Host key changed.").check == "Connection")
         #expect(AgentConversation.Unavailable.unreachable.note == "Connection: Far Cooler can’t reach this runner right now.")
+        // Not "Pairing: Pairing needed." (ov-830 review, S3).
+        #expect(AgentConversation.Unavailable.pairingNeeded.note == "Pairing: Pair this runner in Settings, under Devices, to read its conversations here.")
     }
 
     @Test func aClaudeOrCodexPaneOnAServingRunnerIsOffered() {

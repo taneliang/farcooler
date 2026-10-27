@@ -68,7 +68,7 @@ struct NativeSwitch<Surface: View>: View {
                     if let model {
                         CornerSwitchButton(showing: showing) { model.showsNative.toggle() }
                     } else if let reason {
-                        ConversationUnavailableChip(reason: reason, inGroup: true)
+                        ConversationUnavailableChip(reason: reason, inGroup: true, target: target, agents: agents)
                     }
                 }
             } else if let model {
@@ -89,7 +89,7 @@ struct NativeSwitch<Surface: View>: View {
                 .accessibilityLabel(showing ? "Show Terminal" : "Show Conversation")
                 .identified("native-switch")
             } else if let reason {
-                ConversationUnavailableChip(reason: reason)
+                ConversationUnavailableChip(reason: reason, target: target, agents: agents)
             }
         }
         .onDisappear { agents.model(ifMade: terminal.id)?.setOnScreen(false, by: mount) }

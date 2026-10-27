@@ -342,6 +342,11 @@ struct RemoteConversationTests {
         #expect(agents.unavailable(claude, target: "other@box") == .pairingNeeded)
         pairing.allowPairing(target: "other@box")
         #expect(!pairing.waitsForConsent("other@box"), "Pair is the consent")
+        // Pairing… from the click until its connect ends (ov-830 review, S4).
+        #expect(pairing.pairing.contains("other@box"), "no progress after Pair")
+        _ = await pairing.connect(target: "other@box")
+        #expect(!pairing.pairing.contains("other@box"), "still pairing after the connect ended")
+        #expect(pairing.states["other@box"] == .paired)
     }
 
     @Test("A Keychain that refuses a read is not an empty one: no new key, nothing written")

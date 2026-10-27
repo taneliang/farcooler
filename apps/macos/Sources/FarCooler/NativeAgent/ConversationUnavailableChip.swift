@@ -11,6 +11,10 @@ struct ConversationUnavailableChip: View {
     /// Beside the agents in the orchestrator's corner (ov-829): the corner's
     /// size and glass, the group's inset.
     var inGroup = false
+    /// The pane's runner, as `DaemonClient.target` names it, for Pair where
+    /// pairing is needed (ov-830); empty for this Mac's, which never needs it.
+    var target = ""
+    var agents: NativeAgents = .shared
     @State private var explaining = false
     @Environment(\.openSettings) private var openSettings
 
@@ -29,7 +33,7 @@ struct ConversationUnavailableChip: View {
         .accessibilityValue(reason.sentence)
         .identified("native-switch-unavailable")
         .popover(isPresented: $explaining, arrowEdge: .bottom) {
-            ConversationUnavailableNote(reason: reason) { tab in
+            ConversationUnavailableNote(reason: reason, target: target, agents: agents) { tab in
                 explaining = false
                 Preferences.shared.settingsTab = tab
                 openSettings()
@@ -72,6 +76,9 @@ extension ConversationUnavailableChip {
 /// Settings is where it's fixed.
 struct ConversationUnavailableNote: View {
     let reason: AgentConversation.Unavailable
+    /// The runner Pair pairs, where the reason is that it isn't (ov-830).
+    var target = ""
+    var agents: NativeAgents = .shared
     let open: (String) -> Void
 
     var body: some View {
@@ -80,9 +87,15 @@ struct ConversationUnavailableNote: View {
             Text(reason.note)
                 .foregroundStyle(.secondary)  // style-exempt: a popover's text, system material
                 .fixedSize(horizontal: false, vertical: true)
-            if let tab = ConversationUnavailableChip.settingsTab(for: reason) {
-                Button("Open Settings…") { open(tab) }
-                    .identified("native-unavailable-settings")
+            HStack(spacing: Spacing.group) {
+                // Where it's seen, the one thing that fixes it (ov-830).
+                if reason == .pairingNeeded, !target.isEmpty {
+                    PairButton(target: target, pairing: agents.pairing) { agents.pairAgain(target) }
+                }
+                if let tab = ConversationUnavailableChip.settingsTab(for: reason) {
+                    Button("Open Settings…") { open(tab) }
+                        .identified("native-unavailable-settings")
+                }
             }
         }
         .padding(Spacing.section)
