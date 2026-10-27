@@ -65,7 +65,8 @@ pub(crate) struct Timing {
     /// (`compose::held::RETRY`).
     pub held_retry: Duration,
     /// How long a held message waits out a registry that reads torn
-    /// (`compose::held::TORN_FOR`).
+    /// (`compose::held::TORN_FOR`), and a waiting message a run of reads that
+    /// failed (`compose::pending`, "A bad read").
     pub torn_cap: Duration,
     /// The count notice's window (`COUNT_NOTICE_EVERY`).
     pub count_notice_every: Duration,
@@ -160,6 +161,53 @@ mod tests {
                 queue_watch: s(4 * 60 * 60),
             }
         );
+    }
+
+    /// Why `t`'s waits don't fit together, if they don't: the ways the
+    /// production values work against each other, which pinning each value
+    /// (`production_keeps_every_wait_it_had`) can't say.
+    fn misfit(t: &Timing) -> Option<&'static str> {
+        let poll = crate::watch::answer_wake::PASTE_POLL;
+        if t.wait_poll <= t.idle_twice {
+            Some("a slow poll no longer than idle_twice: two reads between turns would not be two polls")
+        } else if t.wait_poll < poll {
+            Some("a slow poll faster than the fast one")
+        } else if t.wait_slows_after >= t.turn_begun_wait {
+            Some("a wait that ends before it slows")
+        } else if t.carry_agents_for > t.wait_slows_after {
+            Some("the gate's agents trusted past the slowdown, after the fast reads that watch for them")
+        } else if t.torn_cap < t.wait_poll * 3 {
+            Some("fewer than three slow reads before a run of bad ones gives up")
+        } else if t.torn_cap >= t.turn_begun_wait / 10 {
+            Some("a run of bad reads allowed a tenth of the wait or more")
+        } else if t.turn_begun_wait < t.wait_slows_after + t.idle_twice * 2 + t.wait_poll * 2 {
+            Some("too little wait after the slowdown for two idle reads and an Enter")
+        } else {
+            None
+        }
+    }
+
+    /// How the production waits fit together (ov-816 review, N6), and that
+    /// `misfit` can fail: each rule is broken in turn on a copy.
+    #[test]
+    fn the_production_waits_fit_together() {
+        assert_eq!(misfit(&Timing::PRODUCTION), None);
+        type Break = (fn(&mut Timing), &'static str);
+        let broken: [Break; 7] = [
+            (|t| t.wait_poll = t.idle_twice, "no longer than idle_twice"),
+            (|t| (t.wait_poll, t.idle_twice) = (Duration::from_millis(50), Duration::from_millis(10)), "faster than the fast one"),
+            (|t| t.wait_slows_after = t.turn_begun_wait, "ends before it slows"),
+            (|t| t.carry_agents_for = t.wait_slows_after + Duration::from_millis(1), "trusted past the slowdown"),
+            (|t| t.torn_cap = t.wait_poll, "fewer than three slow reads"),
+            (|t| t.torn_cap = t.turn_begun_wait, "a tenth of the wait"),
+            (|t| (t.turn_begun_wait, t.torn_cap) = (t.wait_slows_after + Duration::from_millis(900), Duration::from_secs(3)), "too little wait after the slowdown"),
+        ];
+        for (change, said) in broken {
+            let mut t = Timing::PRODUCTION;
+            change(&mut t);
+            let why = misfit(&t).unwrap_or_else(|| panic!("{said} didn't fail"));
+            assert!(why.contains(said), "{said}: {why}");
+        }
     }
 
     /// A watcher the daemon builds runs with the production waits.

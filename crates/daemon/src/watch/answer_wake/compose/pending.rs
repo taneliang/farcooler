@@ -40,14 +40,26 @@
 //! for the registry's `idle` or `shell`: a later Enter, never one into a
 //! turn (ov-808 re-review, 3c).
 //!
+//! **A bad read** is no verdict. A capture tmux didn't answer, a registry
+//! file caught mid-write is tried again on the next tick, and only a run of them lasting
+//! `Timing::torn_cap` (10 s, as a held message's, `held::TORN_FOR`) ends the
+//! wait: a write is over in milliseconds and tmux answers in a second, so ten
+//! seconds is many consecutive bad reads, and still a small part of ten
+//! minutes. A good read ends the run. A shell, or another process, in front
+//! of the pane is no bad read: the box is gone from the screen (a screen
+//! reads as claude's by the pane's command, so a shell's reads between turns
+//! with no box) and claude from the pane, said as `not_running`, not as a box
+//! changed (`pended`).
+//!
 //! **Given up.** A Stop pressed since the message was queued leaves it, as
 //! the person stopped the turn it waited on (Send Now is refused while the
 //! box holds anything, `interrupt::pressable`, so it never reaches here).
 //! So does a turn claude's transcript says the person stopped some other
 //! way: a permission dialog answered No or Esc, which claude 2.1.309 ends
 //! as `[Request interrupted by user for tool use]`, or Esc typed straight
-//! in the terminal (ov-816 review, S1). So do the wait running out, the
-//! box changing, and the agent going. Each is logged as a paste left in the
+//! in the terminal (ov-816 review, S1). So do the wait running out (said
+//! as the agents' when the gate saw agents and only the registry stayed
+//! busy, `stayed`), the box changing, and the agent going. Each is logged as a paste left in the
 //! box, with its check, and the pane's rows say which, in words of its own (`held::why_not_sent`). A box
 //! that emptied, or a key typed, may be the message sent by hand, from the
 //! Mac or straight in tmux: claude's transcript is read for it first, and if
@@ -56,7 +68,7 @@
 //! **Kept.** The wait is a row in the store (`Store::keep_compose_wait`)
 //! from before it begins until it ends, so a runner restarted during it
 //! picks it up where it was (`resume_compose_waits`): sent meanwhile, its
-//! row is taken back; the same claude still there, the wait goes on, its
+//! row is taken back; the same claude still there (its pid and its session), the wait goes on, its
 //! deadline counted from when it was queued, or given up at once if that
 //! ran out while the runner was down; another claude, or none, says so. A
 //! wait begun since this start, before its first pump, is running already
@@ -290,6 +302,14 @@ impl Watcher {
             return Err(gone("runner_down"));
         }
         let Some(config) = registry_turn::config_of(pid).await else { return Err(gone("not_running")) };
+        // The pid can come round again; the session it's running can too
+        // change (a /clear, a resume). Either way the transcript kept is
+        // another conversation's (ov-823, N4).
+        match mid_turn::transcript_in(&config, pid) {
+            Some((session, _)) if session == kept.session => {}
+            Some(_) => return Err(gone("agent_restarted")),
+            None => return Err(gone("not_running")),
+        }
         let proven = Proven { preset, tty, pid, turn: Turn::During, held: false, background: kept.background() };
         let confirm = Confirm {
             session: kept.session,
@@ -325,6 +345,12 @@ impl Watcher {
         self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).pending.get(&token).is_some_and(|w| w.stopped)
     }
 
+    /// Whether `p`'s claude is no longer the pane's agent: a shell in front,
+    /// or another process.
+    async fn agent_gone(&self, p: &Pending) -> bool {
+        self.proven_agent(&p.to).await.map_or(true, |(_, _, pid)| pid != p.proven.pid)
+    }
+
     /// End every wait's task as a runner stopping does, its row kept in the
     /// store, and have the next pump pick them up (`resume_compose_waits`).
     #[cfg(test)]
@@ -351,6 +377,8 @@ impl Watcher {
         // holds the Enter back until nobody has typed for `TYPED_WITHIN_MS`.
         let mut typed_since = p.started;
         let mut typed = false;
+        // When the run of bad reads now going began.
+        let mut unread_since: Option<Instant> = None;
         let mut last = Left { check: p.left.check, screen: p.left.screen.clone(), turn: true, dialog: p.left.dialog };
         loop {
             let timing = self.timing();
@@ -363,7 +391,7 @@ impl Watcher {
             }
             if waited() >= timing.turn_begun_wait {
                 last.logged(&registry, &p.to, &p.proven);
-                return Err(if last.dialog { "stayed_blocked" } else { "stayed_busy" });
+                return Err(stayed(&last, &p.proven));
             }
             // Never wait on the box: Stop and Bring Here take it.
             let Some(_typing) = self.try_typing(p.to.id) else {
@@ -371,7 +399,38 @@ impl Watcher {
                 continue;
             };
             let proven = if waited() < timing.carry_agents_for { &p.proven } else { &uncarried };
+            #[cfg(test)]
+            let read = if fault(p.to.id) {
+                Err(farcooler_core::DomainError::TmuxTimedOut)
+            } else {
+                self.between_or_why(&p.to, proven, typed_since, &p.expected, false, Some(&p.config)).await
+            };
+            #[cfg(not(test))]
             let read = self.between_or_why(&p.to, proven, typed_since, &p.expected, false, Some(&p.config)).await;
+            // A read that failed, or found nothing to judge, is tried again
+            // on the next tick, and only a run of them lasting `torn_cap`
+            // ends the wait (this module's docs, "A bad read").
+            match &read {
+                Err(e) => {
+                    let first = *unread_since.get_or_insert_with(Instant::now);
+                    if first.elapsed() >= timing.torn_cap {
+                        tracing::warn!(terminal = %p.to.id, error = %e, "a waiting message gave up: the pane stayed unreadable");
+                        return Err("not_running");
+                    }
+                    idle_since = None;
+                    continue;
+                }
+                Ok(Some(left)) if left.check == "registry_torn" => {
+                    let first = *unread_since.get_or_insert_with(Instant::now);
+                    if first.elapsed() >= timing.torn_cap {
+                        left.logged(&registry, &p.to, &p.proven);
+                        return Err(given_up_for(left, p.proven.preset, typed));
+                    }
+                    idle_since = None;
+                    continue;
+                }
+                _ => unread_since = None,
+            }
             let quiet = last_input(self.service.root_dir(), p.to.id).is_none_or(|at| now_millis() - at >= interrupt::TYPED_WITHIN_MS);
             match read {
                 Err(_) => return Err("not_running"),
@@ -453,6 +512,8 @@ impl Watcher {
                     crate::session_projectors::global().runner_hold(p.to.id, |r| r.runner_told(row));
                     return None;
                 }
+                // A box gone from the screen may be claude gone from the pane.
+                let what = if matches!(what, "box_changed" | "box_cleared") && self.agent_gone(p).await { "not_running" } else { what };
                 Some(held::why_not_sent(agent, &p.echo, what))
             }
             Err(what) => Some(held::why_not_sent(agent, &p.echo, what)),
@@ -480,6 +541,22 @@ fn row_of(token: Uuid) -> String {
     format!("pending:{token}")
 }
 
+/// The word a wait that ran out is given up with, by the last thing read.
+/// A dialog still up is `stayed_blocked`. Past the gate's agents, a main loop
+/// the screen shows between turns while the registry stays `busy` is
+/// background work's, and if the gate saw agents it's theirs: `stayed_agents`
+/// says so, not that claude stayed busy (ov-816 review, N3). A spinner
+/// drawn, or no agents ever seen, is a turn: `stayed_busy`.
+fn stayed(last: &Left, gate: &Proven) -> &'static str {
+    if last.dialog {
+        "stayed_blocked"
+    } else if gate.background == Background::Agents && matches!(last.check, "registry_busy" | "registry_busy_no_background") {
+        "stayed_agents"
+    } else {
+        "stayed_busy"
+    }
+}
+
 /// The word a wait is given up with for `still_between`'s check `left`,
 /// `typed` when a key was typed in Far Cooler's terminal since the paste.
 fn given_up_for(left: &Left, preset: &str, typed: bool) -> &'static str {
@@ -491,6 +568,30 @@ fn given_up_for(left: &Left, preset: &str, typed: bool) -> &'static str {
         "not_shown" if typed => "typed",
         "not_shown" if left.screen.as_deref().is_some_and(|screen| composer::read(preset, screen) == Composer::Empty) => "box_cleared",
         _ => "box_changed",
+    }
+}
+
+/// Reads a test has the waits of a pane fail, as a tmux that timed out
+/// does, counted down by each try (`fault`).
+#[cfg(test)]
+static FAULTS: std::sync::Mutex<Option<std::collections::HashMap<Uuid, usize>>> = std::sync::Mutex::new(None);
+
+/// Have the next `reads` tries of `terminal`'s waits fail to read the pane.
+#[cfg(test)]
+pub(crate) fn fail_reads(terminal: Uuid, reads: usize) {
+    FAULTS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(terminal, reads);
+}
+
+/// Whether this try's read is to fail (`fail_reads`).
+#[cfg(test)]
+fn fault(terminal: Uuid) -> bool {
+    let mut faults = FAULTS.lock().unwrap_or_else(|e| e.into_inner());
+    match faults.as_mut().and_then(|m| m.get_mut(&terminal)) {
+        Some(left) if *left > 0 => {
+            *left -= 1;
+            true
+        }
+        _ => false,
     }
 }
 
