@@ -416,9 +416,10 @@ struct RemoteConversationTests {
         #expect(!agents.offers(terminal, target: "me@box"))
     }
 
-    @Test("The setting and Devices say the key is added to every runner and runs commands there")
+    /// Beside the Pair that consents to it (ov-830: no setting does any more).
+    @Test("Devices says the key is added to each runner and runs commands there")
     func theCopySaysWhatTheKeyCanDo() {
-        for copy in [ConversationPairingSection.footer, NativeAgents.settingNote] {
+        for copy in [ConversationPairingSection.footer] {
             #expect(copy.contains("key of its own"), "\(copy)")
             #expect(copy.contains("run commands") && copy.contains("terminals"), "\(copy)")
             #expect(!copy.contains("can’t open a shell"), "\(copy)")

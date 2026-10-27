@@ -228,6 +228,10 @@ struct NativeDefaultOnTests {
     @Test("The switch's command flips an offered pane, and says no to another")
     func theCommandFlipsOnlyAnOfferedPane() throws {
         let terminal = try NativeAgentTests.terminal()
+        // An earlier test in this suite leaves this id remembered as the
+        // conversation; the test that ran before this one used to clear it
+        // in passing, and went with the setting (ov-830).
+        NativePaneModel.remember(false, for: terminal.id)
         let agents = NativeAgentTests.agents()
         defer { NativePaneModel.remember(false, for: terminal.id) }
         #expect(agents.toggleView(of: terminal, target: ""))
