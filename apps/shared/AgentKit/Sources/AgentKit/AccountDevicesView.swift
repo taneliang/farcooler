@@ -50,6 +50,7 @@ public struct AccountDevicesSections: View {
     /// would come back with nothing said about why it came back.
     @State private var removalFailure: AccountError?
     @State private var copied = false
+    @State private var loads = LoadOnce()
 
     public init() {}
 
@@ -113,7 +114,13 @@ public struct AccountDevicesSections: View {
                 }
             }
         }
-        .task { await load() }
+        // Not `.task`: on this `Group` a modifier lands on EACH section, so
+        // every section `load()` swapped in started another load and every one
+        // it swapped out cancelled its own, 128 cancelled `POST /v1/account`s
+        // in two seconds on the owner's phone (ov-828). One load per showing,
+        // and one per sign-in or sign-out, however many sections appear.
+        .onAppear { loads.start(for: account.isSignedIn) { await load() } }
+        .onChange(of: account.isSignedIn) { _, signedIn in loads.start(for: signedIn) { await load() } }
     }
 
     private var lastProblem: String {
@@ -224,4 +231,28 @@ public struct AccountDevicesSections: View {
         await load()
         if case .failure(let why) = outcome { removalFailure = why }
     }
+}
+
+/// One load for a view built of several sections, however many of them
+/// appear or see the same change (ov-828): one per `key`, the state the load
+/// is for, so each section asking for the same one starts nothing more.
+///
+/// The load runs in a task of its own rather than the asking section's, so a
+/// section swapped out while it runs doesn't cancel it.
+@MainActor
+public final class LoadOnce {
+    private var loaded: AnyHashable?
+    private var running: Task<Void, Never>?
+
+    public init() {}
+
+    /// Start `work` for `key`, unless it has already started for it.
+    public func start(for key: AnyHashable, _ work: @escaping @MainActor () async -> Void) {
+        guard loaded != key else { return }
+        loaded = key
+        running = Task { await work() }
+    }
+
+    /// The load in flight, for a test to wait on.
+    public var current: Task<Void, Never>? { running }
 }
