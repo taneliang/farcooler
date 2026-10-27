@@ -11,8 +11,8 @@
 3380 services/relay/src/index.ts
 3245 crates/store/src/tasks.rs
 3189 apps/macos/Sources/FarCooler/DaemonClient.swift
-3075 crates/client/src/session.rs
 2943 apps/ios/FarCooler/ChangesView.swift
+2744 crates/client/src/session.rs
 2605 apps/macos/Sources/FarCooler/ChangesPane.swift
 2506 apps/ios/FarCooler/TerminalView.swift
 2450 crates/daemon/src/rpc.rs

@@ -67,7 +67,6 @@ the CI environment variable is set: CI runners are separate machines.
 
 import argparse
 import contextlib
-import fcntl
 import importlib.util
 import os
 import pathlib
@@ -77,6 +76,10 @@ import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import heavy_lock as hl  # noqa: E402  the machine-wide lock, shared with scripts/heavy
+from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -360,66 +363,8 @@ def jobs_for(files, site, ios_relevant, commands):
 # ---------------------------------------------------------------- running
 
 
-def load1():
-    return os.getloadavg()[0]
-
-
 def wait_for_load(limit=20.0, poll=30):
-    started = time.time()
-    announced = 0
-    while load1() >= limit:
-        if time.time() - started >= announced * 300:
-            print(f"  waiting: load average {load1():.1f} is {limit:.0f} or more", flush=True)
-            announced += 1
-        time.sleep(poll)
-
-
-LOCK_POLL = 5  # seconds between a waiter's tries; a releasing gate pauses a little longer so a waiter gets the next turn
-
-
-def lock_path():
-    return pathlib.Path(tempfile.gettempdir()) / "lane-gate.lock"
-
-
-def lock_wanted(args):
-    """Locking is on unless --no-lock, or CI is set (separate runners there)."""
-    return not (getattr(args, "no_lock", False) or os.environ.get("CI"))
-
-
-def read_holder(path):
-    try:
-        return (path.with_name(path.name + ".holder").read_text().strip()) or "an unknown gate"
-    except OSError:
-        return "an unknown gate"
-
-
-@contextlib.contextmanager
-def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=print):
-    """Hold the machine-wide heavy-job lock for one job. A waiter names the holder."""
-    path = path or lock_path()
-    f = open(path, "a+")
-    started = time.time()
-    announced = -1
-    holder = path.with_name(path.name + ".holder")
-    got = False
-    try:
-        while True:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                got = True
-                break
-            except OSError:
-                if time.time() - started >= (announced + 1) * announce:
-                    announced += 1
-                    say(f"  waiting for the machine-wide heavy-job lock ({job}); held by {read_holder(path)}", flush=True)
-                time.sleep(poll)
-        holder.write_text(f"worktree {worktree}, PID {os.getpid()}, started {time.strftime('%Y-%m-%d %H:%M:%S')}, running {job}\n")
-        yield
-    finally:
-        if got:
-            with contextlib.suppress(OSError):
-                holder.unlink()
-        f.close()  # closing releases the flock
+    hl.wait_for_load(limit, poll)
 
 
 COUNTS = [
@@ -718,7 +663,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
     for j in chosen:
-        locked = j in HEAVY and lock_wanted(args)
+        locked = j in HEAVY and hl.lock_wanted(getattr(args, "no_lock", False))
         with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
             failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
         if locked:
@@ -896,39 +841,11 @@ def self_test():
     users = [i for i, s in enumerate(swift_run) if "$APP_NAME" in s.run]
     expect("the swift job sets APP_NAME before any step uses it", bool(names and users and names[0] < users[0]), True)
 
-    # One heavy job at a time on the machine (ov-831): a second gate waits and names the holder.
+    # One heavy job at a time on the machine (ov-831); the lock itself is tested in scripts/heavy_lock.py (ov-836).
     import threading
     with tempfile.TemporaryDirectory() as t:
         t = pathlib.Path(t)
         lock = t / "lane-gate.lock"
-        said, order = [], []
-        held, go = threading.Event(), threading.Event()
-
-        def first():
-            with machine_lock("/wt/first", "rust", path=lock, poll=0.05):
-                order.append("first in")
-                held.set()
-                go.wait(5)
-                order.append("first out")
-
-        def second():
-            with machine_lock("/wt/second", "swift", path=lock, poll=0.05, announce=0.1, say=lambda m, **k: said.append(m)):
-                order.append("second in")
-
-        a = threading.Thread(target=first)
-        a.start()
-        held.wait(5)
-        b = threading.Thread(target=second)
-        b.start()
-        time.sleep(0.4)
-        expect("the second gate has not started while the first holds the lock", order, ["first in"])
-        go.set()
-        a.join(5)
-        b.join(5)
-        expect("the second gate ran after the first let go", order, ["first in", "first out", "second in"])
-        expect("the waiter names the holder's worktree, PID and start time",
-               bool(said) and "/wt/first" in said[0] and f"PID {os.getpid()}" in said[0] and re.search(r"started \d{4}-\d\d-\d\d \d\d:\d\d:\d\d", said[0]) is not None, True)
-        expect("the holder note goes when the lock does", lock.with_name(lock.name + ".holder").exists(), False)
 
         # Through run_jobs: two fake heavy jobs at once do not overlap, but a light job does not wait,
         # and the lock is let go between a gate's jobs so the other gate's job slips in.
@@ -936,13 +853,12 @@ def self_test():
         def step(name):
             return Step("x", name, f'echo "{name} start" >> "{marks}"; sleep 0.5; echo "{name} end" >> "{marks}"\n')
         plans2 = {"h1": [step("g1h1")], "h2": [step("g1h2")], "g2h": [step("g2h")], "light": [step("g2light")]}
-        saved_heavy, saved_lock_path, saved_ci = set(HEAVY), lock_path, os.environ.pop("CI", None)
+        saved_heavy, saved_ci = set(HEAVY), os.environ.pop("CI", None)
         HEAVY.update({"h1", "h2", "g2h"})
         saved_poll = LOCK_POLL
         globals()["LOCK_POLL"] = 0.05
-        globals()["lock_path"] = lambda: lock
         orig_lock = machine_lock
-        globals()["machine_lock"] = lambda wt, j, **k: orig_lock(wt, j, poll=LOCK_POLL, say=lambda *a, **kw: None, **k)
+        globals()["machine_lock"] = lambda wt, j, **k: orig_lock(wt, j, path=lock, poll=LOCK_POLL, say=lambda *a, **kw: None, **k)
         try:
             ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, no_lock=False)
             with contextlib.redirect_stdout(io.StringIO()):
@@ -977,12 +893,11 @@ def self_test():
             expect("--no-lock lets them overlap", marks.read_text().split()[:4], ["g1h1", "start", "g2h", "start"])
             ns.no_lock = False
             os.environ["CI"] = "true"
-            expect("CI turns the lock off by default", lock_wanted(ns), False)
+            expect("CI turns the lock off by default", hl.lock_wanted(ns.no_lock), False)
             os.environ.pop("CI")
-            expect("... and without CI or --no-lock it is on", lock_wanted(ns), True)
+            expect("... and without CI or --no-lock it is on", hl.lock_wanted(ns.no_lock), True)
         finally:
             HEAVY.clear(); HEAVY.update(saved_heavy)
-            globals()["lock_path"] = saved_lock_path
             globals()["LOCK_POLL"] = saved_poll
             globals()["machine_lock"] = orig_lock
             if saved_ci is not None:
