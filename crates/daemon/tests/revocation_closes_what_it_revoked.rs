@@ -302,6 +302,27 @@ async fn a_revoked_device_is_served_nothing_until_it_is_enrolled_again() {
     back.call(request("client.list")).await.expect("a device enrolled again is served again");
 }
 
+/// An enrollment that writes nothing doesn't lift a revoke (ov-820 review
+/// S4): a re-send that matches a line already there on its key alone, here
+/// the laptop's key under the revoked phone's id, leaves the phone shut out;
+/// the phone's own enrollment, written, lets it back.
+#[tokio::test]
+async fn only_a_written_enrollment_of_that_device_lifts_its_revoke() {
+    let h = start().await;
+    let mut admin = connect(&h, None).await;
+    enroll(&mut admin, PHONE_KEY, "iPhone", "phone").await;
+    enroll(&mut admin, LAPTOP_KEY, "MacBook", "laptop").await;
+    revoke(&mut admin, "phone").await;
+
+    enroll(&mut admin, LAPTOP_KEY, "iPhone", "phone").await;
+    let mut still = connect(&h, Some("farcooler-session control phone\n")).await;
+    assert_served_nothing(&mut still).await;
+
+    enroll(&mut admin, PHONE_KEY, "iPhone", "phone").await;
+    let mut back = connect(&h, Some("farcooler-session control phone\n")).await;
+    back.call(request("client.list")).await.expect("the phone, enrolled again, is served again");
+}
+
 /// Every call a revoked device could use to stay in, refused: enrolling a key
 /// of its own, reading the keys, reading who it is.
 async fn assert_served_nothing(device: &mut SocketClient) {

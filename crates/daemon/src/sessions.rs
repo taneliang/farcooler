@@ -135,7 +135,16 @@ impl Sessions {
 }
 
 impl Sessions {
+    /// This device is revoked: every connection it opens from now on starts
+    /// closed, until [`readmit`](Self::readmit). Called by a revoke under the
+    /// fence lock, before its write lands (ov-820 review S4).
+    pub fn mark_revoked(&self, client_id: &str) {
+        let _live = self.live.lock().unwrap();
+        self.revoked.lock().unwrap().insert(client_id.to_string());
+    }
+
     /// This device was enrolled again: its connections are served again.
+    /// Only for a real enrollment write of this id, under the fence lock.
     pub fn readmit(&self, client_id: &str) {
         self.revoked.lock().unwrap().remove(client_id);
     }
@@ -313,6 +322,18 @@ mod tests {
         assert!(closing.said_within(short).await, "an ended connection and a said farewell were waited on still");
         drop(control);
         assert_eq!(sessions.closing("phone").count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_marked_device_opens_closed_until_it_is_readmitted() {
+        // What a revoke records under the fence lock, and a written
+        // enrollment lifts (ov-820 review S4).
+        let sessions = Sessions::new();
+        sessions.mark_revoked("phone");
+        assert!(sessions.open(Some("phone".into())).is_closed(), "a revoked device's connection was served");
+        assert!(!sessions.open(Some("laptop".into())).is_closed(), "another device was shut out");
+        sessions.readmit("phone");
+        assert!(!sessions.open(Some("phone".into())).is_closed(), "a readmitted device stayed shut out");
     }
 
     #[test]

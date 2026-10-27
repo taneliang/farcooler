@@ -164,6 +164,7 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
     // place that knows whether the write happened or the line was already
     // there.
     let admitting = request.node_key.clone();
+    let sessions = svc.sessions().clone();
     let (mut result, admitted) = blocking(move || {
         // Read and write under ONE lock hold. Two enrollments landing in the same
         // instant used to each rebuild the block from a snapshot taken before the
@@ -238,6 +239,11 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
             }
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
+            // A real enrollment of this id, under the fence lock that orders it
+            // against a revoke's mark: a device revoked earlier is served
+            // again (ov-820 review S4). Not on the path above, which writes
+            // nothing and can match on a fingerprint alone.
+            sessions.readmit(&mine.client_id);
             Ok((
                 fence::Change::Write { entries: ours, foreign },
                 (
@@ -257,8 +263,6 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
         })
     })
     .await?;
-    // Enrolled again: a device revoked earlier is served again (ov-820 review B1).
-    svc.sessions().readmit(&request.client_id);
 
     // The file first, the tunnel second, and the answer only after both.
     //
@@ -606,6 +610,7 @@ pub async fn revoke_many(
     rebuild_tunnel: bool,
 ) -> Result<Vec<String>> {
     let path = svc.authorized_keys().to_path_buf();
+    let sessions = svc.sessions().clone();
     let (revoked, was_tunneled) = blocking(move || {
         fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
             let entries = attributed(entries);
@@ -616,6 +621,11 @@ pub async fn revoke_many(
                 .collect();
             if revoked.is_empty() {
                 return Ok((fence::Change::Leave, (revoked, false)));
+            }
+            // Marked under the fence lock, ordered against a re-enrollment's
+            // `readmit` (ov-820 review S4).
+            for id in &revoked {
+                sessions.mark_revoked(id);
             }
             let was_tunneled = entries.iter().any(|e| revoked.contains(&e.client_id) && !e.node_key.is_empty());
             let remaining: Vec<Entry> = entries.into_iter().filter(|e| !revoked.contains(&e.client_id)).collect();
@@ -704,6 +714,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         return Err(DomainError::InvalidArgument { what: "client_id" });
     }
     let closing = client_id.clone();
+    let sessions = svc.sessions().clone();
     let (remaining, was_tunneled) = blocking(move || {
         // Read and write under one lock hold, so that a revocation cannot rebuild
         // the block from a snapshot taken before a concurrent enrollment landed
@@ -729,6 +740,8 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
                 // device's live tunnel down for nothing.
                 let was_tunneled =
                     entries.iter().any(|e| e.client_id == client_id && !e.node_key.is_empty());
+                // Marked under the fence lock (ov-820 review S4), as in `revoke_many`.
+                sessions.mark_revoked(&client_id);
                 let remaining: Vec<Entry> =
                     entries.into_iter().filter(|e| e.client_id != client_id).collect();
                 let (ours, foreign) = sorted(&remaining);
