@@ -74,6 +74,8 @@ enum NeedsYouRowModel {
         if item.kind == .prReview {
             return (githubLink(item.link).map { [.githubReview($0.absoluteString)] } ?? [], [])
         }
+        // An FYI is read, not answered: nothing to open or press (ov-756).
+        if item.kind == .fyi { return ([], []) }
         guard canAct else { return ([.open], []) }
         switch item.kind {
         case .ask:
@@ -93,7 +95,7 @@ enum NeedsYouRowModel {
             return (thread + options.prefix(visibleOptions), Array(options.dropFirst(visibleOptions)))
         case .review:
             return ([.review], [])
-        case .blocked, .unknown, .prReview, .claudeLogin:
+        case .blocked, .unknown, .prReview, .claudeLogin, .fyi:
             return ([.open], [])
         }
     }

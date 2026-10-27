@@ -4232,6 +4232,11 @@ enum NeedsYouKind {
   // released device's and the runner-wide count never have it. Ranks with
   // BLOCKED.
   NEEDS_YOU_KIND_CLAUDE_LOGIN = 7;
+  // A quiet notice, not an ask (ov-756): a member kept a ruling, or Kept All,
+  // and the workspace's lead is told who kept what. No actions, the lowest
+  // rank, and only the lead's list has it; the runner-wide count and every
+  // push leave it out. An app that doesn't know it files it last as `unknown`.
+  NEEDS_YOU_KIND_FYI = 8;
 }
 
 message NeedsYouItem {

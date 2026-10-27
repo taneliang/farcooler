@@ -585,6 +585,7 @@ private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.PR_THREAD -> "A review thread needs you"
     NeedsYouKind.PR_REVIEW -> "A pull request wants your review"
     NeedsYouKind.CLAUDE_LOGIN -> "Logins"
+    NeedsYouKind.FYI -> "FYI"
     NeedsYouKind.UNKNOWN -> "Needs you"
 }
 

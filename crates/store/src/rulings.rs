@@ -391,6 +391,24 @@ impl Store {
         Ok(kept)
     }
 
+    /// The rulings a member kept at or after `since_ms`, on any board, oldest
+    /// first (ov-756). A ruling reversed since is no longer kept and isn't
+    /// here. What the lead's Needs You reads to say who kept what.
+    pub fn member_kept_rulings_since(&self, since_ms: i64) -> Result<Vec<Ruling>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {COLS} FROM board_rulings
+                  WHERE state = 'confirmed' AND settled_by LIKE 'member:%' AND settled_at >= ?1
+                  ORDER BY settled_at, number"
+            ))
+            .map_err(map_err)?;
+        stmt.query_map(params![since_ms], row_to_ruling)
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)
+    }
+
     /// A ruling by id.
     pub fn ruling(&self, ruling: Uuid) -> Result<Ruling> {
         ruling_in(&self.conn(), ruling)

@@ -336,6 +336,8 @@ object NeedsYouAnswer {
             // The sheet it opens is answered at any scope, so [mayAnswer] is not asked. The owner's copy of the line has no
             // action and so no button: it is the member's to fix.
             NeedsYouKind.CLAUDE_LOGIN -> item.actions.filter { it.id == SIGN_IN }.map { NeedsYouButton.SignIn(it.title) }
+            // Read, not answered: nothing to open or press.
+            NeedsYouKind.FYI -> emptyList()
         }
     }
 

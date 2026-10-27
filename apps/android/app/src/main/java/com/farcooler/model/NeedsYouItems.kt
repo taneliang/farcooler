@@ -47,6 +47,9 @@ enum class NeedsYouKind(val wire: String) {
      * The runner sends it to that member's own devices, and to the owner as a line with no button.
      */
     CLAUDE_LOGIN("claude_login"),
+
+    /** A quiet notice for a workspace's lead: a member kept a ruling (ov-756). No buttons; it ranks last. */
+    FYI("fyi"),
     UNKNOWN("unknown");
 
     /** A question on a task waiting for an answer: a decision, or one about a review thread. */

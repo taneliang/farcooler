@@ -113,6 +113,7 @@ pub fn kind_word(raw: i32) -> &'static str {
         Ok(pb::NeedsYouKind::PrReview) => "pr_review",
         Ok(pb::NeedsYouKind::PrThread) => "pr_thread",
         Ok(pb::NeedsYouKind::ClaudeLogin) => "claude_login",
+        Ok(pb::NeedsYouKind::Fyi) => "fyi",
         Ok(pb::NeedsYouKind::Unspecified) | Err(_) => "unknown",
     }
 }

@@ -35,6 +35,7 @@ use uuid::Uuid;
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
 
 pub(crate) mod concern;
+pub(crate) mod kept;
 pub(crate) mod login;
 pub(crate) mod pr;
 
@@ -156,6 +157,8 @@ pub struct Inputs {
     pub logins: Vec<crate::claude_login_renewal::LoginNeed>,
     /// What this runner calls itself, for a login's item (`push::runner_name`).
     pub runner: String,
+    /// What members kept lately, for the lead's FYI (`kept`, ov-756).
+    pub kept: Vec<kept::Kept>,
     /// Who is reading the list. A member's login item is theirs and the
     /// owner's alone (`login`), so a reader with no viewer (the runner-wide
     /// count) gets none.
@@ -233,6 +236,12 @@ pub async fn gather(
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
+    let since = millis(SystemTime::now()) - kept::WINDOW_MS;
+    inputs.kept = kept::group(
+        svc.store.member_kept_rulings_since(since)?,
+        |workspace| svc.store.workspace_lead(workspace).ok().flatten(),
+        |handle| svc.store.member_name(handle).ok().flatten(),
+    );
     Ok(inputs)
 }
 
@@ -268,6 +277,7 @@ fn tier(kind: NeedsYouKind) -> u32 {
         NeedsYouKind::PrThread => 3,
         NeedsYouKind::PrReview => 4,
         NeedsYouKind::Review | NeedsYouKind::Unspecified => 5,
+        NeedsYouKind::Fyi => 6,
     }
 }
 
@@ -495,7 +505,8 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
         signals.extend(task_signal(task, inputs));
     }
     signals.extend(inputs.pr_requests.iter().enumerate().map(|(i, r)| pr::request_signal(i, r)));
-    let logins = login::items(inputs, now_ms);
+    let mut quiet = login::items(inputs, now_ms);
+    quiet.extend(kept::items(inputs, now_ms));
 
     // One item per subject: the most urgent signal wins, the oldest within a
     // kind, and the others' kinds go in `also`.
@@ -519,7 +530,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
             item(winner, also, terminal, &tasks, &terminals, inputs, now_ms)
         })
         .collect();
-    items.extend(logins);
+    items.extend(quiet);
     // The reader's own and nobody's first, then everyone else's (ov-633).
     items.sort_by(|a, b| {
         (concern::is_others(a), a.rank).cmp(&(concern::is_others(b), b.rank)).then_with(|| a.id.cmp(&b.id))
@@ -630,7 +641,7 @@ pub fn redact_list_below_control(items: Vec<pb::NeedsYouItem>) -> Vec<pb::NeedsY
 pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
     // A login item names a person, never a command or a path, and its button
     // is answered at any scope (`claude.sign_in`): nothing to take out.
-    if item.kind() == NeedsYouKind::ClaudeLogin {
+    if matches!(item.kind(), NeedsYouKind::ClaudeLogin | NeedsYouKind::Fyi) {
         return item;
     }
     let agent = item
@@ -645,7 +656,7 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
         NeedsYouKind::Decision => "Needs a decision".to_string(),
         NeedsYouKind::PrThread => "A review thread needs you".to_string(),
         NeedsYouKind::PrReview => "A pull request wants your review".to_string(),
-        NeedsYouKind::ClaudeLogin => item.question.clone(),
+        NeedsYouKind::ClaudeLogin | NeedsYouKind::Fyi => item.question.clone(),
         NeedsYouKind::Review | NeedsYouKind::Unspecified => "Ready for review".to_string(),
     };
     pb::NeedsYouItem {

@@ -36,6 +36,9 @@ public enum NeedsYouKind: String, Hashable, Sendable, Decodable {
     /// own devices with a `sign_in` action, and to the owner as a line with no
     /// button. Ranks with a block.
     case claudeLogin = "claude_login"
+    /// A quiet notice, not an ask (ov-756): a member kept a ruling, and the
+    /// workspace's lead is told who kept what. No buttons; it ranks last.
+    case fyi
 
     public init(from decoder: Decoder) throws {
         let word = try decoder.singleValueContainer().decode(String.self)

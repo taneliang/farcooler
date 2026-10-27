@@ -1115,13 +1115,14 @@ public struct WidgetItemRow: Sendable, Equatable, Identifiable {
         case .prReview: kind = "PR Review"
         case .prThread: kind = "PR Thread"
         case .claudeLogin: kind = "Login"
+        case .fyi: kind = "FYI"
         case .unknown: kind = "Needs You"
         }
         let title = item.question.count > Self.titleWidth
             ? String(item.question.prefix(Self.titleWidth - 1)) + "…" : item.question
         line = [item.workspaceName, kind, title].filter { !$0.isEmpty }.joined(separator: " · ")
         hedged = item.isDerived
-        status = item.kind == .review || item.kind == .prReview ? "done" : "blocked"
+        status = item.kind == .review || item.kind == .prReview || item.kind == .fyi ? "done" : "blocked"
         terminal = item.terminal?.id
     }
 }
