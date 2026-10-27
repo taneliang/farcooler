@@ -88,6 +88,10 @@ pub struct TeammateOffer {
 
 /// The roles that put a person in a team for this purpose. `billing` grants
 /// nothing (ov-480 §2), so it neither vouches for anyone nor is vouched for.
+///
+/// The relay's `TEAMMATE_RULE` (`services/relay/src/ceremony-reply.ts`) is the
+/// same rule for who may post a teammate's sealed reply, and the two must
+/// agree: a phone this admits that the relay refuses can't reach a browser.
 const ROLES: &[&str] = &["admin", "member"];
 
 /// The teammates of `own_account`, from the directory's own answers.

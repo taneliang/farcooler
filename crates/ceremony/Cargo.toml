@@ -33,6 +33,9 @@ rand = "0.10"
 # `getrandom`'s feature: the caller's RNG is `rand`'s, which already knows how
 # to ask a browser. The same aead, hkdf and curve25519 versions as the rest of
 # the tree, so this adds hpke and x25519-dalek and no second copy of either.
+# Checked against RFC 9180's test vectors upstream but never formally
+# audited: acceptable for keeping a topology blob from the relay (ov-769
+# security review, N5).
 hpke = { version = "0.15", default-features = false, features = ["alloc", "x25519", "chacha"] }
 # The reply key and the sealed reply as unpadded base64url: compact enough
 # that a full sealed manifest stays under the relay's 4 KB with room to

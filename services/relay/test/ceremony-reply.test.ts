@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
-import { REPLY_MAX, REPLY_TTL_MS } from '../src/ceremony-reply'
+import { REPLIES_MAX, REPLY_MAX, REPLY_TTL_MS } from '../src/ceremony-reply'
 import fixture from './fixtures/ceremony-reply.json'
 
 // The sealed ceremony reply (ov-769): who may post one, who may read it, that
@@ -69,21 +69,24 @@ async function stored(): Promise<Record<string, unknown>[]> {
   return (await env.DB.prepare(`SELECT * FROM ceremony_replies`).all()).results
 }
 
-/// `admin` an admin and `member` a member of one team; `role` sets the first's.
-async function team(admin: string, member: string, role: 'admin' | 'member' = 'admin'): Promise<void> {
+/// A team `id` holding `members`, each with a role. `personal`, when given,
+/// makes it that account's personal team.
+async function team(id: string, members: [string, 'admin' | 'member' | 'billing'][], personal: string | null = null): Promise<void> {
   const now = Date.now()
   await env.DB.batch([
-    env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, created_at) VALUES (?, ?), (?, ?)`).bind(admin, now, member, now),
-    env.DB.prepare(`INSERT INTO teams (id, name, created_at) VALUES ('team_1', 'Team', ?)`).bind(now),
-    env.DB.prepare(`INSERT INTO memberships (team_id, account_id, role, joined_at) VALUES ('team_1', ?, ?, ?), ('team_1', ?, 'member', ?)`).bind(
-      admin,
-      role,
-      now,
-      member,
-      now,
+    ...members.map(([account]) => env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, created_at) VALUES (?, ?)`).bind(account, now)),
+    env.DB.prepare(`INSERT INTO teams (id, name, personal_of, created_at) VALUES (?, 'Team', ?, ?)`).bind(id, personal, now),
+    ...members.map(([account, role]) =>
+      env.DB.prepare(`INSERT INTO memberships (team_id, account_id, role, joined_at) VALUES (?, ?, ?, ?)`).bind(id, account, role, now),
     ),
   ])
 }
+
+/// What a read answers with, for one reply.
+const one = (sealed: string, postedBy: string) => ({ replies: [{ sealed, posted_by: postedBy }] })
+
+/// A sealed-shaped reply that isn't the fixture: 64 bytes of `n`.
+const junk = (n: number) => base64Url(new Uint8Array(64).fill(n))
 
 let logged: string[] = []
 
@@ -117,7 +120,7 @@ describe('the sealed ceremony reply', () => {
 
     const first = await take(ALICE)
     expect(first.status).toBe(200)
-    expect(first.body).toEqual({ sealed: fixture.sealed })
+    expect(first.body).toEqual(one(fixture.sealed, ALICE))
     expect(first.headers.get('cache-control')).toBe('no-store')
 
     // A read deletes it: the second read gets nothing.
@@ -131,29 +134,69 @@ describe('the sealed ceremony reply', () => {
     expect(await stored()).toEqual([])
   })
 
-  it('takes a reply from an admin of a team the account is in', async () => {
-    await team('carol', ALICE)
+  it('takes a reply from a teammate who is an admin or a member, and says who posted it', async () => {
+    await team('team_1', [['carol', 'admin'], ['dave', 'member'], [ALICE, 'member']])
     expect((await post('carol')).status).toBe(200)
-    expect((await take(ALICE)).body).toEqual({ sealed: fixture.sealed })
+    expect((await post('dave', { ceremony: CEREMONY, account: ALICE, sealed: junk(1) })).status).toBe(200)
+    expect((await take(ALICE)).body).toEqual({
+      replies: [
+        { sealed: fixture.sealed, posted_by: 'carol' },
+        { sealed: junk(1), posted_by: 'dave' },
+      ],
+    })
   })
 
-  it('refuses one from a team member who isn’t its admin', async () => {
-    await team('dave', ALICE, 'member')
-    expect((await post('dave')).status).toBe(403)
+  it('refuses a teammate whose role, or the account’s, is billing', async () => {
+    await team('team_1', [['erin', 'billing'], [ALICE, 'member']])
+    expect((await post('erin')).status).toBe(403)
+    await team('team_2', [['carol', 'admin'], [ALICE, 'billing']])
+    expect((await post('carol')).status).toBe(403)
   })
 
-  it('refuses one from an admin of a team the account isn’t in', async () => {
-    await team('carol', 'someone_else')
+  it('refuses a teammate only through a personal team, or of a team the account isn’t in', async () => {
+    // Impossible through the routes, and refused anyway.
+    await team('personal_1', [['carol', 'admin'], [ALICE, 'member']], 'carol')
+    expect((await post('carol')).status).toBe(403)
+    await team('team_2', [['carol', 'admin'], ['someone_else', 'member']])
     expect((await post('carol')).status).toBe(403)
   })
 
   it('lets only the offer’s account read it, and another’s read takes nothing', async () => {
     await post(ALICE)
     expect((await take('mallory')).status).toBe(404)
-    // The poster too, when the poster is a teammate's admin.
-    await team('carol', ALICE)
+    // The poster too, when the poster is a teammate.
+    await team('team_1', [['carol', 'admin'], [ALICE, 'member']])
     expect((await take('carol')).status).toBe(404)
     expect((await take(ALICE)).status).toBe(200)
+  })
+
+  it('doesn’t let one account’s post under a ceremony block another’s', async () => {
+    // Mallory saw Alice's offer and posts junk under its ceremony, for herself.
+    expect((await post('mallory', { ceremony: CEREMONY, account: 'mallory', sealed: junk(9) })).status).toBe(200)
+    expect((await post(ALICE)).status).toBe(200)
+    expect((await take(ALICE)).body).toEqual(one(fixture.sealed, ALICE))
+    expect((await take('mallory')).body).toEqual(one(junk(9), 'mallory'))
+  })
+
+  it('doesn’t let a teammate’s junk post block the account’s own', async () => {
+    await team('team_1', [['carol', 'admin'], [ALICE, 'member']])
+    expect((await post('carol', { ceremony: CEREMONY, account: ALICE, sealed: junk(9) })).status).toBe(200)
+    expect((await post(ALICE)).status).toBe(200)
+    const replies = (await take(ALICE)).body.replies
+    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE })
+    expect(replies).toHaveLength(2)
+  })
+
+  it('holds at most four replies for one ceremony and account', async () => {
+    expect(REPLIES_MAX).toBe(4)
+    const mates = ['m1', 'm2', 'm3', 'm4']
+    await team('team_1', [...mates.map(m => [m, 'member'] as [string, 'member']), [ALICE, 'member']])
+    expect((await post(ALICE)).status).toBe(200)
+    for (const [i, mate] of mates.entries()) {
+      const answer = await post(mate, { ceremony: CEREMONY, account: ALICE, sealed: junk(i + 1) })
+      expect(answer.status, mate).toBe(i < 3 ? 200 : 409)
+    }
+    expect((await take(ALICE)).body.replies).toHaveLength(4)
   })
 
   it('is gone 120 s after it was posted', async () => {
@@ -179,26 +222,37 @@ describe('the sealed ceremony reply', () => {
     expect((await post(ALICE, atLimit)).status).toBe(200)
   })
 
-  it('keeps the first reply to a ceremony and refuses a second', async () => {
-    await team('carol', ALICE)
+  it('keeps a poster’s first reply to a ceremony and refuses its second', async () => {
     expect((await post(ALICE)).status).toBe(200)
-    const other = { ceremony: CEREMONY, account: ALICE, sealed: base64Url(new Uint8Array(64).fill(7)) }
-    expect((await post('carol', other)).status).toBe(409)
-    expect((await take(ALICE)).body).toEqual({ sealed: fixture.sealed })
+    expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(7) })).status).toBe(409)
+    expect((await take(ALICE)).body).toEqual(one(fixture.sealed, ALICE))
   })
 
-  it('takes a new reply to a ceremony whose old one outlived its window', async () => {
+  it('takes a poster’s new reply once its old one outlived its window', async () => {
     const start = Date.now()
     await post(ALICE)
     vi.spyOn(Date, 'now').mockReturnValue(start + REPLY_TTL_MS + 1000)
-    const other = { ceremony: CEREMONY, account: ALICE, sealed: base64Url(new Uint8Array(64).fill(7)) }
-    expect((await post(ALICE, other)).status).toBe(200)
-    expect((await take(ALICE)).body).toEqual({ sealed: other.sealed })
+    expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(7) })).status).toBe(200)
+    expect((await take(ALICE)).body).toEqual(one(junk(7), ALICE))
   })
 
   it('needs a session on both routes', async () => {
     expect((await post(null)).status).toBe(401)
     expect((await take(null)).status).toBe(401)
+  })
+
+  it('spends the per-account limit on both routes, before any D1 read', async () => {
+    const keys: string[] = []
+    const limit = { limit: async ({ key }: { key: string }) => (keys.push(key), { success: keys.length <= 2 }) }
+    const limited = { ...(env as any), CEREMONY_REPLY_LIMIT: limit }
+    const ask = async (method: string, path: string, body?: string) =>
+      (await worker.fetch(new Request(`https://relay.test${path}`, { method, headers: { authorization: `Bearer ${await sessionFor(ALICE)}` }, body }), limited as never, ctx)).status
+    const body = JSON.stringify({ ceremony: CEREMONY, account: ALICE, sealed: fixture.sealed })
+    expect(await ask('POST', '/v1/ceremony/reply', body)).toBe(200)
+    expect(await ask('GET', `/v1/ceremony/reply/${CEREMONY}`)).toBe(200)
+    expect(await ask('POST', '/v1/ceremony/reply', body)).toBe(429)
+    expect(await ask('GET', `/v1/ceremony/reply/${CEREMONY}`)).toBe(429)
+    expect(keys).toEqual([ALICE, ALICE, ALICE, ALICE])
   })
 
   it('takes each route by one method only', async () => {

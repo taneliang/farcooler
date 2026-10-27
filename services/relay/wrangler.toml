@@ -216,6 +216,16 @@ type = "ratelimit"
 namespace_id = "1021"
 simple = { limit = 120, period = 60 }
 
+# Per-account throttle on both sealed ceremony-reply routes (ov-769), keyed on
+# the verified account and spent before any D1 read. A browser polls the read
+# every two seconds for the 120 s a ceremony lasts, 30 a minute, and a phone
+# posts once; 120 a minute is four times that. Ids 1031-1034, one per channel.
+[[unsafe.bindings]]
+name = "CEREMONY_REPLY_LIMIT"
+type = "ratelimit"
+namespace_id = "1031"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # preview
 #
@@ -275,6 +285,13 @@ type = "ratelimit"
 namespace_id = "1022"
 simple = { limit = 120, period = 60 }
 
+# Per-account throttle on the ceremony-reply routes (ov-769); the stable block says why 120.
+[[env.preview.unsafe.bindings]]
+name = "CEREMONY_REPLY_LIMIT"
+type = "ratelimit"
+namespace_id = "1032"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # canary
 #
@@ -329,6 +346,13 @@ type = "ratelimit"
 namespace_id = "1024"
 simple = { limit = 120, period = 60 }
 
+# Per-account throttle on the ceremony-reply routes (ov-769); the stable block says why 120.
+[[env.canary.unsafe.bindings]]
+name = "CEREMONY_REPLY_LIMIT"
+type = "ratelimit"
+namespace_id = "1034"
+simple = { limit = 120, period = 60 }
+
 # ---------------------------------------------------------------------------
 # local
 #
@@ -380,4 +404,11 @@ simple = { limit = 10, period = 60 }
 name = "DIRECTORY_ME_LIMIT"
 type = "ratelimit"
 namespace_id = "1023"
+simple = { limit = 120, period = 60 }
+
+# Per-account throttle on the ceremony-reply routes (ov-769); the stable block says why 120.
+[[env.local.unsafe.bindings]]
+name = "CEREMONY_REPLY_LIMIT"
+type = "ratelimit"
+namespace_id = "1033"
 simple = { limit = 120, period = 60 }

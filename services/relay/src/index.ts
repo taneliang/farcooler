@@ -69,6 +69,8 @@ export interface Env extends PasskeyConfig {
   /// web client's Worker calls it on every page load and API call. Fails open
   /// when absent, like `AUTH_LIMIT`.
   DIRECTORY_ME_LIMIT?: RateLimit
+  /// Throttles both sealed ceremony-reply routes per account (ov-769). Fails open when absent.
+  CEREMONY_REPLY_LIMIT?: RateLimit
   METRICS: Metrics
   WORKOS_CLIENT_ID: string
   /// The `iss` this environment's tokens must carry. Required, not optional:
@@ -163,9 +165,9 @@ export default {
   /// The cron trigger, every five minutes (`[triggers]` in wrangler.toml).
   /// See `sweepQuiet`.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await sweepCeremonyReplies(env)
     await sweepQuiet(env)
     await pruneSessionsSeen(env)
+    await sweepCeremonyReplies(env)
   },
 }
 

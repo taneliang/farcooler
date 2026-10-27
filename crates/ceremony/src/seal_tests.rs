@@ -37,7 +37,7 @@ fn asking(key: &ReplyKey) -> Offer {
 
 fn sealed_for(o: &Offer) -> (Manifest, String) {
     let m = manifest(o, vec![runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4")]);
-    let sealed = seal_reply(&m, o.reply_key.as_deref().unwrap()).unwrap();
+    let sealed = seal_reply(o, &m).unwrap();
     (m, sealed)
 }
 
@@ -66,12 +66,15 @@ fn the_ciphertext_holds_none_of_the_reply() {
 #[test]
 fn a_wrong_key_does_not_open_it() {
     let key = ReplyKey::generate();
-    let (_, sealed) = sealed_for(&asking(&key));
+    let o = asking(&key);
+    let (_, sealed) = sealed_for(&o);
 
-    // Another device, showing the same ceremony with its own key.
+    // The same offer in every echo, the same ceremony id included, naming
+    // another key: only the key differs, so only the key can refuse it.
     let other = ReplyKey::generate();
-    let theirs = Offer { reply_key: Some(other.public().into()), ..asking(&key) };
+    let theirs = Offer { reply_key: Some(other.public().into()), ..o.clone() };
     assert_eq!(open_reply(&sealed, &other, &theirs), Err(CeremonyError::Unopened));
+    assert!(open_reply(&sealed, &key, &o).is_ok(), "the right key must open it, or this tests nothing");
 }
 
 #[test]
@@ -137,9 +140,33 @@ fn any_changed_ciphertext_byte_fails_to_open() {
 #[test]
 fn an_offer_that_named_another_key_takes_no_sealed_reply() {
     let key = ReplyKey::generate();
-    let (_, sealed) = sealed_for(&asking(&key));
-    let plain = offer("Chrome", "acct_1", KEY_A, None);
-    assert!(matches!(open_reply(&sealed, &key, &plain), Err(CeremonyError::Malformed(_))));
+    let o = asking(&key);
+    let (_, sealed) = sealed_for(&o);
+    // The same ceremony, so the AAD matches and the key would open it: only
+    // the offer's own reply key refuses it.
+    let none = Offer { reply_key: None, ..o.clone() };
+    assert!(matches!(open_reply(&sealed, &key, &none), Err(CeremonyError::Malformed(_))));
+    let other = Offer { reply_key: Some(ReplyKey::generate().public().into()), ..o.clone() };
+    assert!(matches!(open_reply(&sealed, &key, &other), Err(CeremonyError::Malformed(_))));
+}
+
+#[test]
+fn a_reply_is_sealed_only_for_the_offer_it_answers() {
+    let key = ReplyKey::generate();
+    let o = asking(&key);
+    let m = manifest(&o, vec![runner("SHA256:x")]);
+    assert!(seal_reply(&o, &m).is_ok());
+
+    let no_key = Offer { reply_key: None, ..o.clone() };
+    assert!(matches!(seal_reply(&no_key, &m), Err(CeremonyError::Malformed(_))));
+    for other in [
+        Offer { ceremony: "f".repeat(32), ..o.clone() },
+        Offer { account: "acct_2".into(), ..o.clone() },
+        Offer { channel: format!("{}x", o.channel), ..o.clone() },
+        Offer { key_a: KEY_B.into(), ..o.clone() },
+    ] {
+        assert!(matches!(seal_reply(&other, &m), Err(CeremonyError::Malformed(_))), "{other:?}");
+    }
 }
 
 #[test]
@@ -166,20 +193,22 @@ fn a_manifest_over_budget_is_not_sealed_and_one_at_budget_fits_the_relay() {
     m.runners[0].label.push_str(&"x".repeat(room));
     assert_eq!(encode_manifest(&m).len(), BUDGET);
 
-    let sealed = seal_reply(&m, key.public()).unwrap();
+    let sealed = seal_reply(&o, &m).unwrap();
     // The body a phone posts: the relay refuses anything over 4096 bytes.
     let body = serde_json::json!({ "ceremony": o.ceremony, "account": "a".repeat(64), "sealed": sealed }).to_string();
     assert!(body.len() <= 4096, "a sealed manifest at budget posts {} bytes", body.len());
 
     m.runners[0].label.push('x');
-    assert_eq!(seal_reply(&m, key.public()), Err(CeremonyError::TooLarge));
+    assert_eq!(seal_reply(&o, &m), Err(CeremonyError::TooLarge));
 }
 
 #[test]
 fn a_reply_key_that_is_not_a_key_is_refused() {
-    let m = manifest(&offer("Chrome", "acct_1", KEY_A, None), vec![]);
+    let o = offer("Chrome", "acct_1", KEY_A, None);
+    let m = manifest(&o, vec![]);
     for bad in ["", "AAAA", "not base64 at all", &"A".repeat(44)] {
-        assert!(matches!(seal_reply(&m, bad), Err(CeremonyError::Malformed(_))), "{bad}");
+        let asked = Offer { reply_key: Some(bad.into()), ..o.clone() };
+        assert!(matches!(seal_reply(&asked, &m), Err(CeremonyError::Malformed(_))), "{bad}");
     }
 }
 
@@ -238,7 +267,7 @@ fn write_the_relays_fixture() {
     let key = ReplyKey::generate();
     let o = Offer { ceremony: "0123456789abcdef0123456789abcdef".into(), ..asking(&key) };
     let m = manifest(&o, vec![runner(FIXTURE_HOST_KEY)]);
-    let sealed = seal_reply(&m, key.public()).unwrap();
+    let sealed = seal_reply(&o, &m).unwrap();
     let f = Fixture { secret: key.secret(), offer: o, manifest: encode_manifest(&m), host_key: FIXTURE_HOST_KEY.into(), sealed };
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../services/relay/test/fixtures/ceremony-reply.json");
     std::fs::write(path, serde_json::to_string_pretty(&f).unwrap() + "\n").unwrap();

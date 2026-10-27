@@ -19,6 +19,18 @@
 //! exactly as the module note on the QR leg says, and sealing changes who can
 //! READ a reply, not who can WRITE one.
 //!
+//! ## What it does not stop
+//!
+//! The offer is public, so anyone who saw it holds everything a valid reply
+//! needs: the reply key and every echo. A reply they seal OPENS, and passes
+//! [`accept_manifest`], with their own machines and host keys in it. The QR
+//! leg's residual risk is someone who "filmed the first code, is in the room";
+//! the relay removes "in the room", leaving whoever it lets post (the account
+//! and its teammates, `services/relay/src/ceremony-reply.ts`). What stops a
+//! forged reply is the comparison code the browser shows (slice 8): computed
+//! over the manifest, matched by the person against the granting phone's
+//! screen, before the browser keeps anything.
+//!
 //! The associated data is the reply's four echoes, `ceremony ‖ account ‖
 //! channel ‖ target`, each prefixed with its length as four big-endian bytes.
 //! Plain concatenation would let `"acct_1" ‖ "canary"` and `"acct_1c" ‖
@@ -83,7 +95,9 @@ impl ReplyKey {
     }
 
     /// The secret half, as unpadded base64url. Only for the device's own
-    /// storage: anything that holds this can read the reply.
+    /// storage: anything that holds this can read the reply. Not zeroized once
+    /// it's a `String`, so a browser keeps it in `sessionStorage` at most and
+    /// drops it once the reply is taken or the ceremony abandoned.
     pub fn secret(&self) -> String {
         Base64UrlUnpadded::encode_string(&self.secret.to_bytes())
     }
@@ -102,12 +116,22 @@ impl std::fmt::Debug for ReplyKey {
 
 /// Seal a reply to the key its offer named, for the relay to carry.
 ///
-/// `reply_key` is the scanned offer's [`Offer::reply_key`]. The associated
-/// data comes from the manifest, which [`super::manifest`] built from that
-/// same offer, so it names the ceremony, account, channel and key the reply
-/// answers. A manifest over [`BUDGET`] is refused as `TooLarge`, as it is on a
-/// screen: the relay's 4 KB is sized for one that fits.
-pub fn seal_reply(manifest: &Manifest, reply_key: &str) -> Result<String, CeremonyError> {
+/// `offer` is the scanned offer and `manifest` the reply [`super::manifest`]
+/// built from it. Taking both, rather than a bare key, means a reply sealed to
+/// one offer's key with another's echoes can't be built: a manifest whose
+/// ceremony, account, channel or target isn't the offer's is refused as
+/// `Malformed`, and so is an offer that asked for no sealed reply. A manifest
+/// over [`BUDGET`] is refused as `TooLarge`, as it is on a screen: the relay's
+/// 4 KB is sized for one that fits.
+pub fn seal_reply(offer: &Offer, manifest: &Manifest) -> Result<String, CeremonyError> {
+    let Some(reply_key) = offer.reply_key.as_deref() else {
+        return Err(CeremonyError::Malformed("this offer asked for no sealed reply".into()));
+    };
+    let target = fingerprint(&offer.key_a).unwrap_or_default();
+    let echoes = (&manifest.ceremony, &manifest.account, &manifest.channel, &manifest.target);
+    if echoes != (&offer.ceremony, &offer.account, &offer.channel, &target) {
+        return Err(CeremonyError::Malformed("this reply answers a different offer".into()));
+    }
     let plaintext = encode_manifest(manifest);
     if plaintext.len() > BUDGET {
         return Err(CeremonyError::TooLarge);
@@ -115,7 +139,7 @@ pub fn seal_reply(manifest: &Manifest, reply_key: &str) -> Result<String, Ceremo
     let bytes = decode_exact(reply_key, "reply key")?;
     let public = <Kem as hpke::Kem>::PublicKey::from_bytes(&bytes)
         .map_err(|_| CeremonyError::Malformed("the reply key is not a key".into()))?;
-    let aad = associated(&manifest.ceremony, &manifest.account, &manifest.channel, &manifest.target);
+    let aad = associated(&offer.ceremony, &offer.account, &offer.channel, &target);
     let (encapped, ciphertext) = hpke::single_shot_seal_with_rng::<Aead, Kdf, Kem>(
         &OpModeS::Base,
         &public,
