@@ -2,10 +2,10 @@
 """The machine-wide heavy-job lock, shared by scripts/lane-gate.py and scripts/heavy (ov-831, ov-836).
 
 Several lanes share one Mac. Two builds or test suites at once push the load past
-100 and make timing tests fail for no reason, so anything heavy takes one flock on
-lane-gate.lock in the temp dir first. A second taker waits and says who holds it
-(worktree, PID, start time, what it runs), read from a .holder file beside the lock.
-Closing the file releases the flock, so a holder that dies frees the lock itself.
+100 and make timing tests fail for no reason, so anything heavy takes the lock on
+lane-gate.lock in the temp dir first: a first-come, first-served queue of ticket files in
+lane-gate.lock.queue/. The oldest live ticket runs; a waiter says who holds it (worktree,
+PID, start time, what it runs) and how many are ahead. A holder that dies loses its place.
 
     scripts/heavy_lock.py --self-test
 
@@ -52,40 +52,75 @@ def wait_for_load(limit=LOAD_LIMIT, poll=30, load=load1, say=print):
         time.sleep(poll)
 
 
-def read_holder(path):
+def queue_dir(path):
+    return path.with_name(path.name + ".queue")
+
+
+def pid_alive(pid):
     try:
-        return (path.with_name(path.name + ".holder").read_text().strip()) or "an unknown holder"
-    except OSError:
-        return "an unknown holder"
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def live_tickets(qd):
+    """The queue, oldest first: (ticket path, text). A ticket whose process is gone is deleted."""
+    out = []
+    for t in sorted(qd.glob("*.ticket")):
+        try:
+            pid = int(t.name.split(".")[0].split("-")[1])
+            if not pid_alive(pid):
+                t.unlink(missing_ok=True)
+                continue
+            out.append((t, t.read_text().strip()))
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+def read_holder(path):
+    """Who is at the head of the queue: the one running now."""
+    held = live_tickets(queue_dir(path))
+    return held[0][1] if held else "an unknown holder"
 
 
 @contextlib.contextmanager
 def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=print):
-    """Hold the machine-wide heavy-job lock for one job. A waiter names the holder."""
+    """Wait in a first-come, first-served queue for the machine-wide heavy-job lock; hold it for the block.
+
+    A ticket file named by arrival time and PID is the place in line; the oldest ticket whose
+    process is alive runs, and a ticket left by a dead process is deleted. A flock is not a
+    queue (the releaser retakes it before a waiter polls), which is why this is tickets.
+    A waiter names the holder and how many are ahead.
+    """
     path = path or lock_path()
-    f = open(path, "a+")
+    qd = queue_dir(path)
+    qd.mkdir(parents=True, exist_ok=True)
+    text = f"worktree {worktree}, PID {os.getpid()}, started {time.strftime('%Y-%m-%d %H:%M:%S')}, running {job}\n"
+    with open(qd / ".enter", "a+") as enter:  # taking a number is one step at a time, so numbers match arrival
+        fcntl.flock(enter, fcntl.LOCK_EX)
+        ticket = qd / f"{time.time_ns():020d}-{os.getpid()}.ticket"
+        tmp = qd / f".new-{os.getpid()}-{time.time_ns()}"
+        tmp.write_text(text)
+        os.rename(tmp, ticket)
     started = time.time()
     announced = -1
-    holder = path.with_name(path.name + ".holder")
-    got = False
     try:
         while True:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                got = True
+            queue = live_tickets(qd)
+            if not queue or queue[0][0] == ticket:
                 break
-            except OSError:
-                if time.time() - started >= (announced + 1) * announce:
-                    announced += 1
-                    say(f"  waiting for the machine-wide heavy-job lock ({job}); held by {read_holder(path)}", flush=True)
-                time.sleep(poll)
-        holder.write_text(f"worktree {worktree}, PID {os.getpid()}, started {time.strftime('%Y-%m-%d %H:%M:%S')}, running {job}\n")
+            if time.time() - started >= (announced + 1) * announce:
+                announced += 1
+                ahead = [i for i, (t, _) in enumerate(queue) if t == ticket]
+                say(f"  waiting for the machine-wide heavy-job lock ({job}); held by {queue[0][1]} ({ahead[0] if ahead else len(queue)} in line ahead of you)", flush=True)
+            time.sleep(poll)
         yield
     finally:
-        if got:
-            with contextlib.suppress(OSError):
-                holder.unlink()
-        f.close()  # closing releases the flock
+        ticket.unlink(missing_ok=True)
 
 
 def self_test():
@@ -135,11 +170,45 @@ def self_test():
         expect("the waiter names the holder's worktree, PID and start time",
                bool(said) and "/wt/first" in said[0] and f"PID {os.getpid()}" in said[0]
                and re.search(r"started \d{4}-\d\d-\d\d \d\d:\d\d:\d\d", said[0]) is not None, True)
-        expect("the holder note goes when the lock does", lock.with_name(lock.name + ".holder").exists(), False)
+        expect("the ticket goes when the lock does", list(queue_dir(lock).glob("*.ticket")), [])
         expect("CI turns the lock off", (os.environ.update(CI="1"), lock_wanted())[1], False)
         os.environ.pop("CI")
         expect("--no-lock turns the lock off", lock_wanted(True), False)
         expect("otherwise it is on", lock_wanted(), True)
+
+        # First come, first served: five takers arrive 0.1s apart while the first holds; they run in arrival order.
+        # (A bare flock would let whichever polled first win.)
+        order.clear()
+        gate = threading.Event()
+        def taker(n):
+            with machine_lock(f"/wt/{n}", f"job{n}", path=lock, poll=0.01, say=lambda *a, **k: None):
+                order.append(n)
+                if n == 0:
+                    gate.wait(5)
+                time.sleep(0.02)
+        ths = []
+        for n in range(5):
+            th = threading.Thread(target=taker, args=(n,))
+            th.start()
+            ths.append(th)
+            time.sleep(0.1)
+        gate.set()
+        for th in ths:
+            th.join(5)
+        expect("takers run in arrival order", order, [0, 1, 2, 3, 4])
+
+        # A ticket left by a dead process is skipped (and cleaned up), not waited on.
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        qd = queue_dir(lock)
+        (qd / f"{1:020d}-{dead.pid}.ticket").write_text("worktree /wt/dead, PID gone\n")
+        got = []
+        th = threading.Thread(target=lambda: [got.append("ran") for _ in [machine_lock("/wt/live", "x", path=lock, poll=0.01, say=print).__enter__()]])
+        th.start()
+        th.join(2)
+        expect("a dead holder's ticket is skipped", (got, list(qd.glob(f"*-{dead.pid}.ticket"))), (["ran"], []))
+        for t in qd.glob("*.ticket"):
+            t.unlink()
 
         # Through the real wrapper: the wrapper holds the lock, so an in-process taker waits and names it.
         marks = t / "marks"

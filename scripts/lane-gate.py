@@ -57,10 +57,11 @@ is 20 or more.
 
 Only one heavy job runs on this Mac at a time (ov-831). Ten lanes each running a
 full gate pushed the load past 190 and made timing tests fail for no reason, so a
-heavy job takes a machine-wide flock on lane-gate.lock in the temp dir first. A
-second gate waits and says who holds it (worktree, PID, start time). The lock is
-held for one job and let go before the next, so another gate's heavy job can slip
-in between rather than wait out a whole run. Light jobs (wire, doc-comments,
+gate takes a place in a first-come, first-served queue (scripts/heavy_lock.py, shared with
+scripts/heavy) before its first heavy job. A waiting gate says who holds it (worktree, PID,
+start time) and how many are ahead. The place is held for the gate's whole run of heavy jobs, so
+gates finish one after another, oldest first; --release-between-jobs queues again per job, which
+interleaves gates and makes each take as long as all of them. Light jobs (wire, doc-comments,
 relay, site) never take it. --no-lock turns it off, and it is off by default when
 the CI environment variable is set: CI runners are separate machines.
 """
@@ -599,6 +600,7 @@ def main(argv):
     ap.add_argument("--skip", default="", help="comma-separated jobs to leave out")
     ap.add_argument("--log-dir", default="", help="where each step's full output goes (default: a new temp dir)")
     ap.add_argument("--no-load-wait", action="store_true", help="do not wait for the load average to fall")
+    ap.add_argument("--release-between-jobs", action="store_true", help="queue again for each heavy job instead of holding the lock for the whole gate")
     ap.add_argument("--no-lock", action="store_true", help="skip the machine-wide heavy-job lock (it is off already when CI is set)")
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--self-test", action="store_true")
@@ -662,12 +664,15 @@ def main(argv):
 def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
-    for j in chosen:
-        locked = j in HEAVY and hl.lock_wanted(getattr(args, "no_lock", False))
-        with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
-            failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
-        if locked:
-            time.sleep(LOCK_POLL * 1.5)  # flock is not a queue: without this the releaser retakes it before a waiter polls
+    heavy = [j for j in chosen if j in HEAVY] and hl.lock_wanted(getattr(args, "no_lock", False))
+    between = getattr(args, "release_between_jobs", False)
+    # By default one place in line covers all of this gate's heavy jobs, so gates finish one after
+    # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
+    with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
+        for j in chosen:
+            locked = bool(heavy) and between and j in HEAVY
+            with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
+                failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
     if "ios" in chosen:
         rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
     return failed
@@ -880,8 +885,21 @@ def self_test():
                 open_.append(n) if what == "start" else open_.remove(n)
                 spans.append(len([x for x in open_ if x != "g2light"]))
             expect("heavy jobs never overlap", max(spans), 1)
-            expect("the other gate's heavy job slipped in between the first gate's jobs",
-                   [l.split()[0] for l in seq if l.endswith("start") and not l.startswith("g2light")], ["g1h1", "g2h", "g1h2"])
+            expect("a gate holds the lock for all its heavy jobs, so the other gate waits for the whole gate",
+                   [l.split()[0] for l in seq if l.endswith("start") and not l.startswith("g2light")], ["g1h1", "g1h2", "g2h"])
+            ns.release_between_jobs = True
+            marks.write_text("")
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1", "h2"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                t2 = threading.Thread(target=run_jobs, args=(["g2h"], plans2, [], t, t, ctx, t, ns))
+                t2.start()
+                t1.join(10)
+                t2.join(10)
+            expect("--release-between-jobs queues again for each job, so the other gate slips in",
+                   [l.split()[0] for l in marks.read_text().split("\n") if l.endswith("start")], ["g1h1", "g2h", "g1h2"])
+            ns.release_between_jobs = False
             ns.no_lock = True
             marks.write_text("")
             with contextlib.redirect_stdout(io.StringIO()):
