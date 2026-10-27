@@ -304,8 +304,9 @@ struct KeyRefusalsTests {
         #expect(refusals.cannotBeProven)
         refusals.probed(proved: true)
         #expect(!refusals.cannotBeProven)
-        #expect(refusals.mayProbe(at: Self.t0))
-        #expect(refusals.mayProbe(at: Self.t0.addingTimeInterval(30)))
+        let first = refusals.mayProbe(at: Self.t0)
+        let second = refusals.mayProbe(at: Self.t0.addingTimeInterval(30))
+        #expect(first && second)
     }
 
     @Test func beingLetInForgetsTheProbesThatProvedNothing() {
