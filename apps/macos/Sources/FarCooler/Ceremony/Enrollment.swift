@@ -287,9 +287,11 @@ enum Enrollment {
     /// unusable key differently, and `fence::render` refuses the empty string
     /// as unusable — so passing it would refuse a v=1 device, or a phone whose
     /// own mint failed, an enrollment it is entitled to.
+    /// `forTeammate` is the Add Teammate's write: the runner keeps that
+    /// device nobody's until the `member add` that follows binds it (ov-828).
     static func arguments(
         key: String, label: String, clientID: String, scope: String, shell: Bool,
-        nodeKey: String, runner: String
+        nodeKey: String, runner: String, forTeammate: Bool = false
     ) -> [String] {
         var arguments = ["--json"]
         if !runner.isEmpty { arguments += ["--runner", runner] }
@@ -299,6 +301,7 @@ enum Enrollment {
         ]
         if shell { arguments.append("--shell-access") }
         if !shell, !nodeKey.isEmpty { arguments += ["--node-key", nodeKey] }
+        if forTeammate { arguments.append("--for-teammate") }
         return arguments
     }
 

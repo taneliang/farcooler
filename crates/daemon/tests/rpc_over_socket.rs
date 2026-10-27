@@ -2136,6 +2136,7 @@ fn enrollment_of(
         // for one, and a node key changes neither. It also asks this runner to
         // join the tunnel network, which none of these tests is about.
         node_key: String::new(),
+        for_teammate: false,
     }));
     req
 }
@@ -2196,6 +2197,7 @@ fn the_enrollment_request_cannot_ask_for_a_line_far_cooler_did_not_render() {
             scope: Scope::Control as i32,
             shell_access: false,
             node_key: String::new(),
+            for_teammate: false,
         }
     );
     for forbidden in ["restrict", "unrestricted", "raw", "options", "command", "force", "line"] {

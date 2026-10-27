@@ -3201,6 +3201,16 @@ message ClientEnroll {
   // Default empty, which is what a client built before this field existed
   // sends, and what every device that cannot join a tunnel sends today.
   string node_key = 6;
+  // The device is a teammate's, to be bound to them by the `member.set` that
+  // follows (the Mac's Add Teammate). Until that bind it is nobody's: refused
+  // every call, and never the owner's, which an unbound device otherwise is
+  // (ov-828 review S1). It only narrows what the new line may do, so any
+  // caller that may enroll may set it.
+  //
+  // Default false. A daemon from before this field drops it, and there only
+  // `host_admin` may enroll at all, so an unbound device there can grant
+  // nothing either.
+  bool for_teammate = 7;
 }
 
 message ClientEnrollResult {

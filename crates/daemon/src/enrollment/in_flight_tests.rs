@@ -44,6 +44,7 @@ fn asking(key: &str, client_id: &str, shell_access: bool) -> ClientEnroll {
         scope: Scope::HostAdmin as i32,
         shell_access,
         node_key: String::new(),
+        for_teammate: false,
     }
 }
 

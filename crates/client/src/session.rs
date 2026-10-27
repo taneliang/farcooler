@@ -1464,6 +1464,7 @@ impl Session {
                 // NOT an unusable key: the daemon reads absence and presence
                 // differently, and refuses only the second.
                 node_key: node_key.to_string(),
+                for_teammate: false,
             });
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(json!({

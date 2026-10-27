@@ -70,6 +70,7 @@ fn enroll(key: &str, client_id: &str, scope: Scope, shell_access: bool) -> Reque
             scope: scope as i32,
             shell_access,
             node_key: String::new(),
+            for_teammate: false,
         })),
         ..Default::default()
     }
@@ -315,6 +316,7 @@ async fn removing_a_member_revokes_a_device_whose_line_lands_late() {
                 scope: Scope::Control as i32,
                 shell_access: false,
                 node_key: String::new(),
+                for_teammate: false,
             };
             crate::enrollment::enroll_as(&svc, &request, Some(by_bob), None).await
         })

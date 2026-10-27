@@ -296,6 +296,7 @@ impl Store {
         // released again it's one `released_to_sweep` names (ov-783).
         for device in devices.iter().chain(&released) {
             tx.execute("DELETE FROM device_enrollers WHERE client_id = ?1", [device]).map_err(map_err)?;
+            tx.execute("DELETE FROM pending_teammates WHERE client_id = ?1", [device]).map_err(map_err)?;
         }
         // A device left off the list is released, never the owner's again.
         tx.execute(
@@ -339,7 +340,8 @@ impl Store {
     /// The released devices that must have no line and no session (ov-783):
     /// each was a member's and was taken off their list, or went with them.
     /// Not one a member's device enrolled that's waiting on its first binding
-    /// (`record_member_enrolled`): it's released too, and keeps its line. And
+    /// (`record_member_enrolled`), nor a teammate's the owner is adding
+    /// (`record_teammate_pending`, ov-828): released too, each keeps its line. And
     /// never one bound to a member, whatever an older build or a hand edit
     /// left in `released_devices`. Sorted.
     pub fn released_to_sweep(&self) -> Result<Vec<String>> {
@@ -348,6 +350,7 @@ impl Store {
             .prepare(
                 "SELECT r.client_id FROM released_devices r
                  WHERE NOT EXISTS (SELECT 1 FROM device_enrollers e WHERE e.client_id = r.client_id)
+                   AND NOT EXISTS (SELECT 1 FROM pending_teammates t WHERE t.client_id = r.client_id)
                    AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = r.client_id)
                  ORDER BY r.client_id",
             )

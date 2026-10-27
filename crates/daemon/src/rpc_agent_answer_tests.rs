@@ -44,6 +44,7 @@ async fn a_runner(label: &str) -> Runner {
             scope: Scope::Control as i32,
             shell_access: false,
             node_key: String::new(),
+            for_teammate: false,
         },
     )
     .await

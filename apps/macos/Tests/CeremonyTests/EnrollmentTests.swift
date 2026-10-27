@@ -36,6 +36,9 @@ struct EnrollmentTests {
 
         #expect(!restricted.contains("--shell-access"))
         #expect(plain.contains("--shell-access"))
+        // The owner's own devices are the owner's: only Add Teammate asks the
+        // runner to keep a device nobody's until bound (ov-828).
+        #expect(!restricted.contains("--for-teammate") && !plain.contains("--for-teammate"))
     }
 
     /// Order matters to nobody but a reader, but the subcommand has to survive

@@ -210,6 +210,8 @@ struct TeammateCeremonyTests {
         #expect(outcome.written == [Self.runner.id])
         let enroll = try #require(runner.call("enroll"))
         #expect(enroll.contains("read") && !enroll.contains("--shell-access"))
+        // Nobody's on the runner until the bind below (ov-828 S1).
+        #expect(enroll.contains("--for-teammate"))
         #expect(runner.calls.filter { $0.contains("enroll") }.count == 1, "one key, never Key B")
         let add = try #require(runner.call("add"))
         #expect(

@@ -420,6 +420,7 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
             scope: Scope::Control as i32,
             shell_access: false,
             node_key: String::new(),
+            for_teammate: false,
         },
     )
     .await

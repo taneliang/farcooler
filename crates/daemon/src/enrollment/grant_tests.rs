@@ -11,6 +11,8 @@ use crate::rpc::RpcFactory;
 use crate::service::Service;
 
 const KEY_OWNERS_PHONE: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMj phone";
+/// A teammate's phone the owner's Mac adds (S1).
+const KEY_TESS: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi phone";
 const KEY_BOBS_PHONE: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER phone";
 /// The browser's key. Ed25519 rather than its passkey: whether this runner's
 /// sshd takes passkeys is process-wide (`sshd_version`'s test owns it), and
@@ -61,6 +63,7 @@ fn enroll(key: &str, client_id: &str, scope: Scope, shell_access: bool, node_key
         scope: scope as i32,
         shell_access,
         node_key: node_key.into(),
+        for_teammate: false,
     };
     Request { method: "client.enroll".into(), payload: Some(request::Payload::ClientEnroll(p)), ..Default::default() }
 }
@@ -117,6 +120,35 @@ async fn a_members_control_phone_grants_nothing() {
     let (_dir, svc) = runner().await;
     let bobs = factory(&svc, Some("phone-b"), Scope::Control);
     let refused = call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::Control, false, NODE_BROWSER)).await;
-    assert_eq!(refused.err().as_deref(), Some("scope-denied:"));
+    assert_eq!(refused.err().as_deref(), Some("not-yours:not_owners_device"));
     assert!(!enrolled(&svc).await.contains(&"browser-b".to_string()));
+}
+
+/// The review's S1 (ov-828): the Mac's Add Teammate writes the teammate's
+/// key, then binds it in a second call. Between the two, a device bound to
+/// nobody read as the owner's, and could grant devices that stayed the
+/// owner's after the teammate was removed. Written `for_teammate`, it is
+/// nobody's from the write: refused, and left for the bind by the sweep.
+#[tokio::test]
+async fn a_teammates_device_waiting_on_its_bind_grants_nothing() {
+    let (_dir, svc) = runner().await;
+    let local = factory(&svc, None, Scope::HostAdmin);
+    let mut teammate = enroll(KEY_TESS, "phone-t", Scope::Control, false, "");
+    let Some(request::Payload::ClientEnroll(p)) = teammate.payload.as_mut() else { unreachable!() };
+    p.for_teammate = true;
+    call(&local, teammate).await.expect("the owner's Mac writes the teammate's key");
+    assert!(enrolled(&svc).await.contains(&"phone-t".to_string()));
+
+    let tess = factory(&svc, Some("phone-t"), Scope::Control);
+    let refused = call(&tess, enroll(KEY_BROWSER, "browser-t", Scope::Control, false, NODE_BROWSER)).await;
+    assert!(refused.as_ref().err().is_some_and(|e| e.starts_with("not-yours:")), "{refused:?}");
+    assert!(!enrolled(&svc).await.contains(&"browser-t".to_string()), "an unbound teammate granted a device");
+    assert!(!svc.store.released_to_sweep().unwrap().contains(&"phone-t".to_string()), "the sweep would take it before the bind");
+
+    // Bound, it is Tess's: still no grant, and no longer waiting.
+    let bind = pb::MemberSet { handle: "tess".into(), name: "Tess".into(), client_ids: vec!["phone-t".into()], ..Default::default() };
+    let bind = Request { method: "member.set".into(), payload: Some(request::Payload::MemberSet(bind)), ..Default::default() };
+    call(&local, bind).await.expect("bound");
+    let refused = call(&tess, enroll(KEY_BROWSER, "browser-t", Scope::Control, false, NODE_BROWSER)).await;
+    assert_eq!(refused.err().as_deref(), Some("not-yours:not_owners_device"));
 }

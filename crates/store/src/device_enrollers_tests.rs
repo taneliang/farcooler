@@ -67,5 +67,30 @@ fn the_migration_is_welcome() {
     let it = &crate::migrate::MIGRATIONS[48];
     assert!(std::ptr::fn_addr_eq(it.0, migration_0058_device_enrollers as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
     assert_eq!(it.1, crate::compat::Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 53);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 54);
+}
+
+/// 0063 (ov-828) is the 54th and `Welcome`.
+#[test]
+fn the_pending_teammates_migration_is_welcome() {
+    let it = &crate::migrate::MIGRATIONS[53];
+    assert!(std::ptr::fn_addr_eq(it.0, migration_0063_pending_teammates as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
+    assert_eq!(it.1, crate::compat::Older::Welcome);
+}
+
+/// A teammate's device the owner is adding (ov-828 S1) is nobody's from its
+/// write, and the sweep leaves it for the bind; bound, it is the member's
+/// and waits on nothing, and taken off them it is swept as any other.
+#[test]
+fn a_pending_teammate_is_released_until_bound_and_never_swept_meanwhile() {
+    let store = Store::open_in_memory().unwrap();
+    store.record_teammate_pending("phone-t").unwrap();
+    assert!(store.device_released("phone-t").unwrap());
+    assert!(!store.device_is_owners("phone-t").unwrap());
+    assert!(!store.released_to_sweep().unwrap().contains(&"phone-t".to_string()));
+
+    store.set_member("tess", "Tess", &["phone-t".to_string()]).unwrap();
+    assert!(!store.device_released("phone-t").unwrap());
+    store.set_member("tess", "Tess", &[]).unwrap();
+    assert!(store.released_to_sweep().unwrap().contains(&"phone-t".to_string()), "a pending mark outlived its bind");
 }

@@ -32,14 +32,24 @@ use farcooler_transport::Peer;
 use crate::people::Person;
 
 /// Whether a caller at `caller`, who is `who`, may grant what `request`
-/// asks. Refused as `scope_denied` naming `host_admin`, the scope that may.
+/// asks.
+///
+/// A device below `host_admin` that isn't the owner's is refused
+/// `not_yours: not_owners_device`, so a member's phone can say "only the
+/// owner can add devices here" rather than "update Far Cooler" (ov-828 review
+/// N4). A grant wider than `control` is refused `scope_denied` naming
+/// `host_admin`, the scope that may, as a runner from before ov-828 refuses
+/// every `control` caller.
 pub fn may_grant(caller: Scope, who: &Person, request: &ClientEnroll) -> Result<()> {
     if caller == Scope::HostAdmin {
         return Ok(());
     }
+    if !matches!(who, Person::Owner) {
+        return Err(DomainError::NotYours { what: "not_owners_device" });
+    }
     let asked = Scope::try_from(request.scope).unwrap_or(Scope::Unspecified);
     let within_control = matches!(asked, Scope::Read | Scope::Control);
-    if caller == Scope::Control && matches!(who, Person::Owner) && !request.shell_access && within_control {
+    if caller == Scope::Control && !request.shell_access && within_control {
         return Ok(());
     }
     Err(DomainError::ScopeDenied { needed: "host_admin" })
@@ -56,20 +66,35 @@ pub struct Attempt {
 
 impl Attempt {
     /// The attempt in `req`, logged, or `None` for any other method.
+    ///
+    /// Keyed on the method, so another method's request carrying this
+    /// payload is not logged as an enrollment. The device id is the caller's
+    /// text, logged before anything has judged it and by a caller as narrow
+    /// as `read`, so one the fence would refuse is logged as `(invalid)`, and
+    /// a usable one Debug-quoted.
     pub fn of(req: &Request, peer: &Peer) -> Option<Attempt> {
-        let Some(request::Payload::ClientEnroll(p)) = req.payload.as_ref() else { return None };
+        if req.method != "client.enroll" {
+            return None;
+        }
+        let none = ClientEnroll::default();
+        let p = match req.payload.as_ref() {
+            Some(request::Payload::ClientEnroll(p)) => p,
+            _ => &none,
+        };
         let by = peer.client_id.clone().unwrap_or_else(|| "-".into());
+        let client = if farcooler_fence::usable_client_id(&p.client_id) { p.client_id.clone() } else { "(invalid)".into() };
         let scope = Scope::try_from(p.scope).map(|s| s.as_str_name()).unwrap_or("unknown");
         tracing::info!(
-            by = %by,
+            by = ?by,
             by_scope = peer.scope.as_str_name(),
-            client = %p.client_id,
+            client = ?client,
             scope,
             shell = p.shell_access,
             tunnel = !p.node_key.is_empty(),
+            teammate = p.for_teammate,
             "a device asked to enroll another"
         );
-        Some(Attempt { by, client: p.client_id.clone() })
+        Some(Attempt { by, client })
     }
 
     /// The answer, logged: written, already there, or the refusal's word.
@@ -77,16 +102,16 @@ impl Attempt {
         let Attempt { by, client } = self;
         match outcome {
             Ok(result::Value::ClientEnroll(done)) => tracing::info!(
-                by = %by,
-                client = %client,
+                by = ?by,
+                client = ?client,
                 outcome = if done.already_enrolled { "already_enrolled" } else { "enrolled" },
                 tunnel = !done.conn_blob.is_empty(),
                 "an enrollment was answered"
             ),
-            Ok(_) => tracing::info!(by = %by, client = %client, outcome = "unexpected", "an enrollment was answered"),
+            Ok(_) => tracing::info!(by = ?by, client = ?client, outcome = "unexpected", "an enrollment was answered"),
             Err(e) => tracing::info!(
-                by = %by,
-                client = %client,
+                by = ?by,
+                client = ?client,
                 outcome = farcooler_core::error::word(e.code()),
                 what = e.what(),
                 "an enrollment was refused"

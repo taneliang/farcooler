@@ -37,7 +37,43 @@ pub(crate) fn migration_0058_device_enrollers(tx: &rusqlite::Transaction) -> rus
     )
 }
 
+/// One new table (ov-828, the review's S1): the devices the owner's Add
+/// Teammate enrolled that are waiting on the `member.set` binding them. Until
+/// then a device bound to nobody would read as the owner's, and a `control`
+/// device may now grant (`enrollment::may_grant`), so each is released from
+/// its write (refused every call) and kept here so the sweep (ov-783) leaves
+/// its line for the bind. A bind or an unbind takes the row away.
+///
+/// `Older::Welcome`: a build from before it never names the table; the
+/// release is 0046's own `released_devices`, which it reads as before.
+pub(crate) fn migration_0063_pending_teammates(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE pending_teammates (
+             client_id TEXT PRIMARY KEY NOT NULL,
+             enrolled_at INTEGER NOT NULL
+         );",
+    )
+}
+
 impl Store {
+    /// Release `client_id`, written for a teammate the owner is adding, until
+    /// a runner admin binds it (ov-828): unbound from any member, released,
+    /// and kept out of the sweep. One transaction, so the device is never the
+    /// owner's for a moment once its line is about to be written.
+    pub fn record_teammate_pending(&self, client_id: &str) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        tx.execute(
+            "INSERT INTO pending_teammates (client_id, enrolled_at) VALUES (?1, ?2)
+             ON CONFLICT(client_id) DO UPDATE SET enrolled_at = excluded.enrolled_at",
+            params![client_id, crate::tasks::now_millis()],
+        )
+        .map_err(map_err)?;
+        tx.execute("DELETE FROM member_devices WHERE client_id = ?1", [client_id]).map_err(map_err)?;
+        tx.execute("INSERT OR IGNORE INTO released_devices (client_id) VALUES (?1)", [client_id]).map_err(map_err)?;
+        tx.commit().map_err(map_err)
+    }
+
     /// Record that `handle`'s device enrolled `client_id`, and release it,
     /// unbinding it from any member first. Only a new line reaches here,
     /// under an id with no line (`enrollment::enroll_as`), so an id still

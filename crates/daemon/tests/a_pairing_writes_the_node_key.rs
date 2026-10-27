@@ -62,6 +62,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str, shell_access: bool
         scope: if shell_access { Scope::HostAdmin as i32 } else { Scope::Control as i32 },
         shell_access,
         node_key: node_key.into(),
+        for_teammate: false,
     }
 }
 

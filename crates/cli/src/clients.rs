@@ -73,6 +73,11 @@ pub enum ClientCmd {
         /// only.
         #[arg(long)]
         node_key: Option<String>,
+        /// The device is a teammate's, bound to them by the `member add` that
+        /// follows. Until then the runner treats it as nobody's: refused every
+        /// call, and never the owner's (ov-828). The Mac's Add Teammate passes it.
+        #[arg(long)]
+        for_teammate: bool,
     },
     /// Remove a device's keys and close the sessions they were holding.
     ///
@@ -106,7 +111,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
     // whatever the far end says about an enum it was handed.
     let outbound = match &cmd {
         ClientCmd::List => req("client.list"),
-        ClientCmd::Enroll { key, label, client_id, scope, shell_access, node_key } => with(
+        ClientCmd::Enroll { key, label, client_id, scope, shell_access, node_key, for_teammate } => with(
             req("client.enroll"),
             request::Payload::ClientEnroll(pb::ClientEnroll {
                 public_key: key.clone(),
@@ -117,6 +122,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 // Absent is the empty string, which the daemon reads as "this
                 // device asked for no tunnel" — not as an unusable key.
                 node_key: node_key.clone().unwrap_or_default(),
+                for_teammate: *for_teammate,
             }),
         ),
         ClientCmd::Revoke { client_id } => with(

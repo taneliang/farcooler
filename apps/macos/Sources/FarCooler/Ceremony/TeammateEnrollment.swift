@@ -86,7 +86,7 @@ enum TeammateEnrollment {
         }
         let enroll = Enrollment.arguments(
             key: keyA, label: label, clientID: clientID, scope: scope.rawValue, shell: false, nodeKey: nodeKey,
-            runner: runner.id)
+            runner: runner.id, forTeammate: true)
         var written = await run(enroll)
         // A key already here keeps its lines, and they may be wider than what
         // was chosen. The answer describes only Key A's line, and a Mac's Key B

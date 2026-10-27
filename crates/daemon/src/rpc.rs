@@ -1002,6 +1002,11 @@ impl Rpc {
                         let svc = svc.clone();
                         Some(Box::new(move |id: &str| svc.store.record_member_enrolled(id, &handle)) as crate::enrollment::MemberEnrolled)
                     }
+                    // The owner's Add Teammate: nobody's until bound (ov-828 S1).
+                    _ if p.for_teammate => {
+                        let svc = svc.clone();
+                        Some(Box::new(move |id: &str| svc.store.record_teammate_pending(id)) as crate::enrollment::MemberEnrolled)
+                    }
                     _ => None,
                 };
                 Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(self.session.clone())).await?))

@@ -684,7 +684,7 @@ pub fn with_node_key(entry: &Entry, node_key: &str) -> Result<String, Rejected> 
 /// One predicate for both directions and both shapes: `render` refuses what it
 /// cannot write, and `shell_client_id` refuses to adopt a plain line carrying an
 /// id `render` would not have written.
-fn usable_client_id(client_id: &str) -> bool {
+pub fn usable_client_id(client_id: &str) -> bool {
     !client_id.is_empty()
         && client_id.len() <= 64
         && client_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))

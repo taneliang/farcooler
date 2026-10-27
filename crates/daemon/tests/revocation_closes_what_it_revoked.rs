@@ -140,6 +140,7 @@ async fn enroll(admin: &mut SocketClient, key: &str, label: &str, client_id: &st
         // the fixture itself start a server — see `line` below, which is how
         // this file builds a tunneled device on purpose.
         node_key: String::new(),
+        for_teammate: false,
     }));
     admin.call(req).await.expect("client.enroll");
 }
@@ -334,6 +335,7 @@ async fn assert_served_nothing(device: &mut SocketClient) {
         scope: Scope::HostAdmin as i32,
         shell_access: false,
         node_key: String::new(),
+        for_teammate: false,
     }));
     for call in [enrolling, request("client.list"), request("member.list")] {
         let method = call.method.clone();
