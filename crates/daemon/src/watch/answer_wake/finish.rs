@@ -29,10 +29,11 @@
 //!
 //! **A key typed since the paste** (ov-827). A dialog answered from inside
 //! Far Cooler, typed in the pane from the Mac or a phone, marks input as
-//! typing in the box does. The box tells them apart: still holding exactly
+//! typing in the box does. In claude the box tells them apart (measured on
+//! 2.1.309, ov-816: a dialog's key leaves the box as it was): still holding exactly
 //! the text, the key went elsewhere and the wait goes on, its checks counting
 //! keys from the last one read; changed, it settles as a paste left in the
-//! box. Before ov-827 any key settled it so, and a notice a dialog's answer
+//! box. In codex any key still settles it so. Before ov-827 claude's did too, and a notice a dialog's answer
 //! followed was left in the box for good. Nobody may have typed for
 //! `QUIET_MS` (`ready`), longer than a compose's 3 s, and a claude no hook is
 //! heard from is read between turns twice, `idle_twice` apart, before its
@@ -102,7 +103,13 @@ impl Watcher {
         // Mac or a phone. Not the end of the wait (ov-827, as ov-816 made it
         // for a compose); nobody has typed for `QUIET_MS` (`ready`), and the
         // checks below count keys only from the last one read.
-        let since = last_input(self.service.root_dir(), to.id).map_or(pasted, |at| pasted.max(at + 1));
+        // codex keeps the old rule: what its box does with a dialog's key was
+        // never measured, and no fence reads its keyboard again.
+        let typed = last_input(self.service.root_dir(), to.id).filter(|at| *at >= pasted);
+        if typed.is_some() && preset != "claude" {
+            return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
+        }
+        let since = typed.map_or(pasted, |at| at + 1);
         let proven = super::Proven { preset, tty: String::new(), pid, turn, held: false, background: farcooler_core::activity::Background::None };
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {

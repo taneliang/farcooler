@@ -154,10 +154,12 @@ async fn a_pasted_answer_someone_typed_beside_is_never_entered_in_codex() {
     assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
 }
 
-/// The same in claude: the fence reads the keyboard from the original
-/// paste, not from when the finishing pass began.
+/// In claude, a key typed since the paste that left the box exactly the
+/// answer went elsewhere (a dialog's answer, from the Mac or a phone): it no
+/// longer strands the answer (ov-827). The fence reads the keyboard from
+/// that key, and, quiet since, the Enter goes.
 #[tokio::test]
-async fn a_pasted_answer_someone_typed_beside_is_never_entered_in_claude() {
+async fn a_pasted_answer_a_key_left_unchanged_is_entered_in_claude() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -168,8 +170,8 @@ async fn a_pasted_answer_someone_typed_beside_is_never_entered_in_claude() {
     typed_at(&b, agent.id, now - QUIET_MS - 1_000);
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_dialog"));
     b.pump().await;
-    assert!(!si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
+    assert!(si.log().contains("ENTER"), "{}", si.log());
+    assert!(!b.settled().iter().any(|n| n.starts_with("Paste left")), "{:?}", b.settled());
 }
 
 /// Answer an idle claude whose stand-in puts a permission menu up in the
@@ -340,8 +342,9 @@ async fn a_hookless_orchestrator_whose_registry_lags_or_works_gets_no_enter() {
     }
 }
 
-/// A key typed in the pane since the paste: no Enter, which would send
-/// whatever the key made of the box; it settles as a paste left there.
+/// A key typed in the pane since the paste that changed the box: no Enter,
+/// which would send whatever the key made of it; it settles as a paste left
+/// there.
 #[tokio::test]
 async fn a_hookless_orchestrator_typed_into_during_the_wait_gets_no_enter() {
     let b = board().await;
@@ -350,10 +353,27 @@ async fn a_hookless_orchestrator_typed_into_during_the_wait_gets_no_enter() {
     let now = now_millis();
     assert!(b.svc.store.mark_wake_pasted(&wake, now - 10_000).unwrap());
     typed_at(&b, orchestrator.id, now - QUIET_MS - 1_000);
-    si.show("idle").await;
+    si.show(&format!("draft:[Far Cooler] {NOTICE} and more")).await;
     passes_while_idle(&b, &orchestrator).await;
     assert!(!si.log().contains("ENTER"), "{}", si.log());
     assert_eq!(b.settled().last().map(String::as_str), Some("Paste left in the composer; not sent"));
+}
+
+/// A key typed since the paste that left the box as it was (a dialog's
+/// answer from the phone): the notice is sent between turns, not stranded
+/// (ov-827).
+#[tokio::test]
+async fn a_hookless_orchestrator_keyed_beside_the_notice_still_gets_it() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+    let wake = b.messages().remove(0);
+    let now = now_millis();
+    assert!(b.svc.store.mark_wake_pasted(&wake, now - 10_000).unwrap());
+    typed_at(&b, orchestrator.id, now - QUIET_MS - 1_000);
+    si.show("idle").await;
+    passes_while_idle(&b, &orchestrator).await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [format!("[Far Cooler] {NOTICE}")], "{}", si.log());
 }
 
 /// A claude its hooks were heard from keeps waiting with no witness, as it
