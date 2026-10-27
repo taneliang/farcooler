@@ -37,8 +37,11 @@ struct NativeAgentView: View {
                     .zIndex(1)
             }
             NativeTranscript(model: model, store: store, isPane: opened == nil, showTerminal: showTerminal)
-                // Clear of the switch that floats in the pane's top corner.
-                .contentMargins(.top, opened == nil ? 36 : Spacing.group, for: .scrollContent)
+                // Clear of the switch, and on the orchestrator's pane the
+                // agents, that float in the pane's top corner (ov-829); a row
+                // scrolled up fades out before it passes under them.
+                .contentMargins(.top, opened == nil ? PaneCorner.clearance : Spacing.group, for: .scrollContent)
+                .mask { if opened == nil { CornerFade() } else { Color.black } }
                 .overlay {
                     if store.shownIds.isEmpty { emptyState(store.phase, agent: opened != nil) }
                 }
@@ -51,8 +54,8 @@ struct NativeAgentView: View {
                 .identified("native-transcript")
         }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // The agents at work are the Agents card's, at the top of the
-                // column (ov-641), not a tray over the box.
+                // The agents at work are the corner's (ov-641, ov-829), not a
+                // tray over the box.
                 VStack(spacing: Spacing.group) {
                     if opened == nil {
                         NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
@@ -65,6 +68,19 @@ struct NativeAgentView: View {
             .environment(\.promptImages, model.promptImages)
             .onChange(of: model.store.ids.count) { _, _ in model.settleQueued() }
             .identified("native-agent-view")
+    }
+
+    /// The transcript's mask under the corner's controls: clear at the top
+    /// edge, whole by the controls' foot, so the newest rows at the bottom
+    /// are never touched.
+    private struct CornerFade: View {
+        var body: some View {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: PaneCorner.inset + PaneCorner.control)
+                Color.black
+            }
+        }
     }
 
     private static func subagent(_ row: AgentRow) -> AgentRow.Subagent? {

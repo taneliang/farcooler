@@ -368,19 +368,28 @@ struct QueuedLine: View {
         // The person's message, as a prompt is drawn, with what became of
         // it under it: still queued, taken into the running turn, or taken
         // back (ov-452).
-        VStack(alignment: .trailing, spacing: Spacing.tight) {
+        // "Queued · Send Now" on one caption baseline, Send Now a text
+        // button in the accent color rather than a bezel beside a caption, a
+        // group's gap under the bubble (ov-829).
+        VStack(alignment: .trailing, spacing: Spacing.group - 2) {
             YourBubble(text: text)
-            HStack(spacing: Spacing.group) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
                 Text(AgentConversation.queuedLabel(state))
-                    .font(.caption)
                     .foregroundStyle(.quietInk)
+                    .baselineProbed("native-queued-label-baseline")
                 if state == "Waiting", let sendNow {
+                    Text("·").foregroundStyle(.quietInk).accessibilityHidden(true)
                     Button("Send Now", action: sendNow)
-                        .controlSize(.small)
+                        .buttonStyle(.plain)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.tint)
                         .help("Claude reads the queued messages now instead of after this turn.")
+                        .baselineProbed("native-send-now-baseline")
                         .identified("native-send-now")
                 }
             }
+            .font(.caption)
+            .padding(.trailing, Spacing.tight)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .identified("native-queued")

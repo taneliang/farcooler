@@ -1,8 +1,8 @@
 import AgentKit
 import SwiftUI
 
-// The agents at work in a workspace, on the Mac (ov-641): the Agents card at
-// the top of the conversation column, beside Now/Next, and the panel it opens.
+// The agents at work in a workspace, on the Mac (ov-641): the count in the
+// orchestrator's top corner (ov-829, `AgentsCorner.swift`), and the panel it opens.
 // The iPhone's (`WorkspaceCards`, `AgentsView`), with the same count, the same
 // rows and the same words, because the counting rule is AgentKit's
 // `RunningAgents`; only the data's way in is the Mac's, since the Mac decodes
@@ -94,83 +94,20 @@ enum AgentsWords {
     static let panesSection = "Agents"
 }
 
-/// The two cards over a workspace's conversation: Now/Next, most of the width,
-/// and Agents beside it, compact. Same height and material, a narrow gap
-/// between them. With a canvas beside the chat, the plan is there and the row
-/// carries the Agents card alone, the row's width. With none running the card
-/// goes, and Now/Next takes the row.
-struct WorkspaceCardsRow<NowNext: View>: View {
-    let agents: RunningAgents
-    /// Draw Now/Next: the folded window's; a window with the canvas has the
-    /// plan beside the chat.
-    let showsPlan: Bool
-    let onChoose: (RunningAgent) -> Void
+/// Now/Next over a workspace's conversation while the canvas is folded
+/// away: the plan's strip, the column's width. Its edges are the paper's
+/// below it (`Pane.inset` in from the column, the same gap above), so the
+/// strip and the conversation read as one column. The agents at work are the
+/// corner's (`AgentsCornerButton`, ov-829), not a card in this row.
+struct WorkspaceStripRow<NowNext: View>: View {
     @ViewBuilder let nowNext: () -> NowNext
 
-    @State private var viewing = false
-
     var body: some View {
-        let running = agents.count > 0
-        if showsPlan || running {
-            HStack(spacing: Spacing.group) {
-                if showsPlan { nowNext() }
-                if running {
-                    AgentsCard(agents: agents, wide: !showsPlan) { viewing = true }
-                        .popover(isPresented: $viewing, arrowEdge: .bottom) {
-                            AgentsPanel(agents: agents) { agent in
-                                viewing = false
-                                onChoose(agent)
-                            }
-                        }
-                        .transition(.scale(scale: 0.6, anchor: .trailing).combined(with: .opacity))
-                }
-            }
-            // One height for both: the taller one's.
+        nowNext()
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, Spacing.inset)
-            .padding(.top, Spacing.group)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: running)
+            .padding(.horizontal, Pane.inset)
+            .padding(.top, Pane.inset)
             .identified("workspace-cards")
-        }
-    }
-}
-
-/// Up to three status dots and how many agents run. One tap target.
-struct AgentsCard: View {
-    let agents: RunningAgents
-    /// The card the row's width, saying its count in words: alone over the chat.
-    let wide: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Spacing.group) {
-                // A short stack of dots, overlapping as avatars do.
-                HStack(spacing: -2) {
-                    ForEach(Array(agents.dots.enumerated()), id: \.offset) { _, mark in
-                        GlanceMarkView(mark, inAppDiameter: 8)
-                    }
-                }
-                Text(wide ? agents.summary : "\(agents.count)")
-                    .font(.system(size: WorkspaceStyle.PaneText.title, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.primary)
-                if wide { Spacer(minLength: 0) }
-            }
-            .padding(.horizontal, Spacing.inset)
-            .padding(.vertical, Spacing.group)
-            .frame(maxHeight: .infinity)
-            .frame(maxWidth: wide ? .infinity : nil, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .surface(.floating, in: .floating)
-        .help("Show Agents")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(agents.summary)
-        .accessibilityValue("\(agents.count)")
-        .accessibilityHint("Shows the agents")
-        .accessibilityAddTraits(.isButton)
-        .identified("agents-card")
     }
 }
 

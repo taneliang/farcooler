@@ -31,6 +31,8 @@ extension ContentView {
                 // count as seen or watched (`shown`).
                 let drawn = KeptOrchestrator.conversation(visible: layouts, drawable: drawableLayouts(for: selection))
                 conversationColumn(host: host, workspace: summary, shown: drawn.layout, onScreen: drawn.onScreen)
+                    // The agents at work, in the orchestrator pane's corner (ov-829).
+                    .environment(\.paneCornerAccessory, agentsCorner(host: host, workspace: summary))
             },
             navigator: {
                 if let board = scene.board {
@@ -198,6 +200,10 @@ extension ContentView {
                         offers: ConversationColumn.offers(
                             state, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))),
                         shown: shown, seat: seat, workspace: workspace, host: host, onScreen: onScreen)
+                    // Only a live pane carries the agents beside its switch;
+                    // otherwise they stand alone in the same corner.
+                    .transformEnvironment(\.paneCornerAccessory) { if state != .live { $0 = nil } }
+                    .overlay(alignment: .topTrailing) { cornerAlone(state, host: host, workspace: workspace) }
                 }
             }
             // A start first seen here is timed from here; a live one clears it.
@@ -257,6 +263,17 @@ extension ContentView {
             }
         case .none, .starting:
             placeholder(true)
+        }
+    }
+
+    /// The corner's agents over a column with no pane to carry them (no
+    /// orchestrator, or one lost or starting): alone, where they'd be beside
+    /// the switch.
+    @ViewBuilder
+    private func cornerAlone(_ state: ConversationColumn.State, host: String, workspace: WorkspaceSummary) -> some View {
+        if state != .live, let control = agentsControl(host: host, workspace: workspace) {
+            PaneCornerGroup(accessory: control) { EmptyView() }
+                .padding(Pane.inset)
         }
     }
 

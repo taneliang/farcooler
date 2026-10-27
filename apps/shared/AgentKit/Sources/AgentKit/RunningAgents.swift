@@ -125,10 +125,20 @@ public struct RunningAgents: Equatable, Sendable {
     /// conversation is the screen they're counted from.
     public var count: Int { agents.filter { $0.kind != .orchestrator }.map(\.stands).reduce(0, +) }
 
-    /// The marks the card stacks: the first three it counts.
+    /// The marks the card stacks: three of those it counts, the ones that
+    /// want a person first (stopped on a question, failed, or done and not
+    /// looked at), then the rest in the list's order (ov-829). Taking the
+    /// list's first three, a waiting twelfth agent showed no sign at all.
     public var dots: [GlanceMark] {
-        let counted = agents.filter { $0.kind != .orchestrator }
-        return Array(counted.flatMap { Array(repeating: $0.mark, count: $0.stands) }.prefix(Self.dotLimit))
+        let marks = agents.filter { $0.kind != .orchestrator }.flatMap { Array(repeating: $0.mark, count: $0.stands) }
+        let wanting = marks.filter { $0.attention != .quiet }
+        return Array((wanting + marks.filter { $0.attention == .quiet }).prefix(Self.dotLimit))
+    }
+
+    /// How many want a person now: stopped on a question, or failed.
+    public var waiting: Int {
+        agents.filter { $0.kind != .orchestrator && ($0.mark.attention == .needsYou || $0.mark.attention == .failed) }
+            .map(\.stands).reduce(0, +)
     }
 
     public static let dotLimit = 3

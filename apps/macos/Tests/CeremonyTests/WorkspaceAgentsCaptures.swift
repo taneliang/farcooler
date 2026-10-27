@@ -64,8 +64,8 @@ struct WorkspaceAgentsCaptures {
                 navigator: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear }, split: true,
                 home: { AnyView(PlanHome(board: board, needsYou: PlanNeedsYou(), onOpen: { _ in })) },
                 cards: { canvas in
-                    AnyView(
-                        WorkspaceCardsRow(agents: agents, showsPlan: !canvas, onChoose: { _ in }) {
+                    canvas ? AnyView(EmptyView()) : AnyView(
+                        WorkspaceStripRow {
                             PlanStripRow(plan: board.plan, needsYou: 2, statuses: board.board.statuses) {}
                         })
                 })

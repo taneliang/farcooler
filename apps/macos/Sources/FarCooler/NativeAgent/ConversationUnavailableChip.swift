@@ -8,6 +8,9 @@ import SwiftUI
 /// switch at all (`AgentConversation.Unavailable.isAboutTheRunner`).
 struct ConversationUnavailableChip: View {
     let reason: AgentConversation.Unavailable
+    /// Beside the agents in the orchestrator's corner (ov-829): the corner's
+    /// size and glass, the group's inset.
+    var inGroup = false
     @State private var explaining = false
     @Environment(\.openSettings) private var openSettings
 
@@ -21,17 +24,7 @@ struct ConversationUnavailableChip: View {
     }
 
     var body: some View {
-        Button {
-            explaining.toggle()
-        } label: {
-            Image(systemName: "text.bubble")
-                .foregroundStyle(.quietInk)
-                .frame(width: 16, height: 16)
-        }
-        .buttonStyle(.borderless)
-        .padding(Spacing.group)
-        .surface(.content, in: .floating)
-        .padding(Spacing.group)
+        chip
         .help("Conversation Unavailable: \(reason.sentence)")
         .accessibilityLabel("Conversation Unavailable")
         .accessibilityValue(reason.sentence)
@@ -42,6 +35,36 @@ struct ConversationUnavailableChip: View {
                 Preferences.shared.settingsTab = tab
                 openSettings()
             }
+        }
+    }
+}
+
+extension ConversationUnavailableChip {
+    @ViewBuilder fileprivate var chip: some View {
+        if inGroup {
+            Button {
+                explaining.toggle()
+            } label: {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.quietInk)
+                    .frame(width: PaneCorner.control, height: PaneCorner.control)
+                    .contentShape(PaneCorner.shape)
+            }
+            .buttonStyle(.plain)
+            .surface(.floating, in: PaneCorner.shape, interactive: true)
+        } else {
+            Button {
+                explaining.toggle()
+            } label: {
+                Image(systemName: "text.bubble")
+                    .foregroundStyle(.quietInk)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .padding(Spacing.group)
+            .surface(.content, in: .floating)
+            .padding(Spacing.group)
         }
     }
 }

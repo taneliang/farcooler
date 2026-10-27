@@ -95,6 +95,26 @@ struct RunningAgentsTests {
         #expect(Set(agents.agents.map(\.id)).count == agents.agents.count, "every row has its own id")
     }
 
+    @Test("The dots lead with the agents that want a person, however far down the list they are (ov-829)")
+    func dotsLeadWithWhoWantsYou() {
+        func pane(_ id: String, _ mark: GlanceMark) -> AgentPane {
+            AgentPane(
+                terminal: id, worktree: id, label: id, isOrchestrator: false, workspace: Self.main, activity: "",
+                startedMs: nil, mark: mark, subagents: [], subagentIds: [], subagentsRunning: nil)
+        }
+        let working = GlanceMark(attention: .quiet, core: .producing)
+        let waiting = GlanceMark(attention: .needsYou, core: .atAPrompt)
+        let failed = GlanceMark(attention: .failed, core: .atAPrompt)
+        let panes = (0..<9).map { pane("w\($0)", working) } + [pane("asks", waiting), pane("w9", working), pane("broke", failed)]
+        let agents = RunningAgents.workspace(Self.main, runner: Self.runner, panes: panes)
+        #expect(agents.count == 12)
+        #expect(agents.dots == [waiting, failed, working], "the list's first three are all working")
+        #expect(agents.waiting == 2)
+        let calm = RunningAgents.workspace(Self.main, runner: Self.runner, panes: (0..<4).map { pane("w\($0)", working) })
+        #expect(calm.dots == [working, working, working])
+        #expect(calm.waiting == 0)
+    }
+
     @Test("With none at work the card has nothing to count, and collapses")
     func noneRunning() {
         let quiet = Fleet(

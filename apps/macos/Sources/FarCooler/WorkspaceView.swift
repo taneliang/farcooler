@@ -295,11 +295,15 @@ struct WorkspaceView<
     ) -> some View {
         let shown = now.showsConversation
         if hasConversation {
-            // The cards on a row of their own over the conversation, never
-            // over it: Now/Next and Agents, or, with the canvas beside the
-            // chat, Agents alone (ov-641). Always a stack, so the terminal is
-            // one view in one place whether the cards show or not.
+            // Now/Next on a row of its own over the conversation while the
+            // canvas is folded (ov-641); beside the canvas, the header's
+            // height of the window's plane while what's opened there has a
+            // jump bar, so the two papers start on one line (ov-829). Always
+            // a stack, so the terminal is one view in one place either way.
             VStack(spacing: 0) {
+                if Self.headerBand(drawn) {
+                    Color.clear.frame(height: ColumnHeader.total).probed("workspace-chat-header")
+                }
                 cards(drawn.canvas)
                     .frame(width: kept)
                 conversation()
@@ -319,6 +323,13 @@ struct WorkspaceView<
                 .disabled(!shown)
                 .accessibilityIdentifier("workspace-conversation")
         }
+    }
+
+    /// Whether the chat column beside the canvas starts a header lower:
+    /// while something is opened there under its jump bar (`ColumnHeader`),
+    /// not over the plan, whose card starts at the window's gutter.
+    nonisolated static func headerBand(_ drawn: WorkspaceColumns.Arrangement) -> Bool {
+        drawn.canvas && drawn.opened
     }
 
     /// The chat column's leading edge, dragged to set its width in whole

@@ -40,6 +40,8 @@ struct NativeSwitch<Surface: View>: View {
     /// (`outOfSight`), and in a window somebody can see (`windowVisible`).
     @Environment(\.outOfSight) private var outOfSight
     @Environment(\.windowVisible) private var windowVisible
+    /// The agents control, on the orchestrator's pane (ov-829).
+    @Environment(\.paneCornerAccessory) private var cornerAccessory
 
     var body: some View {
         let model = agents.offers(terminal, target: target)
@@ -59,7 +61,17 @@ struct NativeSwitch<Surface: View>: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if let model {
+            if let accessory = cornerAccessory, accessory.terminal == terminal.id {
+                // The orchestrator's pane (ov-829): the agents beside the
+                // switch, one group of glass in the corner.
+                PaneCornerGroup(accessory: accessory.content) {
+                    if let model {
+                        CornerSwitchButton(showing: showing) { model.showsNative.toggle() }
+                    } else if let reason {
+                        ConversationUnavailableChip(reason: reason, inGroup: true)
+                    }
+                }
+            } else if let model {
                 Button {
                     model.showsNative.toggle()
                 } label: {

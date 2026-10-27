@@ -189,16 +189,12 @@ struct WorkspaceAgentsTests {
 
     // MARK: - Drawn
 
-    static func cards(_ agents: RunningAgents, showsPlan: Bool = true, width: CGFloat = 700, chosen: Box = Box())
-        -> some View
-    {
-        WorkspaceCardsRow(agents: agents, showsPlan: showsPlan, onChoose: { chosen.agent = $0 }) {
+    static func strip(width: CGFloat = 700) -> some View {
+        WorkspaceStripRow {
             Text("Now and Next").frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).probed("now-next-stub")
         }
         .frame(width: width, alignment: .topLeading)
     }
-
-    final class Box { var agent: RunningAgent? }
 
     static func drawn(_ view: some View, width: CGFloat = 700, height: CGFloat = 400) async -> (P.Frames, NSWindow) {
         let frames = P.Frames()
@@ -207,34 +203,14 @@ struct WorkspaceAgentsTests {
         return (frames, window)
     }
 
-    @Test("The Agents card sits beside Now/Next at the same height, and goes when none run")
-    func theCard() async throws {
-        let agents = MacAgents.running(workspace: Self.main, host: "", fleet: try Self.busy())
-        let (frames, window) = await Self.drawn(Self.cards(agents))
+    @Test("Folded, Now/Next is the column's width less the paper's inset each side, and no agents card shares its row (ov-829)")
+    func theStrip() async throws {
+        let (frames, window) = await Self.drawn(Self.strip(width: 520), width: 520)
         defer { window.close() }
-        let card = try #require(frames.views["agents-card"], "\(frames.views.keys.sorted())")
-        let now = try #require(frames.views["now-next-stub"])
-        #expect(card.minX >= now.maxX, "beside it: \(card) \(now)")
-        #expect(card.height >= now.height - 1, "as tall as it: \(card) \(now)")
-        #expect(card.width < 120, "compact: \(card)")
-
-        let (quiet, quietWindow) = await Self.drawn(Self.cards(.empty))
-        defer { quietWindow.close() }
-        #expect(quiet.views["agents-card"] == nil, "nothing runs, so the card collapses")
-        #expect(quiet.views["now-next-stub"] != nil, "Now/Next takes the row")
-    }
-
-    @Test("With the canvas beside the chat the card is alone, the row's width, saying its count in words")
-    func theCardAlone() async throws {
-        let agents = MacAgents.running(workspace: Self.main, host: "", fleet: try Self.busy())
-        let (frames, window) = await Self.drawn(Self.cards(agents, showsPlan: false, width: 520), width: 520)
-        defer { window.close() }
-        let card = try #require(frames.views["agents-card"])
-        #expect(frames.views["now-next-stub"] == nil)
-        #expect(card.width > 520 - 2 * Spacing.inset - 1, "the row's width: \(card)")
-        let (none, noneWindow) = await Self.drawn(Self.cards(.empty, showsPlan: false, width: 520), width: 520)
-        defer { noneWindow.close() }
-        #expect(none.views.isEmpty || none.views["agents-card"] == nil, "no agents, no card, and no row: \(none.views.keys)")
+        let now = try #require(frames.views["now-next-stub"], "\(frames.views.keys.sorted())")
+        #expect(abs(now.minX - Pane.inset) < 0.5 && abs(now.maxX - (520 - Pane.inset)) < 0.5, "the paper's edges: \(now)")
+        #expect(abs(now.minY - Pane.inset) < 0.5, "the paper's gap above: \(now)")
+        #expect(frames.views["agents-card"] == nil)
     }
 
     @Test("The panel lists the orchestrator's subagents under their heading, then each agent, a row each that opens it")
