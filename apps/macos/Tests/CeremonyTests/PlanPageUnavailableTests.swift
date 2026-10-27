@@ -13,7 +13,11 @@ import Testing
 @Suite(.serialized)
 struct PlanPageUnavailableTests {
     /// What the page drew, by probe id.
-    static func drawn(_ plan: PlanStore, page: PlanPage) async -> Set<String> {
+    ///
+    /// `until` names a probe the caller expects: drawing goes on, 20 ms at a
+    /// time, until it shows (or a minute passes), so a loaded runner that is
+    /// slow to lay the page out is waited for rather than judged.
+    static func drawn(_ plan: PlanStore, page: PlanPage, until expected: String? = nil) async -> Set<String> {
         let seen = NavigatorFilterTests.Seen()
         let context = PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })
         let host = NSHostingView(
@@ -30,9 +34,11 @@ struct PlanPageUnavailableTests {
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.close() }
-        for _ in 0..<15 {
+        var laps = 0
+        while laps < 15 || (expected.map { !seen.views.keys.contains($0) } == true && laps < 3_000) {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(20))
+            laps += 1
         }
         return Set(seen.views.keys)
     }
@@ -60,16 +66,35 @@ struct PlanPageUnavailableTests {
 
     @Test("A page whose plan read hasn't come back yet shows a spinner")
     func reading() async throws {
+        // The read is held until the test lets it go. It used to sleep 30 s
+        // and then fail, and a runner too loaded to inspect the page inside
+        // those 30 s saw the failed read's state instead of the spinner
+        // (run 40477375974: 40.7 s).
+        let held = HeldRead()
         let client = DaemonClient(target: "", notifications: NotificationCenter())
-        client.commandRunnerForTesting = { _ in
-            try? await Task.sleep(for: .seconds(30))
-            return (nil, "cancelled")
-        }
+        client.commandRunnerForTesting = { _ in await held.answer() }
         let plan = PlanStore(
             client: client, workspace: .implicit(repository: "r"), host: "mini",
             defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
-        let ids = await Self.drawn(plan, page: .lane("00000000-0000-0000-0000-000000002002"))
+        let ids = await Self.drawn(
+            plan, page: .lane("00000000-0000-0000-0000-000000002002"), until: "plan-page-reading")
         #expect(ids.contains("plan-page-reading"), "drew \(ids)")
         #expect(!ids.contains("plan-page-unavailable"))
+        held.release()
+    }
+
+    /// A runner that has not answered, and does not until `release()`.
+    @MainActor final class HeldRead {
+        private var waiting: [CheckedContinuation<(data: Data?, message: String?), Never>] = []
+        private var released = false
+        func answer() async -> (data: Data?, message: String?) {
+            if released { return (nil, "released") }
+            return await withCheckedContinuation { waiting.append($0) }
+        }
+        func release() {
+            released = true
+            for each in waiting { each.resume(returning: (nil, "released")) }
+            waiting = []
+        }
     }
 }

@@ -87,23 +87,53 @@ struct TaskNameTests {
     }
 
     @Test func aModelThatIgnoresTheDeadlineIsAbandonedAtIt() async {
-        // Sleeps without checking for cancellation, the way a stuck model call
-        // would: only a race that does not wait for it can return on time.
+        // A stuck model call: it waits on something cancellation does not
+        // reach, and is let go only by the test. The outcome is what
+        // `name` returned while the model was still stuck: a namer that waited
+        // for the model would not return until the backstop above and would
+        // return its late answer, which the heuristic name rules out. No
+        // elapsed time is asserted, so a loaded runner cannot fail it.
+        let stuck = StuckModel()
+        // A backstop only, so a namer that waits for the model fails rather
+        // than hangs; nothing asserts on it.
+        let backstop = Task {
+            try? await Task.sleep(for: .seconds(30))
+            stuck.release()
+        }
+        defer { backstop.cancel() }
         let namer = TaskNamer(
             model: { _ in
-                let until = ContinuousClock.now + .seconds(10)
-                while ContinuousClock.now < until { usleep(10_000) }
+                await stuck.wait()
                 return "too-late"
             },
-            timeout: .milliseconds(200))
-        let started = ContinuousClock.now
+            timeout: .milliseconds(50))
         let name = await namer.name(for: "Please fix the flaky reconnect test")
-        let took = ContinuousClock.now - started
+        stuck.release()
         #expect(name == "fix-flaky-reconnect-test", "the heuristic, not the late answer")
-        // Well under the model's 10 s, with room for a 2-core CI runner: the
-        // model blocks a thread with usleep, which can starve the race there
-        // (1.32 s seen against a 1 s bound).
-        #expect(took < .seconds(5), "returned at the deadline: \(took)")
+    }
+
+    /// A model call that ignores cancellation until `release()`.
+    final class StuckModel: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var released = false
+        func wait() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let now = lock.withLock { () -> Bool in
+                    if !released { waiting.append(continuation) }
+                    return released
+                }
+                if now { continuation.resume() }
+            }
+        }
+        func release() {
+            let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                released = true
+                defer { waiting = [] }
+                return waiting
+            }
+            for each in all { each.resume() }
+        }
     }
 
     @Test func aModelThatFailsOrRamblesFallsBackToTheHeuristic() async {

@@ -42,25 +42,43 @@ struct ProcessRunnerTests {
         #expect(String(decoding: ran.stdout, as: UTF8.self) == "done")
     }
 
+    /// The outcome, not the clock: a child that is still sleeping when it is
+    /// stopped ends by the signal (15), not by finishing its 30 s (status 0).
+    /// Elapsed time is not asserted, so a loaded runner cannot fail it.
     @Test func aChildThatNeverFinishesIsTerminatedAtTheDeadline() async {
-        let started = Date()
         let ran = await ProcessRunner.run(Self.sh, ["-c", "exec sleep 30"], deadline: 0.3)
         #expect(ran.timedOut)
         #expect(!ran.succeeded)
-        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(ran.status == SIGTERM, "ended by the terminate, status \(ran.status)")
     }
 
-    /// SIGTERM is ignored here, so only the escalation ends it.
+    /// SIGTERM is ignored here (an ignored signal survives the `exec`), so only
+    /// the escalation ends the child, and it ends by SIGKILL (9) rather than by
+    /// sleeping out its 30 s (status 0).
+    ///
+    /// The child says when its `trap` is in place, and only then is it stopped
+    /// (by cancelling, which takes the same terminate-then-kill path as the
+    /// deadline): a SIGTERM that landed before the trap would end it at once
+    /// and prove nothing, which a loaded runner can cause with a short
+    /// deadline. The escalation delay is shortened so the test observes the
+    /// kill instead of waiting out the production 2 s. Elapsed time is never
+    /// asserted; with the escalation removed the child sleeps on, the run ends
+    /// with status 0 and this fails.
     @Test func aChildThatIgnoresTermIsKilledShortlyAfterTheDeadline() async {
-        let started = Date()
-        let ran = await ProcessRunner.run(
-            Self.sh, ["-c", "trap '' TERM; exec sleep 30"], deadline: 0.3)
-        #expect(ran.timedOut)
-        #expect(Date().timeIntervalSince(started) < 10, "ran \(Date().timeIntervalSince(started)) s")
+        let marker = NSTemporaryDirectory() + "pr-trap-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: marker) }
+        let task = Task {
+            await ProcessRunner.run(
+                Self.sh, ["-c", "trap '' TERM; touch \(marker); exec sleep 30"], killAfter: 0.1)
+        }
+        while !FileManager.default.fileExists(atPath: marker) { try? await Task.sleep(for: .milliseconds(10)) }
+        task.cancel()
+        let ran = await task.value
+        #expect(ran.cancelled)
+        #expect(ran.status == SIGKILL, "killed, status \(ran.status)")
     }
 
     @Test func cancellingTheTaskTerminatesTheChild() async {
-        let started = Date()
         let task = Task {
             await ProcessRunner.run(Self.sh, ["-c", "exec sleep 30"])
         }
@@ -69,7 +87,7 @@ struct ProcessRunnerTests {
         let ran = await task.value
         #expect(ran.cancelled)
         #expect(!ran.succeeded)
-        #expect(Date().timeIntervalSince(started) < 10)
+        #expect(ran.status == SIGTERM, "ended by the terminate, status \(ran.status)")
     }
 
     @Test func aTaskCancelledBeforeItStartsNeverLaunchesTheChild() async {

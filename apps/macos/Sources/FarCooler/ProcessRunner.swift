@@ -47,12 +47,15 @@ enum ProcessRunner {
     ///     fills its output pipe while we are still writing cannot wedge both.
     ///   - deadline: seconds before the child is terminated, or nil for none.
     ///   - discardStderr: for tools whose stderr is an ordinary answer.
+    ///   - killAfter: how long a terminated child gets before SIGKILL; a test
+    ///     shortens it so the escalation is observed, not waited for.
     static func run(
         _ executable: String, _ arguments: [String],
         environment: [String: String]? = nil, stdin: Data? = nil,
-        deadline: TimeInterval? = nil, discardStderr: Bool = false
+        deadline: TimeInterval? = nil, discardStderr: Bool = false,
+        killAfter: TimeInterval = ProcessRunner.killAfter
     ) async -> Result {
-        let handle = Handle()
+        let handle = Handle(killAfter: killAfter)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -176,10 +179,13 @@ enum ProcessRunner {
     /// cannot catch.
     private final class Handle: @unchecked Sendable {
         let lock = NSLock()
+        let killAfter: TimeInterval
         var process: Process?
         var cancelled = false
         private var timedOut = false
         private var reaped = false
+
+        init(killAfter: TimeInterval) { self.killAfter = killAfter }
 
         var flags: (timedOut: Bool, cancelled: Bool) {
             lock.withLock { (timedOut, cancelled) }
@@ -209,7 +215,7 @@ enum ProcessRunner {
             // ended on its own. Killed if it is still there `killAfter` later;
             // under the lock, for the reason above.
             let pid = process.processIdentifier
-            DispatchQueue.global().asyncAfter(deadline: .now() + ProcessRunner.killAfter) { [self] in
+            DispatchQueue.global().asyncAfter(deadline: .now() + killAfter) { [self] in
                 lock.withLock {
                     if !reaped, process.isRunning { kill(pid, SIGKILL) }
                 }
