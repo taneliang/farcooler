@@ -19,7 +19,6 @@ apps/ios/FarCooler/Connection.swift :: health :: try? await core.call("host.heal
 apps/ios/FarCooler/Connection.swift :: setBranchPrefix :: try? await core.call( "settings.set_branch_prefix", ["prefix": prefix]) :: nil is shown: RunnerSettingsModel.setBranchPrefix sets failure
 apps/ios/FarCooler/Connection.swift :: upsertTheme :: try? await core.call("theme.upsert", theme.arguments) :: nil is shown: RunnerSettingsModel.save(theme:) sets failure
 apps/ios/FarCooler/Connection.swift :: deleteTheme :: try? await core.call("theme.delete", ["name": name]) :: nil is shown: RunnerSettingsModel.delete(themeNamed:) sets failure
-apps/ios/FarCooler/Connection.swift :: enroll :: try? await core.call( "client.enroll", [ "publicKey": publicKey, "label": label, "clientId": clientId, "scope": "control", "nodeKey": nodeKey, ]) :: nil becomes .couldNotWrite, which the enroll screen shows
 apps/ios/FarCooler/TerminalSession.swift :: resizePane :: _ = try? await core.call( "terminal.resize", ["terminal": terminalID, "columns": size.columns, "rows": size.rows]) :: a refused resize leaves the old geometry; the next layout pass resends
 apps/ios/FarCooler/TerminalSession.swift :: releasePane :: _ = try? await core.call( "terminal.resize", ["terminal": id, "columns": shape.columns, "rows": shape.rows]) :: best effort on leaving a pane; nobody is left to tell
 apps/ios/FarCooler/TerminalSession.swift :: checkGeometry :: try? await core.call( "terminal.screen", ["terminal": terminalID, "knownRevision": revision]) :: poll read; the next tick asks again
