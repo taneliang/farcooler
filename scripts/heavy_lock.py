@@ -12,6 +12,7 @@ PID, start time, what it runs) and how many are ahead. A holder that dies loses 
 Locking is off under CI (separate runners) and with --no-lock.
 """
 import contextlib
+import errno
 import fcntl
 import os
 import pathlib
@@ -23,6 +24,62 @@ import time
 LOCK_POLL = 5  # seconds between a waiter's tries
 LOAD_LIMIT = 20.0
 HELD_ENV = "HEAVY_LOCK_HELD"  # set in the child of scripts/heavy: nested takers do not queue behind their own parent
+
+
+class _Survivor:
+    """A text stream that goes quiet instead of raising when its far end is gone.
+
+    A waiting gate prints "waiting for the lock" lines for as long as it is queued, which can be hours. If
+    the reader has gone (a closed pipe, a hung-up terminal, a log on a full disk), the next print raises
+    BrokenPipeError, EIO or ENOSPC inside the queue loop; the gate dies, loses its place, and Python exits 120
+    with a traceback nobody sees (ov-839). Output is a courtesy; the wait is the job. On the first failure the
+    descriptor is pointed at /dev/null, so the later flush at exit succeeds too."""
+
+    def __init__(self, stream, fd):
+        self._stream, self._fd, self.dead = stream, fd, False
+
+    def _quiet(self):
+        self.dead = True
+        try:
+            null = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(null, self._fd)
+            os.close(null)
+        except OSError:
+            pass
+
+    def write(self, text):
+        if not self.dead:
+            try:
+                return self._stream.write(text)
+            except (OSError, ValueError):
+                self._quiet()
+        return len(text)
+
+    def flush(self):
+        if not self.dead:
+            try:
+                self._stream.flush()
+            except (OSError, ValueError):
+                self._quiet()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def survive_dead_output():
+    """Make stdout and stderr survive their reader going away. A stream that is closed or not a file is left alone."""
+    for name, fd in (("stdout", 1), ("stderr", 2)):
+        stream = getattr(sys, name)
+        try:
+            if stream is not None and stream.fileno() == fd and not isinstance(stream, _Survivor):
+                setattr(sys, name, _Survivor(stream, fd))
+        except (OSError, ValueError, AttributeError):
+            pass  # no descriptor behind it (a StringIO, or closed): nothing to protect
+
+
+def disk_full(e):
+    """True for an error that means the volume has no room."""
+    return isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT)
 
 
 def lock_path():
@@ -266,6 +323,42 @@ def self_test():
         o = p.communicate()[0]
         expect("the wrapper waits while the load is over the limit", (still_waiting, marks.read_text()), (True, ""))
         expect("... and says so", "load average" in o, True)
+
+        # A waiter whose reader goes away (a closed pipe, a hung-up terminal) keeps its place and runs when its turn
+        # comes (ov-839). The control run leaves out survive_dead_output() and must die, so this check can fail.
+        for protected in (True, False):
+            marks.write_text("")
+            driver = ("import sys; sys.path.insert(0, %r); import heavy_lock as hl\n%s"
+                      "with hl.machine_lock('/wt/gate', 'gate: x', poll=0.05, announce=0.05):\n"
+                      "    open(%r, 'a').write('gate-in\\n')\n") % (str(here), "hl.survive_dead_output()\n" if protected else "", str(marks))
+            holder = subprocess.Popen([heavy, "--", "sh", "-c", f'echo wrapper-in >> "{marks}"; sleep 1.5; echo wrapper-out >> "{marks}"'],
+                                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.time() + 5
+            while "wrapper-in" not in marks.read_text() and time.time() < deadline:
+                time.sleep(0.02)
+            w = subprocess.Popen([sys.executable, "-c", driver], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            w.stdout.readline()  # it is waiting and has said so
+            w.stdout.close()     # ... and now nobody is listening
+            rc = w.wait(timeout=10)
+            holder.wait()
+            if protected:
+                expect("a waiter whose output pipe closes still takes its turn and exits 0", (rc, marks.read_text().split()), (0, ["wrapper-in", "wrapper-out", "gate-in"]))
+            else:
+                expect("control: without survive_dead_output a closed pipe kills the waiter", rc != 0 and "gate-in" not in marks.read_text(), True)
+        # scripts/heavy waits the same way: its wait lines go to a closed pipe and the command still runs.
+        marks.write_text("")
+        holder = subprocess.Popen([heavy, "--", "sh", "-c", f'echo wrapper-in >> "{marks}"; sleep 1.5; echo wrapper-out >> "{marks}"'],
+                                  env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.time() + 5
+        while "wrapper-in" not in marks.read_text() and time.time() < deadline:
+            time.sleep(0.02)
+        w = subprocess.Popen([heavy, "--", "sh", "-c", f'echo second-in >> "{marks}"'], env={**env, "HEAVY_ANNOUNCE": "0.05"},
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        w.stderr.readline()
+        w.stderr.close()
+        rc = w.wait(timeout=10)
+        holder.wait()
+        expect("scripts/heavy with its stderr pipe closed still runs its command", (rc, marks.read_text().split()), (0, ["wrapper-in", "wrapper-out", "second-in"]))
     if fails:
         for line in fails:
             print(f"heavy_lock self-test: {line}", file=sys.stderr)

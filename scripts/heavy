@@ -27,6 +27,7 @@ def main(argv):
     ap.add_argument("--load-limit", type=float, default=float(os.environ.get("HEAVY_LOAD_LIMIT", hl.LOAD_LIMIT)), help="5-minute load average to wait under (default 20)")
     ap.add_argument("command", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
+    hl.survive_dead_output()
     cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not cmd:
         ap.error("no command; usage: scripts/heavy -- <command...>")

@@ -524,6 +524,10 @@ def env_gap(step, output):
     return ""
 
 
+DISK_FULL = "the disk is full (no space left on device); free some space and run the gate again"
+NO_SPACE = re.compile(r"No space left on device|os error 28\b|ENOSPC")
+
+
 def run_step_safely(step, repo, env, logdir, tmp):
     """(result, seconds, counts, ok, log, output) for one step; never raises.
 
@@ -536,12 +540,14 @@ def run_step_safely(step, repo, env, logdir, tmp):
     try:
         code, secs, output, log = run_step(step, repo, env, logdir, tmp)
     except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
-        reason = f"lane-gate could not run it: {type(e).__name__}: {e}"
+        reason = DISK_FULL if hl.disk_full(e) else f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     result = "pass" if code == 0 else f"FAIL (exit {code})"
     gap = "" if code == 0 else env_gap(step, output)
     if gap:
         result += f" [env-gap: {gap}]"
+    if code != 0 and NO_SPACE.search(output):
+        result += "; the disk is full (\"No space left on device\" in its output)"
     notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
     if notes:
         result += f"; {notes}"
@@ -607,11 +613,21 @@ def main(argv):
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
+    hl.survive_dead_output()  # a waiting gate outlives the terminal or pipe that started it (ov-839)
+    try:
+        return gate(args)
+    except OSError as e:
+        if not hl.disk_full(e):
+            raise
+        print(f"lane-gate: FAIL: {DISK_FULL}\n\nlane-gate: FAILED", flush=True)
+        return 1
 
+
+def gate(args):
     repo = pathlib.Path(args.worktree).resolve()
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC here is caught by main
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
@@ -652,11 +668,16 @@ def main(argv):
     try:
         failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
     except BaseException as e:  # an interrupt or a bug still leaves a table of what ran
-        rows.append(("lane-gate", "(the gate itself)", f"FAIL: {type(e).__name__}: {e}", "", ""))
+        full = hl.disk_full(e)  # a full disk is a named row and a red gate, not a traceback
+        rows.append(("lane-gate", "(the gate itself)", f"FAIL: {DISK_FULL if full else f'{type(e).__name__}: {e}'}", "", ""))
         failed = True
-        raise
+        if not full:
+            raise
     finally:
-        print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
+        try:
+            print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
+        except OSError as e:  # the table is on screen; only the saved copy needs room
+            print(f"lane-gate: could not save the summary file: {e.strerror or e}", flush=True)
         shutil.rmtree(tmp, ignore_errors=True)
     return 1 if failed else 0
 
@@ -1080,6 +1101,45 @@ def self_test():
         run_jobs = real_run_jobs
     text_out = out.getvalue()
     expect("the summary table prints after an exception", ("## lane-gate summary" in text_out, "a step that ran" in text_out, "FAIL: RuntimeError: the gate tripped" in text_out, "lane-gate: FAILED" in text_out), (True, True, True, True))
+
+    # A full disk is a named FAIL row and a red gate, never a traceback (ov-839).
+    import errno
+    full = OSError(errno.ENOSPC, "No space left on device")
+    def full_run(*a, **k):
+        raise full
+    real_run_step, real_mkdtemp = run_step, tempfile.mkdtemp
+    run_step = full_run
+    try:
+        res = run_step_safely(Step("rust", "n", "true\n"), ROOT, {"PATH": os.environ["PATH"]}, pathlib.Path("/tmp"), pathlib.Path("/tmp"))
+    finally:
+        run_step = real_run_step
+    expect("a step that cannot write for want of room is a named FAIL row", (res[0].startswith("FAIL: the disk is full"), res[3]), (True, False))
+    with tempfile.TemporaryDirectory() as t:
+        res = run_step_safely(Step("rust", "n", "echo 'error: No space left on device (os error 28)'; exit 101\n"), ROOT, {"PATH": os.environ["PATH"]}, pathlib.Path(t), pathlib.Path(t))
+    expect("a step that ran out of room says so beside its exit code", (res[0].startswith("FAIL (exit 101); the disk is full"), res[3]), (True, False))
+    for where in ("run_jobs", "mkdtemp"):
+        out = io.StringIO()
+        if where == "run_jobs":
+            run_jobs = full_run
+        else:
+            tempfile.mkdtemp = full_run
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "wire", "--no-load-wait"])
+        except OSError as e:
+            rc = f"raised {e!r}"
+        finally:
+            run_jobs, tempfile.mkdtemp = real_run_jobs, real_mkdtemp
+        expect(f"a full disk in {where} gives a named FAIL and exit 1, not a crash", (rc, "FAIL: the disk is full" in out.getvalue(), "lane-gate: FAILED" in out.getvalue()), (1, True, True))
+    asked = []
+    real_survive = hl.survive_dead_output
+    hl.survive_dead_output = lambda: asked.append(1)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["--worktree", str(ROOT), "--base", "HEAD", "--dry-run"])
+    finally:
+        hl.survive_dead_output = real_survive
+    expect("the gate protects its own output before it queues", asked, [1])
 
     # A filtered gate says so in its summary heading and its last line, and an unfiltered one does not (ov-817).
     for left, failed_, want_head, want_last in [
