@@ -254,6 +254,15 @@ final class DaemonClient: ObservableObject {
         if !boardNews.isEmpty { boardNews = [:] }
     }
 
+    /// How long the next check of `state` waits when it isn't on the backoff:
+    /// the slow cadence for a state retrying fixes none of, a version
+    /// mismatch, or a refusal the probe has twice failed to prove (ov-821).
+    func slowWait(for state: HostState) -> Double? {
+        if retryWaitsLong(state) { return slowRetrySeconds }
+        if case .unreachable(let reason) = state, looksVersionMismatch(reason) { return slowRetrySeconds }
+        return nil
+    }
+
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
     /// failure paths cannot each schedule their own and race.
     ///
@@ -278,18 +287,14 @@ final class DaemonClient: ObservableObject {
         guard !isStopped, retryTask == nil else { return }
 
         let wait: Double
-        switch state {
-        case _ where retryWaitsLong(state):
+        if let slow = slowWait(for: state) {
             // `attempt` resets rather than climbs here: it drives the fast
             // exponential schedule only, means nothing at this cadence, and
             // letting it grow would leave a later, genuinely transient
             // failure starting at the 30s ceiling instead of a fresh 1s.
             attempt = 0
-            wait = slowRetrySeconds
-        case .unreachable(let reason) where looksVersionMismatch(reason):
-            attempt = 0
-            wait = slowRetrySeconds
-        default:
+            wait = slow
+        } else {
             attempt += 1
             wait = backoffSeconds
         }

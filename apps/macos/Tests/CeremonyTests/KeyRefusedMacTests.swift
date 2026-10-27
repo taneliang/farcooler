@@ -523,11 +523,11 @@ struct KeyRefusedMacTests {
         let start = clock.at
         await refuse(client, runner, from: start, at: Self.spacing, clock: clock)
         #expect(probes.count == 1)
-        #expect(!client.retryWaitsLong(client.state), "one probe that proved nothing slowed the checks")
+        #expect(client.slowWait(for: client.state) == nil, "one probe that proved nothing slowed the checks")
 
         await refuse(client, runner, from: start, at: [44], clock: clock)
         #expect(probes.count == 2)
-        #expect(client.retryWaitsLong(client.state), "two probes that proved nothing left the checks fast")
+        #expect(client.slowWait(for: client.state) == 300, "two probes that proved nothing left the checks fast")
         #expect(client.state == .unreachable(reason: Self.refused))
 
         await refuse(client, runner, from: start, at: [74, 104, 134, 164, 194, 224, 254, 284, 314], clock: clock)
@@ -538,7 +538,7 @@ struct KeyRefusedMacTests {
         runner.refusing = false
         await client.refresh(recheck: true)
         #expect(client.state == .connected)
-        #expect(!client.retryWaitsLong(client.state))
+        #expect(client.slowWait(for: client.state) == nil)
         #expect(!client.keyRefusals.cannotBeProven)
     }
 
@@ -551,10 +551,10 @@ struct KeyRefusedMacTests {
         let client = client(runner, defaults, probe: try Self.sample("proxyjump"), clock: clock)
         await client.refresh()
         await refuse(client, runner, from: clock.at, at: Self.spacing + [44], clock: clock)
-        #expect(client.retryWaitsLong(client.state))
+        #expect(client.slowWait(for: client.state) == 300)
         runner.refusal = "ssh: connect to host cosmo port 22: Connection refused\nCould not reach you@cosmo over ssh."
         await client.refresh(recheck: true)
-        #expect(!client.retryWaitsLong(client.state), "\(client.state)")
+        #expect(client.slowWait(for: client.state) == nil, "\(client.state)")
     }
 
     /// The probe asks nothing of the person, reuses no master, and checks the
