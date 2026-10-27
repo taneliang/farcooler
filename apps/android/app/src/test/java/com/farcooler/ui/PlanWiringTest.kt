@@ -12,6 +12,11 @@ import java.io.File
  * where they live (`PlanTest`, `PlanReadsTest`, `PlanListTest`).
  */
 class PlanWiringTest {
+    companion object {
+        /** A main source file's text, for another wiring test (ov-820). */
+        fun sourceOf(relative: String): String = PlanWiringTest().source(relative)
+    }
+
     private fun source(relative: String): String {
         var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
         while (directory != null) {

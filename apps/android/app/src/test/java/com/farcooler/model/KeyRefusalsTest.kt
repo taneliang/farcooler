@@ -74,6 +74,54 @@ class KeyRefusalsTest {
         assertFalse(runners.admitted("b"))
     }
 
+    /**
+     * A Tailcat-only phone is never refused after its revoke, only ignored: once the runner has said `released`
+     * (ov-820), every failure to reach it is the no-access row, from the first dial, checked slowly.
+     */
+    @Test
+    fun `a released phone reads every failure to reach the runner as access removed`() {
+        val refusals = KeyRefusals(admitted = true).apply { release() }
+        val gone = listOf(
+            Connection.Failure.TUNNEL_NO_ANSWER, Connection.Failure.TUNNEL_UNSPECIFIED, Connection.Failure.UNREACHABLE,
+            Connection.Failure.KEY_REJECTED, Connection.Failure.OTHER,
+        )
+        for (failure in gone) {
+            val kind = failure.reading(refusals, t0)
+            assertEquals(failure.name, Connection.Failure.ACCESS_REMOVED, kind)
+            assertEquals(Connection.Retry.AFTER_A_WHILE, kind.retry)
+        }
+        val own = listOf(
+            Connection.Failure.NO_NODE_KEY, Connection.Failure.NO_IDENTITY, Connection.Failure.HOST_KEY_CHANGED,
+            Connection.Failure.TUNNEL_RENDEZVOUS, Connection.Failure.STOPPED,
+        )
+        for (failure in own) assertEquals(failure, failure.reading(refusals, t0))
+        // Not released: a tunnel that doesn't answer is a runner that may be asleep.
+        assertEquals(Connection.Failure.TUNNEL_NO_ANSWER, Connection.Failure.TUNNEL_NO_ANSWER.reading(KeyRefusals(admitted = true), t0))
+        // A dial that gets in ends it.
+        refusals.letIn()
+        assertEquals(Connection.Failure.TUNNEL_NO_ANSWER, Connection.Failure.TUNNEL_NO_ANSWER.reading(refusals, t0))
+    }
+
+    @Test
+    fun `a release is remembered per runner until a dial gets in`() {
+        val runners = InMemoryAdmittedRunners()
+        runners.remember("a")
+        runners.release("a")
+        assertTrue(runners.released("a"))
+        assertFalse(runners.released("b"))
+        runners.remember("a")
+        assertFalse(runners.released("a"))
+    }
+
+    /** The notice reaches the phone's no-access row: read out of its source, since `Connection` needs the core. */
+    @Test
+    fun `a released notice is heard and kept for the runner`() {
+        val connection = com.farcooler.ui.PlanWiringTest.sourceOf("net/Connection.kt")
+        assertTrue("the notice", "if (event == \"released\") {\n            scope.launch { hearReleased() }" in connection)
+        assertTrue("kept across launches", "admissions.release(host.id)" in connection)
+        assertTrue("read back at start", "if (admissions.released(host.id)) release()" in connection)
+    }
+
     /** Its own row says it was shut out; "isn't answering" under it would say otherwise (review S5). */
     @Test
     fun `a runner that shut this phone out is not among the ones not answering`() {

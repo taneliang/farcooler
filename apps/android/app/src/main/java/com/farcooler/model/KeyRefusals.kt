@@ -28,9 +28,24 @@ class KeyRefusals(admitted: Boolean) {
     private var firstAt: Long? = null
     private var lastAt: Long? = null
 
+    /**
+     * The runner said it took this phone's access away (ov-820): `released`, its link's last notice before the
+     * runner closed it. A phone that reaches the runner only through Tailcat is never refused after that, only
+     * ignored, so every later dial ends `no_answer`; while this holds, [reading] makes any failure to reach the
+     * runner [Connection.Failure.ACCESS_REMOVED]. Kept across launches by [AdmittedRunners] until a dial gets in.
+     */
+    var released: Boolean = false
+        private set
+
+    /** The runner said so. */
+    fun release() {
+        released = true
+    }
+
     /** A dial got in. */
     fun letIn() {
         admitted = true
+        released = false
         refusals = 0
         firstAt = null
         lastAt = null
@@ -65,6 +80,7 @@ class KeyRefusals(admitted: Boolean) {
  * [Connection.Failure.ACCESS_REMOVED]. Every other kind is itself. Counts the refusal into [refusals].
  */
 fun Connection.Failure.reading(refusals: KeyRefusals, nowMs: Long): Connection.Failure {
+    if (refusals.released && this in GONE) return Connection.Failure.ACCESS_REMOVED
     if (this != Connection.Failure.KEY_REJECTED) return this
     return when (refusals.refused(nowMs)) {
         KeyRefusals.Verdict.STRANGER -> Connection.Failure.KEY_REJECTED
@@ -73,17 +89,39 @@ fun Connection.Failure.reading(refusals: KeyRefusals, nowMs: Long): Connection.F
     }
 }
 
-/** Which runners have let this phone in, across launches (ov-818). `Settings` keeps it on a phone. */
+/**
+ * The failures a released phone reads as the release (ov-820): failing to reach the runner or be let in by it. Not
+ * this phone's own trouble (no key, no node key, no tunnel in this build, a person who stopped or didn't trust a
+ * key), its own network's ([Connection.Failure.TUNNEL_RENDEZVOUS]), or a changed host key, which says something else.
+ */
+private val GONE = setOf(
+    Connection.Failure.KEY_REJECTED, Connection.Failure.UNREACHABLE, Connection.Failure.TUNNEL_NO_ANSWER,
+    Connection.Failure.TUNNEL_UNSPECIFIED, Connection.Failure.REFUSED_THIS_TIME, Connection.Failure.ACCESS_REMOVED,
+    Connection.Failure.OTHER,
+)
+
+/**
+ * Which runners have let this phone in (ov-818), and which said they released it since (ov-820), across launches.
+ * `Settings` keeps it on a phone. [remember] is a dial getting in, which ends a release.
+ */
 interface AdmittedRunners {
     fun admitted(runner: String): Boolean
     fun remember(runner: String)
+    fun released(runner: String): Boolean
+    fun release(runner: String)
 }
 
 /** For a test, and a [Connection] built without one. */
 class InMemoryAdmittedRunners : AdmittedRunners {
     private val runners = mutableSetOf<String>()
+    private val releasedBy = mutableSetOf<String>()
     override fun admitted(runner: String) = runner in runners
     override fun remember(runner: String) {
         runners += runner
+        releasedBy -= runner
+    }
+    override fun released(runner: String) = runner in releasedBy
+    override fun release(runner: String) {
+        releasedBy += runner
     }
 }

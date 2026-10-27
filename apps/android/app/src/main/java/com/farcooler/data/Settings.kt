@@ -271,7 +271,14 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory, com.farcool
     override fun admitted(runner: String): Boolean = preferences.getBoolean("keyRefusals.admitted.$runner", false)
 
     override fun remember(runner: String) {
-        preferences.edit().putBoolean("keyRefusals.admitted.$runner", true).apply()
+        preferences.edit().putBoolean("keyRefusals.admitted.$runner", true).remove("keyRefusals.released.$runner").apply()
+    }
+
+    /** Which runners said they released this phone, until one lets it in again (ov-820). */
+    override fun released(runner: String): Boolean = preferences.getBoolean("keyRefusals.released.$runner", false)
+
+    override fun release(runner: String) {
+        preferences.edit().putBoolean("keyRefusals.released.$runner", true).apply()
     }
 
     companion object {

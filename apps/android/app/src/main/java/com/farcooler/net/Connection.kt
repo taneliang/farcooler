@@ -734,6 +734,11 @@ class Connection(
             scope.launch { readsSync.hear(notice) }
             return
         }
+        // The runner took this phone's access away (ov-820).
+        if (event == "released") {
+            scope.launch { hearReleased() }
+            return
+        }
         if (event == "needs_you" || event == "resync") {
             needsYouOwed = true
             if (isForeground) scope.launch { readNeedsYou() }
@@ -796,7 +801,7 @@ class Connection(
     val lastTrouble: StateFlow<Failure?> = _lastTrouble.asStateFlow()
 
     /** How this runner has answered this phone's key: see [KeyRefusals]. */
-    private val keyRefusals = KeyRefusals(admissions.admitted(host.id))
+    private val keyRefusals = KeyRefusals(admissions.admitted(host.id)).apply { if (admissions.released(host.id)) release() }
 
     /** The clock [keyRefusals] reads. A test moves its own. */
     internal var nowMs: () -> Long = System::currentTimeMillis
@@ -1166,7 +1171,7 @@ class Connection(
 
     /** A dial got in: the runner accepts this phone's key, remembered across launches. Written only when news. */
     private fun letIn() {
-        if (keyRefusals.admitted && keyRefusals.refusals == 0) return
+        if (keyRefusals.admitted && keyRefusals.refusals == 0 && !keyRefusals.released) return
         keyRefusals.letIn()
         admissions.remember(host.id)
     }
@@ -1177,7 +1182,21 @@ class Connection(
         _inbox.value = emptyMap()
         _needsYou.value = RunnerNeedsYou(emptyList(), derived = false)
         _repositories.value = emptyList()
-        // The glances and notifications are ov-820's.
+    }
+
+    /**
+     * The runner said it took this phone's access away (ov-820): `released`, the last notice on a link it then
+     * closed. Kept for the runner, so a Tailcat-only phone, whose every later dial goes unanswered, stays on the
+     * no-access row until a dial gets in ([reading]).
+     */
+    internal fun hearReleased() {
+        keyRefusals.release()
+        admissions.release(host.id)
+        forgetTeamWork()
+        poller?.cancel()
+        reconnector?.cancel()
+        attempt += 1
+        settle(Phase.Failed("", Failure.ACCESS_REMOVED), 0)
     }
 
     /**
