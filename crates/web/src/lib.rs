@@ -17,6 +17,7 @@
 
 pub mod enroll;
 pub mod error;
+mod pages;
 pub mod passkey;
 pub mod ssh;
 pub mod wire;

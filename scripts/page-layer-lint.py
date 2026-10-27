@@ -59,6 +59,8 @@ PAGE_FILES = [
     "crates/daemon/tests/a_page_reads_live_ci.rs",
     # The client: pages as JSON for the phones.
     "crates/client/src/page_json.rs",
+    # The browser's: the same JSON, read through the client core (ov-768).
+    "crates/web/src/pages.rs",
     "crates/client/src/page_json_tests.rs",
     "crates/client/src/session/pages.rs",
     "crates/client/src/ffi/page_phone_tests.rs",

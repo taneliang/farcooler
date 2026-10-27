@@ -79,7 +79,7 @@ pub struct TerminalSummary {
 
 /// A connected runner: the client core's session over one SSH connection.
 pub struct Runner {
-    session: Rc<Session>,
+    pub(crate) session: Rc<Session>,
 }
 
 impl Runner {
@@ -120,12 +120,6 @@ impl Runner {
     /// A workspace's plan, in the phones' shape (`plan_json`).
     pub async fn plan(&self, workspace: Uuid) -> Result<serde_json::Value, WebError> {
         Ok(farcooler_client::plan_json::plan_json(&self.session.plan(workspace).await?))
-    }
-
-    /// One of a workspace's orchestrator pages, in the phones' shape
-    /// (`page_json`).
-    pub async fn page(&self, workspace: Uuid, slot: &str) -> Result<serde_json::Value, WebError> {
-        Ok(farcooler_client::page_json::page_json(&self.session.page(workspace, slot).await?))
     }
 
     /// Attach a pane: a second channel carrying the terminal's bytes.
