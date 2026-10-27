@@ -279,7 +279,7 @@ final class DaemonClient: ObservableObject {
 
         let wait: Double
         switch state {
-        case _ where Self.waitsLong(state):
+        case _ where retryWaitsLong(state):
             // `attempt` resets rather than climbs here: it drives the fast
             // exponential schedule only, means nothing at this cadence, and
             // letting it grow would leave a later, genuinely transient
@@ -319,11 +319,19 @@ final class DaemonClient: ObservableObject {
             // runs, and the subprocess it starts either survives (this
             // runner is back) or dies and fires `onEnd`, which finds
             // `retryTask` nil by then and arms the next wait correctly.
-            await self.refresh()
+            await self.refresh(recheck: true)
             guard !Task.isCancelled else { return }
             self.retryTask = nil
-            self.startEvents()
+            self.afterRecheck()
         }
+    }
+
+    /// What follows a scheduled check's read: the events stream, unless the
+    /// runner just refused this Mac, when the stream would be one more
+    /// failed login for the same answer (ov-821). The next check is armed
+    /// here instead; the stream starts once a read gets in.
+    private func afterRecheck() {
+        if awaitingRecheck { scheduleRetry() } else { startEvents() }
     }
 
     /// Retry this runner at once, whatever the backoff had planned.
@@ -357,10 +365,10 @@ final class DaemonClient: ObservableObject {
                 NativeAgents.shared.start()
             }
             guard !Task.isCancelled else { return }
-            await self.refresh()
+            await self.refresh(recheck: true)
             guard !Task.isCancelled else { return }
             self.retryTask = nil
-            self.startEvents()
+            self.afterRecheck()
         }
     }
 
@@ -773,7 +781,17 @@ final class DaemonClient: ObservableObject {
     @Published private(set) var hasLoaded = false
 
     private var missingPanes = MissingPanes()  // which panes have really gone (ov-622)
-    func refresh() async {
+    /// Reads the fleet.
+    ///
+    /// `recheck` is true for the dial a scheduled check or Check Again makes:
+    /// the one dial the runner gets per check. Every other call, and there
+    /// are some thirty, returns at once while the runner is refusing this Mac
+    /// or its access is gone (`awaitingRecheck`, ov-821): each would be its
+    /// own failed login on the runner's address, a burst of them is how a
+    /// removed Mac gets everyone behind its address turned away, and the
+    /// check already scheduled will read what they would have.
+    func refresh(recheck: Bool = false) async {
+        if !recheck, awaitingRecheck { return }
         // `runRaw`, not `run`: the failure message comes back from THIS
         // call directly, and a refresh inside an action is not that action's
         // failure — a Stop the runner refused is not undone by the fleet

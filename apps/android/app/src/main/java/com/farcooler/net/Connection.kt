@@ -918,7 +918,7 @@ class Connection(
     private fun dialOnReturn(outcome: LinkRevival.Outcome) {
         if (outcome is LinkRevival.Outcome.Redialed && _phase.value !is Phase.Connected) return
         steps.log("dialing on return: $outcome")
-        reconnectNow()
+        reconnectIfDue()
     }
 
     suspend fun start(withHost: Runner = host) {
@@ -955,10 +955,14 @@ class Connection(
             return
         }
 
+        keyRefusals.dialing(nowMs())
         val dialed = steps.dialBegan()
         try {
             // The old key for a runner not moved to a new one yet (ov-569).
-            connectWithEitherKey(withHost.id, IdentityKeyRing, { core.connect(withHost.config(it, nodeKey, rendezvous.value)) })
+            connectWithEitherKey(
+                withHost.id, IdentityKeyRing, { core.connect(withHost.config(it, nodeKey, rendezvous.value)) },
+                triesTheOther = keyRefusals.triesTheOtherKey,
+            )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             steps.dialEnded(dialed, connected = false)
@@ -1065,6 +1069,16 @@ class Connection(
         reconnector = scope.launch { reconnect(0) }
     }
 
+    /**
+     * [reconnectNow] for a dial nobody asked for: the network returning, the app coming forward. A phone whose access
+     * is gone dials once per slow recheck, not at each of those (ov-821, [KeyRefusals.holdsOffDial]); a person's tap
+     * on Check Again still dials at once.
+     */
+    fun reconnectIfDue() {
+        if (keyRefusals.holdsOffDial(nowMs())) return
+        reconnectNow()
+    }
+
     private suspend fun reconnect(attempt: Int) {
         if (_phase.value !is Phase.Reconnecting) return
         val key = Identity.privateKey()
@@ -1083,9 +1097,13 @@ class Connection(
             return
         }
 
+        keyRefusals.dialing(nowMs())
         val dialed = steps.dialBegan()
         try {
-            connectWithEitherKey(current.id, IdentityKeyRing, { core.connect(current.config(it, nodeKey, rendezvous.value)) })
+            connectWithEitherKey(
+                current.id, IdentityKeyRing, { core.connect(current.config(it, nodeKey, rendezvous.value)) },
+                triesTheOther = keyRefusals.triesTheOtherKey,
+            )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             steps.dialEnded(dialed, connected = false)

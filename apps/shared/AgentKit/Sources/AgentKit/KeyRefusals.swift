@@ -90,6 +90,7 @@ public struct KeyRefusals: Sendable, Equatable {
         refusals = 0
         firstRefusal = nil
         lastRefusal = nil
+        unprovenProbes = 0
     }
 
     /// The runner said it took this device's access away (ov-820): the
@@ -229,12 +230,63 @@ public struct KeyRefusals: Sendable, Equatable {
     public private(set) var probedAt: Date?
     public static let probesEvery: TimeInterval = 30
 
+    /// Probes since the last dial that got in that proved nothing (ov-821):
+    /// a ProxyJump, an agent-only setup or a `UserKnownHostsFile /dev/null`
+    /// gives the same answer however often it's asked, and each ask is one
+    /// more failed login on the runner. After ``unprovenBeforeSlow`` of them
+    /// the probe waits ``slowProbesEvery`` and the Mac's own checks wait with
+    /// it (``cannotBeProven``).
+    public private(set) var unprovenProbes = 0
+    public static let unprovenBeforeSlow = 2
+    public static let slowProbesEvery: TimeInterval = 300
+
     /// Whether a probe may be made at `now`, and if so, that it's being made.
     public mutating func mayProbe(at now: Date) -> Bool {
-        if let probedAt, now.timeIntervalSince(probedAt) < Self.probesEvery { return false }
+        let gap = cannotBeProven ? Self.slowProbesEvery : Self.probesEvery
+        if let probedAt, now.timeIntervalSince(probedAt) < gap { return false }
         probedAt = now
         return true
     }
+
+    /// What the probe `mayProbe(at:)` allowed found: whether it proved the
+    /// runner refused the key.
+    public mutating func probed(proved: Bool) {
+        if proved { unprovenProbes = 0 } else { unprovenProbes += 1 }
+    }
+
+    /// Whether asking again would only repeat an answer that proved nothing:
+    /// the probes can't settle these refusals, so the Mac checks as slowly
+    /// as it would a settled one.
+    public var cannotBeProven: Bool { unprovenProbes >= Self.unprovenBeforeSlow }
+
+    /// When this device last dialed the runner (ov-821). Kept so that, once
+    /// the access is gone, nothing but the slow recheck, or a person asking,
+    /// dials again: see ``holdsOffDial(at:)``.
+    public private(set) var lastDial: Date?
+
+    /// How often a settled device checks again: five minutes.
+    public static let rechecksEvery: TimeInterval = 300
+
+    /// A dial is starting.
+    public mutating func dialing(at now: Date) { lastDial = now }
+
+    /// Whether a dial nobody asked for (the app coming forward, the network
+    /// returning, a watch asking) should wait: this device's access is gone
+    /// (``Verdict/revoked``, or the runner said it released it), and it
+    /// dialed less than ``rechecksEvery`` ago. Each of those dials is one more
+    /// failed login on the runner, and a failed login costs the whole
+    /// address's standing, so a settled device dials once per recheck. A
+    /// person's tap and the recheck itself don't ask.
+    public func holdsOffDial(at now: Date) -> Bool {
+        guard verdict == .revoked || released, let lastDial else { return false }
+        return now.timeIntervalSince(lastDial) < Self.rechecksEvery
+    }
+
+    /// Whether a refused dial should try the device's other key too (ov-821):
+    /// not once its access is gone, when the second key is a second refusal
+    /// on the same recheck and no answer a runner that's refused the first
+    /// three times would change.
+    public var triesTheOtherKey: Bool { verdict != .revoked && !released }
 
     /// Whether `stderr` from a command the Mac ran over `ssh` is sshd
     /// refusing this device's key: OpenSSH's "Permission denied (publickey)"

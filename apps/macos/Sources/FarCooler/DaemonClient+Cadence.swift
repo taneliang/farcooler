@@ -38,4 +38,14 @@ extension DaemonClient {
         case .connecting, .connected, .reconnecting, .unreachable: return false
         }
     }
+
+    /// Whether the next check of `state` waits on the slow cadence for a
+    /// reason `waitsLong(_:)` can't see (ov-821): a refusal the probe has
+    /// twice failed to prove, which asking again every thirty seconds would
+    /// only cost the runner's address a failed login for.
+    func retryWaitsLong(_ state: HostState) -> Bool {
+        if Self.waitsLong(state) { return true }
+        guard case .unreachable(let reason) = state else { return false }
+        return !target.isEmpty && keyRefusals.cannotBeProven && KeyRefusals.isKeyRefusal(reason)
+    }
 }

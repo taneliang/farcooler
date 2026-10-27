@@ -68,9 +68,39 @@ class KeyRefusals(admitted: Boolean) {
             return if (refusals >= SETTLES_AFTER && last - first >= SETTLES_OVER_MS) Verdict.REVOKED else Verdict.PASSING
         }
 
+    /** When this phone last dialed the runner (ov-821), or null. See [holdsOffDial]. */
+    var lastDialMs: Long? = null
+        private set
+
+    /** A dial is starting at [nowMs]. */
+    fun dialing(nowMs: Long) {
+        lastDialMs = nowMs
+    }
+
+    /**
+     * Whether a dial nobody asked for (the app coming forward, the network returning) should wait (ov-821): this
+     * phone's access is gone ([Verdict.REVOKED], or the runner said it released it) and it dialed less than
+     * [RECHECKS_EVERY_MS] ago. Each such dial is one more failed login on the runner, and a failed login costs
+     * the whole address's standing, so a settled phone dials once per recheck. A person's tap and the recheck
+     * itself don't ask. AgentKit's `KeyRefusals.holdsOffDial(at:)`.
+     */
+    fun holdsOffDial(nowMs: Long): Boolean {
+        val last = lastDialMs ?: return false
+        return (verdict == Verdict.REVOKED || released) && nowMs - last < RECHECKS_EVERY_MS
+    }
+
+    /**
+     * Whether a refused dial should try the phone's other key too (ov-821): not once its access is gone, when the
+     * second key is a second refusal on the same recheck.
+     */
+    val triesTheOtherKey: Boolean get() = verdict != Verdict.REVOKED && !released
+
     companion object {
         const val SETTLES_AFTER = 3
         const val SETTLES_OVER_MS = 10_000L
+
+        /** How often a settled phone checks again: five minutes. */
+        const val RECHECKS_EVERY_MS = 300_000L
     }
 }
 

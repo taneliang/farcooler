@@ -74,7 +74,7 @@ final class Connection: ObservableObject {
     var shutsThisPhoneOut: Bool { accessRemoved || talk.removed }
     /// How this runner has answered this phone's key: see `KeyRefusals`.
     /// Read for the runner when `start` is given a new one.
-    private var keyRefusals = KeyRefusals(admitted: false)
+    private(set) var keyRefusals = KeyRefusals(admitted: false)
     private var keyRefusalsRunner: UUID?
     @Published private(set) var fleet: Fleet = .empty
     /// Whom this phone talks to in each workspace: the orchestrator, or a
@@ -403,7 +403,7 @@ final class Connection: ObservableObject {
         // just found a network, so `Reachability` keeps a list; the store's
         // teardown is what removes an entry. See `Reachability`.
         Reachability.shared.onShouldRetry(host.id.uuidString) { [weak self] in
-            self?.reconnectNow()
+            self?.reconnectIfDue()
         }
         // Not again for the same runner: `retry` restarts it through here,
         // and that mustn't forget the refusals it's counting (ov-818).
@@ -426,6 +426,7 @@ final class Connection: ObservableObject {
             return
         }
 
+        keyRefusals.dialing(at: Date())
         let dialed = dialing()
         do {
             try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
@@ -619,6 +620,15 @@ final class Connection: ObservableObject {
         reconnectTask = Task { [weak self] in await self?.reconnect(attempt: 0) }
     }
 
+    /// `reconnectNow()` for a dial nobody asked for: the network returning,
+    /// the app coming forward. A phone whose access is gone dials once per
+    /// slow recheck, not at each of those (ov-821, `KeyRefusals.holdsOffDial`);
+    /// a person's tap on Check Again still dials at once.
+    func reconnectIfDue() {
+        guard !keyRefusals.holdsOffDial(at: Date()) else { return }
+        reconnectNow()
+    }
+
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
         // A `reconnectNow` or a `start` since this set out makes its answer
@@ -636,6 +646,7 @@ final class Connection: ObservableObject {
             return
         }
 
+        keyRefusals.dialing(at: Date())
         let dialed = dialing()
         do {
             try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)

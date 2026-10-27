@@ -274,7 +274,7 @@ class FleetRepository(
      * of those.
      */
     fun reconnectAll() {
-        connections.values.forEach { it.reconnectNow() }
+        connections.values.forEach { it.reconnectIfDue() }
     }
 
     // There is no fleet-wide landing rule here any more, and its absence is

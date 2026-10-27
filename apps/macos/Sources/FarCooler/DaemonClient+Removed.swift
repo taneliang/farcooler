@@ -18,7 +18,8 @@ extension DaemonClient {
     /// verbose dial proves the runner refused the very key it named as the
     /// one this Mac came in with (`KeyRefusals.isProvenKeyRefusal`). No probe
     /// when the CLI's stderr already shows the agent in trouble, since the
-    /// probe would only ask it again, and none oftener than every 30 s. Short
+    /// probe would only ask it again, and none oftener than every 30 s, nor
+    /// every 5 minutes once two of them proved nothing (ov-821). Short
     /// of any of that, it's left as it was: a runner that can't be reached,
     /// retried on the backoff.
     ///
@@ -47,9 +48,11 @@ extension DaemonClient {
             if state == .noAccess { return state }
             let held = state == .removed ? HostState.removed : nil
             guard keyRefusals.refused(at: now()) == .revoked, let key = keyRefusals.key,
-                !KeyRefusals.showsAgentTrouble(reason), keyRefusals.mayProbe(at: now()),
-                KeyRefusals.isProvenKeyRefusal(verbose: await refusalProbe(target), key: key)
+                !KeyRefusals.showsAgentTrouble(reason), keyRefusals.mayProbe(at: now())
             else { return held }
+            let proved = KeyRefusals.isProvenKeyRefusal(verbose: await refusalProbe(target), key: key)
+            keyRefusals.probed(proved: proved)  // ov-821: a probe that proves nothing is asked less and less
+            guard proved else { return held }
             forgetTeamWork()
             return .noAccess
         }
@@ -58,6 +61,21 @@ extension DaemonClient {
         guard let data, Self.saysRemoved(data) else { return nil }
         forgetTeamWork()
         return .removed
+    }
+
+    /// Whether this Mac's last word from the runner was a refusal, or that its
+    /// access is gone (ov-821): the state in which every dial is one more
+    /// failed login on the runner's address. Until the next scheduled check, a
+    /// `refresh()` nobody scheduled coalesces into that one (`refresh(recheck:)`),
+    /// and that check doesn't follow its read with an events stream's dial.
+    var awaitingRecheck: Bool {
+        guard !target.isEmpty else { return false }
+        switch state {
+        case .noAccess: return true
+        case .removed: return keyRefusals.refusals > 0
+        case .unreachable(let reason): return keyRefusals.refusals > 0 && KeyRefusals.isKeyRefusal(reason)
+        case .connecting, .connected, .reconnecting, .notInstalled: return false
+        }
     }
 
     /// Forgets everything read from this runner, for one that doesn't let

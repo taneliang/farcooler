@@ -77,7 +77,7 @@ extension Connection {
     private func dialOnReturn(_ outcome: LinkRevival.Outcome) {
         if case .redialed = outcome, phase != .connected { return }
         log("dialing on return: \(outcome)")
-        reconnectNow()
+        reconnectIfDue()
     }
 
     /// The probe, as a verdict. A refusal or an unreadable answer is still
