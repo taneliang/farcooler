@@ -1171,14 +1171,13 @@ def self_test():
         sh("worktree", "add", "-q", "--detach", str(lane_wt), cwd=main_wt)
         for wt in (main_wt, lane_wt):
             (wt / "target").mkdir()
-        saved_lean = os.environ.pop(hl.LEAN_ENV, None)
+        saved_env = {k: os.environ.pop(k, None) for k in (hl.LEAN_ENV, "CI")}  # the gate runs its own tests with CI=true
         try:
             clean_target_after_pass(main_wt, say=lambda *a, **k: None)
             clean_target_after_pass(lane_wt, say=lambda *a, **k: None)
             expect("a green gate removes the lane worktree's target/ and leaves the main checkout's", ((lane_wt / "target").exists(), (main_wt / "target").exists()), (False, True))
         finally:
-            if saved_lean is not None:
-                os.environ[hl.LEAN_ENV] = saved_lean
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
     cleaned = []
     real_clean, real_run_jobs2 = clean_target_after_pass, run_jobs
     clean_target_after_pass = lambda repo, say=print: cleaned.append(1)
