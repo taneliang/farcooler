@@ -160,7 +160,7 @@ const LONGEST_TITLE: usize = 80;
 /// How long a pasted answer has to show up in the box before it's judged
 /// not to have.
 pub(crate) const PASTE_SETTLES: Duration = Duration::from_secs(2);
-pub(crate) const PASTE_POLL: Duration = Duration::from_millis(100);
+const PASTE_POLL: Duration = Duration::from_millis(100);
 
 const COULDNT_CONFIRM: &str = "Couldn't confirm the agent got the decision";
 const PASTE_LEFT: &str = "Paste left in the composer; not sent";

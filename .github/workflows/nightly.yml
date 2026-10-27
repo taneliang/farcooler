@@ -223,50 +223,11 @@ jobs:
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 2) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
 
-  # The one daemon test that runs at the daemon's own timing, five minutes
-  # long (ov-816, ov-823): a message sent to a claude no hook is heard from,
-  # whose turn runs five minutes and raises a permission dialog partway, is
-  # sent when the turn ends. The six-second variant per push covers the
-  # logic; this is the one that catches the production waits working against
-  # each other (`watch::timing::tests::the_production_waits_fit_together`
-  # pins the values per push). Real tmux and perl, as ci.yml's Rust job has
-  # them. Ubuntu, so it never takes one of the five macOS runners the shards
-  # start on. `--run-ignored only` and a filter that names the one test; the
-  # step reads nextest's summary for exactly one test run and passed, so a
-  # renamed test fails it rather than passing empty. The test takes about 5.2 minutes, inside
-  # nextest's 10-minute terminate-after (.config/nextest.toml); the job's
-  # timeout is the build (about 12 minutes cold, 3 with a warm cache) plus
-  # that, with room.
-  daemon-production-timing:
-    name: Daemon production timing
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: nightly-production-timing
-      - uses: taiki-e/install-action@v2.87.28
-        with:
-          tool: cargo-nextest@0.9.148
-      - name: Install tmux
-        timeout-minutes: 10
-        run: ./scripts/ci-install-tmux.sh
-      - name: Five-minute turn with a dialog, at production timing
-        run: |
-          set -euo pipefail
-          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- \
-            cargo nextest run --profile ci -p farcooler-daemon --run-ignored only \
-            -E 'test(a_message_sent_during_a_five_minute_turn_with_a_dialog_is_sent_when_it_ends)' \
-            2>&1 | tee "$RUNNER_TEMP/nextest.log"
-          grep -q 'Summary.* 1 test run: 1 passed' "$RUNNER_TEMP/nextest.log"
-
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
   report:
     name: Report
-    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing]
+    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

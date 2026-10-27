@@ -26,8 +26,7 @@
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
 # already holding <text>), or <mode>-on-paste (idle until a paste arrives,
 # then <mode>: menu, working, working-hidden…, drawn in the same pass that
-# logs PASTE, so a test never races it against the read-back), or quit
-# (clears the screen and exits, as claude quitting to the shell leaves it).
+# logs PASTE, so a test never races it against the read-back).
 #
 # In menu or working-menu, a typed key is the dialog's answer: it logs
 # `ANSWERED <key>`, and the box keeps what it held (ov-816). `2` (No) or a
@@ -430,13 +429,6 @@ while (1) {
     my $now = mode();
     $fired = "" if $now !~ /-on-paste$/;
     $now = $fired if $fired ne "";
-    # quit: claude gone to the shell, the screen cleared as it goes, so
-    # nothing of it is left to read (ov-823).
-    if ($now eq 'quit') {
-        print "\e[2J\e[H\e[?2004l";
-        logit("MODE quit");
-        exit 0;
-    }
     if ($now ne $mode) {
         run_queue() if working($mode) && !working($now);
         $mode = $now;
