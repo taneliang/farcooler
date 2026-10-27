@@ -11,6 +11,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
 
+import { Replacement } from './reconnect'
+
 const SCROLLBACK = 5000
 /// The most typed before a pane is live that is held for it.
 const EARLY_LIMIT = 64 * 1024
@@ -27,7 +29,7 @@ export class PaneView {
   private generation = 0
   /// A resumed pane keeps showing what it had until the runner's replay
   /// arrives, and is cleared only then (`resume`).
-  private replacing = false
+  private replacement = new Replacement(false)
   private resizing = 0
   private readonly encoder = new TextEncoder()
   private readonly watching = new ResizeObserver(() => this.refit())
@@ -70,9 +72,10 @@ export class PaneView {
     // keeps its scrollback on screen until the runner's replay arrives, so the
     // person is never looking at a blank terminal, and the replay, which
     // carries the pane's history of its own, replaces it in one step.
-    this.replacing = resuming
+    this.replacement = new Replacement(resuming)
     if (!resuming) this.term.reset()
     const generation = ++this.generation
+    const replacement = this.replacement
     const current = () => this.generation === generation
     this.typedEarly = []
     this.typedEarlyBytes = 0
@@ -83,10 +86,7 @@ export class PaneView {
         terminal,
         bytes => {
           if (!current()) return
-          if (this.replacing) {
-            this.replacing = false
-            this.term.reset()
-          }
+          if (replacement.first()) this.term.reset()
           this.term.write(bytes)
         },
         () => {

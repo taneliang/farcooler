@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { linkNotice } from '../src/client/copy'
-import { type Deps, type LinkView, type Linked, PREDIAL_MAX_AGE_MS, Reconnector } from '../src/client/reconnect'
+import { type Deps, type LinkView, type Linked, PREDIAL_MAX_AGE_MS, Reconnector, Replacement } from '../src/client/reconnect'
 
 class Runner implements Linked {
   freed = false
@@ -190,5 +190,19 @@ describe('the words', () => {
     expect(linkNotice({ kind: 'failed', word: 'derp' }, 'studio')?.detail).toContain('rendezvous')
     expect(linkNotice({ kind: 'up' }, 'studio')).toBeNull()
     expect(linkNotice({ kind: 'connecting' }, 'studio')?.action).toBeNull()
+  })
+})
+
+describe('a pane that comes back after a drop', () => {
+  it('keeps what it showed until the replay starts, then clears once', () => {
+    const replay = new Replacement(true)
+    // Nothing has arrived yet: the old screen and scrollback are still shown.
+    expect(replay.first()).toBe(true)
+    expect(replay.first()).toBe(false)
+    expect(replay.first()).toBe(false)
+  })
+
+  it('never clears a pane that was opened fresh', () => {
+    expect(new Replacement(false).first()).toBe(false)
   })
 })

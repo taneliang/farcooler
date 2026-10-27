@@ -60,7 +60,6 @@ export class Reconnector<R extends Linked, C> {
   private generation = 0
   private view: LinkView = { kind: 'up' }
   private ahead: { at: number; conn: Promise<C | null> } | null = null
-  private busy = false
 
   constructor(private readonly deps: Deps<R, C>) {}
 
@@ -126,8 +125,8 @@ export class Reconnector<R extends Linked, C> {
 
   /// The Reconnect button. Must be called from the click itself.
   async reconnect(): Promise<void> {
-    if (this.busy || this.view.kind === 'up' || this.view.kind === 'connecting') return
-    this.busy = true
+    // The view is the guard: a second click lands on `connecting`.
+    if (this.view.kind === 'up' || this.view.kind === 'connecting') return
     this.set({ kind: 'connecting' })
     try {
       const conn = await this.tunnel()
@@ -135,8 +134,6 @@ export class Reconnector<R extends Linked, C> {
       await this.deps.resume(runner)
     } catch (e) {
       this.set({ kind: 'failed', word: (e as Error).message })
-    } finally {
-      this.busy = false
     }
   }
 
@@ -157,5 +154,23 @@ export class Reconnector<R extends Linked, C> {
   private set(view: LinkView): void {
     this.view = view
     this.deps.show(view)
+  }
+}
+
+/// When a resumed pane clears what it was showing: on the first byte of the
+/// runner's replay, once, and never for a pane that was not resumed.
+///
+/// The replay a runner sends on attach carries the pane's history of its own
+/// (crates/daemon/src/resync.rs), so the old scrollback is replaced by the
+/// runner's rather than added to; clearing at the first byte, not at the click,
+/// keeps the terminal on screen through the reconnect.
+export class Replacement {
+  constructor(private pending: boolean) {}
+
+  /// True for the first byte of a resumed pane's replay, false after.
+  first(): boolean {
+    const now = this.pending
+    this.pending = false
+    return now
   }
 }

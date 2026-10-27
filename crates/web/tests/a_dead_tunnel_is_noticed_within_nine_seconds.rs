@@ -337,3 +337,40 @@ async fn a_runner_the_page_dropped_is_never_reported_lost() {
     })
     .await;
 }
+
+/// ov-772 acceptance 2's runner half: after the tunnel dies and is given up
+/// on, a fresh connection attaches the same terminal, gets the runner's replay
+/// (which carries the pane's scrollback) and types into it. Nothing of the old
+/// connection is needed, and none of it can answer for the new one.
+#[tokio::test(start_paused = true)]
+async fn a_new_connection_attaches_the_same_terminal_and_types_after_a_loss() {
+    local(async {
+        let old = Rig::up().await;
+        let _pane = old.runner.attach(TERMINAL, |_| {}, || {}).await.unwrap();
+        old.kill();
+        for _ in 0..9 {
+            old.second().await;
+        }
+        assert!(old.runner.lost());
+        drop(_pane);
+        let Rig { runner, .. } = old;
+        drop(runner);
+
+        let fresh = Rig::up().await;
+        let (shown_tx, mut shown) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let pane = fresh
+            .runner
+            .attach(TERMINAL, move |bytes| { let _ = shown_tx.send(bytes.to_vec()); }, || {})
+            .await
+            .unwrap();
+        assert_eq!(shown.recv().await.unwrap(), b"replay$ ", "the runner replays the pane on attach");
+        pane.write(b"ls").await.unwrap();
+        let mut echoed = Vec::new();
+        while echoed.len() < 2 {
+            echoed.extend(shown.recv().await.unwrap());
+        }
+        assert_eq!(echoed, b"ls");
+        assert!(!fresh.runner.lost());
+    })
+    .await;
+}
