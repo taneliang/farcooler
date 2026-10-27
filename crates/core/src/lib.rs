@@ -20,6 +20,9 @@ pub mod page_schema;
 pub mod phrase;
 pub mod ports;
 pub mod preconditions;
+/// Finding and starting programs on this machine: a runner's, never a
+/// browser's (ov-768), which has no processes to start.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod programs;
 pub mod redact;
 pub mod replay;

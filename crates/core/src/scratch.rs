@@ -17,6 +17,7 @@ static ROOT: OnceLock<PathBuf> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 /// Registered with `atexit`, where a panic must not unwind into C.
+#[cfg(not(target_arch = "wasm32"))]
 extern "C" fn remove_root() {
     farcooler_ffi_guard::guarded((), || {
         if let Some(root) = ROOT.get() {
@@ -39,7 +40,9 @@ pub fn root() -> &'static Path {
         let root = std::env::temp_dir().join(format!("fc-t{}-{nanos:x}", std::process::id()));
         std::fs::create_dir_all(&root).expect("a scratch root");
         // SAFETY: `remove_root` is an `extern "C"` function that takes nothing
-        // and only removes a directory.
+        // and only removes a directory. No tests run in a browser (ov-768),
+        // so there is nothing to remove there and no `atexit` to ask.
+        #[cfg(not(target_arch = "wasm32"))]
         unsafe {
             libc::atexit(remove_root);
         }

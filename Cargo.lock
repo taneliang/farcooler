@@ -938,6 +938,8 @@ dependencies = [
  "farcooler-tailcat",
  "farcooler-tmux",
  "farcooler-transport",
+ "getrandom 0.2.17",
+ "js-sys",
  "libc",
  "prost",
  "prost-types",
@@ -1113,6 +1115,7 @@ dependencies = [
  "bytes",
  "farcooler-core",
  "farcooler-protocol",
+ "js-sys",
  "libc",
  "prost",
  "tempfile",
@@ -1120,6 +1123,8 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -2804,6 +2809,7 @@ dependencies = [
  "polyval",
  "rand",
  "rand_core",
+ "ring",
  "rsa",
  "russh-cryptovec",
  "russh-util",

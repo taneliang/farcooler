@@ -42,7 +42,6 @@
 //!   waits for a deadline to learn the link is gone.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -54,7 +53,6 @@ use farcooler_protocol::v1::{
 };
 use farcooler_protocol::{PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::codec::{CodecError, FrameReader, FrameWriter, encode_frame};
@@ -139,7 +137,7 @@ pub struct Client<R, W> {
     urgent: mpsc::UnboundedSender<Outgoing>,
     ordinary: mpsc::UnboundedSender<Outgoing>,
     server: ServerHello,
-    reader: tokio::task::JoinHandle<()>,
+    reader: crate::rt::Task<()>,
     /// The halves now belong to the tasks; the types stay in the signature so
     /// every caller that names a `Client<R, W>` still does.
     _halves: std::marker::PhantomData<fn() -> (R, W)>,
@@ -301,7 +299,7 @@ impl Answer {
         }
         let answered = match self.deadline {
             None => (&mut self.answer).await,
-            Some(after) => match tokio::time::timeout(after, &mut self.answer).await {
+            Some(after) => match crate::rt::timeout(after, &mut self.answer).await {
                 Ok(answered) => answered,
                 Err(_) => {
                     let method = std::mem::take(&mut self.method);
@@ -353,14 +351,16 @@ impl Drop for Answer {
     }
 }
 
+#[cfg(feature = "native")]
 impl Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf> {
     /// Connect to a daemon's Unix socket and complete the handshake.
     pub async fn connect(
-        socket: impl AsRef<Path>,
+        socket: impl AsRef<std::path::Path>,
         client_name: &str,
         client_version: &str,
     ) -> Result<Self, ClientError> {
-        let stream = UnixStream::connect(socket.as_ref()).await.map_err(ClientError::Connect)?;
+        let stream =
+            tokio::net::UnixStream::connect(socket.as_ref()).await.map_err(ClientError::Connect)?;
         let (read, write) = stream.into_split();
         Self::over(read, write, client_name, client_version).await
     }
@@ -375,7 +375,7 @@ where
     /// through sshd as it does over a local socket.
     ///
     /// Then hands the halves to a reader task and a writer task, which is why
-    /// this needs a tokio runtime and `'static` halves.
+    /// this needs a runtime to spawn on (`rt::spawn`) and `'static` halves.
     pub async fn over(
         read: R,
         write: W,
@@ -435,8 +435,8 @@ where
         });
         let (urgent, urgent_rx) = mpsc::unbounded_channel();
         let (ordinary, ordinary_rx) = mpsc::unbounded_channel();
-        let reader = tokio::spawn(read_replies(reader, Arc::clone(&shared)));
-        tokio::spawn(write_requests(writer, urgent_rx, ordinary_rx, Arc::clone(&shared)));
+        let reader = crate::rt::spawn(read_replies(reader, Arc::clone(&shared)));
+        crate::rt::spawn(write_requests(writer, urgent_rx, ordinary_rx, Arc::clone(&shared)));
 
         Ok(Self {
             shared,

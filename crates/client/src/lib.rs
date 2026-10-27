@@ -13,14 +13,18 @@ pub mod actions;
 /// rules (ov-764). Re-exported under its old name, so no caller changed.
 pub use farcooler_ceremony as ceremony;
 pub mod deadlines;
+#[cfg(feature = "native")]
 pub mod device_keys;
 pub mod changes_json;
+/// The C ABI the phones and the Mac link: `native` only, as a browser calls
+/// through crates/web's wasm-bindgen surface instead (ov-768).
+#[cfg(feature = "native")]
 pub mod ffi;
 pub mod files_json;
 pub mod members_json;
 pub mod needs_you_json;
 pub mod page_json;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "native"))]
 pub mod pipe;
 pub mod plan_json;
 pub mod session;

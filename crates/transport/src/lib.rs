@@ -16,18 +16,28 @@
 
 pub mod client;
 pub mod codec;
+// The daemon's side: a socket, a process's stdio, and the connections they
+// serve. `native` because a browser serves nothing (ov-768); the client above
+// and `rt` are all a browser builds.
+#[cfg(feature = "native")]
 pub mod connection;
+#[cfg(feature = "native")]
 pub mod listener;
 pub mod push;
+pub mod rt;
+#[cfg(feature = "native")]
 pub mod stdio;
 
 pub use client::{Answer, CallOptions, Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
+#[cfg(feature = "native")]
 pub use connection::{
     Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, refuse, serve_connection,
 };
+#[cfg(feature = "native")]
 pub use listener::{SessionPreamble, UnixListenerServer};
 pub use push::{PushReceiver, PushSender, Pushed, push_queue};
+#[cfg(feature = "native")]
 pub use stdio::{refuse_stdio, serve_stdio};
 
 use farcooler_protocol::v1::{Request, Response, Scope};

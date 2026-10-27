@@ -19,10 +19,16 @@
 //!   reported to the caller with its fingerprint, and connecting anyway is the
 //!   user's explicit decision, not a default.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
+#[cfg(feature = "native")]
 use farcooler_tailcat::TunnelError;
-use russh::client::{self, Config, Handle, Handler, Msg};
+use russh::client::{Handle, Handler, Msg};
+#[cfg(feature = "native")]
+use russh::client::{self, Config};
+#[cfg(feature = "native")]
 use russh::keys::{PrivateKeyWithHashAlg, ssh_key};
 use russh::{Channel, ChannelMsg};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -114,6 +120,7 @@ pub enum HostKeyPolicy {
     Accept,
 }
 
+#[cfg(feature = "native")]
 /// The verdict on a host key, recorded by the handler so it survives the
 /// connection attempt that produced it.
 #[derive(Default)]
@@ -122,11 +129,13 @@ struct KeyVerdict {
     mismatch: std::sync::Mutex<Option<(String, String)>>,
 }
 
+#[cfg(feature = "native")]
 struct Verifier {
     policy: HostKeyPolicy,
     verdict: Arc<KeyVerdict>,
 }
 
+#[cfg(feature = "native")]
 impl Handler for Verifier {
     type Error = russh::Error;
 
@@ -199,6 +208,7 @@ pub struct Destination {
     pub derp_map: String,
 }
 
+#[cfg(feature = "native")]
 /// A live SSH session.
 pub struct Session {
     handle: Handle<Verifier>,
@@ -207,6 +217,7 @@ pub struct Session {
     pub host_fingerprint: Option<String>,
 }
 
+#[cfg(feature = "native")]
 impl Session {
     /// Connect and authenticate.
     pub async fn open(destination: &Destination) -> Result<Self, SshError> {
@@ -309,17 +320,43 @@ impl Session {
     ///
     /// This is the whole remote transport: `farcoolerd --stdio` on one end, the
     /// protocol client on the other, and SSH in between doing what it is for.
-    pub async fn exec(&mut self, command: &str) -> Result<Streams, SshError> {
-        let channel = self
-            .handle
-            .channel_open_session()
-            .await
-            .map_err(|e| SshError::Exec(e.to_string()))?;
-        channel.exec(true, command).await.map_err(|e| SshError::Exec(e.to_string()))?;
-        Ok(Streams::new(channel))
+    pub async fn exec(&self, command: &str) -> Result<Streams, SshError> {
+        exec_on(&self.handle, command).await
     }
 }
 
+#[cfg(feature = "native")]
+impl Exec for Session {
+    fn exec<'a>(&'a self, command: &'a str) -> Pin<Box<dyn Future<Output = Result<Streams, SshError>> + Send + 'a>> {
+        Box::pin(exec_on(&self.handle, command))
+    }
+}
+
+/// An authenticated SSH connection, as a `crate::session::Session` holds one:
+/// something that runs a command on a channel of its own.
+///
+/// Natively that is this module's own `Session`, connected and authenticated
+/// here. In a browser it is a russh `Handle` the page authenticated with its
+/// passkey over a stream it dialed (crates/web, ov-768), which this crate
+/// never sees the making of. Both open channels the same way, `exec_on`.
+pub trait Exec: Send + Sync {
+    fn exec<'a>(&'a self, command: &'a str) -> Pin<Box<dyn Future<Output = Result<Streams, SshError>> + Send + 'a>>;
+}
+
+impl<H: Handler> Exec for Handle<H> {
+    fn exec<'a>(&'a self, command: &'a str) -> Pin<Box<dyn Future<Output = Result<Streams, SshError>> + Send + 'a>> {
+        Box::pin(exec_on(self, command))
+    }
+}
+
+/// Run `command` on a new session channel of `handle`.
+async fn exec_on<H: Handler>(handle: &Handle<H>, command: &str) -> Result<Streams, SshError> {
+    let channel = handle.channel_open_session().await.map_err(|e| SshError::Exec(e.to_string()))?;
+    channel.exec(true, command).await.map_err(|e| SshError::Exec(e.to_string()))?;
+    Ok(Streams::new(channel))
+}
+
+#[cfg(feature = "native")]
 /// The client's settings for a connection on this reach: its keepalive.
 ///
 /// A phone sleeps and wakes; without keepalives a session that the network
@@ -348,6 +385,7 @@ fn config_for(reach: &Reach) -> Arc<Config> {
 /// same way in either case (see `Destination::host_key`'s doc), because it is
 /// still plain SSH inside the tunnel, so a mismatch or an unknown key reads
 /// the same regardless of which reach carried the bytes.
+#[cfg(feature = "native")]
 fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdict) -> SshError {
     if let Some((expected, actual)) = verdict.mismatch.lock().unwrap().take() {
         return SshError::HostKeyChanged { host: destination.reach.label(), expected, actual };
@@ -382,6 +420,7 @@ fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdic
 /// and has to render the same two outcomes. A second copy of "connection
 /// refused means the tunnel worked and sshd did not" is a second dialect, and
 /// the one that drifts is whichever copy is not the one being read.
+#[cfg(feature = "native")]
 pub fn tunnel_error(error: TunnelError) -> SshError {
     match error {
         TunnelError::Io(source) if source.kind() == std::io::ErrorKind::ConnectionRefused => {
@@ -392,6 +431,7 @@ pub fn tunnel_error(error: TunnelError) -> SshError {
 }
 
 /// Decode an OpenSSH private key, with a message that says what to do about it.
+#[cfg(feature = "native")]
 fn decode_key(text: &str, passphrase: Option<&str>) -> Result<ssh_key::PrivateKey, SshError> {
     let key = match passphrase {
         Some(pass) => russh::keys::decode_secret_key(text, Some(pass)),
@@ -454,7 +494,7 @@ impl Streams {
         let (closed, mut closing) = tokio::sync::oneshot::channel::<()>();
         let guard: ChannelGuard = Arc::new(closed);
 
-        tokio::spawn(async move {
+        farcooler_transport::rt::spawn(async move {
             loop {
                 let msg = tokio::select! {
                     // Both halves gone. Stop reading and say so, below.
@@ -588,12 +628,12 @@ impl AsyncRead for ChannelReader {
 mod liveness_tests;
 
 /// Load a key, for tests in sibling modules that need to prove one is usable.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 pub(crate) fn decode_key_for_test(text: &str) -> Result<ssh_key::PrivateKey, SshError> {
     decode_key(text, None)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 pub(crate) mod tests {
     use super::*;
 

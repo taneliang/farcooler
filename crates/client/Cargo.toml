@@ -14,6 +14,21 @@ name = "farcooler_client"
 # that produces something nothing would ever load.
 crate-type = ["staticlib", "rlib"]
 
+# Two builds of one client (ov-768, plan-763 slice 5).
+#
+# `native`, the default, is every client that runs as a process: the phones'
+# FFI, the CLI and the Mac. russh on aws-lc, tokio's sockets and processes,
+# the tunnel (`farcooler-tailcat`) and the fenced `~/.ssh/config` writer.
+#
+# `web` is the browser's (crates/web): russh on ring, an SSH connection the
+# page already authenticated over a stream it dialed, and the page's task
+# queue and clock (`farcooler_transport::rt`). It builds for
+# wasm32-unknown-unknown, where aws-lc's C and tokio's mio cannot, and CI
+# holds that tree to neither (scripts/web-client-tree-check.sh).
+#
+# The two can be built together, which is what `--workspace` lints with
+# `--all-features` would do, but nothing ships that way.
+#
 # The default build has no Go archive linked into `farcooler-tailcat`, and
 # that is fine: the tunnel path exists in this crate's code either way, it
 # just always fails with `no_tailcat` until a platform script supplies the
@@ -22,19 +37,43 @@ crate-type = ["staticlib", "rlib"]
 # know at compile time whether the archive is really linked: the test that
 # proves a build without one fails the tunnel by name.
 [features]
-default = []
-tailcat = ["farcooler-tailcat/linked"]
+default = ["native"]
+native = [
+    "dep:farcooler-tailcat",
+    "dep:farcooler-fence",
+    "dep:farcooler-ffi-guard",
+    "dep:rand",
+    "farcooler-transport/native",
+    "russh/aws-lc-rs",
+    "russh/flate2",
+    "russh/rsa",
+    "tokio/rt-multi-thread",
+    "tokio/net",
+    "tokio/io-std",
+    "tokio/process",
+    "tokio/time",
+    "tokio/signal",
+    "tokio/fs",
+]
+web = ["russh/ring", "uuid/js"]
+tailcat = ["native", "farcooler-tailcat/linked"]
 
 [dependencies]
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
-farcooler-transport.workspace = true
-farcooler-ffi-guard.workspace = true
-farcooler-tailcat.workspace = true
+# A path, not `workspace = true`: an inherited dependency keeps the
+# workspace's default features whatever this line says, and the browser's
+# build must not have `native`.
+farcooler-transport = { path = "../transport", default-features = false }
+farcooler-ffi-guard = { workspace = true, optional = true }
+farcooler-tailcat = { workspace = true, optional = true }
 # The ceremony's codes and rules, re-exported as `ceremony` so every caller is
 # unchanged. Their own crate so the browser builds the same rules (ov-764).
 farcooler-ceremony.workspace = true
-tokio.workspace = true
+# Not `workspace = true`, for the reason farcooler-transport's manifest gives:
+# the workspace's tokio carries `net`, which is mio, which a browser cannot
+# build. `native` adds the rest.
+tokio = { version = "1", default-features = false, features = ["sync", "io-util", "macros"] }
 bytes.workspace = true
 uuid.workspace = true
 # Derived, for the two ceremony payloads. Hand-written encoders for a struct
@@ -44,11 +83,12 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-russh = "0.62"
+# The crypto backend is the feature's: aws-lc natively, ring in a browser.
+russh = { version = "0.62", default-features = false }
 async-trait = "0.1"
 # The RNG russh itself uses to generate keys. Matching upstream rather than
 # picking our own means one source of randomness, and one thing to audit.
-rand = "0.10"
+rand = { version = "0.10", optional = true }
 
 # The fenced writer for `~/.ssh/config`, and NOT target-gated.
 #
@@ -69,7 +109,13 @@ rand = "0.10"
 #
 # The `~/.ssh/config` entry point is still `cfg`-gated in `ffi.rs`, now for the
 # only honest reason left: a phone has no `~/.ssh` for an editor to read.
-farcooler-fence.workspace = true
+farcooler-fence = { workspace = true, optional = true }
+
+# ring asks getrandom 0.2 for randomness, and a browser's is the page's.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+# The page's clock, for `session::now_millis`.
+js-sys = "0.3"
 
 # `pipe.rs` closes what a spawned `runner pipe` would inherit; macOS only.
 [target.'cfg(target_os = "macos")'.dependencies]

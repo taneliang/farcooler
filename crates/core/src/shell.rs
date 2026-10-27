@@ -73,8 +73,15 @@ fn users_shell() -> String {
         .unwrap_or_else(|| "/bin/sh".to_string())
 }
 
+/// A browser (ov-768) has no password database and no login shell.
+#[cfg(target_arch = "wasm32")]
+fn from_passwd() -> Option<String> {
+    None
+}
+
 /// `pw_shell` for the uid this process runs as, or `None` when there is no
 /// entry to read.
+#[cfg(not(target_arch = "wasm32"))]
 fn from_passwd() -> Option<String> {
     // The reentrant form rather than plain `getpwuid`, which hands back a
     // pointer into a shared static that another thread's call can overwrite
