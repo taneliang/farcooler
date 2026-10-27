@@ -13,7 +13,8 @@
 //     with read, write and close, which the Rust side (crates/web) wraps as a
 //     byte stream for russh.
 //   - No raw TCP, so the relay probe that tells "the rendezvous is down" from
-//     "the runner did not answer" cannot run. See relayReachable below.
+//     "the runner did not answer" is a WebSocket to the node instead. See
+//     relayReachable below.
 //   - No main loop of its own: main registers the functions and parks, and
 //     every call that waits runs on a goroutine of its own, because a
 //     js.FuncOf callback that blocks deadlocks the page.
@@ -28,9 +29,11 @@ package main
 import (
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"syscall"
 	"syscall/js"
+	"time"
 
 	"github.com/tailscale/tailcat"
 )
@@ -50,16 +53,101 @@ func main() {
 	select {}
 }
 
-// relayReachable always answers yes in a browser, which cannot open a raw TCP
-// connection to ask.
+// relayReachable reports whether a DERP node the token names accepts a
+// WebSocket, which is the only way a browser reaches one (ov-772).
 //
-// Yes rather than no on purpose. "No" would turn every failed handshake into
-// "can't reach the rendezvous", including a revoked device's, which is the
-// misreport dialConn's split exists to prevent. "Yes" leaves the two answers a
-// browser can honestly give: the runner did not answer, or something else
-// failed.
-func relayReachable(tailcat.ConnInfo) bool {
-	return true
+// A browser cannot open the raw TCP connection the native probe makes, so this
+// opens the same connection the data plane will: `wss://<host>/derp`, with the
+// `derp` subprotocol. It answers the same question the native probe does,
+// "is the rendezvous reachable from here", and that is what tells "can't reach
+// the rendezvous" (a relay that is down, or a network that is) from "the
+// runner did not answer", which is also what a revoked device sees. It runs
+// only after a handshake has failed, as the native one does.
+//
+// **Only a hostname can be tried.** A certificate names a host, so a node
+// listed by address alone cannot be probed from a page. When no node has a
+// hostname the answer is yes, as it was when this could not run at all: "no"
+// would blame the relay for a failure nobody examined.
+func relayReachable(ci tailcat.ConnInfo) bool {
+	tried := false
+	for _, region := range ci.Region {
+		for _, node := range region.Nodes {
+			if node.HostName == "" {
+				continue
+			}
+			tried = true
+			host := node.HostName
+			if node.DERPPort != 0 && node.DERPPort != 443 {
+				host += ":" + strconv.Itoa(node.DERPPort)
+			}
+			if probeWebSocket("wss://"+host+"/derp", relayProbeTimeout) {
+				return true
+			}
+		}
+	}
+	return !tried
+}
+
+// probeWebSocket opens `url` with the `derp` subprotocol and answers whether
+// the socket opened before `timeout`. The socket is closed either way.
+//
+// A page without a WebSocket constructor cannot ask, and "reachable" is the
+// answer that blames nothing.
+func probeWebSocket(url string, timeout time.Duration) bool {
+	constructor := js.Global().Get("WebSocket")
+	if constructor.Type() != js.TypeFunction {
+		return true
+	}
+	opened := make(chan bool, 2)
+	var onOpen, onFail js.Func
+	onOpen = js.FuncOf(func(js.Value, []js.Value) any {
+		select {
+		case opened <- true:
+		default:
+		}
+		return nil
+	})
+	onFail = js.FuncOf(func(js.Value, []js.Value) any {
+		select {
+		case opened <- false:
+		default:
+		}
+		return nil
+	})
+	defer onOpen.Release()
+	defer onFail.Release()
+
+	// `new WebSocket` throws on a malformed URL or a blocked scheme; a throw is
+	// a probe that failed, and must not take the module down.
+	socket, ok := construct(constructor, url)
+	if !ok {
+		return false
+	}
+	socket.Set("onopen", onOpen)
+	socket.Set("onerror", onFail)
+	socket.Set("onclose", onFail)
+	defer func() {
+		socket.Set("onopen", js.Null())
+		socket.Set("onerror", js.Null())
+		socket.Set("onclose", js.Null())
+		socket.Call("close")
+	}()
+	select {
+	case up := <-opened:
+		return up
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// construct is `new constructor(url, "derp")`, with a throw turned into false.
+func construct(constructor js.Value, url string) (socket js.Value, ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	return constructor.New(url, "derp"), true
 }
 
 // jsMintNodeKey answers {priv, pub}: a fresh node key pair in this product's
@@ -78,8 +166,8 @@ func jsMintNodeKey(js.Value, []js.Value) any {
 // A refusal is an Error whose message is one stable word, the same words the
 // Rust side's TunnelError::code gives a phone, so the page owns the sentence:
 //
-//	derp       the relay the token names did not answer (never, in a browser;
-//	           see relayReachable)
+//	derp       no DERP node the token names accepted a WebSocket (see
+//	           relayReachable)
 //	no_answer  the relay answered and the runner did not, which is also what
 //	           a device the runner no longer admits sees
 //	io         anything else: a bad token or key, the data plane, the connect
