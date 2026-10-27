@@ -74,8 +74,8 @@
 //! nobody has typed since the paste, and every check the first Enter passed
 //! passes again (`finish`). A box holding anything else is "Paste left in the
 //! composer; not sent", as before; the text is never typed twice. A dialog
-//! answered by typing in the pane from Far Cooler counts as a key typed since
-//! the paste, so that answer settles as a paste left in the box (`finish`).
+//! answered by typing in the pane from Far Cooler leaves the box as it was,
+//! so the answer waits on (`finish`, ov-827).
 //!
 //! **Mid-turn** (ov-360). claude takes a message submitted while it works,
 //! as the person typing it would, and queues it for its next turn. Measured
@@ -686,13 +686,12 @@ impl Watcher {
         // claude between turns gets compose's last check before an Enter with
         // no fence (`still_between`): a turn of its own begun during the
         // read-back waits, marked pasted, for the fenced Enter (`finish`).
+        // A key typed meanwhile, too, waits: `finish_paste` reads the box,
+        // and settles it as left only if the key changed it (ov-827).
         if preset == "claude"
             && witness.is_none()
             && self.still_between(to, &proven, started, &composer::drawn::Expected::plain(text), true).await.is_err()
         {
-            if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-                return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
-            }
             return self.paste_waits(wake, task, started);
         }
         let entered = match &witness {

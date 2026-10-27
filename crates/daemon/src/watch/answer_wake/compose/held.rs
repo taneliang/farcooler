@@ -86,6 +86,9 @@ pub(crate) struct Tellers {
     /// When each pane's registry first read torn, in a run of tries that
     /// all did (`torn_for`).
     torn_since: HashMap<Uuid, Instant>,
+    /// Each pane's parked messages wait on this, which the watcher wakes
+    /// when that pane's activity moves (`pending`, "Parked", ov-827).
+    pub(super) turns: HashMap<Uuid, Arc<tokio::sync::Notify>>,
     /// A test's pause after a send the gate said to hold, before it's held:
     /// says so on the first, waits on the second.
     #[cfg(test)]

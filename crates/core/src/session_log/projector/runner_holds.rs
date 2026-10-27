@@ -5,7 +5,9 @@
 //! Queued for it as it does for one in claude's own queue, and settles the
 //! echo it drew when it sent it. Once the runner types it, the row is taken
 //! back: claude's own record, a queued row or a turn, shows it from then on.
-//! One the runner gives up on goes Withdrawn, with a notice saying why.
+//! One the runner gives up on goes Withdrawn, with a notice saying why. One
+//! pasted into the box whose Enter waits for the turn's end is `InBox`, which
+//! a view says as "Waiting to send" (ov-827).
 
 use super::fold::{LINE_CHARS, Projection, squeeze};
 use super::rows::*;
@@ -25,6 +27,18 @@ impl Projection {
         }
         let queued = Queued { text: squeeze(text, LINE_CHARS), state: QueuedState::Waiting, at_ms: Some(at_ms) };
         self.push(row, self.newest_turn, false, RowKind::Queued(queued));
+    }
+
+    /// `text`, `id`, is in the agent's box since `at_ms`, its Enter waiting
+    /// for the turn's end (ov-827): an `InBox` row, made once however often
+    /// this is said, or a held row moved to it.
+    pub fn runner_in_box(&mut self, id: &str, text: &str, at_ms: i64) {
+        if let Some(&i) = self.index.get(&row_id(id)) {
+            self.set_queued(i, QueuedState::InBox);
+            return;
+        }
+        let queued = Queued { text: squeeze(text, LINE_CHARS), state: QueuedState::InBox, at_ms: Some(at_ms) };
+        self.push(row_id(id), self.newest_turn, false, RowKind::Queued(queued));
     }
 
     /// The runner typed `id`: its row is taken back.

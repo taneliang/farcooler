@@ -377,6 +377,10 @@ pub struct Queued {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum QueuedState {
     Waiting,
+    /// In the agent's box, its Enter waiting for the turn's end: the runner
+    /// sends it then (ov-827). Views say "Waiting to send", and offer no
+    /// Send Now, which is refused while the box holds anything.
+    InBox,
     /// Taken into the turn that was running (`absorbed_mid_turn`), or handed
     /// to an agent. One a dequeue sent as a turn of its own is retracted
     /// instead: that turn shows it (ov-452).

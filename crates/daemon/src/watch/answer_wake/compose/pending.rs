@@ -1,7 +1,7 @@
 //! A composed message pasted into claude's box whose Enter waits out a turn
-//! claude began after the paste, with no fence to be had yet (ov-808), for
-//! as long as the owner's orchestrator's turns run (`TURN_BEGUN_WAIT`,
-//! ov-816).
+//! claude began after the paste, with no fence to be had yet (ov-808): read
+//! often for as long as the owner's orchestrator's turns run
+//! (`TURN_BEGUN_WAIT`, ov-816), then parked until the turn's end (ov-827).
 //!
 //! **Off the lock.** The send is answered Queued at once and the Enter left
 //! to a task of its own, which takes the pane's typing lock only for each
@@ -12,7 +12,7 @@
 //! while it waits, as a held message's do (`held`).
 //!
 //! **Each try**, every `PASTE_POLL` for the first `SLOWS_AFTER` and every
-//! `SLOW_POLL` after, until `turn_begun_wait`: the read-back of
+//! `SLOW_POLL` after, until `turn_begun_wait`, then parked (below): the read-back of
 //! `still_between` again (`between_or_why`), claude's config directory read
 //! from its process once for the whole wait, and then
 //! - a turn still running: the box must still show the message (cleared or
@@ -57,7 +57,7 @@
 //! So does a turn claude's transcript says the person stopped some other
 //! way: a permission dialog answered No or Esc, which claude 2.1.309 ends
 //! as `[Request interrupted by user for tool use]`, or Esc typed straight
-//! in the terminal (ov-816 review, S1). So do the wait running out (said
+//! in the terminal (ov-816 review, S1). So do the wait running out at `left_kept` (said
 //! as the agents' when the gate saw agents and only the registry stayed
 //! busy, `stayed`), the box changing, and the agent going. Each is logged as a paste left in the
 //! box, with its check, and the pane's rows say which, in words of its own (`held::why_not_sent`). A box
@@ -65,11 +65,28 @@
 //! Mac or straight in tmux: claude's transcript is read for it first, and if
 //! it's there the Queued row is taken back for claude's own.
 //!
+//! **Parked** (ov-827). A turn that outlasts `turn_begun_wait` no longer
+//! leaves the message in the box for good: the wait parks. It reads the pane
+//! when the watcher sees the pane's activity move (`Watcher::turn_moved`, the
+//! turn's end among them), and at the latest every `parked_poll`, a fallback
+//! for an end the screen doesn't show (a box holding text can hide claude's
+//! spinner, and agents ending move only the registry). Once a read finds
+//! the pane between turns it reads every `wait_poll` again, so the second
+//! read `IDLE_TWICE` asks for comes soon. Every rule above holds while
+//! parked: no Enter on a dialog, the box still exactly the message, nobody
+//! typing for 3 s, the fenced Enter when the hooks give one. The pane's rows
+//! say it's waiting to send (`Projection::runner_in_box`) from the start.
+//! It's given up, as stayed busy, only past `left_kept` (4 hours): the
+//! longest anything in this runner waits on an agent (a held message,
+//! `held::GIVE_UP_MS`; an agent's message, `messages::GIVE_UP_AFTER_MS`), so
+//! a message held behind this one never outlives it, and past it a message
+//! sent would answer a conversation long moved on.
+//!
 //! **Kept.** The wait is a row in the store (`Store::keep_compose_wait`)
 //! from before it begins until it ends, so a runner restarted during it
 //! picks it up where it was (`resume_compose_waits`): sent meanwhile, its
 //! row is taken back; the same claude still there (its pid and its session), the wait goes on, its
-//! deadline counted from when it was queued, or given up at once if that
+//! deadline (`left_kept`) counted from when it was queued, or given up at once if that
 //! ran out while the runner was down; another claude, or none, says so. A
 //! wait begun since this start, before its first pump, is running already
 //! and isn't started twice.
@@ -105,6 +122,15 @@ pub(crate) const SLOW_POLL: Duration = Duration::from_secs(1);
 /// How long a waiting message trusts the background agents its gate saw
 /// (this module's docs, "The gate's agents").
 pub(crate) const AGENTS_TRUSTED_FOR: Duration = Duration::from_secs(30);
+
+/// How often a parked message reads the pane when the watcher hasn't woken
+/// it (this module's docs, "Parked"): at most 1,440 reads over `LEFT_KEPT`,
+/// one pane's capture and one registry read each.
+pub(crate) const PARKED_POLL: Duration = Duration::from_secs(10);
+
+/// The longest a message waits in the box for its Enter (this module's
+/// docs, "Parked").
+pub(crate) const LEFT_KEPT: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// One message waiting for its Enter, in `Tellers::pending` by a token of
 /// its own, so one wait ending never clears another's.
@@ -264,7 +290,7 @@ impl Watcher {
     {
         let Some(me) = self.me.upgrade() else { return };
         let row = row_of(token);
-        crate::session_projectors::global().runner_hold(terminal, |p| p.runner_held(&row, echo, queued_at));
+        crate::session_projectors::global().runner_hold(terminal, |p| p.runner_in_box(&row, echo, queued_at));
         let waiting = Waiting {
             terminal,
             stopped: false,
@@ -298,7 +324,7 @@ impl Watcher {
         }
         // Its whole wait ran out while the runner was down: nothing was
         // tried, and claude was never read.
-        if now_millis() - kept.queued_at >= i64::try_from(self.timing().turn_begun_wait.as_millis()).unwrap_or(i64::MAX) {
+        if now_millis() - kept.queued_at >= i64::try_from(self.timing().left_kept.as_millis()).unwrap_or(i64::MAX) {
             return Err(gone("runner_down"));
         }
         let Some(config) = registry_turn::config_of(pid).await else { return Err(gone("not_running")) };
@@ -341,6 +367,20 @@ impl Watcher {
         }
     }
 
+    /// What a parked message in `terminal` waits on (`turn_moved`).
+    fn turn_signal(&self, terminal: Uuid) -> Arc<tokio::sync::Notify> {
+        Arc::clone(self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).turns.entry(terminal).or_default())
+    }
+
+    /// The watcher saw `terminal`'s activity move, a turn's end among such
+    /// moves: every message parked there reads the pane now, not at its
+    /// next `parked_poll` (this module's docs, "Parked").
+    pub(crate) fn turn_moved(&self, terminal: Uuid) {
+        if let Some(moved) = self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).turns.get(&terminal) {
+            moved.notify_waiters();
+        }
+    }
+
     fn stopped_since_queued(&self, token: Uuid) -> bool {
         self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).pending.get(&token).is_some_and(|w| w.stopped)
     }
@@ -380,16 +420,29 @@ impl Watcher {
         // When the run of bad reads now going began.
         let mut unread_since: Option<Instant> = None;
         let mut last = Left { check: p.left.check, screen: p.left.screen.clone(), turn: true, dialog: p.left.dialog };
+        let mut parked = false;
         loop {
             let timing = self.timing();
-            tokio::time::sleep(if waited() < timing.wait_slows_after { PASTE_POLL } else { timing.wait_poll }).await;
+            if waited() < timing.wait_slows_after {
+                tokio::time::sleep(PASTE_POLL).await;
+            } else if waited() < timing.turn_begun_wait || idle_since.is_some() {
+                tokio::time::sleep(timing.wait_poll).await;
+            } else {
+                // Parked: until the watcher sees the pane's activity move,
+                // or `parked_poll` (this module's docs, "Parked").
+                if !std::mem::replace(&mut parked, true) {
+                    tracing::info!(terminal = %p.to.id, check = last.check, "a waiting message parked in the box until the turn ends");
+                }
+                let moved = self.turn_signal(p.to.id);
+                let _ = tokio::time::timeout(timing.parked_poll, moved.notified()).await;
+            }
             #[cfg(test)]
             tried(p.to.id);
             if self.stopped_since_queued(token) {
                 left_in_box(&registry, &p.to, "stopped", p.proven.background, None);
                 return Err("stopped");
             }
-            if waited() >= timing.turn_begun_wait {
+            if waited() >= timing.left_kept {
                 last.logged(&registry, &p.to, &p.proven);
                 return Err(stayed(&last, &p.proven));
             }

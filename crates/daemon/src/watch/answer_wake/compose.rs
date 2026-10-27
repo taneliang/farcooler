@@ -82,7 +82,7 @@ use crate::watch::{Watcher, now_millis};
 pub(super) mod codex;
 pub(crate) mod held;
 mod pending;
-pub(crate) use pending::{AGENTS_TRUSTED_FOR, IDLE_TWICE, SLOW_POLL, SLOWS_AFTER};
+pub(crate) use pending::{AGENTS_TRUSTED_FOR, IDLE_TWICE, LEFT_KEPT, PARKED_POLL, SLOW_POLL, SLOWS_AFTER};
 #[cfg(test)]
 pub(crate) use pending::{fail_reads, slow_return, tries};
 
@@ -97,12 +97,14 @@ pub(crate) const MOST_IMAGES: usize = crate::pastes::staged::MOST_IMAGES;
 pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
 
 /// How long a composed message whose claude began a turn between the paste
-/// and the Enter waits for a fenced Enter or the turn's end before it's left
-/// in the box (`pending`, ov-808): a long turn's worth, as the owner's
-/// orchestrator runs with no hooks, so no fence (ov-816). Nothing waits on
-/// it: the send was answered Queued, the box is taken only for each try, a
-/// dialog is waited out, the reads slow after `SLOWS_AFTER`, and the gate's
-/// agents are trusted only for `AGENTS_TRUSTED_FOR`.
+/// and the Enter reads the pane every `SLOW_POLL` for a fenced Enter or the
+/// turn's end (`pending`, ov-808): a long turn's worth, as the owner's
+/// orchestrator runs with no hooks, so no fence (ov-816). Past it the
+/// message isn't left: it parks, waiting in the box until the next turn's
+/// end, up to `LEFT_KEPT` (ov-827). Nothing waits on it: the send was
+/// answered Queued, the box is taken only for each try, a dialog is waited
+/// out, the reads slow after `SLOWS_AFTER`, and the gate's agents are
+/// trusted only for `AGENTS_TRUSTED_FOR`.
 pub(crate) const TURN_BEGUN_WAIT: Duration = Duration::from_secs(10 * 60);
 
 /// claude 2.1.290's own commands that aren't prompts: each opens a panel or
@@ -415,28 +417,36 @@ impl Watcher {
         let submitted = composed.submitted(&placeholders);
         let since = Instant::now();
         let queued_before = mid_turn::enqueued_before(&transcript, from, &submitted);
-        match &witness {
+        let left = match &witness {
             None => {
                 #[cfg(test)]
                 if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     run();
                 }
-                if let Entered::Pending(left) = self.enter_between(to, &proven, started, &expected, &submitted).await? {
-                    let confirm = Confirm { session, transcript, from, queued_before, since, submitted };
-                    let echo = pending::echo(placeholders.len(), raw);
-                    let drawn = pending::Drawn { images: paths.len(), pastes };
-                    self.pend_enter(pending::Pending { to: to.clone(), proven, started, expected, confirm, echo, left, config, queued_at: now_millis(), drawn });
-                    return Ok(Turn::During);
+                match self.enter_between(to, &proven, started, &expected, &submitted).await? {
+                    Entered::Pending(left) => Some(left),
+                    Entered::Now => None,
                 }
             }
             Some(witness) => {
                 let witness = witness.clone().pasted_at(started);
-                self.enter_expecting(to, preset, &witness, &expected).await.map_err(|no| match no {
-                    mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
-                    mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
-                    mid_turn::NoEnter::Failed => DomainError::OperationFailed,
-                })?
+                match self.enter_expecting(to, preset, &witness, &expected).await {
+                    Ok(()) => None,
+                    // Nothing pressed: a dialog up or announced. The message
+                    // is in the box, so it waits, as one a turn began under
+                    // does, rather than be left there (ov-827).
+                    Err(mid_turn::NoEnter::Dialog) => Some(Left::dialog_ahead()),
+                    Err(mid_turn::NoEnter::Moved) => return Err(DomainError::Conflict { what: "paste_left" }),
+                    Err(mid_turn::NoEnter::Failed) => return Err(DomainError::OperationFailed),
+                }
             }
+        };
+        if let Some(left) = left {
+            let confirm = Confirm { session, transcript, from, queued_before, since, submitted };
+            let echo = pending::echo(placeholders.len(), raw);
+            let drawn = pending::Drawn { images: paths.len(), pastes };
+            self.pend_enter(pending::Pending { to: to.clone(), proven, started, expected, confirm, echo, left, config, queued_at: now_millis(), drawn });
+            return Ok(Turn::During);
         }
         self.mark_told(to.id);
         let took = Confirm { session, transcript, from, queued_before, since, submitted };
@@ -606,13 +616,13 @@ impl Watcher {
             return Err(left.logged(&self.service.registry(), to, proven));
         }
         match self.witness(proven, to, submitted).await {
-            Some(witness) => {
-                self.enter_fenced_for(to, proven, started, &witness, expected).await.map_err(|what| match what {
-                    "failed" => DomainError::OperationFailed,
-                    what => DomainError::Conflict { what },
-                })?;
-                Ok(Entered::Now)
-            }
+            Some(witness) => match self.enter_fenced_for(to, proven, started, &witness, expected).await {
+                Ok(()) => Ok(Entered::Now),
+                // Nothing pressed: waited out, not left (ov-827).
+                Err("dialog") => Ok(Entered::Pending(Left::dialog_ahead())),
+                Err("failed") => Err(DomainError::OperationFailed),
+                Err(what) => Err(DomainError::Conflict { what }),
+            },
             None => Ok(Entered::Pending(left)),
         }
     }
@@ -777,6 +787,12 @@ pub(super) struct Left {
 }
 
 impl Left {
+    /// A fenced Enter the hooks refused, nothing pressed: a dialog up, or a
+    /// call or gate a dialog may follow. Waited out as a turn is (ov-827).
+    fn dialog_ahead() -> Left {
+        Left { check: "dialog_ahead", screen: None, turn: true, dialog: false }
+    }
+
     /// Log it (`left_in_box`) and refuse as `paste_left`.
     fn logged(&self, registry: &farcooler_core::activity::Registry, to: &Terminal, proven: &super::Proven) -> DomainError {
         left_in_box(registry, to, self.check, proven.background, self.screen.as_deref().map(|screen| (proven.preset, screen)));

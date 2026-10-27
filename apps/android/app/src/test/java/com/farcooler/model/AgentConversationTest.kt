@@ -232,6 +232,7 @@ class AgentConversationTest {
         assertEquals("A line of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 1)))
         assertEquals("Sent mid-turn", AgentConversation.queuedLabel("Sent"))
         assertEquals("Queued", AgentConversation.queuedLabel("Waiting"))
+        assertEquals("ov-827: in the box until the turn ends", "Waiting to send", AgentConversation.queuedLabel("InBox"))
     }
 
     /** ov-404: the Mac's words for an image refused, and which limit it hit. */

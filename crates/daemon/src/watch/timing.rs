@@ -22,9 +22,16 @@ pub(crate) struct Timing {
     /// claude's hook or transcript, or codex's rollout (`compose`'s
     /// `CONFIRM_SETTLES`).
     pub compose_confirm: Duration,
-    /// How long a compose waits out a turn claude began between its paste
-    /// and its Enter (`compose::TURN_BEGUN_WAIT`).
+    /// How long a compose whose turn claude began between its paste and its
+    /// Enter reads the pane every `wait_poll`, before it parks
+    /// (`compose::TURN_BEGUN_WAIT`, ov-827).
     pub turn_begun_wait: Duration,
+    /// How often a parked message reads the pane when the watcher hasn't
+    /// woken it first (`compose::pending::PARKED_POLL`, ov-827).
+    pub parked_poll: Duration,
+    /// The longest a message waits in claude's box for its Enter, parked
+    /// included, before it's given up (`compose::pending::LEFT_KEPT`, ov-827).
+    pub left_kept: Duration,
     /// How far apart a waiting message's two reads between turns are before
     /// its plain Enter (`compose::pending::IDLE_TWICE`).
     pub idle_twice: Duration,
@@ -80,6 +87,8 @@ impl Timing {
     pub(crate) const PRODUCTION: Timing = Timing {
         compose_confirm: super::answer_wake::compose::CONFIRM_SETTLES,
         turn_begun_wait: super::answer_wake::compose::TURN_BEGUN_WAIT,
+        parked_poll: super::answer_wake::compose::PARKED_POLL,
+        left_kept: super::answer_wake::compose::LEFT_KEPT,
         idle_twice: super::answer_wake::compose::IDLE_TWICE,
         wait_slows_after: super::answer_wake::compose::SLOWS_AFTER,
         wait_poll: super::answer_wake::compose::SLOW_POLL,
@@ -143,6 +152,8 @@ mod tests {
             Timing {
                 compose_confirm: s(5),
                 turn_begun_wait: s(10 * 60),
+                parked_poll: s(10),
+                left_kept: s(4 * 60 * 60),
                 idle_twice: ms(300),
                 wait_slows_after: s(30),
                 wait_poll: s(1),
@@ -173,7 +184,11 @@ mod tests {
         } else if t.wait_poll < poll {
             Some("a slow poll faster than the fast one")
         } else if t.wait_slows_after >= t.turn_begun_wait {
-            Some("a wait that ends before it slows")
+            Some("a wait that parks before it slows")
+        } else if t.parked_poll < t.wait_poll {
+            Some("a parked poll faster than the slow one")
+        } else if t.left_kept <= t.turn_begun_wait {
+            Some("a message given up before it parks")
         } else if t.carry_agents_for > t.wait_slows_after {
             Some("the gate's agents trusted past the slowdown, after the fast reads that watch for them")
         } else if t.torn_cap < t.wait_poll * 3 {
@@ -193,10 +208,12 @@ mod tests {
     fn the_production_waits_fit_together() {
         assert_eq!(misfit(&Timing::PRODUCTION), None);
         type Break = (fn(&mut Timing), &'static str);
-        let broken: [Break; 7] = [
+        let broken: [Break; 9] = [
             (|t| t.wait_poll = t.idle_twice, "no longer than idle_twice"),
             (|t| (t.wait_poll, t.idle_twice) = (Duration::from_millis(50), Duration::from_millis(10)), "faster than the fast one"),
-            (|t| t.wait_slows_after = t.turn_begun_wait, "ends before it slows"),
+            (|t| t.wait_slows_after = t.turn_begun_wait, "parks before it slows"),
+            (|t| t.parked_poll = t.wait_poll / 2, "parked poll faster than the slow one"),
+            (|t| t.left_kept = t.turn_begun_wait, "given up before it parks"),
             (|t| t.carry_agents_for = t.wait_slows_after + Duration::from_millis(1), "trusted past the slowdown"),
             (|t| t.torn_cap = t.wait_poll, "fewer than three slow reads"),
             (|t| t.torn_cap = t.turn_begun_wait, "a tenth of the wait"),

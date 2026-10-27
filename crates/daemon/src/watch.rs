@@ -5243,8 +5243,10 @@ impl Watcher {
             let record = entry.clone();
             drop(state);
             // Blocked, or no longer, or a turn that just failed: the list moved.
+            // A message parked in this pane's box reads it now (ov-827).
             if activity_moved.is_some() {
                 self.announce_needs_you();
+                self.turn_moved(id);
             }
 
             // Worth telling the owner about, and only on the transition.

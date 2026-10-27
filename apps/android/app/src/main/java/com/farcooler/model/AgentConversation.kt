@@ -558,8 +558,10 @@ object AgentConversation {
         else -> "The answer wasn’t sent. Answer in the terminal."
     }
 
+    /** A Queued row's label. `InBox` is a message in claude's box that the runner sends when the turn ends (ov-827). */
     fun queuedLabel(state: String): String = when (state) {
         "Withdrawn" -> "Withdrawn"
+        "InBox" -> "Waiting to send"
         "Sent" -> "Sent mid-turn"
         else -> "Queued"
     }

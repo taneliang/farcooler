@@ -9,7 +9,8 @@
 //!   (`proven_agent`);
 //! - a fresh capture reads the box holding exactly the text, with no dialog
 //!   over it;
-//! - nobody has typed there since the paste began;
+//! - nobody has typed there since the paste began, or since the last key
+//!   read, the box unchanged by it (below);
 //! - for claude, every check a mid-turn Enter makes, whether or not it reads
 //!   as working: the session quiet, no call in flight, no ask held
 //!   (`witness`), and the same again under the fence (`enter`). A box holding
@@ -26,13 +27,16 @@
 //!   that reading holds. Any other agent's screen with text in the box was
 //!   never measured, so its answer settles as a paste left in the box.
 //!
-//! **A limit.** A dialog answered from inside Far Cooler, typed in the pane
-//! from the Mac or a phone, is a key typed since the paste: Far Cooler can't
-//! tell a key that went to the dialog from one that went to the box, so the
-//! answer settles "Paste left in the composer; not sent". It's finished only
-//! when the dialog went without a key Far Cooler saw: a tool call that needed
-//! no answer, an ask answered through the hook, or a key typed in a terminal
-//! attached to tmux directly.
+//! **A key typed since the paste** (ov-827). A dialog answered from inside
+//! Far Cooler, typed in the pane from the Mac or a phone, marks input as
+//! typing in the box does. The box tells them apart: still holding exactly
+//! the text, the key went elsewhere and the wait goes on, its checks counting
+//! keys from the last one read; changed, it settles as a paste left in the
+//! box. Before ov-827 any key settled it so, and a notice a dialog's answer
+//! followed was left in the box for good. Nobody may have typed for
+//! `QUIET_MS` (`ready`), longer than a compose's 3 s, and a claude no hook is
+//! heard from is read between turns twice, `idle_twice` apart, before its
+//! Enter.
 //!
 //! A box holding anything else, or nothing, settles "Paste left in the
 //! composer; not sent", as a box that never matched always has. The text is
@@ -93,16 +97,27 @@ impl Watcher {
             ("codex", Turn::Between) if said == super::registry_turn::Said::NotIdle => Turn::During,
             _ => turn,
         };
-        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
-            return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
-        }
+        // A key typed since the paste that left the box exactly the text (it
+        // was just read so) went somewhere else: a dialog's answer, from the
+        // Mac or a phone. Not the end of the wait (ov-827, as ov-816 made it
+        // for a compose); nobody has typed for `QUIET_MS` (`ready`), and the
+        // checks below count keys only from the last one read.
+        let since = last_input(self.service.root_dir(), to.id).map_or(pasted, |at| pasted.max(at + 1));
         let proven = super::Proven { preset, tty: String::new(), pid, turn, held: false, background: farcooler_core::activity::Background::None };
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {
-                Some(witness) => Some(witness.pasted_at(pasted)),
+                Some(witness) => Some(witness.pasted_at(since)),
                 // No hook was ever heard from it (ov-711): claude's own
-                // registry may still say it's between turns.
-                None if turn == Turn::Between && self.between_unhooked(to, &proven, pasted, text).await => None,
+                // registry may still say it's between turns, read so twice
+                // `idle_twice` apart, as a waiting compose's plain Enter is:
+                // one stray frame read idle mid-turn sends no key (ov-827).
+                None if turn == Turn::Between && self.between_unhooked(to, &proven, since, text).await => {
+                    tokio::time::sleep(self.timing().idle_twice).await;
+                    if !self.between_unhooked(to, &proven, since, text).await {
+                        return Pass::Waiting(Held::Busy);
+                    }
+                    None
+                }
                 None => return Pass::Waiting(Held::Busy),
             },
             (false, Turn::Between) => None,
