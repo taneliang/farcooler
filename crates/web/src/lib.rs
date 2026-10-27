@@ -8,8 +8,8 @@
 //! - **SSH** ([`ssh`]): russh on its ring backend over whatever byte stream the
 //!   page hands it, with the runner's host key pinned from the reply, signing
 //!   in with this browser's passkey ([`passkey`]).
-//! - **The runner's protocol** ([`wire`]): one control session and one stream
-//!   per pane, laid out as `crates/client/src/session.rs` lays them out.
+//! - **The runner's protocol** ([`wire`]): the phones' own client core,
+//!   `farcooler_client::session::Session`, built for the browser (ov-768).
 //!
 //! `js` is the wasm-bindgen surface the page calls, and only it knows there is
 //! a page. Everything else builds natively too, which is how `tests/` drives it

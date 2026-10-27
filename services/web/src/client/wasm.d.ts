@@ -31,6 +31,11 @@ declare module 'fc-web' {
   export class WebRunner {
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>
+    /// The phones' shapes (crates/client's needs_you_json, plan_json and
+    /// page_json), as JSON. Not shown by the page yet.
+    needsYou(): Promise<string>
+    plan(workspace: string): Promise<string>
+    page(workspace: string, slot: string): Promise<string>
     free(): void
   }
   export class WebPane {

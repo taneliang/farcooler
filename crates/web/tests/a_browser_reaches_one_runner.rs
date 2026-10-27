@@ -12,8 +12,9 @@
 //!   passkey, which this server cannot verify; see
 //!   `a_passkey_signs_in_to_a_real_sshd.rs`), lists its
 //!   terminals, and a pane's input goes on the control channel while its
-//!   output arrives on a channel of its own (`crates/client/src/session.rs`'s
-//!   layout).
+//!   output arrives on a channel of its own. Since ov-768 that is the phones'
+//!   own client core, `farcooler_client::session::Session`, and each hello
+//!   names this crate's client.
 
 mod support;
 
@@ -155,6 +156,9 @@ async fn the_pinned_runner_lists_attaches_and_takes_keystrokes_on_the_control_ch
             assert_eq!(echoed, b"echo");
             assert_eq!(&*seen.typed.lock().await, b"echo");
             assert_eq!(*seen.resized.lock().await, Some((132, 40)));
+            // Both channels are the client core's `Session` (ov-768), which
+            // says so in each hello by the name this crate gave it.
+            assert_eq!(*seen.hellos.lock().await, ["farcooler-web", "farcooler-web"]);
 
             let requests = seen.requests.lock().await.clone();
             let control = requests.iter().find(|(_, m)| m == "terminal.list").unwrap().0;

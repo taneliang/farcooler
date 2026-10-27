@@ -208,6 +208,25 @@ impl WebRunner {
         serde_json::to_string(&list).map_err(|e| failure("protocol", &e.to_string()))
     }
 
+    /// `needs_you.list`, as JSON in the phones' shape (`needs_you_json`).
+    #[wasm_bindgen(js_name = needsYou)]
+    pub async fn needs_you(&self) -> Result<String, JsValue> {
+        let value = self.0.needs_you().await.map_err(web_failure)?;
+        Ok(value.to_string())
+    }
+
+    /// A workspace's plan, as JSON in the phones' shape (`plan_json`).
+    pub async fn plan(&self, workspace: String) -> Result<String, JsValue> {
+        let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.plan(id).await.map_err(web_failure)?.to_string())
+    }
+
+    /// One orchestrator page, as JSON in the phones' shape (`page_json`).
+    pub async fn page(&self, workspace: String, slot: String) -> Result<String, JsValue> {
+        let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.page(id, &slot).await.map_err(web_failure)?.to_string())
+    }
+
     /// Attach a pane: `output(Uint8Array)` for every byte, `ended()` once.
     pub async fn attach(&self, terminal: String, output: Function, ended: Function) -> Result<WebPane, JsValue> {
         let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;

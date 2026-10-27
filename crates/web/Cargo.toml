@@ -25,6 +25,9 @@ name = "farcooler_web"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# The client core every phone runs, built for the browser: its Session is this
+# crate's protocol client (ov-768, src/wire.rs).
+farcooler-client = { path = "../client", default-features = false, features = ["web"] }
 farcooler-protocol = { path = "../protocol" }
 farcooler-ceremony = { path = "../ceremony" }
 russh = { version = "0.62", default-features = false, features = ["ring"] }

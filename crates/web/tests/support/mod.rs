@@ -107,6 +107,8 @@ pub struct Seen {
     /// What `terminal.write` carried, in arrival order.
     pub typed: Mutex<Vec<u8>>,
     pub resized: Mutex<Option<(u32, u32)>>,
+    /// The `client_name` of every hello, one per channel.
+    pub hellos: Mutex<Vec<String>>,
     /// The attach channel's write half, so a write can echo onto it.
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
     /// Told of each write as it arrives, for a caller watching from outside.
@@ -210,11 +212,14 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
         };
         let Some(env) = env else { return };
         let out = match env.body {
-            Some(wire_envelope::Body::ClientHello(_)) => envelope(wire_envelope::Body::ServerHello(ServerHello {
+            Some(wire_envelope::Body::ClientHello(hello)) => {
+                seen.hellos.lock().await.push(hello.client_name);
+                envelope(wire_envelope::Body::ServerHello(ServerHello {
                 selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
                 capabilities: vec![capability::TERMINAL_STREAM.to_string()],
                 ..Default::default()
-            })),
+            }))
+            }
             Some(wire_envelope::Body::Request(req)) => {
                 seen.requests.lock().await.push((id, req.method.clone()));
                 match (req.method.as_str(), req.payload.clone()) {
