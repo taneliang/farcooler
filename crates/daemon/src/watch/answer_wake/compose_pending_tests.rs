@@ -13,13 +13,13 @@
 use super::*;
 use crate::watch::answer_wake::interrupt::Key;
 
-/// How long a turn begun is waited out here (`Timing::turn_begun_wait`).
+/// How long a turn begun is waited out here (`Timing::left_kept`; it never parks first).
 const WAIT: Duration = Duration::from_millis(1_500);
 
 /// Sends spaced sooner, a turn begun waited out for `WAIT`, and every fenced
 /// Enter said to `si`.
 fn quick_turns(b: &Board, si: &StandIn) {
-    b.watcher.with_timing(|t| (t.told_spacing, t.turn_begun_wait, t.held_retry) = (crate::watch::Timing::SHORT, WAIT, Duration::from_millis(100)));
+    b.watcher.with_timing(|t| (t.told_spacing, t.left_kept, t.held_retry) = (crate::watch::Timing::SHORT, WAIT, Duration::from_millis(100)));
     b.watcher.mark_fence_in(PathBuf::from(format!("{}.fence", si.control.display())));
 }
 
@@ -189,7 +189,7 @@ async fn a_turn_that_ends_within_the_wait_takes_the_message_between_turns() {
     let b = board().await;
     let (agent, si) = unfenceable_claude(&b).await;
     quick_turns(&b, &si);
-    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(10));
+    b.watcher.with_timing(|t| t.left_kept = Duration::from_secs(10));
     si.show("shells").await;
     b.screen_with(agent.id, "2 shells · ↓ to manage").await;
     let shower = si.clone();
@@ -257,7 +257,7 @@ async fn one_stray_idle_frame_mid_turn_gets_no_enter() {
     let b = board().await;
     let (agent, si) = unfenceable_claude(&b).await;
     quick_turns(&b, &si);
-    b.watcher.with_timing(|t| (t.idle_twice, t.turn_begun_wait) = (Duration::from_secs(1), Duration::from_secs(3)));
+    b.watcher.with_timing(|t| (t.idle_twice, t.left_kept) = (Duration::from_secs(1), Duration::from_secs(3)));
     si.show("agents-shells").await;
     b.screen_with(agent.id, "◯ general-purpose").await;
     let shower = si.clone();
@@ -282,7 +282,7 @@ async fn stop_during_the_wait_acts_at_once_and_the_wait_gives_up_unentered() {
     let b = board().await;
     let (agent, si) = unfenceable_claude(&b).await;
     quick_turns(&b, &si);
-    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(6));
+    b.watcher.with_timing(|t| t.left_kept = Duration::from_secs(6));
     rows_open(&b, agent.id);
     si.show("shells").await;
     b.screen_with(agent.id, "2 shells · ↓ to manage").await;
@@ -407,7 +407,7 @@ async fn a_second_send_during_the_wait_is_held_behind_it() {
 async fn waiting_through(b: &Board, mode: &'static str) -> (Terminal, StandIn) {
     let (agent, si) = unfenceable_claude(b).await;
     quick_turns(b, &si);
-    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(10));
+    b.watcher.with_timing(|t| t.left_kept = Duration::from_secs(10));
     drop(hook_on_submit(b, &si));
     rows_open(b, agent.id);
     si.show("shells").await;
@@ -430,9 +430,10 @@ async fn waits_over(b: &Board) {
     panic!("a wait never ended");
 }
 
-/// The Queued rows a wait shows, waiting still (`held:pending:<token>`).
+/// The rows a wait shows, waiting still (`held:pending:<token>`): in the
+/// box, which a view says as "Waiting to send" (ov-827).
 fn waiting_rows(terminal: Uuid) -> Vec<String> {
-    held_rows(terminal).into_iter().filter(|(_, state)| *state == QueuedState::Waiting).map(|(text, _)| text).collect()
+    held_rows(terminal).into_iter().filter(|(_, state)| *state == QueuedState::InBox).map(|(text, _)| text).collect()
 }
 
 /// A key someone types in Far Cooler's terminal, input-marked as the Mac's
@@ -480,7 +481,7 @@ async fn a_dialog_drawn_before_the_enter_is_waited_out() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
     quick_turns(&b, &si);
-    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(10));
+    b.watcher.with_timing(|t| t.left_kept = Duration::from_secs(10));
     si.show("shells").await;
     b.screen_with(agent.id, "2 shells · ↓ to manage").await;
     let _hook = hook_on_submit(&b, &si);
@@ -500,7 +501,7 @@ async fn a_dialog_drawn_before_the_enter_is_waited_out() {
 async fn a_dialog_up_past_the_wait_is_said_so() {
     let b = board().await;
     let (agent, si) = waiting_through(&b, "working").await;
-    b.watcher.with_timing(|t| t.turn_begun_wait = WAIT);
+    b.watcher.with_timing(|t| t.left_kept = WAIT);
     si.show("menu").await;
     waits_over(&b).await;
     assert!(enters(&si).is_empty(), "{}", si.log());
@@ -532,7 +533,7 @@ async fn a_long_wait_reads_claudes_process_once_and_slows() {
 async fn agents_hidden_after_a_turn(b: &Board, carry: Duration) -> (Terminal, StandIn) {
     let (agent, si) = unfenceable_claude(b).await;
     quick_turns(b, &si);
-    b.watcher.with_timing(|t| (t.turn_begun_wait, t.carry_agents_for) = (Duration::from_secs(4), carry));
+    b.watcher.with_timing(|t| (t.left_kept, t.carry_agents_for) = (Duration::from_secs(4), carry));
     rows_open(b, agent.id);
     si.show("agents-shells").await;
     b.screen_with(agent.id, "◯ general-purpose").await;
@@ -577,7 +578,7 @@ async fn the_gates_agents_are_not_trusted_past_their_time() {
 async fn a_box_cleared_mid_turn_is_said_at_once() {
     let b = board().await;
     let (agent, si) = waiting_through(&b, "working").await;
-    b.watcher.with_timing(|t| t.turn_begun_wait = Duration::from_secs(30));
+    b.watcher.with_timing(|t| t.left_kept = Duration::from_secs(30));
     let began = std::time::Instant::now();
     si.show("working-cleared").await;
     waits_over(&b).await;
@@ -807,3 +808,6 @@ async fn a_resumed_wait_keeps_the_deadline_it_was_queued_with() {
 
 #[path = "compose_bad_read_tests.rs"]
 mod compose_bad_read_tests;
+
+#[path = "compose_parked_tests.rs"]
+mod compose_parked_tests;

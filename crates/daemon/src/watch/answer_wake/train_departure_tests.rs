@@ -133,3 +133,6 @@ async fn a_departure_caused_by_an_rpc_is_told_in_that_call() {
     assert!(!told[0].contains("--state integrating"), "{}", told[0]);
     assert!(told[0].contains("start your own train with `train start`"), "{}", told[0]);
 }
+
+#[path = "notice_wait_tests.rs"]
+mod notice_wait_tests;

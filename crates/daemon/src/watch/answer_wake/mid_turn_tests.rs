@@ -79,8 +79,9 @@ async fn a_working_codex_is_left_to_finish() {
 }
 
 /// A dialog announced after the paste began, and before the Enter: no Enter,
-/// and the text is left in the box. The gate is heard the moment the paste
-/// reaches the stand-in, well before the read-back's first look.
+/// and the message waits in the box for the dialog to go, answered Queued,
+/// not refused and left there (ov-827). The gate is heard the moment the
+/// paste reaches the stand-in, well before the read-back's first look.
 #[tokio::test]
 async fn a_dialog_announced_during_the_paste_gets_no_enter() {
     let b = board().await;
@@ -99,8 +100,10 @@ async fn a_dialog_announced_during_the_paste_gets_no_enter() {
         }
         false
     });
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "dialog");
+    let told = b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await;
+    assert_eq!(told.expect("waits"), Turn::During);
     assert!(gate.await.unwrap(), "the paste never reached the stand-in");
+    assert_eq!(b.svc.store.compose_waits().unwrap().len(), 1, "it waits for its Enter");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
 

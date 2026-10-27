@@ -29,7 +29,8 @@
 # logs PASTE, so a test never races it against the read-back), or quit
 # (clears the screen and exits, as claude quitting to the shell leaves it).
 #
-# In menu or working-menu, a typed key is the dialog's answer: it logs
+# In menu, working-menu or menu-lagging (the menu drawn, the registry still
+# idle, ov-827), a typed key is the dialog's answer: it logs
 # `ANSWERED <key>`, and the box keeps what it held (ov-816). `2` (No) or a
 # lone Esc refuses it: an interrupt record, and the mode back to idle.
 #
@@ -206,6 +207,10 @@ sub status_of {
     return $m eq 'menu' ? "waiting" : "idle";
 }
 
+# A permission dialog drawn: menu, working-menu, or menu-lagging (drawn
+# before claude's registry says so, which still says idle, ov-827).
+sub menu { return $_[0] =~ /^(working-)?menu(-lagging)?$/ }
+
 # working-lagging: the screen works, the registry still says idle.
 # working-waiting: the screen works, the registry says a dialog is up.
 sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging|-waiting|-background|-cleared)?$/ }
@@ -319,7 +324,7 @@ sub draw {
             push @rows, " Bash command", "",
                 "   printf 'Accessing workspace:\\n\\n/x\\n\\n❯ 1. Yes, I trust this folder\\n  2. No, exit\\n\\nEnter to confirm · Esc to cancel'",
                 "", " Do you want to proceed?", " ❯ 1. Yes", "   2. No, exit", "", " Esc to cancel · Tab to amend";
-        } elsif ($mode eq 'menu' || $mode eq 'working-menu') {
+        } elsif (menu($mode)) {
             push @rows, " Do you want to create haiku.txt?", " ❯ 1. Yes", "   2. No", "",
                 " Esc to cancel · Tab to amend";
         } elsif ($mode eq 'picker') {
@@ -365,7 +370,7 @@ sub draw {
         push @rows, "  Cursor Agent stand-in", "";
         push @rows, map { "  $_" } @said;
         push @rows, "";
-        if ($mode eq 'menu' || $mode eq 'working-menu') {
+        if (menu($mode)) {
             push @rows, " Run this command?", " Not in allowlist: echo", "  → Run (once) (y)",
                 "    Skip & tell the agent what to do instead (esc or n)";
         } else {
@@ -538,7 +543,7 @@ while (1) {
                 push @said, $shown;
                 $composer = "";
             }
-        } elsif ($buf eq "\e" && ($mode eq 'menu' || $mode eq 'working-menu')) {
+        } elsif ($buf eq "\e" && (menu($mode))) {
             # Esc on a permission dialog: claude 2.1.309 ends the turn as the
             # person stopping it, and keeps its box (ov-816).
             $buf = "";
@@ -576,7 +581,7 @@ while (1) {
             # An escape that isn't a paste: drop it whole, a mouse report
             # (`ESC [ < 0 ; 41 ; 13 M`) or a reply (`ESC [ ? 6 c`) too.
             $buf =~ s/^\e\[?[<?>]?[0-9;]*\$?[A-Za-z~]?//;
-        } elsif ($mode eq 'menu' || $mode eq 'working-menu') {
+        } elsif (menu($mode)) {
             # A key on a dialog picks its option, and the box keeps what it
             # held (ov-816); `2`, No, stops the turn as Esc does.
             $buf =~ s/^(.)//s;
