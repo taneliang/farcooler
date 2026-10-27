@@ -22,12 +22,14 @@ extension DaemonClient {
     /// of any of that, it's left as it was: a runner that can't be reached,
     /// retried on the backoff.
     ///
-    /// A Mac connected when it was removed reads `(released)` over its
-    /// still-open ssh master (`a_real_sshd_master_outlives_a_revoke`), so it
-    /// shows `.removed` first, and meets the refused key once that master
-    /// ends. `.removed` holds through refusals short of proof; a proven one
-    /// moves it to `.noAccess`, whose words don't claim the member was
-    /// removed, which a device-only revoke (`member.set`) didn't do.
+    /// A Mac connected when it was removed no longer reads `(released)` over
+    /// its still-open ssh master: since ov-820 the runner serves a revoked
+    /// device's new channel nothing and says `device_released` on it
+    /// (`a_real_sshd_master_outlives_a_revoke`), so the Mac shows `.noAccess`
+    /// (`heardReleased`), and meets the refused key once that master ends.
+    /// `.removed` is still what a member's device that reads `(released)` on
+    /// a connection the runner never revoked shows; it holds through refusals
+    /// short of proof, and a proven one moves it to `.noAccess`.
     ///
     /// And `.noAccess` for a failure to reach the runner once it has said it
     /// released this Mac (`heardReleased`, ov-820), until a read gets in: over
