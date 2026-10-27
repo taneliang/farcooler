@@ -8,6 +8,8 @@ Waits for the 5-minute load average to fall under 20, takes the same flock
 scripts/lane-gate.py takes (scripts/heavy_lock.py), writes the holder note
 (worktree, PID, start time, command), runs the command, passes its exit status
 through, and releases. A wait prints who holds the lock. Off under CI.
+In a lane worktree a cargo command also builds without debug info and keeps target/ under 20 GB, which
+keeps the disk from filling (ov-837, scripts/heavy_lock.py); FARCOOLER_LEAN_BUILD=off opts out.
 Use it for builds and test suites: cargo, swift test, gradle, xcodebuild, apps/macos/test.sh.
 """
 import argparse
@@ -39,12 +41,13 @@ def main(argv):
                      say=lambda m, **k: print(m.replace("load average", "5-minute load average"), file=sys.stderr, **k))
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip() or os.getcwd()
     with hl.machine_lock(top, shlex.join(cmd), poll=poll, announce=announce, say=lambda m, **k: print(m, file=sys.stderr, **k)):
-        return run(cmd, held=True)
+        extra = hl.prepare_lane_build(top, say=lambda m, **k: print(m, file=sys.stderr, **k)) if hl.runs_cargo(cmd) else {}
+        return run(cmd, held=True, extra=extra)
 
 
-def run(cmd, held=False):
+def run(cmd, held=False, extra=None):
     try:
-        child = subprocess.Popen(cmd, env={**os.environ, hl.HELD_ENV: "1"} if held else None)
+        child = subprocess.Popen(cmd, env={**os.environ, hl.HELD_ENV: "1", **(extra or {})} if held else None)
     except OSError as e:
         print(f"scripts/heavy: cannot run {cmd[0]}: {e.strerror}", file=sys.stderr)
         return 127

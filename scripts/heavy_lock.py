@@ -16,6 +16,7 @@ import errno
 import fcntl
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -80,6 +81,76 @@ def survive_dead_output():
 def disk_full(e):
     """True for an error that means the volume has no room."""
     return isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT)
+
+
+# ---- a lane's Rust target/ stays small (ov-837)
+#
+# Each lane worktree grew its own target/, 10-84 GB apiece (about 230 GB across five lanes on Oct 27), and the disk
+# filled. A shared CARGO_TARGET_DIR was measured and rejected: each checkout still builds its own copies of the
+# workspace crates, so two lanes shared only the registry dependencies (28.3 GB for two lanes after one edit each, against
+# about 30 GB apart), and cargo's mtime check let one lane's build stand in for another's older checkout: B's
+# transport crate failed with E0063 against the protocol crate built for A. sccache cannot cache incremental
+# builds and leaves every lane its own target/. What does work, per lane worktree:
+#   1. no debug info in the dev and test profiles: 12.6 GB to 7.0 GB for daemon+client, cold build 212 s to 132 s,
+#      an edit rebuild unchanged at 22 s. (Incremental caches stay: dropping them halves the size again but makes an
+#      edit rebuild 2.4 times slower.)
+#   2. a ceiling: over FARCOOLER_TARGET_MAX_GB (20) the incremental caches go, then the whole target/.
+#   3. scripts/lane-gate.py removes target/ after a fully green gate, when the lane is done.
+# Lanes only (a linked worktree): the main checkout and CI build as before. Opt out with FARCOOLER_LEAN_BUILD=off.
+
+LEAN_ENV = "FARCOOLER_LEAN_BUILD"
+TARGET_MAX_ENV = "FARCOOLER_TARGET_MAX_GB"
+TARGET_MAX_GB = 20.0
+
+
+def is_linked_worktree(top):
+    """True in a `git worktree add` checkout, false in the main checkout."""
+    def git(flag):
+        out = subprocess.run(["git", "-C", str(top), "rev-parse", flag], capture_output=True, text=True).stdout.strip()
+        return (pathlib.Path(top) / out).resolve() if out else None
+    git_dir, common = git("--git-dir"), git("--git-common-dir")
+    return bool(git_dir and common and git_dir != common)
+
+
+def lean_wanted(top):
+    return not (os.environ.get("CI") or os.environ.get(LEAN_ENV) == "off") and is_linked_worktree(top)
+
+
+def lean_cargo_env(top):
+    """Environment that keeps a lane's target/ small: no debug info unless the caller chose a level. {} outside a lane."""
+    if not lean_wanted(top) or "CARGO_PROFILE_DEV_DEBUG" in os.environ:
+        return {}
+    return {"CARGO_PROFILE_DEV_DEBUG": "0"}
+
+
+def runs_cargo(cmd):
+    return "cargo" in [os.path.basename(a) for a in cmd]
+
+
+def target_kb(target):
+    out = subprocess.run(["du", "-sk", str(target)], capture_output=True, text=True).stdout.split()
+    return int(out[0]) if out else 0
+
+
+def trim_target(target, say=print):
+    """Over the ceiling: drop the incremental caches, then everything. Call with the machine lock held."""
+    target = pathlib.Path(target)
+    limit = float(os.environ.get(TARGET_MAX_ENV, TARGET_MAX_GB)) * 1024 * 1024  # KB
+    if not target.is_dir() or target_kb(target) <= limit:
+        return
+    for inc in target.glob("*/incremental"):
+        shutil.rmtree(inc, ignore_errors=True)
+    if target_kb(target) > limit:
+        say(f"  {target} is over {limit / 1024 / 1024:g} GB; clearing it (the next build starts cold)")
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def prepare_lane_build(top, say=print):
+    """What a lane's cargo command gets: the lean environment, after the ceiling is enforced."""
+    env = lean_cargo_env(top)
+    if lean_wanted(top):
+        trim_target(pathlib.Path(top) / "target", say)
+    return env
 
 
 def lock_path():
@@ -359,6 +430,71 @@ def self_test():
         rc = w.wait(timeout=10)
         holder.wait()
         expect("scripts/heavy with its stderr pipe closed still runs its command", (rc, marks.read_text().split()), (0, ["wrapper-in", "wrapper-out", "second-in"]))
+
+        # A lane's Rust target/ stays small (ov-837): linked worktrees build without debug info and under a ceiling; the main checkout does not.
+        def git(*a, cwd):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, capture_output=True, text=True, check=True)
+        main_wt, lane_wt = t / "main", t / "lane"
+        main_wt.mkdir()
+        git("init", "-q", cwd=main_wt)
+        git("commit", "-q", "--allow-empty", "-m", "x", cwd=main_wt)
+        git("worktree", "add", "-q", "--detach", str(lane_wt), cwd=main_wt)
+        knobs = ("CI", "CARGO_PROFILE_DEV_DEBUG", LEAN_ENV, TARGET_MAX_ENV)
+        saved = {k: os.environ.pop(k, None) for k in knobs}
+        lean = {"CARGO_PROFILE_DEV_DEBUG": "0"}
+        try:
+            expect("the main checkout builds as before", lean_cargo_env(main_wt), {})
+            expect("a lane worktree builds without debug info", lean_cargo_env(lane_wt), lean)
+            os.environ["CARGO_PROFILE_DEV_DEBUG"] = "1"
+            expect("a debug level the caller chose wins", lean_cargo_env(lane_wt), {})
+            del os.environ["CARGO_PROFILE_DEV_DEBUG"]
+            os.environ["CI"] = "1"
+            expect("CI builds as before", lean_cargo_env(lane_wt), {})
+            del os.environ["CI"]
+            os.environ[LEAN_ENV] = "off"
+            expect("off opts out", lean_cargo_env(lane_wt), {})
+            del os.environ[LEAN_ENV]
+            expect("only cargo commands are lean", [runs_cargo(c) for c in (["cargo", "test"], ["./scripts/test-leak-check.py", "--", "cargo", "nextest"], ["swift", "test"], ["apps/macos/test.sh"])], [True, True, False, False])
+
+            # Through scripts/heavy with a fake cargo and swift that print what they were given.
+            bindir = t / "bin"
+            bindir.mkdir()
+            for tool in ("cargo", "swift"):
+                (bindir / tool).write_text('#!/bin/sh\necho "debug=${CARGO_PROFILE_DEV_DEBUG:-none}"\n')
+                (bindir / tool).chmod(0o755)
+            e3 = {**env, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+            def via_heavy(wt, *cmd, extra=(), more=None):
+                return subprocess.run([heavy, *extra, "--", *cmd], cwd=wt, env={**e3, **(more or {})}, capture_output=True, text=True, timeout=20).stdout.strip()
+            expect("scripts/heavy gives a lane's cargo the lean build", via_heavy(lane_wt, "cargo", "build"), "debug=0")
+            expect("... not the main checkout's", via_heavy(main_wt, "cargo", "build"), "debug=none")
+            expect("... not a swift build", via_heavy(lane_wt, "swift", "test"), "debug=none")
+
+            # The ceiling: over it, incremental caches go first, then the whole target/. The wrapper enforces it before the command runs.
+            tgt = lane_wt / "target"
+            (tgt / "debug" / "incremental").mkdir(parents=True)
+            (tgt / "debug" / "deps").mkdir()
+            (tgt / "debug" / "incremental" / "big").write_bytes(b"x" * 2_000_000)
+            (tgt / "debug" / "deps" / "small").write_bytes(b"x" * 100_000)
+            os.environ[TARGET_MAX_ENV] = "0.001"  # about 1 MB
+            trim_target(tgt, say=lambda *a, **k: None)
+            expect("over the ceiling, incremental caches go and the dependencies stay", ((tgt / "debug" / "incremental").exists(), (tgt / "debug" / "deps" / "small").exists()), (False, True))
+            (tgt / "debug" / "deps" / "big").write_bytes(b"x" * 2_000_000)
+            via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
+            expect("still over, scripts/heavy clears the whole target/ before it builds", tgt.exists(), False)
+            tgt.mkdir(exist_ok=True)
+            (tgt / "keep").write_bytes(b"x")
+            via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
+            expect("under the ceiling, nothing is touched", (tgt / "keep").exists(), True)
+            main_tgt = main_wt / "target"
+            main_tgt.mkdir()
+            (main_tgt / "big").write_bytes(b"x" * 2_000_000)
+            via_heavy(main_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
+            expect("the main checkout's target/ is never trimmed", (main_tgt / "big").exists(), True)
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
     if fails:
         for line in fails:
             print(f"heavy_lock self-test: {line}", file=sys.stderr)

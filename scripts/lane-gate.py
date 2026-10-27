@@ -64,6 +64,10 @@ gates finish one after another, oldest first; --release-between-jobs queues agai
 interleaves gates and makes each take as long as all of them. Light jobs (wire, doc-comments,
 relay, site) never take it. --no-lock turns it off, and it is off by default when
 the CI environment variable is set: CI runners are separate machines.
+
+A lane worktree's Rust target/ was 10-84 GB and filled the disk (ov-837). In a linked worktree the rust job builds
+without debug info and keeps target/ under 20 GB (scripts/heavy_lock.py has the measurements), and a fully green
+gate removes target/ at the end; --keep-target keeps it. FARCOOLER_LEAN_BUILD=off opts out of the first two.
 """
 
 import argparse
@@ -609,6 +613,7 @@ def main(argv):
     ap.add_argument("--release-between-jobs", action="store_true", help="queue again for each heavy job instead of holding the lock for the whole gate")
     ap.add_argument("--no-lock", action="store_true", help="skip the machine-wide heavy-job lock (it is off already when CI is set)")
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
+    ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -679,7 +684,18 @@ def gate(args):
         except OSError as e:  # the table is on screen; only the saved copy needs room
             print(f"lane-gate: could not save the summary file: {e.strerror or e}", flush=True)
         shutil.rmtree(tmp, ignore_errors=True)
+    if not failed and not partial and not args.keep_target and not args.dry_run:
+        clean_target_after_pass(repo)
     return 1 if failed else 0
+
+
+def clean_target_after_pass(repo, say=print):
+    """A fully green gate means the lane is done: its target/ (several GB) goes, so a finished lane does not hold the disk (ov-837).
+    Only a linked worktree's, never the main checkout's, and the next build in it starts cold."""
+    target = pathlib.Path(repo) / "target"
+    if target.is_dir() and hl.lean_wanted(repo):
+        shutil.rmtree(target, ignore_errors=True)
+        say(f"lane-gate: removed {target} (the gate passed; --keep-target keeps it)", flush=True)
 
 
 def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
@@ -705,6 +721,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         wait_for_load()
     env = base_env(repo, tmp, ctx, args.strict_leaks)
     env.update(job_env(j))
+    if j == "rust":  # a lane's target/ stays small: no debug info, a ceiling (ov-837)
+        env.update(hl.prepare_lane_build(repo))
     if j == "android" and ctx["steps.jdk21.outputs.path"]:
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
     print(f"\n[{j}]", flush=True)
@@ -771,7 +789,7 @@ def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
 
 
 def self_test():
-    global run_jobs
+    global run_jobs, clean_target_after_pass
     import contextlib
     import io
     failures = []
@@ -1140,6 +1158,39 @@ def self_test():
     finally:
         hl.survive_dead_output = real_survive
     expect("the gate protects its own output before it queues", asked, [1])
+
+    # A fully green gate removes a lane worktree's target/ (ov-837); never the main checkout's, never after a partial or failed gate.
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        def sh(*a, cwd):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, capture_output=True, check=True)
+        main_wt, lane_wt = t / "main", t / "lane"
+        main_wt.mkdir()
+        sh("init", "-q", cwd=main_wt)
+        sh("commit", "-q", "--allow-empty", "-m", "x", cwd=main_wt)
+        sh("worktree", "add", "-q", "--detach", str(lane_wt), cwd=main_wt)
+        for wt in (main_wt, lane_wt):
+            (wt / "target").mkdir()
+        saved_lean = os.environ.pop(hl.LEAN_ENV, None)
+        try:
+            clean_target_after_pass(main_wt, say=lambda *a, **k: None)
+            clean_target_after_pass(lane_wt, say=lambda *a, **k: None)
+            expect("a green gate removes the lane worktree's target/ and leaves the main checkout's", ((lane_wt / "target").exists(), (main_wt / "target").exists()), (False, True))
+        finally:
+            if saved_lean is not None:
+                os.environ[hl.LEAN_ENV] = saved_lean
+    cleaned = []
+    real_clean, real_run_jobs2 = clean_target_after_pass, run_jobs
+    clean_target_after_pass = lambda repo, say=print: cleaned.append(1)
+    try:
+        for stub, extra, want in ((False, [], 1), (False, ["--keep-target"], 0), (True, [], 0), (False, ["--only", "wire"], 0)):
+            cleaned.clear()
+            run_jobs = lambda chosen, plans, rows, *r, _f=stub: _f
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(["--worktree", str(ROOT), "--base", "HEAD", "--no-load-wait", *extra])
+            expect(f"target/ cleaning after a gate (failed={stub}, args={extra})", len(cleaned), want)
+    finally:
+        clean_target_after_pass, run_jobs = real_clean, real_run_jobs2
 
     # A filtered gate says so in its summary heading and its last line, and an unfiltered one does not (ov-817).
     for left, failed_, want_head, want_last in [
