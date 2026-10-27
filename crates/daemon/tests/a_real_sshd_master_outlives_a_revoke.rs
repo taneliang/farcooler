@@ -48,19 +48,19 @@ async fn a_new_channel_on_a_master_from_before_the_revoke() {
 
     // The next read: a fresh `farcooler --host`, which finds the master. sshd
     // serves the channel without reading `authorized_keys`, and the forced
-    // command still names `mac-b`: the daemon takes it as the released device it
-    // now is (ov-758), which reads `member.list` and nothing else. So a Mac that
-    // was connected when it was removed is told so (ov-784's screen) for as long
-    // as the master lives, and meets the refused key (ov-818) once it ends.
+    // command still names `mac-b`. Since ov-820 (review B1) the daemon serves a
+    // revoked device's new connection nothing until it is enrolled again: the
+    // channel is told `device_released` and ends, so the Mac shows no access
+    // (`heardReleased`) for as long as the master lives, and meets the refused
+    // key (ov-818) once it ends.
     assert!(master_alive(&runner, &control), "the master died with the revoke");
     let (_next, mut next) = connect(&runner, &control).await;
-    let read = next.call(request("member.list")).await.expect("the released Mac reads member.list");
-    let Some(result::Value::MemberList(list)) = read.value else { panic!("not a member list: {read:?}") };
-    assert_eq!(list.you, "(released)", "the channel on the old master isn't the released device's");
-    let fleet = next.call(request("worktree.list")).await;
+    let read = next.call(request("member.list")).await;
+    assert!(read.is_err(), "the revoked Mac's new channel was served: {read:?}");
+    let farewell = tokio::time::timeout(std::time::Duration::from_secs(10), next.next_event()).await;
     assert!(
-        matches!(&fleet, Err(ClientError::Daemon { what, .. }) if what == "not_yours"),
-        "a released Mac read the fleet, or was refused for another reason: {fleet:?}"
+        matches!(&farewell, Ok(Ok(e)) if matches!(e.payload, Some(farcooler_protocol::v1::event::Payload::DeviceReleased(_)))),
+        "the revoked Mac's new channel wasn't told it was released: {farewell:?}"
     );
     stop_master(&runner, &control);
     assert!(!master_alive(&runner, &control), "the master outlived this test");
