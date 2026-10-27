@@ -2,7 +2,7 @@
 //! reaches it, from a phone enrolled at `control` as the Mac's ceremony
 //! leaves every phone.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use farcooler_protocol::v1::{self as pb, Request, Scope, request, response};
 use farcooler_transport::Peer;
@@ -19,6 +19,9 @@ const KEY_BROWSER: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJhEUXBcOjzsos5a
 /// The browser's Tailcat node key, as its offer carries it.
 const NODE_BROWSER: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+/// The log of each enrollment is `tests/an_enrollment_is_logged.rs`: a log
+/// capture races every other test reaching the same call site on another
+/// thread, so it runs alone in its own binary.
 async fn runner() -> (tempfile::TempDir, Arc<Service>) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
@@ -113,56 +116,4 @@ async fn a_members_control_phone_grants_nothing() {
     let refused = call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::Control, false, NODE_BROWSER)).await;
     assert_eq!(refused.err().as_deref(), Some("scope-denied:"));
     assert!(!enrolled(&svc).await.contains(&"browser-b".to_string()));
-}
-
-#[derive(Clone, Default)]
-struct Sink(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for Sink {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
-    type Writer = Sink;
-    fn make_writer(&'a self) -> Sink {
-        self.clone()
-    }
-}
-
-/// Every attempt is logged at INFO when asked and when answered, whoever
-/// answered it, the scope gate included: who asked, for which device, and the
-/// outcome. Never a key.
-#[tokio::test]
-async fn every_enrollment_is_logged_asked_and_answered() {
-    let (_dir, svc) = runner().await;
-    let sink = Sink::default();
-    let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).with_max_level(tracing::Level::INFO).finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-    tracing::callsite::rebuild_interest_cache();
-
-    let phone = factory(&svc, Some("phone-o"), Scope::Control);
-    call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::Control, false, NODE_BROWSER)).await.expect("enrolled");
-    call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::Control, false, NODE_BROWSER)).await.expect("again");
-    let read = factory(&svc, Some("phone-r"), Scope::Read);
-    call(&read, enroll(KEY_BROWSER, "browser-2", Scope::Read, false, "")).await.expect_err("refused at the gate");
-
-    let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
-    let lines: Vec<&str> = logged.lines().collect();
-    let asked = lines.iter().filter(|l| l.contains("a device asked to enroll another")).count();
-    assert_eq!(asked, 3, "{logged}");
-    assert!(lines.iter().any(|l| l.contains("INFO") && l.contains("by=phone-o") && l.contains("client=browser-1") && l.contains("outcome=\"enrolled\"")), "{logged}");
-    assert!(lines.iter().any(|l| l.contains("client=browser-1") && l.contains("outcome=\"already_enrolled\"")), "{logged}");
-    assert!(
-        lines.iter().any(|l| l.contains("by=phone-r") && l.contains("client=browser-2") && l.contains("outcome=\"scope-denied\"")),
-        "{logged}"
-    );
-    for secret in ["AAAAC3Nza", NODE_BROWSER] {
-        assert!(!logged.contains(secret), "{secret} reached the log: {logged}");
-    }
 }
