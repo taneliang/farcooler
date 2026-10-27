@@ -117,3 +117,39 @@ fn folding_a_recorded_session() {
         }
     }
 }
+
+/// What reopening a long transcript costs (ov-830): a pane's projector is
+/// let go once nobody has viewed it for `LINGER`, and the next view rebuilds
+/// it from the file, its first page waiting on that. Measured, not asserted
+/// (`--ignored --nocapture`, in release for the number the linger is set
+/// from).
+#[test]
+#[ignore = "a measurement; run with --release --ignored --nocapture"]
+fn rebuilding_a_long_transcript() {
+    // Every copy's ids its own, so each line makes its rows; with the 8 KB
+    // attachments real sessions carry, and without, the densest in rows.
+    let dense = |copies: usize| corpus(copies).lines().filter(|l| !l.contains("skill_listing")).map(|l| format!("{l}\n")).collect::<String>();
+    let per_copy = (corpus(1).len(), dense(1).len());
+    for (megabytes, rows_only) in [(5usize, false), (25, false), (5, true), (25, true)] {
+        let text = match rows_only {
+            false => corpus((megabytes * 1_000_000).div_ceil(per_copy.0)),
+            true => dense((megabytes * 1_000_000).div_ceil(per_copy.1)),
+        };
+        let path = std::env::temp_dir().join(format!("fc-rebuild-{}-{megabytes}.jsonl", std::process::id()));
+        std::fs::File::create(&path).unwrap().write_all(text.as_bytes()).unwrap();
+        let mut best = f64::MAX;
+        for _ in 0..3 {
+            let start = Instant::now();
+            let mut session = SessionProjector::open(path.clone());
+            session.poll();
+            best = best.min(start.elapsed().as_secs_f64() * 1e3);
+        }
+        let rows = {
+            let mut session = SessionProjector::open(path.clone());
+            session.poll();
+            session.projection().rows().len()
+        };
+        eprintln!("rebuild: {:.1} MB, {} lines, {rows} rows, best of 3 {best:.0} ms", text.len() as f64 / 1e6, text.lines().count());
+        let _ = std::fs::remove_file(&path);
+    }
+}

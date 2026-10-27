@@ -116,3 +116,66 @@ async fn a_follows_wait_counts_from_arrival_not_from_the_open() {
     assert!(matches!(follow, Follow::Changes { ref changes, .. } if changes.is_empty()), "{follow:?}");
     assert!(took >= Duration::from_millis(480) && took < Duration::from_millis(700), "took {took:?}");
 }
+
+/// B2 (ov-830 review): a pane whose projector the tick opens after the
+/// first page, a claude typed into a shell, answers its waiting follow with
+/// Reset once it opens, not at the end of a 20 s wait; and so does a return
+/// after the linger let the projector go. On tokio's paused clock: the
+/// bound is the follow's own, never the machine's speed. Goes red with the
+/// wait's look for an opened projector gone (`OPENED_EVERY`).
+#[tokio::test(start_paused = true)]
+async fn a_follow_answers_reset_as_soon_as_the_tick_opens_the_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, "{\"type\":\"user\",\"promptId\":\"p1\",\"promptSource\":\"typed\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n").unwrap();
+    let projectors = session_projectors::SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    let ask = |epoch: u64, rev: u64| pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch, after_rev: rev, wait_ms: 20_000, hint_rows: true, agent_id: String::new() };
+    let tick = Duration::from_secs(1);
+
+    for (epoch, rev, when) in [(0, 0, "the first open"), (7, 3, "a return after the linger")] {
+        let arrived = tokio::time::Instant::now();
+        let p = ask(epoch, rev);
+        let opened_by_the_tick = async {
+            tokio::time::sleep(tick).await;
+            projectors.open(terminal, path.clone());
+        };
+        let (follow, ()) = tokio::join!(follow_answer(&projectors, terminal, &p, arrived, async { Ok(false) }), opened_by_the_tick);
+        let took = arrived.elapsed();
+        assert!(matches!(follow, Ok(Follow::Reset { epoch, .. }) if epoch != 0), "{when}: {follow:?}");
+        assert!(took <= tick + OPENED_EVERY, "{when}: answered after {took:?}, not once it opened");
+        // The linger runs out: the tick lets it go.
+        projectors.forget(terminal);
+    }
+}
+
+/// A follow marks its pane viewed, as a page does, so a pane somebody is
+/// following keeps its projector past `LINGER` (ov-830 review). Goes red
+/// with `viewed` taken off `agent.rows_follow`'s path.
+#[tokio::test]
+async fn a_follow_keeps_its_pane_viewed() {
+    use farcooler_protocol::v1::TerminalIntent;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let worktree = svc.store.list_worktrees_in_order().unwrap().into_iter().find(|w| w.repository_id == repo).expect("the checkout");
+    let terminal = svc.store.create_terminal(worktree.id, "pane", "shell", TerminalIntent::Running, 80, 24).unwrap().id;
+    let follow = || Request {
+        method: "agent.rows_follow".into(),
+        payload: Some(request::Payload::AgentRowsFollow(pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: 0, after_rev: 0, wait_ms: 0, hint_rows: true, agent_id: String::new() })),
+        ..Default::default()
+    };
+    dispatch(&svc, follow()).await.expect("follow");
+    assert!(session_projectors::wanted(terminal), "a follow didn't mark its pane viewed");
+    session_projectors::age_view(terminal, session_projectors::LINGER + Duration::from_secs(1));
+    assert!(!session_projectors::wanted(terminal), "the linger ran out");
+    dispatch(&svc, follow()).await.expect("follow");
+    assert!(session_projectors::wanted(terminal), "a follow after the linger didn't mark it again");
+
+    // An id the runner has no terminal for marks nothing.
+    let unknown = Uuid::now_v7();
+    let mut req = follow();
+    if let Some(request::Payload::AgentRowsFollow(p)) = req.payload.as_mut() {
+        p.terminal_id = wire::id_bytes(unknown);
+    }
+    assert!(dispatch(&svc, req).await.is_err());
+    assert!(!session_projectors::wanted(unknown));
+}

@@ -275,7 +275,7 @@ impl Watcher {
                     }
                     // Sent meanwhile: claude's own rows show it.
                     Err(None) => {
-                        crate::session_projectors::global().runner_hold(terminal, |r| r.runner_told(&row_of(token)));
+                        crate::session_projectors::global().runner_told(terminal, &row_of(token));
                         None
                     }
                     Err(Some(why)) => Some(why),
@@ -294,7 +294,7 @@ impl Watcher {
     {
         let Some(me) = self.me.upgrade() else { return };
         let row = row_of(token);
-        crate::session_projectors::global().runner_hold(terminal, |p| p.runner_in_box(&row, echo, queued_at));
+        crate::session_projectors::global().runner_in_box(terminal, &row, echo, queued_at);
         let waiting = Waiting {
             terminal,
             stopped: false,
@@ -603,12 +603,12 @@ impl Watcher {
                 // while the key's send is still returning (ov-823).
                 let confirm = Confirm { since: pressed, ..p.confirm.clone() };
                 let took = self.took(&confirm).await;
-                crate::session_projectors::global().runner_hold(p.to.id, |r| r.runner_told(row));
+                crate::session_projectors::global().runner_told(p.to.id, row);
                 took.is_none().then(|| held::why_not_sent(agent, &p.echo, "unconfirmed"))
             }
             Err(what @ ("typed" | "box_changed" | "box_cleared")) => {
                 if self.recorded_within(&p.confirm).await {
-                    crate::session_projectors::global().runner_hold(p.to.id, |r| r.runner_told(row));
+                    crate::session_projectors::global().runner_told(p.to.id, row);
                     return None;
                 }
                 // A box gone from the screen may be claude gone from the pane.
@@ -758,7 +758,7 @@ impl Drop for Settle {
         let _ = self.me.service.store.drop_compose_wait(self.token);
         if let Some(why) = &self.why {
             let row = &self.row;
-            crate::session_projectors::global().runner_hold(self.terminal, |r| r.runner_dropped(row, why, now_millis()));
+            crate::session_projectors::global().runner_dropped(self.terminal, row, why, now_millis());
         }
     }
 }

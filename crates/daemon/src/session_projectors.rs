@@ -52,6 +52,8 @@ use uuid::Uuid;
 
 #[path = "session_watch.rs"]
 mod session_watch;
+#[path = "session_projectors_holds.rs"]
+mod holds;
 use session_watch::Watches;
 
 /// How often a watched projector still reads every file, for a change its
@@ -139,7 +141,9 @@ pub(crate) fn next_epoch() -> u64 {
     NEXT.get_or_init(|| AtomicU64::new((now_ms().max(1) as u64).saturating_mul(1000))).fetch_add(1, Ordering::Relaxed)
 }
 
-/// A hook that arrived while its terminal's projector was being built.
+/// A hook that arrived while its terminal's projector was being built, or
+/// one kept to replay into the next (`holds`).
+#[derive(Clone)]
 struct Held {
     codex: bool,
     event: String,
@@ -179,6 +183,9 @@ pub(crate) struct Inner {
     /// the watch alone wake a follower.
     catch_up: Duration,
     watches: Watches,
+    /// What each pane's runner holds that its transcript can't say, replayed
+    /// into every projector a build makes (ov-830).
+    holds: holds::Holds,
     /// Itself, for the watch's thread, which must not keep it alive.
     me: std::sync::Weak<Inner>,
 }
@@ -204,6 +211,7 @@ impl SessionProjectors {
                 next_build: AtomicU64::new(1),
                 catch_up,
                 watches: Watches::default(),
+                holds: holds::Holds::default(),
                 me: me.clone(),
             }),
         }
@@ -280,9 +288,13 @@ pub fn set_eager(on: bool) {
 }
 
 /// How long a pane keeps its projector after a device last asked for its
-/// rows. Longer than a follow is held (`rpc_rows::MAX_WAIT`, 25 s), so a
-/// view that is following never sees its projector let go between two
-/// follows, and long enough that switching away and back costs no rebuild.
+/// rows. Longer than a follow is held (`rpc_rows::MAX_WAIT`, 25 s) with room
+/// for a reconnect, so a view that is following never sees its projector let
+/// go between two follows. Not longer: coming back later costs a rebuild,
+/// measured in release at 7 ms for a 5 MB transcript and 66 ms for 25 MB of
+/// dense rows (55,000 lines, 6,800 rows; core's `rebuilding_a_long_transcript`),
+/// so keeping a watch and a read per tick for minutes would buy almost
+/// nothing.
 pub const LINGER: Duration = Duration::from_secs(90);
 
 /// When each terminal's rows were last asked for.
@@ -516,9 +528,12 @@ impl SessionProjectors {
         let mut session = open.lock();
         drop(building);
         drop(guard);
-        for hook in held {
+        for hook in &held {
             apply(&mut session, hook.codex, &hook.event, &hook.payload, hook.at);
         }
+        // What the transcript can't say: a live held ask, held messages and
+        // why one wasn't sent, from while no projector was open (ov-830).
+        self.inner.holds.replay(terminal, &mut session, &held);
         open.publish(&session);
         drop(session);
         self.inner.ensure_watch(terminal, &open, dirs);
@@ -576,6 +591,14 @@ impl SessionProjectors {
     }
 
     fn hook_from(&self, terminal: Uuid, codex: bool, event: &str, payload: &Value) {
+        // Kept whether or not a projector is open, for the next one (ov-830).
+        if event == ASK_ENDED {
+            if let Some(id) = payload.get("ask_id").and_then(Value::as_str) {
+                self.inner.holds.ask_gone(terminal, id);
+            }
+        } else {
+            self.inner.holds.hook(terminal, &Held { codex, event: event.to_string(), payload: payload.clone(), at: now_ms() });
+        }
         {
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(Build { held, .. }) = building.get_mut(&terminal) {
@@ -760,13 +783,49 @@ impl SessionProjectors {
         open.publish(&session);
     }
 
-    /// A message the runner holds for `terminal`, on its rows (ov-468): `f`
-    /// on its projection, published. Nothing when no projector is open.
-    pub fn runner_hold(&self, terminal: Uuid, f: impl FnOnce(&mut farcooler_core::session_log::projector::Projection)) {
+    /// `f` on `terminal`'s projection, published, if one is open.
+    fn on_projection(&self, terminal: Uuid, f: impl FnOnce(&mut farcooler_core::session_log::projector::Projection)) {
         let Some(open) = self.get(terminal) else { return };
         let mut session = open.lock();
         f(session.projection_mut());
         open.publish(&session);
+    }
+
+    /// The runner holds `text` for `terminal` as `id` (ov-468): Queued on its
+    /// rows, now if a projector is open and in every one opened while it's
+    /// held (ov-830).
+    pub fn runner_held(&self, terminal: Uuid, id: &str, text: &str, at_ms: i64) {
+        self.inner.holds.held(terminal, id, text, at_ms);
+        self.on_projection(terminal, |p| p.runner_held(id, text, at_ms));
+    }
+
+    /// The runner pasted `text` as `id` into the agent's box, its Enter
+    /// waiting for the turn's end (ov-827): Waiting to send, now and in a
+    /// projector opened later.
+    pub fn runner_in_box(&self, terminal: Uuid, id: &str, text: &str, at_ms: i64) {
+        self.inner.holds.in_box(terminal, id, text, at_ms);
+        self.on_projection(terminal, |p| p.runner_in_box(id, text, at_ms));
+    }
+
+    /// The runner typed `id`: its Queued row comes off, and claude's own
+    /// record shows it from now on.
+    pub fn runner_told(&self, terminal: Uuid, id: &str) {
+        self.inner.holds.told(terminal, id);
+        self.on_projection(terminal, |p| p.runner_told(id));
+    }
+
+    /// The runner gave `id` up, for `why`: Withdrawn, with a notice, now and
+    /// in a projector opened later (ov-830).
+    pub fn runner_dropped(&self, terminal: Uuid, id: &str, why: &str, at_ms: i64) {
+        self.inner.holds.dropped(terminal, id, why, at_ms);
+        self.on_projection(terminal, |p| p.runner_dropped(id, why, at_ms));
+    }
+
+    /// The held ask `id` on `terminal` ended, however it did, a device's
+    /// answer or a withdrawal that tells no row: a projector opened from
+    /// now on doesn't show it held (ov-830).
+    pub fn ask_gone(&self, terminal: Uuid, id: &str) {
+        self.inner.holds.ask_gone(terminal, id);
     }
 
     /// A page of `terminal`'s rows, oldest first: up to `limit` before `ord`.
@@ -842,10 +901,20 @@ impl SessionProjectors {
         }
     }
 
-    /// The terminal is gone. Its watch is let go on a thread of its own:
-    /// never the watch's (where FSEvents would wait on itself forever), and
-    /// not the caller's, since taking a directory off an FSEvents stream
-    /// restarts the stream, about half a second measured.
+    /// `terminal` is gone: its projector, what the runner held for it, and
+    /// when it was last viewed.
+    pub fn forget_terminal(&self, terminal: Uuid) {
+        self.forget(terminal);
+        self.inner.holds.forget(terminal);
+        VIEWED.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+    }
+
+    /// The projector goes: the terminal is gone, or nobody views it. Its
+    /// watch is let go on a thread of its own: never the watch's (where
+    /// FSEvents would wait on itself forever), and not the caller's, since
+    /// taking a directory off an FSEvents stream restarts the stream, about
+    /// half a second measured. What the runner holds for the pane stays,
+    /// for the next projector (`forget_terminal` takes that too).
     pub fn forget(&self, terminal: Uuid) {
         let open = {
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());

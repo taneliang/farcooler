@@ -85,6 +85,7 @@ pub mod rpc_people;
 pub(crate) mod rpc_agent_answer;
 pub mod rpc_claude_sign_in;
 pub mod rpc_rows;
+pub(crate) mod rpc_rows_join;
 pub mod subagent_rows;
 pub(crate) mod rpc_pages;
 pub(crate) mod rpc_plan;

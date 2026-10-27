@@ -108,7 +108,7 @@ impl Watcher {
     pub(super) fn watch_queued(&self, pane: Uuid, id: Uuid, text: &str, queued: Queued, task: Option<&Task>) {
         let (row, text) = (id.to_string(), text.to_string());
         let (me, task, watch) = (self.me.clone(), task.cloned(), self.timing().queue_watch);
-        crate::session_projectors::global().runner_hold(pane, |p| p.runner_held(&row, &text, queued.at));
+        crate::session_projectors::global().runner_held(pane, &row, &text, queued.at);
         let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
         runtime.spawn(async move {
             let sent = Sent { text, images: 0, before: Some(queued.rollout.clone()), from: queued.from, entered: queued.at };
@@ -132,10 +132,10 @@ impl Watcher {
             // Never seen run (codex moved threads, or didn't pick it up): said
             // so, as a held message given up is, never shown as told.
             let why = (!ran).then(|| super::compose::held::why_not_sent("Codex", &sent.text, "queued_unseen"));
-            crate::session_projectors::global().runner_hold(pane, |p| match &why {
-                None => p.runner_told(&row),
-                Some(why) => p.runner_dropped(&row, why, now_millis()),
-            });
+            match &why {
+                None => crate::session_projectors::global().runner_told(pane, &row),
+                Some(why) => crate::session_projectors::global().runner_dropped(pane, &row, why, now_millis()),
+            }
             if let (Some(why), Some(task), Some(me)) = (why, task, me.upgrade()) {
                 match me.service.store.add_note(task.id, farcooler_store::models::NoteKind::Progress, farcooler_store::models::Actor::Runner, &why, serde_json::json!({})) {
                     Ok(_) => me.announce_task_changed(&task, None, farcooler_store::models::Actor::Runner),

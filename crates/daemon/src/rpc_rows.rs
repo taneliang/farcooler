@@ -42,7 +42,6 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
     match (req.method.as_str(), req.payload) {
         ("agent.rows", Some(request::Payload::AgentRowsPage(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-            session_projectors::viewed(terminal);
             let open = ensure_open(svc, terminal).await?;
             let limit = match p.limit as usize {
                 0 => DEFAULT_PAGE,
@@ -70,7 +69,6 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-            session_projectors::viewed(terminal);
             let follow = match p.agent_id.is_empty() {
                 true => follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?,
                 false => subagent_follow(terminal, &p, arrived, ensure_open(svc, terminal)).await?,
@@ -89,7 +87,6 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
 pub(crate) async fn image(svc: &Service, req: Request) -> Result<result::Value> {
     let Some(request::Payload::AgentImage(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
     let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-    session_projectors::viewed(terminal);
     ensure_open(svc, terminal).await?;
     let key = (terminal, p.row_id.clone(), p.index);
     let held = RECENT.lock().unwrap_or_else(|e| e.into_inner()).get(&key);
@@ -182,16 +179,27 @@ pub(crate) async fn follow_answer(
         true => projectors.follow(terminal, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await,
         false => None,
     };
-    Ok(match follow {
-        Some(follow) => follow,
-        // No session to follow: nothing changes, after the wait, so a
-        // follower does not spin.
-        None => {
-            tokio::time::sleep_until(deadline).await;
-            Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() }
+    if let Some(follow) = follow {
+        return Ok(follow);
+    }
+    // No projector yet. One the pane's tick opens meanwhile (a claude it
+    // joins by its registry, ov-830) answers Reset at once, so the follower
+    // pages it now rather than at the end of its wait. None by the deadline:
+    // nothing changes, after the wait, so a follower does not spin.
+    loop {
+        if let Some(page) = projectors.read_page(terminal, None, 0) {
+            return Ok(Follow::Reset { epoch: page.epoch, rev: page.rev });
         }
-    })
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Ok(Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() });
+        }
+        tokio::time::sleep_until((now + OPENED_EVERY).min(deadline)).await;
+    }
 }
+
+/// How often a follow on a pane with no projector looks for one opened.
+pub const OPENED_EVERY: Duration = Duration::from_millis(250);
 
 /// Where subagent `agent` of `terminal` writes its own transcript, beside
 /// the pane's (ov-453). `None` while the pane has no session open; refused
@@ -210,37 +218,46 @@ async fn subagent_follow(
     open: impl std::future::Future<Output = Result<bool>>,
 ) -> Result<Follow> {
     let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
-    match subagent_path(open.await?, terminal, &p.agent_id)? {
-        Some(path) => {
-            Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, (p.epoch, p.after_rev), deadline, session_projectors::MAX_CHANGES).await)
+    let mut open = open.await?;
+    // The pane's projector, once the tick opens it, as `follow_answer` waits.
+    loop {
+        if let Some(path) = subagent_path(open, terminal, &p.agent_id)? {
+            return Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, (p.epoch, p.after_rev), deadline, session_projectors::MAX_CHANGES).await);
         }
-        None => {
-            tokio::time::sleep_until(deadline).await;
-            Ok(Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() })
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Ok(Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() });
         }
+        tokio::time::sleep_until((now + OPENED_EVERY).min(deadline)).await;
+        open = session_projectors::global().is_open(terminal);
     }
 }
 
-/// Open `terminal`'s projector if it has none, from its transcript on disk.
-/// `false` for a terminal that runs no claude session. A codex pane's is
-/// opened by the watcher's tick, on the rollout its process holds open
-/// (`registry_join::feed_codex_projector`, ov-378): until then, `false`, and
-/// a follower that waited pages again once it has one.
+/// Open `terminal`'s projector if it has none, from its transcript on disk,
+/// and mark the pane viewed, which keeps it open (`session_projectors::
+/// wanted`). The transcript is the session the runner launched claude on,
+/// else the one the agent in the pane's foreground is writing, found as the
+/// tick finds it (`rpc_rows_join`, ov-830): a claude typed into a shell, or a
+/// codex. `false` where neither is found yet; the tick may still open one,
+/// and a waiting follow answers Reset when it does (`follow_answer`).
 async fn ensure_open(svc: &Service, terminal: Uuid) -> Result<bool> {
+    let term = svc.store.get_terminal(terminal)?;
+    // Once the terminal is known: an id the runner has none of marks nothing.
+    session_projectors::viewed(terminal);
     let projectors = session_projectors::global();
     if projectors.is_open(terminal) {
         return Ok(true);
     }
-    let term = svc.store.get_terminal(terminal)?;
-    // The pane's own login's directory: a member's sessions are under theirs.
-    let Some(config) = svc.claude_dir_of(&term) else { return Ok(false) };
-    let Some(session) = term.agent_session_id.filter(|_| term.command_preset.starts_with("claude")) else { return Ok(false) };
     let worktree = svc.store.get_worktree(term.worktree_id)?.worktree_path;
-    let built = tokio::task::spawn_blocking(move || {
-        let path = transcript_of(&config, &worktree, &session);
-        projectors.open(terminal, path);
-    })
-    .await;
+    // The pane's own login's directory: a member's sessions are under theirs.
+    let launched = svc.claude_dir_of(&term).zip(term.agent_session_id.clone().filter(|_| term.command_preset.starts_with("claude")));
+    let path = match launched {
+        // A directory read or two: off the async workers, as the open is.
+        Some((config, session)) => tokio::task::spawn_blocking(move || transcript_of(&config, &worktree, &session)).await.ok(),
+        None => crate::rpc_rows_join::joined(svc, &term, &worktree).await,
+    };
+    let Some(path) = path else { return Ok(false) };
+    let built = tokio::task::spawn_blocking(move || projectors.open(terminal, path)).await;
     if let Err(e) = built {
         tracing::warn!(error = %e, "could not rebuild a terminal's agent rows");
     }

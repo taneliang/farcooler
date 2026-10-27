@@ -610,9 +610,9 @@ message AgentSubscribe {
 // id that never changes, so a follow names rows by id and a client applies it
 // to the row it already drew.
 //
-// Experimental: served only while the runner runs with FARCOOLER_PROJECTOR=1,
-// until a client reads it (ov-372); otherwise both methods are refused as
-// unsupported.
+// Served by every runner from ov-830, which opens a pane's projector while a
+// device asks for its rows; a runner from before serves them only while its
+// projector setting is on, and refuses both methods as unsupported otherwise.
 
 // `agent.image` (ov-454): one image a prompt carried, from its turn row's
 // `images`, a piece at a time. The bytes stay in the agent's transcript on

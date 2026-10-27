@@ -797,6 +797,9 @@ impl HookAsks {
         if note {
             shape::ended(terminal, &ended, None, None);
         }
+        // However it ended, a projector opened from now on doesn't show it
+        // held (ov-830): a device's answer tells the row itself, later.
+        crate::session_projectors::global().ask_gone(terminal, &ended);
         if was_open {
             self.changed();
         }

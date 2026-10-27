@@ -240,7 +240,7 @@ impl Watcher {
                 }
                 Ok(_) => {
                     let _ = self.service.store.drop_compose_hold(hold.id);
-                    crate::session_projectors::global().runner_hold(id, |p| p.runner_told(&hold.id.to_string()));
+                    crate::session_projectors::global().runner_told(id, &hold.id.to_string());
                 }
                 Err(e) => {
                     tracing::warn!(terminal = %id, error = %e, "a held message wasn't sent");
@@ -278,13 +278,12 @@ impl Watcher {
         let agent = self.service.store.get_terminal(hold.terminal).map(|t| agent_name(&t.command_preset)).unwrap_or("The agent");
         let why = why_not_sent(agent, &hold.text, what);
         let (id, typed) = (hold.id.to_string(), matches!(what, "claimed" | "unconfirmed"));
-        crate::session_projectors::global().runner_hold(hold.terminal, |p| {
-            // Typed, or it may have been: claude's own rows show it if it took it.
-            if typed {
-                p.runner_told(&id);
-            }
-            p.runner_dropped(&id, &why, now_millis());
-        });
+        let projectors = crate::session_projectors::global();
+        // Typed, or it may have been: claude's own rows show it if it took it.
+        if typed {
+            projectors.runner_told(hold.terminal, &id);
+        }
+        projectors.runner_dropped(hold.terminal, &id, &why, now_millis());
     }
 }
 
@@ -302,7 +301,7 @@ async fn tell_held(me: Arc<Watcher>, id: Uuid) {
 /// `hold` on its pane's rows, as Queued.
 fn show_held(hold: &ComposeHold) {
     let text = echo(hold);
-    crate::session_projectors::global().runner_hold(hold.terminal, |p| p.runner_held(&hold.id.to_string(), &text, hold.enqueued_at));
+    crate::session_projectors::global().runner_held(hold.terminal, &hold.id.to_string(), &text, hold.enqueued_at);
 }
 
 /// A held message's words, as a view's echo draws them: each image as

@@ -9,8 +9,8 @@
 //! hello's capabilities, and one page of the pane's rows. That page is what
 //! a view asks for first, so it opens the pane's projector as a view would,
 //! for the runner's linger (`session_projectors::LINGER`), and nothing else.
-
-use std::time::Duration;
+//! One ask: the runner opens a typed-in claude's or a codex's projector on
+//! that first page, as it does a launched claude's (ov-830).
 
 use farcooler_protocol::capability;
 use farcooler_protocol::v1::{AgentRowPage, PaneMode, Terminal, TerminalRole, TerminalState, request, result};
@@ -206,13 +206,7 @@ pub(crate) async fn run(mut link: Link, t: &Terminal, remote: bool, json_out: bo
     let id = crate::uuid_of(&t.id);
     let offered = link.daemon_capabilities().to_vec();
     let rows = if offered.iter().any(|c| c == capability::AGENT_ROWS) {
-        let mut first = page(&mut link, id).await?;
-        // A claude typed into a shell has its projector opened by the pane's
-        // next tick, a second after this first ask: look once more.
-        if first.epoch == 0 {
-            tokio::time::sleep(Duration::from_millis(2500)).await;
-            first = page(&mut link, id).await?;
-        }
+        let first = page(&mut link, id).await?;
         Some(Rows { epoch: first.epoch, count: first.rows.len() })
     } else {
         None
