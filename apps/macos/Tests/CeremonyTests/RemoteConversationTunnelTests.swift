@@ -19,6 +19,8 @@ struct RemoteConversationTunnelTests {
         let runner = RemoteConversationTests.Runner()
         runner.shown = "SHA256:someone-else"
         let pairing = RemoteConversationTests.pairing(runner, defaults: RemoteConversationTests.defaults())
+        // Pair, chosen in Settings (ov-830): the refusal is the host key's.
+        pairing.consentToPair("fc-cosmo")
         pairing.resolve = { _ in
             .success(
                 RemoteReach(

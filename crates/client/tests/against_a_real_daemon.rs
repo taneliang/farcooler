@@ -2090,18 +2090,14 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
 }
 
 /// The daemon a test starts reads the config.toml in its own scratch
-/// directory, not this machine's shared one: a projector switched on there
-/// (ov-372) is offered, and one never switched on there is not, whatever this
-/// Mac's owner has set. Without `FARCOOLER_CONFIG` in `spawn_configured`, the
-/// first half reads the owner's file and the second half is only as true as
-/// their setting.
+/// directory, not this machine's shared one: a branch prefix planted there is
+/// the one it says, whatever this Mac's owner has set. Without
+/// `FARCOOLER_CONFIG` in `spawn_configured`, it would read the owner's file.
+/// (It read `[agents] projector` until ov-830 removed that setting.)
 #[tokio::test]
 async fn a_spawned_daemon_reads_its_own_config_and_not_this_machines() {
-    use farcooler_protocol::capability::AGENT_ROWS;
-    let on = spawn_configured(false, None, Some("[agents]\nprojector = true\n")).await;
-    let session = Session::connect_local(&on.socket).await.expect("connect");
-    assert!(session.can(AGENT_ROWS), "the planted projector = true was not read");
-    let off = spawn_configured(false, None, Some("[agents]\nprojector = false\n")).await;
-    let session = Session::connect_local(&off.socket).await.expect("connect");
-    assert!(!session.can(AGENT_ROWS), "a daemon offered rows its own config turned off");
+    let planted = spawn_configured(false, None, Some("[branches]\nprefix = \"scratch-830/\"\n")).await;
+    let session = Session::connect_local(&planted.socket).await.expect("connect");
+    let host = session.host().await.expect("host");
+    assert_eq!(host.settings.map(|s| s.branch_prefix).as_deref(), Some("scratch-830/"), "the planted prefix was not read");
 }
