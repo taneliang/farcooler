@@ -50,8 +50,12 @@ impl Projection {
 
     /// The runner gave `id` up: Withdrawn, and a notice, `why`, after it. A
     /// message never held here (a projection rebuilt since) gets the notice
-    /// alone.
+    /// alone. Said once: told again (a replay racing the live call, ov-830),
+    /// it changes nothing.
     pub fn runner_dropped(&mut self, id: &str, why: &str, at_ms: i64) {
+        if !self.runner_dropped.insert(id.to_string()) {
+            return;
+        }
         if let Some(&i) = self.index.get(&row_id(id)) {
             self.set_queued(i, QueuedState::Withdrawn);
         }

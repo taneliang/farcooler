@@ -38,3 +38,7 @@ pub(crate) fn transcript_for(agent: &str, pid: i32, registry: &Registry, worktre
         None
     }
 }
+
+#[cfg(test)]
+#[path = "rpc_rows_join_tests.rs"]
+mod tests;

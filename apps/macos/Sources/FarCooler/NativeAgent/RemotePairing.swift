@@ -65,6 +65,9 @@ final class RemotePairing: ObservableObject {
     /// Runners a Pair is on its way to, from the click until its connect
     /// ends (ov-830): Settings and the pane's note say so meanwhile.
     @Published private(set) var pairing: Set<String> = []
+    /// The connect each runner's spinner belongs to: a reconnect cancels the
+    /// one before it, whose end must not take down the newer one's spinner.
+    private var pairingRuns: [String: UUID] = [:]
 
     /// How the CLI runs. The real one in the app; a test passes its own.
     var cli: ([String]) async -> CLI.Result = { await CLI.run($0) }
@@ -120,7 +123,14 @@ final class RemotePairing: ObservableObject {
     /// checks it, the record and cancellation before it writes a line or a
     /// record. A line an abandoned connect wrote anyway is taken back off.
     func connect(target: String) async -> Outcome {
-        defer { pairing.remove(target) }
+        let run = UUID()
+        pairingRuns[target] = run
+        defer {
+            if pairingRuns[target] == run {
+                pairingRuns[target] = nil
+                pairing.remove(target)
+            }
+        }
         let generation = generations[target, default: 0]
         // Said before anything that could fail would hide it behind a
         // passing sentence (and a Try Again that isn't Pair Again).
@@ -133,6 +143,8 @@ final class RemotePairing: ObservableObject {
             states[target] = nil
             return .unavailable
         }
+        // A Pair, not a reconnect: one that can't reach the runner says so.
+        let pairs = record[target] == nil
         let reach: RemoteReach
         switch await resolve(target) {
         case .failure(let refusal):
@@ -155,7 +167,7 @@ final class RemotePairing: ObservableObject {
             guard current(target, generation) else { return .unavailable }
             let known = reach.pipe == nil ? "the one ssh knows" : "the one it was added with"
             return unavailable(target, "This runner’s host key doesn’t match \(known), so Far Cooler won’t connect to it.")
-        case .failed: return .unreachable
+        case .failed: return unreached(target, generation, pairs: pairs)
         }
 
         switch await open(reach, privateKey: privateKey, pin: pin) {
@@ -183,11 +195,26 @@ final class RemotePairing: ObservableObject {
                 return unavailable(target, "This runner didn’t take this Mac’s key. Update Far Cooler on it and try again.")
             }
             // Recorded only once a connect proves the line (`settle`).
-            guard case .connected(let core, let offered) = await open(reach, privateKey: privateKey, pin: pin) else { return .unreachable }
+            guard case .connected(let core, let offered) = await open(reach, privateKey: privateKey, pin: pin) else {
+                return unreached(target, generation, pairs: pairs)
+            }
             return await settle(target, generation, core, offered, clientID: clientID)
         case .failed:
-            return .unreachable
+            return unreached(target, generation, pairs: pairs)
         }
+    }
+
+    static let unreachableSentence = "Far Cooler can’t reach this runner right now."
+
+    /// The runner didn't answer. A Pair says so, so its row offers Try Again
+    /// rather than going back to Pair without a word (ov-830); Try Again
+    /// pairs, since the consent is kept. A runner already paired keeps its
+    /// state, and its view retries by itself.
+    private func unreached(_ target: String, _ generation: Int, pairs: Bool) -> Outcome {
+        if pairs, current(target, generation) {
+            states[target] = .unavailable(Self.unreachableSentence)
+        }
+        return .unreachable
     }
 
     /// Remove this Mac's key from `target`'s runner (`client revoke`), and

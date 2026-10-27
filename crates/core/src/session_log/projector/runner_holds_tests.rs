@@ -32,6 +32,7 @@ fn a_held_message_is_queued_then_taken_back_or_withdrawn_with_why() {
         })
     );
 }
+<<<<<<< HEAD
 
 /// ov-827: a message in the box whose Enter waits for the turn's end is
 /// `InBox` ("Waiting to send"), made once; a held row moves to it; and it's
@@ -55,3 +56,18 @@ fn a_message_waiting_in_the_box_is_in_box_then_taken_back_or_withdrawn() {
     let RowKind::Queued(q) = held(&p, "b").unwrap().kind else { panic!() };
     assert_eq!(q.state, QueuedState::Withdrawn);
 }
+||||||| parent of f0e87faef (daemon, Mac: a give-up is said in its own turn and once, a Pair that can't reach the runner says so, a replaced connect leaves the newer spinner, and the first page's join and an answered ask's replay are tested (ov-830))
+=======
+
+/// A give-up told twice, a replay racing the live call (ov-830 review),
+/// says its notice once. Goes red with the `runner_dropped` set gone.
+#[test]
+fn a_give_up_told_twice_says_so_once() {
+    let mut p = Projection::new();
+    p.runner_held("c", "Run it", 1);
+    p.runner_dropped("c", "Not sent: “Run it”.", 2);
+    p.runner_dropped("c", "Not sent: “Run it”.", 2);
+    let notices = p.rows().iter().filter(|r| matches!(r.kind, RowKind::Notice(_))).count();
+    assert_eq!(notices, 1);
+}
+>>>>>>> f0e87faef (daemon, Mac: a give-up is said in its own turn and once, a Pair that can't reach the runner says so, a replaced connect leaves the newer spinner, and the first page's join and an answered ask's replay are tested (ov-830))

@@ -349,6 +349,68 @@ struct RemoteConversationTests {
         #expect(pairing.states["other@box"] == .paired)
     }
 
+    /// A Pair the runner doesn't answer says so, with Try Again, rather than
+    /// going back to Pair without a word; Try Again then pairs (ov-830
+    /// re-review, fix 2). Goes red with `unreached` setting no state.
+    @Test("A Pair that can't reach the runner says so, and Try Again pairs")
+    func aPairThatCantReachSaysSo() async {
+        let runner = Runner()
+        let pairing = Self.pairing(runner, defaults: Self.defaults())
+        pairing.allowPairing(target: "far@box")
+        runner.reachable = false
+        guard case .unreachable = await pairing.connect(target: "far@box") else {
+            Issue.record("not unreachable")
+            return
+        }
+        #expect(pairing.states["far@box"] == .unavailable(RemotePairing.unreachableSentence), "\(String(describing: pairing.states["far@box"]))")
+        #expect(!pairing.pairing.contains("far@box"))
+        runner.reachable = true
+        guard case .connected = await pairing.connect(target: "far@box") else {
+            Issue.record("Try Again didn't pair: \(String(describing: pairing.states["far@box"]))")
+            return
+        }
+        #expect(pairing.states["far@box"] == .paired)
+    }
+
+    /// Two resolves that each wait until the test lets them go, in order.
+    final class Gates: @unchecked Sendable {
+        let older = AsyncStream<Void>.makeStream()
+        let newer = AsyncStream<Void>.makeStream()
+        private let lock = NSLock()
+        private var calls = 0
+        func next() -> AsyncStream<Void> {
+            lock.withLock {
+                calls += 1
+                return calls == 1 ? older.stream : newer.stream
+            }
+        }
+    }
+
+    /// A reconnect that replaces a Pair's connect while it runs leaves the
+    /// newer one's spinner up when the older one ends (ov-830 re-review,
+    /// nit). Goes red with the spinner cleared by whichever connect ends.
+    @Test("A connect that a newer one replaced doesn't take the newer one's spinner down")
+    func anOlderConnectLeavesTheSpinner() async {
+        let runner = Runner()
+        let pairing = Self.pairing(runner, defaults: Self.defaults())
+        pairing.allowPairing(target: "slow@box")
+        let gates = Gates()
+        pairing.resolve = { _ in
+            for await _ in gates.next() { break }
+            return .success(Self.reach)
+        }
+        let older = Task { await pairing.connect(target: "slow@box") }
+        try? await Task.sleep(for: .milliseconds(50))
+        let newer = Task { await pairing.connect(target: "slow@box") }
+        try? await Task.sleep(for: .milliseconds(50))
+        gates.older.continuation.yield(())
+        _ = await older.value
+        #expect(pairing.pairing.contains("slow@box"), "the older connect took the newer one's spinner down")
+        gates.newer.continuation.yield(())
+        _ = await newer.value
+        #expect(!pairing.pairing.contains("slow@box"), "the newer connect left its spinner up")
+    }
+
     @Test("A Keychain that refuses a read is not an empty one: no new key, nothing written")
     func aFailedReadMakesNoKey() {
         let vault = MemoryConversationKeyVault("-----BEGIN OPENSSH PRIVATE KEY-----")

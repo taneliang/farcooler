@@ -21,6 +21,13 @@ use super::Held;
 /// notice on a rebuilt projection, so the oldest given-up ones go first.
 const MOST_MESSAGES: usize = 32;
 
+/// How long a given-up message's notice is kept for a projector opened
+/// later, at most. It is let go sooner, at the pane's next prompt: a notice
+/// is said in the turn it's folded into, the newest, so one kept past that
+/// would say "not sent" under a later reply, and read as that one failing.
+/// The bound is for a pane with no hooks to say its prompts.
+const DROPPED_KEPT_MS: i64 = 10 * 60 * 1000;
+
 /// One message the runner holds for a pane, or gave up on.
 #[derive(Debug, Clone, PartialEq)]
 struct Message {
@@ -66,8 +73,12 @@ impl Holds {
         r
     }
 
-    /// A hook routed to `terminal`: kept when it holds an ask.
+    /// A hook routed to `terminal`: kept when it holds an ask. A new prompt
+    /// lets the given-up messages go (`DROPPED_KEPT_MS`).
     pub(crate) fn hook(&self, terminal: Uuid, held: &Held) {
+        if held.event == "UserPromptSubmit" {
+            self.with(terminal, |p| p.messages.retain(|m| m.dropped.is_none()));
+        }
         if let Some(id) = held.payload.get(HELD_ASK).and_then(Value::as_str) {
             let id = id.to_string();
             let held = Held { codex: held.codex, event: held.event.clone(), payload: held.payload.clone(), at: held.at };
@@ -137,8 +148,10 @@ impl Holds {
     /// that same request, then every held message and why one wasn't sent.
     pub(crate) fn replay(&self, terminal: Uuid, session: &mut SessionProjector, building: &[Held]) {
         let (ask, messages) = {
-            let all = self.0.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(p) = all.get(&terminal) else { return };
+            let mut all = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(p) = all.get_mut(&terminal) else { return };
+            let since = super::now_ms() - DROPPED_KEPT_MS;
+            p.messages.retain(|m| m.dropped.as_ref().is_none_or(|(_, at)| *at >= since));
             (p.ask.as_ref().map(|(id, h)| (id.clone(), h.clone())), p.messages.clone())
         };
         if let Some((id, ask)) = ask {

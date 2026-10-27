@@ -149,6 +149,9 @@ pub struct Projection {
     pub(super) sub_tools: HashMap<String, Vec<(String, String, String)>>,
     /// Asks the runner's hook holds, and what's waiting to be tied (`held.rs`).
     pub(super) held: super::held::HeldAsks,
+    /// The held messages the runner gave up on, whose notice is in: said
+    /// once however often it's told (`runner_holds.rs`).
+    pub(super) runner_dropped: std::collections::HashSet<String>,
     seq: u64,
     /// Bumped by every change; a row's `rev` is the value when it last moved.
     revision: u64,
