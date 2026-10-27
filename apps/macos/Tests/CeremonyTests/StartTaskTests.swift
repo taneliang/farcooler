@@ -156,21 +156,31 @@ struct StartTaskTests {
 
     private func start(
         _ client: DaemonClient, name: String = "fix-flaky-reconnect", agent: String = "claude",
-        description: String = description
+        description: String = description,
+        undelivered: (@MainActor (String) -> Void)? = nil
     ) async -> DaemonClient.TaskStart {
-        await client.startTask(project: "repo", description: description, name: name, agent: agent)
+        await client.startTask(
+            project: "repo", description: description, name: name, agent: agent, undelivered: undelivered)
+    }
+
+    /// Texts the typing path gave up on. The stub's agent is never idle until
+    /// a test says so, and the typing path waits a minute for it, so a start
+    /// that returned with this still empty returned while the wait was
+    /// pending; a start that held the window for the wait would return with
+    /// the give-up recorded. That is the outcome, without a clock.
+    @MainActor final class GaveUp {
+        var texts: [String] = []
     }
 
     @Test func aRunnerThatTakesALaunchPromptGetsTheTaskAsOneAndNothingIsTyped() async {
         let runner = Runner(capabilities: Self.prompting)
         let client = await client(runner)
 
-        let started = ContinuousClock.now
-        let outcome = await start(client)
-        let took = ContinuousClock.now - started
+        let gaveUp = GaveUp()
+        let outcome = await start(client) { gaveUp.texts.append($0) }
 
         #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
-        #expect(took < .seconds(2), "returned once the terminal existed, not after a wait: \(took)")
+        #expect(gaveUp.texts.isEmpty, "returned once the terminal existed, not after a wait for the agent")
         #expect(runner.made("terminal")?.contains("--prompt=\(Self.description)") == true)
         // Nothing is typed, then or later — the agent already has it. Idle
         // now, which is what the typing path waits for.
@@ -183,12 +193,12 @@ struct StartTaskTests {
         let runner = Runner(capabilities: ["workspaces", "terminals"])
         let client = await client(runner)
 
-        let started = ContinuousClock.now
-        let outcome = await start(client)
-        let took = ContinuousClock.now - started
+        let gaveUp = GaveUp()
+        let outcome = await start(client) { gaveUp.texts.append($0) }
 
         #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
-        #expect(took < .seconds(2), "the typing no longer holds the window: \(took)")
+        #expect(runner.sent.isEmpty, "nothing typed yet: the agent is not idle")
+        #expect(gaveUp.texts.isEmpty, "the typing no longer holds the window")
         #expect(runner.made("terminal")?.contains { $0.hasPrefix("--prompt") } == false)
 
         runner.activity = "idle"

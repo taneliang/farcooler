@@ -81,31 +81,27 @@ struct PlanReadingTests {
 
     @Test("A read nobody answers is reconnecting once the wait is up, never loading forever")
     func unanswered() async {
-        let started = ContinuousClock.now
         let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(80)) {
             try await Task.sleep(for: .seconds(90))
             return Data()
         }
-        #expect(state == .reconnecting)
-        // The runner sleeps for 90 s, so this tells the timeout from the
-        // runner, and is loose enough for a CI machine that took 13 s over
-        // an 80 ms wait.
-        #expect(ContinuousClock.now - started < .seconds(60), "it waited out the runner instead of the timeout")
+        // The runner would answer after 90 s, so `.reconnecting` is the
+        // timeout's doing and not the runner's: no elapsed time is asserted.
+        #expect(state == .reconnecting, "it waited out the runner instead of the timeout")
     }
 
     @Test(
         "A runner that never answers, through a call nothing can cancel, is still reconnecting once the wait is up",
         .timeLimit(.minutes(1)))
     func unansweredAndUncancellable() async {
-        let started = ContinuousClock.now
         // The client core's own shape: a continuation held under a ticket that
         // cancellation can't wake, and that nothing ever resumes.
         let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(100)) {
             try await withCheckedThrowingContinuation { (_: CheckedContinuation<Data, Error>) in }
         }
+        // Nothing ever resumes that call, so only the timeout can end this
+        // (and the time limit above fails it if it never does).
         #expect(state == .reconnecting)
-        // Nothing ever resumes that call, so only the timeout can end this.
-        #expect(ContinuousClock.now - started < .seconds(45))
     }
 
     @Test("A late answer after the timeout changes nothing")

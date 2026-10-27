@@ -15,7 +15,10 @@ import Foundation
 /// and the pass that follows reads the value written.
 @MainActor
 enum ChangeWake {
-    static func next(of publishers: [ObservableObjectPublisher], orAfter limit: Duration) async {
+    /// Whether a change ended the wait (rather than the limit or a
+    /// cancellation); a test reads it instead of timing the wait.
+    @discardableResult
+    static func next(of publishers: [ObservableObjectPublisher], orAfter limit: Duration) async -> Bool {
         let once = Once()
         var subscription: AnyCancellable?
         await withTaskCancellationHandler {
@@ -23,7 +26,10 @@ enum ChangeWake {
                 once.continuation = continuation
                 guard !Task.isCancelled else { return once.resume() }
                 subscription = Publishers.MergeMany(publishers).first().sink { _ in
-                    Task { @MainActor in once.resume() }
+                    Task { @MainActor in
+                        once.changed = true
+                        once.resume()
+                    }
                 }
                 once.timer = Task { @MainActor in
                     try? await Task.sleep(for: limit)
@@ -34,12 +40,15 @@ enum ChangeWake {
             Task { @MainActor in once.resume() }
         }
         subscription?.cancel()
+        return once.changed
     }
 
     /// Resumes its continuation at most once, whoever gets there first.
     @MainActor private final class Once {
         var continuation: CheckedContinuation<Void, Never>?
         var timer: Task<Void, Never>?
+        /// A publisher spoke before anything else ended the wait.
+        var changed = false
 
         func resume() {
             timer?.cancel()

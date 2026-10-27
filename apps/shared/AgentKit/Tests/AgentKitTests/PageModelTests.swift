@@ -173,11 +173,11 @@ struct PageModelTests {
         return Data(#"{"v":1,"title":"Huge","blocks":[\#(([table, text] + headings).joined(separator: ","))]}"#.utf8)
     }
 
-    @Test("a page past the limits draws what fits, ends with one line saying so, and doesn't hang")
+    @Test("a page past the limits draws what fits, ends with one line saying so, and doesn't hang", .timeLimit(.minutes(2)))
     func oversizeIsClamped() throws {
-        let started = Date()
+        // "Doesn't hang" is the clamps below holding (50 rows, not 10,000)
+        // and the test's own time limit, not a stopwatch on a busy runner.
         let doc = try PageDoc.decode(Self.oversize())
-        #expect(Date().timeIntervalSince(started) < 5, "decoding took too long")
         #expect(doc.blocks.count == PageCaps.blocks + 1)
         #expect(doc.blocks.last == .unknown(type: "too-large", alt: "This page is too large to show in full."))
         guard case .table(let columns, let rows) = doc.blocks[0], case .text(let md, _) = doc.blocks[1] else {

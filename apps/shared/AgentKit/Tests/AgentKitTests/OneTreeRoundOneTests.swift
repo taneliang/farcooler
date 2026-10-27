@@ -40,15 +40,26 @@ struct OneTreeRoundOneTests {
             })
     }
 
+    /// The nanoseconds of CPU this thread has run.
+    static func threadCPU() -> Double {
+        var spec = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &spec)
+        return Double(spec.tv_sec) * 1e9 + Double(spec.tv_nsec)
+    }
+
     @Test("1,000 cards and 300 lanes build in well under a frame budget, even in a debug build on CI")
     func bigBoardBuildsFast() throws {
         let input = try Self.big(cards: 1000, lanes: 300)
-        let clock = ContinuousClock()
         var tree = OneTree.build(input)
-        let took = clock.measure { tree = OneTree.build(input) }
+        // The CPU time this thread spent, not the wall clock: a busy runner
+        // stretches the wall clock by whole multiples and says nothing about
+        // the build (the same measure as `buildIsLinear`).
+        let start = Self.threadCPU()
+        tree = OneTree.build(input)
+        let took = Duration.nanoseconds(Int64(Self.threadCPU() - start))
         // Measured on this Mac, debug: about 7 ms (it was 200 ms before the
         // joins were indexed). A quarter second leaves a slow CI runner 20x.
-        #expect(took < .milliseconds(250), "took \(took)")
+        #expect(took < .milliseconds(250), "took \(took) of CPU")
         print("one tree, 1,000 cards: \(took)")
         #expect(tree.tree.count == 20)
         // Every live lane's two cards list it: the indexes join what the
