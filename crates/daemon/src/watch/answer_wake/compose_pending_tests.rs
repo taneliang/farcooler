@@ -391,7 +391,12 @@ async fn send_now_during_the_wait_is_refused_and_the_wait_goes_on() {
 
 /// Review F2: a second send while the first waits in the box is held behind
 /// it and answered Queued, never refused as a draft; once the turn ends the
-/// first is entered, then the second is typed and entered, in order.
+/// first is entered, then the second is typed and entered, in order. While
+/// the first waits, the second's teller never tries it (ov-827): each try
+/// took the box for the gate's slow reads, every `held_retry`, and on a
+/// loaded Linux runner the first's wait, which never waits for the box, never
+/// read the turn's end twice, so neither was ever entered. Counted, not
+/// timed: the tries are zero however slow the runner.
 #[tokio::test]
 async fn a_second_send_during_the_wait_is_held_behind_it() {
     let b = board().await;
@@ -399,6 +404,16 @@ async fn a_second_send_during_the_wait_is_held_behind_it() {
     let second = b.watcher.compose_into(agent.id, "and the second", &[]).await;
     assert_eq!(second.expect("held"), Turn::During);
     assert!(b.svc.store.holds_compose(agent.id).unwrap());
+    // Several of the teller's retries (`held_retry`, 100 ms here) pass.
+    let (tries, read) = (crate::watch::answer_wake::compose::held::told_tries(agent.id), super::compose::tries(agent.id));
+    for _ in 0..750 {
+        if super::compose::tries(agent.id) >= read + 5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(super::compose::tries(agent.id) >= read + 5, "the wait stopped reading");
+    assert_eq!(crate::watch::answer_wake::compose::held::told_tries(agent.id), tries, "the held message was tried while the first waited for its Enter");
     si.show("shells").await;
     super::logs(&si, "SUBMIT and the second").await;
     assert_eq!(si.submitted(), ["what did they find", "and the second"], "{}", si.log());

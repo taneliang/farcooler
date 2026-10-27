@@ -187,6 +187,17 @@ impl Watcher {
     async fn tell_held_once(&self, id: Uuid) -> bool {
         let _slot = self.compose_slot(id).await;
         loop {
+            // A message ahead in the box waits for its Enter: nothing behind
+            // it can be typed until it's gone, and a try would take the box
+            // for the gate's slow reads, every `RETRY`, starving that wait's
+            // own reads, which never wait for the box (`pending`). On a loaded
+            // runner it never read the turn's end twice and was never entered
+            // (CI, Oct 27, `a_second_send_during_the_wait_is_held_behind_it`).
+            if self.enter_pending(id) {
+                return true;
+            }
+            #[cfg(test)]
+            told_try(id);
             let hold = match self.service.store.first_compose_hold(id) {
                 Ok(Some(hold)) => hold,
                 Ok(None) => {
@@ -346,4 +357,20 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "queued_unseen" => format!("{agent} took “{quoted}” into its queue but never showed it ran. Check the terminal before sending it again."),
         _ => format!("Not sent: “{quoted}”. The runner couldn’t type it."),
     }
+}
+
+/// How many times each pane's teller tried its oldest held message, for a
+/// test that none is tried while a message ahead waits for its Enter.
+#[cfg(test)]
+static TOLD_TRIES: std::sync::Mutex<Option<HashMap<Uuid, usize>>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn told_try(terminal: Uuid) {
+    *TOLD_TRIES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).entry(terminal).or_default() += 1;
+}
+
+/// How many times `terminal`'s teller has tried a held message (`TOLD_TRIES`).
+#[cfg(test)]
+pub(crate) fn told_tries(terminal: Uuid) -> usize {
+    TOLD_TRIES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&terminal).copied()).unwrap_or(0)
 }
