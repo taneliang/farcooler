@@ -3366,28 +3366,6 @@ mod identity_tests {
         assert_eq!(queue.pending.len(), 2);
     }
 
-    /// A reader that stopped costs a bounded amount of memory and loses no
-    /// news it could act on.
-    ///
-    /// Overflow COLLAPSES rather than truncates, and that is the whole safety
-    /// argument: dropping the oldest would silently lose a worktree nobody
-    /// then re-reads, and a client left believing it is current is the one
-    /// outcome this queue must not produce. `resync` covers every notice that
-    /// was thrown away because every notice only ever meant "re-read".
-    #[test]
-    fn a_reader_that_stopped_overflows_into_one_resync() {
-        use crate::session::FleetEvent;
-        let mut queue = super::EventQueue::default();
-        for _ in 0..super::EVENT_QUEUE_LIMIT + 10 {
-            queue.push(super::event_line(&FleetEvent::Stack { repository: uuid::Uuid::now_v7() }));
-        }
-        assert!(queue.pending.len() <= super::EVENT_QUEUE_LIMIT);
-        assert!(
-            queue.pending.iter().any(|line| line == r#"{"event":"resync"}"#),
-            "an overflowed queue has to say so: {:?}",
-            queue.pending
-        );
-    }
 
     /// A subscription that dies after a newer one is up cannot report the
     /// newer one dead.

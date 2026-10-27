@@ -128,3 +128,26 @@ fn an_overflow_keeps_released() {
     full.push(released.clone());
     assert_eq!(full.pending, [r#"{"event":"resync"}"#.to_string(), released], "the released that overflowed it was lost");
 }
+
+/// A reader that stopped costs a bounded amount of memory and loses no
+/// news it could act on.
+///
+/// Overflow COLLAPSES rather than truncates, and that is the whole safety
+/// argument: dropping the oldest would silently lose a worktree nobody
+/// then re-reads, and a client left believing it is current is the one
+/// outcome this queue must not produce. `resync` covers every notice that
+/// was thrown away because every notice only ever meant "re-read".
+#[test]
+fn a_reader_that_stopped_overflows_into_one_resync() {
+    use crate::session::FleetEvent;
+    let mut queue = EventQueue::default();
+    for _ in 0..EVENT_QUEUE_LIMIT + 10 {
+        queue.push(event_line(&FleetEvent::Stack { repository: uuid::Uuid::now_v7() }));
+    }
+    assert!(queue.pending.len() <= EVENT_QUEUE_LIMIT);
+    assert!(
+        queue.pending.iter().any(|line| line == r#"{"event":"resync"}"#),
+        "an overflowed queue has to say so: {:?}",
+        queue.pending
+    );
+}

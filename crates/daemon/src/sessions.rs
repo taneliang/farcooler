@@ -115,6 +115,20 @@ impl Sessions {
     }
 }
 
+/// What a closed connection says last (ov-820): `device_released`.
+///
+/// A session is closed only by revocation ([`Sessions::close`]), so this is
+/// said only to a device whose access was just taken away, on its own
+/// connection, which already knows who it is: it tells nobody anything they
+/// couldn't read before.
+pub fn farewell() -> farcooler_protocol::v1::Event {
+    farcooler_protocol::v1::Event {
+        event_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+        sequence: 0,
+        payload: Some(farcooler_protocol::v1::event::Payload::DeviceReleased(farcooler_protocol::v1::Empty {})),
+    }
+}
+
 /// Connections [`Sessions::closing`] closed, whose farewells can be waited on.
 #[must_use = "a closing that nobody waits on is `Sessions::close`"]
 pub struct Closing {

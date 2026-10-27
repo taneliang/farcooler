@@ -302,21 +302,12 @@ impl Handler for RpcFactory {
         async move { session.closed().await }
     }
 
-    /// `device_released` (ov-820). A session is closed only by revocation
-    /// (`Sessions::close`), so this is said only to a device whose access was
-    /// just taken away, on its own connection, which already knows who it
-    /// is: it tells nobody anything they couldn't read before.
+    /// `device_released` (ov-820): see `sessions::farewell`.
     fn farewell(&self) -> Option<farcooler_protocol::v1::Event> {
-        Some(farcooler_protocol::v1::Event {
-            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
-            sequence: 0,
-            payload: Some(farcooler_protocol::v1::event::Payload::DeviceReleased(farcooler_protocol::v1::Empty {})),
-        })
+        Some(crate::sessions::farewell())
     }
 
-    fn farewell_said(&self) {
-        self.session.said_farewell();
-    }
+    fn farewell_said(&self) { self.session.said_farewell() }
 }
 
 /// `Host.agents_found` for this runner, now.
