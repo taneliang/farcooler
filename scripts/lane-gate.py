@@ -12,6 +12,10 @@ swift-test-guard, nextest --profile ci). That used to be recalled by hand from
     scripts/lane-gate.py --base main --log-dir /tmp/gate-logs
     scripts/lane-gate.py --self-test
 
+Each real run also saves its summary, with the full HEAD sha it gated, to
+`<git-dir>/lane-gate-summary.txt` (one per worktree); scripts/gate-summary-check.py
+reads it, and the push guard calls that before a single-lane push (ov-822).
+
 It prints a Markdown table (job, command, result, seconds, test counts) to paste
 into a lane report, and exits non-zero if any step failed.
 
@@ -496,6 +500,25 @@ def blocker(step, repo, env):
     return ""
 
 
+# Known gaps in THIS host's environment, not in the code under test (ov-822). A failed step whose output
+# matches one is tagged "[env-gap: NAME]" in its Result cell, and scripts/gate-summary-check.py lets a push
+# through when every failure carries a tag it lists. Add one only for a gap the host owner can't close, and add it to
+# GAP_NAMES in gate-summary-check.py too. The match is on output, so a step that fails for a gap AND a real reason is
+# still waved through: the log named in the summary is where to look.
+ENV_GAPS = (
+    ("git-lfs-missing", re.compile(r"git-lfs[^\n]*(isn't|is not|not) (on PATH|installed)|'lfs' is not a git command"), re.compile(r"cargo nextest|cargo test")),
+    ("wrangler-dry-run-without-dist", re.compile(r"(assets|dist)[^\n]*(does not exist|ENOENT|no such file)|ENOENT[^\n]*dist", re.I), re.compile(r"wrangler deploy --dry-run")),
+)
+
+
+def env_gap(step, output):
+    """The name of the known environment gap that explains this failed step, or ""."""
+    for name, in_output, in_step in ENV_GAPS:
+        if in_step.search(step.run) and in_output.search(output):
+            return name
+    return ""
+
+
 def run_step_safely(step, repo, env, logdir, tmp):
     """(result, seconds, counts, ok, log, output) for one step; never raises.
 
@@ -511,6 +534,9 @@ def run_step_safely(step, repo, env, logdir, tmp):
         reason = f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     result = "pass" if code == 0 else f"FAIL (exit {code})"
+    gap = "" if code == 0 else env_gap(step, output)
+    if gap:
+        result += f" [env-gap: {gap}]"
     notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
     if notes:
         result += f"; {notes}"
@@ -623,7 +649,7 @@ def main(argv):
         failed = True
         raise
     finally:
-        print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [])
+        print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
         shutil.rmtree(tmp, ignore_errors=True)
     return 1 if failed else 0
 
@@ -662,21 +688,42 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     return failed
 
 
-def print_summary(rows, repo, base, logdir, failed, left_out=()):
-    print("\n## lane-gate summary" + (" (PARTIAL)" if left_out else "") + "\n")
-    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
-    print(f"Branch HEAD {head} against {base}; logs in {logdir}\n")
-    print("| Job | Command | Result | Secs | Tests |")
-    print("| --- | --- | --- | --- | --- |")
-    for r in rows:
-        print("| " + " | ".join(md(c) for c in r) + " |")
+SUMMARY_NAME = "lane-gate-summary.txt"
+FAIL_GAP = re.compile(r"\[env-gap: ([a-z0-9-]+)\]")
+
+
+def summary_path(repo):
+    """Where `repo`'s last gate summary lives: inside its own git dir, so each worktree has one (ov-822)."""
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True).stdout.strip()
+    return pathlib.Path(out) / SUMMARY_NAME if out else None
+
+
+def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
+    """Print the summary table and, given `write_to`, save it there with the full HEAD sha it gated.
+
+    The file opens with `key: value` lines scripts/gate-summary-check.py reads: head, verdict (ok, partial or
+    failed; partial wins over failed) and a `failed-step:` line per failed row with the env gap it matched."""
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    verdict = "partial" if left_out else "failed" if failed else "ok"
+    lines = ["## lane-gate summary" + (" (PARTIAL)" if left_out else ""), ""]
+    lines += [f"Branch HEAD {sha[:9]} against {base}; logs in {logdir}", ""]
+    lines += ["| Job | Command | Result | Secs | Tests |", "| --- | --- | --- | --- | --- |"]
+    lines += ["| " + " | ".join(md(c) for c in r) + " |" for r in rows]
     note = f" (PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run by --only/--skip)" if left_out else ""
     if failed:
-        print("\nlane-gate: FAILED" + note, flush=True)
+        last = "lane-gate: FAILED" + note
     elif left_out:
-        print(f"\nlane-gate: PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run (--only/--skip); the steps that ran passed", flush=True)
+        last = f"lane-gate: PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run (--only/--skip); the steps that ran passed"
     else:
-        print("\nlane-gate: all steps passed", flush=True)
+        last = "lane-gate: all steps passed"
+    print("\n".join(lines) + "\n\n" + last, flush=True)
+    if write_to:
+        head = ["lane-gate-summary v1", f"head: {sha}", f"verdict: {verdict}"]
+        for r in rows:
+            if str(r[2]).startswith("FAIL"):
+                m = FAIL_GAP.search(str(r[2]))
+                head.append(f"failed-step: {r[0]} | {md(r[1])} | gap={m.group(1) if m else 'none'}")
+        pathlib.Path(write_to).write_text("\n".join(head) + "\n\n" + "\n".join(lines) + "\n\n" + last + "\n")
 
 
 # ---------------------------------------------------------------- self-test
@@ -949,6 +996,24 @@ def self_test():
             print_summary([("wire", "x", "pass", "1", "")], ROOT, "HEAD", "/tmp", failed_, left)
         o = buf.getvalue()
         expect(f"summary with {len(left)} job(s) left out", (want_head in o, want_last in o, ("PARTIAL" in o) == bool(left)), (True, True, True))
+
+    # The summary file carries the full sha it gated, the verdict, and each failed step's env gap (ov-822).
+    with tempfile.TemporaryDirectory() as t:
+        dest = pathlib.Path(t) / SUMMARY_NAME
+        rows = [("rust", "cargo nextest run", "FAIL (exit 101) [env-gap: git-lfs-missing]", "2", ""), ("web", "tsc", "FAIL (exit 2)", "1", "")]
+        with contextlib.redirect_stdout(io.StringIO()):
+            print_summary(rows, ROOT, "HEAD", "/tmp", True, [], dest)
+        saved = dest.read_text()
+        full = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        expect("the saved summary", (f"head: {full}\n" in saved, "verdict: failed\n" in saved, "failed-step: rust | cargo nextest run | gap=git-lfs-missing\n" in saved, "failed-step: web | tsc | gap=none\n" in saved), (True,) * 4)
+        with contextlib.redirect_stdout(io.StringIO()):
+            print_summary(rows[:0], ROOT, "HEAD", "/tmp", False, ["rust"], dest)
+        expect("a partial run saves verdict partial", "verdict: partial\n" in dest.read_text(), True)
+    gap_step = Step("rust", "n", "cargo nextest run --profile ci\n")
+    expect("a git-lfs gap", env_gap(gap_step, "panicked: CI installs git-lfs, and it isn't on PATH"), "git-lfs-missing")
+    expect("the same words from another command", env_gap(Step("wire", "n", "./scripts/x.sh\n"), "git-lfs isn't on PATH"), "")
+    expect("a plain test failure", env_gap(gap_step, "assertion failed: left == right"), "")
+    expect("a wrangler gap", env_gap(Step("web", "n", "npx wrangler deploy --dry-run --outdir /tmp/w\n"), "The directory specified by assets.directory does not exist: dist"), "wrangler-dry-run-without-dist")
 
     for failure in failures:
         print(f"lane-gate self-test: {failure}", file=sys.stderr)
