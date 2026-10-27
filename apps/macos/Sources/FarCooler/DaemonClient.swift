@@ -246,21 +246,12 @@ final class DaemonClient: ObservableObject {
     /// noise every 30 seconds forever. This is the opposite failure — never
     /// checking again — which would mean installing it later, or updating
     /// the older side, goes unnoticed until someone restarts the app.
-    private let slowRetrySeconds: Double = 300
+    let slowRetrySeconds: Double = 300
 
     /// `forgetTeamWork`'s part that only this file may write (ov-818).
     func forgetNeedsYou() {
         if !needsYouRead.isEmpty { needsYouRead = [] }
         if !boardNews.isEmpty { boardNews = [:] }
-    }
-
-    /// How long the next check of `state` waits when it isn't on the backoff:
-    /// the slow cadence for a state retrying fixes none of, a version
-    /// mismatch, or a refusal the probe has twice failed to prove (ov-821).
-    func slowWait(for state: HostState) -> Double? {
-        if retryWaitsLong(state) { return slowRetrySeconds }
-        if case .unreachable(let reason) = state, looksVersionMismatch(reason) { return slowRetrySeconds }
-        return nil
     }
 
     /// The one place that arms a retry, so `onEnd` and `refresh()`'s own
@@ -283,15 +274,13 @@ final class DaemonClient: ObservableObject {
     /// hold the connection open for up to 45s — reports no `onEnd` at all,
     /// and without this a client in that state sits at `.unreachable`
     /// forever with nothing counting down.
-    private func scheduleRetry() {
+    func scheduleRetry() {
         guard !isStopped, retryTask == nil else { return }
 
         let wait: Double
         if let slow = slowWait(for: state) {
-            // `attempt` resets rather than climbs here: it drives the fast
-            // exponential schedule only, means nothing at this cadence, and
-            // letting it grow would leave a later, genuinely transient
-            // failure starting at the 30s ceiling instead of a fresh 1s.
+            // `attempt` resets rather than climbs: it drives the fast schedule only, and
+            // letting it grow would start a later transient failure at the 30s ceiling.
             attempt = 0
             wait = slow
         } else {
@@ -329,14 +318,6 @@ final class DaemonClient: ObservableObject {
             self.retryTask = nil
             self.afterRecheck()
         }
-    }
-
-    /// What follows a scheduled check's read: the events stream, unless the
-    /// runner just refused this Mac, when the stream would be one more
-    /// failed login for the same answer (ov-821). The next check is armed
-    /// here instead; the stream starts once a read gets in.
-    func afterRecheck() {
-        if awaitingRecheck { scheduleRetry() } else { startEvents() }
     }
 
     /// Retry this runner at once, whatever the backoff had planned.
@@ -786,15 +767,11 @@ final class DaemonClient: ObservableObject {
     @Published private(set) var hasLoaded = false
 
     private var missingPanes = MissingPanes()  // which panes have really gone (ov-622)
-    /// Reads the fleet.
-    ///
-    /// `recheck` is true for the dial a scheduled check or Check Again makes:
-    /// the one dial the runner gets per check. Every other call, and there
-    /// are some thirty, returns at once while the runner is refusing this Mac
-    /// or its access is gone (`awaitingRecheck`, ov-821): each would be its
-    /// own failed login on the runner's address, a burst of them is how a
-    /// removed Mac gets everyone behind its address turned away, and the
-    /// check already scheduled will read what they would have.
+    /// Reads the fleet. `recheck` is the dial a scheduled check or Check Again
+    /// makes, the one the runner gets per check. Every other call (there are
+    /// some thirty) returns at once while the runner refuses this Mac
+    /// (`awaitingRecheck`, ov-821): each would be its own failed login on the
+    /// runner's address, and the scheduled check reads what they would have.
     func refresh(recheck: Bool = false) async {
         if !recheck, awaitingRecheck { return }
         // `runRaw`, not `run`: the failure message comes back from THIS

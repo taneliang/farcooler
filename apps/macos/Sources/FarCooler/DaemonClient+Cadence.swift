@@ -49,4 +49,21 @@ extension DaemonClient {
         guard case .unreachable(let reason) = state else { return false }
         return !target.isEmpty && keyRefusals.cannotBeProven && KeyRefusals.isKeyRefusal(reason)
     }
+
+    /// How long the next check of `state` waits when it isn't on the backoff:
+    /// the slow cadence for a state retrying fixes none of, a version
+    /// mismatch, or a refusal the probe has twice failed to prove (ov-821).
+    func slowWait(for state: HostState) -> Double? {
+        if retryWaitsLong(state) { return slowRetrySeconds }
+        if case .unreachable(let reason) = state, looksVersionMismatch(reason) { return slowRetrySeconds }
+        return nil
+    }
+
+    /// What follows a scheduled check's read: the events stream, unless the
+    /// runner just refused this Mac, when the stream would be one more
+    /// failed login for the same answer (ov-821). The next check is armed
+    /// here instead; the stream starts once a read gets in.
+    func afterRecheck() {
+        if awaitingRecheck { scheduleRetry() } else { startEvents() }
+    }
 }
