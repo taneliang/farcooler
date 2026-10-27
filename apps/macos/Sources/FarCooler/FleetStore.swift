@@ -672,7 +672,7 @@ final class FleetStore: ObservableObject {
     /// runner's own perfectly good event stream on every Wi-Fi change,
     /// which is the one runner a network flap never actually touches.
     func reconnectAll() {
-        for (host, client) in clients where !client.state.isUsable {
+        for (host, client) in clients where !client.state.isUsable && !client.holdsOffNetworkDial {
             cancelBringUp(host)
             client.reconnectNow()
         }

@@ -371,21 +371,6 @@ struct KeyRefusalsTests {
         #expect(!refusals.holdsOffDial(at: Self.dials[3].addingTimeInterval(1)))
     }
 
-    /// The second key is a second refusal on the same recheck.
-    @Test func aDeviceWhoseAccessIsGoneTriesOneKeyPerRecheck() throws {
-        var refusals = KeyRefusals(admitted: true)
-        #expect(refusals.triesTheOtherKey)
-        for dial in Self.dials.prefix(3) { _ = refusals.refused(at: dial) }
-        #expect(refusals.triesTheOtherKey, "not settled yet: the rekey's second key still gets its turn")
-        _ = refusals.refused(at: Self.dials[3])
-        #expect(!refusals.triesTheOtherKey)
-        refusals.letIn()
-        #expect(refusals.triesTheOtherKey)
-        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
-        refusals.release("studio", in: defaults)
-        #expect(!refusals.triesTheOtherKey)
-    }
-
     @Test func otherRefusalsAndFailuresAreNot() {
         #expect(!KeyRefusals.isKeyRefusal("e@box: Permission denied (password)."))
         #expect(!KeyRefusals.isKeyRefusal("error: permission denied for control\ncode: scope-denied"))

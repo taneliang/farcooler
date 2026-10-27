@@ -45,7 +45,6 @@ suspend fun connectWithEitherKey(
     ring: KeyRing,
     connect: suspend (key: String) -> Unit,
     refused: (Exception) -> Boolean = ::refusedTheKey,
-    triesTheOther: Boolean = true,
 ) {
     val previous = ring.previous
     val tried = PhoneKeyChoice.forRunner(runnerId, ring.onPrevious, previous != null)
@@ -56,7 +55,7 @@ suspend fun connectWithEitherKey(
     } catch (e: Exception) {
         e.rethrowIfCancellation()
         val other = tried.alternate(previous != null)
-        if (!refused(e) || !triesTheOther || other == null) throw e
+        if (!refused(e) || other == null) throw e
         val otherKey = (if (other == PhoneKeyChoice.PREVIOUS) previous else ring.current) ?: throw e
         connect(otherKey)
         ring.onPrevious = if (other == PhoneKeyChoice.CURRENT) ring.onPrevious - runnerId else ring.onPrevious + runnerId

@@ -69,7 +69,8 @@ extension DaemonClient {
     /// `refresh()` nobody scheduled coalesces into that one (`refresh(recheck:)`),
     /// and that check doesn't follow its read with an events stream's dial.
     var awaitingRecheck: Bool {
-        guard !target.isEmpty else { return false }
+        // A live stream means a dial got in, and its news is a read worth making.
+        guard !target.isEmpty, eventStream == nil else { return false }
         switch state {
         case .noAccess: return true
         case .removed: return keyRefusals.refusals > 0
@@ -77,6 +78,11 @@ extension DaemonClient {
         case .connecting, .connected, .reconnecting, .notInstalled: return false
         }
     }
+
+    /// Whether the network coming back should leave this Mac alone (ov-821):
+    /// its access is gone and it dialed less than five minutes ago. The phones
+    /// hold the same dial off (`KeyRefusals.holdsOffDial`).
+    var holdsOffNetworkDial: Bool { awaitingRecheck && keyRefusals.holdsOffDial(at: now()) }
 
     /// Forgets everything read from this runner, for one that doesn't let
     /// this Mac see its work anymore (ov-784, ov-818): its worktrees and

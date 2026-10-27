@@ -282,12 +282,6 @@ public struct KeyRefusals: Sendable, Equatable {
         return now.timeIntervalSince(lastDial) < Self.rechecksEvery
     }
 
-    /// Whether a refused dial should try the device's other key too (ov-821):
-    /// not once its access is gone, when the second key is a second refusal
-    /// on the same recheck and no answer a runner that's refused the first
-    /// three times would change.
-    public var triesTheOtherKey: Bool { verdict != .revoked && !released }
-
     /// Whether `stderr` from a command the Mac ran over `ssh` is sshd
     /// refusing this device's key: OpenSSH's "Permission denied (publickey)"
     /// or "(publickey,password)", the methods sshd offers in its order. The

@@ -71,8 +71,7 @@ extension Connection {
             let id = host.id.uuidString
             let hasPrevious = Identity.previousPrivateKey != nil
             let tried = PhoneKeyChoice.forRunner(id, onPrevious: RekeyMarks.onPrevious, hasPrevious: hasPrevious)
-            guard Self.refusedTheKey(error), keyRefusals.triesTheOtherKey,
-                let other = tried.alternate(hasPrevious: hasPrevious),
+            guard Self.refusedTheKey(error), let other = tried.alternate(hasPrevious: hasPrevious),
                 let otherKey = Identity.privateKey(for: host.id, choice: other)
             else { throw error }
             _ = try await core.connect(config: config(otherKey))

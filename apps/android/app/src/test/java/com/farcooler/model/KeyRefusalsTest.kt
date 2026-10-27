@@ -179,18 +179,4 @@ class KeyRefusalsTest {
         refusals.letIn()
         assertFalse(refusals.holdsOffDial(t0 + 60_000))
     }
-
-    @Test
-    fun `a phone whose access is gone tries one key per recheck`() {
-        val refusals = KeyRefusals(admitted = true)
-        assertTrue(refusals.triesTheOtherKey)
-        for (at in dials.take(3)) Connection.Failure.KEY_REJECTED.reading(refusals, at)
-        assertTrue(refusals.triesTheOtherKey)
-        Connection.Failure.KEY_REJECTED.reading(refusals, dials[3])
-        assertFalse(refusals.triesTheOtherKey)
-        refusals.letIn()
-        assertTrue(refusals.triesTheOtherKey)
-        refusals.release()
-        assertFalse(refusals.triesTheOtherKey)
-    }
 }

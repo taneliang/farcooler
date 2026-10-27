@@ -355,7 +355,7 @@ extension ContentView {
         case .reload:
             Task {
                 for client in store.clients.values {
-                    await client.refresh()
+                    await client.refresh(recheck: true)
                     await client.refreshRepositories()
                     await client.refreshRoots()
                     await client.refreshLayouts()

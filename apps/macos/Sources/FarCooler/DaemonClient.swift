@@ -389,7 +389,7 @@ final class DaemonClient: ObservableObject {
 
     // MARK: - Live updates
 
-    private var eventStream: EventStream?
+    private(set) var eventStream: EventStream?
     /// Which stream is current, so a terminated one's `onEnd` can tell
     /// whether it still is.
     ///
@@ -774,6 +774,7 @@ final class DaemonClient: ObservableObject {
     /// runner's address, and the scheduled check reads what they would have.
     func refresh(recheck: Bool = false) async {
         if !recheck, awaitingRecheck { return }
+        keyRefusals.dialing(at: now())
         // `runRaw`, not `run`: the failure message comes back from THIS
         // call directly, and a refresh inside an action is not that action's
         // failure — a Stop the runner refused is not undone by the fleet

@@ -89,12 +89,6 @@ class KeyRefusals(admitted: Boolean) {
         return (verdict == Verdict.REVOKED || released) && nowMs - last < RECHECKS_EVERY_MS
     }
 
-    /**
-     * Whether a refused dial should try the phone's other key too (ov-821): not once its access is gone, when the
-     * second key is a second refusal on the same recheck.
-     */
-    val triesTheOtherKey: Boolean get() = verdict != Verdict.REVOKED && !released
-
     companion object {
         const val SETTLES_AFTER = 3
         const val SETTLES_OVER_MS = 10_000L

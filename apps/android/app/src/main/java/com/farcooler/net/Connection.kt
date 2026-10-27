@@ -801,7 +801,7 @@ class Connection(
     val lastTrouble: StateFlow<Failure?> = _lastTrouble.asStateFlow()
 
     /** How this runner has answered this phone's key: see [KeyRefusals]. */
-    private val keyRefusals = KeyRefusals(admissions.admitted(host.id)).apply { if (admissions.released(host.id)) release() }
+    internal val keyRefusals = KeyRefusals(admissions.admitted(host.id)).apply { if (admissions.released(host.id)) release() }
 
     /** The clock [keyRefusals] reads. A test moves its own. */
     internal var nowMs: () -> Long = System::currentTimeMillis
@@ -961,7 +961,6 @@ class Connection(
             // The old key for a runner not moved to a new one yet (ov-569).
             connectWithEitherKey(
                 withHost.id, IdentityKeyRing, { core.connect(withHost.config(it, nodeKey, rendezvous.value)) },
-                triesTheOther = keyRefusals.triesTheOtherKey,
             )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
@@ -1102,7 +1101,6 @@ class Connection(
         try {
             connectWithEitherKey(
                 current.id, IdentityKeyRing, { core.connect(current.config(it, nodeKey, rendezvous.value)) },
-                triesTheOther = keyRefusals.triesTheOtherKey,
             )
         } catch (e: Exception) {
             e.rethrowIfCancellation()

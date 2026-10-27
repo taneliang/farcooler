@@ -557,6 +557,59 @@ struct KeyRefusedMacTests {
         #expect(client.slowWait(for: client.state) == nil, "\(client.state)")
     }
 
+    /// The windows were closed while this Mac had no access, and access was
+    /// restored meanwhile (review S1): reopening starts the event stream, no
+    /// scheduled check is armed, and the stream's first news must be read, or
+    /// the Mac would sit on no access until Check Again.
+    @Test func aLiveEventStreamsNewsIsReadEvenWhileNoAccess() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing, clock: clock)
+        #expect(client.state == .noAccess)
+        #expect(client.awaitingRecheck)
+
+        runner.refusing = false
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ov821-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cli = directory.appendingPathComponent("farcooler")
+        try "#!/bin/sh\nprintf '%s\\n' '{\"kind\":\"fleet\"}'\nexec sleep 30\n".write(to: cli, atomically: true, encoding: .utf8)
+        client.binaryForTesting = cli.path
+        // Read by /bin/sh, never executed: a script written a moment ago stalls under load (ov-566).
+        client.interpreterForTesting = "/bin/sh"
+        client.startEvents()
+        defer { client.stopEvents() }
+        #expect(!client.awaitingRecheck, "a live stream was treated as a refusal")
+        for _ in 0..<250 where client.state != .connected { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(client.state == .connected, "\(client.state)")
+    }
+
+    /// A network change leaves a Mac with no access alone for five minutes
+    /// after its last dial (review N1), as the phones do, and dials after.
+    @Test func theNetworkReturningDialsAMacWithNoAccessOncePerRecheck() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        let start = clock.at
+        await refuse(client, runner, from: start, at: Self.spacing, clock: clock)
+        #expect(client.state == .noAccess)
+        let store = FleetStore(clients: ["you@cosmo": client])
+
+        clock.at = start.addingTimeInterval(14 + 120)
+        store.reconnectAll()
+        #expect(client.state == .noAccess, "a network change redialed two minutes after the last dial: \(client.state)")
+
+        clock.at = start.addingTimeInterval(14 + 301)
+        store.reconnectAll()
+        #expect(client.state == .connecting, "a network change five minutes on didn't dial: \(client.state)")
+        client.stopEvents()
+    }
+
     /// The probe asks nothing of the person, reuses no master, and checks the
     /// host key strictly whatever the config says.
     @Test func theProbeIsStrictAndQuiet() {

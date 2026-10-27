@@ -63,16 +63,4 @@ class ConnectionRekeyTest {
         assertTrue(failure is IllegalStateException)
         assertEquals(listOf("new"), offered)
     }
-
-    /** ov-821: a phone whose access is gone offers one key per recheck, so a refusal is one failed login. */
-    @Test
-    fun aPhoneWhoseAccessIsGoneOffersOneKey() = runTest {
-        val ring = Ring(previous = "old", onPrevious = emptySet())
-        val offered = mutableListOf<String>()
-        val failure = runCatching {
-            connectWithEitherKey("r1", ring, { offered += it; throw Refused() }, refused = { it is Refused }, triesTheOther = false)
-        }.exceptionOrNull()
-        assertTrue(failure is Refused)
-        assertEquals(listOf("new"), offered)
-    }
 }
