@@ -43,6 +43,33 @@ impl AsyncRead for StreamReader {
     }
 }
 
+/// The reader `attach_stream` returns: the bytes, and the task feeding them.
+///
+/// Dropping it aborts the task, which drops the protocol client and with it the
+/// ssh channel. Without that the task only noticed a gone reader when its next
+/// frame failed to write, so a pane closed while idle held one of sshd's ten
+/// session slots until the terminal next printed (ov-825).
+struct AttachReader {
+    inner: tokio::io::DuplexStream,
+    task: farcooler_transport::rt::Task<()>,
+}
+
+impl AsyncRead for AttachReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl Drop for AttachReader {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     #[cfg(feature = "native")]
@@ -233,8 +260,9 @@ impl Session {
         // Dropping the far half is what gives the reader its end of stream, and
         // it happens exactly when the task below returns: on a closed ssh
         // channel, on a daemon that stopped, or on the reader itself being
-        // dropped, which fails the write. The last of those is what returns the
-        // ssh session slot — `ChannelGuard` in `ssh.rs` — so a client that stops
+        // dropped, which fails the write, but only when the next frame arrives.
+        // `AttachReader` closes that gap: dropping it aborts the task at once. The
+        // last of those is what returns the ssh session slot — `ChannelGuard` in `ssh.rs` — so a client that stops
         // reading stops holding one of sshd's ten.
         // Fleet news arriving on THIS channel, forwarded rather than dropped.
         //
@@ -251,7 +279,7 @@ impl Session {
         // notices a millisecond apart are one notice.
         let news = self.events.lock().unwrap_or_else(|p| p.into_inner()).clone();
         let (mine, theirs) = tokio::io::duplex(64 * 1024);
-        farcooler_transport::rt::spawn(async move {
+        let task = farcooler_transport::rt::spawn(async move {
             use tokio::io::AsyncWriteExt;
             let mut sink = theirs;
             loop {
@@ -284,7 +312,7 @@ impl Session {
             }
         });
 
-        Ok(Box::new(mine))
+        Ok(Box::new(AttachReader { inner: mine, task }))
     }
 
     /// Receive fleet news on a channel of its own, for as long as this session

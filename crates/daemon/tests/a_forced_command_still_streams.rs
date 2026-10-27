@@ -194,6 +194,97 @@ async fn the_stream_command_still_streams_on_a_key_that_forces_nothing() {
     assert!(read > 0, "`--stream` opened and ended without a byte");
 }
 
+// MARK: - a closed pane gives its channel back (ov-825)
+
+/// Open a stream and read it until the pane goes quiet, as a pane that has
+/// drawn its prompt and then sits idle.
+async fn an_idle_pane(
+    session: &Session,
+    terminal: uuid::Uuid,
+) -> Box<dyn tokio::io::AsyncRead + Unpin + Send> {
+    let mut stream = session.open_stream(terminal).await.expect("open a stream");
+    let mut buf = vec![0u8; 64 * 1024];
+    while let Ok(Ok(n)) =
+        tokio::time::timeout(Duration::from_millis(300), stream.read(&mut buf)).await
+    {
+        assert!(n > 0, "the pane ended instead of going idle");
+    }
+    stream
+}
+
+/// Closing an idle pane returns its sshd session slot without waiting for the
+/// terminal to print.
+///
+/// The control connection and the news channel hold two of sshd's ten, so eight
+/// panes fill the connection. Dropping one idle reader must make room for a
+/// ninth within moments. Before the reader aborted its task, the slot came back
+/// only when the pane next wrote, which an idle pane never does, so the retry
+/// loop below runs out.
+#[tokio::test]
+async fn closing_an_idle_pane_frees_its_channel_without_waiting_for_output() {
+    let runner = start().await;
+    let terminal = a_pane(&runner).await;
+    let session = Session::connect_ssh(&destination(&runner, &runner.plain_key))
+        .await
+        .expect("connect the product's client over a real sshd");
+    let _news = session.subscribe(std::sync::Arc::new(|_| {})).await.expect("subscribe");
+
+    // Idle, not merely open: a pane still draining its replay would fail its
+    // next write on a dropped reader and free the slot by accident.
+    let mut panes = Vec::new();
+    loop {
+        if panes.len() > 12 {
+            panic!("sshd never ran out of channels, so this proves nothing");
+        }
+        if panes.len() >= 6 {
+            // Past here an open may be refused; that is the end of the room.
+            match session.open_stream(terminal).await {
+                Ok(pane) => panes.push(pane),
+                Err(_) => break,
+            }
+        } else {
+            panes.push(an_idle_pane(&session, terminal).await);
+        }
+    }
+    assert!(panes.len() >= 2, "only {} panes opened", panes.len());
+    // Let the last few settle to idle too.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Nothing is attempted while it settles: a failed open is itself traffic,
+    // and traffic is what used to wake the stranded task.
+    drop(panes.pop());
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    if let Err(e) = session.open_stream(terminal).await {
+        panic!("a closed idle pane never gave its channel back: {e}");
+    }
+}
+
+/// Twenty idle panes opened and closed one after another on one connection all
+/// open, against sshd's default `MaxSessions` of ten.
+#[tokio::test]
+async fn twenty_idle_panes_opened_and_closed_on_one_connection_all_open() {
+    let runner = start().await;
+    let terminal = a_pane(&runner).await;
+    let session = Session::connect_ssh(&destination(&runner, &runner.plain_key))
+        .await
+        .expect("connect the product's client over a real sshd");
+
+    for _ in 0..20 {
+        let pane = an_idle_pane(&session, terminal).await;
+        drop(pane);
+        // Slots are returned asynchronously; a short breath, not a wait for
+        // output, which is what this property is about.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let mut last = session.open_stream(terminal).await.expect("the twenty-first pane opens");
+    let mut buf = [0u8; 1024];
+    let n = tokio::time::timeout(FIRST_BYTE_CEILING, last.read(&mut buf))
+        .await
+        .expect("a byte")
+        .expect("read");
+    assert!(n > 0);
+}
+
 // MARK: - the client, against one key
 
 /// How long `Session::open_stream` takes to produce a byte, through this key.
