@@ -84,7 +84,7 @@ pub(crate) mod held;
 mod pending;
 pub(crate) use pending::{AGENTS_TRUSTED_FOR, IDLE_TWICE, SLOW_POLL, SLOWS_AFTER};
 #[cfg(test)]
-pub(crate) use pending::{fail_reads, tries};
+pub(crate) use pending::{fail_reads, slow_return, tries};
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.

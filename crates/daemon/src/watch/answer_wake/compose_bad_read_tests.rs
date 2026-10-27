@@ -120,3 +120,20 @@ async fn a_wait_resumed_against_another_session_is_given_up() {
     assert!(enters(&si).is_empty(), "{}", si.log());
     assert_eq!(not_sent(agent.id), ["Claude restarted while “what did they find” waited, so the runner didn’t send it. Check the terminal."]);
 }
+
+/// Why the first version of this lane failed on Linux CI: claude's hook can
+/// be heard while the Enter's send is still returning, and a confirmation
+/// counted from the return missed it ("didn't confirm"). It's counted from
+/// the key. The return here takes 150 ms (the nextest processes are one per
+/// test, so the pause can't reach another test).
+#[tokio::test]
+async fn a_hook_heard_before_the_enter_returns_still_confirms_it() {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "shells-busy").await;
+    crate::watch::answer_wake::compose::slow_return(Duration::from_millis(150));
+    si.show("shells").await;
+    super::super::logs(&si, "SUBMIT what did they find").await;
+    waits_over(&b).await;
+    assert_eq!(enters(&si), ["ENTER"], "{}", si.log());
+    assert!(not_sent(agent.id).is_empty(), "{:?}", not_sent(agent.id));
+}

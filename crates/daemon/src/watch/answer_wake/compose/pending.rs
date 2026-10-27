@@ -367,7 +367,7 @@ impl Watcher {
 
     /// Try `p`'s Enter until it goes or must be given up (this module's
     /// docs): the word it's given up with (`held::why_not_sent`).
-    async fn enter_when_it_can(&self, p: &Pending, token: Uuid) -> Result<(), &'static str> {
+    async fn enter_when_it_can(&self, p: &Pending, token: Uuid) -> Result<Instant, &'static str> {
         let registry = self.service.registry();
         let waited = || Duration::from_millis(u64::try_from(now_millis() - p.queued_at).unwrap_or(0));
         // Past `carry_agents_for`, only the screen says agents run.
@@ -453,7 +453,8 @@ impl Watcher {
                     let first = *idle_since.get_or_insert_with(Instant::now);
                     if first.elapsed() >= timing.idle_twice {
                         let runtime = Runtime { marks: None, ..self.service.runtime() };
-                        return runtime.send_bytes_hex(p.to.id, "0d").await.map_err(|_| "enter_failed");
+                        let pressed = Instant::now();
+                        return runtime.send_bytes_hex(p.to.id, "0d").await.map(|_| pressed).map_err(|_| "enter_failed");
                     }
                 }
                 Ok(Some(left)) if left.dialog => {
@@ -478,8 +479,9 @@ impl Watcher {
                         continue;
                     }
                     if let Some(witness) = self.witness_in(&p.config, proven, &p.to, &p.confirm.submitted) {
+                        let pressed = Instant::now();
                         match self.enter_fenced_for(&p.to, proven, typed_since, &witness, &p.expected).await {
-                            Ok(()) => return Ok(()),
+                            Ok(()) => return Ok(pressed),
                             // Nothing was pressed: a call or a gate the hooks
                             // say a dialog may follow, waited out as a turn is.
                             Err("dialog") => {}
@@ -497,12 +499,18 @@ impl Watcher {
     /// its own rows show it; else what the pane's rows say instead. A key
     /// typed or a box changed may be the message sent by hand: if claude's
     /// transcript has it within `compose_confirm`, the row goes to claude's.
-    async fn pended(&self, p: &Pending, row: &str, entered: Result<(), &'static str>) -> Option<String> {
+    async fn pended(&self, p: &Pending, row: &str, entered: Result<Instant, &'static str>) -> Option<String> {
         let agent = held::agent_name(&p.to.command_preset);
         match entered {
-            Ok(()) => {
+            Ok(pressed) => {
                 self.mark_told(p.to.id);
-                let confirm = Confirm { since: Instant::now(), ..p.confirm.clone() };
+                #[cfg(test)]
+                let slow = *SLOW_RETURN.lock().unwrap_or_else(|e| e.into_inner());
+                #[cfg(test)]
+                tokio::time::sleep(slow).await;
+                // From the key, not from here: claude's hook can be heard
+                // while the key's send is still returning (ov-823).
+                let confirm = Confirm { since: pressed, ..p.confirm.clone() };
                 let took = self.took(&confirm).await;
                 crate::session_projectors::global().runner_hold(p.to.id, |r| r.runner_told(row));
                 took.is_none().then(|| held::why_not_sent(agent, &p.echo, "unconfirmed"))
@@ -569,6 +577,16 @@ fn given_up_for(left: &Left, preset: &str, typed: bool) -> &'static str {
         "not_shown" if left.screen.as_deref().is_some_and(|screen| composer::read(preset, screen) == Composer::Empty) => "box_cleared",
         _ => "box_changed",
     }
+}
+
+/// How long a test has a pressed Enter's return take, as a loaded runner's
+/// does: claude's hook is heard meanwhile (`pended`).
+#[cfg(test)]
+static SLOW_RETURN: std::sync::Mutex<Duration> = std::sync::Mutex::new(Duration::ZERO);
+
+#[cfg(test)]
+pub(crate) fn slow_return(by: Duration) {
+    *SLOW_RETURN.lock().unwrap_or_else(|e| e.into_inner()) = by;
 }
 
 /// Reads a test has the waits of a pane fail, as a tmux that timed out
