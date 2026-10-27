@@ -54,9 +54,20 @@ Not run here, and said so in the output: the iOS UI smoke (a simulator; use
 scripts/ios-ui-tests.sh, one simulator at most) and the parts of the web job
 that download Linux binaries. A heavy job waits while the 1-minute load average
 is 20 or more.
+
+Only one heavy job runs on this Mac at a time (ov-831). Ten lanes each running a
+full gate pushed the load past 190 and made timing tests fail for no reason, so a
+heavy job takes a machine-wide flock on lane-gate.lock in the temp dir first. A
+second gate waits and says who holds it (worktree, PID, start time). The lock is
+held for one job and let go before the next, so another gate's heavy job can slip
+in between rather than wait out a whole run. Light jobs (wire, doc-comments,
+relay, site) never take it. --no-lock turns it off, and it is off by default when
+the CI environment variable is set: CI runners are separate machines.
 """
 
 import argparse
+import contextlib
+import fcntl
 import importlib.util
 import os
 import pathlib
@@ -363,6 +374,54 @@ def wait_for_load(limit=20.0, poll=30):
         time.sleep(poll)
 
 
+LOCK_POLL = 5  # seconds between a waiter's tries; a releasing gate pauses a little longer so a waiter gets the next turn
+
+
+def lock_path():
+    return pathlib.Path(tempfile.gettempdir()) / "lane-gate.lock"
+
+
+def lock_wanted(args):
+    """Locking is on unless --no-lock, or CI is set (separate runners there)."""
+    return not (getattr(args, "no_lock", False) or os.environ.get("CI"))
+
+
+def read_holder(path):
+    try:
+        return (path.with_name(path.name + ".holder").read_text().strip()) or "an unknown gate"
+    except OSError:
+        return "an unknown gate"
+
+
+@contextlib.contextmanager
+def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=print):
+    """Hold the machine-wide heavy-job lock for one job. A waiter names the holder."""
+    path = path or lock_path()
+    f = open(path, "a+")
+    started = time.time()
+    announced = -1
+    holder = path.with_name(path.name + ".holder")
+    got = False
+    try:
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                got = True
+                break
+            except OSError:
+                if time.time() - started >= (announced + 1) * announce:
+                    announced += 1
+                    say(f"  waiting for the machine-wide heavy-job lock ({job}); held by {read_holder(path)}", flush=True)
+                time.sleep(poll)
+        holder.write_text(f"worktree {worktree}, PID {os.getpid()}, started {time.strftime('%Y-%m-%d %H:%M:%S')}, running {job}\n")
+        yield
+    finally:
+        if got:
+            with contextlib.suppress(OSError):
+                holder.unlink()
+        f.close()  # closing releases the flock
+
+
 COUNTS = [
     (re.compile(r"Summary \[.*?\]\s+(\d+) tests? run: (\d+) passed"), "nextest", 2),
     (re.compile(r"test result: ok\. (\d+) passed"), "doc/unit", 1),
@@ -595,6 +654,7 @@ def main(argv):
     ap.add_argument("--skip", default="", help="comma-separated jobs to leave out")
     ap.add_argument("--log-dir", default="", help="where each step's full output goes (default: a new temp dir)")
     ap.add_argument("--no-load-wait", action="store_true", help="do not wait for the load average to fall")
+    ap.add_argument("--no-lock", action="store_true", help="skip the machine-wide heavy-job lock (it is off already when CI is set)")
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
@@ -658,33 +718,43 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
     for j in chosen:
-        if j in HEAVY and not args.no_load_wait:
-            wait_for_load()
-        env = base_env(repo, tmp, ctx, args.strict_leaks)
-        env.update(job_env(j))
-        if j == "android" and ctx["steps.jdk21.outputs.path"]:
-            env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
-        print(f"\n[{j}]", flush=True)
-        for s in plans[j]:
-            if s.skip:
-                rows.append((j, s.label(), f"skipped: {s.skip}", "", ""))
-                print(f"  skip {s.label()}  ({s.skip})")
-                continue
-            print(f"  run  {s.label()}", flush=True)
-            # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
-            # swift job's APP_NAME) is read back into it for the steps after
-            # (ov-812). The step's own `env:` is laid over it inside run_step.
-            result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp)
-            rows.append((j, s.label(), result, f"{secs:.0f}", counts))
-            if not ok:
-                failed = True
-                if log is None:
-                    print(f"  FAILED before it ran: {output}")
-                else:
-                    tail = "\n".join(output.splitlines()[-15:])
-                    print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
+        locked = j in HEAVY and lock_wanted(args)
+        with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
+            failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
+        if locked:
+            time.sleep(LOCK_POLL * 1.5)  # flock is not a queue: without this the releaser retakes it before a waiter polls
     if "ios" in chosen:
         rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
+    return failed
+
+
+def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
+    failed = False
+    if j in HEAVY and not args.no_load_wait:
+        wait_for_load()
+    env = base_env(repo, tmp, ctx, args.strict_leaks)
+    env.update(job_env(j))
+    if j == "android" and ctx["steps.jdk21.outputs.path"]:
+        env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
+    print(f"\n[{j}]", flush=True)
+    for s in plans[j]:
+        if s.skip:
+            rows.append((j, s.label(), f"skipped: {s.skip}", "", ""))
+            print(f"  skip {s.label()}  ({s.skip})")
+            continue
+        print(f"  run  {s.label()}", flush=True)
+        # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
+        # swift job's APP_NAME) is read back into it for the steps after
+        # (ov-812). The step's own `env:` is laid over it inside run_step.
+        result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp)
+        rows.append((j, s.label(), result, f"{secs:.0f}", counts))
+        if not ok:
+            failed = True
+            if log is None:
+                print(f"  FAILED before it ran: {output}")
+            else:
+                tail = "\n".join(output.splitlines()[-15:])
+                print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
     return failed
 
 
@@ -825,6 +895,98 @@ def self_test():
     names = [i for i, s in enumerate(swift_run) if 'GITHUB_ENV' in s.run and "APP_NAME=" in s.run]
     users = [i for i, s in enumerate(swift_run) if "$APP_NAME" in s.run]
     expect("the swift job sets APP_NAME before any step uses it", bool(names and users and names[0] < users[0]), True)
+
+    # One heavy job at a time on the machine (ov-831): a second gate waits and names the holder.
+    import threading
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        lock = t / "lane-gate.lock"
+        said, order = [], []
+        held, go = threading.Event(), threading.Event()
+
+        def first():
+            with machine_lock("/wt/first", "rust", path=lock, poll=0.05):
+                order.append("first in")
+                held.set()
+                go.wait(5)
+                order.append("first out")
+
+        def second():
+            with machine_lock("/wt/second", "swift", path=lock, poll=0.05, announce=0.1, say=lambda m, **k: said.append(m)):
+                order.append("second in")
+
+        a = threading.Thread(target=first)
+        a.start()
+        held.wait(5)
+        b = threading.Thread(target=second)
+        b.start()
+        time.sleep(0.4)
+        expect("the second gate has not started while the first holds the lock", order, ["first in"])
+        go.set()
+        a.join(5)
+        b.join(5)
+        expect("the second gate ran after the first let go", order, ["first in", "first out", "second in"])
+        expect("the waiter names the holder's worktree, PID and start time",
+               bool(said) and "/wt/first" in said[0] and f"PID {os.getpid()}" in said[0] and re.search(r"started \d{4}-\d\d-\d\d \d\d:\d\d:\d\d", said[0]) is not None, True)
+        expect("the holder note goes when the lock does", lock.with_name(lock.name + ".holder").exists(), False)
+
+        # Through run_jobs: two fake heavy jobs at once do not overlap, but a light job does not wait,
+        # and the lock is let go between a gate's jobs so the other gate's job slips in.
+        marks = t / "marks"
+        def step(name):
+            return Step("x", name, f'echo "{name} start" >> "{marks}"; sleep 0.5; echo "{name} end" >> "{marks}"\n')
+        plans2 = {"h1": [step("g1h1")], "h2": [step("g1h2")], "g2h": [step("g2h")], "light": [step("g2light")]}
+        saved_heavy, saved_lock_path, saved_ci = set(HEAVY), lock_path, os.environ.pop("CI", None)
+        HEAVY.update({"h1", "h2", "g2h"})
+        saved_poll = LOCK_POLL
+        globals()["LOCK_POLL"] = 0.05
+        globals()["lock_path"] = lambda: lock
+        orig_lock = machine_lock
+        globals()["machine_lock"] = lambda wt, j, **k: orig_lock(wt, j, poll=LOCK_POLL, say=lambda *a, **kw: None, **k)
+        try:
+            ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, no_lock=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1", "h2"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                t2 = threading.Thread(target=run_jobs, args=(["g2h"], plans2, [], t, t, ctx, t, ns))
+                t2.start()
+                t0 = time.time()
+                run_jobs(["light"], plans2, [], t, t, ctx, t, ns)
+                light_secs = time.time() - t0
+                t1.join(10)
+                t2.join(10)
+            expect("a light job does not wait for the lock", light_secs < 0.8, True)
+            seq = marks.read_text().split("\n")
+            spans, open_ = [], []
+            for line in filter(None, seq):
+                n, what = line.split()
+                open_.append(n) if what == "start" else open_.remove(n)
+                spans.append(len([x for x in open_ if x != "g2light"]))
+            expect("heavy jobs never overlap", max(spans), 1)
+            expect("the other gate's heavy job slipped in between the first gate's jobs",
+                   [l.split()[0] for l in seq if l.endswith("start") and not l.startswith("g2light")], ["g1h1", "g2h", "g1h2"])
+            ns.no_lock = True
+            marks.write_text("")
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                run_jobs(["g2h"], plans2, [], t, t, ctx, t, ns)
+                t1.join(10)
+            expect("--no-lock lets them overlap", marks.read_text().split()[:4], ["g1h1", "start", "g2h", "start"])
+            ns.no_lock = False
+            os.environ["CI"] = "true"
+            expect("CI turns the lock off by default", lock_wanted(ns), False)
+            os.environ.pop("CI")
+            expect("... and without CI or --no-lock it is on", lock_wanted(ns), True)
+        finally:
+            HEAVY.clear(); HEAVY.update(saved_heavy)
+            globals()["lock_path"] = saved_lock_path
+            globals()["LOCK_POLL"] = saved_poll
+            globals()["machine_lock"] = orig_lock
+            if saved_ci is not None:
+                os.environ["CI"] = saved_ci
 
     # The parser, on the shapes ci.yml uses, so a mistake cannot hide in ci.yml.
     sample = (
