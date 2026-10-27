@@ -51,7 +51,7 @@ async fn only_the_needs_you_read_says_it_places_an_fyi() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("runner.sock");
     let mut requests = a_runner(&socket).await;
-    let mut session = Session::connect_local(&socket).await.expect("connect");
+    let session = Session::connect_local(&socket).await.expect("connect");
     assert!(session.can(farcooler_protocol::capability::NEEDS_YOU));
 
     let bound = std::time::Duration::from_secs(5);
