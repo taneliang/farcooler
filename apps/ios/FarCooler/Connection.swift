@@ -2058,11 +2058,13 @@ final class Connection: ObservableObject {
         /// That runner's Far Cooler is older than device enrollment. Nothing
         /// was written, and no amount of retrying writes it.
         case tooOld
+        /// Refused `scope-denied`: a runner from before ov-828, or a `read` phone.
+        case notAllowed
+        /// A passkey, on a runner without `passkey_keys` (OpenSSH before 8.4).
+        case noPasskeys
         /// Nothing was written, and the reason is not knowable from here: a
-        /// runner that went away mid-ceremony, a daemon that refused because
-        /// this device's own key is not enrolled with `host_admin` there
-        /// (`crates/daemon/src/rpc.rs` requires it for `client.enroll`), and a
-        /// fence that could not be rewritten all arrive as the same silence.
+        /// runner that went away mid-ceremony, and a fence that could not be
+        /// rewritten, arrive as the same silence.
         case couldNotWrite
     }
 
@@ -2118,6 +2120,9 @@ final class Connection: ObservableObject {
         await loadDaemonBuild()
         guard let daemon else { return .couldNotWrite }
         guard daemon.can(.enrollment) else { return .tooOld }
+        if publicKey.hasPrefix("sk-ecdsa-sha2-nistp256@openssh.com "), !daemon.can(.passkeyKeys) {
+            return .noPasskeys
+        }
 
         // The keys are camelCase because that is what `crates/client/src/ffi.rs`
         // reads, and it checks the required three for PRESENCE by name rather
@@ -2127,8 +2132,9 @@ final class Connection: ObservableObject {
         //
         // The client id is the caller's, and it is what the forced command will
         // carry — so it is what closing this device's sessions later will name.
-        guard
-            let answered = try? await core.call(
+        let answered: Data
+        do {
+            answered = try await core.call(
                 "client.enroll",
                 [
                     "publicKey": publicKey,
@@ -2143,7 +2149,9 @@ final class Connection: ObservableObject {
                     // carry from here.
                     "nodeKey": nodeKey,
                 ])
-        else { return .couldNotWrite }
+        } catch {
+            return .refused(error)
+        }
         let reply = try? JSONSerialization.jsonObject(with: answered) as? [String: Any]
         return .written(tunnel: reply?["connBlob"] as? String ?? "")
     }

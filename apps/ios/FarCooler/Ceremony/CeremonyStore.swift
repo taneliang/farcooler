@@ -66,6 +66,9 @@ struct CeremonyRunner: Codable, Equatable, Identifiable {
     /// A tunneled runner's address, kept as the route a person may choose when
     /// the tunnel fails (ov-485). Never dialed on its own; see `RunnerRoutes`.
     var alternative: Reach? = nil
+    /// Why `pending`, when this phone knows (ov-828): `Connection.Enrollment`'s
+    /// word, or `not_connected` for a runner it held no session to.
+    var pending_why: String? = nil  // swiftlint:disable:this identifier_name
 }
 
 /// The reply: the runners a trusted device granted, addressed to one ceremony.
@@ -429,7 +432,9 @@ struct RunnerRow: Identifiable, Equatable {
     /// The second line. Which account a runner is reached through is not
     /// something this device records, so what is shown is what it does know:
     /// where the runner is and who it logs in as.
-    var detail: String { "\(runner.user)@\(runner.address)" }
+    /// A runner reached only through Tailcat has no address, and showed as
+    /// "user@" with nothing after it (ov-828).
+    var detail: String { runner.reach.detail(user: runner.user) }
 }
 
 /// The ceremony, from this app's side of it — either side.
@@ -515,6 +520,8 @@ final class CeremonyStore: ObservableObject {
     var certify: (_ account: String, _ keyA: String) async -> Void = {
         await DeviceCertification.shared.certifyScanned(account: $0, keyA: $1)
     }
+    /// The Face ID gate; a harness answers it (`GrantBrowserHarness`).
+    var confirmTap: (_ reason: String) async -> ConfirmingTap.Outcome = { await ConfirmingTap.ask(reason: $0) }
     /// The certification started by the last reply this phone built.
     private(set) var certification: Task<Void, Never>?
 
@@ -726,7 +733,7 @@ final class CeremonyStore: ObservableObject {
             return
         }
 
-        switch await ConfirmingTap.ask(reason: "Confirm adding \(offer.name) to your runners") {
+        switch await confirmTap("Confirm adding \(offer.name) to your runners") {
         case .cancelled:
             // Changing your mind is not a failure and gets no screen.
             return
@@ -773,7 +780,9 @@ final class CeremonyStore: ObservableObject {
         // No id means nothing to enroll under, so nothing is enrolled and every
         // runner travels pending — which is a true statement about the file.
         let outcomes: [String: Connection.Enrollment]
-        if let clientId = Self.clientId(of: rescanned) {
+        let clientId = Self.clientId(of: rescanned)
+        let askedAny = clientId != nil
+        if let clientId {
             // The new device's node key, straight off its offer. Empty for a
             // v=1 device and for a phone whose own mint failed, both of which
             // enroll exactly as they always have — and the ONLY route by which
@@ -807,7 +816,13 @@ final class CeremonyStore: ObservableObject {
                 // The FILE's state, not this app's intention: pending unless
                 // that runner answered that the line is there.
                 pending: { if case .written? = written { return false } else { return true } }(),
-                alternative: route.alternative)
+                alternative: route.alternative,
+                // Why not, for the new device's screen: what the runner said,
+                // or that this phone never reached it (ov-828).
+                pending_why: { () -> String? in
+                    if let written { return written.pendingWhy }
+                    return askedAny ? "not_connected" : "failed"
+                }())
         }
         pendingNote = Self.note(about: granting, outcomes: outcomes)
 
@@ -924,6 +939,14 @@ final class CeremonyStore: ObservableObject {
             return "Far Cooler on \(old.label) is too old to add devices. "
                 + "Update it there, then add this device again."
         }
+        if let refused = granting.first(where: { outcomes[$0.id] == .notAllowed }) {
+            return "\(refused.label) didn’t let this iPhone add devices. "
+                + "Update Far Cooler on \(refused.label), or add the device from your Mac."
+        }
+        if let old = granting.first(where: { outcomes[$0.id] == .noPasskeys }) {
+            return "\(old.label)’s OpenSSH is too old for passkeys. "
+                + "Update it to 8.4 or later, then add this device again."
+        }
         return "Some runners don’t have this device’s key yet. You can add it later "
             + "from a device that can reach them."
     }
@@ -1038,5 +1061,26 @@ extension CeremonyRunner {
             reach: reach,
             user: user,
             fingerprint: host_key.isEmpty ? nil : host_key)
+    }
+}
+
+extension Connection.Enrollment {
+    /// The reason a reply carries for a runner this left pending
+    /// (`RunnerEntry.pending_why`, ov-828), or nil for a written one. The
+    /// browser has a sentence for each (`services/web/src/client/copy.ts`).
+    var pendingWhy: String? {
+        switch self {
+        case .written: return nil
+        case .tooOld: return "too_old"
+        case .notAllowed: return "not_allowed"
+        case .noPasskeys: return "no_passkeys"
+        case .couldNotWrite: return "failed"
+        }
+    }
+
+    /// What a refused `client.enroll` means, by the runner's word.
+    static func refused(_ error: Error) -> Self {
+        if case .rejected(_, "scope-denied", _)? = error as? ClientCore.CoreError { return .notAllowed }
+        return .couldNotWrite
     }
 }

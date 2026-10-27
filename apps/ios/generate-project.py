@@ -186,6 +186,8 @@ SOURCES = [
     # A teammate's phone asking before it joins (ov-525), for the UI suite.
     # DEBUG only.
     "TeammateJoinHarness.swift",
+    # The owner's phone adding a browser to a Tailcat-only runner (ov-828).
+    "GrantBrowserHarness.swift",
     # A real notification to tap, for the UI suite (ov-787). DEBUG only.
     "NotificationTapHarness.swift",
     "DockedBar.swift",
@@ -1160,6 +1162,7 @@ UI_TEST_SOURCES = [
     # A teammate's phone asks before it joins another account's runners
     # (ov-525). Over a canned reply, so it needs no runner either.
     "TeammateJoinUITests.swift",
+    "GrantBrowserUITests.swift",
     # A member's Talk opens their rep, and starts it first (ov-526).
     "TalkToRepUITests.swift",
     # The stack reopening where a relaunch left it, and a decision push
