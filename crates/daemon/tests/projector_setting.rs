@@ -1,8 +1,7 @@
-//! The projector as a setting (ov-372): `settings.set_projector` writes
-//! `[agents] projector` to the runner's config.toml and turns `agent_rows`
-//! on or off in the running daemon at once, so the next connection's hello
-//! says so; a daemon started on a config that says on offers it from the
-//! start. Each daemon reads its own config.toml, never this Mac's.
+//! No projector setting (ov-830): a runner offers `agent_rows` and
+//! `subagent_rows` from the start, with nothing in its config.toml or its
+//! environment, and `settings.set_projector`, kept for apps from before,
+//! answers and changes nothing: rows stay offered, and no config is written.
 
 use std::path::Path;
 
@@ -18,8 +17,8 @@ async fn socket(dir: &Path) -> Socket {
     Client::connect(dir.join("farcoolerd.sock"), "test", "0.0.0").await.expect("socket handshake")
 }
 
-fn offers_rows(client: &Socket) -> bool {
-    client.server_hello().capabilities.iter().any(|c| c == "agent_rows")
+fn offers(client: &Socket, capability: &str) -> bool {
+    client.server_hello().capabilities.iter().any(|c| c == capability)
 }
 
 async fn set(client: &Socket, on: bool) {
@@ -29,28 +28,23 @@ async fn set(client: &Socket, on: bool) {
     assert!(matches!(answer.value, Some(result::Value::Empty(_))), "{answer:?}");
 }
 
+/// Goes red with the setting's gate back (`set_shadowing(load_projector())`
+/// at start, or `set_projector` withholding `agent_rows`).
 #[tokio::test]
-async fn the_setting_turns_rows_on_and_off_without_a_restart() {
+async fn rows_are_offered_with_no_setting_and_the_old_switch_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");
     let path = config.to_string_lossy().into_owned();
-    let mut daemon = listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &path)]).await;
+    let _daemon = listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &path)]).await;
     let first = socket(dir.path()).await;
-    assert!(!offers_rows(&first), "off by default");
-    assert!(first.server_hello().capabilities.iter().any(|c| c == "projector_setting"));
+    assert!(offers(&first, "agent_rows"), "offered with nothing set");
+    assert!(offers(&first, "subagent_rows"));
+    assert!(offers(&first, "projector_setting"), "kept for apps from before");
 
-    set(&first, true).await;
-    assert!(std::fs::read_to_string(&config).unwrap().contains("projector = true"));
-    assert!(offers_rows(&socket(dir.path()).await), "the next hello offers rows");
-
+    // An app from before turns its view off, then on: neither changes what
+    // this runner serves, and neither writes its config.
     set(&first, false).await;
-    assert!(!std::fs::read_to_string(&config).unwrap_or_default().contains("projector"));
-    assert!(!offers_rows(&socket(dir.path()).await), "and stops");
-
-    // Read back at start.
+    assert!(offers(&socket(dir.path()).await, "agent_rows"), "still offered after an old app's off");
     set(&first, true).await;
-    drop(first);
-    daemon.child.kill().await.unwrap();
-    let _again = listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &path)]).await;
-    assert!(offers_rows(&socket(dir.path()).await), "a daemon started on `projector = true` offers rows");
+    assert!(!std::fs::read_to_string(&config).unwrap_or_default().contains("projector"), "nothing written");
 }

@@ -4,8 +4,7 @@
 //! The page is one line, `{"page": {...}}`; each follow that changed
 //! something is one line, `{"changes": {...}}`, in the shapes the FFI gives
 //! the apps (`ffi/rows_args.rs`). A reset (the runner restarted, or the pane
-//! moved to another conversation) prints a fresh page. Served only by a
-//! runner with `FARCOOLER_PROJECTOR=1` until a client reads it (ov-372).
+//! moved to another conversation) prints a fresh page.
 
 use std::io::Write;
 

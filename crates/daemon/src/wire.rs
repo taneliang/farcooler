@@ -104,9 +104,10 @@ pub fn host(
         // bytes of TOML is not a cost worth a staleness bug.
         settings: Some(wire::HostSettings {
             branch_prefix: farcooler_core::config::load_branch_prefix(),
-            // The config's word, which is what a settings switch shows; the
-            // environment's override isn't a setting anyone can change.
-            projector: farcooler_core::config::load_projector(),
+            // Always on (ov-830): there is no setting, and the view is served
+            // to every app. An app from before then reads this as its
+            // switch, on, and offers the view.
+            projector: true,
         }),
         // The same identity `id` already carries, as text. Derived from it
         // rather than computed a second time from the install id, so the two

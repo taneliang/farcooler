@@ -19,7 +19,7 @@
 
 mod agent_follow;
 mod agent_rows;
-mod projector_setting;
+mod conversation_check;
 mod app_update;
 mod daemon_link;
 mod hook;
@@ -674,8 +674,6 @@ enum SettingsCmd {
     Show,
     /// Set what a derived branch name starts with. Empty opts out entirely.
     SetBranchPrefix { prefix: String },
-    /// Turn the agent row projector, which the native view reads, on or off.
-    SetProjector { state: projector_setting::OnOff },
 }
 
 #[derive(Subcommand)]
@@ -985,8 +983,16 @@ enum TerminalCmd {
         #[arg(long)]
         follow: bool,
     },
+    /// Why a pane is or isn't offered the conversation view (ov-830).
+    ///
+    /// Prints every check the apps make, PASS or FAIL with what this runner
+    /// says for each, under the names an app's dimmed switch uses, and the
+    /// reason the apps show. Reads the pane's record, the runner's
+    /// capabilities and one page of its rows, which a view would ask for
+    /// first.
+    ConversationCheck { terminal: String },
     /// The pane's agent rows (ov-366) as JSON lines: a page, then with
-    /// `--follow` each change. Needs a runner run with FARCOOLER_PROJECTOR=1.
+    /// `--follow` each change.
     Rows {
         terminal: String,
         /// Rows before this `ord`; the newest without it.
@@ -1529,13 +1535,12 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
         SettingsCmd::Show => {
             let facts = host_get(&mut link).await?;
             let prefix = facts.settings.as_ref().map(|s| s.branch_prefix.clone()).unwrap_or_default();
-            let projector = facts.settings.as_ref().is_some_and(|s| s.projector);
             if json {
-                println!("{}", serde_json::json!({ "branchPrefix": prefix, "projector": projector }));
+                println!("{}", serde_json::json!({ "branchPrefix": prefix }));
             } else {
                 // Quoted, because the empty string is a real and deliberate
                 // value here and an unquoted blank line would read as a bug.
-                println!("branch prefix  \"{prefix}\"\nprojector      {}", if projector { "on" } else { "off" });
+                println!("branch prefix  \"{prefix}\"");
             }
         }
         SettingsCmd::SetBranchPrefix { prefix } => {
@@ -1559,7 +1564,6 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 println!("branch prefix is now \"{stored}\"");
             }
         }
-        SettingsCmd::SetProjector { state } => projector_setting::set(&mut link, state, json).await?,
     }
     Ok(())
 }
@@ -2628,6 +2632,13 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         // rather than the envelope's `target_resource_id` — see the matching
         // comment in `crates/daemon/src/rpc.rs` — so `req(method)` plus
         // `with(...)` is right, not `req_for`.
+        TerminalCmd::ConversationCheck { terminal } => {
+            let mut link = connect_to(runner).await?;
+            let terminals = list_terminals(&mut link, None).await?;
+            let t = resolve(&terminals, &terminal, |t| &t.id, "terminal")?.clone();
+            return conversation_check::run(link, &t, runner.is_some(), json).await;
+        }
+
         TerminalCmd::Rows { terminal, before, limit, follow } => {
             let (link, id) = terminal_by_record(runner, &terminal).await?;
             return agent_rows::run(link, id, before, limit, follow).await;

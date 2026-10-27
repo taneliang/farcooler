@@ -88,10 +88,6 @@ async fn run() -> Result<(), i32> {
         return Ok(());
     }
 
-    // Agent rows are offered only where they are served (ov-366): the
-    // environment, or the runner's config.toml (ov-372).
-    farcooler_daemon::session_projectors::set_shadowing(farcooler_core::config::load_projector());
-
     if std::env::args().any(|a| a == "--stdio") {
         return serve_stdio_session().await;
     }

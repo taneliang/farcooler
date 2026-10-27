@@ -9,8 +9,8 @@
 //! whichever project directory holds that session's file (an orchestrator
 //! runs from its own directory). The rebuild runs on a blocking thread.
 //!
-//! Behind `FARCOOLER_PROJECTOR=1` (see `session_projectors`): without it
-//! both are refused as unsupported.
+//! Always served (ov-830): each ask marks the pane viewed, which keeps its
+//! projector open while somebody reads it (`session_projectors::wanted`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -39,12 +39,10 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
     if req.method == "settings.set_projector" {
         return set_projector(req);
     }
-    if !session_projectors::shadowing() {
-        return Err(DomainError::CapabilityUnsupported { needed: farcooler_protocol::capability::AGENT_ROWS });
-    }
     match (req.method.as_str(), req.payload) {
         ("agent.rows", Some(request::Payload::AgentRowsPage(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+            session_projectors::viewed(terminal);
             let open = ensure_open(svc, terminal).await?;
             let limit = match p.limit as usize {
                 0 => DEFAULT_PAGE,
@@ -72,6 +70,7 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+            session_projectors::viewed(terminal);
             let follow = match p.agent_id.is_empty() {
                 true => follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?,
                 false => subagent_follow(terminal, &p, arrived, ensure_open(svc, terminal)).await?,
@@ -88,11 +87,9 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
 /// as not found for a row that isn't a turn, an index it has no image at,
 /// or a record that can't be read back.
 pub(crate) async fn image(svc: &Service, req: Request) -> Result<result::Value> {
-    if !session_projectors::shadowing() {
-        return Err(DomainError::CapabilityUnsupported { needed: farcooler_protocol::capability::AGENT_ROWS });
-    }
     let Some(request::Payload::AgentImage(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
     let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+    session_projectors::viewed(terminal);
     ensure_open(svc, terminal).await?;
     let key = (terminal, p.row_id.clone(), p.index);
     let held = RECENT.lock().unwrap_or_else(|e| e.into_inner()).get(&key);
@@ -159,19 +156,14 @@ impl RecentImages {
 
 static RECENT: std::sync::Mutex<RecentImages> = std::sync::Mutex::new(RecentImages(Vec::new()));
 
-/// `settings.set_projector` (ov-372): `[agents] projector` written to
-/// config.toml, then the projector turned on or off in this daemon at once.
-/// Refused, with nothing changed, when the file can't be written.
+/// `settings.set_projector` (ov-372), kept for apps from before ov-830:
+/// there is no setting any more, so it changes nothing and answers as a
+/// write did. An older app turns its view on through it, and a refusal
+/// would leave that app's view off on a runner that serves it.
 fn set_projector(req: Request) -> Result<result::Value> {
-    let Some(request::Payload::HostSettings(p)) = req.payload else {
+    let Some(request::Payload::HostSettings(_)) = req.payload else {
         return Err(DomainError::InvalidArgument { what: "payload" });
     };
-    let path = farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
-    farcooler_core::config::write_projector(&path, p.projector).map_err(|e| {
-        tracing::warn!(error = %e, "couldn't write the projector setting");
-        DomainError::OperationFailed
-    })?;
-    session_projectors::set_shadowing(p.projector);
     Ok(result::Value::Empty(pb::Empty {}))
 }
 

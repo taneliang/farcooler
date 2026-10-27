@@ -622,9 +622,9 @@ pub mod capability {
     /// Agent rows (ov-366): `agent.rows` and `agent.rows_follow`, a page of a
     /// terminal's projected agent rows and a follow of them by revision.
     ///
-    /// **Experimental, behind the runner's `FARCOOLER_PROJECTOR=1`** until a
-    /// client reads it (ov-372): without it both methods are refused as
-    /// unsupported. Its own capability because no earlier runner has either.
+    /// Offered by every runner from ov-830, which removed the setting that
+    /// gated it; a runner from before offers it only while its projector
+    /// setting is on. Its own capability because no earlier runner has either.
     pub const AGENT_ROWS: &str = "agent_rows";
     /// A draft held behind a dialog (ov-385): `hold_behind_dialog` on
     /// `terminal.draft_prompt`, the `DraftHold` it answers with,
@@ -634,8 +634,9 @@ pub mod capability {
     /// a draft a dialog is in the way of: a client that reads it absent copies
     /// the draft to the clipboard instead, as it always did.
     pub const DRAFT_HOLD: &str = "draft_hold";
-    /// `settings.set_projector` (ov-372): turn the runner's projector, and so
-    /// `agent_rows`, on or off from a client's settings, without a restart.
+    /// `settings.set_projector` (ov-372): turned the runner's projector, and
+    /// so `agent_rows`, on or off. From ov-830 there is no setting: the method
+    /// is kept, and changes nothing, for apps from before that still send it.
     pub const PROJECTOR_SETTING: &str = "projector_setting";
     /// `terminal.compose` (ov-372): the native view's send. Its own word, so
     /// a runner that serves rows from before compose isn't offered a view
@@ -854,10 +855,8 @@ pub mod capability {
     /// daemon has read its sshd's version.
     pub const WITHHELD_UNTIL_OFFERED: &[&str] = &[PASSKEY_KEYS];
 
-    /// Capabilities this process has but does not offer: a feature behind a
-    /// runner's flag (`agent_rows` with the projector off), and until
-    /// offered, `WITHHELD_UNTIL_OFFERED`. Set at start, and again when
-    /// `settings.set_projector` turns it on or off.
+    /// Capabilities this process has but does not offer: until offered,
+    /// `WITHHELD_UNTIL_OFFERED`.
     static WITHHELD: std::sync::LazyLock<std::sync::RwLock<Vec<&'static str>>> =
         std::sync::LazyLock::new(|| std::sync::RwLock::new(WITHHELD_UNTIL_OFFERED.to_vec()));
 
@@ -869,7 +868,7 @@ pub mod capability {
         }
     }
 
-    /// Offer `capability` again (`settings.set_projector` turning it on).
+    /// Offer `capability` again (`passkey_keys` once sshd's version is read).
     pub fn offer(capability: &str) {
         WITHHELD.write().unwrap_or_else(|e| e.into_inner()).retain(|c| *c != capability);
     }

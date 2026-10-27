@@ -28,13 +28,16 @@
 //! would be a row with an `ord` ahead of turns older than it. A second open
 //! meanwhile waits for that read rather than starting its own.
 //!
-//! **Behind a setting, off by default** (ov-372): `[agents] projector` in
-//! config.toml, which a client's settings turn on (`settings.set_projector`),
-//! or `FARCOOLER_PROJECTOR=1`. It gates all of it: off, no projector opens for a pane,
-//! `agent.rows` and `agent.rows_follow` are refused as unsupported, and
-//! `agent_rows` is left out of the hello, so the daemon does what it did
-//! before. watch.rs's own turn, question and subagent state still come from
-//! `claude::parse_line` either way.
+//! **Opened for a viewer, not for every pane** (ov-830). There is no
+//! setting: `agent_rows` is always offered, and a pane's projector opens
+//! when a device asks for its rows (`agent.rows`, `agent.rows_follow`,
+//! `agent.image`, each marking it `viewed`), and is let go on the pane's
+//! next tick once nobody has asked for `LINGER`. A pane nobody views has no
+//! projector, no watch and no rebuild, so the idle cost is the one check of
+//! the time it was last asked for. `FARCOOLER_PROJECTOR=1` (or `set_eager`,
+//! in a test) opens one for every claude pane, as the projector did before
+//! a viewer had to ask. watch.rs's own turn, question and subagent state
+//! still come from `claude::parse_line` either way.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -256,36 +259,65 @@ impl Inner {
     }
 }
 
-/// Whether claude panes get a projector, and `agent.rows` is served: the
-/// `FARCOOLER_PROJECTOR=1` environment, or `[agents] projector` in
-/// config.toml as the daemon read it at start or a client last set it
-/// (`set_shadowing`, ov-372).
-pub fn shadowing() -> bool {
-    by_environment() || SETTING.load(Ordering::Relaxed)
+/// Whether every claude pane gets a projector, viewed or not: the
+/// `FARCOOLER_PROJECTOR=1` environment, or a test's `set_eager`.
+pub fn eager() -> bool {
+    by_environment() || EAGER.load(Ordering::Relaxed)
 }
 
-/// The config's half of `shadowing`, which `settings.set_projector` changes
-/// while the daemon runs.
-static SETTING: AtomicBool = AtomicBool::new(false);
+/// A test's half of `eager`.
+static EAGER: AtomicBool = AtomicBool::new(false);
 
 fn by_environment() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("FARCOOLER_PROJECTOR").is_some_and(|v| v == "1"))
 }
 
-/// Turn the projector on or off, and offer `agent_rows` in every hello from
-/// now on only while it's on. A connection open before keeps the hello it
-/// had, so a client reconnects to see the change. Turned off, a projector
-/// already open keeps following its pane until the daemon restarts; no new
-/// one opens, and `agent.rows` is refused.
-pub fn set_shadowing(on: bool) {
-    SETTING.store(on, Ordering::Relaxed);
-    use farcooler_protocol::capability::{AGENT_ROWS, SUBAGENT_ROWS};
-    for rows in [AGENT_ROWS, SUBAGENT_ROWS] {
-        match shadowing() {
-            true => farcooler_protocol::capability::offer(rows),
-            false => farcooler_protocol::capability::withhold(rows),
+/// Open a projector for every claude pane from now on, viewed or not, as
+/// `FARCOOLER_PROJECTOR=1` does. For tests of the tick's own feeding.
+pub fn set_eager(on: bool) {
+    EAGER.store(on, Ordering::Relaxed);
+}
+
+/// How long a pane keeps its projector after a device last asked for its
+/// rows. Longer than a follow is held (`rpc_rows::MAX_WAIT`, 25 s), so a
+/// view that is following never sees its projector let go between two
+/// follows, and long enough that switching away and back costs no rebuild.
+pub const LINGER: Duration = Duration::from_secs(90);
+
+/// When each terminal's rows were last asked for.
+static VIEWED: std::sync::LazyLock<Mutex<HashMap<Uuid, Instant>>> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A device asked for `terminal`'s rows just now: its projector opens on
+/// the pane's next tick if it has none, and stays until `LINGER` after the
+/// last such ask.
+pub fn viewed(terminal: Uuid) {
+    VIEWED.lock().unwrap_or_else(|e| e.into_inner()).insert(terminal, Instant::now());
+}
+
+/// Whether `terminal` should have a projector: every pane while `eager`,
+/// else one a device asked for within `LINGER`. A pane past it is
+/// forgotten here, so the map holds only the panes being viewed.
+pub fn wanted(terminal: Uuid) -> bool {
+    if eager() {
+        return true;
+    }
+    let mut viewed = VIEWED.lock().unwrap_or_else(|e| e.into_inner());
+    match viewed.get(&terminal) {
+        Some(at) if at.elapsed() < LINGER => true,
+        Some(_) => {
+            viewed.remove(&terminal);
+            false
         }
+        None => false,
+    }
+}
+
+/// Move `terminal`'s last ask back by `by`, as if that long had passed.
+#[cfg(test)]
+pub(crate) fn age_view(terminal: Uuid, by: Duration) {
+    if let Some(at) = VIEWED.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal) {
+        *at = at.checked_sub(by).unwrap_or(*at);
     }
 }
 

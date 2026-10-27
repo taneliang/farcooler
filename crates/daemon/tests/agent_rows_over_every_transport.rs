@@ -12,8 +12,10 @@
 //! the same rows by id, rebuilt from the file, in a new epoch that tells a
 //! follower from before to page again.
 //!
-//! The daemon runs with `FARCOOLER_PROJECTOR=1`, and with `CLAUDE_CONFIG_DIR`
-//! in the test's own directory: nothing here reads `~/.claude`.
+//! The daemon runs as a runner does, with no projector flag (ov-830): each
+//! pane's projector opens because the test asks for its rows. Its
+//! `CLAUDE_CONFIG_DIR` is in the test's own directory: nothing here reads
+//! `~/.claude`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -29,7 +31,7 @@ use common::{listening_daemon_with_env, spawn, DaemonChild};
 type Socket = Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
 
 fn env(dir: &Path) -> Vec<(&'static str, String)> {
-    vec![("FARCOOLER_PROJECTOR", "1".into()), ("CLAUDE_CONFIG_DIR", dir.join("claude").to_string_lossy().into_owned())]
+    vec![("CLAUDE_CONFIG_DIR", dir.join("claude").to_string_lossy().into_owned())]
 }
 
 async fn daemon(dir: &Path) -> DaemonChild {
@@ -322,24 +324,25 @@ async fn a_subagents_own_rows_page_and_follow_by_its_id() {
     }
 }
 
-/// Without `FARCOOLER_PROJECTOR=1` the capability is not offered, over the
-/// socket or the relayed stdio, and the methods are refused.
+/// With no flag and nothing in config.toml the capability is offered, over
+/// the socket and the relayed stdio, and the methods are served (ov-830):
+/// a terminal the runner doesn't have is not found, not unsupported.
 #[tokio::test]
-async fn without_the_flag_rows_are_refused_as_unsupported() {
+async fn with_no_flag_rows_are_offered_and_served() {
     let dir = tempfile::tempdir().unwrap();
-    // Its own config.toml, which says nothing: this Mac's may turn the
-    // projector on (`[agents] projector`, ov-372).
+    // Its own config.toml, which says nothing: this Mac's may still hold
+    // the old `[agents] projector` (ov-372), which nothing reads now.
     let config = dir.path().join("config.toml").to_string_lossy().into_owned();
     let _daemon = common::listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &config)]).await;
     let client = socket(dir.path()).await;
-    assert!(!client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered and then refused");
-    assert!(!client.server_hello().capabilities.iter().any(|c| c == "subagent_rows"), "nor a subagent's");
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered");
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "subagent_rows"), "and a subagent's");
     let (_relay, relayed) = spawn(dir.path()).await;
-    assert!(!relayed.server_hello().capabilities.iter().any(|c| c == "agent_rows"));
+    assert!(relayed.server_hello().capabilities.iter().any(|c| c == "agent_rows"));
     let mut req = call_named("agent.rows");
     req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0, hint_rows: false, agent_id: String::new() }));
     match client.call_with(req, Default::default()).await {
-        Err(farcooler_transport::ClientError::Daemon { code, .. }) => assert_eq!(code, pb::ErrorCode::CapabilityUnsupported as i32),
+        Err(farcooler_transport::ClientError::Daemon { code, .. }) => assert_eq!(code, pb::ErrorCode::NotFound as i32),
         other => panic!("{other:?}"),
     }
 }
@@ -405,44 +408,6 @@ async fn measure_follow_latency_and_attach_cost() {
         attach.rows.len(),
         bytes
     );
-}
-
-/// The setting turned off lets go of a projector already open (ov-372
-/// review): on again, the pane's rows are rebuilt in a new epoch, so the
-/// one before was dropped rather than followed in the background.
-#[tokio::test]
-async fn turning_the_setting_off_lets_open_projectors_go() {
-    let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join("config.toml").to_string_lossy().into_owned();
-    let claude = dir.path().join("claude").to_string_lossy().into_owned();
-    let _daemon = common::listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &config), ("CLAUDE_CONFIG_DIR", &claude)]).await;
-    let mut client = socket(dir.path()).await;
-    let set = |on: bool| request::Payload::HostSettings(pb::HostSettings { branch_prefix: String::new(), projector: on });
-    call(&client, "settings.set_projector", set(true)).await;
-    let worktree = a_worktree(&mut client, dir.path()).await;
-    let terminal = a_claude_pane(&mut client, &worktree).await;
-    append(&transcript(dir.path(), &worktree, &terminal), prompt("p1", "Tidy the parser."));
-    let before = page(&client, &terminal, None, 10).await;
-    assert!(!before.rows.is_empty() && before.epoch != 0, "{before:?}");
-
-    // Off long enough for a tick of the watcher to land while it is, which a
-    // loaded machine can stretch past any fixed wait: off for longer each
-    // time until the projector was let go (ov-547, where it was 4 s). One kept
-    // while off stays in the same epoch through every round, a minute of them.
-    let started = Instant::now();
-    let mut off_for = Duration::from_secs(1);
-    let after = loop {
-        call(&client, "settings.set_projector", set(false)).await;
-        tokio::time::sleep(off_for).await;
-        call(&client, "settings.set_projector", set(true)).await;
-        let after = page(&socket(dir.path()).await, &terminal, None, 10).await;
-        if after.epoch != before.epoch || started.elapsed() > Duration::from_secs(60) {
-            break after;
-        }
-        off_for *= 2;
-    };
-    assert_ne!(after.epoch, before.epoch, "the projector was kept while off");
-    assert_eq!(ids(&after), ids(&before), "and rebuilt the same from the file");
 }
 
 /// Over the wire, `terminal.tell` still reaches only an orchestrator, and

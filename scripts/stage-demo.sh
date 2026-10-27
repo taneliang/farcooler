@@ -192,7 +192,6 @@ g add -A && g commit -q -m "Blog styles"
 cd "$root"
 
 fc --json daemon ensure >/dev/null 2>&1 || fc --json daemon ensure >/dev/null
-fc settings set-projector on >/dev/null
 fc root add "$H/src" >/dev/null
 fc repo register "$repo" >/dev/null
 ws=$(fc --json workspace list | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspaces"][0]["id"])')

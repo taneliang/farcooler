@@ -1,6 +1,6 @@
 //! A terminal's agent rows the way an app reads them (ov-366): `dispatch`
-//! with the JSON an app passes, a `Session`, and a real `farcoolerd` run with
-//! `FARCOOLER_PROJECTOR=1`, killed and started again. The daemon's own tests
+//! with the JSON an app passes, a `Session`, and a real `farcoolerd` run as a
+//! runner is, with no projector flag (ov-830), killed and started again. The daemon's own tests
 //! cover the socket and the relayed stdio (`tests/agent_rows_over_every_
 //! transport.rs`); this is the FFI's JSON on top, which iOS, Android and the
 //! Mac decode.
@@ -49,18 +49,10 @@ impl Drop for Reaper {
     }
 }
 
+/// A daemon whose projectors open as a viewer asks, as a runner's do. Its
+/// config.toml is the test's own, never this Mac's.
 async fn daemon(dir: &Path) -> Daemon {
-    daemon_with(dir, true).await
-}
-
-/// A daemon with the projector forced on by the environment, or left to its
-/// setting. Its config.toml is the test's own, never this Mac's.
-async fn daemon_with(dir: &Path, forced: bool) -> Daemon {
-    let mut command = std::process::Command::new(daemon_binary());
-    if forced {
-        command.env("FARCOOLER_PROJECTOR", "1");
-    }
-    let process = command
+    let process = std::process::Command::new(daemon_binary())
         .env("FARCOOLER_HOME", dir)
         .env("FARCOOLER_CONFIG", dir.join("config.toml"))
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
@@ -187,38 +179,18 @@ async fn an_app_pages_follows_and_pages_again_after_a_restart() {
     assert!(matches!(dispatch(&session, "agent.rows", &json!({})).await, Err(crate::session::SessionError::Protocol(_))), "no terminal, no call");
 }
 
-/// A phone's settings row (ov-373): `settings.set_projector` through the
-/// FFI turns the runner's projector on, `host` says so, and the next hello
-/// offers `agent_rows`; off takes both back. Written to the test's own
-/// config.toml.
+/// No setting (ov-830): with nothing in its config.toml a runner's hello
+/// offers `agent_rows`, and `host` says its projector is on, which an app
+/// from before reads as its switch. Goes red with the setting's gate back.
 #[tokio::test]
-async fn an_app_turns_the_projector_on_and_off_and_reconnects_to_read_rows() {
+async fn a_runner_offers_rows_with_no_setting() {
     std::fs::create_dir_all("/tmp/fc-phone").unwrap();
     let dir = tempfile::Builder::new().prefix("p").tempdir_in("/tmp/fc-phone").unwrap();
     let _reaper = Reaper(dir.path().to_path_buf());
-    let _daemon = daemon_with(dir.path(), false).await;
+    let _daemon = daemon(dir.path()).await;
     let socket = dir.path().join("farcoolerd.sock");
-    let offers_rows = |host: &Value| host["capabilities"].as_array().unwrap().iter().any(|c| c == "agent_rows");
-
     let session = Session::connect_local(&socket).await.expect("connect");
     let host = dispatch(&session, "host", &json!({})).await.expect("host");
-    assert_eq!(host["projector"], false, "{host}");
-    assert!(!offers_rows(&host), "{host}");
-    assert!(matches!(dispatch(&session, "settings.set_projector", &json!({})).await, Err(crate::session::SessionError::Protocol(_))), "no on, no call");
-    let set = dispatch(&session, "settings.set_projector", &json!({ "on": true })).await.expect("set on");
-    assert_eq!(set, json!({ "projector": true }));
-    assert!(std::fs::read_to_string(dir.path().join("config.toml")).unwrap().contains("projector = true"));
-    drop(session);
-
-    let session = Session::connect_local(&socket).await.expect("reconnect");
-    let host = dispatch(&session, "host", &json!({})).await.unwrap();
     assert_eq!(host["projector"], true, "{host}");
-    assert!(offers_rows(&host), "the next hello offers rows: {host}");
-    dispatch(&session, "settings.set_projector", &json!({ "on": false })).await.expect("set off");
-    drop(session);
-
-    let session = Session::connect_local(&socket).await.expect("reconnect");
-    let host = dispatch(&session, "host", &json!({})).await.unwrap();
-    assert_eq!(host["projector"], false, "{host}");
-    assert!(!offers_rows(&host), "{host}");
+    assert!(host["capabilities"].as_array().unwrap().iter().any(|c| c == "agent_rows"), "{host}");
 }

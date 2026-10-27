@@ -1,6 +1,6 @@
 //! A terminal's agent rows on a session (ov-366): a page, and a follow by
-//! revision, served while the runner's projector is on: its setting
-//! (`set_projector`, ov-372) or `FARCOOLER_PROJECTOR=1`.
+//! revision, served by every runner from ov-830 (one from before only
+//! while its projector setting is on).
 
 use super::*;
 
@@ -95,19 +95,5 @@ impl Session {
         }
         require(self.capabilities(), SUBAGENT_ROWS, method)?;
         Ok(vec![SUBAGENT_ROWS.to_string()])
-    }
-
-    /// Turn the runner's projector on or off (`settings.set_projector`,
-    /// ov-372): `[agents] projector` in its config.toml, live at once. A
-    /// hello offers `agent_rows` only while it's on, and a hello is made once
-    /// per connection, so a client reconnects to read rows after turning it
-    /// on (ov-373, a phone's settings row). Needs `host_admin`.
-    pub async fn set_projector(&self, on: bool) -> Result<(), SessionError> {
-        require(self.capabilities(), farcooler_protocol::capability::PROJECTOR_SETTING, "settings.set_projector")?;
-        let payload = request::Payload::HostSettings(farcooler_protocol::v1::HostSettings { branch_prefix: String::new(), projector: on });
-        match self.value("settings.set_projector", None, Some(payload)).await? {
-            result::Value::Empty(_) => Ok(()),
-            other => Err(wrong("empty", &other)),
-        }
     }
 }

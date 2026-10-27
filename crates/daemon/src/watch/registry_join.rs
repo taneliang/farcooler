@@ -25,7 +25,7 @@ pub(super) fn registered_log(registry: &Registry, pane: &PaneJoin) -> Option<Pat
 /// Read from the screen the watcher already holds; a pane with no projector
 /// open ignores it.
 pub(super) fn feed_suggestion(terminal: Uuid, agent: Option<&str>, screen: &str, resting: bool) {
-    if !crate::session_projectors::shadowing() {
+    if !crate::session_projectors::wanted(terminal) {
         return;
     }
     let (suggestion, hint) = offered(agent, screen, resting);
@@ -63,7 +63,7 @@ pub(super) fn offered(agent: Option<&str>, screen: &str, resting: bool) -> (Opti
 
 /// The pane's tick for its session projector (`session_projectors`): what its
 /// files gained, and the registry's busy or idle. Opens one for a claude pane
-/// the registry names only while the daemon shadows (`FARCOOLER_PROJECTOR=1`).
+/// the registry names only while a device views it (`session_projectors::wanted`).
 ///
 /// An open projector follows the registry too: when the registry names a
 /// different file than the one it reads (a `/clear` whose `SessionStart` was
@@ -75,11 +75,11 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     }
     let projectors = crate::session_projectors::global();
     let open = projectors.transcript(terminal);
-    // Off means off (ov-372 review): a projector opened before the setting
-    // went off is let go on its pane's next tick, not followed until a
-    // restart. Turned on again, the pane's next `agent.rows` rebuilds it in
-    // a new epoch, and a follower pages again.
-    if !crate::session_projectors::shadowing() {
+    // Nobody views it (ov-830): a projector opened for a view that has
+    // since gone is let go on its pane's next tick, so an unviewed pane
+    // costs no watch and no reads. Viewed again, the pane's next
+    // `agent.rows` rebuilds it in a new epoch, and a follower pages again.
+    if !crate::session_projectors::wanted(terminal) {
         if open.is_some() {
             projectors.forget(terminal);
         }
@@ -132,15 +132,15 @@ fn is_codex(pane: &PaneJoin) -> bool {
 /// when that changes (`/new` starts a thread and a rollout of its own).
 /// Joined so, a hook's rebind to the new thread and the next tick agree,
 /// rather than taking turns (review 1, M2). Read on every tick. Its activity
-/// is the rollout's own, so the tick passes none. Only while the daemon
-/// shadows, as `feed_projector`.
+/// is the rollout's own, so the tick passes none. Only while a device views
+/// it, as `feed_projector`.
 pub(super) fn feed_codex_projector(terminal: Uuid, pane: &PaneJoin, log: &PaneLog) {
     if !is_codex(pane) {
         return;
     }
     let projectors = crate::session_projectors::global();
     let open = projectors.transcript(terminal);
-    if !crate::session_projectors::shadowing() {
+    if !crate::session_projectors::wanted(terminal) {
         if open.is_some() {
             projectors.forget(terminal);
         }
@@ -235,13 +235,12 @@ mod tests {
     /// the 30 s being the re-read alone (ov-681).
     #[test]
     fn an_open_projector_follows_the_registry_to_a_new_session() {
-        // With the setting off an open projector is let go (ov-372), so on.
-        // Nothing else in this binary reads the flag off.
-        crate::session_projectors::set_shadowing(true);
+        // Unviewed, an open projector is let go (ov-830), so viewed.
         let config = tempfile::tempdir().unwrap();
         session(config.path(), "s-one");
         let registry = Registry::unwatched(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         let first = crate::session_projectors::canonical(&registered_log(&registry, &pane()).unwrap());
         crate::session_projectors::global().open(id, first.clone());
         session(config.path(), "s-two");
@@ -250,6 +249,29 @@ mod tests {
         let now = crate::session_projectors::global().transcript(id).unwrap();
         crate::session_projectors::global().forget(id);
         assert!(now.ends_with("s-two.jsonl"), "{now:?}");
+    }
+
+    /// The idle cost is nothing (ov-830): with no setting, a claude pane's
+    /// tick opens no projector until a device asks for its rows, keeps it
+    /// for `LINGER` after the last ask, and lets it go on the tick after.
+    /// Goes red with `wanted` true for every pane (the old setting on).
+    #[test]
+    fn a_projector_opens_for_a_viewer_and_goes_once_nobody_views() {
+        use crate::session_projectors::{LINGER, age_view, global, viewed};
+        let config = tempfile::tempdir().unwrap();
+        let (registry, _alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        assert!(!global().is_open(id), "a pane nobody views has no projector");
+        viewed(id);
+        feed_projector(&registry, id, &pane());
+        assert!(global().is_open(id), "viewed, its tick opens one");
+        age_view(id, LINGER - std::time::Duration::from_secs(5));
+        feed_projector(&registry, id, &pane());
+        assert!(global().is_open(id), "kept between one follow and the next");
+        age_view(id, std::time::Duration::from_secs(10));
+        feed_projector(&registry, id, &pane());
+        assert!(!global().is_open(id), "let go once nobody has asked for LINGER");
     }
 
     const LAUNCHES: &str = include_str!("../../../core/fixtures/session-logs/claude-subagents.jsonl");
@@ -293,10 +315,10 @@ mod tests {
     /// running (ov-612 review): what decides is claude's process.
     #[test]
     fn a_claude_whose_screen_misreads_keeps_its_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (registry, _alive) = launched(config.path());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         feed_projector(&registry, id, &pane());
         let before = running(id);
         // Not claude by its screen, and its editor in front.
@@ -313,10 +335,10 @@ mod tests {
     /// even with claude's last frame still on the screen.
     #[test]
     fn an_exited_claude_leaves_no_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (registry, alive) = launched(config.path());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         feed_projector(&registry, id, &pane());
         let before = running(id);
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -334,10 +356,10 @@ mod tests {
     /// stop running.
     #[test]
     fn a_claude_replaced_between_ticks_leaves_no_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (registry, alive) = launched(config.path());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         feed_projector(&registry, id, &pane());
         let before = running(id);
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -379,10 +401,10 @@ mod tests {
     /// background agent it launched is left running.
     #[test]
     fn a_projector_restarted_after_claude_crashed_shows_no_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (registry, alive) = launched(config.path());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         feed_projector(&registry, id, &pane());
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
         restarted(id, config.path());
@@ -399,7 +421,6 @@ mod tests {
     /// held no agent for several ticks running.
     #[test]
     fn a_projector_restarted_after_claude_exited_cleanly_shows_no_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -407,6 +428,7 @@ mod tests {
         // The restarted daemon's registry has never seen the file.
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         shell_tick(&registry, id, true);
         shell_tick(&registry, id, true);
@@ -428,12 +450,12 @@ mod tests {
     /// its agents: the pane's processes say claude is in the foreground.
     #[test]
     fn a_projector_restarted_with_an_unregistered_claude_running_keeps_its_agent() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         for _ in 0..5 {
             shell_tick(&registry, id, false);
@@ -447,10 +469,10 @@ mod tests {
     /// and on the ticks after it.
     #[test]
     fn a_projector_restarted_with_claude_alive_keeps_its_agent_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (registry, _alive) = launched(config.path());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         feed_projector(&registry, id, &pane());
         restarted(id, config.path());
         for _ in 0..5 {
@@ -467,12 +489,12 @@ mod tests {
     /// pane's mode keeps its live agents.
     #[test]
     fn a_chat_mode_shim_pane_keeps_its_live_agent() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         for _ in 0..5 {
             feed_foreground(id, true, PaneMode::Agent, "");
@@ -488,7 +510,6 @@ mod tests {
     /// before the new one started is gone.
     #[test]
     fn a_session_resumed_before_the_daemon_returned_stops_the_old_agents() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -499,6 +520,7 @@ mod tests {
         std::fs::write(&file, std::fs::read_to_string(&file).unwrap().replace("2026-10-05", "2026-10-03")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         let before = running(id);
         feed_projector(&registry, id, &PaneJoin { pid: Some(4343), ..pane() });
@@ -512,13 +534,13 @@ mod tests {
     /// claude left no registry file, and its agents stop all the same.
     #[test]
     fn an_exited_pane_s_agent_is_not_left_running() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         alive.store(false, std::sync::atomic::Ordering::SeqCst);
         std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         let before = running(id);
         feed_gone(&registry, id, false);
@@ -543,7 +565,6 @@ mod tests {
                 None
             }
         }
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let session = "c0ffee00-0000-4000-8000-000000000453";
         fake::write(config.path(), 4242, session, "/nonexistent/fc-registry-join");
@@ -556,6 +577,7 @@ mod tests {
         std::fs::write(project.join(format!("{session}.jsonl")), LAUNCHES.replace("2026-08-10", "2026-10-03")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Two));
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         restarted(id, config.path());
         let before = running(id);
         feed_projector(&registry, id, &PaneJoin { pid: Some(4343), ..pane() });
@@ -570,12 +592,12 @@ mod tests {
     /// pane nobody claims is gone.
     #[test]
     fn a_contested_lost_pane_keeps_its_unregistered_claudes_agent() {
-        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         let (_old, alive) = launched(config.path());
         std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
         let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
         let contested = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(contested);
         let unclaimed = uuid::Uuid::now_v7();
         restarted(contested, config.path());
         restarted(unclaimed, config.path());
@@ -610,7 +632,6 @@ mod tests {
     /// its rows and its activity the rollout's own, and moves with `/new`.
     #[test]
     fn a_codex_pane_s_projector_follows_its_rollout() {
-        crate::session_projectors::set_shadowing(true);
         let dir = tempfile::tempdir().unwrap();
         let first = dir.path().join("rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
         let second = dir.path().join("rollout-2026-10-07T12-28-45-01a117d6-f550-7013-a939-b02d182c0321.jsonl");
@@ -619,6 +640,7 @@ mod tests {
         // No pid: the watcher's own join is what it follows.
         let pane = PaneJoin { preset: Some("codex".into()), pid: None, cwd: "/nonexistent".into(), title: String::new() };
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         let projectors = crate::session_projectors::global();
 
         feed_codex_projector(id, &pane, &reading(first.to_str().unwrap(), LogFormat::Codex));
@@ -651,7 +673,6 @@ mod tests {
     /// on the rollout its process holds open.
     #[tokio::test]
     async fn the_watcher_opens_a_codex_pane_s_projector_on_the_rollout_it_holds() {
-        crate::session_projectors::set_shadowing(true);
         let (_dir, svc, _repo) = crate::test_support::fixture().await;
         let root = tempfile::tempdir().unwrap();
         let rollout = root.path().join(".codex/sessions/2026/10/07/rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
@@ -664,6 +685,7 @@ mod tests {
             .unwrap();
         let watcher = super::super::Watcher::new(svc.clone());
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         let pane = || PaneJoin { preset: Some("codex".into()), pid: Some(codex.id() as i32), cwd: "/nonexistent".into(), title: String::new() };
         let projectors = crate::session_projectors::global();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -687,7 +709,6 @@ mod tests {
     /// rebind to that file is not undone by the next tick.
     #[test]
     fn a_codex_projector_follows_the_process_not_the_watcher_s_lagging_join() {
-        crate::session_projectors::set_shadowing(true);
         let dir = tempfile::tempdir().unwrap();
         let sessions = dir.path().join(".codex/sessions/2026/10/07");
         std::fs::create_dir_all(&sessions).unwrap();
@@ -698,6 +719,7 @@ mod tests {
         let mut codex = std::process::Command::new("sh").arg("-c").arg(format!("exec 3<'{}'\nsleep 30\n", new.display())).spawn().unwrap();
         let pane = PaneJoin { preset: Some("codex".into()), pid: Some(codex.id() as i32), cwd: "/nonexistent".into(), title: String::new() };
         let id = uuid::Uuid::now_v7();
+        crate::session_projectors::viewed(id);
         let projectors = crate::session_projectors::global();
         // The hook's rebind put it on the new thread; the watcher still reads the old.
         projectors.open(id, new.clone());
