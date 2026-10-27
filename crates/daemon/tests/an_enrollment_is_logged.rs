@@ -61,6 +61,7 @@ fn enroll(key: &str, client_id: &str, scope: Scope, node_key: &str) -> Request {
         scope: scope as i32,
         shell_access: false,
         node_key: node_key.into(),
+        for_teammate: false,
     };
     Request { method: "client.enroll".into(), payload: Some(request::Payload::ClientEnroll(p)), ..Default::default() }
 }
@@ -92,17 +93,25 @@ async fn every_enrollment_is_logged_asked_and_answered() {
     call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::Control, NODE_BROWSER)).await.expect("again");
     let read = factory(&svc, Some("phone-r"), Scope::Read);
     call(&read, enroll(KEY_BROWSER, "browser-2", Scope::Read, "")).await.expect_err("refused at the gate");
+    // The caller's text, before anything judged it: never logged as it came.
+    call(&read, enroll(KEY_BROWSER, "evil\nINFO forged=1", Scope::Read, "")).await.expect_err("refused at the gate");
+    // Another method carrying the payload is no enrollment.
+    let mut other = enroll(KEY_BROWSER, "browser-3", Scope::Control, "");
+    other.method = "client.list".into();
+    call(&phone, other).await.expect("a list");
 
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
     let lines: Vec<&str> = logged.lines().collect();
     let asked: Vec<&&str> = lines.iter().filter(|l| l.contains("a device asked to enroll another")).collect();
-    assert_eq!(asked.len(), 4, "{logged}");
+    assert_eq!(asked.len(), 5, "{logged}");
+    assert!(!logged.contains("forged=1") && !logged.contains("browser-3"), "{logged}");
+    assert!(lines.iter().any(|l| l.contains("client=\"(invalid)\"")), "{logged}");
     assert!(asked.iter().all(|l| l.contains(" INFO ")), "{logged}");
     let answered = |by: &str, client: &str, outcome: &str| {
         lines.iter().any(|l| {
             l.contains(" INFO ")
-                && l.contains(&format!("by={by} "))
-                && l.contains(&format!("client={client} "))
+                && l.contains(&format!("by={by:?} "))
+                && l.contains(&format!("client={client:?} "))
                 && l.contains(&format!("outcome=\"{outcome}\""))
         })
     };
