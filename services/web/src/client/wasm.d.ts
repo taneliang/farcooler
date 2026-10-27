@@ -26,6 +26,9 @@ declare module 'fc-web' {
     /// `navigator.credentials.get` over the login's data; rejects with
     /// `declined` when the person or the browser said no.
     assert: (challenge: Uint8Array) => Promise<import('./device').Signed>,
+    /// Called once if this connection goes silent for nine seconds or closes
+    /// (crates/web/src/liveness.rs). Not called when the runner is freed.
+    onLost: () => void,
   ): Promise<WebRunner>
   export function build(): string
   export class WebRunner {
@@ -36,6 +39,10 @@ declare module 'fc-web' {
     needsYou(): Promise<string>
     plan(workspace: string): Promise<string>
     page(workspace: string, slot: string): Promise<string>
+    /// Whether the runner answers right now. False means the connection is
+    /// over, and `onLost` is called.
+    check(): Promise<boolean>
+    readonly lost: boolean
     free(): void
   }
   export class WebPane {

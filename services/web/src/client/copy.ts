@@ -76,3 +76,33 @@ export function joinTitle(labels: string[]): string {
 export function joinDetail(from: string): string {
   return `This code says ${from} added this device to their runners. Work there runs on the Claude account signed in on each runner, so its usage and limits are shared. Join only if you were adding this device with them just now.`
 }
+
+/// What the page says about a connection that dropped (ov-772), by the
+/// reconnector's view. `title` names the state in a word; `detail` says what
+/// to do. `action` is the button, when there is one.
+export function linkNotice(
+  view: import('./reconnect').LinkView,
+  runner: string,
+): { title: string; detail: string; action: string | null } | null {
+  switch (view.kind) {
+    case 'up':
+      return null
+    case 'reconnecting':
+      return {
+        title: `Reconnecting to ${runner}…`,
+        detail:
+          view.tunnel === 'failed'
+            ? `Far Cooler couldn’t reach ${runner} yet. Select Reconnect to try again, then touch your passkey.`
+            : 'The connection dropped. Select Reconnect, then touch your passkey. The terminal comes back as you left it.',
+        action: 'Reconnect',
+      }
+    case 'connecting':
+      return { title: `Reconnecting to ${runner}…`, detail: 'Touch your passkey if your browser asks.', action: null }
+    case 'failed':
+      return {
+        title: `Couldn’t reconnect to ${runner}`,
+        detail: connectFailure(view.word, runner),
+        action: 'Reconnect',
+      }
+  }
+}

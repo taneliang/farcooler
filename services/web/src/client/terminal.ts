@@ -25,6 +25,9 @@ export class PaneView {
   private typedEarly: Uint8Array[] | null = null
   private typedEarlyBytes = 0
   private generation = 0
+  /// A resumed pane keeps showing what it had until the runner's replay
+  /// arrives, and is cleared only then (`resume`).
+  private replacing = false
   private resizing = 0
   private readonly encoder = new TextEncoder()
   private readonly watching = new ResizeObserver(() => this.refit())
@@ -61,9 +64,14 @@ export class PaneView {
   /// The terminal takes focus at once, and what is typed before the runner has
   /// accepted the attach is held and sent first, in order. `data-attached` on
   /// the host says the pane is live.
-  async attach(runner: WebRunner, terminal: string, ended: () => void): Promise<void> {
+  async attach(runner: WebRunner, terminal: string, ended: () => void, resuming = false): Promise<void> {
     this.detach()
-    this.term.reset()
+    // A fresh pane starts empty. A resumed one (after a dropped connection)
+    // keeps its scrollback on screen until the runner's replay arrives, so the
+    // person is never looking at a blank terminal, and the replay, which
+    // carries the pane's history of its own, replaces it in one step.
+    this.replacing = resuming
+    if (!resuming) this.term.reset()
     const generation = ++this.generation
     const current = () => this.generation === generation
     this.typedEarly = []
@@ -74,7 +82,12 @@ export class PaneView {
       pane = await runner.attach(
         terminal,
         bytes => {
-          if (current()) this.term.write(bytes)
+          if (!current()) return
+          if (this.replacing) {
+            this.replacing = false
+            this.term.reset()
+          }
+          this.term.write(bytes)
         },
         () => {
           if (current()) ended()
@@ -96,6 +109,11 @@ export class PaneView {
     this.host.dataset.attached = 'true'
     this.refit(true)
     this.term.focus()
+  }
+
+  /// Show `terminal` again from a new connection, as it was.
+  resume(runner: WebRunner, terminal: string, ended: () => void): Promise<void> {
+    return this.attach(runner, terminal, ended, true)
   }
 
   detach(): void {

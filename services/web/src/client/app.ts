@@ -23,12 +23,13 @@
 
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, passkeyKeyLine, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, replyRefusal, unreachable } from './copy'
+import { connectFailure, joinDetail, joinTitle, linkNotice, replyRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
+import { type LinkView, Reconnector } from './reconnect'
 import { PaneView } from './terminal'
-import { loadTailcat, type Tailcat } from './tunnel'
+import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -319,12 +320,50 @@ function signIn(session: Session, label: string): (challenge: Uint8Array) => Pro
   }
 }
 
+/// The connection on the page, so a tab coming back or the browser coming
+/// online can ask whether it still answers (ov-772).
+let link: Reconnector<WebRunner, TunnelConn> | null = null
+
+/// What the page says about the connection: nothing while it is up, else a
+/// notice above the terminal, with Reconnect when a click is wanted.
+function showLink(view: LinkView, label: string): void {
+  // The first connection is still listing terminals; the screen is not up yet.
+  if (view.kind !== 'up' || shown) show('work')
+  const notice = linkNotice(view, label)
+  $('link-note').hidden = !notice
+  if (!notice) return
+  $('link-title').textContent = notice.title
+  $('link-detail').textContent = notice.detail
+  const action = $<HTMLButtonElement>('link-action')
+  action.hidden = !notice.action
+  if (notice.action) action.textContent = notice.action
+  action.onclick = () => void link?.reconnect()
+}
+
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
   let runner: WebRunner
+  /// The terminal on the page, so a new connection can show it again.
+  let showing: string | null = null
+  const reconnector = new Reconnector<WebRunner, TunnelConn>({
+    dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
+    discard: conn => conn.close(),
+    connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
+    resume: async next => {
+      if (showing && shown) await shown.resume(next, showing, () => ended(next))
+    },
+    show: view => showLink(view, target.label),
+    now: () => Date.now(),
+  })
+  /// A pane's stream ended: said so unless the whole connection did, which
+  /// the notice above the terminal already says.
+  const ended = (from: WebRunner) => {
+    if (!from.lost) paneNote('This terminal’s stream ended. Select it to open it again.')
+  }
+  link = reconnector
   try {
     const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
-    runner = await connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label))
+    runner = await reconnector.open(conn)
   } catch (e) {
     const word = (e as Error).message
     const action =
@@ -362,8 +401,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     for (const b of list.querySelectorAll('button')) b.removeAttribute('aria-current')
     button.setAttribute('aria-current', 'true')
     paneNote('')
+    const current = reconnector.current
+    if (!current) return
+    showing = id
     try {
-      await view.attach(runner, id, () => paneNote('This terminal’s stream ended. Select it to open it again.'))
+      await view.attach(current, id, () => ended(current))
     } catch (e) {
       paneNote(connectFailure((e as Error).message, target.label))
     }
@@ -388,7 +430,14 @@ function paneNote(text: string): void {
   note.hidden = text === ''
 }
 
+/// The tab is visible again or the browser is online: ask the runner now
+/// rather than wait out the probe interval.
+function recheckLink(): void {
+  void link?.recheck()
+}
+
 async function addAgain(session: Session): Promise<void> {
+  link = null
   shown?.dispose()
   shown = null
   delete session.device.runners
@@ -417,6 +466,10 @@ function signOutForgets(): void {
 async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
   window.addEventListener('focus', () => void checkVersion())
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recheckLink()
+  })
+  window.addEventListener('online', recheckLink)
   signOutForgets()
 
   // Which account is signed in decides which device this browser may use, so
