@@ -41,13 +41,15 @@
 //! turn (ov-808 re-review, 3c).
 //!
 //! **A bad read** is no verdict. A capture tmux didn't answer, a registry
-//! file caught mid-write, or a screen that reads as nothing of claude's is
-//! tried again on the next tick, and only a run of them lasting
+//! file caught mid-write is tried again on the next tick, and only a run of them lasting
 //! `Timing::torn_cap` (10 s, as a held message's, `held::TORN_FOR`) ends the
 //! wait: a write is over in milliseconds and tmux answers in a second, so ten
 //! seconds is many consecutive bad reads, and still a small part of ten
 //! minutes. A good read ends the run. A shell, or another process, in front
-//! of the pane is not a bad read: claude is gone (`not_running`) at once.
+//! of the pane is no bad read: the box is gone from the screen (a screen
+//! reads as claude's by the pane's command, so a shell's reads between turns
+//! with no box) and claude from the pane, said as `not_running`, not as a box
+//! changed (`pended`).
 //!
 //! **Given up.** A Stop pressed since the message was queued leaves it, as
 //! the person stopped the turn it waited on (Send Now is refused while the
@@ -418,13 +420,7 @@ impl Watcher {
                     idle_since = None;
                     continue;
                 }
-                Ok(Some(left)) if left.check == "registry_torn" || (left.check == "not_idle" && !left.turn) => {
-                    // A shell, or nothing of claude's, in the pane is claude
-                    // gone, not a screen unread.
-                    if left.check == "not_idle" && self.agent_gone(p).await {
-                        left.logged(&registry, &p.to, &p.proven);
-                        return Err("not_running");
-                    }
+                Ok(Some(left)) if left.check == "registry_torn" => {
                     let first = *unread_since.get_or_insert_with(Instant::now);
                     if first.elapsed() >= timing.torn_cap {
                         left.logged(&registry, &p.to, &p.proven);
