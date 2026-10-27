@@ -80,11 +80,12 @@ fn every_runner_setting_method_requires_host_admin() {
 }
 
 #[test]
-fn enrolling_a_device_requires_host_admin_and_looking_does_not() {
-    // Stronger than the settings writes above: these decide who may log in
-    // to this runner. A client that could enroll could widen its own
-    // access, which would make every scope beneath this one advisory.
-    assert_eq!(required_scope("client.enroll"), Some(Scope::HostAdmin));
+fn enrolling_a_device_requires_control_and_looking_does_not() {
+    // Revoking decides who may log in here at all. Enrolling is `control` at
+    // the gate so the owner's phone can add a browser (ov-828), and
+    // `enrollment::may_grant` keeps a control caller to grants no wider than
+    // its own (`enrollment/grant_tests.rs`).
+    assert_eq!(required_scope("client.enroll"), Some(Scope::Control));
     assert_eq!(required_scope("client.revoke"), Some(Scope::HostAdmin));
     // Reading is the shape of the fleet: no path, and a public key's
     // fingerprint is published by design.

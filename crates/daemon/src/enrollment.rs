@@ -31,7 +31,9 @@ use farcooler_fence::{self as fence, Entry, FenceError, Rejected};
 use crate::service::Service;
 use crate::wire;
 
+mod grant;
 mod rekey;
+pub use grant::{Attempt, may_grant};
 pub use rekey::rekey;
 
 /// Every line in this runner's fence, ours and otherwise.

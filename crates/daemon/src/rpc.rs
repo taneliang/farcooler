@@ -594,13 +594,14 @@ fn scope_of(method: Method) -> Scope {
         // published by design — and a phone that can see the fleet should be
         // able to see who else can.
         //
-        // Enrolling and revoking are `host_admin` for a stronger reason than
-        // the settings writes below. They do not merely write a file in the
-        // user's home directory; they decide who may log in to this runner at
-        // all. A client that could enroll could widen its own access, which
-        // would make every scope beneath this one advisory.
+        // Revoking is `host_admin`: it decides who may log in here at all.
+        // Enrolling is `control` at the gate so the owner's phone can add a
+        // browser (ov-828), and `enrollment::may_grant` holds a `control`
+        // caller to no shell line, no scope above its own, and the owner's
+        // devices alone, so no client widens its own access.
         Method::ClientList => Scope::Read,
-        Method::ClientEnroll | Method::ClientRevoke => Scope::HostAdmin,
+        Method::ClientEnroll => Scope::Control,
+        Method::ClientRevoke => Scope::HostAdmin,
         // Who is on the runner, as the device list is; saying so is who may log
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
         // own device, checked in `rpc_people` (ov-494).
@@ -668,6 +669,7 @@ impl Handler for Rpc {
 
     async fn handle(&self, req: Request) -> Response {
         let request_id = req.request_id.clone();
+        let enrolling = crate::enrollment::Attempt::of(&req, &self.peer); // logged asked and answered (ov-828)
         let outcome = match required_scope(&req.method) {
             // A method this daemon does not implement.
             //
@@ -703,6 +705,7 @@ impl Handler for Rpc {
             },
         };
 
+        if let Some(attempt) = enrolling { attempt.answered(&outcome) }
         match outcome {
             Ok(value) => Response {
                 request_id,
@@ -987,29 +990,14 @@ impl Rpc {
                 let Some(request::Payload::ClientEnroll(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                // Who granted access to whom, in this runner's log, and WHICH OF
-                // THE TWO KEYS.
-                //
-                // The audit entry the spec asks for is on the wire in
-                // `EnrolledClient`; this is the other half of it, and it is the
-                // half that says which device performed the ceremony rather
-                // than merely which one was enrolled. Both are device ids, both
-                // are already written in `authorized_keys` in plain text.
-                //
-                // The shape is here because a plain line is a shell on this
-                // account, and a `host_admin` client could always have got one
-                // by driving a terminal — see `fence::Grant`. What this call
-                // adds over that route is that the runner records it and
-                // manages the line, so the record has to say what was granted.
-                tracing::info!(
-                    by = self.who(),
-                    client = %p.client_id,
-                    shell = p.shell_access,
-                    "enrolling a device"
-                );
+                // Who granted access to whom is logged in `handle`, asked and
+                // answered, by `enrollment::Attempt` (ov-828). Who MAY grant is
+                // `may_grant`: the gate lets `control` this far.
                 // From a member's device, the device is nobody's until a runner
                 // admin binds it (ov-719): bound to nobody, it would be the owner's.
-                let by_member = match crate::people::person_of(&svc.store, &self.peer)? {
+                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                crate::enrollment::may_grant(self.peer.scope, &person, &p)?;
+                let by_member = match person {
                     crate::people::Person::Member(handle) => {
                         let svc = svc.clone();
                         Some(Box::new(move |id: &str| svc.store.record_member_enrolled(id, &handle)) as crate::enrollment::MemberEnrolled)
