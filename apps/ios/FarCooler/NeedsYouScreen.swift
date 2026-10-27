@@ -913,7 +913,7 @@ struct NeedsYouRow: View {
         case .decision, .prThread, .review: "Opens the task"
         // Somebody else's pull request opens nothing here: no hint says so.
         case .prReview: ""
-        case .claudeLogin: ""
+        case .claudeLogin, .fyi: ""
         case .unknown: "Opens its workspace"
         }
     }
@@ -927,6 +927,7 @@ struct NeedsYouRow: View {
         case .prThread: "text.bubble.fill"
         case .prReview: "arrow.triangle.pull"
         case .claudeLogin: "person.crop.circle.badge.exclamationmark"
+        case .fyi: "info.circle"
         case .unknown: "circle"
         }
     }
@@ -1021,6 +1022,9 @@ struct NeedsYouRow: View {
                         .controlSize(.small)
                         .accessibilityIdentifier("needs-you-sign-in-\(item.itemID)")
                 }
+            case .fyi:
+                // Read, not answered (ov-756): no button.
+                EmptyView()
             case .review:
                 Button("Review", action: onOpen)
                     .buttonStyle(.bordered)

@@ -68,7 +68,7 @@ enum NeedsYouNavigation {
         case .decision, .prThread: return .overview
         case .review: return item.worktree != nil ? .changes : .overview
         case .ask, .blocked: return .agent
-        case .unknown, .prReview, .claudeLogin: return nil
+        case .unknown, .prReview, .claudeLogin, .fyi: return nil
         }
     }
 

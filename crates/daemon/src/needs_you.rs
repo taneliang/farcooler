@@ -238,7 +238,9 @@ pub async fn gather(
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
     inputs.kept = kept::group(
-        svc.store.member_kept_rulings_since(since)?,
+        // A runner without the rulings table (the plan layer off) has none; a
+        // failed read must not take the whole list down for a quiet notice.
+        svc.store.member_kept_rulings_since(since).unwrap_or_default(),
         |workspace| svc.store.workspace_lead(workspace).ok().flatten(),
         |handle| svc.store.member_name(handle).ok().flatten(),
     );
