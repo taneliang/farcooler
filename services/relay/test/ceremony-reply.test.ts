@@ -259,11 +259,15 @@ describe('what the relay holds of a reply', () => {
     expect(held).toContain(fixture.sealed)
     expect(held).not.toContain(HOST_KEY)
     expect(held).not.toContain('box.tail-1234')
+    // And the logs hold nothing of a reply at all, not even its ciphertext.
+    expect(logged.join('\n')).not.toContain(fixture.sealed.slice(0, 40))
   })
 
   it('refuses a reply posted in the clear, and keeps none of it', async () => {
     for (const sealed of [base64Url(fixture.manifest), base64Url(`{"runners":[]}${'x'.repeat(64)}`)]) {
       expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed })).status).toBe(400)
+      // Base64 hides the host key from a plain search, so look for the body itself.
+      expect(logged.join('\n')).not.toContain(sealed.slice(0, 40))
     }
     expect(await stored()).toEqual([])
     expect(await everywhere()).not.toContain(HOST_KEY)
