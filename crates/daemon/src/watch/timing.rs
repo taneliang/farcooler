@@ -192,7 +192,8 @@ mod tests {
     #[test]
     fn the_production_waits_fit_together() {
         assert_eq!(misfit(&Timing::PRODUCTION), None);
-        let broken: [(fn(&mut Timing), &str); 7] = [
+        type Break = (fn(&mut Timing), &'static str);
+        let broken: [Break; 7] = [
             (|t| t.wait_poll = t.idle_twice, "no longer than idle_twice"),
             (|t| (t.wait_poll, t.idle_twice) = (Duration::from_millis(50), Duration::from_millis(10)), "faster than the fast one"),
             (|t| t.wait_slows_after = t.turn_begun_wait, "ends before it slows"),
