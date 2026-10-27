@@ -284,6 +284,43 @@ async fn a_revoked_device_hears_it_was_released_and_a_bystander_does_not() {
     laptop.call(request("client.list")).await.expect("the laptop is still connected");
 }
 
+/// A device revoked here is served nothing on any connection it opens
+/// afterwards, until it is enrolled again (ov-820 review B1): a new channel
+/// on an ssh transport the revoke hasn't severed yet is the device's own.
+#[tokio::test]
+async fn a_revoked_device_is_served_nothing_until_it_is_enrolled_again() {
+    let h = start().await;
+    let mut admin = connect(&h, None).await;
+    enroll(&mut admin, PHONE_KEY, "iPhone", "phone").await;
+    revoke(&mut admin, "phone").await;
+
+    let mut again = connect(&h, Some("farcooler-session host_admin phone\n")).await;
+    assert_served_nothing(&mut again).await;
+
+    enroll(&mut admin, PHONE_KEY, "iPhone", "phone").await;
+    let mut back = connect(&h, Some("farcooler-session control phone\n")).await;
+    back.call(request("client.list")).await.expect("a device enrolled again is served again");
+}
+
+/// Every call a revoked device could use to stay in, refused: enrolling a key
+/// of its own, reading the keys, reading who it is.
+async fn assert_served_nothing(device: &mut SocketClient) {
+    let mut enrolling = request("client.enroll");
+    enrolling.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        public_key: LAPTOP_KEY.into(),
+        label: "mine now".into(),
+        client_id: "phone-2".into(),
+        scope: Scope::HostAdmin as i32,
+        shell_access: false,
+        node_key: String::new(),
+    }));
+    for call in [enrolling, request("client.list"), request("member.list")] {
+        let method = call.method.clone();
+        let outcome = device.call(call).await;
+        assert!(outcome.is_err(), "a revoked device was served {method}: {outcome:?}");
+    }
+}
+
 /// The tunnel half of containment, where a revoked device's *route* lives.
 ///
 /// Deleting a line stops the next login and closes the sessions this daemon is
@@ -673,10 +710,12 @@ done
     }
     /// A revoked device's route is torn down only once its farewell is out
     /// (ov-820): a Tailcat-only device hears `device_released` over that
-    /// route or never. The device here says its farewell 200 ms after its
-    /// session is closed, and the tunnel must still be as it was then.
+    /// route or never. The device says its farewell 200 ms after its session
+    /// is closed: the tunnel must still be as it was then, and stay so for
+    /// `FAREWELL_IN_FLIGHT` after, while the frame crosses to the device.
     #[tokio::test]
     async fn the_tunnel_waits_for_the_revoked_devices_farewell() {
+        use farcooler_daemon::enrollment::FAREWELL_IN_FLIGHT;
         let _serial = TUNNEL.lock().await;
         let h = start().await;
         let log = fake_helper(&h);
@@ -693,18 +732,58 @@ done
         let saying = tokio::spawn(async move {
             phone.closed().await;
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let rebuilt = commands(&watched).contains("serve");
+            let before = commands(&watched).contains("serve");
             phone.said_farewell();
-            rebuilt
+            tokio::time::sleep(FAREWELL_IN_FLIGHT - std::time::Duration::from_millis(150)).await;
+            (before, commands(&watched).contains("serve"))
         });
         revoke_directly(&h, "phone").await;
 
-        assert!(!saying.await.unwrap(), "the tunnel was rebuilt before the revoked device's farewell was out");
+        let (before, in_flight) = saying.await.unwrap();
+        assert!(!before, "the tunnel was rebuilt before the revoked device's farewell was out");
+        assert!(!in_flight, "the tunnel was rebuilt while the farewell was still in flight");
         assert!(
             commands(&log).contains(&format!("serve 22 {NODE_B}")),
             "the tunnel was never rebuilt: {}",
             commands(&log)
         );
+    }
+
+    /// While a tunneled device's farewell is let through, its route is still
+    /// up (review B1): a connection it opens in that window is served
+    /// nothing, and no key it tried to add reaches the file or the rebuild.
+    #[tokio::test]
+    async fn a_revoked_device_is_served_nothing_while_its_farewell_is_let_through() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", Some(NODE_B)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(matches!(outcome, TunnelOutcome::Serving(_)), "the fixture's own tunnel never started: {outcome:?}");
+        std::fs::write(&log, "").unwrap();
+
+        // Never says its farewell, so the revoke waits `FAREWELL_WAIT`.
+        let silent = h.service.sessions().open(Some("phone".into()));
+        let service = h.service.clone();
+        let revoking = tokio::spawn(async move {
+            farcooler_daemon::enrollment::revoke(&service, &farcooler_protocol::v1::ClientRevoke { client_id: "phone".into() })
+                .await
+                .expect("client.revoke");
+        });
+        silent.closed().await;
+        assert!(!commands(&log).contains("serve"), "the window this test is about had already closed");
+
+        let mut device = connect(&h, Some("farcooler-session host_admin phone\n")).await;
+        assert_served_nothing(&mut device).await;
+        assert!(!commands(&log).contains("serve"), "the calls above weren't made inside the window");
+
+        revoking.await.unwrap();
+        let keys = std::fs::read_to_string(h.service.authorized_keys()).unwrap();
+        assert!(!keys.contains("phone-2") && !keys.contains("--client phone "), "a revoked device kept a line:\n{keys}");
+        assert!(commands(&log).contains(&format!("serve 22 {NODE_B}")), "the tunnel was never rebuilt: {}", commands(&log));
     }
 
     /// A device that never says its farewell doesn't hold the revocation:

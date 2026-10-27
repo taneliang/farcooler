@@ -53,6 +53,12 @@ pub fn peer_from_preamble(preamble: Option<&SessionPreamble>) -> Option<Peer> {
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<u64, Live>>,
+    /// Devices revoked since this daemon started, until each is enrolled
+    /// again (ov-820 review B1). A connection one of them opens later, a new
+    /// channel on an ssh transport the revoke hasn't severed yet, say while a
+    /// tunneled device's farewell is let through, starts closed: it is told
+    /// its farewell and served nothing.
+    revoked: Mutex<std::collections::HashSet<String>>,
     /// Handed out in order and never reused, so a session that ends while a
     /// sweep is deciding cannot have its slot taken by a new one.
     next: AtomicU64,
@@ -81,7 +87,14 @@ impl Sessions {
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
         let said = Arc::new(tokio::sync::Semaphore::new(0));
         let id = self.next.fetch_add(1, Ordering::Relaxed);
-        self.live.lock().unwrap().insert(id, Live { client_id, gate: gate.clone(), said: said.clone() });
+        // Checked and registered under `live`'s lock, the one `closing` holds
+        // while it records the device, so no connection slips between them.
+        let mut live = self.live.lock().unwrap();
+        if client_id.as_ref().is_some_and(|id| self.revoked.lock().unwrap().contains(id)) {
+            gate.close();
+        }
+        live.insert(id, Live { client_id, gate: gate.clone(), said: said.clone() });
+        drop(live);
         Arc::new(Session { sessions: self.clone(), id, gate, said })
     }
 
@@ -102,8 +115,14 @@ impl Sessions {
     /// connection's farewell (ov-820). A revocation that is about to tear
     /// down a tunneled device's route waits on it first, so the
     /// `device_released` frame isn't cut off on its way.
+    ///
+    /// And from now on, until [`readmit`](Self::readmit), every connection
+    /// this device opens starts closed (review B1).
     pub fn closing(&self, client_id: &str) -> Closing {
+        // Before the sweep, under the same lock `open` registers under, so a
+        // connection either is in `live` and closed below, or sees this.
         let live = self.live.lock().unwrap();
+        self.revoked.lock().unwrap().insert(client_id.to_string());
         let mut said = Vec::new();
         for session in live.values() {
             if session.client_id.as_deref() == Some(client_id) {
@@ -112,6 +131,13 @@ impl Sessions {
             }
         }
         Closing { said }
+    }
+}
+
+impl Sessions {
+    /// This device was enrolled again: its connections are served again.
+    pub fn readmit(&self, client_id: &str) {
+        self.revoked.lock().unwrap().remove(client_id);
     }
 }
 

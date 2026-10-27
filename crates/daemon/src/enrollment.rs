@@ -257,6 +257,8 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
         })
     })
     .await?;
+    // Enrolled again: a device revoked earlier is served again (ov-820 review B1).
+    svc.sessions().readmit(&request.client_id);
 
     // The file first, the tunnel second, and the answer only after both.
     //
