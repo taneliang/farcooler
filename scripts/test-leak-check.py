@@ -118,7 +118,14 @@ def tool_scratch(base):
 
 
 def system_temp():
-    """The user's real temporary folder on macOS, which Foundation uses whatever TMPDIR says; None elsewhere."""
+    """The user's real temporary folder on macOS, which Foundation uses whatever TMPDIR says; None elsewhere.
+
+    FC_LEAK_SYSTEM_TEMP names a folder to use instead; the self-test points it
+    at a private scratch folder so a sibling lane's entries in the real one
+    cannot reach its cases (ov-824)."""
+    override = os.environ.get("FC_LEAK_SYSTEM_TEMP")
+    if override:
+        return os.path.realpath(override)
     if sys.platform != "darwin":
         return None
     try:
@@ -373,6 +380,9 @@ def self_test():
     prefs = os.path.join(scratch, "prefs")
     os.mkdir(prefs)
     os.environ["FC_LEAK_PREFERENCES"] = prefs
+    system_dir = os.path.join(scratch, "systemtmp")
+    os.mkdir(system_dir)
+    os.environ["FC_LEAK_SYSTEM_TEMP"] = system_dir
     uuid = "0A1B2C3D-0000-4000-8000-000000000001"
     failures = []
 
