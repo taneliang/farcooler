@@ -525,6 +525,7 @@ final class DaemonClient: ObservableObject {
                     self.planNews[workspace, default: 0] += 1
                 }
             },
+            onReleased: { [weak self] in Task { @MainActor in if self?.streamGeneration == generation { self?.heardReleased() } } },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -575,6 +576,14 @@ final class DaemonClient: ObservableObject {
             }
             self.attempt = 0
         }
+    }
+
+    /// The runner said it took this Mac’s access away (ov-820): no access until a read gets in.
+    func heardReleased() {
+        guard !target.isEmpty else { return }
+        keyRefusals.release(target, in: admissions)
+        forgetTeamWork()
+        state = .noAccess
     }
 
     func stopEvents() {

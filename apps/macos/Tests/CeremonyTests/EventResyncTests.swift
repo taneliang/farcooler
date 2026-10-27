@@ -166,4 +166,16 @@ struct EventResyncTests {
         }
         #expect(reads == 5)
     }
+
+    /// The runner's last word to a Mac it revoked (ov-820) reaches its own
+    /// callback, and is never read as a line that didn't decode.
+    @Test func releasedReachesItsOwnCallback() {
+        var released = 0
+        var missed = 0
+        EventStream.dispatch(
+            Data(#"{"kind":"released"}"#.utf8), decoder: JSONDecoder(),
+            onMissed: { missed += 1 }, onReleased: { released += 1 }, onUndecodable: { missed += 1 })
+        #expect(released == 1)
+        #expect(missed == 0)
+    }
 }

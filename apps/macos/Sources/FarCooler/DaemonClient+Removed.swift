@@ -28,7 +28,15 @@ extension DaemonClient {
     /// ends. `.removed` holds through refusals short of proof; a proven one
     /// moves it to `.noAccess`, whose words don't claim the member was
     /// removed, which a device-only revoke (`member.set`) didn't do.
+    ///
+    /// And `.noAccess` for any failure at all once the runner has said it
+    /// released this Mac (`heardReleased`, ov-820), until a read gets in: over
+    /// Tailcat a revoked Mac is never refused, only met with silence.
     func removal(after reason: String) async -> HostState? {
+        if !target.isEmpty, keyRefusals.released {
+            forgetTeamWork()
+            return .noAccess
+        }
         if !target.isEmpty, KeyRefusals.isKeyRefusal(reason) {
             if state == .noAccess { return state }
             let held = state == .removed ? HostState.removed : nil
@@ -53,8 +61,6 @@ extension DaemonClient {
     /// `teamWorkForgotten`, which `TaskBoardStore.isHeld` reads) any board
     /// or plan the window holds open. Set before the fleet empties, since
     /// the window prunes its boards when the fleet publishes.
-    ///
-    /// The glances, widgets, watch and Live Activity rows are ov-820's.
     func forgetTeamWork() {
         teamWorkForgotten = true
         if fleet != .empty { fleet = .empty }
@@ -151,7 +157,7 @@ extension DaemonClient {
     /// across launches (ov-818). Written only when that's news.
     func letIn() {
         teamWorkForgotten = false
-        guard !target.isEmpty, !keyRefusals.admitted || keyRefusals.refusals > 0 else { return }
+        guard !target.isEmpty, !keyRefusals.admitted || keyRefusals.refusals > 0 || keyRefusals.released else { return }
         keyRefusals.letIn(target, in: admissions)
     }
 

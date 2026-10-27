@@ -132,6 +132,41 @@ struct KeyRefusedMacTests {
         #expect(client.state.refusal == RunnerPeople.noAccessBody)
     }
 
+    /// A Mac that reaches its runner only through Tailcat, and that the
+    /// runner said it released (ov-820): every read after fails without a
+    /// refusal, only the tunnel's silence, and each is no access, with the
+    /// team's work gone and the slow cadence, across a relaunch, and no probe.
+    /// A read that gets in ends it.
+    @Test func aRunnerThatSaidItReleasedThisMacIsNoAccessThroughItsSilence() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, clock: clock)
+        await client.refresh()
+        #expect(client.state == .connected)
+
+        client.heardReleased()
+        #expect(client.state == .noAccess)
+        #expect(client.fleet.worktrees.isEmpty, "the runner's work stayed on screen")
+
+        runner.refusing = true
+        runner.refusal = "Connection closed by UNKNOWN port 65535\nCould not reach you@cosmo over ssh."
+        await client.refresh()
+        #expect(client.state == .noAccess, "\(client.state)")
+        #expect(DaemonClient.waitsLong(client.state))
+
+        let relaunched = self.client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, clock: clock)
+        await relaunched.refresh()
+        #expect(relaunched.state == .noAccess, "a relaunch forgot the runner said so: \(relaunched.state)")
+        #expect(probes.count == 0, "probed \(probes.count) times")
+
+        runner.refusing = false
+        await relaunched.refresh()
+        #expect(relaunched.state == .connected)
+        #expect(!KeyRefusals.remembered("you@cosmo", in: defaults).released, "being let in again didn't end it")
+    }
+
     /// Every way to "Permission denied (publickey)" that isn't the runner
     /// refusing this Mac's key, read through the probe: never no access, the
     /// work kept, retried fast.

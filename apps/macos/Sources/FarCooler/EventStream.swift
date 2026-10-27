@@ -302,6 +302,9 @@ final class EventStream {
     private let onReads: @Sendable (WireBoardReads) -> Void
     /// A board's plan moved (`plan`, ov-273): the workspace's id.
     private let onPlan: @Sendable (String) -> Void
+    /// The runner took this Mac's access away (`released`, ov-820): the last
+    /// line before it closes the stream.
+    private let onReleased: @Sendable () -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -315,6 +318,7 @@ final class EventStream {
         onNotice: @escaping @Sendable (NoticeEvent) -> Void = { _ in },
         onReads: @escaping @Sendable (WireBoardReads) -> Void = { _ in },
         onPlan: @escaping @Sendable (String) -> Void = { _ in },
+        onReleased: @escaping @Sendable () -> Void = {},
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
@@ -327,6 +331,7 @@ final class EventStream {
         self.onNotice = onNotice
         self.onReads = onReads
         self.onPlan = onPlan
+        self.onReleased = onReleased
         self.onEnd = onEnd
     }
 
@@ -356,7 +361,7 @@ final class EventStream {
         let handle = out.fileHandleForReading
         outputHandle = handle
         handle.readabilityHandler = {
-            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou, onNotice, onReads, onPlan] h in
+            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou, onNotice, onReads, onPlan, onReleased] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -365,7 +370,7 @@ final class EventStream {
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
                     onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
                     onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice, onReads: onReads,
-                    onPlan: onPlan,
+                    onPlan: onPlan, onReleased: onReleased,
                     onUndecodable: { if limiter.allow() { onMissed() } })
             }
         }
@@ -403,6 +408,7 @@ final class EventStream {
         onNotice: (NoticeEvent) -> Void = { _ in },
         onReads: (WireBoardReads) -> Void = { _ in },
         onPlan: (String) -> Void = { _ in },
+        onReleased: () -> Void = {},
         // Where a line that will not decode goes, if not to `onMissed`: the stream
         // rate-limits it (`DecodeMissLimiter`), since a full read never fixes a
         // decode failure.
@@ -472,6 +478,9 @@ final class EventStream {
             } else {
                 miss("a plan line")
             }
+        // The runner took this Mac's access away (ov-820).
+        case "released":
+            onReleased()
         // Resources this app does not track yet are skipped, not an error.
         default: return
         }
