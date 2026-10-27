@@ -29,11 +29,15 @@ extension DaemonClient {
     /// moves it to `.noAccess`, whose words don't claim the member was
     /// removed, which a device-only revoke (`member.set`) didn't do.
     ///
-    /// And `.noAccess` for any failure at all once the runner has said it
+    /// And `.noAccess` for a failure to reach the runner once it has said it
     /// released this Mac (`heardReleased`, ov-820), until a read gets in: over
-    /// Tailcat a revoked Mac is never refused, only met with silence.
+    /// Tailcat a revoked Mac is never refused, only met with silence. Not a
+    /// changed host key or a version mismatch, which say something else and
+    /// which a re-admitted Mac must still be shown, as on the phones.
     func removal(after reason: String) async -> HostState? {
-        if !target.isEmpty, keyRefusals.released {
+        if !target.isEmpty, keyRefusals.released, !KeyRefusals.showsHostKeyTrouble(reason),
+            !looksVersionMismatch(reason)
+        {
             forgetTeamWork()
             return .noAccess
         }

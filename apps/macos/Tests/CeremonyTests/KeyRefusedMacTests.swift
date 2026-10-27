@@ -167,6 +167,32 @@ struct KeyRefusedMacTests {
         #expect(!KeyRefusals.remembered("you@cosmo", in: defaults).released, "being let in again didn't end it")
     }
 
+    /// A released Mac whose runner's host key changed is shown that, not no
+    /// access (review S2), and once it's let in again the release ends.
+    @Test func aReleasedMacMeetingAChangedHostKeyIsToldThatAndCanComeBack() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        client.heardReleased()
+
+        runner.refusing = true
+        runner.refusal = "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed."
+        await client.refresh()
+        #expect(client.state != .noAccess, "a changed host key read as no access")
+        if case .unreachable(let reason) = client.state {
+            #expect(reason.contains("Host key verification failed"))
+        } else {
+            Issue.record("expected the host key's own failure, got \(client.state)")
+        }
+
+        runner.refusing = false
+        await client.refresh()
+        #expect(client.state == .connected)
+        #expect(!KeyRefusals.remembered("you@cosmo", in: defaults).released, "being let in again didn't end it")
+    }
+
     /// Every way to "Permission denied (publickey)" that isn't the runner
     /// refusing this Mac's key, read through the probe: never no access, the
     /// work kept, retried fast.

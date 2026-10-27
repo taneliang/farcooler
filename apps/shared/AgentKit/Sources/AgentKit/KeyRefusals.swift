@@ -174,6 +174,17 @@ public struct KeyRefusals: Sendable, Equatable {
         return agentTrouble.contains(where: lower.contains)
     }
 
+    /// Whether the stderr of a read that failed shows the runner's host key
+    /// changed or unverified: something to put to a person, never read as a
+    /// release (ov-820 review S2), as `RunnerTrouble.meansTheRunnerIsGone`
+    /// leaves out ``RunnerTrouble/hostKeyChanged`` on the phones.
+    public static func showsHostKeyTrouble(_ stderr: String) -> Bool {
+        let lower = stderr.lowercased()
+        return hostKeyTrouble.contains(where: lower.contains)
+    }
+
+    static let hostKeyTrouble = ["remote host identification has changed", "host key verification failed"]
+
     static let agentTrouble = [
         "sign_and_send_pubkey", "agent refused operation", "communication with agent failed",
         "ssh_get_authentication_socket", "agent contains no identities",
@@ -203,8 +214,7 @@ public struct KeyRefusals: Sendable, Equatable {
         let disqualifying =
             agentTrouble + [
                 "server accepts key", "executing proxy command", "setting implicit proxycommand",
-                "remote host identification has changed", "host key verification failed",
-            ]
+            ] + hostKeyTrouble
         guard !disqualifying.contains(where: lower.contains) else { return false }
         let offeredTheKey = verbose.split(separator: "\n").contains {
             $0.contains("Offering public key") && $0.split(separator: " ").contains(Substring(key))
