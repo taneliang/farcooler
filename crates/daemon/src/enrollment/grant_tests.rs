@@ -98,6 +98,9 @@ async fn a_control_phone_grants_nothing_wider_than_its_own() {
     assert_eq!(admin.err().as_deref(), Some("scope-denied:"), "host_admin from a control phone");
     let shell = call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::HostAdmin, true, "")).await;
     assert_eq!(shell.err().as_deref(), Some("scope-denied:"), "a shell line from a control phone");
+    // Refused at the grant, not left to the fence's own shape check.
+    let shell = call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::Control, true, "")).await;
+    assert_eq!(shell.err().as_deref(), Some("scope-denied:"), "a shell line asked for at control");
     let read = factory(&svc, Some("phone-o"), Scope::Read);
     let looked = call(&read, enroll(KEY_BROWSER, "browser-1", Scope::Read, false, "")).await;
     assert_eq!(looked.err().as_deref(), Some("scope-denied:"), "a read phone enrolls nothing");
