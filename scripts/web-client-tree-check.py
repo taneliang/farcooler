@@ -24,6 +24,7 @@ purpose: an empty tree must never read as a clean one.
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -67,8 +68,13 @@ def banned_paths(text):
 
 
 def cargo_tree():
-    cargo = os.environ.get("CARGO", "cargo")
-    run = subprocess.run([cargo, *TREE_ARGS], cwd=ROOT, capture_output=True, text=True)
+    # $CARGO, then cargo on PATH, then rustup's own: a Mac shell often has
+    # ~/.cargo/bin off PATH.
+    cargo = os.environ.get("CARGO") or shutil.which("cargo") or str(Path.home() / ".cargo/bin/cargo")
+    try:
+        run = subprocess.run([cargo, *TREE_ARGS], cwd=ROOT, capture_output=True, text=True)
+    except OSError as e:
+        raise Unreadable(f"cannot run {cargo}: {e}")
     if run.returncode != 0:
         raise Unreadable(f"cargo tree failed:\n{run.stderr.strip()}")
     return run.stdout
