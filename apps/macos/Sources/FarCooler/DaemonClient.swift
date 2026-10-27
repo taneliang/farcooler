@@ -768,10 +768,9 @@ final class DaemonClient: ObservableObject {
 
     private var missingPanes = MissingPanes()  // which panes have really gone (ov-622)
     /// Reads the fleet. `recheck` is the dial a scheduled check or Check Again
-    /// makes, the one the runner gets per check. Every other call (there are
+    /// makes, one per check. Every other call (there are
     /// some thirty) returns at once while the runner refuses this Mac
-    /// (`awaitingRecheck`, ov-821): each would be its own failed login on the
-    /// runner's address, and the scheduled check reads what they would have.
+    /// (`awaitingRecheck`, ov-821): each would be a failed login on its address.
     func refresh(recheck: Bool = false) async {
         if !recheck, awaitingRecheck { return }
         keyRefusals.dialing(at: now())
