@@ -1,4 +1,4 @@
-// Shipped by Canary at beb8384729d0ae7effaf2a1448c07b31d7087532. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 421efb78cb23c1c5b9a4e68d0c18379e71d7e26a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1272,6 +1272,14 @@ message Host {
   // runner from before. A client words the warning with
   // `farcooler_core::claude_keys::warning`.
   repeated string rc_claude_keys = 19;
+  // The fingerprint (`SHA256:…`, as `ssh-keygen -lf` prints it) of the key
+  // the caller's own connection authenticated with: its Far Cooler line in
+  // this runner's `authorized_keys` (ov-818). Empty for a caller with no line,
+  // such as the owner's Mac on its own socket, and from a runner from before.
+  // It names only the caller's own key, which the caller holds already. A Mac
+  // whose key is refused later counts the refusal only when it was this key
+  // that was offered and refused.
+  string caller_key_fingerprint = 20;
 }
 
 // One extra read-only folder (ov-232).
