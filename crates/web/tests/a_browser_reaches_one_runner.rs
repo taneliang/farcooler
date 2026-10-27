@@ -51,6 +51,7 @@ fn granted_runner(host_key: &str) -> enroll::Granted {
         reach: Reach::Tailcat { token: "tc-token".into(), client_key: String::new() },
         alternative: None,
         pending: false,
+        pending_why: None,
     };
     let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&offer, vec![entry]));
     let manifest = enroll::accept(&reply, &offer, false, 0.0, 0.0).expect("the browser accepts its own reply");
@@ -187,6 +188,7 @@ fn only_a_written_tunneled_runner_is_dialable_from_a_browser() {
         reach,
         alternative: None,
         pending,
+        pending_why: None,
     };
     let tunnel = || Reach::Tailcat { token: "tc-token".into(), client_key: String::new() };
     let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(

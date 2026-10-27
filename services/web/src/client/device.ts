@@ -24,6 +24,9 @@ export interface Granted {
   token: string
   /// Empty when this browser can dial it; `pending` or `address_only` if not.
   why: string
+  /// The phone's reason for `pending`, or empty (crates/web `enroll::CAUSES`).
+  /// Absent from runners stored before ov-828.
+  cause?: string
 }
 
 export interface Passkey {

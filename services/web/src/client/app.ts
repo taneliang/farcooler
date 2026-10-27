@@ -272,7 +272,7 @@ async function work(session: Session): Promise<void> {
     const first = runners[0]
     status(
       'No runner here can be opened from a browser yet',
-      first ? unreachable(first.why, first.label, true) : 'Your phone granted no runners.',
+      first ? unreachable(first.why, first.label, first.cause) : 'Your phone granted no runners.',
       { label: 'Add Again', run: () => void addAgain(session) },
     )
     return

@@ -54,16 +54,27 @@ export function replyRefusal(word: string): string {
 
 /// Why a granted runner can't be opened here.
 ///
-/// A runner refuses a passkey when its OpenSSH is older than 8.4 (it doesn't
-/// offer `passkey_keys`, ov-765), and the reply can't say whether that or an
-/// unreachable runner is why (`RunnerEntry.pending` carries no cause), so a
-/// passkey's sentence names both. There is no fallback key (R-88).
-export function unreachable(why: string, runner: string, passkey = false): string {
-  if (why === 'pending' && passkey)
-    return `Your phone couldn’t add this browser’s passkey to ${runner}. Passkeys need OpenSSH 8.4 or later on the runner, so if ${runner}’s is older, update it. Otherwise, add this browser again while your phone can reach ${runner}.`
-  return why === 'pending'
-    ? `Your phone couldn’t add this browser’s key to ${runner}. Add this browser again while your phone can reach it.`
-    : `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
+/// `cause` is the phone's reason for a pending runner (crates/web's
+/// `enroll::CAUSES`), or empty from a phone that didn't say. Only
+/// `no_passkeys`, which the phone reads off the runner's own capabilities,
+/// names OpenSSH: an empty cause is not a guess about the runner (ov-828).
+export function unreachable(why: string, runner: string, cause = ''): string {
+  if (why !== 'pending')
+    return `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
+  switch (cause) {
+    case 'no_passkeys':
+      return `${runner}’s OpenSSH is too old for passkeys, so your phone couldn’t add this browser to it. Update OpenSSH on ${runner} to 8.4 or later, then add this browser again.`
+    case 'too_old':
+      return `Far Cooler on ${runner} is too old to add devices. Update it, then add this browser again.`
+    case 'not_allowed':
+      return `${runner} didn’t let your phone add devices. Update Far Cooler on ${runner}, or add this browser from your Mac.`
+    case 'not_connected':
+      return `Your phone wasn’t connected to ${runner}. Open Far Cooler on your phone and wait for ${runner} to connect, then add this browser again.`
+    case 'failed':
+      return `${runner} didn’t take this browser’s passkey. Add this browser again from your phone.`
+    default:
+      return `Your phone couldn’t add this browser to ${runner}. Add this browser again while your phone is connected to ${runner}.`
+  }
 }
 
 /// The headline for joining a teammate's runners, as the phone words it

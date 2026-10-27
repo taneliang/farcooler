@@ -82,7 +82,15 @@ pub struct Granted {
     /// phone could not write this browser's key there) or `address_only` (a
     /// browser has no raw TCP, so it reaches runners through the tunnel only).
     pub why: String,
+    /// Why `pending`, when the phone said (ov-828): one of [`CAUSES`], or
+    /// empty. A word the page has no sentence for is empty here, so the page
+    /// says the general thing rather than a reply's own text.
+    pub cause: String,
 }
+
+/// The reasons a phone gives for a runner it couldn't add this browser to
+/// (`RunnerEntry::pending_why`).
+pub const CAUSES: [&str; 5] = ["too_old", "no_passkeys", "not_allowed", "not_connected", "failed"];
 
 /// Every runner in a reply, with whether and how this browser reaches it.
 pub fn granted(manifest: &Manifest) -> Vec<Granted> {
@@ -102,6 +110,10 @@ pub fn granted(manifest: &Manifest) -> Vec<Granted> {
                 host_key: r.host_key.clone(),
                 token,
                 why: why.to_string(),
+                cause: match (r.pending, r.pending_why.as_deref()) {
+                    (true, Some(word)) if CAUSES.contains(&word) => word.to_string(),
+                    _ => String::new(),
+                },
             }
         })
         .collect()
@@ -143,6 +155,38 @@ mod tests {
         assert!(!offer_is_stale(SHOWN, SHOWN + window));
         assert!(offer_is_stale(SHOWN, SHOWN + window + 1.0));
         assert!(offer_is_stale(SHOWN, SHOWN - 1.0));
+    }
+
+    /// A pending runner carries the phone's reason when it is one the page
+    /// has a sentence for, and nothing otherwise (ov-828).
+    #[test]
+    fn a_pending_runner_carries_the_phones_reason() {
+        use farcooler_ceremony::RunnerEntry;
+        let o = offer("Chrome on Mac", "acct", KEY, NODE);
+        let entry = |id: &str, pending: bool, why: Option<&str>| RunnerEntry {
+            id: id.into(),
+            label: id.into(),
+            alias: id.into(),
+            user: "you".into(),
+            host_key: String::new(),
+            reach: Reach::Tailcat { token: "tc".into(), client_key: String::new() },
+            alternative: None,
+            pending,
+            pending_why: why.map(str::to_string),
+        };
+        let runners = vec![
+            entry("cosmo", true, Some("not_allowed")),
+            entry("odd", true, Some("<b>update now</b>")),
+            entry("quiet", true, None),
+            entry("fine", false, Some("failed")),
+        ];
+        let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&o, runners));
+        let got = granted(&accept(&reply, &o, false, SHOWN, SHOWN).unwrap());
+        let causes: Vec<(&str, &str, &str)> = got.iter().map(|g| (g.id.as_str(), g.why.as_str(), g.cause.as_str())).collect();
+        assert_eq!(
+            causes,
+            vec![("cosmo", "pending", "not_allowed"), ("odd", "pending", ""), ("quiet", "pending", ""), ("fine", "", "")]
+        );
     }
 
     /// A teammate's reply says whose runners these are, so the page can ask.

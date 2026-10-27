@@ -64,6 +64,16 @@ pub fn fit_manifest_from(
     if manifest_fits(&reply, budget_bytes) {
         return Ok(fitted(&reply, &[]));
     }
+    // Why a runner is pending goes first (ov-828): the grant is the same
+    // without it, and the reply after the writes must fit wherever the one
+    // measured before them did.
+    let mut said_why = false;
+    for runner in &mut reply.runners {
+        said_why |= runner.pending_why.take().is_some();
+    }
+    if said_why && manifest_fits(&reply, budget_bytes) {
+        return Ok(fitted(&reply, &[]));
+    }
     let original = reply.runners.clone();
     for i in 0..original.len() {
         if reply.runners[i].alternative.take().is_some() && manifest_fits(&reply, budget_bytes) {
@@ -186,6 +196,7 @@ mod tests {
             reach,
             alternative,
             pending: false,
+            pending_why: None,
         }
     }
 
@@ -325,5 +336,25 @@ mod tests {
         assert!(matches!(fit_manifest(&device, picked(8), BUDGET), Err(CeremonyError::TooLarge)));
         // What fits before the writes fits after them, whatever the tokens.
         assert!(fit_manifest(&device, (0..7).map(tunneled).collect(), BUDGET).is_ok());
+    }
+
+    /// Why a runner is pending travels when it fits, and is given up first
+    /// when it doesn't, before any runner's route (ov-828): a reply measured
+    /// before the writes, with no reasons, still fits after them.
+    #[test]
+    fn a_pending_reason_travels_and_is_given_up_first() {
+        let device = build_offer("Chrome on Mac", "acct_1", KEY_A, None, NODE_KEY);
+        let pending = |i: usize| RunnerEntry { pending: true, pending_why: Some("not_allowed".into()), ..tunneled(i) };
+        let one = fit_manifest(&device, vec![pending(0)], BUDGET).unwrap().manifest;
+        assert!(encode_manifest(&one).contains(r#""pending_why":"not_allowed""#));
+        let taken = accept_manifest(&encode_manifest(&one), &device, false).unwrap();
+        assert_eq!(taken.runners[0].pending_why.as_deref(), Some("not_allowed"));
+
+        let measured = fit_manifest(&device, (0..3).map(tunneled).collect(), BUDGET).unwrap().manifest;
+        let room = encode_manifest(&measured).len();
+        let written = fit_manifest(&device, (0..3).map(pending).collect(), room).unwrap();
+        assert!(written.manifest.runners.iter().all(|r| r.pending_why.is_none()), "kept a reason over budget");
+        assert!(written.manifest.runners.iter().all(|r| r.alternative.is_some()), "gave up a route for a reason");
+        assert!(written.address_only.is_empty());
     }
 }

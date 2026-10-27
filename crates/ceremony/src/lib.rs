@@ -230,6 +230,11 @@ pub struct RunnerEntry {
     /// device that CAN reach this runner. Both join screens read this to decide
     /// what not to add and what to say: see `Joined` in each `JoinView.swift`.
     pub pending: bool,
+    /// Why `pending`, when the granting device knows (ov-828): `too_old`,
+    /// `no_passkeys`, `not_allowed`, `not_connected` or `failed`. Shown, never
+    /// trusted; absent from older builds, and the first thing [`fit`] gives up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_why: Option<String>,
 }
 
 /// The reply: the runners a trusted device granted, addressed to one ceremony.
@@ -744,6 +749,7 @@ mod tests {
             reach,
             alternative: None,
             pending: false,
+            pending_why: None,
         }
     }
 
