@@ -437,3 +437,38 @@ async fn a_closed_connection_says_its_farewell_first() {
         .expect("the handler was never told its farewell was said")
         .expect_err("a closed semaphore");
 }
+
+/// "Said" means written, not queued (ov-820 review S1): with a device that
+/// has stopped reading, so the farewell can't leave the writer, the daemon is
+/// not told it was said until `FAREWELL_DEADLINE` gives up on it, and then it
+/// is, so the revocation waiting on it goes on.
+#[tokio::test]
+async fn a_farewell_nobody_reads_is_said_only_at_its_deadline() {
+    use farcooler_transport::connection::FAREWELL_DEADLINE;
+    // One byte of buffer: the farewell's frame can't fit, so it stays queued
+    // for as long as the device doesn't read.
+    let (device_end, runner_end) = tokio::io::duplex(1);
+    let handler = FarewellHandler { closable: ClosableHandler::new(), said: Arc::new(tokio::sync::Semaphore::new(0)) };
+    let serving = handler.clone();
+    let server = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(runner_end);
+        let mut conn = Connection::new(read, write);
+        let _ = farcooler_transport::serve_connection(&mut conn, &handshake_cfg(), &serving).await;
+    });
+    let (read, write) = tokio::io::split(device_end);
+    let mut device = Connection::new(read, write);
+    device.client_handshake("itest", "0.1.0").await.unwrap();
+
+    // From here the device reads nothing.
+    let closed_at = std::time::Instant::now();
+    handler.closable.gate.close();
+    tokio::time::sleep(FAREWELL_DEADLINE / 2).await;
+    assert!(!handler.said.is_closed(), "the farewell was said while it was still queued behind a device that doesn't read");
+    tokio::time::timeout(FAREWELL_DEADLINE * 5, handler.said.acquire())
+        .await
+        .expect("a device that doesn't read held the farewell past its deadline")
+        .expect_err("a closed semaphore");
+    assert!(closed_at.elapsed() >= FAREWELL_DEADLINE, "said before its deadline: {:?}", closed_at.elapsed());
+    drop(device);
+    let _ = server.await;
+}
