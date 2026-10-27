@@ -422,10 +422,11 @@ struct RemoteConversationTests {
     }
 
     /// Beside the Pair that consents to it (ov-830: no setting does any more).
-    @Test("Devices says the key is added to each runner and runs commands there")
+    @Test("Devices says Pair adds a key to that runner, and it runs commands there")
     func theCopySaysWhatTheKeyCanDo() {
         for copy in [ConversationPairingSection.footer] {
-            #expect(copy.contains("key of its own"), "\(copy)")
+            #expect(copy.hasPrefix("Pair adds a key of this Mac’s own"), "\(copy)")
+            #expect(copy.contains("to that runner"), "Pair is the consent, one runner at a time: \(copy)")
             #expect(copy.contains("run commands") && copy.contains("terminals"), "\(copy)")
             #expect(!copy.contains("can’t open a shell"), "\(copy)")
         }
