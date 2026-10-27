@@ -215,11 +215,8 @@ fun TerminalPane(
     // The conversation covers the terminal now.
     val covered = native.covered
     // Why a Claude or Codex pane isn't offered it, for its dimmed switch (ov-443).
-    val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
     val unavailable = terminal?.takeIf { !native.switchable }?.let {
-        AgentConversation.unavailable(
-            it.paneMode, AgentConversation.agent(it), AgentConversation.isRunning(it.state), daemon ?: lastDaemon, projectorOn,
-        )
+        AgentConversation.unavailable(it.paneMode, AgentConversation.agent(it), AgentConversation.isRunning(it.state), daemon ?: lastDaemon)
     }?.takeIf { it.isAboutTheRunner }
 
     // What this pane costs while nobody is reading it: nothing. `resume` and
@@ -341,7 +338,7 @@ fun TerminalPane(
             if (native.switchable) {
                 NativeSwitchButton(showing = covered, onClick = { native.toggle() })
             } else if (unavailable != null) {
-                NativeUnavailableButton(unavailable, maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon))
+                NativeUnavailableButton(unavailable)
             }
             Box {
                 IconButton(onClick = { showMenu = true }) {
@@ -417,7 +414,6 @@ fun TerminalPane(
                 pane = native,
                 floatingSwitch = !showTopBar,
                 unavailable = unavailable,
-                maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon),
                 viewer = viewer,
             ) {
                 TerminalSurface(

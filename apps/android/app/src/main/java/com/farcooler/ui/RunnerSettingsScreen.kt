@@ -61,7 +61,6 @@ import com.farcooler.net.Connection
 import com.farcooler.net.memberOwnLogins
 import com.farcooler.net.runnerTeam
 import com.farcooler.net.setOwnLogin
-import com.farcooler.net.setProjector
 import com.farcooler.net.setRole
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
@@ -102,7 +101,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
         }
     }
     var addingRepository by remember { mutableStateOf(false) }
-    var changingConversation by remember { mutableStateOf(false) }
     // The switches for members' own logins, with who this phone is (ov-652).
     var ownLogins by remember { mutableStateOf<Pair<MemberOwnLogins, String>?>(null) }
     var changingOwnLogin by remember { mutableStateOf(false) }
@@ -283,45 +281,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                         }
                     }
                 }) { Text("Save") }
-            }
-
-            // Shown on a runner that has the setting (ov-374), and dimmed with
-            // the reason for a device that isn't its host admin (ov-443).
-            // Changing it reconnects, so the panes are offered the view on the
-            // new hello.
-            val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
-            if (AgentConversation.offersSetting(daemon, projectorOn)) {
-                Separator()
-                SectionTitle("Agents")
-                Row(
-                    Modifier.fillMaxWidth().testTag("runner-conversation-view"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(AgentConversation.SETTING_TITLE, Modifier.weight(1f))
-                    Switch(
-                        checked = projectorOn == true,
-                        // The switch waits while a change is on its way, so two
-                        // flips can't land out of order.
-                        enabled = !changingConversation && AgentConversation.maySetSetting(daemon),
-                        onCheckedChange = { on ->
-                            changingConversation = true
-                            scope.launch {
-                                try {
-                                    failure = connection.setProjector(on)
-                                } finally {
-                                    changingConversation = false
-                                }
-                            }
-                        },
-                    )
-                }
-                Text(
-                    AgentConversation.SETTING_FOOTER +
-                        (if (AgentConversation.maySetSetting(daemon)) "" else "\n\n" + restrictedSentence()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
 
             // Who's on a shared runner, and for the owner a role picker on each (ov-784), as on the Mac and the

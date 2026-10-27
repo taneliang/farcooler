@@ -100,10 +100,11 @@ struct NativeAgentTests {
         }
     }
 
-    /// A registry offering the native view, with `model` as the pane's.
+    /// A registry offering the native view, with `model` as the pane's;
+    /// not `offering`, one whose runner was never reached.
     static func agents(offering: Bool = true, rows: Bool = true, model: NativePaneModel? = nil) -> NativeAgents {
         let agents = NativeAgents(defaults: ScratchDefaults.suite("native-agent-tests-\(UUID().uuidString)")!)
-        agents.pretend(enabled: offering, rowsServed: rows, core: RunnerCore())
+        if offering { agents.pretend(rowsServed: rows, core: RunnerCore()) }
         if let model { agents.adopt(model) }
         return agents
     }
@@ -153,7 +154,7 @@ struct NativeAgentTests {
         let shell = try Self.terminal(id: "0199aaaa-0000-7000-8000-000000000002", program: "shell")
         let chat = try Self.terminal(id: "0199aaaa-0000-7000-8000-000000000003", mode: "agent")
         let cases: [(String, NativeAgents, Terminal, String)] = [
-            ("the setting off", Self.agents(offering: false), claude, ""),
+            ("a runner not reached yet", Self.agents(offering: false), claude, ""),
             ("a runner without agent_rows", Self.agents(rows: false), claude, ""),
             ("a shell pane", Self.agents(), shell, ""),
             ("a pane still in chat mode, from an older runner", Self.agents(), chat, ""),

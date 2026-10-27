@@ -372,10 +372,14 @@ struct OrchestratorViewItem: View {
             ConversationSwitchItem(
                 model: agents.model(for: terminal.id, target: target, program: NativeAgents.agent(of: terminal)))
         } else if let reason = agents.unavailable(terminal, target: target), reason.isAboutTheRunner {
-            // Dimmed, saying why (ov-443), rather than gone without a word.
+            // Dimmed, saying why (ov-443), rather than gone without a word:
+            // on a line of its own, since a menu item's help shows only on a
+            // hover nobody thinks to try (ov-830), and with the check it
+            // failed, as `terminal conversation-check` names it.
             Button(OrchestratorViewSwitch.showConversation.title) {}
                 .disabled(true)
-                .help(reason.sentence)
+                .help(reason.note)
+            Text(reason.note)
         }
     }
 }

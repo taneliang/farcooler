@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Settings > Devices > Conversation View (ov-408): each remote runner this
 /// Mac's conversation key is paired with, or why it isn't, with the one
-/// action that changes it. Unpair takes the key off the runner
+/// action that changes it. Pair writes the key to a runner never paired
+/// here, and is the consent to (ov-830); Unpair takes it off the runner
 /// (`client revoke`); Pair Again writes it back. A key removed on the runner
 /// is never put back without this.
 struct ConversationPairingSection: View {
@@ -20,7 +21,7 @@ struct ConversationPairingSection: View {
 
     var body: some View {
         let targets = Set(native.remotes).union(pairing.states.keys).sorted()
-        if native.enabled || !pairing.states.isEmpty, !targets.isEmpty {
+        if !targets.isEmpty {
             Section {
                 ForEach(targets, id: \.self) { target in
                     row(target, pairing.states[target])
@@ -47,7 +48,7 @@ struct ConversationPairingSection: View {
             case .unavailable?:
                 Button("Try Again") { native.retry(target) }
             case nil:
-                EmptyView()
+                Button("Pair") { native.pairAgain(target) }
             }
         } label: {
             Text(target)
@@ -55,8 +56,8 @@ struct ConversationPairingSection: View {
         }
     }
 
-    /// What the key can do, said plainly: turning the setting on is the
-    /// consent for every runner, and `control` runs commands.
+    /// What the key can do, said plainly, beside the Pair that consents to
+    /// it: `control` runs commands.
     static let footer =
         "This Mac adds a key of its own, kept in the Keychain, to each runner. With it, anyone using Far Cooler "
         + "on this Mac can read and reply to Claude there, and create terminals and run commands, as with a paired phone."

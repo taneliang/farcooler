@@ -127,7 +127,6 @@ fun NativeLayer(
     modifier: Modifier = Modifier,
     /** Why the conversation isn't offered, where the switch is dimmed and says so (ov-443). */
     unavailable: com.farcooler.model.AgentConversation.Unavailable? = null,
-    maySetSetting: Boolean = true,
     /** Who this phone is on the runner (`member.list`'s `you`), for an answered ask's "You answered" (ov-746). */
     viewer: String? = null,
     terminal: @Composable () -> Unit,
@@ -155,7 +154,7 @@ fun NativeLayer(
                 modifier = Modifier.align(Alignment.TopEnd),
             )
         } else if (floatingSwitch && unavailable != null) {
-            NativeUnavailableButton(unavailable, Modifier.align(Alignment.TopEnd), maySetSetting)
+            NativeUnavailableButton(unavailable, Modifier.align(Alignment.TopEnd))
         }
     }
 }

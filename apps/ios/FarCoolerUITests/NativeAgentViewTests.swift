@@ -299,7 +299,9 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertFalse(harness(app).contains("brought=from"), harness(app))
     }
 
-    /// A runner whose projector is off: the terminal, and no switch.
+    /// A runner from before ov-830 whose projector setting is off: the
+    /// terminal, and a dimmed switch saying it needs an update, by the check
+    /// that failed. Nothing tells a person to find a setting that's gone.
     func testFlagOffShowsTheTerminal() {
         let app = launch(["-native-flag-off"])
         XCTAssertTrue(element(app, "terminal-surface").waitForExistence(timeout: 60), "no terminal")
@@ -316,7 +318,8 @@ final class NativeAgentViewTests: XCTestCase {
         let alert = app.alerts["Conversation Unavailable"]
         XCTAssertTrue(alert.waitForExistence(timeout: 30), "no reason shown")
         capture("unavailable-reason", expecting: .shows(alert))
-        XCTAssertTrue(alert.staticTexts["Turn on Conversation view in Settings."].exists, alert.debugDescription)
+        XCTAssertTrue(
+            alert.staticTexts["Runner version: This runner needs an update to show the conversation."].exists, alert.debugDescription)
     }
 
     /// A turn nobody typed, a background task finishing, is a notice line,

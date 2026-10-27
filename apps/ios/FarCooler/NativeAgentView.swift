@@ -50,13 +50,9 @@ struct NativeSwitch<Content: View>: View {
     private var unavailable: AgentConversation.Unavailable? {
         let reason = AgentConversation.unavailable(
             paneMode: terminal.paneMode, agent: agent, running: AgentConversation.isRunning(state: terminal.state),
-            offered: build?.capabilities, projectorOn: connection.projectorOn)
+            offered: build?.capabilities)
         return reason?.isAboutTheRunner == true ? reason : nil
     }
-
-    /// Whether this device may turn the runner's setting on: the reason says so
-    /// when it may not.
-    private var maySetSetting: Bool { build?.grantedScope == "host_admin" }
 
     /// The build the layout reads: see `model`.
     private var build: DaemonBuild? { connection.daemon ?? connection.lastDaemon ?? connection.knownBuild }
@@ -64,7 +60,7 @@ struct NativeSwitch<Content: View>: View {
     var body: some View {
         let model = model
         NativeSwitchBody(
-            terminal: terminal.id, model: model, unavailable: model == nil ? unavailable?.sentence(maySetSetting: maySetSetting) : nil, offer: NativeOffer(build),
+            terminal: terminal.id, model: model, unavailable: model == nil ? unavailable?.note : nil, offer: NativeOffer(build),
             isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible, toConversation: toConversation,
             viewer: connection.talk.viewer, content: content)
     }

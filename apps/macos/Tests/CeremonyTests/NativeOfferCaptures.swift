@@ -18,7 +18,7 @@ struct NativeOfferCaptures {
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let claude = try NativeOfferTests.terminal(#""preset":"Fix the login bug","program":"shell","runningAgent":"claude""#)
         let reasons: [(String, AgentConversation.Unavailable)] = [
-            ("update", .runnerNeedsUpdate), ("pairing", .pairingNeeded), ("setting", .settingOff),
+            ("update", .runnerNeedsUpdate), ("pairing", .pairingNeeded), ("unreachable", .unreachable),
         ]
         for (name, appearance) in RealWindowCaptures.variants {
             let agents = NativeOfferTests.agents(offered: ["agent_compose"])

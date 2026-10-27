@@ -35,16 +35,6 @@ final class RunnerSettingsModel: ObservableObject {
     /// screen never opens dimmed and then un-dims a moment later. The controls
     /// are honest either way: the runner enforces this, not the app.
     @Published private(set) var mayAdminister = true
-    /// Whether the conversation view's setting is shown (ov-373): on a
-    /// runner that has the setting. To every device, so one that may not
-    /// change it still sees where it stands and why (ov-443).
-    @Published private(set) var offersConversation = false
-    /// Whether this device may change it: the runner's host admin only.
-    @Published private(set) var mayChangeConversation = false
-    @Published private(set) var conversationOn = false
-    /// A change to it is on its way: the switch waits, so two flips can't
-    /// land out of order.
-    @Published private(set) var changingConversation = false
     /// Who's on this runner and whose Claude account it runs on (ov-508):
     /// nil until read, and on a runner that doesn't know its people.
     @Published private(set) var people: RunnerPeople?
@@ -69,9 +59,6 @@ final class RunnerSettingsModel: ObservableObject {
         await connection.loadDaemonBuild()
         mayAdminister = connection.daemon?.mayAdministerRunner ?? true
         branchPrefix = connection.branchPrefix
-        offersConversation = connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
-        mayChangeConversation = connection.daemon?.grantedScope == "host_admin"
-        conversationOn = connection.projectorOn ?? false
         // Beside the reads below, not before them: who's here is extra.
         async let peopleRead: Void = loadPeople()
         let readThemes = await connection.hostThemes()
@@ -230,19 +217,6 @@ final class RunnerSettingsModel: ObservableObject {
         return outcome
     }
 
-    /// Turn the conversation view on or off for every client of this
-    /// runner. The connection reconnects after, so its panes are offered it.
-    func setConversation(_ on: Bool) async {
-        guard mayChangeConversation, !changingConversation else { return }
-        changingConversation = true
-        defer { changingConversation = false }
-        if let trouble = await connection.setProjector(on) {
-            failure = trouble
-            return
-        }
-        conversationOn = on
-    }
-
     func setBranchPrefix(_ prefix: String) async {
         guard let stored = await connection.setBranchPrefix(prefix) else {
             failure = Self.notSaved
@@ -380,25 +354,6 @@ struct RunnerSettingsView: View {
                     "Added to branch names created from task descriptions. Leave it empty for "
                     + "no prefix."
                     + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
-            }
-
-            if model.offersConversation {
-                Section {
-                    Toggle(
-                        "Conversation View for Claude and Codex Panes",
-                        isOn: Binding(
-                            get: { model.conversationOn },
-                            set: { on in Task { await model.setConversation(on) } }))
-                        .disabled(model.changingConversation || !model.mayChangeConversation)
-                        .accessibilityIdentifier("runner-conversation-view")
-                } header: {
-                    Text("Agents")
-                } footer: {
-                    Text(
-                        "Shows a Claude or Codex pane that runs in a terminal as a conversation you can read and "
-                            + "reply to, on every device that reaches this runner. Its terminal is one tap away."
-                            + (model.mayChangeConversation ? "" : "\n\n" + restrictedSentence))
-                }
             }
 
             Section {

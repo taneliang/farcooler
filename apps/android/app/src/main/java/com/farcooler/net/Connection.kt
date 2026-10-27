@@ -1325,7 +1325,6 @@ class Connection(
         // differently-named branches than the Mac beside it.
         _branchPrefix.value =
             body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
-        projector.read(body)
         // Boards this link never read: a sweep before the build was known
         // could not tell the runner keeps a board, and read nothing.
         scope.launch { boardReads.buildLanded(boardList()) }
@@ -1762,8 +1761,7 @@ class Connection(
         }.getOrDefault(emptyList())
     }
 
-    /** The runner's conversation-view setting and this connection's panes for it (ov-374). */
-    val projector = ProjectorSetting()
+    /** This connection's panes for the conversation view (ov-374). */
     val nativePanes = NativePanes(scope, ClientCall { method, args -> core.call(method, args) })
 
     suspend fun setBranchPrefix(prefix: String): String? {

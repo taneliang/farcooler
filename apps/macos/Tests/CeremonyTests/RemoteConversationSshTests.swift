@@ -17,7 +17,7 @@ import Testing
 ///
 /// Then the real thing: `NativeAgents` pairs the Mac's key through the real
 /// CLI over ssh, the client core dials the runner pinned to the host key in
-/// the scratch `known_hosts`, the projector is turned on over ssh, rows are
+/// the scratch `known_hosts`, with no setting turned on (ov-830), rows are
 /// read and followed, a send and Stop come back with the runner's word, a
 /// revoke on the runner ends the session and brings the terminal back with
 /// no re-pair, and a runner that stops answering does the same.
@@ -205,8 +205,9 @@ struct RemoteConversationSshTests {
 
         // The Mac: a key in a memory vault, the real CLI over the wrapper.
         let defaults = RemoteConversationTests.defaults()
-        defaults.set(true, forKey: NativeAgents.settingKey)
         let pairing = RemotePairing(key: ConversationKey(vault: MemoryConversationKeyVault()), defaults: defaults)
+        // Pair, chosen in Settings (ov-830): nothing pairs by itself.
+        pairing.consentToPair(target)
         let mac = macEnvironment
         let cli = cli
         pairing.cli = { args in
@@ -233,7 +234,7 @@ struct RemoteConversationSshTests {
         let line = try #require(lines.split(separator: "\n").first { $0.contains(pairing.key.clientID!) })
         #expect(line.hasPrefix("restrict,command=\""))
         #expect(line.contains("--scope control"))
-        #expect(try String(contentsOfFile: base + "/config.toml", encoding: .utf8).contains("projector = true"))
+        #expect((try? String(contentsOfFile: base + "/config.toml", encoding: .utf8))?.contains("projector") != true, "no setting written")
 
         // Rows, followed.
         let model = agents.model(for: id, target: target)

@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 /// The pane's switch where the conversation view isn't offered, for a reason
-/// about the runner, the setting or the pairing (ov-443): the same glyph,
+/// about the runner or the pairing (ov-443): the same glyph,
 /// dimmed, in the same place, and a click says why, with the way to Settings
 /// where that's where it's fixed. A pane that isn't Claude or Codex shows no
 /// switch at all (`AgentConversation.Unavailable.isAboutTheRunner`).
@@ -17,7 +17,6 @@ struct ConversationUnavailableChip: View {
     /// The Settings tab that fixes `reason`, if one does.
     static func settingsTab(for reason: AgentConversation.Unavailable) -> String? {
         switch reason {
-        case .settingOff: return SettingsTab.general
         case .pairingNeeded: return "devices"
         default: return nil
         }
@@ -25,7 +24,7 @@ struct ConversationUnavailableChip: View {
 
     var body: some View {
         chip
-        .help("Conversation Unavailable: \(reason.sentence)")
+        .help("Conversation Unavailable. \(reason.note)")
         .accessibilityLabel("Conversation Unavailable")
         .accessibilityValue(reason.sentence)
         .identified("native-switch-unavailable")
@@ -78,7 +77,7 @@ struct ConversationUnavailableNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             Text("Conversation Unavailable").font(.headline)
-            Text(reason.sentence)
+            Text(reason.note)
                 .foregroundStyle(.secondary)  // style-exempt: a popover's text, system material
                 .fixedSize(horizontal: false, vertical: true)
             if let tab = ConversationUnavailableChip.settingsTab(for: reason) {

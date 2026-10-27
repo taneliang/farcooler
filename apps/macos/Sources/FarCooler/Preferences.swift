@@ -217,7 +217,6 @@ struct SettingsView: View {
     @ObservedObject private var themes = Themes.shared
     @StateObject private var service = ServiceRegistration()
     @StateObject private var cliTools = CommandLineTools()
-    @ObservedObject private var native = NativeAgents.shared
 
     var body: some View {
         TabView(selection: SettingsTab.binding($preferences.settingsTab)) {
@@ -389,17 +388,6 @@ struct SettingsView: View {
 
                 Setting("Lost terminals are kept until you dismiss them.") {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
-                }
-
-                // Off by default until it matches the terminal (ov-372).
-                Setting(LocalizedStringKey(NativeAgents.settingNote)) {
-                    Toggle(
-                        "Conversation view for Claude and Codex panes",
-                        isOn: Binding(get: { native.enabled }, set: { on in Task { await native.setEnabled(on) } }))
-                        .disabled(native.changing)
-                    if let trouble = native.settingTrouble {
-                        Text(trouble).font(.callout).foregroundStyle(.secondary)
-                    }
                 }
 
                 Setting("Active only while more than one pane is on screen.") {

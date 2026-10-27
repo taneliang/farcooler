@@ -22,12 +22,12 @@ extension AgentConversation {
         running ?? program ?? preset
     }
 
-    /// Why a pane isn't offered the conversation view.
+    /// Why a pane isn't offered the conversation view. There is no setting
+    /// (ov-830): the view is offered wherever a runner serves it to a
+    /// running Claude or Codex pane.
     public enum Unavailable: Equatable, Sendable {
-        /// The view's setting is off (this Mac's), or the runner's projector
-        /// is (a phone's runner).
-        case settingOff
-        /// The runner is from before the view, or before this agent's view.
+        /// The runner is from before the view, or before this agent's view,
+        /// or from before ov-830 with its projector setting off.
         case runnerNeedsUpdate
         /// Not claude or codex in a terminal.
         case notAnAgent
@@ -44,7 +44,6 @@ extension AgentConversation {
         /// The reason, in a sentence.
         public var sentence: String {
             switch self {
-            case .settingOff: return "Turn on Conversation view in Settings."
             case .runnerNeedsUpdate: return "This runner needs an update to show the conversation."
             case .notAnAgent: return "This isn’t a Claude or Codex pane."
             case .notRunning: return "The agent in this pane isn’t running."
@@ -54,17 +53,26 @@ extension AgentConversation {
             }
         }
 
-        /// The reason as this device should read it. A device that may not
-        /// change the runner's setting is not told to turn it on (ov-443
-        /// review 1): it is told whose switch it is.
-        public func sentence(maySetSetting: Bool) -> String {
-            guard self == .settingOff, !maySetSetting else { return sentence }
-            return "Conversation view is off on this runner. Turn it on from a device with full access."
+        /// The check that failed, by the name `farcooler terminal
+        /// conversation-check` prints for it (ov-830), so a reason read off
+        /// a screen finds its line in the command's output.
+        public var check: String {
+            switch self {
+            case .notAnAgent: return "Pane"
+            case .notRunning: return "Agent running"
+            case .runnerNeedsUpdate: return "Runner version"
+            case .pairingNeeded: return "Pairing"
+            case .unreachable, .said: return "Connection"
+            }
         }
 
+        /// The reason with its check, for a line drawn under a dimmed control,
+        /// which is read without hovering.
+        public var note: String { "\(check): \(sentence)" }
+
         /// Whether the pane should still show a dimmed switch that says the
-        /// reason: an agent's pane whose runner, setting or pairing is in the
-        /// way. A pane that isn't an agent's shows no switch at all.
+        /// reason: an agent's pane whose runner or pairing is in the way. A
+        /// pane that isn't an agent's shows no switch at all.
         public var isAboutTheRunner: Bool {
             switch self {
             case .notAnAgent, .notRunning: return false
@@ -84,20 +92,19 @@ extension AgentConversation {
 
     /// Why the pane isn't offered the view, nil where it is.
     ///
-    /// The pane first: a shell is never told to turn a setting on. Then the
+    /// The pane first: a shell is never told about its runner. Then the
     /// runner: `offered` is its hello's capabilities, nil while there's no
-    /// link to it; `projectorOn` what it says of its projector, nil where
-    /// that's unknown. `agent_rows` is offered only while the projector is
-    /// on, so a runner that has the setting and says it's off needs the
-    /// setting, and any other runner without rows and compose needs an
-    /// update.
+    /// link to it. A runner without rows and compose needs an update: every
+    /// runner from ov-830 offers both, and one from before offers rows only
+    /// while its projector setting is on, which an update retires (ov-830:
+    /// the app doesn't turn that setting on for it, since that brought back
+    /// the always-on projector, and a device without full access can't).
     public static func unavailable(
-        paneMode: String?, agent: String, running: Bool = true, offered: Set<String>?, projectorOn: Bool? = nil
+        paneMode: String?, agent: String, running: Bool = true, offered: Set<String>?
     ) -> Unavailable? {
         if let pane = unavailable(paneMode: paneMode, agent: agent, running: running) { return pane }
         guard let offered else { return .unreachable }
         guard offered.contains(Capability.agentRows.rawValue), offered.contains(Capability.agentCompose.rawValue) else {
-            if projectorOn == false, offered.contains(Capability.projectorSetting.rawValue) { return .settingOff }
             return .runnerNeedsUpdate
         }
         if agent.hasPrefix("codex"), !offered.contains(Capability.codexView.rawValue) { return .runnerNeedsUpdate }

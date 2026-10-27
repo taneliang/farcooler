@@ -76,7 +76,7 @@ struct NativeComposerFixTests {
     func richFollowsTheOffer() throws {
         for (offered, rich) in [(Set(["agent_rows", "agent_compose"]), false), (Set(["agent_rows", "agent_compose", "compose"]), true)] {
             let agents = NativeAgents(defaults: ScratchDefaults.suite("native-fix-\(UUID().uuidString)")!)
-            agents.pretend(enabled: true, rowsServed: true, core: RunnerCore(), offered: offered)
+            agents.pretend(rowsServed: true, core: RunnerCore(), offered: offered)
             let model = agents.model(for: "0199aaaa-0000-7000-8000-00000000000\(rich ? 5 : 4)")
             #expect(model.rich == rich, "\(offered)")
             model.draft = "one\ntwo"

@@ -77,20 +77,6 @@ class AgentConversationTest {
         assertTrue(AgentConversation.picker("Codex").contains("@ or $"))
     }
 
-    @Test
-    fun `the settings row shows on a runner that says where the setting stands, changeable by its host admin`() {
-        val admin = build(Capability.PROJECTOR_SETTING, scope = "host_admin")
-        val control = build(Capability.PROJECTOR_SETTING, scope = "control")
-        assertTrue(AgentConversation.offersSetting(admin, false))
-        assertFalse(AgentConversation.offersSetting(admin, null))
-        // A phone paired with control sees where it stands, dimmed (ov-443).
-        assertTrue(AgentConversation.offersSetting(control, true))
-        assertTrue(AgentConversation.maySetSetting(admin))
-        assertFalse(AgentConversation.maySetSetting(control))
-        assertFalse(AgentConversation.offersSetting(build(Capability.TERMINALS, scope = "host_admin"), true))
-        assertFalse(AgentConversation.offersSetting(null, true))
-    }
-
     /**
      * The owner's panes (ov-443): a claude that named its session, whose preset
      * is the title, and a claude typed into a shell. Neither was offered the view.
@@ -115,25 +101,40 @@ class AgentConversationTest {
     @Test
     fun `an unoffered pane says why, the pane first`() {
         val u = AgentConversation.Unavailable::class.java
-        fun why(agent: String, build: DaemonBuild?, projectorOn: Boolean? = null, paneMode: String? = null, running: Boolean = true) =
-            AgentConversation.unavailable(paneMode, agent, running, build, projectorOn)
+        fun why(agent: String, build: DaemonBuild?, paneMode: String? = null, running: Boolean = true) =
+            AgentConversation.unavailable(paneMode, agent, running, build)
         assertNull(why("claude", serving))
         assertEquals(AgentConversation.Unavailable.NOT_AN_AGENT, why("shell", null))
         assertEquals(AgentConversation.Unavailable.NOT_AN_AGENT, why("claude", serving, paneMode = "agent"))
         assertEquals(AgentConversation.Unavailable.NOT_RUNNING, why("claude", serving, running = false))
         assertEquals(AgentConversation.Unavailable.UNREACHABLE, why("claude", null))
+        // A runner from before ov-830 with its projector setting off: it needs an update,
+        // and nothing tells a person to find a setting that's gone.
         val off = build(Capability.AGENT_COMPOSE, Capability.PROJECTOR_SETTING)
-        assertEquals(AgentConversation.Unavailable.SETTING_OFF, why("claude", off, projectorOn = false))
         assertEquals(AgentConversation.Unavailable.RUNNER_NEEDS_UPDATE, why("claude", off))
         assertEquals(AgentConversation.Unavailable.RUNNER_NEEDS_UPDATE, why("codex", serving))
-        assertEquals("Turn on the conversation view in this runner’s settings.", AgentConversation.Unavailable.SETTING_OFF.sentence)
-        // A device that can't change it is told whose switch it is (review 1).
-        val settingOff = AgentConversation.Unavailable.SETTING_OFF
-        assertEquals(settingOff.sentence, settingOff.sentence(true))
-        assertTrue(settingOff.sentence(false).contains("device with full access"))
-        assertEquals(AgentConversation.Unavailable.UNREACHABLE.sentence, AgentConversation.Unavailable.UNREACHABLE.sentence(false))
         assertFalse(AgentConversation.Unavailable.NOT_AN_AGENT.isAboutTheRunner)
         assertTrue(u.enumConstants.all { it.sentence.endsWith(".") })
+        // Each names the check `terminal conversation-check` prints for it, as AgentKit's do.
+        assertEquals("Runner version: This runner needs an update to show the conversation.", AgentConversation.Unavailable.RUNNER_NEEDS_UPDATE.note)
+        assertEquals("Connection", AgentConversation.Unavailable.UNREACHABLE.check)
+    }
+
+    /**
+     * ov-830: the owner's orchestrator, a claude typed into a shell and then adopted, is offered the
+     * view on a runner that serves it, as one the runner launched is. Goes red with a gate on how the
+     * pane was launched (`program`) or a setting back in `offered`.
+     */
+    @Test
+    fun `an adopted orchestrator is offered the view, as a launched one still is`() {
+        val adopted = Terminal(
+            id = "o1", preset = "User test issues and onboarding flow (2)", program = "shell", runningAgent = "claude",
+            state = "running", role = "orchestrator",
+        )
+        val launched = Terminal(id = "o2", preset = "claude", program = "claude", runningAgent = "claude", state = "running", role = "orchestrator")
+        assertTrue(AgentConversation.offered(serving, null, adopted))
+        assertNull(AgentConversation.unavailable(adopted.paneMode, AgentConversation.agent(adopted), true, serving))
+        assertTrue(AgentConversation.offered(serving, null, launched))
     }
 
     @Test

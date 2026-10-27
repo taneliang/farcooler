@@ -3,38 +3,28 @@ import Foundation
 import SwiftUI
 
 /// The native view for terminal-mode claude panes, app-wide (ov-372): the
-/// setting that gates it, the one connection per runner it reads through,
-/// and each pane's model.
+/// one connection per runner it reads through, and each pane's model.
 ///
-/// **Off by default**, so it can ship before it matches the terminal. Turning
-/// it on turns the runner's projector on (`farcooler settings set-projector
-/// on`, which writes `[agents] projector` to the runner's config.toml and
-/// takes effect at once), then reconnects, since a hello says what a runner
-/// offers only when it's made.
+/// **No setting** (ov-830): the view is an option on each pane already, so
+/// it's offered wherever a runner serves it. A runner's projector opens a
+/// pane's rows only while a view asks for them, so offering costs a runner
+/// nothing until somebody looks.
 ///
 /// **Every runner, each over its own connection.** This Mac's runner over
 /// its socket. A remote runner over the client core's own ssh session
 /// (ov-408), signed in with this Mac's conversation key, which
-/// `RemotePairing` pairs with the runner the way a phone is paired. The rest
-/// of the Mac still reaches a remote runner by the CLI over ssh, a process at
-/// a time; reading rows without a process per pane is why this one doesn't.
+/// `RemotePairing` pairs with the runner the way a phone is paired, once
+/// the person pairs it in Settings. The rest of the Mac still reaches a
+/// remote runner by the CLI over ssh, a process at a time; reading rows
+/// without a process per pane is why this one doesn't.
 ///
-/// Wherever the view can't be offered (the setting off, the runner without
-/// `agent_rows`, a remote runner that couldn't be paired or reached, a pane
-/// that isn't claude in a terminal), the switch is hidden and the terminal
-/// shows. Never a blank pane.
+/// Wherever the view can't be offered (the runner without `agent_rows`, a
+/// remote runner that isn't paired or couldn't be reached, a pane that isn't
+/// claude in a terminal), the terminal shows, and an agent's pane says why.
+/// Never a blank pane.
 @MainActor
 final class NativeAgents: ObservableObject {
     static let shared = NativeAgents()
-
-    /// The user's setting.
-    @Published private(set) var enabled: Bool
-    /// What went wrong turning the setting on or off, or reaching this Mac's
-    /// runner, for Settings to show. A remote runner's is its pairing state.
-    @Published private(set) var settingTrouble: String?
-    /// A change to the setting is on its way to the runner: the switch waits
-    /// for it, so two flips can't land out of order.
-    @Published private(set) var changing = false
 
     /// One runner's connection, as its last hello left it.
     struct Link {
@@ -52,8 +42,7 @@ final class NativeAgents: ObservableObject {
     /// This Mac's runner's connection.
     var core: RunnerCore? { links[""]?.core }
 
-    /// The remote runners the fleet brought up, connected while the setting
-    /// is on.
+    /// The remote runners the fleet brought up, connected where paired.
     @Published private(set) var remotes: Set<String> = []
     private var panes: [String: NativePaneModel] = [:]
     /// Which runner each pane is on.
@@ -64,56 +53,43 @@ final class NativeAgents: ObservableObject {
     private var retrying: [String: Task<Void, Never>] = [:]
     /// Reconnects in a row the runner didn't answer.
     private var failures: [String: Int] = [:]
+    /// How many reconnects in a row `target`'s runner didn't answer.
+    func failedConnects(_ target: String = "") -> Int { failures[target] ?? 0 }
     /// How many of them a view is kept through before it's dropped for the
     /// terminal, and how long the first retry waits (doubling, to a minute).
     /// A test sets these near zero.
     var keepThroughFailures = 4
     var retryDelay: Duration = .seconds(2)
 
-    /// How the setting reaches the runner. The real CLI in the app; a test
-    /// passes its own.
-    var setProjector: (Bool) async -> String? = { on in
-        let ran = await CLI.run(["settings", "set-projector", on ? "on" : "off"])
-        // The CLI's own words are for a terminal; this is the sentence for
-        // a settings window. The usual cause is a runner from before ov-372.
-        return ran.ok ? nil : "This Mac’s runner didn’t take the setting. Update Far Cooler and try again."
-    }
     /// Where this Mac's runner listens.
     var socket: () -> String = { RunnerCore.localSocket() }
     /// How a remote runner is paired and reached.
     let pairing: RemotePairing
 
-    static let settingKey = "nativeAgent.enabled"
-    /// The setting's line in Settings: it adds a key to every other runner,
-    /// and that key runs commands there.
-    static let settingNote =
-        "Adds a view of each Claude or Codex pane you can read and reply in, beside its terminal. On other runners, this Mac adds "
-        + "a key of its own to each one, which can create terminals and run commands there. See Devices."
-
     init(defaults: UserDefaults = .standard, pairing: RemotePairing? = nil) {
         self.defaults = defaults
         self.pairing = pairing ?? .shared
-        enabled = defaults.bool(forKey: Self.settingKey)
         // Photos kept past their age, or past the caps, go once per launch (ov-622).
         DraftImages.shared.prune()
         let cache = PromptImageStore.disk.files
         Task.detached(priority: .utility) { cache.prune() }
     }
 
-    /// Start reading this Mac's runner, when the setting is on. Called at
-    /// launch, and when its daemon comes back.
+    /// Start reading this Mac's runner. Called at launch, and when its
+    /// daemon comes back.
     func start() {
-        guard enabled else { return }
         reconnect()
     }
 
     /// A remote runner the fleet brought up or reconnected to: read it too,
-    /// when the setting is on, unless it's already connected or on its way.
-    /// A link that drops asks again by itself (`linkLost`).
+    /// unless it's already connected or on its way. A runner this Mac isn't
+    /// paired with answers that it needs pairing, without a key being added
+    /// (`RemotePairing.connect`). A link that drops asks again by itself
+    /// (`linkLost`).
     func start(target: String) {
         guard !target.isEmpty else { return start() }
         remotes.insert(target)
-        guard enabled, connecting[target] == nil, links[target]?.rowsServed != true else { return }
+        guard connecting[target] == nil, links[target]?.rowsServed != true else { return }
         reconnect(target)
     }
 
@@ -128,38 +104,6 @@ final class NativeAgents: ObservableObject {
         retrying[target] = nil
         drop(target)
         links[target] = nil
-    }
-
-    /// The setting's switch.
-    func setEnabled(_ on: Bool) async {
-        guard !changing else { return }
-        changing = true
-        defer { changing = false }
-        settingTrouble = nil
-        if let trouble = await setProjector(on) {
-            settingTrouble = trouble
-            return
-        }
-        enabled = on
-        defaults.set(on, forKey: Self.settingKey)
-        if on {
-            for remote in remotes { reconnect(remote) }
-            reconnect()
-            await connecting[""]?.value
-        } else {
-            // A reconnect still on its way would otherwise set a core after,
-            // or write a line on a runner after the setting went off.
-            for remote in remotes { pairing.halt(remote) }
-            for task in connecting.values { task.cancel() }
-            for task in retrying.values { task.cancel() }
-            connecting = [:]
-            retrying = [:]
-            failures = [:]
-            for pane in panes.values { pane.store.stop() }
-            panes = [:]
-            paneTargets = [:]
-            links = [:]
-        }
     }
 
     /// A fresh connection to `target`'s runner (this Mac's when empty), so
@@ -193,7 +137,6 @@ final class NativeAgents: ObservableObject {
         switch outcome {
         case .connected(let core, let offered):
             failures[target] = 0
-            if target.isEmpty { settingTrouble = nil }
             // Rows to read and a way to send: a runner with rows from before
             // `terminal.compose` gets the terminal, not a view whose every
             // send would fail.
@@ -212,9 +155,6 @@ final class NativeAgents: ObservableObject {
         case .unreachable:
             let failed = (failures[target] ?? 0) + 1
             failures[target] = failed
-            if target.isEmpty {
-                settingTrouble = "Far Cooler can’t reach this Mac’s runner, so Claude and Codex panes show the terminal."
-            }
             // The runner didn't answer this once, but it did before: keep
             // what that hello said for a few tries. Tearing the view down for
             // a blink would put the terminal up, with the keyboard, and bring
@@ -224,9 +164,6 @@ final class NativeAgents: ObservableObject {
             // something to call `start()`, and past `keepThroughFailures`
             // it's dropped: a connection nobody can reach shows the terminal.
             if link.rowsServed, link.core != nil, failed <= keepThroughFailures {
-                if target.isEmpty {
-                    settingTrouble = "Far Cooler can’t reach this Mac’s runner right now. The conversation view may be out of date until it answers."
-                }
                 scheduleRetry(target)
                 return
             }
@@ -262,7 +199,7 @@ final class NativeAgents: ObservableObject {
     /// when the fleet next retries, so a lost runner is said (the stale
     /// banner) and, past its retries, shows the terminal.
     func linkLost(_ target: String, core: RunnerCore) {
-        guard enabled, links[target]?.core === core, connecting[target] == nil, retrying[target] == nil else { return }
+        guard links[target]?.core === core, connecting[target] == nil, retrying[target] == nil else { return }
         Task { [weak self] in
             guard await !core.isConnected, let self, self.links[target]?.core === core, self.connecting[target] == nil,
                 self.retrying[target] == nil
@@ -272,11 +209,11 @@ final class NativeAgents: ObservableObject {
     }
 
     /// Whether `terminal`, on the runner `target` names, gets the native
-    /// view: the setting on, that runner serving rows over a connection this
-    /// Mac holds, and claude running in a terminal-mode pane, or codex where
-    /// that runner projects and composes into it (`codex_view`, ov-416).
+    /// view: that runner serving rows over a connection this Mac holds, and
+    /// claude running in a terminal-mode pane, or codex where that runner
+    /// projects and composes into it (`codex_view`, ov-416).
     func offers(_ terminal: Terminal, target: String) -> Bool {
-        guard enabled, let link = links[target] else { return false }
+        guard let link = links[target] else { return false }
         return link.rowsServed && link.core != nil && Self.isAgentInATerminal(terminal, offered: link.offered)
     }
 
@@ -304,12 +241,13 @@ final class NativeAgents: ObservableObject {
         let link = links[target]
         let offered = link?.core == nil ? nil : link?.offered
         if let pane = AgentConversation.unavailable(paneMode: terminal.paneMode, agent: Self.agent(of: terminal)) { return pane }
-        guard enabled else { return .settingOff }
         if !target.isEmpty, link?.core == nil {
             switch pairing.states[target] {
             case .removed?, .unpaired?: return .pairingNeeded
             case .unavailable(let words)?: return .said(words)
-            case .paired?, nil: break
+            case .paired?: break
+            case nil where pairing.waitsForConsent(target): return .pairingNeeded
+            case nil: break
             }
         }
         if offered == nil, connecting[target] != nil || retrying[target] != nil { return .said(Self.connectingSentence) }
@@ -400,13 +338,14 @@ final class NativeAgents: ObservableObject {
     /// a runner that was unpaired or whose key was removed; only Pair Again
     /// does.
     func retry(_ target: String) {
-        if enabled { reconnect(target) }
+        reconnect(target)
     }
 
-    /// Settings' Pair Again: pair `target`'s runner on the next connect, now.
+    /// Settings' Pair and Pair Again: pair `target`'s runner on the next
+    /// connect, now.
     func pairAgain(_ target: String) {
         pairing.allowPairing(target: target)
-        if enabled { reconnect(target) }
+        reconnect(target)
     }
 
     /// A model a test made, under the registry's rules.
@@ -415,9 +354,8 @@ final class NativeAgents: ObservableObject {
         paneTargets[model.terminal] = target
     }
 
-    /// For tests: the setting as if turned on, against `core`.
-    func pretend(enabled: Bool, rowsServed: Bool, core: RunnerCore?, offered: Set<String> = [], target: String = "") {
-        self.enabled = enabled
+    /// For tests: `target`'s runner as if connected, against `core`.
+    func pretend(rowsServed: Bool, core: RunnerCore?, offered: Set<String> = [], target: String = "") {
         links[target] = Link(core: core, offered: offered, rowsServed: rowsServed)
     }
 }

@@ -88,7 +88,7 @@ struct NativeInterruptTests {
         let terminal = try NativeAgentTests.terminal()
         for (offered, served) in [(Set(["agent_rows", "agent_compose", "terminal_interrupt"]), true), (Set(["agent_rows", "agent_compose"]), false)] {
             let agents = NativeAgents(defaults: ScratchDefaults.suite("native-interrupt-tests-\(UUID().uuidString)")!)
-            agents.pretend(enabled: true, rowsServed: true, core: RunnerCore(), offered: offered)
+            agents.pretend(rowsServed: true, core: RunnerCore(), offered: offered)
             #expect((agents.model(for: terminal.id).keys != nil) == served, "\(offered)")
         }
     }

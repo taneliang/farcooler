@@ -145,6 +145,13 @@ struct MainWindowFocus: Equatable {
         return layout.conversationUnavailable
     }
 
+    /// The line under it, while it's dimmed for a reason about the runner or
+    /// the pairing (ov-830).
+    static func conversationNote(_ focus: MainWindowFocus?) -> String? {
+        guard navigates(focus), let layout = focus?.layout, !layout.switchesConversation else { return nil }
+        return layout.conversationNote
+    }
+
     /// A menu item that reads the main window (⌘N, ⌘P, ⌘R, ⌘/) acts only
     /// while it's key: with Settings or About key, nothing hears it.
     static func isKey(_ focus: MainWindowFocus?) -> Bool {

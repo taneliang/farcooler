@@ -25,13 +25,13 @@ import Testing
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: agent, offered: served) == .notAnAgent)
     }
 
-    /// A device that can't change the setting is told whose it is, not to turn it on.
-    @Test func aDeviceWithoutFullAccessIsNotToldToTurnTheSettingOn() {
-        let off = AgentConversation.Unavailable.settingOff
-        #expect(off.sentence(maySetSetting: true) == "Turn on Conversation view in Settings.")
-        #expect(off.sentence(maySetSetting: false).contains("device with full access"))
-        #expect(!off.sentence(maySetSetting: false).contains("Turn on Conversation view in Settings"))
-        #expect(AgentConversation.Unavailable.runnerNeedsUpdate.sentence(maySetSetting: false) == AgentConversation.Unavailable.runnerNeedsUpdate.sentence)
+    /// Each reason names the check `farcooler terminal conversation-check`
+    /// prints, and its note leads with it (ov-830).
+    @Test func eachReasonNamesItsCheck() {
+        #expect(AgentConversation.Unavailable.runnerNeedsUpdate.check == "Runner version")
+        #expect(AgentConversation.Unavailable.pairingNeeded.check == "Pairing")
+        #expect(AgentConversation.Unavailable.said("Host key changed.").check == "Connection")
+        #expect(AgentConversation.Unavailable.unreachable.note == "Connection: Far Cooler can’t reach this runner right now.")
     }
 
     @Test func aClaudeOrCodexPaneOnAServingRunnerIsOffered() {
@@ -39,21 +39,21 @@ import Testing
         #expect(AgentConversation.unavailable(paneMode: nil, agent: "codex", offered: served) == nil)
     }
 
-    /// The pane first: a shell is never told to turn a setting on.
+    /// The pane first: a shell is never told about its runner.
     @Test func thePaneComesFirst() {
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "shell", offered: nil) == .notAnAgent)
         #expect(AgentConversation.unavailable(paneMode: "changes", agent: "claude", offered: served) == .notAnAgent)
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", running: false, offered: served) == .notRunning)
     }
 
+    /// A runner from before ov-830 with its projector setting off offers
+    /// the setting and compose but not rows: it needs an update, which is
+    /// true, and nothing tells a person to find a setting that's gone.
     @Test func theRunnerSaysWhatsMissing() {
         let off: Set<String> = ["agent_compose", "projector_setting"]
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: nil) == .unreachable)
-        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: off, projectorOn: false) == .settingOff)
-        #expect(
-            AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: off, projectorOn: nil) == .runnerNeedsUpdate,
-            "nothing says the projector is off")
-        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: ["agent_rows"], projectorOn: false) == .runnerNeedsUpdate)
+        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: off) == .runnerNeedsUpdate)
+        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: ["agent_rows"]) == .runnerNeedsUpdate)
         #expect(
             AgentConversation.unavailable(paneMode: "terminal", agent: "codex", offered: ["agent_rows", "agent_compose"]) == .runnerNeedsUpdate,
             "a runner from before codex's view")
@@ -61,14 +61,13 @@ import Testing
 
     @Test func eachReasonIsASentenceAndOnlyTheRunnersShowASwitch() {
         let all: [AgentConversation.Unavailable] = [
-            .settingOff, .runnerNeedsUpdate, .notAnAgent, .notRunning, .pairingNeeded, .unreachable, .said("Can’t reach it."),
+            .runnerNeedsUpdate, .notAnAgent, .notRunning, .pairingNeeded, .unreachable, .said("Can’t reach it."),
         ]
         for reason in all {
             #expect(reason.sentence.hasSuffix("."), "\(reason)")
             #expect(!reason.sentence.contains("Error"), "\(reason)")
         }
-        #expect(AgentConversation.Unavailable.settingOff.sentence == "Turn on Conversation view in Settings.")
         #expect(AgentConversation.Unavailable.notAnAgent.sentence == "This isn’t a Claude or Codex pane.")
-        #expect(all.filter(\.isAboutTheRunner).count == 5)
+        #expect(all.filter(\.isAboutTheRunner).count == 4)
     }
 }

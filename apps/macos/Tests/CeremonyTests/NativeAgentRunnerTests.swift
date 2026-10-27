@@ -84,11 +84,8 @@ struct NativeAgentRunnerTests {
         let core = RunnerCore()
         let socket = RunnerCore.localSocket(environment: Self.environment(home))
         do {
-            // Off until the setting turns it on, which needs no restart.
-            #expect(!(try await core.connect(socket: socket)).contains("agent_rows"))
-            let set = await farcooler(["settings", "set-projector", "on"], home: home)
-            #expect(set.ok, "\(set.err)")
-            #expect((try? String(contentsOfFile: home + "/config.toml", encoding: .utf8))?.contains("projector = true") == true)
+            // Served from the start, with no setting (ov-830).
+            #expect(try await core.connect(socket: socket).contains("agent_rows"))
             let fresh = RunnerCore()
             let offered = try await fresh.connect(socket: socket)
             #expect(offered.contains("agent_rows"))

@@ -18,14 +18,17 @@ import Foundation
 /// The daemon writes the line (restricted, a forced command, `control`), as it
 /// does for a phone. Restricted means no ssh shell, not little power:
 /// `control` creates terminals and types into them, which runs commands as
-/// the runner's user. The setting's copy says so, since turning it on is the
-/// consent for every runner. It grants nothing the owner's own ssh on that
+/// the runner's user. Settings > Devices says so beside each runner's Pair
+/// button, and that button is the consent, one runner at a time (ov-830:
+/// before, a setting was the consent for every runner at once, and the
+/// setting is gone). It grants nothing the owner's own ssh on that
 /// runner can't do, but it's a software key in the login keychain, used
 /// without whatever presence check the owner's ssh key has.
 ///
-/// **Revocation is never undone by itself.** A runner is paired automatically
-/// only when this Mac has no record of it. A runner that refuses a key this
-/// Mac paired was revoked (`client revoke`), and one the person unpaired here
+/// **Nothing is paired by itself.** A runner this Mac has no record of waits
+/// for Pair in Settings (`waitsForConsent`); one paired before, under the
+/// setting's consent, stays paired. A runner that refuses a key this Mac
+/// paired was revoked (`client revoke`), and one the person unpaired here
 /// stays unpaired. Both show the terminal until Pair Again in Settings.
 ///
 /// **The owner's ssh setup doesn't change.** `RemoteReach` reads the config
@@ -82,8 +85,9 @@ final class RemotePairing: ObservableObject {
     private var pins: [String: String] = [:]
     /// Bumped by `halt`: a connect begun under an older one acts no more.
     private var generations: [String: Int] = [:]
-    /// Runners whose projector this run already turned on.
-    private var projectorAsked: Set<String> = []
+    /// Runners the person chose Pair for in this run, which have no record
+    /// until a connect proves the line.
+    private var consented: Set<String> = []
 
     static let recordKey = "nativeAgent.remotePairings"
 
@@ -105,10 +109,10 @@ final class RemotePairing: ObservableObject {
     /// The label the runner's device list shows for this Mac's line.
     static var label: String { "\(thisMacName) Conversation View" }
 
-    /// Reach `target`'s runner, pairing first where this Mac never has.
+    /// Reach `target`'s runner, pairing first where the person said to.
     ///
     /// **Nothing a person stopped is undone by a connect already on its way.**
-    /// Unpair, the setting going off and a runner leaving the fleet each bump
+    /// Unpair and a runner leaving the fleet each bump
     /// `target`'s generation (`halt`), and every step after a suspension
     /// checks it, the record and cancellation before it writes a line or a
     /// record. A line an abandoned connect wrote anyway is taken back off.
@@ -118,6 +122,11 @@ final class RemotePairing: ObservableObject {
         // passing sentence (and a Try Again that isn't Pair Again).
         if let stopped = stopped(target) {
             states[target] = stopped
+            return .unavailable
+        }
+        // Never paired, and not asked to: no key is written (ov-830).
+        if waitsForConsent(target) {
+            states[target] = nil
             return .unavailable
         }
         let reach: RemoteReach
@@ -147,7 +156,7 @@ final class RemotePairing: ObservableObject {
 
         switch await open(reach, privateKey: privateKey, pin: pin) {
         case .connected(let core, let offered):
-            return await settle(target, generation, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
+            return await settle(target, generation, core, offered)
         case .rejected:
             guard current(target, generation) else { return .unavailable }
             // Revoked: a key this Mac paired, refused. Never re-paired here.
@@ -171,7 +180,7 @@ final class RemotePairing: ObservableObject {
             }
             // Recorded only once a connect proves the line (`settle`).
             guard case .connected(let core, let offered) = await open(reach, privateKey: privateKey, pin: pin) else { return .unreachable }
-            return await settle(target, generation, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
+            return await settle(target, generation, core, offered)
         case .failed:
             return .unreachable
         }
@@ -211,10 +220,26 @@ final class RemotePairing: ObservableObject {
         !Task.isCancelled && generations[target, default: 0] == generation && stopped(target) == nil
     }
 
-    /// Forget why `target` stopped, so the next connect pairs it again.
+    /// Forget why `target` stopped, and take this as the person's word to
+    /// pair it: the next connect does.
     func allowPairing(target: String) {
         record[target] = nil
         states[target] = nil
+        consentToPair(target)
+    }
+
+    /// The person's word to pair `target`, leaving whatever stopped it in
+    /// place: what Pair says on its way to `allowPairing`, and a test's
+    /// stand-in for that click.
+    func consentToPair(_ target: String) {
+        consented.insert(target)
+    }
+
+    /// Whether `target` has never been paired here and nobody has chosen
+    /// Pair for it: a connect writes no key, and its panes say pairing is
+    /// needed (ov-830).
+    func waitsForConsent(_ target: String) -> Bool {
+        record[target] == nil && !consented.contains(target)
     }
 
     // MARK: - Steps
@@ -260,21 +285,16 @@ final class RemotePairing: ObservableObject {
         return .failed
     }
 
-    /// Paired and connected; turn the runner's projector on once if its hello
-    /// doesn't serve rows, since the setting says it does.
+    /// Paired and connected. A runner whose hello doesn't serve rows is from
+    /// before ov-830 with its projector setting off: its panes say it needs
+    /// an update, and nothing turns that setting on for it.
     private func settle(
-        _ target: String, _ generation: Int, _ core: RunnerCore, _ offered: Set<String>, reach: RemoteReach, privateKey: String,
-        pin: String, clientID: String
+        _ target: String, _ generation: Int, _ core: RunnerCore, _ offered: Set<String>
     ) async -> Outcome {
         guard current(target, generation) else { return .unavailable }
-        record[target] = clientID
+        record[target] = key.clientID
         states[target] = .paired
-        guard !NativeAgents.serves(offered), !projectorAsked.contains(target) else { return .connected(core, offered) }
-        projectorAsked.insert(target)
-        guard await cli(["--runner", target, "settings", "set-projector", "on"]).ok,
-            case .connected(let fresh, let offered) = await open(reach, privateKey: privateKey, pin: pin)
-        else { return .connected(core, offered) }
-        return .connected(fresh, offered)
+        return .connected(core, offered)
     }
 
     private func unavailable(_ target: String, _ sentence: String) -> Outcome {

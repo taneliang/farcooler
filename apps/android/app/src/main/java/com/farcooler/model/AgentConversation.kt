@@ -10,8 +10,8 @@ object AgentConversation {
     /**
      * Whether a runner serves the view: rows to read and a way to send. A runner
      * with rows from before `terminal.compose` gets the terminal, not a view whose
-     * every send would fail. `agent_rows` is offered only while the runner's
-     * projector is on, so this is also the setting.
+     * every send would fail. Every runner from ov-830 offers both; one from before
+     * offers `agent_rows` only while its projector setting is on.
      */
     fun served(build: DaemonBuild?): Boolean =
         build != null && build.can(Capability.AGENT_ROWS) && build.can(Capability.AGENT_COMPOSE)
@@ -79,65 +79,41 @@ object AgentConversation {
 
     fun agent(terminal: Terminal): String = agent(terminal.runningAgent, terminal.program, terminal.preset)
 
-    /** Why a pane isn't offered the conversation view (ov-443), AgentKit's `Unavailable` with its words. */
-    enum class Unavailable(val sentence: String, val isAboutTheRunner: Boolean = true) {
-        SETTING_OFF("Turn on the conversation view in this runner’s settings."),
-        RUNNER_NEEDS_UPDATE("This runner needs an update to show the conversation."),
-        NOT_AN_AGENT("This isn’t a Claude or Codex pane.", isAboutTheRunner = false),
-        NOT_RUNNING("The agent in this pane isn’t running.", isAboutTheRunner = false),
-        UNREACHABLE("Far Cooler can’t reach this runner right now."),
+    /**
+     * Why a pane isn't offered the conversation view (ov-443), AgentKit's `Unavailable` with its words,
+     * and the check it failed as `farcooler terminal conversation-check` names it (ov-830). There is no
+     * setting: the view is offered wherever a runner serves it.
+     */
+    enum class Unavailable(val sentence: String, val check: String, val isAboutTheRunner: Boolean = true) {
+        RUNNER_NEEDS_UPDATE("This runner needs an update to show the conversation.", "Runner version"),
+        NOT_AN_AGENT("This isn’t a Claude or Codex pane.", "Pane", isAboutTheRunner = false),
+        NOT_RUNNING("The agent in this pane isn’t running.", "Agent running", isAboutTheRunner = false),
+        UNREACHABLE("Far Cooler can’t reach this runner right now.", "Connection"),
         ;
 
-        /** The reason as this device reads it: one that may not change the setting isn't told to turn it on. */
-        fun sentence(maySetSetting: Boolean): String =
-            if (this == SETTING_OFF && !maySetSetting) {
-                "Conversation view is off on this runner. Turn it on from a device with full access."
-            } else {
-                sentence
-            }
+        /** The reason with its check, as a dimmed switch says it. */
+        val note: String get() = "$check: $sentence"
     }
 
     /**
      * Why the pane isn't offered the view, null where it is. The pane first, so a
-     * shell is never told to turn a setting on; then the runner: [build] null
-     * while there's no link, [projectorOn] null where unknown. `agent_rows` is
-     * offered only while the projector is on, so a runner with the setting that
-     * says it's off needs the setting, and any other without rows and compose
-     * needs an update.
+     * shell is never told about its runner; then the runner: [build] null while
+     * there's no link. A runner without rows and compose needs an update: every
+     * runner from ov-830 offers both, and one from before offers rows only while
+     * its projector setting is on, which an update retires. The phone doesn't turn
+     * that setting on for it: that brought back the always-on projector, and a
+     * phone without full access can't.
      */
-    fun unavailable(paneMode: String?, agent: String, running: Boolean, build: DaemonBuild?, projectorOn: Boolean?): Unavailable? {
+    fun unavailable(paneMode: String?, agent: String, running: Boolean, build: DaemonBuild?): Unavailable? {
         val claude = agent.startsWith("claude")
         val codex = agent.startsWith("codex")
         if ((paneMode ?: "terminal") != "terminal" || !(claude || codex)) return Unavailable.NOT_AN_AGENT
         if (!running) return Unavailable.NOT_RUNNING
         if (build == null) return Unavailable.UNREACHABLE
-        if (!served(build)) {
-            return if (projectorOn == false && build.can(Capability.PROJECTOR_SETTING)) Unavailable.SETTING_OFF
-            else Unavailable.RUNNER_NEEDS_UPDATE
-        }
+        if (!served(build)) return Unavailable.RUNNER_NEEDS_UPDATE
         if (codex && !build.can(Capability.CODEX_VIEW)) return Unavailable.RUNNER_NEEDS_UPDATE
         return null
     }
-
-    /**
-     * Whether the runner settings screen shows the conversation view's switch: on
-     * a runner that has the setting and says where it stands. To every device, so
-     * one that may not change it still sees where it stands and why (ov-443).
-     */
-    fun offersSetting(build: DaemonBuild?, projectorOn: Boolean?): Boolean =
-        build != null && build.can(Capability.PROJECTOR_SETTING) && projectorOn != null
-
-    /**
-     * Whether this device may change it: the runner's host admin only.
-     * Client-side display only; the runner enforces it (`settings.set_projector`
-     * is `host_admin`).
-     */
-    fun maySetSetting(build: DaemonBuild?): Boolean = build?.grantedScope == "host_admin"
-
-    const val SETTING_TITLE = "Conversation view for Claude and Codex panes"
-    const val SETTING_FOOTER =
-        "Shows a Claude or Codex pane that runs in a terminal as a conversation you can read and reply to, " +
-            "on every device that reaches this runner. Its terminal is one tap away."
 
     /** One key per pane (R-27). */
     fun viewKey(terminal: String): String = "nativeAgent.view.$terminal"

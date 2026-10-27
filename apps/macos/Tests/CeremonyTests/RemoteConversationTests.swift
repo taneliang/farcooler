@@ -159,6 +159,8 @@ struct RemoteConversationTests {
     {
         let key = ConversationKey(vault: vault)
         let pairing = RemotePairing(key: key, defaults: defaults)
+        // The person chose Pair for it (ov-830): nothing pairs by itself.
+        pairing.consentToPair("me@box")
         pairing.resolve = { _ in .success(Self.reach) }
         pairing.cli = { args in
             runner.calls.append(args)
@@ -302,23 +304,44 @@ struct RemoteConversationTests {
         #expect(pairing.states["me@box"] == .unpaired)
     }
 
-    @Test("A runner whose hello serves no rows has its projector turned on once, then a fresh hello")
-    func theProjectorIsTurnedOnOnce() async {
+    /// A runner from before ov-830 with its projector setting off: paired,
+    /// its hello serves no rows, and nothing turns that setting on for it.
+    /// Its panes say it needs an update (`AgentConversation.unavailable`).
+    @Test("A runner whose hello serves no rows is left as it is: no setting is turned on")
+    func noSettingIsTurnedOn() async {
         let runner = Runner()
-        runner.offered = []
+        runner.offered = ["agent_compose", "projector_setting"]
         let pairing = Self.pairing(runner, defaults: Self.defaults())
-        pairing.cli = { args in
-            runner.calls.append(args)
-            if args.contains("enroll"), let at = args.firstIndex(of: "--key") { runner.keys.insert(args[at + 1]) }
-            if args.contains("set-projector") { runner.offered = ["agent_rows", "agent_compose"] }
-            return CLI.Result(ok: true, output: "", errors: "")
-        }
         guard case .connected(_, let offered) = await pairing.connect(target: "me@box") else {
             Issue.record("not connected")
             return
         }
-        #expect(NativeAgents.serves(offered))
-        #expect(runner.calls.contains(["--runner", "me@box", "settings", "set-projector", "on"]))
+        #expect(!NativeAgents.serves(offered))
+        #expect(!runner.calls.contains { $0.contains("set-projector") }, "turned an old runner's setting on")
+        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: offered) == .runnerNeedsUpdate)
+    }
+
+    /// Nothing pairs by itself (ov-830): with no setting to consent for every
+    /// runner, a runner never paired here and never chosen gets no key, and
+    /// its panes say pairing is needed. Goes red with the consent check gone
+    /// from `connect`.
+    @Test("A runner never paired and never chosen gets no key, and says pairing is needed")
+    func aRunnerNobodyChoseIsNotPaired() async throws {
+        let runner = Runner()
+        let defaults = Self.defaults()
+        let pairing = Self.pairing(runner, defaults: defaults)
+        guard case .unavailable = await pairing.connect(target: "other@box") else {
+            Issue.record("connected to a runner nobody chose")
+            return
+        }
+        #expect(runner.calls.isEmpty, "wrote a key nobody asked for")
+        #expect(runner.dials.isEmpty, "dialed a runner nobody chose")
+        #expect(pairing.waitsForConsent("other@box"))
+        let agents = NativeAgents(defaults: defaults, pairing: pairing)
+        let claude = try NativeAgentTests.terminal()
+        #expect(agents.unavailable(claude, target: "other@box") == .pairingNeeded)
+        pairing.allowPairing(target: "other@box")
+        #expect(!pairing.waitsForConsent("other@box"), "Pair is the consent")
     }
 
     @Test("A Keychain that refuses a read is not an empty one: no new key, nothing written")
@@ -424,7 +447,6 @@ struct RemoteConversationTests {
 
     static func agents(_ runner: Runner) -> NativeAgents {
         let defaults = Self.defaults()
-        defaults.set(true, forKey: NativeAgents.settingKey)
         return NativeAgents(defaults: defaults, pairing: Self.pairing(runner, defaults: defaults))
     }
 

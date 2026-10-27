@@ -438,8 +438,12 @@ struct FarCoolerCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: [.command, .control])
             .disabled(!MainWindowFocus.lays(\.switchesConversation, mainWindow))
-            // Dimmed, it says why (ov-443).
+            // Dimmed, it says why (ov-443), and for a runner's reason says it
+            // on a line of its own, read without hovering (ov-830).
             .help(MainWindowFocus.conversationUnavailable(mainWindow) ?? "")
+            if let note = MainWindowFocus.conversationNote(mainWindow) {
+                Text(note)
+            }
         }
 
         // The diff pane had not one shortcut in this file, which made the only

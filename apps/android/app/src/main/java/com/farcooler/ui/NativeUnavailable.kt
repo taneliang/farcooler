@@ -28,12 +28,11 @@ import com.farcooler.model.AgentConversation
 fun NativeUnavailableButton(
     reason: AgentConversation.Unavailable,
     modifier: Modifier = Modifier,
-    maySetSetting: Boolean = true,
 ) {
     var explaining by remember { mutableStateOf(false) }
     IconButton(
         onClick = { explaining = true },
-        modifier = modifier.testTag("native-switch-unavailable").semantics { stateDescription = reason.sentence(maySetSetting) },
+        modifier = modifier.testTag("native-switch-unavailable").semantics { stateDescription = reason.note },
     ) {
         Icon(
             Icons.Outlined.Forum,
@@ -46,7 +45,7 @@ fun NativeUnavailableButton(
             onDismissRequest = { explaining = false },
             confirmButton = { TextButton(onClick = { explaining = false }) { Text("OK") } },
             title = { Text("Conversation unavailable") },
-            text = { Text(reason.sentence(maySetSetting)) },
+            text = { Text(reason.note) },
         )
     }
 }

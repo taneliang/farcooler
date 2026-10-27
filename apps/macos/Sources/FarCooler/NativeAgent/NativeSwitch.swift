@@ -113,12 +113,10 @@ struct NativeSwitch<Surface: View>: View {
 }
 
 /// Which reasons a pane's dimmed switch shows (ov-443): one about the runner
-/// or the pairing. Not the setting being off, which is a choice: with it off
-/// by default, a dimmed switch on every Claude pane would be noise. The menu
-/// item's help still says it.
+/// or the pairing, never a pane that isn't an agent's.
 enum NativeSwitchReason {
     static func shown(_ reason: AgentConversation.Unavailable?) -> AgentConversation.Unavailable? {
-        guard let reason, reason.isAboutTheRunner, reason != .settingOff else { return nil }
+        guard let reason, reason.isAboutTheRunner else { return nil }
         return reason
     }
 }

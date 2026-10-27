@@ -19,15 +19,15 @@ struct NativeOfferTests {
             from: Data(#"{"id":"\#(id)","short":"t","title":"Terminal 1","state":"running","epoch":1,"paneMode":"terminal",\#(fields)}"#.utf8))
     }
 
-    static func agents(enabled: Bool = true, offered: Set<String>? = ["agent_rows", "agent_compose"], pairing: RemotePairing? = nil, target: String = "")
+    static func agents(offered: Set<String>? = ["agent_rows", "agent_compose"], pairing: RemotePairing? = nil, target: String = "")
         -> NativeAgents
     {
         let defaults = ScratchDefaults.suite("native-offer-tests-\(UUID().uuidString)")!
         let agents = NativeAgents(defaults: defaults, pairing: pairing ?? Self.pairing(defaults))
         if let offered {
-            agents.pretend(enabled: enabled, rowsServed: NativeAgents.serves(offered), core: RunnerCore(), offered: offered, target: target)
+            agents.pretend(rowsServed: NativeAgents.serves(offered), core: RunnerCore(), offered: offered, target: target)
         } else {
-            agents.pretend(enabled: enabled, rowsServed: false, core: nil, target: target)
+            agents.pretend(rowsServed: false, core: nil, target: target)
         }
         return agents
     }
@@ -62,8 +62,8 @@ struct NativeOfferTests {
         let claude = try Self.terminal(#""preset":"claude","program":"claude""#)
         let shell = try Self.terminal(#""preset":"fish","program":"shell""#)
         #expect(Self.agents().unavailable(shell, target: "") == .notAnAgent)
-        #expect(Self.agents(enabled: false).unavailable(shell, target: "") == .notAnAgent, "a shell is never told to turn a setting on")
-        #expect(Self.agents(enabled: false).unavailable(claude, target: "") == .settingOff)
+        #expect(Self.agents(offered: nil).unavailable(shell, target: "") == .notAnAgent, "a shell is never told about its runner")
+        // A runner from before ov-830 with its projector setting off.
         #expect(Self.agents(offered: ["agent_compose", "projector_setting"]).unavailable(claude, target: "") == .runnerNeedsUpdate)
         #expect(Self.agents(offered: nil).unavailable(claude, target: "") == .unreachable)
 
@@ -76,7 +76,7 @@ struct NativeOfferTests {
     }
 
     /// The pane's switch, dimmed, for a reason about the runner; none for a
-    /// shell, and none for the setting being off, which is a choice.
+    /// shell.
     @Test("A Claude pane whose runner can't serve the view shows a dimmed switch; a shell shows none")
     func theDimmedSwitch() async throws {
         let claude = try Self.terminal(#""preset":"Fix the login bug","program":"shell","runningAgent":"claude""#)
@@ -85,7 +85,7 @@ struct NativeOfferTests {
         let cases: [(String, NativeAgents, Terminal, Bool)] = [
             ("a runner that needs an update", Self.agents(offered: old), claude, true),
             ("a shell", Self.agents(offered: old), shell, false),
-            ("the setting off", Self.agents(enabled: false), claude, false),
+            ("a runner not reached", Self.agents(offered: nil), claude, true),
             ("offered", Self.agents(), claude, false),
         ]
         for (why, agents, terminal, dimmed) in cases {
@@ -99,21 +99,72 @@ struct NativeOfferTests {
             #expect(seen.ids.contains("terminal-surface"), "\(why)")
             window.close()
         }
-        #expect(NativeSwitchReason.shown(.settingOff) == nil)
         #expect(NativeSwitchReason.shown(.notAnAgent) == nil)
         #expect(NativeSwitchReason.shown(.runnerNeedsUpdate) == .runnerNeedsUpdate)
         #expect(ConversationUnavailableChip.settingsTab(for: .pairingNeeded) == "devices")
     }
 
-    @Test("The menu item's help says why it's dimmed, and nothing when it acts")
+    /// The help, and the line under the item that's read without hovering
+    /// (ov-830), naming the check that failed.
+    @Test("The menu item says why it's dimmed, on a line of its own, and nothing when it acts")
     func theMenuSaysWhy() {
+        let reason = AgentConversation.Unavailable.runnerNeedsUpdate
         let dimmed = LayoutMenuFocus.make(
             group: nil, here: nil, layouts: [], switchesConversation: false,
-            conversationUnavailable: AgentConversation.Unavailable.settingOff.sentence)
-        #expect(dimmed.conversationUnavailable == "Turn on Conversation view in Settings.")
+            conversationUnavailable: reason.sentence, conversationNote: reason.note)
+        #expect(dimmed.conversationUnavailable == "This runner needs an update to show the conversation.")
+        #expect(dimmed.conversationNote == "Runner version: This runner needs an update to show the conversation.")
         let acts = LayoutMenuFocus.make(
-            group: nil, here: nil, layouts: [], switchesConversation: true, conversationUnavailable: "stale")
+            group: nil, here: nil, layouts: [], switchesConversation: true, conversationUnavailable: "stale", conversationNote: "stale")
         #expect(acts.conversationUnavailable == nil)
+        #expect(acts.conversationNote == nil)
+    }
+
+    // MARK: - An adopted orchestrator (ov-830)
+
+    /// The owner's orchestrator, as the runner lists it: claude typed into a
+    /// shell pane (`program` shell, labeled with its session's title), then
+    /// adopted (`role` orchestrator), with no session the runner launched it
+    /// on. Offered the view on a runner that serves it, by nothing but the
+    /// runner and the agent: no setting stands in the way. Goes red with a
+    /// setting back in `offers` (`guard enabled`) or the agent read off
+    /// `program`.
+    @Test("An orchestrator adopted from a claude typed into a shell is offered the view")
+    func anAdoptedOrchestratorIsOffered() throws {
+        let adopted = try Self.terminal(
+            #""preset":"User test issues and onboarding flow (2)","program":"shell","runningAgent":"claude","role":"orchestrator","agentSessionId":null"#)
+        let agents = Self.agents()
+        #expect(adopted.role == "orchestrator")
+        #expect(agents.offers(adopted, target: ""))
+        #expect(agents.unavailable(adopted, target: "") == nil)
+        // Fresh from `init`, as on a Mac that never had a setting: the runner
+        // reached is the only gate.
+        let fresh = NativeAgents(defaults: ScratchDefaults.suite("native-offer-fresh-\(UUID().uuidString)")!)
+        #expect(!fresh.offers(adopted, target: ""), "no runner reached yet")
+        #expect(fresh.unavailable(adopted, target: "") == .unreachable)
+        fresh.pretend(rowsServed: true, core: RunnerCore(), offered: ["agent_rows", "agent_compose"])
+        #expect(fresh.offers(adopted, target: ""))
+    }
+
+    /// The regression: an orchestrator the runner launched as claude, with
+    /// its session, is still offered the view.
+    @Test("An orchestrator the runner launched is still offered the view")
+    func aLaunchedOrchestratorIsStillOffered() throws {
+        let launched = try Self.terminal(
+            #""preset":"claude","program":"claude","runningAgent":"claude","role":"orchestrator","agentSessionId":"5f0e307b-0000-4000-8000-000000000001""#)
+        #expect(Self.agents().offers(launched, target: ""))
+        #expect(Self.agents().unavailable(launched, target: "") == nil)
+    }
+
+    /// The reason a dimmed orchestrator menu shows, read without hovering
+    /// (ov-830): the check, then the sentence.
+    @Test("The orchestrator menu's dimmed item carries its reason as a line")
+    func theOrchestratorMenuSaysWhyInline() throws {
+        let adopted = try Self.terminal(#""preset":"Fix the login bug","program":"shell","runningAgent":"claude","role":"orchestrator""#)
+        let old = Self.agents(offered: ["agent_compose", "projector_setting"])
+        let reason = try #require(old.unavailable(adopted, target: ""))
+        #expect(reason.isAboutTheRunner)
+        #expect(reason.note == "Runner version: This runner needs an update to show the conversation.")
     }
 
     // MARK: - The real CLI

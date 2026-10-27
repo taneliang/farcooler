@@ -257,6 +257,9 @@ extension ContentView {
                 conversationUnavailable: target.flatMap {
                     nativeAgents.unavailable($0, target: store.client(for: worktree)?.target ?? "")?.sentence
                 },
+                conversationNote: target.flatMap {
+                    NativeSwitchReason.shown(nativeAgents.unavailable($0, target: store.client(for: worktree)?.target ?? ""))?.note
+                },
                 opensWebPage: store.client(for: worktree)?.daemonBuild?.can(.webPane) == true)
         }
         return focus

@@ -73,6 +73,10 @@ struct LayoutMenuFocus: Equatable {
     /// Why it isn't, for the item's help (ov-443): nil where it is, or where
     /// there's no pane.
     var conversationUnavailable: String?
+    /// The same, with the check it failed, for a line under the dimmed item
+    /// that's read without hovering (ov-830): only for a reason about the
+    /// runner or the pairing, so a shell pane's menu carries no extra line.
+    var conversationNote: String?
     /// The runner serves web panes (`web_pane`): against an older one, Open
     /// Web Page would take an address and then only fail (M5, ov-435 review
     /// 1). HIG: dim an item that can't act.
@@ -93,7 +97,8 @@ struct LayoutMenuFocus: Equatable {
     /// finds it; `layouts` the ones the bar offers.
     static func make(
         group: PaneGroup?, here: PaneRect?, layouts: [PaneGroup],
-        switchesConversation: Bool = false, conversationUnavailable: String? = nil, opensWebPage: Bool = false
+        switchesConversation: Bool = false, conversationUnavailable: String? = nil, conversationNote: String? = nil,
+        opensWebPage: Bool = false
     ) -> LayoutMenuFocus {
         let neighbors = Set(TileDirection.allCases.filter { side in
             guard let group, let here else { return false }
@@ -105,7 +110,8 @@ struct LayoutMenuFocus: Equatable {
             // to go only with another layout, from one the bar lists.
             stepsLayouts: layouts.count > 1 && layouts.contains { $0.id == group?.id },
             switchesConversation: switchesConversation,
-            conversationUnavailable: switchesConversation ? nil : conversationUnavailable, opensWebPage: opensWebPage)
+            conversationUnavailable: switchesConversation ? nil : conversationUnavailable,
+            conversationNote: switchesConversation ? nil : conversationNote, opensWebPage: opensWebPage)
     }
 }
 

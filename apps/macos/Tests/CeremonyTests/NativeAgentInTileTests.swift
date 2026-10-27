@@ -31,7 +31,7 @@ struct NativeAgentInTileTests {
         model.showsNative = true
         model.rich = true
         let agents = NativeAgents.shared
-        agents.pretend(enabled: true, rowsServed: true, core: RunnerCore())
+        agents.pretend(rowsServed: true, core: RunnerCore())
         agents.adopt(model)
         defer { NativePaneModel.remember(false, for: id) }
 

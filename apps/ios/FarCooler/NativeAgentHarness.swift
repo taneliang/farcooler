@@ -57,7 +57,8 @@ import UIKit
 ///   `subagent_rows`, and each agent's own rows (`agent.rows` with `agent`)
 ///   its task, a call and its words.
 ///   With `-native-agents-eight`, four more run, eight in all.
-/// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
+/// - `-native-flag-off`: a runner from before ov-830 whose projector setting
+///   is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
 /// - `-native-off-on`: on the fourth follow, the projector is turned off
@@ -169,10 +170,6 @@ struct NativeAgentHarness: View {
             build: Self.build(
                 rows: !CommandLine.arguments.contains("-native-flag-off")
                     && !CommandLine.arguments.contains("-native-on-later")))
-        // What `host` says of the projector: off where it serves no rows, so
-        // the pane's dimmed switch says to turn it on (ov-443).
-        connection.projectorOn = !CommandLine.arguments.contains("-native-flag-off")
-            && !CommandLine.arguments.contains("-native-on-later")
         fleetStore.republish()
         let connection = connection
         runner.links = { rows in

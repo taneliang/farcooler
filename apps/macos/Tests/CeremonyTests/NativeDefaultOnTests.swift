@@ -163,9 +163,8 @@ struct NativeDefaultOnTests {
         agents.socket = { "/tmp/fc-t/no-such-runner/farcoolerd.sock" }
         agents.retryDelay = .seconds(3600)
         agents.reconnect()
-        try await Self.until { agents.settingTrouble != nil }
-        #expect(agents.settingTrouble != nil, "the reconnect never finished")
-        #expect(agents.settingTrouble?.contains("show the terminal") == false, "says the terminal shows, and the view is kept")
+        try await Self.until { agents.failedConnects() > 0 }
+        #expect(agents.failedConnects() > 0, "the reconnect never finished")
         #expect(agents.rowsServed, "the view was hidden for a blink")
         #expect(agents.core === before)
         let terminal = try NativeAgentTests.terminal()
@@ -190,7 +189,6 @@ struct NativeDefaultOnTests {
         #expect(!agents.rowsServed, "a runner that never answers kept its view for ever")
         #expect(attempts == 4, "kept through 3 failures, dropped on the 4th: \(attempts) attempts")
         #expect(!agents.offers(try NativeAgentTests.terminal(), target: ""))
-        #expect(agents.settingTrouble?.contains("show the terminal") == true)
     }
 
     @Test("A runner that was never reached offers nothing")
@@ -198,7 +196,7 @@ struct NativeDefaultOnTests {
         let agents = NativeAgentTests.agents(rows: false)
         agents.socket = { "/tmp/fc-t/no-such-runner/farcoolerd.sock" }
         agents.reconnect()
-        try await Self.until { agents.settingTrouble != nil }
+        try await Self.until { agents.failedConnects() > 0 }
         #expect(!agents.rowsServed)
         #expect(!agents.offers(try NativeAgentTests.terminal(), target: ""))
     }
@@ -223,24 +221,6 @@ struct NativeDefaultOnTests {
         model.followIfShown()
         try await Self.until { model.store.phase == .live }
         #expect(model.store.phase == .live, "stuck at \(model.store.phase) until a relaunch")
-    }
-
-    /// And the setting's own off and on, which the iOS review named: the
-    /// panes are dropped, so the next ones are made new, not the old ones
-    /// in their dead state.
-    @Test("Turning the setting off and on makes the panes anew")
-    func offThenOnMakesPanesAnew() async throws {
-        let agents = NativeAgentTests.agents()
-        agents.socket = { "/tmp/fc-t/no-such-runner/farcoolerd.sock" }
-        agents.setProjector = { _ in nil }
-        let terminal = try NativeAgentTests.terminal()
-        let old = agents.model(for: terminal.id)
-        defer { NativePaneModel.remember(false, for: terminal.id) }
-        await agents.setEnabled(false)
-        await agents.setEnabled(true)
-        let new = agents.model(for: terminal.id)
-        #expect(new !== old)
-        #expect(new.store.phase != .unavailable)
     }
 
     // MARK: - The key
