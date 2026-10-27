@@ -1166,7 +1166,7 @@ impl Runner {
                 .enrolling_into(self.authorized_keys.clone()),
         );
         assert_eq!(service.tailcat_key(), self.tailcat_key, "the daemon would rebuild some other tunnel");
-        let server = farcooler_transport::UnixListenerServer::bind(&self.runtime().join("farcoolerd.sock"))
+        let server = farcooler_transport::UnixListenerServer::bind(self.runtime().join("farcoolerd.sock"))
             .expect("bind this runner's socket");
         let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
         let served = service.clone();
