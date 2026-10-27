@@ -18,6 +18,7 @@
 
 use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use farcooler_client::session::{Session, SessionError};
 use farcooler_client::ssh::SshError;
@@ -28,6 +29,7 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::error::WebError;
+use crate::liveness::Link;
 use crate::ssh::Connection;
 
 /// The name this client gives in its hello, so a runner's log says which
@@ -80,13 +82,79 @@ pub struct TerminalSummary {
 /// A connected runner: the client core's session over one SSH connection.
 pub struct Runner {
     pub(crate) session: Rc<Session>,
+    /// What this connection has heard, when it is watched (`start_watched`).
+    link: Option<Arc<Link>>,
+    /// Dropped with the runner, which is what stops the watching task.
+    _watching: Option<futures::channel::oneshot::Sender<()>>,
 }
 
 impl Runner {
     /// Start the control session on an authenticated connection.
     pub async fn start(conn: Connection) -> Result<Runner, WebError> {
         let session = Session::over_ssh(conn, CLIENT_NAME).await?;
-        Ok(Runner { session: Rc::new(session) })
+        Ok(Runner { session: Rc::new(session), link: None, _watching: None })
+    }
+
+    /// Start the control session and watch the connection (ov-772).
+    ///
+    /// `link` is the one whose [`Link::tap`] wrapped the stream `conn` runs
+    /// over, so it hears every byte. A quiet connection is probed, and one
+    /// that stays quiet past `Liveness::TUNNEL`'s allowance is given up on:
+    /// `on_lost` is called once, and every pane's `ended` runs with it. The
+    /// watching stops when the runner is dropped, and then `on_lost` is not
+    /// called.
+    pub async fn start_watched(
+        conn: Connection,
+        link: Arc<Link>,
+        on_lost: impl FnOnce() + 'static,
+    ) -> Result<Runner, WebError> {
+        let session = Rc::new(Session::over_ssh(conn, CLIENT_NAME).await?);
+        let (stop, stopped) = futures::channel::oneshot::channel::<()>();
+        let (watched, watching) = (session.clone(), link.clone());
+        spawn(async move {
+            let probe = {
+                let session = watched.clone();
+                move || {
+                    let session = session.clone();
+                    spawn(async move {
+                        let _ = session.probe().await;
+                    });
+                }
+            };
+            let run = std::pin::pin!(watching.run(probe, || watched.link_ended()));
+            // Only the link's own verdict calls `on_lost`: a runner dropped
+            // by the page (the sender going away) is not a loss.
+            if let futures::future::Either::Left(_) = futures::future::select(run, stopped).await {
+                on_lost();
+            }
+        });
+        Ok(Runner { session, link: Some(link), _watching: Some(stop) })
+    }
+
+    /// Whether the connection answers, right now: the foreground probe
+    /// (`Session::probe`, ov-613) and the verdict the phones give it. Silence
+    /// within its deadline ends the link, and so does a closed connection.
+    /// Called when the tab comes back and when the browser says it is online.
+    pub async fn check(&self) -> bool {
+        if self.lost() || self.session.link_ended() {
+            return false;
+        }
+        match self.session.probe().await {
+            Ok(()) => true,
+            Err(e) if farcooler_client::deadlines::ends_the_link(farcooler_client::deadlines::PROBE_METHOD, &e) => {
+                if let Some(link) = &self.link {
+                    link.lose();
+                }
+                false
+            }
+            // A refusal is an answer.
+            Err(_) => true,
+        }
+    }
+
+    /// Whether the watch has given up on this connection.
+    pub fn lost(&self) -> bool {
+        self.link.as_ref().is_some_and(|l| l.is_lost())
     }
 
     pub fn capabilities(&self) -> &[String] {
@@ -141,14 +209,27 @@ impl Runner {
             return Err(WebError::Capability(capability::TERMINAL_STREAM.into()));
         }
         let mut stream = self.session.open_stream(terminal).await?;
+        let link = self.link.clone();
         let (close, mut closing) = futures::channel::oneshot::channel::<()>();
         spawn(async move {
             let mut buf = vec![0u8; 1 << 15];
             loop {
+                // A stream over a dead link never ends by itself, so the
+                // link's loss ends it.
+                let gone = async {
+                    match &link {
+                        Some(link) => link.lost().await,
+                        None => std::future::pending().await,
+                    }
+                };
                 let read = std::pin::pin!(stream.read(&mut buf));
-                match futures::future::select(read, &mut closing).await {
-                    futures::future::Either::Left((Ok(n), _)) if n > 0 => output(&buf[..n]),
-                    // The end of the stream, a failed read, or `close`. The
+                let gone = std::pin::pin!(gone);
+                match futures::future::select(futures::future::select(read, gone), &mut closing).await {
+                    futures::future::Either::Left((futures::future::Either::Left((Ok(n), _)), _)) if n > 0 => {
+                        output(&buf[..n])
+                    }
+                    // The end of the stream, a failed read, the link's loss,
+                    // or `close`. The
                     // stream is dropped with this task, which is what tells
                     // the runner nobody is watching.
                     _ => break,

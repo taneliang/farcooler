@@ -15,8 +15,11 @@ use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
+use farcooler_ceremony::Liveness;
+
 use crate::enroll;
 use crate::error::WebError;
+use crate::liveness::{Link, PageClock};
 use crate::passkey::{self, Assertion, Authenticate, PasskeySigner};
 use crate::ssh::{self, SignError};
 use crate::wire::{self, Pane, Runner, spawn};
@@ -191,17 +194,52 @@ pub struct WebPane(std::rc::Rc<std::cell::RefCell<Pane>>);
 /// SSH to a runner over a dialed tunnel connection, refusing any host key but
 /// `host_key`, signing in with the passkey `key_a` through `assert` (one
 /// touch), and start its control session.
+///
+/// The connection is watched from the moment it is up (ov-772): `on_lost()` is
+/// called once if the tunnel goes quiet for `Liveness::TUNNEL`'s allowance
+/// (nine seconds), or the connection closes. Dropping the runner stops the
+/// watching without calling it.
 #[wasm_bindgen]
-pub async fn connect(conn: JsValue, host_key: String, user: String, key_a: String, assert: Function) -> Result<WebRunner, JsValue> {
-    let stream = bridge(conn)?;
+pub async fn connect(
+    conn: JsValue,
+    host_key: String,
+    user: String,
+    key_a: String,
+    assert: Function,
+    on_lost: Function,
+) -> Result<WebRunner, JsValue> {
+    let link = Link::new(std::sync::Arc::new(PageClock), Liveness::TUNNEL);
+    let stream = link.tap(bridge(conn)?);
     let mut signer = PasskeySigner(JsAuthenticator(assert));
     let connection = ssh::connect(stream, &host_key, &user, &key_a, &mut signer).await.map_err(web_failure)?;
-    let runner = Runner::start(connection).await.map_err(web_failure)?;
+    let runner = Runner::start_watched(connection, link, move || {
+        let _ = on_lost.call0(&JsValue::NULL);
+    })
+    .await
+    .map_err(web_failure)?;
     Ok(WebRunner(std::rc::Rc::new(runner)))
 }
 
 #[wasm_bindgen]
 impl WebRunner {
+    /// Whether the runner answers right now. The page asks when the tab comes
+    /// back and when the browser comes online; false means the connection is
+    /// over and `on_lost` is called.
+    ///
+    /// A promise made by hand rather than an `async fn` on `&self`: that would
+    /// hold a borrow of this object until the answer, and the page frees the
+    /// runner from inside `on_lost`, which a failed check itself causes.
+    pub fn check(&self) -> Promise {
+        let runner = self.0.clone();
+        wasm_bindgen_futures::future_to_promise(async move { Ok(JsValue::from_bool(runner.check().await)) })
+    }
+
+    /// Whether the connection has been given up on.
+    #[wasm_bindgen(getter)]
+    pub fn lost(&self) -> bool {
+        self.0.lost()
+    }
+
     /// `terminal.list`, as JSON (`wire::TerminalSummary`).
     pub async fn terminals(&self) -> Result<String, JsValue> {
         let list = self.0.terminals().await.map_err(web_failure)?;

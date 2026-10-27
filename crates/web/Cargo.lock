@@ -609,6 +609,7 @@ dependencies = [
  "farcooler-ceremony",
  "farcooler-client",
  "farcooler-protocol",
+ "farcooler-transport",
  "futures",
  "getrandom 0.2.17",
  "js-sys",

@@ -17,6 +17,7 @@
 
 pub mod enroll;
 pub mod error;
+pub mod liveness;
 mod pages;
 pub mod passkey;
 pub mod ssh;

@@ -107,6 +107,8 @@ pub struct Seen {
     /// What `terminal.write` carried, in arrival order.
     pub typed: Mutex<Vec<u8>>,
     pub resized: Mutex<Option<(u32, u32)>>,
+    /// `daemon.version` calls answered: the liveness probe (ov-772).
+    pub probes: AtomicUsize,
     /// The `client_name` of every hello, one per channel.
     pub hellos: Mutex<Vec<String>>,
     /// The attach channel's write half, so a write can echo onto it.
@@ -255,6 +257,16 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                             attached.data(&output(&w.payload)[..]).await.unwrap();
                         }
                         answer(&req, result::Value::Empty(Empty {}))
+                    }
+                    ("daemon.version", _) => {
+                        seen.probes.fetch_add(1, Ordering::SeqCst);
+                        answer(
+                            &req,
+                            result::Value::DaemonVersion(farcooler_protocol::v1::DaemonVersion {
+                                daemon_version: "test".into(),
+                                ..Default::default()
+                            }),
+                        )
                     }
                     ("terminal.resize", Some(request::Payload::TerminalResize(r))) => {
                         *seen.resized.lock().await = Some((r.columns, r.rows));
