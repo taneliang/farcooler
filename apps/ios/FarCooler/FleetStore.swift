@@ -302,9 +302,14 @@ final class FleetStore: ObservableObject {
         // and its last fleet must not go on reading as working on the lock
         // screen while it does — and its fleet read on this link. See
         // `Connection.isAnswering`.
+        //
+        // And not a runner that removed this phone or took its access away
+        // (ov-820): its team's agents and asks leave the widgets, the watch
+        // and the Live Activity's rows with the app's own screens.
+        let glanced = mine.filter { !$0.1.shutsThisPhoneOut }
         FleetSnapshotWriter.keep(
-            runners: Set(mine.map { $0.0.id.uuidString }),
-            answering: Set(mine.filter { $0.1.isAnswering }.map { $0.0.id.uuidString }))
+            runners: Set(glanced.map { $0.0.id.uuidString }),
+            answering: Set(glanced.filter { $0.1.isAnswering }.map { $0.0.id.uuidString }))
 
         var lists: [String: [NeedsYouItem]] = [:]
         for (host, connection) in mine where connection.needsYouRead {

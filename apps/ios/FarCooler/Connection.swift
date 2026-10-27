@@ -726,8 +726,22 @@ final class Connection: ObservableObject {
     /// A dial got in: the runner accepts this phone's key, remembered across
     /// launches. Written only when that's news.
     private func letIn(_ host: Runner) {
-        guard !keyRefusals.admitted || keyRefusals.refusals > 0 else { return }
+        guard !keyRefusals.admitted || keyRefusals.refusals > 0 || keyRefusals.released else { return }
         keyRefusals.letIn(host.id.uuidString)
+    }
+
+    /// The runner said it took this phone's access away (ov-820): `released`,
+    /// the last notice on a link it then closed. Kept for the runner, so a
+    /// Tailcat-only phone, whose every later dial goes unanswered, stays on
+    /// the no-access screen until a dial gets in (`RunnerTrouble.reading`).
+    func hearReleased() {
+        guard let host else { return }
+        keyRefusals.release(host.id.uuidString)
+        forgetTeamWork()
+        poller?.cancel()
+        newsRefresh?.cancel()
+        attempt += 1
+        settle(.failed(.accessRemoved, ""), attempt: 0)
     }
 
     /// Everything read from this runner, off the screen (ov-818): its
@@ -738,7 +752,8 @@ final class Connection: ObservableObject {
         if !inbox.isEmpty { inbox = [:] }
         if !needsYou.isEmpty { needsYou = [] }
         if !repositories.isEmpty { repositories = [] }
-        // The glances, widgets, watch and Live Activity rows are ov-820's.
+        // The glances leave with it: `FleetStore.publish` keeps a runner that
+        // shuts this phone out off them (ov-820).
     }
 
     /// Dials a runner that took this phone's access away again in five
@@ -2226,6 +2241,14 @@ final class Connection: ObservableObject {
             next = readRefusals(.failed(.keyRejected, "Permission denied"), at: start.addingTimeInterval(offset))
         }
         settle(next, attempt: 0)
+    }
+
+    /// A Tailcat-only runner saying `released` (ov-820), through the news
+    /// path, and the dial after it going unanswered. `PhoneHarness` only.
+    func standInReleased() async {
+        keyRefusals.letIn()
+        await hearNews(["event": "released"])
+        settle(readRefusals(.failed(.tunnelFailed(.noAnswer), "")), attempt: 0)
     }
 
     /// The new link's build landing. `NativeAgentHarness` only.

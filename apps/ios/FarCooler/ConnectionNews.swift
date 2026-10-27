@@ -39,6 +39,8 @@ extension Connection {
         // The rollup moved: an ask held or settled, a decision asked or
         // answered, a review in or out. See `loadNeedsYou`.
         case "needs_you": await loadNeedsYou()
+        // The runner took this phone's access away (ov-820).
+        case "released": hearReleased()
         default: break
         }
     }

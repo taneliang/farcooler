@@ -112,6 +112,9 @@ import SwiftUI
 //   -phone-revoked           the runner let this phone in, then refused its key on four
 //                            dials over fourteen seconds: its row says this phone no longer
 //                            has access, and its work is gone (ov-818)
+//   -phone-tunnel-released   the runner said `released` as it closed this phone's link, and the
+//                            dial after it went unanswered, as a Tailcat-only phone's does: no
+//                            access, its work and the glances' rows gone (ov-820)
 //   -phone-long-record       bil-7's record is thirty-four notes as long as a real card's, its intent
 //                            long and its acceptance six lines, for measuring a fling (ov-791)
 //   -phone-big-board         Billing's board holds eight hundred more tasks, as a long-lived runner's
@@ -341,13 +344,23 @@ extension PhoneHarness {
     /// shell's probes are.
     private var snapshotProbe: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-            Rectangle()
-                .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
-                .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
-                .accessibilityElement()
-                .accessibilityIdentifier("snapshot-probe")
-                .accessibilityValue(
-                    "needsYou=\(SnapshotStore.read()?.needsYou.map { String($0.count) } ?? "-")")
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                    .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                    .accessibilityElement()
+                    .accessibilityIdentifier("snapshot-probe")
+                    .accessibilityValue(
+                        "needsYou=\(SnapshotStore.read()?.needsYou.map { String($0.count) } ?? "-")")
+                // And the agents the glances list, which a runner that shut
+                // this phone out takes with it (ov-820).
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                    .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                    .accessibilityElement()
+                    .accessibilityIdentifier("snapshot-agents-probe")
+                    .accessibilityValue("agents=\(SnapshotStore.read().map { String($0.agents.count) } ?? "-")")
+            }
         }
     }
 
@@ -592,6 +605,8 @@ final class HarnessRunner {
         }
         // A revoked key, refused through the reading a failed dial gets (ov-818).
         if CommandLine.arguments.contains("-phone-revoked") { connection.standInKeyRefused() }
+        // Told it was released, over a tunnel that then went silent (ov-820).
+        if CommandLine.arguments.contains("-phone-tunnel-released") { await connection.standInReleased() }
     }
 
     // MARK: - What it has

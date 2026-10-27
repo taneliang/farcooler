@@ -140,6 +140,30 @@ final class RunnerPeopleUITests: XCTestCase {
         }
     }
 
+    /// A Tailcat-only phone the runner released (ov-820): told `released` as
+    /// its link closed, then met only by silence. It says it has no access,
+    /// not that the runner can't be reached, and the team's work leaves the
+    /// app and the glances: the widgets, the watch and the Live Activity rows.
+    func testATunnelReleasedPhoneSaysItHasNoAccessAndTheGlancesForgetIt() {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication.phoneHarness(["-phone-tunnel-released", "-phone-host-long", "-phone-appearance", appearance])
+            let noAccess = element(app, "runner-no-access")
+            XCTAssertTrue(noAccess.waitForExistence(timeout: 30), "no no-access row: \(app.debugDescription)")
+            XCTAssertEqual(noAccess.label, "You No Longer Have Access to This Runner")
+            XCTAssertTrue(app.buttons["Check Again"].firstMatch.exists, "no Check Again: \(app.debugDescription)")
+            let caveat = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "isn’t answering")).firstMatch
+            XCTAssertFalse(caveat.exists, "Needs You says the released runner isn't answering: \(caveat.label)")
+            XCTAssertTrue(app.staticTexts["Nothing Needs You"].firstMatch.exists, "the runner's work stayed on screen: \(app.debugDescription)")
+            let agents = element(app, "snapshot-agents-probe")
+            XCTAssertTrue(agents.waitForExistence(timeout: 10), "no agents probe")
+            let deadline = Date().addingTimeInterval(10)
+            while agents.value as? String != "agents=0", Date() < deadline { Thread.sleep(forTimeInterval: 0.3) }
+            XCTAssertEqual(agents.value as? String, "agents=0", "the glances kept the released runner's agents")
+            keep(app, "runner-tunnel-released-\(appearance)", expecting: .shows(noAccess))
+            app.terminate()
+        }
+    }
+
     func testARunnerNobodySharesSaysNothingAboutPeople() {
         let app = runnerSettings([])
         // The section the People one would sit above, drawn: the screen read.
