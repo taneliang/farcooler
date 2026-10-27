@@ -87,7 +87,7 @@ pub async fn label_for(svc: &Service, client_id: &str) -> Option<String> {
 /// that: no identity is created, and a runner nobody asked to join does not
 /// join.
 pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrollResult> {
-    enroll_as(svc, request, None).await
+    enroll_as(svc, request, None, None).await
 }
 
 /// What `client.enroll` from a member's device runs before a line is written
@@ -108,7 +108,30 @@ pub type MemberEnrolled = Box<dyn FnOnce(&str) -> Result<()> + Send>;
 /// one in the other shape (`device_taken`): the owner's Mac with only its
 /// Key B would otherwise gain a Key A line that's someone else's key, and
 /// marking that id released would take the owner's Mac with it.
-pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<MemberEnrolled>) -> Result<ClientEnrollResult> {
+///
+/// `caller` is the session the request arrived on, when it came over a
+/// connection. Its device revoked since that session opened, the enroll is
+/// refused under the lock and writes nothing (ov-826): a revoke closes the
+/// session only after its write, so an enroll already waiting on the lock
+/// would otherwise put the revoked device's line straight back.
+pub async fn enroll_as(
+    svc: &Service,
+    request: &ClientEnroll,
+    by_member: Option<MemberEnrolled>,
+    caller: Option<std::sync::Arc<crate::sessions::Session>>,
+) -> Result<ClientEnrollResult> {
+    enroll_held(svc, request, by_member, caller, || ()).await
+}
+
+/// [`enroll_as`], running `held` on the blocking thread just before it takes
+/// the fence lock: where a test parks an enroll while a revoke runs.
+async fn enroll_held(
+    svc: &Service,
+    request: &ClientEnroll,
+    by_member: Option<MemberEnrolled>,
+    caller: Option<std::sync::Arc<crate::sessions::Session>>,
+    held: impl FnOnce() + Send + 'static,
+) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
     // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
     // from the same decoded key material, so this chooses between two lines this
@@ -166,6 +189,7 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
     let admitting = request.node_key.clone();
     let sessions = svc.sessions().clone();
     let (mut result, admitted) = blocking(move || {
+        held();
         // Read and write under ONE lock hold. Two enrollments landing in the same
         // instant used to each rebuild the block from a snapshot taken before the
         // other's write, and the loser's key was silently gone — a device
@@ -173,6 +197,13 @@ pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<
         // enrollments of one client id, so the window was reachable from the
         // product's ordinary path, not only in theory. See `fence::update`.
         fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+            // First, before either answer: a revoke marks under this lock,
+            // so one that got here first is seen (ov-826). Refused as a
+            // closed session's request is, and nothing is written or admitted.
+            if caller.as_ref().is_some_and(|session| session.revoked_since_open()) {
+                tracing::warn!(client = %mine.client_id, "refused an enroll from a session whose device was revoked while it ran");
+                return Err(Refusal(DomainError::AuthRequired));
+            }
             let entries = attributed(entries);
             // Either identity already being present is "already enrolled".
             //
@@ -976,6 +1007,9 @@ fn now_millis() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod in_flight_tests;
 
 #[cfg(test)]
 mod tests {

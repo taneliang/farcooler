@@ -71,6 +71,9 @@ pub struct Rpc {
     /// is how a session could be TOLD it held `read` and then be permitted
     /// everything.
     peer: Peer,
+    /// The connection's registration, which `client.enroll` asks under the
+    /// fence lock whether its device was revoked meanwhile (ov-826).
+    session: Arc<crate::sessions::Session>,
     daemon_version: String,
     /// Fired by `daemon.shutdown`; the process's own stop signal, from inside.
     stop: Arc<tokio::sync::Notify>,
@@ -89,6 +92,7 @@ impl Rpc {
         service: Arc<Service>,
         watcher: Arc<crate::watch::Watcher>,
         peer: Peer,
+        session: Arc<crate::sessions::Session>,
         stop: Arc<tokio::sync::Notify>,
         push: farcooler_transport::PushSender,
         attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
@@ -97,6 +101,7 @@ impl Rpc {
             service,
             watcher,
             peer,
+            session,
             daemon_version: farcooler_protocol::BUILD.to_string(),
             stop,
             push,
@@ -237,17 +242,10 @@ impl Handler for RpcFactory {
     }
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-        let mut rpc = Rpc::new(
-            self.service.clone(),
-            self.watcher.clone(),
-            self.peer.clone(),
-            self.stop.clone(),
-            self.push.clone(),
-            self.attachment.clone(),
-        );
+        let session = self.session.clone();
+        let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), self.peer.clone(), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
         rpc.caller_pid = self.caller_pid;
         rpc.caller_pane = self.caller_pane.clone();
-        let session = self.session.clone();
         async move {
             // The one request a closed connection could still serve.
             //
@@ -1018,7 +1016,7 @@ impl Rpc {
                     }
                     _ => None,
                 };
-                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member).await?))
+                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(self.session.clone())).await?))
             }
 
             // Removes the line AND closes what the line let in — see

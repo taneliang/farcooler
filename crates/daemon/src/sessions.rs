@@ -59,6 +59,12 @@ pub struct Sessions {
     /// tunneled device's farewell is let through, starts closed: it is told
     /// its farewell and served nothing.
     revoked: Mutex<std::collections::HashSet<String>>,
+    /// How many times each device has been marked revoked since this daemon
+    /// started, never lowered, not even by `readmit` (ov-826). A session
+    /// keeps the count it opened under, so a request it was already running
+    /// can tell that its device was revoked after it began, even once the
+    /// device is enrolled again. One number per revoked id.
+    revocations: Mutex<HashMap<String, u64>>,
     /// Handed out in order and never reused, so a session that ends while a
     /// sweep is deciding cannot have its slot taken by a new one.
     next: AtomicU64,
@@ -93,9 +99,10 @@ impl Sessions {
         if client_id.as_ref().is_some_and(|id| self.revoked.lock().unwrap().contains(id)) {
             gate.close();
         }
-        live.insert(id, Live { client_id, gate: gate.clone(), said: said.clone() });
+        let revocations_at_open = client_id.as_deref().map_or(0, |id| self.revocations_of(id));
+        live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone() });
         drop(live);
-        Arc::new(Session { sessions: self.clone(), id, gate, said })
+        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -122,7 +129,7 @@ impl Sessions {
         // Before the sweep, under the same lock `open` registers under, so a
         // connection either is in `live` and closed below, or sees this.
         let live = self.live.lock().unwrap();
-        self.revoked.lock().unwrap().insert(client_id.to_string());
+        self.mark(client_id);
         let mut said = Vec::new();
         for session in live.values() {
             if session.client_id.as_deref() == Some(client_id) {
@@ -140,7 +147,18 @@ impl Sessions {
     /// fence lock, before its write lands (ov-820 review S4).
     pub fn mark_revoked(&self, client_id: &str) {
         let _live = self.live.lock().unwrap();
+        self.mark(client_id);
+    }
+
+    /// The mark, and one more revocation counted. With `live` held, so the
+    /// locks are always taken `live`, `revoked`, `revocations`.
+    fn mark(&self, client_id: &str) {
         self.revoked.lock().unwrap().insert(client_id.to_string());
+        *self.revocations.lock().unwrap().entry(client_id.to_string()).or_default() += 1;
+    }
+
+    fn revocations_of(&self, client_id: &str) -> u64 {
+        self.revocations.lock().unwrap().get(client_id).copied().unwrap_or(0)
     }
 
     /// This device was enrolled again: its connections are served again.
@@ -208,6 +226,9 @@ impl Closing {
 pub struct Session {
     sessions: Arc<Sessions>,
     id: u64,
+    client_id: Option<String>,
+    /// [`Sessions::revocations`] for this device when the session opened.
+    revocations_at_open: u64,
     gate: Arc<tokio::sync::Semaphore>,
     said: Arc<tokio::sync::Semaphore>,
 }
@@ -232,6 +253,21 @@ impl Session {
     /// [`Closing::said_within`] waits for.
     pub fn said_farewell(&self) {
         self.said.close();
+    }
+
+    /// Whether this session's device has been revoked since the session
+    /// opened, or is marked revoked now (ov-826). Never for a session that
+    /// names no device.
+    ///
+    /// What a request the session was already running asks before it writes:
+    /// a revoke closes the session only after its own write lands, so the
+    /// closed gate alone can't stop an enroll that was waiting on the fence
+    /// lock. The mark and the count are both set under that lock. The count
+    /// is there for a device revoked and then enrolled again before the
+    /// request gets its turn: `readmit` lifts the mark, never the count.
+    pub fn revoked_since_open(&self) -> bool {
+        let Some(id) = self.client_id.as_deref() else { return false };
+        self.sessions.revoked.lock().unwrap().contains(id) || self.sessions.revocations_of(id) != self.revocations_at_open
     }
 }
 
@@ -334,6 +370,22 @@ mod tests {
         assert!(!sessions.open(Some("laptop".into())).is_closed(), "another device was shut out");
         sessions.readmit("phone");
         assert!(!sessions.open(Some("phone".into())).is_closed(), "a readmitted device stayed shut out");
+    }
+
+    #[tokio::test]
+    async fn a_session_knows_its_device_was_revoked_after_it_opened() {
+        // What an enroll in flight asks under the fence lock (ov-826): the
+        // mark while it stands, and the count once a readmit has lifted it.
+        let sessions = Sessions::new();
+        let before = sessions.open(Some("phone".into()));
+        let local = sessions.open(None);
+        assert!(!before.revoked_since_open(), "a device nobody revoked reads as revoked");
+        sessions.mark_revoked("phone");
+        assert!(before.revoked_since_open(), "the mark went unseen");
+        sessions.readmit("phone");
+        assert!(before.revoked_since_open(), "a readmit made an older session's revoke unhappen");
+        assert!(!sessions.open(Some("phone".into())).revoked_since_open(), "a session opened after the readmit reads as revoked");
+        assert!(!local.revoked_since_open(), "a local session was matched by a device's revoke");
     }
 
     #[test]

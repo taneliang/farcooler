@@ -316,7 +316,7 @@ async fn removing_a_member_revokes_a_device_whose_line_lands_late() {
                 shell_access: false,
                 node_key: String::new(),
             };
-            crate::enrollment::enroll_as(&svc, &request, Some(by_bob)).await
+            crate::enrollment::enroll_as(&svc, &request, Some(by_bob), None).await
         })
     };
     tokio::task::spawn_blocking(move || recorded_rx.recv().unwrap()).await.unwrap();
