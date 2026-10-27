@@ -28,6 +28,16 @@ thiserror.workspace = true
 ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
 # The ceremony id's 128 random bits, from the RNG russh itself uses.
 rand = "0.10"
+# Sealing the reply for the relay (ov-769): RFC 9180 HPKE, base mode, with
+# X25519, HKDF-SHA256 and ChaCha20-Poly1305 and nothing else. Not
+# `getrandom`'s feature: the caller's RNG is `rand`'s, which already knows how
+# to ask a browser. The same aead, hkdf and curve25519 versions as the rest of
+# the tree, so this adds hpke and x25519-dalek and no second copy of either.
+hpke = { version = "0.15", default-features = false, features = ["alloc", "x25519", "chacha"] }
+# The reply key and the sealed reply as unpadded base64url: compact enough
+# that a full sealed manifest stays under the relay's 4 KB with room to
+# spare, and the encoder `ssh-key` already brings.
+base64ct = { version = "1.8", features = ["alloc"] }
 
 # A browser has no OS RNG for rand to call, so wasm asks the page's
 # `crypto.getRandomValues` for the ceremony id's bits. Not a native build's

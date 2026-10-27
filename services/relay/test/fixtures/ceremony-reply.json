@@ -1,0 +1,16 @@
+{
+  "secret": "WJUKRfiOBgbYeCZumaFOinssQJqCkAFD5Y1HKRKAAFw",
+  "offer": {
+    "v": 2,
+    "key_a": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1iLbeqDzK4CDeUC3t+ffVPDI9Gk+sBwIZqJZW1NfS5 device-a",
+    "name": "Chrome",
+    "account": "acct_1",
+    "channel": "local",
+    "ceremony": "0123456789abcdef0123456789abcdef",
+    "node_key": "",
+    "reply_key": "YwbAvkATmjREjY8yCsUr87XR8t4kv8l2bK516AhoEWQ"
+  },
+  "manifest": "{\"v\":2,\"ceremony\":\"0123456789abcdef0123456789abcdef\",\"account\":\"acct_1\",\"channel\":\"local\",\"target\":\"SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4\",\"runners\":[{\"id\":\"0198f0c3-0000-7000-8000-00000000000a\",\"label\":\"box\",\"alias\":\"box\",\"user\":\"you\",\"host_key\":\"SHA256:ov769FixtureHostKeyMustNeverReachTheRelay00\",\"reach\":{\"kind\":\"direct\",\"host\":\"box.tail-1234.ts.net\",\"port\":22},\"pending\":false}]}",
+  "host_key": "SHA256:ov769FixtureHostKeyMustNeverReachTheRelay00",
+  "sealed": "9F5pIhd9wOMPjuLFHSXWh7xbzGSQqwvPIlc2S2bqBlMe4iZMvH3D4pbmxGLX4DEtip2DwyuS9r7YG847ofsMfaPs3n4-U_C2YZdPd4VS79nWPuRYVpZAq7Jb4EH675Brfe3OBs_qIw_GC4dOdDzFHXk1cxmCkNj6sdq9P_XSOp8Rep_DJ0SWOq1LIgZITi_knIDwaLcHqeKEKX762GTnMhA6TQ_EiG5BBIseF1gsKWQ6AtYbirCDaZOVGrPuLiTYnqQphtrzyUWNUpwmRLMO1B7yVpkybko3QBOvtUU0027ele_-uv4HiljGHcFQGpQaAajUyDGehstE8cnuIOCM1sbq32rvqjyXqpwWaubj1oorl8emPu0_qXr45PKMt89P6Yyh986gjpEK7K1yrKXaJ5jSfOgeySxFqcpquSxuPFBGaHBBgUMg8p_hT_4TsBclM26FUYsKcvxr4gjhWqw0t8F_6x4C-HMRiU_3KHSSHZWreiNEgfxYJhHLZAClQNs6q0bVjj5QY8zlTZhc8npuyq4e0l-qcPlBDZSpZBHZJ9wu225qOIhoxxlWRzYtNzu5ixAJ7261G6_8WZdKkA"
+}

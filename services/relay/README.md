@@ -193,6 +193,22 @@ a stolen session can run Sign Out Everywhere itself, which signs the person out
 too. That is accepted: it costs the person a sign-in, the audit line records
 it, and every other session ends with it.
 
+## Sealed ceremony replies
+
+A browser can't scan the granting phone's reply, so the phone posts it here
+sealed (`src/ceremony-reply.ts`, migration 0030, ov-769). The browser's offer
+names an X25519 `reply_key`, and the phone seals the reply to it with HPKE
+(`crates/ceremony/src/seal.rs`). The relay holds ciphertext and who posted it.
+It never sees a runner, a host key or a token.
+
+- `POST /v1/ceremony/reply` takes `{ceremony, account, sealed}`, at most 4 KB.
+  The poster must be signed in as `account`, or be an admin of a team
+  `account` is in. Anyone else gets 403. Each ceremony takes one reply, and a
+  second post gets 409. A body that looks like an unsealed reply gets 400.
+- `GET /v1/ceremony/reply/<ceremony>` answers only `account`, and the read
+  deletes the reply. After 120 seconds the reply is gone, and the five-minute
+  cron deletes what nobody read. Every refusal is the same 404.
+
 ## Live Activities
 
 A `/v1/notify` that carries a `status` also drives the lock-screen card, on top

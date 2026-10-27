@@ -67,6 +67,9 @@ pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
 mod teammate;
 pub use teammate::{HeldKey, Teammate, TeammateOffer, accept_teammate_offer, teammates};
 
+mod seal;
+pub use seal::{ReplyKey, open_reply, seal_reply, take_sealed_reply};
+
 /// The payload version both codes carry.
 ///
 /// Checked before any other field is read, so a code from a build that knows
@@ -177,6 +180,9 @@ pub struct Offer {
     /// device holds rather than reaching for them.
     #[serde(default)]
     pub node_key: String,
+    /// The public X25519 key a camera-less device's reply is sealed to: [`seal_reply`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_key: Option<String>,
 }
 
 /// One runner in a reply: everything a device needs to reach it and nothing it
@@ -218,12 +224,11 @@ pub struct RunnerEntry {
     /// recoverable from this flag and nothing downstream should guess at one.
     ///
     /// It is still listed, and it is the END STATE rather than a waiting room.
-    /// Nothing retries it: the new device cannot enroll itself anywhere, and a
-    /// phone may never enroll a device's key at all — granting is a
-    /// Mac-and-CLI capability. Access follows only when somebody runs the
-    /// ceremony again from a device that CAN reach this runner. Both join
-    /// screens read this to decide what not to add and what to say about it;
-    /// see `Joined` in each app's `JoinView.swift`.
+    /// Nothing retries it: the new device cannot enroll itself anywhere, and
+    /// the granting Mac, CLI or phone (each through `client.enroll`) already
+    /// tried. Access follows only when somebody runs the ceremony again from a
+    /// device that CAN reach this runner. Both join screens read this to decide
+    /// what not to add and what to say: see `Joined` in each `JoinView.swift`.
     pub pending: bool,
 }
 
@@ -300,6 +305,8 @@ pub enum CeremonyError {
     /// in person (ov-565 fix round 1, Low 1).
     #[error("this code's key is held after a trust reset")]
     HeldKey,
+    #[error("this sealed reply does not open with this device's key")]
+    Unopened,
 }
 
 impl CeremonyError {
@@ -324,6 +331,7 @@ impl CeremonyError {
             CeremonyError::TeammateShell => "teammate_shell",
             CeremonyError::UnregisteredKey => "unregistered_key",
             CeremonyError::HeldKey => "held_key",
+            CeremonyError::Unopened => "unopened",
         }
     }
 }
@@ -346,6 +354,7 @@ pub fn offer(name: &str, account: &str, key_a: &str, key_b: Option<&str>) -> Off
         // Set by the caller that holds one rather than taken as an argument
         // here, so that no app has to pass an empty string to say "none".
         node_key: String::new(),
+        reply_key: None,
     }
 }
 

@@ -15,6 +15,7 @@
 import { record, type Metrics } from './analytics'
 import { withinRate } from './auth-limit'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
+import { ceremonyReply, sweepCeremonyReplies } from './ceremony-reply'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
@@ -98,9 +99,11 @@ export interface Env extends PasskeyConfig {
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
-    if (request.method !== 'POST') return json({ error: 'method' }, 405)
-
     try {
+      // The sealed ceremony reply (ov-769) takes a GET, so it goes first.
+      const reply = await ceremonyReply(request, env, url.pathname)
+      if (reply) return reply
+      if (request.method !== 'POST') return json({ error: 'method' }, 405)
       // The unauthenticated routes, throttled before they do any work.
       //
       // These three are the only ones anyone can call without a credential, and
@@ -160,6 +163,7 @@ export default {
   /// The cron trigger, every five minutes (`[triggers]` in wrangler.toml).
   /// See `sweepQuiet`.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await sweepCeremonyReplies(env)
     await sweepQuiet(env)
     await pruneSessionsSeen(env)
   },
