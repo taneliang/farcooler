@@ -76,7 +76,11 @@
 //! parked: no Enter on a dialog, the box still exactly the message, nobody
 //! typing for 3 s, the fenced Enter when the hooks give one. The pane's rows
 //! say it's waiting to send (`Projection::runner_in_box`) from the start.
-//! It's given up, as stayed busy, only past `left_kept` (4 hours): the
+//! Every read checks claude still runs the session it was written in: a
+//! /clear or /resume gives it up (`session_changed`, ov-827 review, S3).
+//! It's given up only past `left_kept` (4 hours), taken back out of the box
+//! while the box holds exactly it (Bring Here's clear), else left and said
+//! stayed busy: the
 //! longest anything in this runner waits on an agent (a held message,
 //! `held::GIVE_UP_MS`; an agent's message, `messages::GIVE_UP_AFTER_MS`), so
 //! a message held behind this one never outlives it, and past it a message
@@ -367,6 +371,24 @@ impl Watcher {
         }
     }
 
+    /// `p`'s message taken back out of the box at `left_kept`, as Bring
+    /// Here clears it: only claude's, only while the box holds exactly the
+    /// message, nobody typing for 3 s, a row at a time, each read back. The
+    /// word it's given up with, or `None` when it was left.
+    async fn taken_back(&self, p: &Pending) -> Option<&'static str> {
+        let _typing = self.try_typing(p.to.id)?;
+        let to = self.bring_gate(p.to.id).ok()?;
+        let (drawn, _) = self.bring_held(&to, None).await.ok()?;
+        if drawn.is_empty() || !p.expected.shown_by(&Composer::Holds(drawn.clone())) {
+            return None;
+        }
+        match self.bring_held(&to, Some(drawn)).await {
+            Ok((_, true)) => Some("taken_back"),
+            Err(farcooler_core::DomainError::Conflict { what: "partly" }) => Some("partly_taken_back"),
+            _ => None,
+        }
+    }
+
     /// What a parked message in `terminal` waits on (`turn_moved`).
     fn turn_signal(&self, terminal: Uuid) -> Arc<tokio::sync::Notify> {
         Arc::clone(self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).turns.entry(terminal).or_default())
@@ -425,7 +447,10 @@ impl Watcher {
             let timing = self.timing();
             if waited() < timing.wait_slows_after {
                 tokio::time::sleep(PASTE_POLL).await;
-            } else if waited() < timing.turn_begun_wait || idle_since.is_some() {
+            } else if waited() < timing.turn_begun_wait || idle_since.is_some() || unread_since.is_some() {
+                // Parked too, a read between turns is followed by its second
+                // soon, and a bad read by the next good one: two bad reads a
+                // parked poll apart would outlast `torn_cap` (ov-827 review, S2).
                 tokio::time::sleep(timing.wait_poll).await;
             } else {
                 // Parked: until the watcher sees the pane's activity move,
@@ -444,7 +469,9 @@ impl Watcher {
             }
             if waited() >= timing.left_kept {
                 last.logged(&registry, &p.to, &p.proven);
-                return Err(stayed(&last, &p.proven));
+                // Not left in the box for good: taken back out while it
+                // holds exactly the message (ov-827 review, S4).
+                return Err(self.taken_back(p).await.unwrap_or_else(|| stayed(&last, &p.proven)));
             }
             // Never wait on the box: Stop and Bring Here take it.
             let Some(_typing) = self.try_typing(p.to.id) else {
@@ -483,6 +510,14 @@ impl Watcher {
                     continue;
                 }
                 _ => unread_since = None,
+            }
+            // The conversation it was written for: a /clear, /resume or fork
+            // moves claude to another, whose box can hold the same text again
+            // (ov-827 review, S3). Its interrupt and its confirmation are read
+            // in this one's transcript, so nothing is sent into another.
+            if mid_turn::transcript_in(&p.config, p.proven.pid).is_some_and(|(session, _)| session != p.confirm.session) {
+                left_in_box(&registry, &p.to, "session_changed", p.proven.background, None);
+                return Err("session_changed");
             }
             let quiet = last_input(self.service.root_dir(), p.to.id).is_none_or(|at| now_millis() - at >= interrupt::TYPED_WITHIN_MS);
             match read {
@@ -706,7 +741,14 @@ impl Settle {
 
 impl Drop for Settle {
     fn drop(&mut self) {
-        self.me.composed_held.lock().unwrap_or_else(|e| e.into_inner()).pending.remove(&self.token);
+        {
+            let mut tellers = self.me.composed_held.lock().unwrap_or_else(|e| e.into_inner());
+            tellers.pending.remove(&self.token);
+            // The pane's turn signal goes with its last wait (review N2).
+            if !tellers.pending.values().any(|w| w.terminal == self.terminal) {
+                tellers.turns.remove(&self.terminal);
+            }
+        }
         if !self.ended && !std::thread::panicking() {
             return;
         }

@@ -167,6 +167,7 @@ const PASTE_LEFT: &str = "Paste left in the composer; not sent";
 const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
 const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
+const STOPPED: &str = "Not delivered: the agent's turn was stopped after it was typed.";
 const WAITING: &str = "Waiting to tell";
 
 /// What the agent is told.
@@ -495,6 +496,17 @@ impl Watcher {
         {
             self.say_waiting(wake, &task, &to, held);
             return Pass::Waiting(held);
+        }
+        // A notice in claude's box whose turn the person stopped since its
+        // paste: taken back out, never entered after it (ov-827).
+        if let Some(pasted) = wake.pasted_at
+            && self.stopped_since_paste(wake, &to, pasted).await
+        {
+            // Its take-back wants nobody typing (the key that stopped it).
+            if last_input(self.service.root_dir(), to.id).is_some_and(|at| now_millis() - at < interrupt::TYPED_WITHIN_MS) {
+                return Pass::Waiting(Held::Typing);
+            }
+            return self.give_up_paste(wake, &task, pasted, STOPPED.into()).await;
         }
         let Some(_typing) = self.try_typing(to.id) else { return Pass::Skipped };
         let pass = match self.ready(&to).await {
@@ -925,6 +937,7 @@ impl Watcher {
         // or a waiter would deliver it after (`deliver::retract_dropped`).
         self.retract_dropped(wake);
         self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
+        self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).stop_reads.remove(&wake.note);
         match self.service.store.finish_wake(wake, record.as_deref()) {
             Ok(Some(Some(_))) => {
                 if let Some(task) = task {

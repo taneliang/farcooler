@@ -189,6 +189,8 @@ mod tests {
             Some("a parked poll faster than the slow one")
         } else if t.left_kept <= t.turn_begun_wait {
             Some("a message given up before it parks")
+        } else if t.parked_poll * 3 > t.left_kept - t.turn_begun_wait {
+            Some("fewer than three parked reads before the limit")
         } else if t.carry_agents_for > t.wait_slows_after {
             Some("the gate's agents trusted past the slowdown, after the fast reads that watch for them")
         } else if t.torn_cap < t.wait_poll * 3 {
@@ -208,12 +210,13 @@ mod tests {
     fn the_production_waits_fit_together() {
         assert_eq!(misfit(&Timing::PRODUCTION), None);
         type Break = (fn(&mut Timing), &'static str);
-        let broken: [Break; 9] = [
+        let broken: [Break; 10] = [
             (|t| t.wait_poll = t.idle_twice, "no longer than idle_twice"),
             (|t| (t.wait_poll, t.idle_twice) = (Duration::from_millis(50), Duration::from_millis(10)), "faster than the fast one"),
             (|t| t.wait_slows_after = t.turn_begun_wait, "parks before it slows"),
             (|t| t.parked_poll = t.wait_poll / 2, "parked poll faster than the slow one"),
             (|t| t.left_kept = t.turn_begun_wait, "given up before it parks"),
+            (|t| t.parked_poll = t.left_kept, "fewer than three parked reads"),
             (|t| t.carry_agents_for = t.wait_slows_after + Duration::from_millis(1), "trusted past the slowdown"),
             (|t| t.torn_cap = t.wait_poll, "fewer than three slow reads"),
             (|t| t.torn_cap = t.turn_begun_wait, "a tenth of the wait"),

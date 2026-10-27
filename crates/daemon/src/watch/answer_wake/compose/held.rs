@@ -89,6 +89,9 @@ pub(crate) struct Tellers {
     /// Each pane's parked messages wait on this, which the watcher wakes
     /// when that pane's activity moves (`pending`, "Parked", ov-827).
     pub(super) turns: HashMap<Uuid, Arc<tokio::sync::Notify>>,
+    /// Each pasted wake's claude transcript, and how far it has been read
+    /// for a stopped turn, and whether one was found (`Watcher::stopped_since_paste`, ov-827).
+    pub(in crate::watch::answer_wake) stop_reads: HashMap<Uuid, (PathBuf, u64, bool)>,
     /// A test's pause after a send the gate said to hold, before it's held:
     /// says so on the first, waits on the second.
     #[cfg(test)]
@@ -330,6 +333,9 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "interrupted" => format!("Not sent: “{quoted}”. {agent}’s turn was stopped, so it’s still in {agent}’s box."),
         "runner_down" => format!("Not sent: “{quoted}”. The runner was stopped while it waited. Check the terminal."),
         "stayed_blocked" => format!("Not sent: “{quoted}”. {agent} was still asking you something, so the runner didn’t send it. Check the terminal."),
+        "taken_back" => format!("Not sent: “{quoted}”. {agent} stayed busy too long, so the runner took it back out of {agent}’s box. Send it again when you’re ready."),
+        "partly_taken_back" => format!("Not sent: “{quoted}”. {agent} stayed busy too long, and the runner only partly took it back out of {agent}’s box. Check the box before sending anything there."),
+        "session_changed" => format!("{agent} moved to another conversation while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),
         "box_cleared" => format!("{agent}’s box was cleared while “{quoted}” waited, so the runner didn’t send it."),
         "unreadable" => format!("The runner couldn’t read {agent}’s screen while “{quoted}” waited, so it didn’t send it. Check the terminal."),
         "agent_restarted" => format!("{agent} restarted while “{quoted}” waited, so the runner didn’t send it. Check the terminal."),

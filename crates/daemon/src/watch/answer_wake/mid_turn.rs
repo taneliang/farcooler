@@ -434,15 +434,44 @@ pub(crate) fn tool_called_since(path: &Path, from: u64) -> bool {
 /// permission dialog answered No or Esc (`[Request interrupted by user for
 /// tool use]`, measured on claude 2.1.309, ov-816).
 pub(crate) fn interrupted_since(path: &Path, from: u64) -> bool {
-    records(path, from).iter().filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("user")).any(|record| {
-        let content = record.get("message").and_then(|m| m.get("content"));
-        let says = |text: &str| text.starts_with("[Request interrupted by user");
-        match content {
-            Some(serde_json::Value::String(text)) => says(text),
-            Some(serde_json::Value::Array(blocks)) => blocks.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).any(says),
-            _ => false,
-        }
-    })
+    records(path, from).iter().any(is_interrupt)
+}
+
+/// Whether `record` says the person stopped claude's turn
+/// (`interrupted_since`).
+fn is_interrupt(record: &serde_json::Value) -> bool {
+    if record.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return false;
+    }
+    let says = |text: &str| text.starts_with("[Request interrupted by user");
+    match record.get("message").and_then(|m| m.get("content")) {
+        Some(serde_json::Value::String(text)) => says(text),
+        Some(serde_json::Value::Array(blocks)) => blocks.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).any(says),
+        _ => false,
+    }
+}
+
+/// `interrupted_since` for a reader that keeps no byte offset from before
+/// its paste (a wake marked pasted, ov-827): the records whole from byte
+/// `from` to the last line break (at most `LONGEST_READ`, the newest),
+/// those stamped at or after `at_ms` (claude stamps each). Returns the
+/// verdict and where the next read starts, past the last whole record.
+pub(crate) fn interrupted_after(path: &Path, from: u64, at_ms: i64) -> (bool, u64) {
+    let Ok(len) = std::fs::metadata(path).map(|m| m.len()) else { return (false, from) };
+    let start = if len < from { 0 } else { from.max(len.saturating_sub(LONGEST_READ)) };
+    let Ok(mut file) = std::fs::File::open(path) else { return (false, from) };
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err() || file.take(len - start).read_to_end(&mut bytes).is_err() {
+        return (false, from);
+    }
+    let Some(last) = bytes.iter().rposition(|b| *b == b'\n') else { return (false, start) };
+    let whole = String::from_utf8_lossy(&bytes[..last]);
+    let stopped = whole.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|record| {
+            is_interrupt(&record) && farcooler_core::session_log::claude::timestamp_ms(line).is_some_and(|at| at >= at_ms)
+        })
+    });
+    (stopped, start + last as u64 + 1)
 }
 
 /// Whether `text` was queued in the last stretch before byte `from`. A

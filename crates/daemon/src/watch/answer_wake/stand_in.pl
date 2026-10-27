@@ -125,6 +125,16 @@ if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
 # between the truncate and the write sees "no live entry", which drops a
 # held message as unconfirmable (ov-640: compose_held's flake on a loaded CI
 # runner).
+# The session the registry names: `stand-in`, or what `<control>.session`
+# holds, as a /clear or /resume moves claude to another (ov-827).
+sub session {
+    open(my $f, '<', "$control.session") or return "stand-in";
+    my $s = <$f> // "stand-in";
+    close $f;
+    chomp $s;
+    return $s;
+}
+
 sub registry {
     return unless defined $registry;
     # STAND_IN_TORN_REGISTRY seconds: written in place, as a claude that
@@ -132,7 +142,7 @@ sub registry {
     if ($ENV{STAND_IN_TORN_REGISTRY}) {
         open(my $f, '>:utf8', $registry) or die;
         select(undef, undef, undef, $ENV{STAND_IN_TORN_REGISTRY});
-        print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
+        print $f '{"pid":' . $$ . ',"sessionId":"' . session() . '","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
             . ',"status":"' . $_[0] . '"}';
         close $f;
         return;
@@ -141,7 +151,7 @@ sub registry {
     open(my $f, '>:utf8', $tmp) or die;
     # A slow writer, as a loaded runner makes one (STAND_IN_SLOW_REGISTRY seconds).
     select(undef, undef, undef, $ENV{STAND_IN_SLOW_REGISTRY}) if $ENV{STAND_IN_SLOW_REGISTRY};
-    print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
+    print $f '{"pid":' . $$ . ',"sessionId":"' . session() . '","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
         . ',"status":"' . $_[0] . '"}';
     close $f;
     rename($tmp, $registry) or die;
@@ -402,8 +412,15 @@ sub draw {
 
 # A permission dialog answered No or Esc, as claude 2.1.309 records it: the
 # tool's refusal, then the turn stopped, and back between turns (ov-816).
+# Now, as claude stamps a record: `2026-10-27T05:03:04.123Z`.
+sub stamp {
+    my $t = Time::HiRes::time();
+    my @g = gmtime(int $t);
+    return sprintf('%04d-%02d-%02dT%02d:%02d:%02d.%03dZ', $g[5] + 1900, $g[4] + 1, $g[3], $g[2], $g[1], $g[0], int(($t - int $t) * 1000));
+}
+
 sub dialog_refused {
-    record('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}');
+    record('{"type":"user","timestamp":"' . stamp() . '","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}');
     open(my $f, '>', $control) or die;
     print $f "idle";
     close $f;
@@ -553,7 +570,7 @@ while (1) {
             $buf = "";
             logit("ESC");
             if (working($mode)) {
-                record('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}');
+                record('{"type":"user","timestamp":"' . stamp() . '","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}');
                 open(my $f, '>', $control) or die;
                 print $f "idle";
                 close $f;

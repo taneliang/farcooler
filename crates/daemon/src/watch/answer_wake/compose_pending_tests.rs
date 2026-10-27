@@ -178,6 +178,7 @@ async fn a_turn_drawn_with_no_fence_gets_no_enter_and_is_left() {
     let said = logs_line(&sink, "a paste was left in the box").await;
     assert!(said.contains("check=\"not_idle\"") && said.contains("gate=Shells"), "{said}");
     assert!(enters(&si).is_empty(), "{}", si.log());
+    waits_over(&b).await;
     assert!(not_sent(agent.id).iter().any(|n| n.contains("Claude stayed busy, so it’s still in Claude’s box")), "{:?}", not_sent(agent.id));
 }
 
@@ -222,6 +223,7 @@ async fn a_turn_still_running_past_the_wait_leaves_the_paste() {
     assert!(said.contains("registry_busy") && said.contains("background=Shells"), "{said}");
     assert!(!said.contains("find"), "the text is never logged: {said}");
     assert!(enters(&si).is_empty(), "{}", si.log());
+    waits_over(&b).await;
     let rows = not_sent(agent.id);
     assert!(rows.iter().any(|n| n == "Not sent: “what did they find”. Claude stayed busy, so it’s still in Claude’s box."), "{rows:?}");
 }
@@ -299,6 +301,7 @@ async fn stop_during_the_wait_acts_at_once_and_the_wait_gives_up_unentered() {
     assert!(said.contains("a paste was left in the box"), "{said}");
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(enters(&si).is_empty(), "{}", si.log());
+    waits_over(&b).await;
     let rows = not_sent(agent.id);
     assert!(rows.iter().any(|n| n == "Not sent: “what did they find”. You stopped Claude, so it’s still in Claude’s box."), "{rows:?}");
 }
@@ -364,6 +367,7 @@ async fn the_box_changing_during_the_wait_gives_it_up_as_changed() {
     assert!(said.contains("check=\"not_shown\""), "{said}");
     waits_over(&b).await;
     assert!(enters(&si).is_empty(), "{}", si.log());
+    waits_over(&b).await;
     let rows = not_sent(agent.id);
     let want = "Claude’s box changed while “what did they find” waited, so the runner didn’t send it. Check the terminal.";
     assert!(rows.iter().any(|n| n == want), "{rows:?}");
@@ -565,6 +569,9 @@ async fn the_gates_agents_are_not_trusted_past_their_time() {
     let (sink, _logging) = logging();
     let (agent, si) = agents_hidden_after_a_turn(&b, Duration::from_millis(500)).await;
     let said = logs_line(&sink, "a paste was left in the box").await;
+    // Its take-back is tried first (ov-827 review, S4), which a stand-in
+    // drawing no cursor can't have.
+    waits_over(&b).await;
     assert!(said.contains("check=\"registry_busy\"") && said.contains("gate=Agents") && said.contains("background=Shells"), "{said}");
     assert!(enters(&si).is_empty(), "{}", si.log());
     // The gate saw agents and the screen is idle: the agents outlasted the

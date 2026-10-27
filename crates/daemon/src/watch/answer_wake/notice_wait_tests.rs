@@ -71,13 +71,14 @@ async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
 }
 
 /// A runner notice waiting in the box of a claude no hook is heard from:
-/// one frame read between turns mid-turn (a quarter second of it, the
-/// registry idle with it) is no turn's end. Its Enter needs two reads
-/// `idle_twice` apart, a second here, as a waiting compose's does. No Enter.
+/// one frame read between turns mid-turn (0.7 s of it, longer than a pump
+/// cycle so a pass surely reads it, the registry idle with it) is no turn's
+/// end. Its Enter needs two reads `idle_twice` apart, 2 s here, as a waiting
+/// compose's does. No Enter.
 #[tokio::test]
 async fn one_stray_idle_frame_gets_a_waiting_notice_no_enter() {
     let b = board().await;
-    b.watcher.with_timing(|t| (t.told_spacing, t.idle_twice) = (crate::watch::Timing::SHORT, Duration::from_secs(1)));
+    b.watcher.with_timing(|t| (t.told_spacing, t.idle_twice) = (crate::watch::Timing::SHORT, Duration::from_secs(2)));
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
@@ -92,11 +93,55 @@ async fn one_stray_idle_frame_gets_a_waiting_notice_no_enter() {
     si.show("idle").await;
     let ender = si.clone();
     let frame = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(700)).await;
         ender.show("working").await;
     });
-    pumping(&b, Duration::from_secs(2)).await;
+    pumping(&b, Duration::from_secs(3)).await;
     frame.await.unwrap();
     assert!(!si.log().contains("ENTER"), "an Enter on one idle frame: {}", si.log());
     assert_eq!(b.svc.store.pending_message_wakes().unwrap().len(), 1, "still waiting: {:?}", b.progress());
+}
+
+/// Review S1: the notice's turn stopped by the person, a dialog answered
+/// `key` (No, `2`, or Esc) from the phone: never entered after it, but taken
+/// back out of the box once nobody is typing, and the task says so.
+async fn a_notice_whose_turn_was_stopped_is_taken_back(key: &str) {
+    let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
+    let orchestrator = b.orchestrator().await;
+    let si = b.stand_in_with(&orchestrator, "claude", "claude", "STAND_IN_DRAFT=1").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    si.show("working-on-paste").await;
+    b.ready_lane("ios-overwrite");
+    b.watcher.tell_departures();
+    b.pump().await;
+    crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
+    pumping(&b, Duration::from_millis(600)).await;
+    si.show("menu").await;
+    pumping(&b, Duration::from_millis(600)).await;
+    typed_marked(&b, orchestrator.id, key).await;
+    crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "MODE idle\n").await;
+    for _ in 0..60 {
+        b.pump().await;
+        if b.svc.store.pending_message_wakes().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    pumping(&b, Duration::from_secs(1)).await;
+    let log = si.log();
+    assert!(!log.contains("ENTER"), "entered after the stop: {log}");
+    assert!(log.contains("CLEARROW"), "never taken back: {log}");
+    let said = b.progress();
+    assert!(said.iter().any(|n| n.contains("turn was stopped") && n.contains("took it back out")), "{said:?}");
+}
+
+#[tokio::test]
+async fn a_notice_whose_dialog_was_answered_no_is_taken_back() {
+    a_notice_whose_turn_was_stopped_is_taken_back("32").await;
+}
+
+#[tokio::test]
+async fn a_notice_whose_dialog_was_answered_esc_is_taken_back() {
+    a_notice_whose_turn_was_stopped_is_taken_back("1b").await;
 }

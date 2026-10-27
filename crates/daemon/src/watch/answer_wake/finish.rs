@@ -172,6 +172,31 @@ impl Watcher {
         self.settle(wake, Some(task), told(wake.kind, to, turn))
     }
 
+    /// Whether claude in `to` recorded a turn the person stopped (No or Esc
+    /// on a dialog, Esc, Stop) at or after `pasted`, the wake's paste: such
+    /// a notice is never entered after it, but taken back out (ov-827, as a
+    /// compose's wait gives up, ov-816 S1). The transcript is found once and
+    /// read on from where the last pass stopped (`interrupted_after`).
+    pub(super) async fn stopped_since_paste(&self, wake: &PendingWake, to: &Terminal, pasted: i64) -> bool {
+        let known = self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).stop_reads.get(&wake.note).cloned();
+        let (transcript, from, before) = match known {
+            Some(read) => read,
+            None => {
+                let Ok(("claude", _, pid)) = self.proven_agent(to).await else { return false };
+                let found = super::registry_turn::config_of(pid).await.and_then(|config| mid_turn::transcript_in(&config, pid));
+                let Some((_, transcript)) = found else { return false };
+                (transcript, 0, false)
+            }
+        };
+        if before {
+            return true;
+        }
+        let (stopped, next) = mid_turn::interrupted_after(&transcript, from, pasted);
+        // Once seen, kept: the next read starts past it.
+        self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).stop_reads.insert(wake.note, (transcript, next, stopped));
+        stopped
+    }
+
     /// `wake`, pasted at `pasted` and never entered, is past its deadline:
     /// its text is taken back out of the box, so it isn't left there as a
     /// draft for someone to send hours later, or to hold every message after
@@ -207,10 +232,10 @@ impl Watcher {
     /// box (`typing`) throughout. See `give_up_paste`. On a task of its own,
     /// as `bring_draft` is, so a dropped pass can't stop a clear between a
     /// ctrl+u and the ctrl+y that would put it back.
-    async fn take_back(&self, to: &Terminal, text: &str, pasted: i64, typing: tokio::sync::OwnedMutexGuard<()>) -> TakenBack {
-        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
-            return TakenBack::Left;
-        }
+    async fn take_back(&self, to: &Terminal, text: &str, _pasted: i64, typing: tokio::sync::OwnedMutexGuard<()>) -> TakenBack {
+        // A key typed since the paste is no reason to leave it (ov-827): the
+        // box must read exactly the text below, and `bring_held` wants
+        // nobody typing for 3 s.
         let Some(me) = self.me.upgrade() else { return TakenBack::Left };
         let (to, text) = (to.clone(), text.to_string());
         let run = async move {
