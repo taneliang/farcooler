@@ -280,6 +280,111 @@ struct KeyRefusalsTests {
         #expect(first && !tooSoon && later)
     }
 
+    // MARK: - Fewer failed logins on the runner's address (ov-821)
+
+    /// A probe that proves nothing is asked twice at the usual spacing and
+    /// then once in five minutes: a ProxyJump says the same however often it
+    /// is asked, and each ask is a failed login for the runner's address.
+    @Test func aProbeThatProvesNothingIsAskedLessAndLess() {
+        var refusals = KeyRefusals(admitted: true)
+        var asked: [TimeInterval] = []
+        for offset in stride(from: 0.0, through: 700, by: 10) {
+            guard refusals.mayProbe(at: Self.t0.addingTimeInterval(offset)) else { continue }
+            asked.append(offset)
+            refusals.probed(proved: false)
+        }
+        #expect(asked == [0, 30, 330, 630], "\(asked)")
+        #expect(refusals.cannotBeProven)
+    }
+
+    @Test func aProbeThatProvedItselfOnceIsAskedAtTheUsualSpacing() {
+        var refusals = KeyRefusals(admitted: true)
+        refusals.probed(proved: false)
+        refusals.probed(proved: false)
+        #expect(refusals.cannotBeProven)
+        refusals.probed(proved: true)
+        #expect(!refusals.cannotBeProven)
+        #expect(refusals.mayProbe(at: Self.t0))
+        #expect(refusals.mayProbe(at: Self.t0.addingTimeInterval(30)))
+    }
+
+    @Test func beingLetInForgetsTheProbesThatProvedNothing() {
+        var refusals = KeyRefusals(admitted: true)
+        refusals.probed(proved: false)
+        refusals.probed(proved: false)
+        refusals.letIn()
+        #expect(!refusals.cannotBeProven)
+    }
+
+    /// A device whose access is gone dials once per recheck: what the
+    /// foreground and the network returning ask for waits, a tap doesn't
+    /// consult this, and a recheck is five minutes on.
+    @Test func aDeviceWhoseAccessIsGoneHoldsOffADialNobodyAskedFor() {
+        var refusals = KeyRefusals(admitted: true)
+        for dial in Self.dials.prefix(4) {
+            refusals.dialing(at: dial)
+            _ = refusals.refused(at: dial)
+        }
+        #expect(refusals.verdict == .revoked)
+        let last = Self.dials[3]
+        #expect(refusals.holdsOffDial(at: last.addingTimeInterval(1)))
+        #expect(refusals.holdsOffDial(at: last.addingTimeInterval(299)))
+        #expect(!refusals.holdsOffDial(at: last.addingTimeInterval(300)))
+    }
+
+    /// Short of settling, and for a device never let in, nothing waits: the
+    /// backoff and a first connection are not what this is about.
+    @Test func aDeviceThatIsNotSettledHoldsNothingOff() {
+        var refusals = KeyRefusals(admitted: true)
+        #expect(!refusals.holdsOffDial(at: Self.t0))
+        for dial in Self.dials.prefix(3) {
+            refusals.dialing(at: dial)
+            _ = refusals.refused(at: dial)
+        }
+        #expect(refusals.verdict == .passing)
+        #expect(!refusals.holdsOffDial(at: Self.dials[2].addingTimeInterval(1)))
+
+        var stranger = KeyRefusals(admitted: false)
+        stranger.dialing(at: Self.t0)
+        #expect(!stranger.holdsOffDial(at: Self.t0.addingTimeInterval(1)))
+    }
+
+    /// A runner that said it released this device is settled without a
+    /// single refusal, over Tailcat's silence.
+    @Test func aDeviceTheRunnerReleasedHoldsOffADialToo() throws {
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
+        var refusals = KeyRefusals(admitted: true)
+        refusals.release("studio", in: defaults)
+        refusals.dialing(at: Self.t0)
+        #expect(refusals.holdsOffDial(at: Self.t0.addingTimeInterval(60)))
+        #expect(!refusals.holdsOffDial(at: Self.t0.addingTimeInterval(301)))
+    }
+
+    @Test func aDeviceLetInDialsAsItLikesAgain() {
+        var refusals = KeyRefusals(admitted: true)
+        for dial in Self.dials.prefix(4) {
+            refusals.dialing(at: dial)
+            _ = refusals.refused(at: dial)
+        }
+        refusals.letIn()
+        #expect(!refusals.holdsOffDial(at: Self.dials[3].addingTimeInterval(1)))
+    }
+
+    /// The second key is a second refusal on the same recheck.
+    @Test func aDeviceWhoseAccessIsGoneTriesOneKeyPerRecheck() throws {
+        var refusals = KeyRefusals(admitted: true)
+        #expect(refusals.triesTheOtherKey)
+        for dial in Self.dials.prefix(3) { _ = refusals.refused(at: dial) }
+        #expect(refusals.triesTheOtherKey, "not settled yet: the rekey's second key still gets its turn")
+        _ = refusals.refused(at: Self.dials[3])
+        #expect(!refusals.triesTheOtherKey)
+        refusals.letIn()
+        #expect(refusals.triesTheOtherKey)
+        let defaults = try #require(ScratchDefaults.suite("KeyRefusalsTests.\(UUID().uuidString)"))
+        refusals.release("studio", in: defaults)
+        #expect(!refusals.triesTheOtherKey)
+    }
+
     @Test func otherRefusalsAndFailuresAreNot() {
         #expect(!KeyRefusals.isKeyRefusal("e@box: Permission denied (password)."))
         #expect(!KeyRefusals.isKeyRefusal("error: permission denied for control\ncode: scope-denied"))

@@ -330,7 +330,7 @@ final class DaemonClient: ObservableObject {
     /// runner just refused this Mac, when the stream would be one more
     /// failed login for the same answer (ov-821). The next check is armed
     /// here instead; the stream starts once a read gets in.
-    private func afterRecheck() {
+    func afterRecheck() {
         if awaitingRecheck { scheduleRetry() } else { startEvents() }
     }
 

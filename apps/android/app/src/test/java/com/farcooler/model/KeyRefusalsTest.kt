@@ -137,4 +137,60 @@ class KeyRefusalsTest {
         assertTrue(RunnerTeam.NO_ACCESS_BODY.contains("ask the runner’s owner to add this device again"))
         assertTrue(RunnerTeam.NO_ACCESS_BODY.contains("if the runner is yours, add it yourself"))
     }
+
+    /** ov-821: a phone whose access is gone dials once per recheck. */
+    @Test
+    fun `a phone whose access is gone holds off a dial nobody asked for until the recheck`() {
+        val refusals = KeyRefusals(admitted = true)
+        for (at in dials.take(4)) {
+            refusals.dialing(at)
+            Connection.Failure.KEY_REJECTED.reading(refusals, at)
+        }
+        assertEquals(KeyRefusals.Verdict.REVOKED, refusals.verdict)
+        val last = dials[3]
+        assertTrue(refusals.holdsOffDial(last + 1_000))
+        assertTrue(refusals.holdsOffDial(last + 299_999))
+        assertFalse(refusals.holdsOffDial(last + 300_000))
+    }
+
+    @Test
+    fun `a phone that is not settled, or was never let in, holds nothing off`() {
+        val fresh = KeyRefusals(admitted = true)
+        assertFalse(fresh.holdsOffDial(t0))
+        for (at in dials.take(3)) {
+            fresh.dialing(at)
+            Connection.Failure.KEY_REJECTED.reading(fresh, at)
+        }
+        assertEquals(KeyRefusals.Verdict.PASSING, fresh.verdict)
+        assertFalse(fresh.holdsOffDial(dials[2] + 1_000))
+
+        val stranger = KeyRefusals(admitted = false)
+        stranger.dialing(t0)
+        assertFalse(stranger.holdsOffDial(t0 + 1_000))
+    }
+
+    @Test
+    fun `a phone the runner released holds off a dial too, until a dial gets in`() {
+        val refusals = KeyRefusals(admitted = true)
+        refusals.release()
+        refusals.dialing(t0)
+        assertTrue(refusals.holdsOffDial(t0 + 60_000))
+        assertFalse(refusals.holdsOffDial(t0 + 301_000))
+        refusals.letIn()
+        assertFalse(refusals.holdsOffDial(t0 + 60_000))
+    }
+
+    @Test
+    fun `a phone whose access is gone tries one key per recheck`() {
+        val refusals = KeyRefusals(admitted = true)
+        assertTrue(refusals.triesTheOtherKey)
+        for (at in dials.take(3)) Connection.Failure.KEY_REJECTED.reading(refusals, at)
+        assertTrue(refusals.triesTheOtherKey)
+        Connection.Failure.KEY_REJECTED.reading(refusals, dials[3])
+        assertFalse(refusals.triesTheOtherKey)
+        refusals.letIn()
+        assertTrue(refusals.triesTheOtherKey)
+        refusals.release()
+        assertFalse(refusals.triesTheOtherKey)
+    }
 }

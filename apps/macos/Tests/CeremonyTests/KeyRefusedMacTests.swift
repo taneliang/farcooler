@@ -41,7 +41,12 @@ struct KeyRefusedMacTests {
         /// The runner released this Mac but its ssh master still serves it
         /// (ov-784, `a_real_sshd_master_outlives_a_revoke`).
         var released = false
+        /// How many CLI invocations the runner has been asked: each is an
+        /// ssh dial, which a runner that refuses the key counts against the
+        /// whole address (ov-821).
+        var calls = 0
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
+            calls += 1
             if refusing { return (nil, refusal) }
             if released {
                 if args.filter({ $0 != "--json" }) == ["member", "list"] {
@@ -99,7 +104,7 @@ struct KeyRefusedMacTests {
         runner.refusing = true
         for offset in offsets {
             clock.at = start.addingTimeInterval(offset)
-            await client.refresh()
+            await client.refresh(recheck: true)
         }
     }
 
@@ -152,17 +157,17 @@ struct KeyRefusedMacTests {
 
         runner.refusing = true
         runner.refusal = "Connection closed by UNKNOWN port 65535\nCould not reach you@cosmo over ssh."
-        await client.refresh()
+        await client.refresh(recheck: true)
         #expect(client.state == .noAccess, "\(client.state)")
         #expect(DaemonClient.waitsLong(client.state))
 
         let relaunched = self.client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, clock: clock)
-        await relaunched.refresh()
+        await relaunched.refresh(recheck: true)
         #expect(relaunched.state == .noAccess, "a relaunch forgot the runner said so: \(relaunched.state)")
         #expect(probes.count == 0, "probed \(probes.count) times")
 
         runner.refusing = false
-        await relaunched.refresh()
+        await relaunched.refresh(recheck: true)
         #expect(relaunched.state == .connected)
         #expect(!KeyRefusals.remembered("you@cosmo", in: defaults).released, "being let in again didn't end it")
     }
@@ -179,7 +184,7 @@ struct KeyRefusedMacTests {
 
         runner.refusing = true
         runner.refusal = "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed."
-        await client.refresh()
+        await client.refresh(recheck: true)
         #expect(client.state != .noAccess, "a changed host key read as no access")
         if case .unreachable(let reason) = client.state {
             #expect(reason.contains("Host key verification failed"))
@@ -188,7 +193,7 @@ struct KeyRefusedMacTests {
         }
 
         runner.refusing = false
-        await client.refresh()
+        await client.refresh(recheck: true)
         #expect(client.state == .connected)
         #expect(!KeyRefusals.remembered("you@cosmo", in: defaults).released, "being let in again didn't end it")
     }
@@ -330,7 +335,7 @@ struct KeyRefusedMacTests {
         #expect(client.state == .noAccess)
 
         runner.refusing = false
-        await client.refresh()
+        await client.refresh(recheck: true)
         #expect(client.state == .connected)
         #expect(!client.fleet.worktrees.isEmpty, "the fleet wasn't read again")
         #expect(!client.teamWorkForgotten)
@@ -365,14 +370,14 @@ struct KeyRefusedMacTests {
             let start = clock.at
             for offset in Self.spacing.prefix(3) {
                 clock.at = start.addingTimeInterval(offset)
-                await client.refresh()
+                await client.refresh(recheck: true)
                 #expect(client.state == .unreachable(reason: Self.refused), "round \(round): \(client.state)")
                 #expect(!DaemonClient.waitsLong(client.state))
                 #expect(!client.fleet.worktrees.isEmpty)
             }
             runner.refusing = false
             clock.at = clock.at.addingTimeInterval(8)
-            await client.refresh()
+            await client.refresh(recheck: true)
             #expect(client.state == .connected)
         }
     }
@@ -389,6 +394,167 @@ struct KeyRefusedMacTests {
         await refuse(client, runner, from: clock.at, at: Self.spacing + [60, 600], clock: clock)
         #expect(client.state == .unreachable(reason: Self.refused))
         #expect(probes.count == 0)
+    }
+
+    // MARK: - Fewer failed logins on the runner's address (ov-821)
+
+    /// A refused Mac settles in a few seconds, and in that time any of some
+    /// thirty `refresh()` call sites can dial: here a burst of ten. They
+    /// coalesce into the check the backoff already scheduled, so the runner
+    /// sees one failed login per check, not eleven.
+    @Test func refreshesAfterARefusalCoalesceIntoTheScheduledCheck() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        runner.refusing = true
+        runner.calls = 0
+        await client.refresh(recheck: true)
+        #expect(runner.calls == 1)
+
+        for _ in 0..<10 { await client.refresh() }
+        #expect(runner.calls == 1, "a burst of refreshes dialed \(runner.calls - 1) more times")
+        #expect(client.state == .unreachable(reason: Self.refused))
+
+        await client.refresh(recheck: true)
+        #expect(runner.calls == 2, "the scheduled check didn't dial")
+    }
+
+    /// Settled, the Mac dials once per five-minute check, and nothing else
+    /// does: not the burst, and not a probe.
+    @Test func aSettledMacDialsOncePerRecheck() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), probes: probes, clock: clock)
+        await client.refresh()
+        let start = clock.at
+        await refuse(client, runner, from: start, at: Self.spacing, clock: clock)
+        #expect(client.state == .noAccess)
+        #expect(probes.count == 1)
+
+        runner.calls = 0
+        for round in 1...3 {
+            clock.at = start.addingTimeInterval(Double(round) * 300)
+            for _ in 0..<5 { await client.refresh() }
+            await client.refresh(recheck: true)
+            #expect(runner.calls == round, "round \(round): \(runner.calls) dials")
+        }
+        #expect(probes.count == 1, "a settled Mac probed again")
+        #expect(client.state == .noAccess)
+    }
+
+    /// Check Again and the scheduled check read the runner, and being added
+    /// back ends the hold-off for every call site.
+    @Test func aMacLetInAgainRefreshesAsBefore() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing, clock: clock)
+        #expect(client.awaitingRecheck)
+
+        runner.refusing = false
+        await client.refresh(recheck: true)
+        #expect(client.state == .connected)
+        #expect(!client.awaitingRecheck)
+        runner.calls = 0
+        await client.refresh()
+        await client.refresh()
+        #expect(runner.calls == 2, "a connected Mac's refreshes were held off")
+    }
+
+    /// Only a refusal coalesces: a runner that isn't answering, a
+    /// connected Mac and a first launch read as they always have.
+    @Test func onlyARefusalHoldsOffARefresh() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        #expect(!client.awaitingRecheck)
+        await client.refresh()
+        #expect(!client.awaitingRecheck)
+
+        runner.refusing = true
+        runner.refusal = "ssh: connect to host cosmo port 22: Connection refused\nCould not reach you@cosmo over ssh."
+        runner.calls = 0
+        await client.refresh()
+        await client.refresh()
+        await client.refresh()
+        #expect(runner.calls == 3, "a runner that isn't answering was treated as a refusal")
+    }
+
+    /// After a scheduled check that was refused, the events stream, a dial
+    /// of its own for the same answer, doesn't start; the next check is armed
+    /// instead. After one that got in, it does (here: no CLI, so it says so).
+    @Test func aRefusedCheckDoesNotStartTheEventStream() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("revoked"), clock: clock)
+        client.binaryForTesting = ""
+        await client.refresh()
+        #expect(client.state == .connected)
+        client.afterRecheck()
+        #expect(client.state == .unreachable(reason: DaemonClient.cliMissingReason), "a connected Mac's check didn't start the stream")
+        client.stopEvents()
+
+        await refuse(client, runner, from: clock.at, at: Self.spacing, clock: clock)
+        #expect(client.state == .noAccess)
+        client.afterRecheck()
+        #expect(client.state == .noAccess, "a refused check started the stream: \(client.state)")
+        client.stopEvents()
+    }
+
+    /// The probe is asked less and less when it can't prove anything, and
+    /// the Mac's own checks wait with it: a ProxyJump stays on the fast
+    /// backoff otherwise, probing every thirty seconds, for as long as the
+    /// app is open.
+    @Test func aProbeThatProvesNothingIsAskedLessAndLessAndTheChecksSlowDown() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let probes = Counter()
+        let client = client(runner, defaults, probe: try Self.sample("proxyjump"), probes: probes, clock: clock)
+        await client.refresh()
+        let start = clock.at
+        await refuse(client, runner, from: start, at: Self.spacing, clock: clock)
+        #expect(probes.count == 1)
+        #expect(!client.retryWaitsLong(client.state), "one probe that proved nothing slowed the checks")
+
+        await refuse(client, runner, from: start, at: [44], clock: clock)
+        #expect(probes.count == 2)
+        #expect(client.retryWaitsLong(client.state), "two probes that proved nothing left the checks fast")
+        #expect(client.state == .unreachable(reason: Self.refused))
+
+        await refuse(client, runner, from: start, at: [74, 104, 134, 164, 194, 224, 254, 284, 314], clock: clock)
+        #expect(probes.count == 2, "probed \(probes.count) times in five minutes")
+        await refuse(client, runner, from: start, at: [344], clock: clock)
+        #expect(probes.count == 3)
+
+        runner.refusing = false
+        await client.refresh(recheck: true)
+        #expect(client.state == .connected)
+        #expect(!client.retryWaitsLong(client.state))
+        #expect(!client.keyRefusals.cannotBeProven)
+    }
+
+    /// A runner that is down for another reason is not slowed by refusals
+    /// it gave before.
+    @Test func checksStaySlowOnlyWhileTheLastFailureIsARefusal() async throws {
+        let defaults = try defaults()
+        let runner = Runner()
+        let clock = Clock()
+        let client = client(runner, defaults, probe: try Self.sample("proxyjump"), clock: clock)
+        await client.refresh()
+        await refuse(client, runner, from: clock.at, at: Self.spacing + [44], clock: clock)
+        #expect(client.retryWaitsLong(client.state))
+        runner.refusal = "ssh: connect to host cosmo port 22: Connection refused\nCould not reach you@cosmo over ssh."
+        await client.refresh(recheck: true)
+        #expect(!client.retryWaitsLong(client.state), "\(client.state)")
     }
 
     /// The probe asks nothing of the person, reuses no master, and checks the
