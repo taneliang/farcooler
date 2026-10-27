@@ -58,6 +58,9 @@ export class Reconnector<R extends Linked, C> {
   private runner: R | null = null
   /// Each connection has a number; a stale one's news is ignored.
   private generation = 0
+  /// Runners the connection was lost under, kept here because a freed wasm
+  /// object cannot be asked: its `lost` getter throws once it is freed.
+  private readonly gone = new WeakSet<object>()
   private view: LinkView = { kind: 'up' }
   private ahead: { at: number; conn: Promise<C | null> } | null = null
 
@@ -69,7 +72,7 @@ export class Reconnector<R extends Linked, C> {
     const runner = await this.deps.connect(conn, () => this.lost(generation))
     if (generation !== this.generation) {
       runner.free()
-      return runner
+      throw new Error('closed')
     }
     this.runner = runner
     this.set({ kind: 'up' })
@@ -80,6 +83,11 @@ export class Reconnector<R extends Linked, C> {
     return this.runner
   }
 
+  /// Whether the connection `runner` was on has been lost.
+  hasLost(runner: object): boolean {
+    return this.gone.has(runner)
+  }
+
   /// Whether the page is showing a working connection.
   get up(): boolean {
     return this.view.kind === 'up'
@@ -87,6 +95,7 @@ export class Reconnector<R extends Linked, C> {
 
   private lost(generation: number): void {
     if (generation !== this.generation) return
+    if (this.runner) this.gone.add(this.runner)
     this.runner?.free()
     this.runner = null
     this.dialAhead()
@@ -130,7 +139,14 @@ export class Reconnector<R extends Linked, C> {
     this.set({ kind: 'connecting' })
     try {
       const conn = await this.tunnel()
-      const runner = await this.open(conn)
+      let runner: R
+      try {
+        runner = await this.open(conn)
+      } catch (e) {
+        // A tunnel the login never used must not be left dialed.
+        this.deps.discard(conn)
+        throw e
+      }
       await this.deps.resume(runner)
     } catch (e) {
       this.set({ kind: 'failed', word: (e as Error).message })
@@ -172,5 +188,21 @@ export class Replacement {
     const now = this.pending
     this.pending = false
     return now
+  }
+}
+
+/// What a pane does with each chunk the runner sends: nothing once the page
+/// has moved on, the clear before a resumed pane's first chunk, and the write.
+/// One function so the wiring terminal.ts relies on is the one tested.
+export function paneOutput(
+  replacement: Replacement,
+  current: () => boolean,
+  reset: () => void,
+  write: (bytes: Uint8Array) => void,
+): (bytes: Uint8Array) => void {
+  return bytes => {
+    if (!current()) return
+    if (replacement.first()) reset()
+    write(bytes)
   }
 }

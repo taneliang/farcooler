@@ -358,13 +358,21 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   /// A pane's stream ended: said so unless the whole connection did, which
   /// the notice above the terminal already says.
   const ended = (from: WebRunner) => {
-    if (!from.lost) paneNote('This terminal’s stream ended. Select it to open it again.')
+    // Asked a moment later: the loss reaches the page as the pane's end and as
+    // `onLost`, in either order. The reconnector remembers it; the wasm object
+    // cannot be asked once it is freed.
+    setTimeout(() => {
+      if (!reconnector.hasLost(from) && reconnector.current === from) paneNote('This terminal’s stream ended. Select it to open it again.')
+    }, 100)
   }
   link = reconnector
+  let dialed: TunnelConn | null = null
   try {
     const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
+    dialed = conn
     runner = await reconnector.open(conn)
   } catch (e) {
+    dialed?.close()
     const word = (e as Error).message
     const action =
       word === 'host_key_changed' || word === 'host_key_unknown' || word === 'key_rejected'

@@ -70,6 +70,20 @@ fn anything_heard_resets_the_clock_and_the_count() {
     assert_eq!(watch.step(5 * every + 500), Step::Dead);
 }
 
+/// A timer that fires late, as a hidden tab's does, sends one probe and waits
+/// a whole interval for its answer; it does not count the minutes it missed as
+/// unanswered probes.
+#[test]
+fn a_late_look_sends_one_probe_and_gives_it_a_full_interval() {
+    let l = Liveness::TUNNEL;
+    let every = l.probe_after.as_millis() as u64;
+    let mut watch = Watch::new(l, 0);
+    assert_eq!(watch.step(120_000), Step::Probe);
+    assert_eq!(watch.step(120_000), Step::Wait(every), "no second probe in the same look");
+    watch.heard(120_000 + 100);
+    assert_eq!(watch.step(120_000 + 100 + every - 1), Step::Wait(1), "an answer starts the count over");
+}
+
 /// The browser has no figure of its own: whatever `Liveness` says is what the
 /// watch does, so a change to the tunnel's setting moves every client.
 #[test]
@@ -371,6 +385,24 @@ async fn a_new_connection_attaches_the_same_terminal_and_types_after_a_loss() {
         }
         assert_eq!(echoed, b"ls");
         assert!(!fresh.runner.lost());
+    })
+    .await;
+}
+
+/// The same late look end to end: a healthy link whose page clock jumps two
+/// minutes in one step (a tab coming back) answers its probe and stays up.
+#[tokio::test(start_paused = true)]
+async fn a_healthy_link_is_not_called_dead_after_a_two_minute_jump_of_the_clock() {
+    local(async {
+        let rig = Rig::up().await;
+        rig.clock.advance(120_000);
+        rig.settle().await;
+        for _ in 0..4 {
+            rig.second().await;
+        }
+        assert_eq!(rig.lost.load(Ordering::SeqCst), 0);
+        assert!(!rig.runner.lost());
+        assert!(rig.seen.probes.load(Ordering::SeqCst) >= 1);
     })
     .await;
 }

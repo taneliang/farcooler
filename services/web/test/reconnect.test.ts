@@ -5,18 +5,23 @@
 import { describe, expect, it } from 'vitest'
 
 import { linkNotice } from '../src/client/copy'
-import { type Deps, type LinkView, type Linked, PREDIAL_MAX_AGE_MS, Reconnector, Replacement } from '../src/client/reconnect'
+import { type Deps, type LinkView, type Linked, PREDIAL_MAX_AGE_MS, Reconnector, Replacement, paneOutput } from '../src/client/reconnect'
 
 class Runner implements Linked {
   freed = false
   answers = true
   constructor(readonly onLost: () => void, readonly conn: string) {}
   async check() {
+    this.use()
     if (!this.answers) this.onLost()
     return this.answers
   }
+  /// A wasm-bindgen object throws on any use after `free`.
   free() {
     this.freed = true
+  }
+  use(): void {
+    if (this.freed) throw new Error('null pointer passed to rust')
   }
 }
 
@@ -162,6 +167,32 @@ describe('a connection that is lost', () => {
   })
 })
 
+describe('what the page asks after a loss', () => {
+  it('remembers a lost runner without touching the freed object', async () => {
+    const t = rig()
+    const first = await t.link.open('tunnel 0')
+    expect(t.link.hasLost(first)).toBe(false)
+    first.onLost()
+    expect(first.freed).toBe(true)
+    expect(t.link.hasLost(first)).toBe(true)
+    await t.settle()
+    await t.link.reconnect()
+    expect(t.link.hasLost(t.runners[1])).toBe(false)
+    expect(t.link.current).toBe(t.runners[1])
+  })
+
+  it('closes a tunnel the login failed on', async () => {
+    let refuse = false
+    const t = rig({ connectFails: () => (refuse ? 'key_rejected' : null) })
+    const first = await t.link.open('tunnel 0')
+    first.onLost()
+    await t.settle()
+    refuse = true
+    await t.link.reconnect()
+    expect(t.log).toContain('discard tunnel 1')
+  })
+})
+
 describe('a tab that comes back', () => {
   it('asks the runner at once, and a silent runner brings the notice up', async () => {
     const t = rig()
@@ -204,5 +235,32 @@ describe('a pane that comes back after a drop', () => {
 
   it('never clears a pane that was opened fresh', () => {
     expect(new Replacement(false).first()).toBe(false)
+  })
+})
+
+describe('the pane output wiring', () => {
+  const run = (resuming: boolean, live = () => true) => {
+    const events: string[] = []
+    const out = paneOutput(new Replacement(resuming), live, () => events.push('reset'), b => events.push(`write ${b[0]}`))
+    return { events, out }
+  }
+
+  it('clears a resumed pane before its first chunk only', () => {
+    const { events, out } = run(true)
+    out(Uint8Array.of(1))
+    out(Uint8Array.of(2))
+    expect(events).toEqual(['reset', 'write 1', 'write 2'])
+  })
+
+  it('never clears a fresh pane', () => {
+    const { events, out } = run(false)
+    out(Uint8Array.of(1))
+    expect(events).toEqual(['write 1'])
+  })
+
+  it('writes nothing, and clears nothing, once the page moved on', () => {
+    const { events, out } = run(true, () => false)
+    out(Uint8Array.of(1))
+    expect(events).toEqual([])
   })
 })

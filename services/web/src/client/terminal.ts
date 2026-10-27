@@ -11,7 +11,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
 
-import { Replacement } from './reconnect'
+import { paneOutput, Replacement } from './reconnect'
 
 const SCROLLBACK = 5000
 /// The most typed before a pane is live that is held for it.
@@ -84,11 +84,7 @@ export class PaneView {
     try {
       pane = await runner.attach(
         terminal,
-        bytes => {
-          if (!current()) return
-          if (replacement.first()) this.term.reset()
-          this.term.write(bytes)
-        },
+        paneOutput(replacement, current, () => this.term.reset(), bytes => this.term.write(bytes)),
         () => {
           if (current()) ended()
         },

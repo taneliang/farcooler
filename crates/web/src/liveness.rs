@@ -47,8 +47,9 @@ pub enum Step {
 #[derive(Debug, Clone)]
 pub struct Watch {
     liveness: Liveness,
-    /// When something was last received, or when the link was opened.
-    heard_at: u64,
+    /// When the next probe is due: a probe interval after the last byte, or
+    /// after the last probe, as russh re-arms its timer when it fires.
+    due: u64,
     /// Probes sent since, none of them answered.
     unanswered: usize,
 }
@@ -56,13 +57,13 @@ pub struct Watch {
 impl Watch {
     /// A link that opened at `now` (milliseconds on the caller's clock).
     pub fn new(liveness: Liveness, now: u64) -> Self {
-        Self { liveness, heard_at: now, unanswered: 0 }
+        Self { liveness, due: now + liveness.probe_after.as_millis() as u64, unanswered: 0 }
     }
 
     /// Something arrived. Resets the clock and the count: a link carrying
     /// output sends no probes at all.
     pub fn heard(&mut self, now: u64) {
-        self.heard_at = now;
+        self.due = now + self.liveness.probe_after.as_millis() as u64;
         self.unanswered = 0;
     }
 
@@ -70,10 +71,13 @@ impl Watch {
     /// at the same instant says `Wait`.
     pub fn step(&mut self, now: u64) -> Step {
         let every = self.liveness.probe_after.as_millis() as u64;
-        let due = self.heard_at + every * (self.unanswered as u64 + 1);
-        if now < due {
-            return Step::Wait(due - now);
+        if now < self.due {
+            return Step::Wait(self.due - now);
         }
+        // Re-armed from now, not from when it was due: a timer that fired late
+        // (a hidden tab's, a laptop that slept) gives the probe it sends its
+        // whole interval to be answered before the next look.
+        self.due = now + every;
         self.unanswered += 1;
         if self.unanswered > self.liveness.unanswered { Step::Dead } else { Step::Probe }
     }
