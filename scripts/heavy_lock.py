@@ -22,6 +22,7 @@ import time
 
 LOCK_POLL = 5  # seconds between a waiter's tries
 LOAD_LIMIT = 20.0
+HELD_ENV = "HEAVY_LOCK_HELD"  # set in the child of scripts/heavy: nested takers do not queue behind their own parent
 
 
 def lock_path():
@@ -96,6 +97,9 @@ def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=prin
     queue (the releaser retakes it before a waiter polls), which is why this is tickets.
     A waiter names the holder and how many are ahead.
     """
+    if os.environ.get(HELD_ENV):  # an ancestor (scripts/heavy) already holds the place; waiting on ourselves would deadlock
+        yield
+        return
     path = path or lock_path()
     qd = queue_dir(path)
     qd.mkdir(parents=True, exist_ok=True)
@@ -209,6 +213,10 @@ def self_test():
         expect("a dead holder's ticket is skipped", (got, list(qd.glob(f"*-{dead.pid}.ticket"))), (["ran"], []))
         for t in qd.glob("*.ticket"):
             t.unlink()
+
+        # Nested: a command run by scripts/heavy that itself takes the lock (train-gate.sh running lane-gate) does not wait on its parent.
+        out = subprocess.run([heavy, "--", sys.executable, str(here / "heavy"), "--", "echo", "nested-ok"], env=env, capture_output=True, text=True, timeout=10).stdout
+        expect("a nested wrapper does not deadlock behind its parent", out.strip(), "nested-ok")
 
         # Through the real wrapper: the wrapper holds the lock, so an in-process taker waits and names it.
         marks = t / "marks"

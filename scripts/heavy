@@ -30,7 +30,7 @@ def main(argv):
     cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not cmd:
         ap.error("no command; usage: scripts/heavy -- <command...>")
-    if not hl.lock_wanted(args.no_lock):
+    if not hl.lock_wanted(args.no_lock) or os.environ.get(hl.HELD_ENV):
         return run(cmd)
     poll = float(os.environ.get("HEAVY_POLL", hl.LOCK_POLL))
     announce = float(os.environ.get("HEAVY_ANNOUNCE", 60))
@@ -38,12 +38,12 @@ def main(argv):
                      say=lambda m, **k: print(m.replace("load average", "5-minute load average"), file=sys.stderr, **k))
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip() or os.getcwd()
     with hl.machine_lock(top, shlex.join(cmd), poll=poll, announce=announce, say=lambda m, **k: print(m, file=sys.stderr, **k)):
-        return run(cmd)
+        return run(cmd, held=True)
 
 
-def run(cmd):
+def run(cmd, held=False):
     try:
-        child = subprocess.Popen(cmd)
+        child = subprocess.Popen(cmd, env={**os.environ, hl.HELD_ENV: "1"} if held else None)
     except OSError as e:
         print(f"scripts/heavy: cannot run {cmd[0]}: {e.strerror}", file=sys.stderr)
         return 127
