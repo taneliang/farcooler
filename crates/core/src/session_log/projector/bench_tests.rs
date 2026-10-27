@@ -135,7 +135,7 @@ fn rebuilding_a_long_transcript() {
             false => corpus((megabytes * 1_000_000).div_ceil(per_copy.0)),
             true => dense((megabytes * 1_000_000).div_ceil(per_copy.1)),
         };
-        let path = std::env::temp_dir().join(format!("fc-rebuild-{}-{megabytes}.jsonl", std::process::id()));
+        let path = crate::scratch::dir("rebuild").join(format!("long-{megabytes}.jsonl"));
         std::fs::File::create(&path).unwrap().write_all(text.as_bytes()).unwrap();
         let mut best = f64::MAX;
         for _ in 0..3 {
