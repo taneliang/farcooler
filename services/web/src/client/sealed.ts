@@ -4,10 +4,9 @@
 ///
 /// Three rules, each held in one place here and tested (test/sealed.test.ts):
 ///
-/// 1. **The owner's reply is opened first.** Anyone who saw the offer and may
-///    post can post a reply that opens, so the browser never picks among them:
-///    the reply posted by the offer's own account wins, and only with none does
-///    the earliest teammate's open (crates/web `enroll::earliest` decides).
+/// 1. **Only the earliest reply is opened.** Anyone who saw the offer and may
+///    post can post a reply that opens, so the browser never picks among them
+///    (crates/web `enroll::earliest` takes the first the relay lists).
 /// 2. **The code is this browser's own**, from its own open of that reply. A
 ///    reply sealed by anyone but the person's phone opens, and shows another
 ///    code than the phone's: that difference is the only defense there is.
@@ -53,8 +52,7 @@ export interface PollDeps {
 export type Waited = { kind: 'opened'; opened: Opened } | { kind: 'ended'; word: 'stale' | 'already_taken' } | { kind: 'timeout' } | { kind: 'cancelled' }
 
 /// Ask the relay for the reply to `ceremony` every two seconds, for up to
-/// 120 s, and open the one it hands over that the owner's account posted, or
-/// the earliest teammate's when there is none.
+/// 120 s, and open the earliest one it hands over.
 ///
 /// A read takes every reply there is from the relay, so a reply that doesn't
 /// open is gone: the wait goes on for the next, and says so through `refused`.
@@ -94,23 +92,14 @@ export async function confirmCodes(opened: Opened, match: boolean, keep: (opened
 
 /// What the two buttons under the code do. "They Match" keeps the reply;
 /// "They Don't Match" keeps nothing and calls `mismatched`, which puts the
-/// still-unanswered code back on screen. The first tap of either answers for
-/// both: a second tap does nothing, so a double tap keeps the reply once.
+/// still-unanswered code back on screen.
 export function comparisonButtons(opened: Opened, keep: (opened: Opened) => Promise<void>, mismatched: () => void) {
-  let answered = false
-  const once = (answer: () => Promise<void>) => async () => {
-    if (answered) return
-    answered = true
-    await answer()
-  }
   return {
-    yes: once(async () => {
-      await confirmCodes(opened, true, keep)
-    }),
-    no: once(async () => {
+    yes: () => void confirmCodes(opened, true, keep),
+    no: async () => {
       await confirmCodes(opened, false, keep)
       mismatched()
-    }),
+    },
   }
 }
 

@@ -148,9 +148,8 @@ pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str, reply_
     Ok(farcooler_ceremony::encode_offer(&offer))
 }
 
-/// Open the offer's own account's reply in the relay's answer to a read
-/// (`{replies:[{sealed, posted_by}]}`), or the earliest teammate's when there is
-/// none, with this ceremony's key, and judge it
+/// Open the earliest reply in the relay's answer to a read
+/// (`{replies:[{sealed, posted_by}]}`) with this ceremony's key, and judge it
 /// as every device does. Answers `{code, granted_by, runners}` as JSON, or
 /// refuses with the ceremony's word (`unopened` for a reply that doesn't open
 /// with this key, `stale` past the window).

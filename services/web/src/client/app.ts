@@ -324,21 +324,8 @@ function compare(session: Session, opened: Opened): void {
   // Nothing was kept on a mismatch and the code is still unanswered: the QR
   // reply and a later sealed one still work.
   const buttons = comparisonButtons(opened, taken => keep(session, taken), () => void enroll(session, MISMATCH))
-  const yes = $<HTMLButtonElement>('compare-yes')
-  const no = $<HTMLButtonElement>('compare-no')
-  yes.disabled = false
-  no.disabled = false
-  // The first tap answers, so both buttons go dark at once: no second save.
-  yes.onclick = () => {
-    yes.disabled = true
-    no.disabled = true
-    void buttons.yes()
-  }
-  no.onclick = () => {
-    yes.disabled = true
-    no.disabled = true
-    void buttons.no()
-  }
+  $<HTMLButtonElement>('compare-yes').onclick = buttons.yes
+  $<HTMLButtonElement>('compare-no').onclick = () => void buttons.no()
 }
 
 /// Keep what a confirmed reply grants.

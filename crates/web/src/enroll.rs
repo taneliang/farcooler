@@ -70,7 +70,7 @@ pub struct Opened {
     pub taken: Taken,
 }
 
-/// The relay's answer to a read, down to what the chosen reply grants:
+/// The relay's answer to a read, down to what the earliest reply grants:
 /// [`earliest`], then [`open`], then [`taken`].
 pub fn open_earliest(
     relay_answer: &str,
@@ -344,11 +344,11 @@ mod tests {
         assert_ne!(opened.code, phone_code);
     }
 
-    /// Of the owner's replies only the earliest is opened. A later one, even the
-    /// honest one, is not tried, so the forger's earlier reply shows ITS code and
-    /// the honest reply behind it is not reached.
+    /// Only the earliest reply is opened. A later one, even the honest one, is
+    /// not tried, so the forger's earlier reply shows ITS code and the honest
+    /// reply behind it is not reached.
     #[test]
-    fn of_the_owners_replies_only_the_earliest_is_opened() {
+    fn only_the_earliest_reply_is_opened() {
         let secret = new_reply_secret();
         let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
         let (honest, honest_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
