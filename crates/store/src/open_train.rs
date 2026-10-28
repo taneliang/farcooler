@@ -400,6 +400,15 @@ fn departures_in(conn: &Connection, workspace: Uuid) -> Result<Vec<Departed>> {
                 .map_err(map_err)?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(map_err)?;
+            // A train is only "ready for its checks" while it has work to check. One
+            // with a SHA out, or whose lanes have all landed or been dropped, is past
+            // its checks however its own state reads (a coordinator that pushes or
+            // lands the lanes without moving the train leaves it `gating`), and an
+            // untold departure from before that must not be told after a restart
+            // (ov-845).
+            if train.pushed_sha.is_some() || lanes.is_empty() {
+                continue;
+            }
             let mut cards: Vec<Uuid> = train.card_id.into_iter().collect();
             for (id, _) in &lanes {
                 let mut cs = conn.prepare("SELECT task_id FROM lane_tasks WHERE lane_id = ?1").map_err(map_err)?;
@@ -423,3 +432,7 @@ fn departures_in(conn: &Connection, workspace: Uuid) -> Result<Vec<Departed>> {
 #[cfg(test)]
 #[path = "open_train_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "open_train_restart_tests.rs"]
+mod restart_tests;
