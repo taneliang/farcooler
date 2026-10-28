@@ -694,6 +694,10 @@ def clean_target_after_pass(repo, say=print):
     Only a linked worktree's, never the main checkout's, and the next build in it starts cold."""
     target = pathlib.Path(repo) / "target"
     if target.is_dir() and hl.lean_wanted(repo):
+        if target.is_symlink():  # the link may point at a folder somebody else owns: drop the link, never follow it
+            target.unlink()
+            say(f"lane-gate: {target} was a symlink; removed the link and left what it points to (--keep-target keeps the link)", flush=True)
+            return
         shutil.rmtree(target, ignore_errors=True)
         say(f"lane-gate: removed {target} (the gate passed; --keep-target keeps it)", flush=True)
 
@@ -1171,10 +1175,19 @@ def self_test():
         sh("worktree", "add", "-q", "--detach", str(lane_wt), cwd=main_wt)
         for wt in (main_wt, lane_wt):
             (wt / "target").mkdir()
+        link_wt, elsewhere = t / "linked", t / "elsewhere"
+        sh("worktree", "add", "-q", "--detach", str(link_wt), cwd=main_wt)
+        elsewhere.mkdir()
+        (elsewhere / "precious").write_text("x")
+        (link_wt / "target").symlink_to(elsewhere)
+        said = []
         saved_env = {k: os.environ.pop(k, None) for k in (hl.LEAN_ENV, "CI")}  # the gate runs its own tests with CI=true
         try:
             clean_target_after_pass(main_wt, say=lambda *a, **k: None)
             clean_target_after_pass(lane_wt, say=lambda *a, **k: None)
+            clean_target_after_pass(link_wt, say=lambda m, **k: said.append(m))
+            expect("a target/ symlink is unlinked, never followed, and the message does not claim a removal",
+                   ((link_wt / "target").exists() or (link_wt / "target").is_symlink(), (elsewhere / "precious").exists(), "symlink" in said[0] and "removed /" not in said[0]), (False, True, True))
             expect("a green gate removes the lane worktree's target/ and leaves the main checkout's", ((lane_wt / "target").exists(), (main_wt / "target").exists()), (False, True))
         finally:
             os.environ.update({k: v for k, v in saved_env.items() if v is not None})

@@ -132,11 +132,33 @@ def target_kb(target):
     return int(out[0]) if out else 0
 
 
+def cargo_is_building(target):
+    """True when a cargo process holds target/debug/.cargo-lock (a build outside scripts/heavy, say)."""
+    for lock in pathlib.Path(target).glob("*/.cargo-lock"):
+        try:
+            with open(lock, "a+") as f:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def trim_target(target, say=print):
     """Over the ceiling: drop the incremental caches, then everything. Call with the machine lock held."""
     target = pathlib.Path(target)
-    limit = float(os.environ.get(TARGET_MAX_ENV, TARGET_MAX_GB)) * 1024 * 1024  # KB
+    try:
+        cap = float(os.environ.get(TARGET_MAX_ENV, TARGET_MAX_GB))
+    except ValueError:
+        say(f"  {TARGET_MAX_ENV}={os.environ[TARGET_MAX_ENV]!r} is not a number; using {TARGET_MAX_GB:g} GB")
+        cap = TARGET_MAX_GB
+    limit = cap * 1024 * 1024  # KB
     if not target.is_dir() or target_kb(target) <= limit:
+        return
+    if cargo_is_building(target):
+        say(f"  {target} is over {cap:g} GB, but cargo is building in it right now; not clearing it")
         return
     for inc in target.glob("*/incremental"):
         shutil.rmtree(inc, ignore_errors=True)
@@ -485,6 +507,33 @@ def self_test():
             (tgt / "keep").write_bytes(b"x")
             via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
             expect("under the ceiling, nothing is touched", (tgt / "keep").exists(), True)
+            # Cargo holds target/debug/.cargo-lock while it builds: the trim must wait for another day, and say why.
+            (tgt / "debug").mkdir(parents=True, exist_ok=True)
+            (tgt / "debug" / "big").write_bytes(b"x" * 2_000_000)
+            holder = subprocess.Popen([sys.executable, "-c", "import fcntl,sys,time; f=open(sys.argv[1],'a+'); fcntl.flock(f, fcntl.LOCK_EX); print('held', flush=True); time.sleep(30)", str(tgt / "debug" / ".cargo-lock")], stdout=subprocess.PIPE, text=True)
+            try:
+                holder.stdout.readline()
+                told = []
+                trim_target(tgt, say=told.append)
+                expect("a target/ cargo holds is not trimmed, and the line says why", ((tgt / "debug" / "big").exists(), bool(told) and "cargo is building" in told[0]), (True, True))
+            finally:
+                holder.kill()
+                holder.wait()
+            trim_target(tgt, say=lambda *a, **k: None)
+            expect("... and once cargo lets go it is trimmed", tgt.exists(), False)
+            # A cap that is not a number falls back to 20 GB with a warning, not a traceback.
+            tgt.mkdir()
+            (tgt / "keep").write_bytes(b"x")
+            os.environ[TARGET_MAX_ENV] = "lots"
+            told = []
+            try:
+                trim_target(tgt, say=told.append)
+                err = None
+            except ValueError as e:
+                err = e
+            expect("a non-numeric cap warns and keeps the default", (err, bool(told) and "not a number" in told[0], (tgt / "keep").exists()), (None, True, True))
+            os.environ.pop(TARGET_MAX_ENV)
+            shutil.rmtree(tgt)
             main_tgt = main_wt / "target"
             main_tgt.mkdir()
             (main_tgt / "big").write_bytes(b"x" * 2_000_000)
