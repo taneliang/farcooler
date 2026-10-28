@@ -370,6 +370,7 @@ extension NativeSelectionTests {
             // has to scale their heights (text wraps to more lines there).
             await Self.scrollUp(scroll, window, by: 900)
             await Self.park(scroller, at: 0.5, window)
+            await Self.laidOut(scroll, window, held: 10, done: true)
             // A third of the way down the reader's row, not at its edge.
             let layout = try #require(TranscriptScroller.driving(scroll)?.layout)
             let reading = try #require(layout.reading(scroll))
@@ -377,6 +378,10 @@ extension NativeSelectionTests {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
             await T.settle(window, 200)  // capture-exempt: not a capture; the rows there laid out
+            // Then until the scroller says it's idle and the content holds
+            // still: where the reader is and the knob are read from a settled
+            // stack, not a half-built one (ov-842).
+            await Self.laidOut(scroll, window, held: 10, done: true)
             let top = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
             let start = scroller.doubleValue
             var worst = 0.0
