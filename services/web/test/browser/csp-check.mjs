@@ -440,18 +440,21 @@ async function connect(page, live = true) {
 /// line that opens it to the line that frees it.
 function channels(from = 0) {
   const text = readFileSync(runner.log, 'utf8')
-  let open = 0
+  const held = new Set()
   let peak = 0
   const refused = []
   let at = 0
   for (const line of text.split('\n')) {
-    if (/channel \d+: new session|channel \d+: new \[server-session\]/.test(line)) open++
-    else if (/channel \d+: free: server-session/.test(line)) open--
-    if (at >= from) peak = Math.max(peak, open)
-    if (/no more sessions|open failed|administratively prohibited/.test(line)) refused.push(line.trim())
+    const opened = /channel (\d+): new session|channel (\d+): new \[server-session\]/.exec(line)
+    const freed = /channel (\d+): free: server-session/.exec(line) ?? /session open failed, free channel (\d+)/.exec(line)
+    if (at >= from) peak = Math.max(peak, held.size)
+    if (opened) held.add(opened[1] ?? opened[2])
+    else if (freed) held.delete(freed[1])
+    // One line for each refusal ("session open failed" follows it).
+    if (/no more sessions|administratively prohibited/.test(line)) refused.push(line.trim())
     at += line.length + 1
   }
-  return { peak, open, refused, end: text.length }
+  return { peak, open: held.size, refused, end: text.length }
 }
 
 const sorted = xs => [...xs].sort((a, b) => a - b)
@@ -475,7 +478,9 @@ async function lowLimit(page) {
   const opened = channels(mark)
   if (opened.refused.length < 1) failures.push(`MaxSessions ${maxSessions} refused nothing for eight panes, so the check proved nothing`)
   if (opened.refused.length > 1) failures.push(`${opened.refused.length} refusals for eight panes, and only the first is expected: ${opened.refused[1]}`)
-  if (opened.peak > maxSessions) failures.push(`eight panes held ${opened.peak} channels at once, and sshd allows ${maxSessions}`)
+  // A refused session is opened and freed within a few log lines, so the
+  // peak may count it once more.
+  if (opened.peak > maxSessions + opened.refused.length) failures.push(`eight panes held ${opened.peak} channels at once, and sshd allows ${maxSessions}`)
   const note = await page.evaluate(() => document.querySelector('#pane-note')?.textContent ?? '')
   if (note.trim()) failures.push(`the page said "${note}" about a refusal it recovered from`)
   console.log(`csp-check: eight panes on MaxSessions ${maxSessions}: ${opened.refused.length} refusal, at most ${opened.peak} channels, the page silent`)

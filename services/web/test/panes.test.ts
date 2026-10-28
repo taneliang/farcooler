@@ -11,11 +11,14 @@ class Sshd {
   open = 0
   peak = 0
   refused = 0
+  /// Channels given back that the runner has not freed yet, when `lag` is on.
+  closing = 0
+  lag = false
   /// Refuses a channel past this many, as `MaxSessions` does (the control
   /// channel is one of them, so 10 here is 9 panes).
   constructor(readonly sessions = 10) {}
   take(): boolean {
-    if (this.open + 1 >= this.sessions) {
+    if (this.open + this.closing + 1 >= this.sessions) {
       this.refused++
       return false
     }
@@ -25,6 +28,11 @@ class Sshd {
   }
   give(): void {
     this.open--
+    if (this.lag) this.closing++
+  }
+  /// The runner's side has closed what was given back.
+  settle(): void {
+    this.closing = 0
   }
 }
 
@@ -57,14 +65,15 @@ class Screen implements Pane<Sshd> {
   }
 }
 
-function rig(max?: { max: number }, sessions = 10) {
+function rig(max?: { max: number }, sessions = 10, lag = false) {
   const sshd = new Sshd(sessions)
+  sshd.lag = lag
   const screens = new Map<string, Screen>()
   const set = new PaneSet<Sshd>(id => {
     const screen = new Screen(id)
     screens.set(id, screen)
     return screen
-  }, max)
+  }, max, async () => sshd.settle())
   const ids = Array.from({ length: 12 }, (_, i) => `t${i + 1}`)
   const ended: string[] = []
   const open = (id: string) => set.open(id, sshd, () => ended.push(id))
@@ -133,6 +142,12 @@ describe('the channel budget', () => {
 
   it('after a refusal, later opens are not refused again', async () => {
     const { sshd, ids, open } = rig({ max: 8 }, 5)
+    for (const id of ids.slice(0, 8)) await open(id)
+    expect(sshd.refused).toBe(1)
+  })
+
+  it('waits for a channel still closing, and learns from the first refusal only', async () => {
+    const { sshd, ids, open } = rig({ max: 8 }, 5, true)
     for (const id of ids.slice(0, 8)) await open(id)
     expect(sshd.refused).toBe(1)
   })

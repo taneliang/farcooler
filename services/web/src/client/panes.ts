@@ -23,6 +23,11 @@
 /// The most panes attached at once on one connection.
 export const MAX_LIVE_PANES = 7
 
+/// How many times a refused attach is tried again, and how long to wait
+/// between tries, for the runner to free the channel just given back.
+const RETRIES = 5
+const RETRY_MS = 200
+
 /// How many panes one runner's sshd has shown it will hold. The page keeps one
 /// per runner for the session, so a reload of the terminal list, or a new
 /// connection, doesn't forget what a refusal taught.
@@ -57,6 +62,7 @@ export class PaneSet<R> {
   constructor(
     private readonly make: (terminal: string) => Pane<R>,
     private readonly budget: Budget = { max: MAX_LIVE_PANES },
+    private readonly wait: () => Promise<void> = () => new Promise(done => setTimeout(done, RETRY_MS)),
   ) {}
 
   /// The terminal in front.
@@ -115,28 +121,45 @@ export class PaneSet<R> {
     const told = () => {
       if (this.front === id) ended()
     }
-    this.makeRoom(id)
+    // Where the runner has shown a lower limit, a channel just given back
+    // still counts against it: wait for it to be freed rather than be refused
+    // again.
+    if (this.makeRoom(id) && this.budget.max < MAX_LIVE_PANES) await this.wait()
     try {
       await pane.attach(runner, id, told, pane.used)
     } catch (e) {
       // A channel the runner refused: its sshd allows fewer than the budget
       // assumes. The panes holding a channel now are the number that worked;
       // one fewer leaves room for a channel still closing. Keep that as the
-      // budget, give back down to it, and try once more.
+      // budget and give back down to it.
       const worked = this.live.filter(other => other !== id).length
       if ((e as Error).message !== 'exec_failed' || worked === 0) throw e
       this.budget.max = Math.max(1, Math.min(this.budget.max, worked - 1))
       this.makeRoom(id)
       if (this.live.filter(other => other !== id).length >= worked && !this.releaseOne(id)) throw e
-      await pane.attach(runner, id, told, pane.used)
+      // The runner frees a channel only once its side has closed too, so the
+      // one just given back may still count: wait a moment and try again.
+      for (let tries = 1; ; tries++) {
+        await this.wait()
+        try {
+          await pane.attach(runner, id, told, pane.used)
+          return
+        } catch (again) {
+          if ((again as Error).message !== 'exec_failed' || tries >= RETRIES) throw again
+        }
+      }
     }
   }
 
-  /// Detach hidden panes, least recently shown first, until `id` fits.
-  private makeRoom(id: string): void {
+  /// Detach hidden panes, least recently shown first, until `id` fits. True if
+  /// any was detached.
+  private makeRoom(id: string): boolean {
+    let released = false
     while (this.live.filter(other => other !== id).length >= this.budget.max) {
-      if (!this.releaseOne(id)) return
+      if (!this.releaseOne(id)) break
+      released = true
     }
+    return released
   }
 
   private releaseOne(keep: string): boolean {
