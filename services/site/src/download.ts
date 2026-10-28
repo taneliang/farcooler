@@ -13,8 +13,26 @@ const FEED_TIMEOUT_MS = 4000
 /** A cache key, not a real URL anyone requests. */
 const LAST_GOOD_KEY = 'https://last-good.farcooler.invalid/canary'
 
+/** The slice of Workers Analytics Engine this file uses. */
+export interface DownloadCounter {
+  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
+}
+
 export interface DownloadEnv {
   APPCAST_URL: string
+  /// Counts downloads per build (ov-504). Optional: a Worker without the
+  /// binding just doesn't count.
+  DOWNLOADS?: DownloadCounter
+}
+
+/// One aggregate row per download: the event and the build number, nothing
+/// about the visitor. Never throws, so a counter can't break a download.
+function count(env: DownloadEnv, build: number | null): void {
+  try {
+    env.DOWNLOADS?.writeDataPoint({ indexes: ['download.click'], blobs: ['download.click', build === null ? 'unknown' : String(build)], doubles: [1] })
+  } catch {
+    // Counting is best effort.
+  }
 }
 
 /** Read the appcast; null on any failure (network, status, timeout). */
@@ -62,7 +80,7 @@ function unavailable(): Response {
  * out, so a poisoned cache entry is no more trusted than a poisoned feed. With
  * nothing remembered, a friendly 503.
  */
-export async function canaryDownload(env: DownloadEnv): Promise<Response> {
+export async function canaryDownload(env: DownloadEnv, counted = true): Promise<Response> {
   const cache = await caches.open('site-download')
   const xml = await readFeed(env.APPCAST_URL)
   const build = xml === null ? null : newestBuild(xml, env.APPCAST_URL)
@@ -71,10 +89,13 @@ export async function canaryDownload(env: DownloadEnv): Promise<Response> {
       new Request(LAST_GOOD_KEY),
       new Response(build.url, { headers: { 'cache-control': `max-age=${LAST_GOOD_SECONDS}` } }),
     )
+    if (counted) count(env, build.version)
     return redirect(build.url)
   }
   const remembered = await cache.match(new Request(LAST_GOOD_KEY))
   const url = remembered === undefined ? null : allowedDownload(await remembered.text(), env.APPCAST_URL)
   console.error('canary appcast unusable', url === null ? 'no fallback' : 'serving last known build')
-  return url === null ? unavailable() : redirect(url)
+  if (url === null) return unavailable()
+  if (counted) count(env, null)
+  return redirect(url)
 }

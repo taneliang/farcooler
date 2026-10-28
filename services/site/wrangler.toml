@@ -45,6 +45,12 @@ enabled = true
 head_sampling_rate = 1
 invocation_logs = false
 
+# Downloads per build (ov-504): one row per /download/canary redirect, holding
+# the build number and nothing about the visitor.
+[[analytics_engine_datasets]]
+binding = "DOWNLOADS"
+dataset = "farcooler_downloads"
+
 [vars]
 # Where the newest canary build is announced. The download redirect only ever
 # sends a browser to the host of this URL (and only to a .dmg under /canary/).
@@ -101,6 +107,12 @@ simple = { limit = 10, period = 60 }
 name = "farcooler-site-preview"
 routes = [{ pattern = "preview.farcooler.com", custom_domain = true }]
 
+# Downloads per build (ov-504): one row per /download/canary redirect, holding
+# the build number and nothing about the visitor.
+[[env.preview.analytics_engine_datasets]]
+binding = "DOWNLOADS"
+dataset = "farcooler_downloads_preview"
+
 [env.preview.vars]
 APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
 # No beacon: these hosts serve no marketing page.
@@ -120,6 +132,12 @@ simple = { limit = 10, period = 60 }
 [env.canary]
 name = "farcooler-site-canary"
 routes = [{ pattern = "canary.farcooler.com", custom_domain = true }]
+
+# Downloads per build (ov-504): one row per /download/canary redirect, holding
+# the build number and nothing about the visitor.
+[[env.canary.analytics_engine_datasets]]
+binding = "DOWNLOADS"
+dataset = "farcooler_downloads_canary"
 
 [env.canary.vars]
 APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"

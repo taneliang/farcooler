@@ -31,7 +31,8 @@ export default {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('Method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
       }
-      return canaryDownload(env)
+      // A HEAD probe is not a person downloading.
+      return canaryDownload(env, request.method === 'GET')
     }
     // The web app (src/app): its own pages, never the marketing page's assets.
     if (isApp(url.pathname)) return await app(request, env)

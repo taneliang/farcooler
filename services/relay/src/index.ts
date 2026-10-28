@@ -26,6 +26,7 @@ import { notifyMember } from './member-notice'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { pruneSessionsSeen } from './session-prune'
+import { recordDailyActiveRunners } from './usage-counts'
 import { totalOf, type Machine } from './needs-total'
 import { requireAccount } from './session'
 import { type PasskeyConfig } from './sshsig'
@@ -166,8 +167,7 @@ export default {
   /// See `sweepQuiet`.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await sweepQuiet(env)
-    await pruneSessionsSeen(env)
-    await sweepCeremonyReplies(env)
+    await Promise.all([pruneSessionsSeen(env), sweepCeremonyReplies(env), recordDailyActiveRunners(env)])
   },
 }
 

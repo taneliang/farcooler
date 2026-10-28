@@ -100,3 +100,30 @@ describe('/download/canary', () => {
     expect(res.status).toBe(405)
   })
 })
+
+describe('download counting (ov-504)', () => {
+  const rows: any[] = []
+  const counted = { ...env, DOWNLOADS: { writeDataPoint: (e: any) => rows.push(e) } } as unknown as Env
+  beforeEach(() => { rows.length = 0 })
+
+  it('writes one row holding the build and nothing else per GET redirect', async () => {
+    appcastIs(feed(item(dmg(3079), 3079)))
+    await worker.fetch(new Request('https://www.farcooler.com/download/canary', { headers: { 'user-agent': 'Secret/1', 'cf-connecting-ip': '1.2.3.4' } }), counted)
+    expect(rows).toEqual([{ indexes: ['download.click'], blobs: ['download.click', '3079'], doubles: [1] }])
+  })
+
+  it('counts nothing for HEAD or a 503', async () => {
+    appcastIs(feed(item(dmg(3079), 3079)))
+    await worker.fetch(new Request('https://www.farcooler.com/download/canary', { method: 'HEAD' }), counted)
+    await (await caches.open('site-download')).delete(new Request('https://last-good.farcooler.invalid/canary'))
+    appcastIs('down')
+    await worker.fetch(new Request('https://www.farcooler.com/download/canary'), counted)
+    expect(rows).toEqual([])
+  })
+
+  it('still redirects when the counter throws', async () => {
+    appcastIs(feed(item(dmg(3079), 3079)))
+    const broken = { ...env, DOWNLOADS: { writeDataPoint: () => { throw new Error('x') } } } as unknown as Env
+    expect((await worker.fetch(new Request('https://www.farcooler.com/download/canary'), broken)).status).toBe(302)
+  })
+})
