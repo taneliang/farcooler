@@ -318,11 +318,8 @@ mod tests {
         fn peer(&self) -> crate::Peer {
             crate::Peer { client_id: None, scope: farcooler_protocol::v1::Scope::Read }
         }
-        fn handle(
-            &self,
-            _req: farcooler_protocol::v1::Request,
-        ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
-            async { unreachable!("the handshake fails first") }
+        async fn handle(&self, _req: farcooler_protocol::v1::Request) -> farcooler_protocol::v1::Response {
+            unreachable!("the handshake fails first")
         }
     }
 
