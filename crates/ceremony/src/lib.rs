@@ -67,6 +67,10 @@ pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
 mod teammate;
 pub use teammate::{HeldKey, Teammate, TeammateOffer, accept_teammate_offer, teammates};
 
+mod route;
+use route::alternative_is_an_address_beside_a_tunnel;
+pub use route::usable_address;
+
 mod seal;
 pub use seal::{ReplyKey, open_reply, seal_reply, take_sealed_reply};
 
@@ -564,34 +568,6 @@ fn can_be_granted_a_tunnel(offer: &Offer) -> bool {
 
 fn has_a_tunneled_runner(manifest: &Manifest) -> bool {
     manifest.runners.iter().any(|r| matches!(r.reach, Reach::Tailcat { .. }))
-}
-
-/// The one shape [`RunnerEntry::alternative`] may take: none at all, or an
-/// address beside a tunnel. An address beside an address is two routes to
-/// choose between with nothing to say which, and a tunnel held in reserve is a
-/// route a device without a node key would be offered and could never dial.
-///
-/// And the address must be one: a hostname, IPv4 or IPv6 literal with nothing
-/// `ssh_config` would read as a second word or a token (no space, no `%`, no
-/// control character), and a port from 1 to 65535. A Mac writes it as
-/// `HostName`/`Port` in the first block of `~/.ssh/config`, where a bad value
-/// is a parse error for every `ssh` on that Mac (ov-485 M1).
-fn alternative_is_an_address_beside_a_tunnel(runner: &RunnerEntry) -> bool {
-    match (&runner.reach, &runner.alternative) {
-        (_, None) => true,
-        (Reach::Tailcat { .. }, Some(Reach::Direct { host, port })) => {
-            usable_address(host) && *port >= 1
-        }
-        _ => false,
-    }
-}
-
-/// One word `ssh_config` reads as a host: letters, digits, `.`, `_`, `:` and
-/// `-`, 1 to 253 of them, not led by `-`.
-pub fn usable_address(host: &str) -> bool {
-    (1..=253).contains(&host.len())
-        && !host.starts_with('-')
-        && host.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_:".contains(&b))
 }
 
 /// The SHA256 fingerprint of an OpenSSH public key, in the form a person reads

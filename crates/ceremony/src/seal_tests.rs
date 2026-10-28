@@ -27,6 +27,7 @@ fn runner(host_key: &str) -> RunnerEntry {
         reach: Reach::Direct { host: "box.tail-1234.ts.net".into(), port: 22 },
         alternative: None,
         pending: false,
+        pending_why: None,
     }
 }
 
