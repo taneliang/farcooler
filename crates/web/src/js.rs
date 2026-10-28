@@ -22,6 +22,7 @@ use crate::error::WebError;
 use crate::handshake;
 use crate::liveness::{Link, PageClock};
 use crate::passkey::{self, Assertion, Authenticate, PasskeySigner};
+use crate::register;
 use crate::ssh::SignError;
 use crate::wire::{self, Pane, Runner, spawn};
 
@@ -131,10 +132,71 @@ fn bridge(conn: JsValue) -> Result<DuplexStream, JsValue> {
     Ok(ssh_side)
 }
 
-/// The offer this browser shows, as the JSON its QR code carries.
+/// A new ceremony's reply key, as its secret half: the page keeps it for the
+/// life of the code on screen (in `sessionStorage`, never IndexedDB) and gives
+/// it back to [`make_offer`] and [`open_reply`].
+#[wasm_bindgen(js_name = newReplySecret)]
+pub fn new_reply_secret() -> String {
+    enroll::new_reply_secret()
+}
+
+/// The offer this browser shows, as the JSON its QR code carries. It names the
+/// public half of `reply_secret`, so a phone can post a sealed reply.
 #[wasm_bindgen(js_name = makeOffer)]
-pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str) -> String {
-    farcooler_ceremony::encode_offer(&enroll::offer(name, account, key_a, node_key))
+pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str, reply_secret: &str) -> Result<String, JsValue> {
+    let offer = enroll::offer(name, account, key_a, node_key, reply_secret).map_err(|e| failure(e.code(), &e.to_string()))?;
+    Ok(farcooler_ceremony::encode_offer(&offer))
+}
+
+/// Open the earliest reply in the relay's answer to a read
+/// (`{replies:[{sealed, posted_by}]}`) with this ceremony's key, and judge it
+/// as every device does. Answers `{code, granted_by, runners}` as JSON, or
+/// refuses with the ceremony's word (`unopened` for a reply that doesn't open
+/// with this key, `stale` past the window).
+///
+/// The code is this browser's own, from its own open. Nothing is kept: the
+/// page holds the answer until the person says the code matches their phone's.
+/// "Now" is read here, not passed in, so the page cannot leave the window out.
+#[wasm_bindgen(js_name = openReply)]
+pub fn open_reply(
+    relay_answer: &str,
+    offer: &str,
+    reply_secret: &str,
+    already_taken: bool,
+    shown_at_ms: f64,
+) -> Result<String, JsValue> {
+    let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
+    let opened = enroll::open_earliest(relay_answer, &offer, reply_secret, already_taken, shown_at_ms, js_sys::Date::now())
+        .map_err(|e| failure(e.code(), &e.to_string()))?;
+    serde_json::to_string(&opened).map_err(|e| failure("malformed", &e.to_string()))
+}
+
+/// The bytes this browser's passkey signs a challenge of, to register `key_line`
+/// for `account` with the directory against the relay's `challenge`.
+#[wasm_bindgen(js_name = registrationData)]
+pub fn registration_data(account: &str, challenge: &str, key_line: &str) -> Result<Uint8Array, JsValue> {
+    let data = register::signed_data(account, challenge, key_line).map_err(|e| failure(e.word(), &e.to_string()))?;
+    Ok(Uint8Array::from(&data[..]))
+}
+
+/// The armored proof `devices/register` takes, from the passkey's answer to
+/// [`registration_data`]. Refused unless the answer is a touch, for this
+/// build's host, over exactly that data.
+#[wasm_bindgen(js_name = registrationProof)]
+pub fn registration_proof(
+    account: &str,
+    challenge: &str,
+    key_line: &str,
+    authenticator_data: &[u8],
+    client_data_json: &[u8],
+    signature: &[u8],
+) -> Result<String, JsValue> {
+    let assertion = Assertion {
+        authenticator_data: authenticator_data.to_vec(),
+        client_data_json: client_data_json.to_vec(),
+        signature: signature.to_vec(),
+    };
+    register::proof(account, challenge, key_line, &assertion).map_err(|e| failure(e.word(), &e.to_string()))
 }
 
 /// Take the phone's reply to the offer this browser showed at `shown_at_ms`.
