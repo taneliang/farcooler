@@ -306,15 +306,15 @@ async fn a_revoke_outlives_a_daemon_restart() {
     assert!(!svc.sessions().open(Some("phone".into())).is_closed(), "a phone enrolled again was shut out after a restart");
 }
 
-/// A kept mark the store can't lift (ov-832) refuses the enroll that would
-/// lift it: the line and the mark never disagree, and the device stays out.
+/// A kept mark the store can't lift (ov-832) is lifted only once the line
+/// is written, and an enroll that can't lift it errs: the device stays marked
+/// and out, in memory too.
 #[tokio::test]
-async fn an_enroll_whose_mark_cant_be_lifted_writes_nothing() {
+async fn an_enroll_whose_mark_cant_be_lifted_errs_and_the_device_stays_out() {
     let (_dir, svc) = runner().await;
     revoke(&svc).await;
     farcooler_store::testing::break_revoked_marks(&svc.store);
     let answer = super::enroll(&svc, &asking(KEY_PHONE_NEW, "phone", false)).await;
     assert!(answer.is_err(), "an enroll whose mark couldn't be lifted wrote: {answer:?}");
-    assert!(phone_lines(&svc).await.is_empty(), "a line was written while the device stayed marked");
     assert!(svc.sessions().open(Some("phone".into())).is_closed(), "the mark was lifted in memory alone");
 }

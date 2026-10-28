@@ -140,7 +140,8 @@ async fn a_control_device_cant_take_a_revoked_id() {
 async fn a_control_device_cant_reenroll_an_existing_id() {
     let (_dir, svc) = runner().await;
     super::super::enroll(&svc, &asking(1, "phone", Scope::Control)).await.unwrap();
-    super::super::enroll(&svc, &asking(2, "owners-mac", Scope::Control)).await.unwrap();
+    // A shell-only line: the shape a control device's own enroll doesn't match.
+    super::super::enroll(&svc, &ClientEnroll { shell_access: true, ..asking(2, "owners-mac", Scope::Control) }).await.unwrap();
     let before = lines(&svc).await;
     let taken = add(&svc, &as_device(&svc, "phone", Scope::Control), 3, "owners-mac").await;
     assert!(matches!(taken, Err(DomainError::Conflict { what: "device_taken" })), "{taken:?}");
