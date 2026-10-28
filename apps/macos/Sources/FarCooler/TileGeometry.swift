@@ -69,10 +69,19 @@ enum TileGeometry {
         let usableHeight = size.height - CGFloat(down) * chromeHeight
         guard usableWidth > 0, usableHeight > 0 else { return nil }
 
-        return PaneGrid(
-            columns: max(20, Int(usableWidth / cell.width)),
-            rows: max(5, Int(usableHeight / cell.height)))
+        // Not clamped UP to a floor: a clamp turns the sliver a window or
+        // sidebar relayout passes through when the app comes back into a real
+        // 20-column window, and tmux splits that between the panes (ov-853).
+        let columns = Int(usableWidth / cell.width)
+        let rows = Int(usableHeight / cell.height)
+        guard columns >= minimumColumns * across, rows >= minimumRows * down else { return nil }
+        return PaneGrid(columns: columns, rows: rows)
     }
+
+    /// The fewest cells a pane is ever sent, per pane across and down. Below
+    /// this the view is mid-layout, not a size anyone chose, and nothing is sent.
+    static let minimumColumns = 20
+    static let minimumRows = 5
 
     /// Whether a pane draws its header (ov-214): only beside other panes,
     /// where it's the one thing saying which is which, carrying the number
@@ -100,9 +109,12 @@ enum TileGeometry {
         let usableWidth = size.width - TerminalMetrics.padding.left - TerminalMetrics.padding.right
         let usableHeight = size.height - TerminalMetrics.padding.top - TerminalMetrics.padding.bottom
         guard usableWidth > 0, usableHeight > 0 else { return nil }
-        return PaneGrid(
-            columns: max(20, Int(usableWidth / cell.width)),
-            rows: max(5, Int(usableHeight / cell.height)))
+        // Too small to be a size anyone chose: not reported, rather than raised
+        // to a floor and reported as if it were (ov-853).
+        let columns = Int(usableWidth / cell.width)
+        let rows = Int(usableHeight / cell.height)
+        guard columns >= minimumColumns, rows >= minimumRows else { return nil }
+        return PaneGrid(columns: columns, rows: rows)
     }
 
     /// A pane's cell rectangle, in points.
