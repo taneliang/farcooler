@@ -121,3 +121,42 @@ export function linkNotice(
       }
   }
 }
+
+/// Why a sealed reply from the phone was not used, by the ceremony's word.
+/// Said above the code while the wait goes on, except for `stale`.
+export function sealedRefusal(word: string): string {
+  switch (word) {
+    case 'unopened':
+    case 'malformed':
+    case 'wrong_ceremony':
+    case 'wrong_account':
+    case 'wrong_target':
+      return 'A reply arrived that this browser couldn’t open, so it was thrown away. If it wasn’t your phone’s, someone else posted it. Your phone’s reply can still arrive.'
+    case 'stale':
+      return replyRefusal('stale')
+    case 'no_tunnel':
+      return replyRefusal('no_tunnel')
+    default:
+      return 'A reply arrived that Far Cooler couldn’t use, so it was thrown away. Your phone’s reply can still arrive.'
+  }
+}
+
+/// What the page says when the codes don’t match.
+export const MISMATCH =
+  'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just add this browser from your phone, someone else may have posted it. To start again, select Start Over.'
+
+/// Why this browser couldn’t be put on the account’s device list.
+export function registerFailure(word: string): string {
+  switch (word) {
+    case 'declined':
+      return 'Far Cooler didn’t get your passkey. Select Register This Browser and follow your browser’s prompt.'
+    case 'claimed':
+      return 'This passkey is already registered to another Far Cooler account. Sign out, then sign in with the account your phone uses.'
+    case 'revoked':
+      return 'This passkey was removed from your account, so it can’t be added again. Sign out and back in to make a new one.'
+    case 'unreachable':
+      return 'Far Cooler couldn’t reach its service. Check your connection, then try again.'
+    default:
+      return 'Far Cooler couldn’t add this browser to your account. Try again.'
+  }
+}

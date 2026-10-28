@@ -43,6 +43,9 @@ export interface Device {
   passkey?: Passkey
   nodePriv: string
   nodePub: string
+  /// Whether this passkey is registered with the account's device directory
+  /// (ov-771), so a phone can certify it.
+  registered?: boolean
   /// The offer on screen, as its JSON, until a reply is taken or it expires.
   offer?: string
   /// When that offer went up, on this browser's clock (`Date.now()`).

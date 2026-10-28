@@ -18,12 +18,22 @@ import type { WebEnv } from './env'
 import { admitted } from './flag'
 import { withHeaders } from './headers'
 
-/// The relay routes the page may call, under /v1/. Slice 1 needs only who is
-/// signed in, for the enrollment offer's account.
+/// The relay routes the page may call, under /v1/:
+///
+/// - `directory/me`: who is signed in, for the enrollment offer's account.
+/// - `directory/devices/challenge` and `directory/devices/register`: this
+///   browser's passkey joins the account's device list (ov-771). The relay
+///   checks the proof; the Worker adds nothing and forwards the body.
+/// - `ceremony/reply`: the sealed reply to this browser's offer, a GET at the
+///   relay (`{ceremony}` in, `{replies}` out). Only the offer's own account
+///   can read it, and the page opens it in wasm; the Worker holds no key.
 ///
 /// With WEB_CLIENT "everyone" a route here is reachable by every signed-in
 /// stranger, so any new route needs its own security review (ov-810).
-export const ROUTES = new Set(['directory/me'])
+export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply'])
+
+/// A ceremony id as the relay mints it (`fresh_ceremony_id`): 128 bits as hex.
+const CEREMONY = /^[0-9a-f]{32}$/
 
 const MAX_BODY = 16 * 1024
 
@@ -59,7 +69,14 @@ export async function api(request: Request, url: URL, env: Configured & WebEnv):
     if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'bad request' }, 400, cookies())
     const [kind, ...rest] = route.split('/')
     const sub = rest.join('/')
-    answer = kind === 'account' ? await caller.account(sub, body as Record<string, unknown>) : await caller.directory(sub, body as Record<string, unknown>)
+    if (kind === 'ceremony') {
+      // The id goes into a URL path, so it is exactly what the relay mints.
+      const ceremony = (body as { ceremony?: unknown }).ceremony
+      if (typeof ceremony !== 'string' || !CEREMONY.test(ceremony)) return json({ error: 'bad request' }, 400, cookies())
+      answer = await caller.ceremonyReply(ceremony)
+    } else {
+      answer = kind === 'account' ? await caller.account(sub, body as Record<string, unknown>) : await caller.directory(sub, body as Record<string, unknown>)
+    }
   }
   if (answer.kind === 'ok') return json(answer.body, 200, cookies())
   return failure(answer, caller)
