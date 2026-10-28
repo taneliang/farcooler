@@ -342,6 +342,23 @@ extension NativeSelectionTests {
             _ = doc
         }
 
+        /// Waits for the rows to be laid out for the width just set: the
+        /// content's height and the clip's place unchanged over `held`
+        /// polls, and with `done` also the scroller's width hold let go.
+        /// A fixed pause measured a layout the machine hadn't reached when
+        /// it was loaded (a gate beside other builds), and the knob read
+        /// then was a stack's half-built estimate, not the session (ov-842).
+        static func laidOut(_ scroll: NSScrollView, _ window: NSWindow, held: Int = 3, done: Bool = false) async {
+            var last: (CGFloat, CGFloat)?
+            var same = 0
+            for _ in 0..<500 where same < held || (done && TranscriptScroller.driving(scroll).map { $0.ticking || $0.restorePending } == true) {
+                await T.settle(window, 20)  // capture-exempt: not a capture; the rows laid out at the new width
+                let now = (scroll.documentView?.frame.height ?? 0, scroll.contentView.bounds.minY)
+                same = last.map { $0 == now } == true ? same + 1 : 0
+                last = now
+            }
+        }
+
         /// Resized narrower and back a step at a time, as a window's edge
         /// is dragged, with every row laid out at the wide width first: the
         /// knob moves little, and the reader stays on their row.
@@ -382,7 +399,7 @@ extension NativeSelectionTests {
                 window.setContentSize(NSSize(width: width, height: 900))
                 window.contentView?.layoutSubtreeIfNeeded()
                 window.displayIfNeeded()
-                await T.settle(window, 60)  // capture-exempt: not a capture; the rows laid out at the new width
+                await Self.laidOut(scroll, window)
                 if first.isEmpty { first = note("first step, \(Int(width)) pt") }
                 if abs(scroller.doubleValue - start) > worst {
                     worst = abs(scroller.doubleValue - start)
@@ -391,7 +408,7 @@ extension NativeSelectionTests {
             }
             // The knob holds while the width changes, then goes where the
             // reader is: still within 2% of where it started.
-            await T.settle(window, 500)  // capture-exempt: not a capture; the last width laid out and held
+            await Self.laidOut(scroll, window, held: 25, done: true)
             if abs(scroller.doubleValue - start) > worst {
                 worst = abs(scroller.doubleValue - start)
                 worstAt = note("the most at the end")
