@@ -21,14 +21,13 @@
 /// never markup: the CSP's Trusted Types (`require-trusted-types-for
 /// 'script'`) refuse an HTML string sink outright.
 
-import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerIsStale, passkeyKeyLine, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, registerFailure, replyRefusal, sealedRefusal, unreachable } from './copy'
+import { connectFailure, joinDetail, joinTitle, linkNotice, replyRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneSet } from './panes'
-import { confirmCodes, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
@@ -37,7 +36,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 /// A call to the relay, through this Worker (services/web/src/api.ts). The
 /// `x-fc` header and the same-origin `Origin` are its CSRF check.
-async function relayRaw(route: string, body: unknown = {}): Promise<{ status: number; body: any }> {
+async function relay(route: string, body: unknown = {}): Promise<any> {
   const response = await fetch(`/api/relay/${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-fc': '1' },
@@ -46,14 +45,9 @@ async function relayRaw(route: string, body: unknown = {}): Promise<{ status: nu
   })
   if (response.status === 401) {
     location.assign('/')
-    return { status: 401, body: null }
+    return null
   }
-  return { status: response.status, body: await response.json().catch(() => null) }
-}
-
-async function relay(route: string, body: unknown = {}): Promise<any> {
-  const answer = await relayRaw(route, body)
-  return answer.status >= 200 && answer.status < 300 ? answer.body : null
+  return response.ok ? await response.json() : null
 }
 
 /// Never reloads on its own: a reload mid-keystroke would lose what was typed.
@@ -64,7 +58,7 @@ async function checkVersion(): Promise<void> {
   $('update').removeAttribute('hidden')
 }
 
-const SCREENS = ['status', 'enroll', 'compare', 'join', 'work']
+const SCREENS = ['status', 'enroll', 'join', 'work']
 
 function show(screen: string): void {
   for (const id of SCREENS) $(id).toggleAttribute('hidden', id !== screen)
@@ -142,67 +136,6 @@ function keyLineOf(passkey: Passkey): string {
 /// The timer that retires the code on screen when it expires.
 let retiring = 0
 
-/// The secret half of the reply key behind the code on screen. In memory, and
-/// in this tab's `sessionStorage` so a reload keeps the code answerable; never
-/// in IndexedDB, which outlives the tab. A code whose secret is gone is retired.
-const SECRET = 'fc-reply-secret'
-let replySecret: string | null = null
-function keepSecret(secret: string): void {
-  replySecret = secret
-  try {
-    sessionStorage.setItem(SECRET, secret)
-  } catch {}
-}
-function loadSecret(): string | null {
-  if (replySecret) return replySecret
-  try {
-    replySecret = sessionStorage.getItem(SECRET)
-  } catch {}
-  return replySecret
-}
-function dropSecret(): void {
-  replySecret = null
-  try {
-    sessionStorage.removeItem(SECRET)
-  } catch {}
-}
-
-/// Which wait for a sealed reply is current; a new count cancels the one before.
-let polling = 0
-const stopPolling = () => void ++polling
-
-// MARK: Registering
-
-/// Put this browser's passkey on the account's device list, so the phone can
-/// certify it and it shows there as a device (ov-771). One touch. Tried as soon
-/// as it is needed; if the browser refuses to prompt without a click (Safari),
-/// a button asks for the click.
-async function register(session: Session): Promise<void> {
-  const { device } = session
-  const passkey = device.passkey as Passkey
-  const rp = rpId()
-  status('Adding this browser to your account…', 'Touch your passkey if your browser asks.')
-  const done = await registerDevice(
-    {
-      call: relayRaw,
-      sign: data => assertWith(passkey, rp, data),
-      data: registrationData,
-      proof: (account, challenge, keyLine, signed) =>
-        registrationProof(account, challenge, keyLine, new Uint8Array(signed.authenticatorData), new Uint8Array(signed.clientDataJSON), new Uint8Array(signed.signature)),
-    },
-    device.account,
-    session.keyLine,
-    deviceName(),
-  )
-  if (!done.ok) {
-    status('Add this browser to your account', registerFailure(done.word), { label: 'Register This Browser', run: () => void register(session) })
-    return
-  }
-  device.registered = true
-  await saveDevice(device)
-  void enroll(session)
-}
-
 // MARK: Enrolling
 
 /// Show this browser's code, and read the phone's reply to it.
@@ -216,20 +149,12 @@ async function register(session: Session): Promise<void> {
 async function enroll(session: Session, notice = ''): Promise<void> {
   const { device } = session
   clearTimeout(retiring)
-  stopPolling()
-  if (!device.registered) {
-    // Tried without a click first; a refusal to prompt becomes a button.
-    await register(session)
-    return
-  }
-  if (device.offer && (offerIsStale(device.offerShownAt ?? 0) || !loadSecret())) {
+  if (device.offer && offerIsStale(device.offerShownAt ?? 0)) {
     delete device.offer
     delete device.offerShownAt
   }
   if (!device.offer) {
-    const secret = newReplySecret()
-    keepSecret(secret)
-    device.offer = makeOffer(deviceName(), device.account, session.keyLine, device.nodePub, secret)
+    device.offer = makeOffer(deviceName(), device.account, session.keyLine, device.nodePub)
     device.offerShownAt = Date.now()
     await saveDevice(device)
   }
@@ -247,10 +172,7 @@ async function enroll(session: Session, notice = ''): Promise<void> {
     void enroll(session, 'That code expired, so here’s a new one. Scan it with your phone, then scan its reply within two minutes.')
   }, Math.max(0, (device.offerShownAt ?? 0) + freshnessMs() - Date.now()) + 500)
 
-  void waitForSealedReply(session, note)
-
   $<HTMLButtonElement>('start-over').onclick = async () => {
-    dropSecret()
     delete device.offer
     delete device.offerShownAt
     await saveDevice(device)
@@ -281,60 +203,6 @@ async function enroll(session: Session, notice = ''): Promise<void> {
   }
 }
 
-/// Wait for the phone's sealed reply to the code on screen. When one opens, the
-/// person compares its code; nothing is kept before they say it matches.
-function waitForSealedReply(session: Session, note: HTMLElement): void {
-  const { device } = session
-  const offer = device.offer
-  if (!offer) return
-  const ceremony = (JSON.parse(offer) as { ceremony: string }).ceremony
-  const mine = ++polling
-  void waitForReply(
-    {
-      read: id => relayRaw('ceremony/reply', { ceremony: id }),
-      open: answer => JSON.parse(openReply(answer, device.offer ?? '', loadSecret() ?? '', !device.offer, device.offerShownAt ?? 0)) as Opened,
-      now: () => Date.now(),
-      sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-      cancelled: () => mine !== polling,
-      refused: word => {
-        note.textContent = sealedRefusal(word)
-        note.hidden = false
-      },
-    },
-    ceremony,
-  ).then(async waited => {
-    if (waited.kind === 'opened') compare(session, waited.opened)
-    else if (waited.kind === 'ended' && mine === polling) {
-      // Too late for this code, and so for any reply to it: a new one.
-      dropSecret()
-      delete device.offer
-      delete device.offerShownAt
-      await saveDevice(device)
-      void enroll(session, sealedRefusal(waited.word))
-    }
-  })
-}
-
-/// The reply's own code, to match against the phone's before it is kept.
-function compare(session: Session, opened: Opened): void {
-  stopPolling()
-  clearTimeout(retiring)
-  $('compare-code').textContent = opened.code
-  show('compare')
-  $<HTMLButtonElement>('compare-yes').onclick = () => void confirmCodes(opened, true, taken => keep(session, taken))
-  $<HTMLButtonElement>('compare-no').onclick = async () => {
-    await confirmCodes(opened, false, taken => keep(session, taken))
-    // Nothing was kept and the code is still unanswered: the QR reply and a
-    // later sealed one still work.
-    void enroll(session, MISMATCH)
-  }
-}
-
-/// Keep what a confirmed reply grants.
-async function keep(session: Session, opened: Opened): Promise<void> {
-  await finishTaken(session, { granted_by: opened.granted_by, runners: opened.runners })
-}
-
 async function takeReply(session: Session, reply: string): Promise<void> {
   const { device } = session
   let taken: { granted_by: string | null; runners: Granted[] }
@@ -355,16 +223,8 @@ async function takeReply(session: Session, reply: string): Promise<void> {
     note.hidden = false
     return
   }
-  await finishTaken(session, taken)
-}
-
-/// A reply the person has accepted (a scanned one, or a sealed one whose code
-/// they matched): the offer is spent, so a second reply to it is refused.
-async function finishTaken(session: Session, taken: { granted_by: string | null; runners: Granted[] }): Promise<void> {
-  const { device } = session
-  stopPolling()
+  // Taken: the offer is spent, so a second reply to it is refused.
   clearTimeout(retiring)
-  dropSecret()
   delete device.offer
   delete device.offerShownAt
   await saveDevice(device)
@@ -594,7 +454,6 @@ async function addAgain(session: Session): Promise<void> {
   link = null
   panes?.dispose()
   panes = null
-  dropSecret()
   delete session.device.runners
   delete session.device.offer
   delete session.device.offerShownAt
@@ -612,7 +471,6 @@ function signOutForgets(): void {
   if (!form) return
   form.addEventListener('submit', event => {
     event.preventDefault()
-    dropSecret()
     void forgetDevice()
       .catch(() => {})
       .finally(() => form.submit())

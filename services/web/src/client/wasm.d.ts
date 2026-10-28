@@ -6,27 +6,8 @@
 
 declare module 'fc-web' {
   export default function init(options: { module_or_path: string }): Promise<unknown>
-  /// A new ceremony's reply key, as its secret half. Kept while the code on
-  /// screen is up, and given to `makeOffer` and `openReply`.
-  export function newReplySecret(): string
-  /// The offer this browser shows, as the JSON its code carries. It names the
-  /// public half of `replySecret`, so a phone can post a sealed reply.
-  export function makeOffer(name: string, account: string, keyA: string, nodeKey: string, replySecret: string): string
-  /// Opens the EARLIEST reply in the relay's answer (`{replies:[…]}` as JSON)
-  /// and answers `{code, granted_by, runners}` as JSON, or throws an Error
-  /// whose message is the ceremony's word (`unopened`, `stale`, …).
-  export function openReply(relayAnswer: string, offer: string, replySecret: string, alreadyTaken: boolean, shownAtMs: number): string
-  /// What this browser's passkey signs to register `keyLine` for `account`.
-  export function registrationData(account: string, challenge: string, keyLine: string): Uint8Array
-  /// The armored proof `devices/register` takes, from the passkey's answer.
-  export function registrationProof(
-    account: string,
-    challenge: string,
-    keyLine: string,
-    authenticatorData: Uint8Array,
-    clientDataJson: Uint8Array,
-    signature: Uint8Array,
-  ): string
+  /// The offer this browser shows, as the JSON its code carries.
+  export function makeOffer(name: string, account: string, keyA: string, nodeKey: string): string
   /// `{granted_by, runners}` as JSON, or throws an Error whose message is the
   /// ceremony's word (`stale` once the code is past the window).
   export function acceptReply(reply: string, offer: string, alreadyTaken: boolean, shownAtMs: number): string

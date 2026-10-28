@@ -95,13 +95,13 @@ export async function visitorHeaders(env: AppEnv, visitor?: string): Promise<Rec
 
 class Limited extends Error {}
 
-async function post(env: Configured, path: string, body: unknown, token?: string, visitor?: string, method: 'POST' | 'GET' = 'POST'): Promise<Response> {
+async function post(env: Configured, path: string, body: unknown, token?: string, visitor?: string): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json', ...(await visitorHeaders(env, visitor)) }
   if (token) headers.authorization = `Bearer ${token}`
   return await fetch(`${env.APP_RELAY_URL.trim().replace(/\/+$/, '')}${path}`, {
-    method,
+    method: 'POST',
     headers,
-    ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+    body: JSON.stringify(body),
   })
 }
 
@@ -155,21 +155,14 @@ export class Caller {
     return await this.call(`/v1/account/${route}`, body)
   }
 
-  /// The sealed replies waiting for `ceremony` (`GET /v1/ceremony/reply/<id>`,
-  /// ov-769). The relay deletes what it hands over, and answers 404 while
-  /// there is none, which comes back as `refused` with status 404.
-  async ceremonyReply(ceremony: string): Promise<Answer> {
-    return await this.call(`/v1/ceremony/reply/${ceremony}`, {}, 'GET')
-  }
-
-  private async call(path: string, body: Record<string, unknown>, method: 'POST' | 'GET' = 'POST'): Promise<Answer> {
+  private async call(path: string, body: Record<string, unknown>): Promise<Answer> {
     if (this.signedOut) return { kind: 'signed-out' }
     try {
       if (!this.refreshed && expiresSoon(this.tokens.access) && !(await this.refresh())) return { kind: 'signed-out' }
-      let response = await post(this.env, path, body, this.tokens.access, undefined, method)
+      let response = await post(this.env, path, body, this.tokens.access)
       if (response.status === 401 && !this.refreshed) {
         if (!(await this.refresh())) return { kind: 'signed-out' }
-        response = await post(this.env, path, body, this.tokens.access, undefined, method)
+        response = await post(this.env, path, body, this.tokens.access)
       }
       if (response.status === 401) {
         this.signedOut = true
