@@ -506,7 +506,7 @@ impl Watcher {
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| now_millis() - at < interrupt::TYPED_WITHIN_MS) {
                 return Pass::Waiting(Held::Typing);
             }
-            return self.give_up_paste(wake, &task, pasted, STOPPED.into()).await;
+            return self.give_up_paste_why(wake, &task, pasted, STOPPED.into(), true).await;
         }
         let Some(_typing) = self.try_typing(to.id) else { return Pass::Skipped };
         let pass = match self.ready(&to).await {

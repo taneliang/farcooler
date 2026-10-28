@@ -130,6 +130,16 @@ impl Watcher {
             (false, Turn::Between) => None,
             (false, Turn::During) => return Pass::Waiting(Held::Busy),
         };
+        // The turn stopped since this pass began (an unmarked Esc: Stop, or
+        // one typed straight in tmux, repainting idle while the checks above
+        // ran): no Enter. The next pass takes it back (`wake`, ov-827 R1).
+        #[cfg(test)]
+        if let Some(run) = self.before_notice_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
+        if self.stopped_since_paste(wake, to, pasted).await {
+            return Pass::Waiting(Held::Typing);
+        }
         match self.service.store.take_wake_paste(wake) {
             Ok(true) => {}
             Ok(false) => return Pass::Settled,
@@ -202,11 +212,18 @@ impl Watcher {
     /// draft for someone to send hours later, or to hold every message after
     /// it out (ov-711), and `given_up` says why it wasn't delivered. Taken
     /// back by Bring Here's clear (`bring`): only claude's box, only while it
-    /// reads exactly the text, nobody having typed there since the paste,
-    /// and a row at a time, each read back. Anything else leaves it, as
+    /// reads exactly the text (a key typed since the paste that left it so
+    /// went elsewhere, ov-827), nobody typing for 3 s, and a row at a time,
+    /// each read back. Anything else leaves it, as
     /// before: "Paste left in the composer; not sent". Skipped while another
     /// send holds the box, to be tried on the next pass.
     pub(super) async fn give_up_paste(&self, wake: &PendingWake, task: &Task, pasted: i64, given_up: String) -> Pass {
+        self.give_up_paste_why(wake, task, pasted, given_up, false).await
+    }
+
+    /// `give_up_paste`; with `keep_why`, a text left in the box keeps
+    /// `given_up` before saying so, not "Paste left" alone (ov-827, N-e).
+    pub(super) async fn give_up_paste_why(&self, wake: &PendingWake, task: &Task, pasted: i64, given_up: String, keep_why: bool) -> Pass {
         let Some((to, text)) = self.addressed(wake, task).await.unwrap_or_default() else {
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         };
@@ -223,6 +240,7 @@ impl Watcher {
             TakenBack::Partly => format!(
                 "{given_up} Far Cooler began taking it back out of the agent's box but only partly cleared it. Check the box before sending anything there."
             ),
+            TakenBack::Left if keep_why => format!("{given_up} {PASTE_LEFT}."),
             TakenBack::Left => PASTE_LEFT.into(),
         };
         self.settle(wake, Some(task), Some(record))

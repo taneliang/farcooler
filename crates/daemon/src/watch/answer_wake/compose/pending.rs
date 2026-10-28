@@ -374,7 +374,10 @@ impl Watcher {
     /// `p`'s message taken back out of the box at `left_kept`, as Bring
     /// Here clears it: only claude's, only while the box holds exactly the
     /// message, nobody typing for 3 s, a row at a time, each read back. The
-    /// word it's given up with, or `None` when it was left.
+    /// word it's given up with, or `None` when it was left. Not on a task of
+    /// its own, as `finish::take_back` is: only a runner stopping drops this
+    /// wait mid-clear, and the resumed wait then reads a changed box and says
+    /// so (review N-d).
     async fn taken_back(&self, p: &Pending) -> Option<&'static str> {
         let _typing = self.try_typing(p.to.id)?;
         let to = self.bring_gate(p.to.id).ok()?;

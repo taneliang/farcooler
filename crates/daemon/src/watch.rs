@@ -951,6 +951,10 @@ pub struct Watcher {
     /// Enter (`compose`'s tests): a key typed after the box read back.
     #[cfg(test)]
     before_enter: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Run once, right before a pasted notice's last stop check ahead of its
+    /// Enter (`finish`'s, ov-827 R1): a turn stopped mid-pass.
+    #[cfg(test)]
+    before_notice_enter: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// A file a fenced Enter writes while it holds the fence, for the
     /// stand-in to say the Enter it saw was fenced (`mid_turn`'s tests).
     #[cfg(test)]
@@ -2823,6 +2827,8 @@ impl Watcher {
             slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             before_enter: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            before_notice_enter: std::sync::Mutex::new(None),
             #[cfg(test)]
             fence_marker: std::sync::Mutex::new(None),
             #[cfg(test)]

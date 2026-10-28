@@ -231,7 +231,9 @@ impl Watcher {
                 After::Shown(Draft::Holds(now)) if now.text == shown => {}
                 _ => return self.stop(to, &runtime, held, n, "changed").await,
             }
-            runtime.send_bytes_hex(to.id, CLEAR_ROW).await?;
+            // A send that failed may still have reached the pane: said as
+            // partly, so no caller says the text was left whole (ov-827, N-c).
+            runtime.send_bytes_hex(to.id, CLEAR_ROW).await.map_err(|_| conflict("partly"))?;
             match self.after_key(to, &shown, started).await {
                 After::Shown(Draft::Empty) => return Ok(()),
                 // A key takes a row away or a row's text. A window that still
@@ -319,7 +321,7 @@ impl Watcher {
         if !in_front {
             return Err(conflict("partly"));
         }
-        runtime.send_bytes_hex(to.id, PUT_BACK).await?;
+        runtime.send_bytes_hex(to.id, PUT_BACK).await.map_err(|_| conflict("partly"))?;
         let whole: String = held.text.chars().filter(|c| !c.is_whitespace()).collect();
         let deadline = tokio::time::Instant::now() + KEY_SETTLES;
         while tokio::time::Instant::now() < deadline {
