@@ -90,6 +90,19 @@ export async function confirmCodes(opened: Opened, match: boolean, keep: (opened
   return true
 }
 
+/// What the two buttons under the code do. "They Match" keeps the reply;
+/// "They Don't Match" keeps nothing and calls `mismatched`, which puts the
+/// still-unanswered code back on screen.
+export function comparisonButtons(opened: Opened, keep: (opened: Opened) => Promise<void>, mismatched: () => void) {
+  return {
+    yes: () => void confirmCodes(opened, true, keep),
+    no: async () => {
+      await confirmCodes(opened, false, keep)
+      mismatched()
+    },
+  }
+}
+
 export interface RegisterDeps {
   /// `POST /api/relay/<route>`.
   call: (route: string, body: unknown) => Promise<Answer>
