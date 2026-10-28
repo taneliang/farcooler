@@ -152,3 +152,27 @@ async fn a_teammates_device_waiting_on_its_bind_grants_nothing() {
     let refused = call(&tess, enroll(KEY_BROWSER, "browser-t", Scope::Control, false, NODE_BROWSER)).await;
     assert_eq!(refused.err().as_deref(), Some("not-yours:not_owners_device"));
 }
+
+/// The re-review's R1 (ov-828): a member's own enroll is recorded as theirs
+/// even when it says `for_teammate`, so removing the member revokes what it
+/// added. Taken as a pending teammate instead, the device would be nobody's
+/// with no enroller, and the sweep, which spares pending devices, would leave
+/// its line after the member was gone.
+#[tokio::test]
+async fn a_members_enroll_is_theirs_even_when_it_says_for_teammate() {
+    let (_dir, svc) = runner().await;
+    let local = factory(&svc, None, Scope::HostAdmin);
+    call(&local, enroll(KEY_TESS, "mac-b", Scope::HostAdmin, false, "")).await.expect("Bob's Mac");
+    let bind = pb::MemberSet { handle: "bob".into(), name: "Bob".into(), client_ids: vec!["phone-b".into(), "mac-b".into()], ..Default::default() };
+    let bind = Request { method: "member.set".into(), payload: Some(request::Payload::MemberSet(bind)), ..Default::default() };
+    call(&local, bind).await.expect("Bob's Mac is Bob's");
+
+    let bobs_mac = factory(&svc, Some("mac-b"), Scope::HostAdmin);
+    let mut teammate = enroll(KEY_BROWSER, "browser-m", Scope::Control, false, "");
+    let Some(request::Payload::ClientEnroll(p)) = teammate.payload.as_mut() else { unreachable!() };
+    p.for_teammate = true;
+    call(&bobs_mac, teammate).await.expect("a member admin's Mac adds a device");
+
+    let enrolled_by_bob = svc.store.remove_member_with_enrolled("bob").unwrap();
+    assert_eq!(enrolled_by_bob, vec!["browser-m".to_string()], "Bob's enroll wasn't recorded as his");
+}
