@@ -236,7 +236,7 @@ async function authenticator(context, page) {
 
 /// One launch of Chromium on one profile, so IndexedDB (the device) survives
 /// from launch to launch, with `video` as the fake camera when given.
-async function launch(video) {
+async function launch(video, secret) {
   const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
   if (video) args.push(`--use-file-for-fake-video-capture=${video}`)
   const context = await chromium.launchPersistentContext(profile, { args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
@@ -258,6 +258,11 @@ async function launch(video) {
       window.reportViolation({ directive: e.effectiveDirective, blocked: e.blockedURI, sample: e.sample, source: `${e.sourceFile}:${e.lineNumber}` }),
     )
   })
+  // The code on screen is answerable only while its secret half is in the tab's
+  // sessionStorage (the page never keeps it in IndexedDB), and a relaunch is a
+  // new tab: carry the secret across as the person's own tab would hold it, so
+  // the stored code is still the one the fake camera's reply answers.
+  if (secret) await context.addInitScript(s => sessionStorage.getItem('fc-reply-secret') ?? sessionStorage.setItem('fc-reply-secret', s), secret)
   if (runner) await context.addInitScript(swapDial)
   if (runner) await context.addInitScript(refusable)
   const page = context.pages()[0] ?? (await context.newPage())
@@ -347,6 +352,7 @@ const edit = (page, change) =>
     await new Promise(r => (store().put(d, 'this').onsuccess = r))
     db.close()
   }, change)
+const replySecret = page => page.evaluate(() => sessionStorage.getItem('fc-reply-secret'))
 const statusSays = (page, text, timeout = 120_000) =>
   page.waitForFunction(
     text => !document.getElementById('status')?.hidden && document.getElementById('status')?.textContent?.includes(text),
@@ -597,7 +603,9 @@ try {
     if (!kept.passkey || kept.ssh) failures.push('the device keeps something other than a passkey')
     if (kept.account !== 'acct-test') failures.push(`the device is kept for ${kept.account}, not the signed-in account`)
     if (offer.channel !== built || offer.account !== 'acct-test' || offer.node_key.length !== 43) failures.push(`the offer is wrong: ${JSON.stringify(offer)}`)
-    if (touches !== 0) failures.push(`making the passkey cost ${touches} sign-ins`)
+    // Exactly one: the registration with the directory (ov-771), which proves the
+    // browser holds the key. Making the passkey itself, and showing the code, cost none.
+    if (touches !== 1) failures.push(`making the passkey cost ${touches} sign-ins, not the one registration`)
     console.log(`csp-check: the offer's key is ${key.type} for ${key.application}`)
 
     await page.click('#scan')
@@ -643,8 +651,10 @@ try {
       runner.enroll(JSON.parse((await device(page)).offer).key_a)
       // A reply read after the window is refused, through the real camera path.
       let current = JSON.parse((await device(page)).offer)
+      let secret = await replySecret(page)
+      if (!secret) failures.push('the code on screen has no secret half in the tab')
       await session.context.close()
-      session = await launch(replyVideo(current, null, 'late'))
+      session = await launch(replyVideo(current, null, 'late'), secret)
       page = session.page
       await page.clock.install()
       await page.goto(origin)
@@ -660,8 +670,9 @@ try {
 
       // A teammate's reply asks before it joins.
       current = JSON.parse(kept.offer)
+      secret = await replySecret(page)
       await session.context.close()
-      session = await launch(replyVideo(current, 'ana@example.com', 'teammate'))
+      session = await launch(replyVideo(current, 'ana@example.com', 'teammate'), secret)
       page = session.page
       await page.goto(origin)
       await enrolling(page)
@@ -795,6 +806,7 @@ try {
 
   await new Promise(r => setTimeout(r, 500))
   for (const v of violations) failures.push(`CSP violation: ${v.directive} blocked ${v.blocked || '(inline)'} at ${v.source} ${v.sample ?? ''}`)
+  if (!reports.registered) failures.push('the page never registered its passkey with the directory before showing its code')
   for (const r of reports.csp) failures.push(`CSP report: ${r.slice(0, 300)}`)
   for (const e of errors) if (!/Failed to load resource/.test(e)) failures.push(e)
 } finally {

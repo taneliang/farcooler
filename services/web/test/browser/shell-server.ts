@@ -13,6 +13,8 @@ import { shellCsp, withHeaders } from '../../src/headers'
 export interface Reports {
   /// Bodies posted to /csp, as the browser sent them.
   csp: string[]
+  /// Registrations the stub relay accepted.
+  registered?: number
 }
 
 export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pick<WebEnv, 'DERP_HOSTS' | 'DERP_MAP_ORIGIN'>, reports: Reports) {
@@ -23,6 +25,7 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
     },
   } as unknown as Fetcher
 
+  let minted = ''
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url)
     const path = url.pathname
@@ -40,6 +43,31 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
     if (path === '/api/relay/directory/me') {
       return withHeaders(JSON.stringify({ user: { id: 'acct-test', email: 'owner@example.com' } }), 200, { 'content-type': 'application/json' })
     }
+    // The relay's device directory and sealed-reply routes the enroll flow calls
+    // (ov-771), as far as the page can tell: a challenge it minted, a
+    // registration that must echo it with a key and an armored proof, and no
+    // reply yet. A registration that doesn't (a page that skipped the passkey's
+    // signature, or sent another challenge) is refused, so the walk still
+    // proves the page registers before it shows its code.
+    if (path === '/api/relay/directory/devices/challenge') {
+      minted = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('')
+      return withHeaders(JSON.stringify({ challenge: minted }), 200, { 'content-type': 'application/json' })
+    }
+    if (path === '/api/relay/directory/devices/register') {
+      const sent = (await request.json().catch(() => null)) as Record<string, unknown> | null
+      const ok =
+        minted !== '' &&
+        sent?.challenge === minted &&
+        typeof sent.label === 'string' &&
+        sent.label !== '' &&
+        typeof sent.keyA === 'string' &&
+        sent.keyA.startsWith('sk-ecdsa-sha2-nistp256@openssh.com ') &&
+        typeof sent.proofA === 'string' &&
+        sent.proofA.includes('BEGIN SSH SIGNATURE')
+      if (ok) reports.registered = (reports.registered ?? 0) + 1
+      return withHeaders(JSON.stringify(ok ? {} : { error: 'refused' }), ok ? 200 : 400, { 'content-type': 'application/json' })
+    }
+    if (path === '/api/relay/ceremony/reply') return withHeaders('{}', 404, { 'content-type': 'application/json' })
     if (path === '/') {
       const shell = dist('/index.html')
       return withHeaders(shell, 200, {
