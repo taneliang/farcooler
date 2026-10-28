@@ -2058,11 +2058,9 @@ final class Connection: ObservableObject {
         /// That runner's Far Cooler is older than device enrollment. Nothing
         /// was written, and no amount of retrying writes it.
         case tooOld
-        /// Refused `scope-denied`: a runner from before ov-828.
-        case notAllowed
-        /// Not this phone's to grant: a member's phone (`not-yours`), or this
-        /// phone narrowed to `read` there.
-        case notOwner, readOnly
+        /// Refused: a runner from before ov-828 (`notAllowed`), a member's
+        /// phone (`notOwner`), or this phone narrowed to `read` (`readOnly`).
+        case notAllowed, notOwner, readOnly
         /// A passkey, on a runner without `passkey_keys` (OpenSSH before 8.4).
         case noPasskeys
         /// Nothing was written, and the reason is not knowable from here: a
