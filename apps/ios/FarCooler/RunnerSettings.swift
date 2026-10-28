@@ -38,6 +38,11 @@ final class RunnerSettingsModel: ObservableObject {
     /// Who's on this runner and whose Claude account it runs on (ov-508):
     /// nil until read, and on a runner that doesn't know its people.
     @Published private(set) var people: RunnerPeople?
+    /// The devices that may log in to this runner and who added each (ov-855):
+    /// nil until read, and on a runner that won't list them to this phone.
+    @Published private(set) var enrolled: EnrolledDevices?
+    /// Why the last revoke didn't take, in this app's words, or nil.
+    @Published private(set) var revokeFailure: String?
     /// Each workspace's name by id, for where a member's rep works.
     @Published private(set) var workspaceNames: [String: String] = [:]
     /// Whether the runner signs a member in to Claude (`claude_sign_in`, ov-584).
@@ -61,12 +66,14 @@ final class RunnerSettingsModel: ObservableObject {
         branchPrefix = connection.branchPrefix
         // Beside the reads below, not before them: who's here is extra.
         async let peopleRead: Void = loadPeople()
+        async let enrolledRead: Void = loadEnrolled()
         let readThemes = await connection.hostThemes()
         health = await connection.health()
         repositories = connection.repositories
         let readRoots = await connection.repositoryRoots()
         themes = readThemes ?? themes
         await peopleRead
+        await enrolledRead
         roots = readRoots ?? roots
         // A connection below the admin grant is refused these reads by design,
         // and the screen already says why; saying "couldn't read" as well
@@ -74,6 +81,29 @@ final class RunnerSettingsModel: ObservableObject {
         if mayAdminister, readThemes == nil || readRoots == nil {
             failure = "Couldn’t read all of this runner’s settings. Leave and reopen this screen to try again."
         }
+    }
+
+    /// `client.list`. Quiet on a refusal, like the people below: a runner that
+    /// won't list its devices to this phone has nothing to show.
+    private func loadEnrolled() async {
+        guard let data = try? await connection.rpc("client.list") else { return }
+        enrolled = EnrolledDevices(json: data)
+    }
+
+    /// `client.revoke`, taking the devices it added too when asked (ov-855).
+    /// The answer is the list as it now stands; a refusal leaves the list as it
+    /// was and says so in `revokeFailure`.
+    func revoke(_ device: EnrolledDevices.Device, withAdded: Bool) async {
+        guard
+            let data = try? await connection.rpc(
+                "client.revoke", EnrolledDevices.revokeArguments(for: device, withAdded: withAdded)),
+            let updated = EnrolledDevices(json: data)
+        else {
+            revokeFailure = EnrolledDevices.notRevoked
+            return
+        }
+        revokeFailure = nil
+        enrolled = updated
     }
 
     /// `member.list`, on a runner that knows its people. A refusal leaves
@@ -323,6 +353,11 @@ struct RunnerSettingsView: View {
                         logins: logins, owner: people.you.isEmpty,
                         set: logins.mayChange ? { agent, on in await model.setOwnLogin(agent, on) } : nil)
                 }
+            }
+            if let enrolled = model.enrolled, !enrolled.devices.isEmpty {
+                EnrolledDevicesSection(
+                    devices: enrolled, failure: model.revokeFailure,
+                    revoke: { device, withAdded in await model.revoke(device, withAdded: withAdded) })
             }
             repositoriesSection
 

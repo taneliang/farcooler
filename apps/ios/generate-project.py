@@ -1132,6 +1132,8 @@ UI_TEST_SOURCES = [
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",
     "MemberLoginsUITests.swift",
+    # Runner Settings lists the runner's devices, who added each, and Revoke's two choices (ov-855).
+    "EnrolledDevicesUITests.swift",
     "NeedsYouTeamUITests.swift",
     # A member's writes carry their name, and a member is offered no Keep
     # (ov-707). Over the canned runner (`-phone-shared -phone-member-notes`).

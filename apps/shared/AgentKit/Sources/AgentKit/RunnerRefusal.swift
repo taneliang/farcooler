@@ -185,6 +185,30 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         return ReviewTrouble(sentence: context + " " + refusal.sentence, transcript: nil)
     }
 
+    /// What the runner says when a device adds more than it may in a day
+    /// (`add_limit`, ov-838): a device below host admin adds five a day.
+    public static let addLimitSentence =
+        "This device has already added five devices in the past day, which is the most it can add. "
+        + "Try again tomorrow, or add it from the owner’s device."
+
+    /// Whether the runner refused an enrollment for the daily limit. The limit
+    /// travels as a `resource-conflict` whose `what` is `add_limit`; the same
+    /// code with another `what` (`device_taken`, `not_held`) is something else.
+    public static func isAddLimit(word: String?, what: String?) -> Bool {
+        word == resourceConflict.rawValue && what == "add_limit"
+    }
+
+    /// `trouble(forWord:message:otherwise:)` that also knows the daily limit.
+    public static func trouble(
+        forWord word: String?,
+        what: String?,
+        message: String,
+        otherwise generic: String
+    ) -> ReviewTrouble {
+        if isAddLimit(word: word, what: what) { return ReviewTrouble(sentence: addLimitSentence) }
+        return trouble(forWord: word, message: message, otherwise: generic)
+    }
+
     /// The runner's word, read off one answer line from the client core.
     ///
     /// Two lines, and here rather than in `ClientCore.drain` for the reason the

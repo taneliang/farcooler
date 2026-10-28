@@ -100,6 +100,13 @@ struct RunnerSettingsSheet: View {
                             set: logins.mayChange ? { agent, on in await store.setOwnLogin(agent, on) } : nil)
                     }
                 }
+                if let enrolled = store.enrolled, !enrolled.devices.isEmpty {
+                    EnrolledDevicesSection(
+                        devices: enrolled, failure: store.revokeFailure,
+                        revoke: { device, withAdded in await store.revoke(device, withAdded: withAdded) }
+                    )
+                    .identified("runner-enrolled-devices")
+                }
                 if let warning = store.claudeKeyWarning {
                     Section {
                         Label(warning, systemImage: "exclamationmark.triangle.fill")

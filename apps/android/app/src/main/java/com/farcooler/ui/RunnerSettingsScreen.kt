@@ -55,10 +55,13 @@ import com.farcooler.model.HostHealth
 import com.farcooler.model.MemberOwnLogins
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
+import com.farcooler.model.EnrolledDevices
 import com.farcooler.model.RunnerTeam
 import com.farcooler.model.Trouble
 import com.farcooler.net.Connection
 import com.farcooler.net.memberOwnLogins
+import com.farcooler.net.enrolledDevices
+import com.farcooler.net.revokeDevice
 import com.farcooler.net.runnerTeam
 import com.farcooler.net.setOwnLogin
 import com.farcooler.net.setRole
@@ -107,6 +110,9 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
     // Who's on the runner and their roles, with the member whose role is on its way (ov-784).
     var team by remember { mutableStateOf<RunnerTeam?>(null) }
     var changingRole by remember { mutableStateOf<String?>(null) }
+    // The devices that may log in here and who added each (ov-855), and why the last revoke didn't take.
+    var enrolled by remember { mutableStateOf<EnrolledDevices?>(null) }
+    var revokeFailure by remember { mutableStateOf<String?>(null) }
     // The section whose read is `Scope::HostAdmin` while this app enrolls at
     // `control`. Its own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
@@ -301,6 +307,19 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                         }
                     }
                 })
+            }
+
+            // Who may log in to this runner and who added each, with Revoke's two choices (ov-855), as on the Mac
+            // and the iPhone. Quiet where the runner won't list them to this phone.
+            LaunchedEffect(Unit) { enrolled = connection.enrolledDevices() }
+            enrolled?.takeIf { it.devices.isNotEmpty() }?.let { devices ->
+                Separator()
+                EnrolledDevicesSection(devices, revokeFailure) { device, withAdded ->
+                    scope.launch {
+                        val updated = connection.revokeDevice(device.clientId, withAdded)
+                        if (updated == null) revokeFailure = EnrolledDevices.NOT_REVOKED else { revokeFailure = null; enrolled = updated }
+                    }
+                }
             }
 
             // Whether members share this runner's logins (ov-652): on a shared

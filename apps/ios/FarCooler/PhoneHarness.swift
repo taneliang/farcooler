@@ -39,6 +39,8 @@ import SwiftUI
 //                            and an idle orchestrator named for its work (ov-676)
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
+//   -phone-devices           the runner lists four devices (ov-855): Runner Settings shows who added each, and
+//                            Revoke on the Mac offers both choices; -phone-devices-refuse: the revoke fails
 //   -phone-claude-key-warning  Runner Settings' Health shows the owner's shell-exports-a-key warning (ov-651)
 //   -phone-claude-missing    the runner found codex and cursor-agent, not claude
 //   -phone-none-installed    the runner found none of the three agents
@@ -515,6 +517,8 @@ final class HarnessRunner {
     /// Every write the screens made, as `harness-sent` shows it:
     /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`.
     private(set) var sent: [String] = []
+    /// Devices revoked so far under `-phone-devices` (ov-855).
+    private var revokedDevices: Set<String> = []
 
     /// A link the app handed to the system (`openURL`), in `sent` as `opened <url>`:
     /// what a test asserts, in place of waiting for another app to come forward.
@@ -610,6 +614,25 @@ final class HarnessRunner {
     }
 
     // MARK: - What it has
+
+    /// `-phone-devices`: see the launch arguments above.
+    static var devices: Bool { CommandLine.arguments.contains("-phone-devices") }
+
+    /// The canned runner's devices: a Mac that added a phone that added two browsers, and a tablet whose
+    /// adder is gone.
+    static let deviceTable: [(id: String, label: String, scope: String, addedBy: String)] = [
+        ("mac-1", "Studio Mac", "host_admin", ""),
+        ("phone-a", "Alexandra Montgomery-Fitzgerald’s iPhone", "control", "mac-1"),
+        ("web-1", "Alexandra’s Browser at the Platform Team Office", "read", "phone-a"),
+        ("web-2", "", "read", "phone-a"),
+        ("tablet-1", "Old Tablet", "read", "gone-9"),
+    ]
+
+    private func deviceLines() -> [[String: Any]] {
+        Self.deviceTable.filter { !revokedDevices.contains($0.id) }.map {
+            ["clientId": $0.id, "label": $0.label, "scope": $0.scope, "foreign": false, "shellAccess": false, "addedBy": $0.addedBy]
+        }
+    }
 
     /// `-phone-shared`: see the launch arguments above.
     static var shared: Bool {
@@ -958,6 +981,26 @@ final class HarnessRunner {
                 "platform": "darwin-aarch64", "daemonVersion": "0.9.0", "protocolVersion": 1, "healthy": true, "reasons": [String](),
                 "livePanes": 3, "claudeKeyWarning": (CommandLine.arguments.contains("-phone-claude-key-warning") ? warning : NSNull()) as Any,
             ])
+        case "client.list" where Self.devices:
+            sent.append("client.list")
+            return try json(["clients": deviceLines()])
+        case "client.revoke" where Self.devices:
+            guard let id = args["clientId"] as? String else { throw ClientCore.CoreError.rejected("bad", word: "invalid-argument") }
+            let withAdded = args["withAdded"] as? Bool ?? false
+            sent.append("client.revoke \(id) withAdded=\(withAdded)")
+            if CommandLine.arguments.contains("-phone-devices-refuse") {
+                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
+            var gone: Set<String> = [id]
+            if withAdded {
+                var grew = true
+                while grew {
+                    grew = false
+                    for line in Self.deviceTable where gone.contains(line.addedBy) && gone.insert(line.id).inserted { grew = true }
+                }
+            }
+            revokedDevices.formUnion(gone)
+            return try json(["clients": deviceLines()])
         case "member.list" where Self.shared:
             sent.append(method)
             if CommandLine.arguments.contains("-phone-rep-list-fails") {

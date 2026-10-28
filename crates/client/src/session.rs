@@ -1491,14 +1491,18 @@ impl Session {
     /// Answers with what is left, which the daemon reads back out of the file
     /// after writing it: what `authorized_keys` now says is the only claim worth
     /// making about who may log in.
+    ///
+    /// `with_added` also revokes every device this one added, and those they
+    /// added in turn, in the same write (ov-838).
     pub async fn revoke_client(
         &self,
         client_id: &str,
+        with_added: bool,
     ) -> Result<serde_json::Value, SessionError> {
         let payload =
             request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
                 client_id: client_id.to_string(),
-                with_added: false,
+                with_added,
             });
         match self.value("client.revoke", None, Some(payload)).await? {
             result::Value::ClientList(l) => Ok(enrolled_json(&l.items)),

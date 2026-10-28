@@ -1806,7 +1806,11 @@ async fn dispatch(
             id if id.is_empty() => {
                 Err(SessionError::Protocol(format!("{method} needs a clientId")))
             }
-            id => session.revoke_client(&id).await,
+            // `withAdded` also takes the devices this one added, and those they
+            // added in turn (ov-838, ov-855). Absent is false: the one device.
+            id => {
+                session.revoke_client(&id, revoke_args::with_added(&args)).await
+            }
         },
 
         // This device's OWN node key onto its own line (ov-485), for a runner
@@ -3182,6 +3186,7 @@ mod files_args;
 mod rows_args;
 mod answers_args;
 mod rep_args;
+mod revoke_args;
 mod claude_sign_in_args;
 mod images_arg;
 mod reach;

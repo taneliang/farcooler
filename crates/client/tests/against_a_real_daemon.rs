@@ -1037,7 +1037,7 @@ async fn a_mac_enrolls_twice_and_gets_a_line_with_a_shell_behind_it() {
     assert!(ours.iter().all(|c| c["foreign"] == false), "both lines are ours and both are managed");
 
     // And one revoke takes both, which is what the removal copy promises.
-    let left = session.revoke_client("mac-9").await.expect("client.revoke");
+    let left = session.revoke_client("mac-9", false).await.expect("client.revoke");
     assert!(left["clients"].as_array().unwrap().iter().all(|c| c["clientId"] != "mac-9"));
     let written = std::fs::read_to_string(&authorized_keys).unwrap();
     assert!(!written.contains("farcooler-shell-"), "Key B outlived the revoke: {written}");
@@ -1110,7 +1110,7 @@ async fn revoking_a_device_removes_its_line_and_answers_with_the_rest() {
 
     session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "read", false, "").await.expect("enroll");
 
-    let remaining = session.revoke_client("phone-7").await.expect("client.revoke");
+    let remaining = session.revoke_client("phone-7", false).await.expect("client.revoke");
     let clients = remaining["clients"].as_array().unwrap();
     assert!(clients.iter().all(|c| c["clientId"] != "phone-7"), "{remaining}");
     assert_eq!(clients.len(), 1, "the hand-written line survives a revocation");
@@ -1122,7 +1122,7 @@ async fn revoking_a_device_removes_its_line_and_answers_with_the_rest() {
     // Revoking what is not there is NOT a cheerful success: "revoked" from a
     // runner that revoked nothing is the one answer a person must never be
     // given about a device they are trying to cut off.
-    assert!(session.revoke_client("phone-7").await.is_err());
+    assert!(session.revoke_client("phone-7", false).await.is_err());
 }
 
 /// A scope this build does not have is refused before the request is sent.

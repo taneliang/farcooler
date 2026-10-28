@@ -145,6 +145,20 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
             "The runner took too long to answer. Try again in a moment."
 
         /**
+         * What the runner says when a device adds more than it may in a day (`add_limit`, ov-838): a device below
+         * host admin adds five a day.
+         */
+        const val ADD_LIMIT_SENTENCE =
+            "This device has already added five devices in the past day, which is the most it can add. " +
+                "Try again tomorrow, or add it from the owner’s device."
+
+        /**
+         * Whether the runner refused an enrollment for the daily limit. It travels as a `resource-conflict` whose
+         * `what` is `add_limit`; the same code with another `what` (`device_taken`) is something else.
+         */
+        fun isAddLimit(word: String?, what: String?): Boolean = word == RESOURCE_CONFLICT.word && what == "add_limit"
+
+        /**
          * A word this build has a sentence for, or null for every other input —
          * absent, empty, the generic, a code that cannot reach a phone, and a
          * code from a runner newer than this build.
@@ -175,6 +189,9 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
  * "worktrees still exist under this resource" under "Remove those first" — so
  * keeping it would be noise rather than diagnosis.
  */
+fun troubleFor(word: String?, message: String?, generic: String, what: String?): Trouble =
+    if (RunnerRefusal.isAddLimit(word, what)) Trouble(RunnerRefusal.ADD_LIMIT_SENTENCE) else troubleFor(word, message, generic)
+
 fun troubleFor(word: String?, message: String?, generic: String): Trouble {
     if (word == RunnerRefusal.TIMED_OUT_WORD) return Trouble(RunnerRefusal.TIMED_OUT_SENTENCE)
     val refusal = RunnerRefusal.of(word) ?: return Trouble(generic, message)

@@ -37,6 +37,11 @@ final class RunnerSettingsStore: ObservableObject {
     /// Who's on this runner and whose Claude account it runs on (ov-508), or
     /// nil until read, and on a runner that doesn't know its people.
     @Published private(set) var people: RunnerPeople?
+    /// The devices that may log in to this runner and who added each (ov-855),
+    /// or nil until read, and on a runner that won't list them to this Mac.
+    @Published private(set) var enrolled: EnrolledDevices?
+    /// Why the last revoke didn't take, in this app's words, or nil.
+    @Published private(set) var revokeFailure: String?
     /// The owner's warning that their shell's startup files export a Claude
     /// key (ov-651), worded by the runner, or nil: none set, no members, or a
     /// runner from before.
@@ -71,6 +76,7 @@ final class RunnerSettingsStore: ObservableObject {
             group.addTask { await self.loadSettings() }
             group.addTask { await self.loadThemes() }
             group.addTask { await self.loadPeople() }
+            group.addTask { await self.loadEnrolled() }
             group.addTask { await self.loadClaudeKeyWarning() }
         }
     }
@@ -81,6 +87,29 @@ final class RunnerSettingsStore: ObservableObject {
         let result = await cli(hostArguments + ["--json", "member", "list"])
         guard result.ok else { return }
         people = RunnerPeople(json: Data(result.output.utf8))
+    }
+
+    /// `client list`: quiet on a failure, like the people above. A runner that
+    /// won't list its devices to this Mac has nothing to show, and the screen's
+    /// other reads say when it can't be reached.
+    func loadEnrolled() async {
+        let result = await cli(hostArguments + ["--json", "client", "list"])
+        guard result.ok else { return }
+        enrolled = EnrolledDevices(json: Data(result.output.utf8))
+    }
+
+    /// `client revoke`, with `--with-added` to take the devices it added too
+    /// (ov-855). The answer is the list as it now stands; a refusal leaves the
+    /// list as it was and says so in `revokeFailure`.
+    func revoke(_ device: EnrolledDevices.Device, withAdded: Bool) async {
+        let flags = withAdded ? ["--with-added"] : []
+        let result = await cli(hostArguments + ["--json", "client", "revoke", device.clientId] + flags)
+        guard result.ok, let updated = EnrolledDevices(json: Data(result.output.utf8)) else {
+            revokeFailure = EnrolledDevices.notRevoked
+            return
+        }
+        revokeFailure = nil
+        enrolled = updated
     }
 
     /// `status --json`'s `claudeKeyWarning`. Quiet on a failure: this line is
