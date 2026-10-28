@@ -314,7 +314,7 @@ async fn enroll_held(
         // again (ov-820 review S4). Only once the write has landed, so a
         // write that failed leaves the revoke's mark where it was.
         if !out.0.already_enrolled {
-            sessions.readmit(&device).map_err(Refusal)?;
+            sessions.readmit(&mine.client_id).map_err(Refusal)?;
         }
         Ok(out)
     })
