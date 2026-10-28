@@ -1,4 +1,4 @@
-// Shipped by Canary at fd4fd1e9e88e2954cc84778c4a9e0caf17733cd2. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 4430aaed0cc0f502abd8724216ab0bdc590cdff1. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -3122,6 +3122,13 @@ message EnrolledClient {
   // device's ssh, git and Zed access to this runner away entirely, not only its
   // access to Far Cooler.
   bool shell_access = 8;
+  // The device whose `client.enroll` wrote this line (ov-838), by client id.
+  // Empty when this runner's own socket did, and for every line written
+  // before a runner kept it. What lets a client list, beside a lost phone,
+  // the devices that phone added, and those they added in turn: each line
+  // whose `added_by` chain reaches it. `ClientRevoke.with_added` takes them
+  // all in one step.
+  string added_by = 9;
 }
 
 message ClientList { repeated EnrolledClient items = 1; }
@@ -3267,7 +3274,15 @@ message ClientEnrollResult {
 //
 // It does not close a shell that is already open — nothing on a runner can, and
 // that shell can put both lines back. See `enrollment::revoke`.
-message ClientRevoke { string client_id = 1; }
+message ClientRevoke {
+  string client_id = 1;
+  // Also revoke every device this one added, and those they added, in the
+  // same write (ov-838): the devices whose `EnrolledClient.added_by` chain
+  // reaches it. A member's device revoking this way leaves the owner's own
+  // devices alone. Default false, which is what every client before this
+  // field sends, and revokes the one device as it always did.
+  bool with_added = 2;
+}
 
 // A device tells its runner which node key to admit to the tunnel.
 //
