@@ -51,6 +51,7 @@ export function envWith(over: Partial<WebEnv> = {}): WebEnv {
 
 export interface Call {
   path: string
+  method: string | undefined
   authorization: string | null
   body: any
 }
@@ -63,7 +64,7 @@ export function relay(account = OWNER, routes: Record<string, (call: Call) => Re
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input))
       expect(url.origin).toBe(RELAY)
-      const call = { path: url.pathname, authorization: new Headers(init?.headers).get('authorization'), body: init?.body ? JSON.parse(String(init.body)) : null }
+      const call = { path: url.pathname, method: init?.method, authorization: new Headers(init?.headers).get('authorization'), body: init?.body ? JSON.parse(String(init.body)) : null }
       calls.push(call)
       if (url.pathname === '/v1/directory/me') {
         return call.authorization === `Bearer ${ACCESS}`
