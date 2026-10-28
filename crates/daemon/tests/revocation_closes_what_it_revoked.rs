@@ -150,6 +150,7 @@ async fn revoke(admin: &mut SocketClient, client_id: &str) -> Vec<String> {
     let mut req = request("client.revoke");
     req.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
         client_id: client_id.into(),
+        with_added: false,
     }));
     let result = admin.call(req).await.expect("client.revoke");
     let Some(result::Value::ClientList(list)) = result.value else { panic!("wrong result") };
@@ -237,7 +238,7 @@ async fn revoke_answers_only_after_it_has_closed() {
 
     farcooler_daemon::enrollment::revoke(
         &h.service,
-        &farcooler_protocol::v1::ClientRevoke { client_id: "phone".into() },
+        &farcooler_protocol::v1::ClientRevoke { client_id: "phone".into(), with_added: false },
     )
     .await
     .expect("client.revoke");
@@ -487,7 +488,7 @@ done
     async fn revoke_directly(h: &Harness, client_id: &str) {
         farcooler_daemon::enrollment::revoke(
             &h.service,
-            &farcooler_protocol::v1::ClientRevoke { client_id: client_id.into() },
+            &farcooler_protocol::v1::ClientRevoke { client_id: client_id.into(), with_added: false },
         )
         .await
         .expect("client.revoke");
@@ -792,7 +793,7 @@ done
         let silent = h.service.sessions().open(Some("phone".into()));
         let service = h.service.clone();
         let revoking = tokio::spawn(async move {
-            farcooler_daemon::enrollment::revoke(&service, &farcooler_protocol::v1::ClientRevoke { client_id: "phone".into() })
+            farcooler_daemon::enrollment::revoke(&service, &farcooler_protocol::v1::ClientRevoke { client_id: "phone".into(), with_added: false })
                 .await
                 .expect("client.revoke");
         });

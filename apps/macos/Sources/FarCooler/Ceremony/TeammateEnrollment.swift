@@ -182,7 +182,7 @@ enum TeammateEnrollment {
         _ clientID: String, from runner: CeremonyRunner, journal: TeammateJournal, because: String,
         _ why: String, _ run: Enrollment.Writer
     ) async -> String {
-        let revoked = await run(revokeArguments(clientID: clientID, runner: runner.id))
+        let revoked = await run(revokeArguments(clientID: clientID, runner: runner.id, withAdded: true))
         guard revoked.ok else {
             return "\(because) \(Self.stillThere)\n\n\(why)\n\n\(revoked.output)"
         }
@@ -211,7 +211,7 @@ enum TeammateEnrollment {
                 journal.remove(clientID: entry.clientID, runner: entry.runner)
                 continue
             }
-            if await run(revokeArguments(clientID: entry.clientID, runner: entry.runner)).ok {
+            if await run(revokeArguments(clientID: entry.clientID, runner: entry.runner, withAdded: true)).ok {
                 journal.remove(clientID: entry.clientID, runner: entry.runner)
             }
         }
@@ -244,8 +244,11 @@ enum TeammateEnrollment {
         ["--json"] + (runner.isEmpty ? [] : ["--runner", runner]) + rest
     }
 
-    static func revokeArguments(clientID: String, runner: String) -> [String] {
-        arguments(["client", "revoke", clientID], runner: runner)
+    /// `withAdded` takes off, with a teammate's key, every device it added
+    /// while it waited on its bind (ov-838): a key from before ov-828 read as
+    /// the owner's then, and what it added would otherwise stay the owner's.
+    static func revokeArguments(clientID: String, runner: String, withAdded: Bool = false) -> [String] {
+        arguments(["client", "revoke", clientID] + (withAdded ? ["--with-added"] : []), runner: runner)
     }
 
     /// The member list in a `--json` reply: its last line that is an object,

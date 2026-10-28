@@ -191,6 +191,7 @@ pub fn enrolled_client(entry: &farcooler_fence::Entry, enrolled_at: i64) -> wire
         // Never both: a foreign line is one Far Cooler did not write, and this
         // says Far Cooler wrote a plain one on purpose and manages it.
         shell_access: entry.shell_access,
+        added_by: String::new(),
     }
 }
 

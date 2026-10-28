@@ -183,7 +183,7 @@ async fn the_daemon_learns_the_client_id_from_the_forced_command() {
 
     let mut revoke = request("client.revoke");
     revoke.payload = Some(farcooler_protocol::v1::request::Payload::ClientRevoke(
-        farcooler_protocol::v1::ClientRevoke { client_id: "phone-7".into() },
+        farcooler_protocol::v1::ClientRevoke { client_id: "phone-7".into(), with_added: false },
     ));
     admin.call(revoke).await.expect("client.revoke");
 

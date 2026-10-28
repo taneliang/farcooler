@@ -103,6 +103,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::compose_waits::migration_0062_compose_waits, Older::Welcome), // ov-816: one new table (compose_waits.rs says why)
     (crate::device_enrollers::migration_0063_pending_teammates, Older::Welcome), // ov-828: one new table (device_enrollers.rs says why)
     (crate::revoked_marks::migration_0064_revoked_marks, Older::Welcome), // ov-832: one new table (revoked_marks.rs says why)
+    (crate::device_added_by::migration_0065_device_added_by, Older::Welcome), // ov-838: one new table and its index (device_added_by.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

@@ -87,6 +87,11 @@ pub enum ClientCmd {
     Revoke {
         /// The device, as `client list` reports it.
         client_id: String,
+        /// Also revoke every device this one added, and those they added,
+        /// in the same write (ov-838). Without it, the devices it added
+        /// stay, and are named after the revoke.
+        #[arg(long)]
+        with_added: bool,
     },
     /// Add this device's own tunnel key to its own line on the runner, so a
     /// runner it was paired with before the tunnel existed admits it (ov-485).
@@ -125,9 +130,9 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 for_teammate: *for_teammate,
             }),
         ),
-        ClientCmd::Revoke { client_id } => with(
+        ClientCmd::Revoke { client_id, with_added } => with(
             req("client.revoke"),
-            request::Payload::ClientRevoke(pb::ClientRevoke { client_id: client_id.clone() }),
+            request::Payload::ClientRevoke(pb::ClientRevoke { client_id: client_id.clone(), with_added: *with_added }),
         ),
         ClientCmd::SetNodeKey { node_key } => with(
             req("client.set_node_key"),
@@ -227,7 +232,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
             }
         }
 
-        ClientCmd::Revoke { client_id } => {
+        ClientCmd::Revoke { client_id, .. } => {
             // What is LEFT, read back out of the file by the daemon after writing
             // it: what `authorized_keys` now says is the only claim worth making
             // about who may log in.
@@ -243,6 +248,16 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 list.items.len(),
                 if list.items.len() == 1 { "" } else { "s" }
             );
+            // What it added is still enrolled unless `--with-added` took it
+            // (ov-838): named, so a lost phone's browser isn't forgotten.
+            let added = added_under(&list.items, &client_id);
+            if !added.is_empty() {
+                println!(
+                    "{client_id} added {}, still enrolled. To revoke {} too: farcooler client revoke {client_id} --with-added",
+                    added.join(", "),
+                    if added.len() == 1 { "it" } else { "them" }
+                );
+            }
             // Said every time, because it is the part a person acts on and the
             // one thing a revocation cannot do. sshd reads `authorized_keys` at
             // authentication and never again: the line is gone for the next login
@@ -252,6 +267,17 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
         }
     }
     Ok(())
+}
+
+/// The devices in `items` that `root` added, and those they added, by
+/// `added_by`: each once, sorted.
+fn added_under(items: &[pb::EnrolledClient], root: &str) -> Vec<String> {
+    let rows: Vec<(String, String)> = items
+        .iter()
+        .filter(|c| !c.client_id.is_empty() && !c.added_by.is_empty())
+        .map(|c| (c.client_id.clone(), c.added_by.clone()))
+        .collect();
+    farcooler_store::device_added_by::added_under(&rows, root)
 }
 
 /// A scope word, refused rather than resolved.
@@ -300,6 +326,9 @@ fn client_json(c: &pb::EnrolledClient) -> serde_json::Value {
         // that this takes the Mac's ssh, git and Zed access away too — lands on
         // whichever row happened to sort first.
         "shellAccess": c.shell_access,
+        // The device that added this one, empty for the runner's own socket
+        // and for a line from before runners kept it (ov-838).
+        "addedBy": c.added_by,
     })
 }
 
@@ -381,6 +410,7 @@ mod tests {
             enrolled_at: 0,
             foreign,
             shell_access,
+            added_by: String::new(),
         }
     }
 
@@ -399,10 +429,22 @@ mod tests {
             "enrolledAt",
             "foreign",
             "shellAccess",
+            "addedBy",
         ] {
             assert!(!one[key].is_null(), "{key} is missing from a listed client");
         }
         assert_eq!(one["scope"], "control", "the scope is a word, not a number");
+    }
+
+    /// What a revoked phone added, named after its revoke (ov-838).
+    #[test]
+    fn what_a_device_added_is_named_through_every_generation() {
+        let mut browser = line("browser", false, false, pb::Scope::Control);
+        browser.added_by = "phone".into();
+        let mut tablet = line("tablet", false, false, pb::Scope::Control);
+        tablet.added_by = "browser".into();
+        let laptop = line("laptop", false, false, pb::Scope::Control);
+        assert_eq!(added_under(&[tablet, laptop, browser], "phone"), vec!["browser", "tablet"]);
     }
 
     /// **Both of a Mac's rows are distinguishable.** They carry the same client

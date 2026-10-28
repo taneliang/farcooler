@@ -36,6 +36,11 @@ async fn runner() -> (tempfile::TempDir, Arc<Service>) {
     (dir, svc)
 }
 
+/// A session's caller at `host_admin`, as the phone here is enrolled.
+fn admin(session: Arc<Session>) -> super::Caller {
+    super::Caller::new(session, Scope::HostAdmin)
+}
+
 fn asking(key: &str, client_id: &str, shell_access: bool) -> ClientEnroll {
     ClientEnroll {
         public_key: key.into(),
@@ -66,7 +71,7 @@ fn fingerprint(key: &str) -> String {
 }
 
 async fn revoke(svc: &Service) {
-    super::revoke(svc, &ClientRevoke { client_id: "phone".into() }).await.expect("the phone is revoked");
+    super::revoke(svc, &ClientRevoke { client_id: "phone".into(), with_added: false }).await.expect("the phone is revoked");
 }
 
 /// An enroll of `asked` on `caller`, started and parked on its way into the
@@ -85,7 +90,7 @@ async fn parked(
                 reached_tx.send(()).unwrap();
                 go_rx.recv().unwrap();
             };
-            super::enroll_held(&svc, &asked, None, Some(caller), held, None).await
+            super::enroll_held(&svc, &asked, None, Some(admin(caller)), held, None).await
         })
     };
     tokio::task::spawn_blocking(move || reached_rx.recv().unwrap()).await.unwrap();
@@ -144,7 +149,7 @@ async fn an_enroll_on_a_session_nobody_revoked_writes() {
     super::enroll(&svc, &asking(KEY_PHONE_NEW, "phone", false)).await.expect("enrolled again");
     let fresh = svc.sessions().open(Some("phone".into()));
     assert!(!fresh.is_closed(), "the readmitted phone is shut out");
-    super::enroll_as(&svc, &asking(KEY_MAC_SHELL, "phone", true), None, Some(fresh)).await.expect("the readmitted phone's own enroll");
+    super::enroll_as(&svc, &asking(KEY_MAC_SHELL, "phone", true), None, Some(admin(fresh))).await.expect("the readmitted phone's own enroll");
     assert_eq!(phone_lines(&svc).await.len(), 2, "both of the readmitted phone's keys");
 }
 
@@ -203,7 +208,7 @@ async fn parked_at_the_tunnel(
                 reached_tx.send(()).unwrap();
                 go_rx.recv().unwrap();
             });
-            super::enroll_held(&svc, &asked, None, caller, || (), Some(pause)).await
+            super::enroll_held(&svc, &asked, None, caller.map(admin), || (), Some(pause)).await
         })
     };
     tokio::task::spawn_blocking(move || reached_rx.recv().unwrap()).await.unwrap();
@@ -220,7 +225,7 @@ async fn a_key_written_before_a_revoke_never_reaches_the_tunnel_it_rebuilt() {
     let tablet = ClientEnroll { node_key: NODE_PHONE.into(), scope: Scope::Control as i32, ..asking(KEY_BROWSER, "tablet", false) };
     let (go, enrolling) = parked_at_the_tunnel(&svc, tablet, None).await;
 
-    super::revoke(&svc, &ClientRevoke { client_id: "tablet".into() }).await.expect("the tablet is revoked");
+    super::revoke(&svc, &ClientRevoke { client_id: "tablet".into(), with_added: false }).await.expect("the tablet is revoked");
     assert_eq!(tunnel.served.lock().unwrap().last(), Some(&vec![NODE_LAPTOP.to_string()]), "the revoke didn't rebuild the tunnel");
     go.send(()).unwrap();
 
@@ -291,7 +296,7 @@ async fn a_revoke_outlives_a_daemon_restart() {
     let svc = Arc::new(Service::open_in(state.clone()).await.unwrap().enrolling_into(keys.clone()));
     let session = svc.sessions().open(Some("phone".into()));
     assert!(session.is_closed(), "after a restart, the revoked phone's session was served");
-    let answer = super::enroll_as(&svc, &asking(KEY_PHONE, "phone", false), None, Some(session)).await;
+    let answer = super::enroll_as(&svc, &asking(KEY_PHONE, "phone", false), None, Some(admin(session))).await;
     assert!(matches!(answer, Err(DomainError::AuthRequired)), "after a restart, the revoked phone enrolled itself: {answer:?}");
     assert!(phone_lines(&svc).await.is_empty(), "the revoked phone's line came back");
 

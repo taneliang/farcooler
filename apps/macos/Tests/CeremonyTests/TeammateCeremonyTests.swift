@@ -246,7 +246,7 @@ struct TeammateCeremonyTests {
         let outcome = await enroll(runner, journal: journal)
         #expect(outcome.written.isEmpty)
         let revoke = try #require(runner.call("revoke"), "a write that may have landed was left")
-        #expect(Array(revoke.suffix(3)) == ["client", "revoke", "farcooler-0a0b"])
+        #expect(Array(revoke.suffix(4)) == ["client", "revoke", "farcooler-0a0b", "--with-added"])
         #expect(runner.call("add") == nil)
         #expect(journal.entries.isEmpty)
         #expect(outcome.transcript?.contains(TeammateEnrollment.takenOff) == true)
@@ -262,7 +262,7 @@ struct TeammateCeremonyTests {
         let outcome = await enroll(runner, journal: journal)
         #expect(outcome.written.isEmpty)
         let revoke = try #require(runner.call("revoke"))
-        #expect(Array(revoke.suffix(3)) == ["client", "revoke", "farcooler-0a0b"])
+        #expect(Array(revoke.suffix(4)) == ["client", "revoke", "farcooler-0a0b", "--with-added"])
         #expect(outcome.transcript?.contains(TeammateEnrollment.notRecorded) == true)
         #expect(journal.entries.isEmpty)
     }

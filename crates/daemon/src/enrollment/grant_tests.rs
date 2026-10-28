@@ -112,16 +112,36 @@ async fn a_control_phone_grants_nothing_wider_than_its_own() {
     call(&phone, enroll(KEY_BROWSER, "browser-1", Scope::Read, false, "")).await.expect("read is narrower");
 }
 
-/// A member's device at `control` grants nothing: members still grant only
-/// at `host_admin` (ov-719), where the device they add is released until
-/// bound.
+/// ov-838 (R-88): a teammate's phone adds their own browser, at their
+/// scope. The line is theirs from its write: bound to them, never the
+/// owner's, never released, and removing them takes it. Nothing wider than
+/// the phone holds, no shell, and never `for_teammate`, the owner's Add
+/// Teammate.
 #[tokio::test]
-async fn a_members_control_phone_grants_nothing() {
+async fn a_members_control_phone_adds_their_own_browser() {
     let (_dir, svc) = runner().await;
     let bobs = factory(&svc, Some("phone-b"), Scope::Control);
-    let refused = call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::Control, false, NODE_BROWSER)).await;
-    assert_eq!(refused.err().as_deref(), Some("not-yours:not_owners_device"));
-    assert!(!enrolled(&svc).await.contains(&"browser-b".to_string()));
+    let admin = call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::HostAdmin, false, "")).await;
+    assert_eq!(admin.err().as_deref(), Some("scope-denied:"), "host_admin from a member's control phone");
+    let shell = call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::HostAdmin, true, "")).await;
+    assert!(shell.is_err(), "a shell line from a member's phone");
+    let mut teammate = enroll(KEY_BROWSER, "browser-b", Scope::Control, false, "");
+    let Some(request::Payload::ClientEnroll(p)) = teammate.payload.as_mut() else { unreachable!() };
+    p.for_teammate = true;
+    let teammate = call(&bobs, teammate).await;
+    assert_eq!(teammate.err().as_deref(), Some("not-yours:not_owners_device"), "a member adding for a teammate");
+    assert!(!enrolled(&svc).await.contains(&"browser-b".to_string()), "a refused grant wrote");
+
+    call(&bobs, enroll(KEY_BROWSER, "browser-b", Scope::Control, false, NODE_BROWSER)).await.expect("Bob's phone adds Bob's browser");
+    let browser = Peer { client_id: Some("browser-b".into()), scope: Scope::Control };
+    assert_eq!(crate::people::person_of(&svc.store, &browser).unwrap(), crate::people::Person::Member("bob".into()), "the browser isn't Bob's");
+    let line = crate::enrollment::list(&svc).await.unwrap().items.into_iter().find(|e| e.client_id == "browser-b").unwrap();
+    assert_eq!(line.scope, Scope::Control as i32);
+    assert_eq!(line.added_by, "phone-b", "the browser's enroller wasn't kept");
+
+    svc.store.remove_member("bob").unwrap();
+    crate::release_sweep::sweep(&svc).await.unwrap();
+    assert!(!enrolled(&svc).await.contains(&"browser-b".to_string()), "Bob's browser outlived his removal");
 }
 
 /// The review's S1 (ov-828): the Mac's Add Teammate writes the teammate's
@@ -145,12 +165,12 @@ async fn a_teammates_device_waiting_on_its_bind_grants_nothing() {
     assert!(!enrolled(&svc).await.contains(&"browser-t".to_string()), "an unbound teammate granted a device");
     assert!(!svc.store.released_to_sweep().unwrap().contains(&"phone-t".to_string()), "the sweep would take it before the bind");
 
-    // Bound, it is Tess's: still no grant, and no longer waiting.
+    // Bound, it is Tess's, and adds her own browser, hers (ov-838).
     let bind = pb::MemberSet { handle: "tess".into(), name: "Tess".into(), client_ids: vec!["phone-t".into()], ..Default::default() };
     let bind = Request { method: "member.set".into(), payload: Some(request::Payload::MemberSet(bind)), ..Default::default() };
     call(&local, bind).await.expect("bound");
-    let refused = call(&tess, enroll(KEY_BROWSER, "browser-t", Scope::Control, false, NODE_BROWSER)).await;
-    assert_eq!(refused.err().as_deref(), Some("not-yours:not_owners_device"));
+    call(&tess, enroll(KEY_BROWSER, "browser-t", Scope::Control, false, NODE_BROWSER)).await.expect("Tess's phone adds her browser");
+    assert_eq!(svc.store.member_of_device("browser-t").unwrap().as_deref(), Some("tess"));
 }
 
 /// The re-review's R1 (ov-828): a member's own enroll is recorded as theirs

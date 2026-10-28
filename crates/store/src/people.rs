@@ -310,6 +310,12 @@ impl Store {
                 .map_err(map_err)?;
             tx.execute("DELETE FROM released_devices WHERE client_id = ?1", [device]).map_err(map_err)?;
         }
+        // What a device newly theirs added while it read as the owner's is
+        // theirs to answer for too (ov-838, the ov-828 re-review's R3): a
+        // teammate's line from before ov-828 could grant as the owner.
+        for device in devices.iter().filter(|d| !had.contains(d)) {
+            crate::device_added_by::hand_over_added_in(&tx, device, handle)?;
+        }
         let (account, email): (Option<String>, Option<String>) = tx
             .query_row("SELECT account, email FROM members WHERE handle = ?1", [handle], |r| Ok((r.get(0)?, r.get(1)?)))
             .map_err(map_err)?;

@@ -2226,6 +2226,7 @@ async fn a_read_client_cannot_enroll() {
     let mut revoke = request("client.revoke");
     revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
         client_id: "c1".into(),
+        with_added: false,
     }));
     match client.call(revoke).await {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::ScopeDenied as i32),
@@ -2530,6 +2531,7 @@ async fn revoking_removes_the_line_and_leaves_everything_else() {
     let mut revoke = request("client.revoke");
     revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
         client_id: "c1".into(),
+        with_added: false,
     }));
     let result = client.call(revoke).await.expect("client.revoke");
     let Some(result::Value::ClientList(remaining)) = result.value else { panic!("wrong result") };
@@ -2567,6 +2569,7 @@ async fn revoking_a_mac_removes_both_of_its_keys_and_nothing_else() {
     let mut revoke = request("client.revoke");
     revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
         client_id: "mac-1".into(),
+        with_added: false,
     }));
     let result = client.call(revoke).await.expect("client.revoke");
     let Some(result::Value::ClientList(remaining)) = result.value else { panic!("wrong result") };
@@ -2592,6 +2595,7 @@ async fn revoking_something_nobody_enrolled_says_so() {
     let mut revoke = request("client.revoke");
     revoke.payload = Some(request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
         client_id: "never-enrolled".into(),
+        with_added: false,
     }));
     match client.call(revoke).await {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32),

@@ -264,7 +264,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
 async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
     let mut failed = None;
     for device in devices {
-        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await {
+        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone(), with_added: false }).await {
             Ok(_) | Err(DomainError::NotFound) => {}
             Err(err) => {
                 tracing::error!(device = %device, ?err, "revoking a removed member's device failed");

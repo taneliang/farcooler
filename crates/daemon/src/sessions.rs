@@ -182,6 +182,11 @@ impl Sessions {
         *self.revocations.lock().unwrap().entry(client_id.to_string()).or_default() += 1;
     }
 
+    /// Whether `client_id` is marked revoked now, and not enrolled again since.
+    pub fn is_marked(&self, client_id: &str) -> bool {
+        self.revoked.lock().unwrap().contains(client_id)
+    }
+
     fn revocations_of(&self, client_id: &str) -> u64 {
         self.revocations.lock().unwrap().get(client_id).copied().unwrap_or(0)
     }
@@ -271,6 +276,11 @@ impl Session {
         // The error IS the signal: `acquire` on a zero-permit semaphore can
         // finish no other way.
         let _ = self.gate.acquire().await;
+    }
+
+    /// The device this session's line names, or `None` for a local caller.
+    pub fn client_id(&self) -> Option<&str> {
+        self.client_id.as_deref()
     }
 
     /// Whether this session has already been closed.

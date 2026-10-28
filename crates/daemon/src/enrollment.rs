@@ -31,15 +31,19 @@ use farcooler_fence::{self as fence, Entry, FenceError, Rejected};
 use crate::service::Service;
 use crate::wire;
 
+mod added;
 mod grant;
 mod rekey;
+pub use added::{ADD_LIMIT, Caller, revoke_as, revoke_keeping};
 pub use grant::{Attempt, may_grant};
 pub use rekey::rekey;
 
 /// Every line in this runner's fence, ours and otherwise.
+/// Each line with the device that added it (ov-838).
 pub async fn list(svc: &Service) -> Result<ClientList> {
     let path = svc.authorized_keys().to_path_buf();
-    blocking(move || Ok(listing(&read(&path)?))).await
+    let listed = blocking(move || Ok(listing(&read(&path)?))).await?;
+    Ok(added::with_added_by(svc, listed))
 }
 
 /// The name `client_id` was enrolled under, from its line's comment.
@@ -116,11 +120,16 @@ pub type MemberEnrolled = Box<dyn FnOnce(&str) -> Result<()> + Send>;
 /// refused under the lock and writes nothing (ov-826): a revoke closes the
 /// session only after its write, so an enroll already waiting on the lock
 /// would otherwise put the revoked device's line straight back.
+///
+/// Every line written records its enroller (ov-838): the caller's device,
+/// or none for this runner's own socket. A caller below `host_admin` adds
+/// at most [`ADD_LIMIT`] devices a day, may not take an id a revoke marked,
+/// and may not start this runner's tunnel (`Caller::may_start_tunnel`).
 pub async fn enroll_as(
     svc: &Service,
     request: &ClientEnroll,
     by_member: Option<MemberEnrolled>,
-    caller: Option<std::sync::Arc<crate::sessions::Session>>,
+    caller: Option<Caller>,
 ) -> Result<ClientEnrollResult> {
     enroll_held(svc, request, by_member, caller, || (), None).await
 }
@@ -132,7 +141,7 @@ async fn enroll_held(
     svc: &Service,
     request: &ClientEnroll,
     by_member: Option<MemberEnrolled>,
-    caller: Option<std::sync::Arc<crate::sessions::Session>>,
+    caller: Option<Caller>,
     held: impl FnOnce() + Send + 'static,
     before_tunnel: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<ClientEnrollResult> {
@@ -194,6 +203,7 @@ async fn enroll_held(
     let sessions = svc.sessions().clone();
     let asking = caller.clone();
     let device = mine.client_id.clone();
+    let store = svc.store.clone();
     let (mut result, admitted) = blocking(move || {
         held();
         // Read and write under ONE lock hold. Two enrollments landing in the same
@@ -206,7 +216,7 @@ async fn enroll_held(
             // First, before either answer: a revoke marks under this lock,
             // so one that got here first is seen (ov-826). Refused as a
             // closed session's request is, and nothing is written or admitted.
-            if caller.as_ref().is_some_and(|session| session.revoked_since_open()) {
+            if caller.as_ref().is_some_and(|c| c.session.revoked_since_open()) {
                 tracing::warn!(client = %mine.client_id, "refused an enroll from a session whose device was revoked while it ran");
                 return Err(Refusal(DomainError::AuthRequired));
             }
@@ -268,12 +278,18 @@ async fn enroll_held(
                 ));
             }
 
+            // Who may add another line, and how many, decided where the
+            // write is, so two enrolls can't both count under the limit.
+            added::may_add(&store, &sessions, caller.as_ref(), &mine.client_id).map_err(Refusal)?;
             if let Some(mark) = by_member {
                 if entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id) {
                     return Err(Refusal(DomainError::Conflict { what: "device_taken" }));
                 }
                 mark(&mine.client_id).map_err(Refusal)?;
             }
+            // Before the write, so no line is ever without its enroller; one
+            // that can't be recorded is refused (ov-838).
+            store.record_added_by(&mine.client_id, caller.as_ref().and_then(|c| c.session.client_id()).unwrap_or("")).map_err(Refusal)?;
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
             // A real enrollment of this id, under the fence lock that orders it
@@ -312,7 +328,7 @@ async fn enroll_held(
         if let Some(pause) = before_tunnel {
             let _ = tokio::task::spawn_blocking(pause).await;
         }
-        result.conn_blob = tunnel_route(svc, &request.node_key, &device, asking.as_deref()).await;
+        result.conn_blob = tunnel_route(svc, &request.node_key, &device, asking.as_ref()).await;
     }
     Ok(result)
 }
@@ -362,13 +378,21 @@ async fn enroll_held(
 /// this sees the line gone and admits nothing, or it admits first and the
 /// rebuild drops it. A session whose device was revoked since it opened is
 /// admitted nothing either.
-async fn tunnel_route(svc: &Service, node_key: &str, client_id: &str, caller: Option<&crate::sessions::Session>) -> String {
+///
+/// **A caller below `host_admin` is admitted to a running tunnel and never
+/// starts one** (ov-838, the ruling on the ov-828 review's N5): see
+/// [`Caller::may_start_tunnel`].
+async fn tunnel_route(svc: &Service, node_key: &str, client_id: &str, caller: Option<&Caller>) -> String {
     let held = svc.tunnel.hold().await;
-    if !still_admitted(svc, client_id, node_key, caller).await {
+    if !still_admitted(svc, client_id, node_key, caller.map(|c| &*c.session)).await {
         return String::new();
     }
     if let Some(blob) = admit_to_a_running_tunnel(&held, node_key).await {
         return blob;
+    }
+    if !caller.is_none_or(Caller::may_start_tunnel) {
+        tracing::info!(client = %client_id, "this runner serves no tunnel, and a device below host_admin may not start one; the device pairs as direct");
+        return String::new();
     }
 
     // Nothing is serving, so this runner needs an identity of its own before
@@ -806,6 +830,17 @@ pub async fn revoke_many(
 /// named: the containment a runner can offer is per connection, so the
 /// connections must not be shared.
 pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList> {
+    revoke_keeping(svc, request, |_| true).await
+}
+
+/// [`revoke`], for `targets` (the device, and with `with_added` what it
+/// added, ov-838) decided under the fence lock, and the store's leftovers
+/// about each cleared after the write (`added::forget`).
+async fn revoke_targets(
+    svc: &Service,
+    request: &ClientRevoke,
+    targets: impl FnOnce(&[Entry]) -> std::result::Result<Vec<String>, Refusal> + Send + 'static,
+) -> Result<ClientList> {
     let path = svc.authorized_keys().to_path_buf();
     let client_id = request.client_id.clone();
     // A foreign line has no client id, so an empty one must not match all of
@@ -813,7 +848,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     if client_id.is_empty() {
         return Err(DomainError::InvalidArgument { what: "client_id" });
     }
-    let closing = client_id.clone();
+    let closing_id = client_id.clone();
     let sessions = svc.sessions().clone();
     let (remaining, was_tunneled) = blocking(move || {
         // Read and write under one lock hold, so that a revocation cannot rebuild
@@ -832,6 +867,9 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
                 if !entries.iter().any(|e| e.client_id == client_id) {
                     return Err(Refusal(DomainError::NotFound));
                 }
+                // The device, and what it added when asked (ov-838): each
+                // with a line, decided under this lock.
+                let gone = targets(&entries)?;
                 // Whether this device was in the tunnel's allowlist, read off the
                 // lines being REMOVED rather than inferred afterwards from a file
                 // it is no longer in. `allowlist::from_entries` admits a line only
@@ -839,13 +877,15 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
                 // served and rebuilding the tunnel for it would take every other
                 // device's live tunnel down for nothing.
                 let was_tunneled =
-                    entries.iter().any(|e| e.client_id == client_id && !e.node_key.is_empty());
+                    entries.iter().any(|e| gone.contains(&e.client_id) && !e.node_key.is_empty());
                 // Marked under the fence lock (ov-820 review S4), as in `revoke_many`.
-                sessions.mark_revoked(&client_id);
+                for id in &gone {
+                    sessions.mark_revoked(id);
+                }
                 let remaining: Vec<Entry> =
-                    entries.into_iter().filter(|e| e.client_id != client_id).collect();
+                    entries.into_iter().filter(|e| !gone.contains(&e.client_id)).collect();
                 let (ours, foreign) = sorted(&remaining);
-                Ok((fence::Change::Write { entries: ours, foreign }, was_tunneled))
+                Ok((fence::Change::Write { entries: ours, foreign }, (was_tunneled, gone)))
             },
         )?;
         // Read back rather than answering with what was just computed, the same
@@ -859,6 +899,8 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         Ok((listing(&read(&path)?), was_tunneled))
     })
     .await?;
+    let (was_tunneled, gone) = was_tunneled;
+    let remaining = added::with_added_by(svc, remaining);
 
     // Then the sessions, and only then the answer.
     //
@@ -869,8 +911,13 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     // Synchronous and complete when it returns: closing a session is a flag the
     // connection's next poll reads, not a request to something that might get
     // round to it.
-    let closed = svc.sessions().closing(&closing);
-    tracing::info!(client = %closing, closed = closed.count(), "revoked a device and closed its live sessions");
+    let mut closed = crate::sessions::Closing::none();
+    for device in &gone {
+        let closing = svc.sessions().closing(device);
+        tracing::info!(client = %device, asked = %closing_id, closed = closing.count(), "revoked a device and closed its live sessions");
+        closed = closed.and(closing);
+        added::forget(svc, device);
+    }
 
     // Then the tunnel route, and still before the answer.
     //
@@ -904,7 +951,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         // rather than rebuilding one, and a log line that says the wrong one is
         // how a person reading it afterwards reconstructs the wrong story.
         tracing::info!(
-            client = %closing,
+            client = %closing_id,
             ?outcome,
             "made this runner's tunnel match the file the revocation just wrote"
         );

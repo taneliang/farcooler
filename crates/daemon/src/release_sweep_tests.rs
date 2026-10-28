@@ -103,7 +103,7 @@ async fn a_released_device_with_no_line_has_its_sessions_closed() {
     let (_dir, svc) = with_bobs_phone_enrolled().await;
     let admin = factory(&svc, None, Scope::HostAdmin);
     call(&admin, set("bob", &["phone-b"], "", "")).await.expect("Bob bound");
-    crate::enrollment::revoke(&svc, &pb::ClientRevoke { client_id: "phone-b".into() }).await.unwrap();
+    crate::enrollment::revoke(&svc, &pb::ClientRevoke { client_id: "phone-b".into(), with_added: false }).await.unwrap();
     let phone = svc.sessions().open(Some("phone-b".into()));
     svc.store.set_member("bob", "Bob", &[]).unwrap();
     let swept = sweep(&svc).await.unwrap();

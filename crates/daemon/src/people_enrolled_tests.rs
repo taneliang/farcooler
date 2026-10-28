@@ -94,7 +94,7 @@ fn set(handle: &str, devices: &[&str]) -> Request {
 fn revoke(client_id: &str) -> Request {
     Request {
         method: "client.revoke".into(),
-        payload: Some(request::Payload::ClientRevoke(pb::ClientRevoke { client_id: client_id.into() })),
+        payload: Some(request::Payload::ClientRevoke(pb::ClientRevoke { client_id: client_id.into(), with_added: false })),
         ..Default::default()
     }
 }

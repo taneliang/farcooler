@@ -279,7 +279,7 @@ async fn a_revoked_device_hears_it_was_released_through_the_tunnel() {
     let began = Instant::now();
     farcooler_daemon::enrollment::revoke(
         &service,
-        &farcooler_protocol::v1::ClientRevoke { client_id: phone.client_id.clone() },
+        &farcooler_protocol::v1::ClientRevoke { client_id: phone.client_id.clone(), with_added: false },
     )
     .await
     .expect("client.revoke");

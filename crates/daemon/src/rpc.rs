@@ -998,6 +998,11 @@ impl Rpc {
                 let person = crate::people::person_of(&svc.store, &self.peer)?;
                 crate::enrollment::may_grant(self.peer.scope, &person, &p)?;
                 let by_member = match person {
+                    // A member's own `control` device adds a device of theirs (ov-838, R-88).
+                    crate::people::Person::Member(handle) if self.peer.scope != Scope::HostAdmin => {
+                        let svc = svc.clone();
+                        Some(Box::new(move |id: &str| svc.store.record_member_device_added(id, &handle)) as crate::enrollment::MemberEnrolled)
+                    }
                     crate::people::Person::Member(handle) => {
                         let svc = svc.clone();
                         Some(Box::new(move |id: &str| svc.store.record_member_enrolled(id, &handle)) as crate::enrollment::MemberEnrolled)
@@ -1009,7 +1014,7 @@ impl Rpc {
                     }
                     _ => None,
                 };
-                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(self.session.clone())).await?))
+                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(crate::enrollment::Caller::new(self.session.clone(), self.peer.scope))).await?))
             }
 
             // Removes the line AND closes what the line let in — see
@@ -1019,8 +1024,9 @@ impl Rpc {
                 let Some(request::Payload::ClientRevoke(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                tracing::info!(by = self.who(), client = %p.client_id, "revoking a device");
-                Ok(result::Value::ClientList(crate::enrollment::revoke(svc, &p).await?))
+                tracing::info!(by = self.who(), client = %p.client_id, with_added = p.with_added, "revoking a device");
+                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                Ok(result::Value::ClientList(crate::enrollment::revoke_as(svc, &p, &person).await?))
             }
 
             // A device registers its own node key over the access it already

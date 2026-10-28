@@ -15,10 +15,12 @@
 //!   scope; it is `host_admin`'s alone, as before.
 //! - **not above its own scope.** A `control` device grants `read` or
 //!   `control`, never `host_admin`.
-//! - **not from a member's device.** A member's device at `control` could
-//!   otherwise add lines to the owner's `authorized_keys`, even released ones,
-//!   each with a node key the tunnel would admit. Members grant only at
-//!   `host_admin`, as before (ov-719).
+//! - **a member's device grants only for that member** (ov-838, R-88). A
+//!   teammate's phone adds their own browser: the line is bound to them
+//!   from its write (`Store::record_member_device_added`), never the
+//!   owner's and never released, so removing them revokes it. A member's
+//!   `host_admin` device enrolls as before, released until bound (ov-719).
+//!   A released device grants nothing.
 //!
 //! `control` already types into the owner's shells, which can write any
 //! file, `authorized_keys` included; what this adds over that route is that
@@ -34,18 +36,20 @@ use crate::people::Person;
 /// Whether a caller at `caller`, who is `who`, may grant what `request`
 /// asks.
 ///
-/// A device below `host_admin` that isn't the owner's is refused
-/// `not_yours: not_owners_device`, so a member's phone can say "only the
-/// owner can add devices here" rather than "update Far Cooler" (ov-828 review
-/// N4). A grant wider than `control` is refused `scope_denied` naming
-/// `host_admin`, the scope that may, as a runner from before ov-828 refuses
-/// every `control` caller.
+/// A device below `host_admin` that is neither the owner's nor a member's
+/// is refused `not_yours: not_owners_device` (ov-828 review N4). A member's
+/// may grant for themselves alone, never `for_teammate`, which is the
+/// owner's Add Teammate (ov-838). A grant wider than `control` is refused
+/// `scope_denied` naming `host_admin`, the scope that may, as a runner from
+/// before ov-828 refuses every `control` caller.
 pub fn may_grant(caller: Scope, who: &Person, request: &ClientEnroll) -> Result<()> {
     if caller == Scope::HostAdmin {
         return Ok(());
     }
-    if !matches!(who, Person::Owner) {
-        return Err(DomainError::NotYours { what: "not_owners_device" });
+    match who {
+        Person::Owner => {}
+        Person::Member(_) if !request.for_teammate => {}
+        _ => return Err(DomainError::NotYours { what: "not_owners_device" }),
     }
     let asked = Scope::try_from(request.scope).unwrap_or(Scope::Unspecified);
     let within_control = matches!(asked, Scope::Read | Scope::Control);

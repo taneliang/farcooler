@@ -1498,6 +1498,7 @@ impl Session {
         let payload =
             request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
                 client_id: client_id.to_string(),
+                with_added: false,
             });
         match self.value("client.revoke", None, Some(payload)).await? {
             result::Value::ClientList(l) => Ok(enrolled_json(&l.items)),
@@ -1835,6 +1836,9 @@ fn enrolled_client_json(
         // Never true for a foreign line: a plain line of OURS is one this program
         // rendered and manages, and a stranger's key is left as it was found.
         "shellAccess": client.shell_access,
+        // The device that added this one (ov-838): what lets Settings name,
+        // beside a lost phone, the devices it added.
+        "addedBy": client.added_by,
     })
 }
 
@@ -2513,6 +2517,7 @@ mod tests {
             // OURS is one this program rendered and manages, and a stranger's
             // key is left exactly as it was found.
             shell_access: false,
+            added_by: String::new(),
         };
         let json = enrolled_client_json(&hand_written);
         assert_eq!(json["foreign"], true);
@@ -2542,12 +2547,14 @@ mod tests {
             enrolled_at: 0,
             foreign: false,
             shell_access: true,
+            added_by: String::new(),
         };
         let restricted = farcooler_protocol::v1::EnrolledClient {
             fingerprint: "SHA256:a".into(),
             label: "farcooler-macbook-air-1a2b3c4d".into(),
             scope: farcooler_protocol::v1::Scope::Control as i32,
             shell_access: false,
+            added_by: String::new(),
             ..plain.clone()
         };
         let plain = enrolled_client_json(&plain);
