@@ -3,7 +3,7 @@
 // failing on any violation (ov-764 acceptance 4), with its SSH key a passkey
 // held by Chromium's virtual authenticator (ov-767).
 //
-//   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS]
+//   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS] [--max-sessions N]
 //
 // Serves dist/ (build.sh's output, with the real wasm) through
 // shell-server.ts, which uses the Worker's own header and asset code, at
@@ -73,6 +73,9 @@ const shots = flag('--screenshots')
 const throttle = Number(flag('--cpu-throttle') ?? 1)
 // Delay each tunnel message by this many ms each way, for a slow network.
 const delay = Number(flag('--tunnel-delay') ?? 0)
+// The scratch sshd's MaxSessions. Below 10, the walk is the low-limit check
+// alone (ov-846): panes learn the limit from the first refusal.
+const maxSessions = Number(flag('--max-sessions') ?? 10)
 const later = send => (delay > 0 ? setTimeout(send, delay) : send())
 const shoot = async (page, name) => {
   if (!shots) return
@@ -170,8 +173,9 @@ if (fakeDaemon) {
       'UsePAM no',
       'PasswordAuthentication no',
       'KbdInteractiveAuthentication no',
-      // The channel budget (ov-774) is checked against sshd's own default.
-      'MaxSessions 10',
+      // The channel budget (ov-774) is checked against sshd's own default;
+      // --max-sessions sets a lower one (ov-846).
+      `MaxSessions ${maxSessions}`,
       'LogLevel DEBUG1',
       '',
     ].join('\n'),
@@ -453,6 +457,30 @@ function channels(from = 0) {
 const sorted = xs => [...xs].sort((a, b) => a - b)
 const percentile = (xs, p) => sorted(xs)[Math.min(xs.length - 1, Math.ceil(xs.length * p) - 1)]
 
+/// Ends the walk once the low-limit check has run.
+class LowLimitDone extends Error {}
+
+/// A runner whose sshd allows fewer sessions than the page assumes (ov-846):
+/// eight panes opened in a row cost one refusal, the first, and no more. The
+/// page says nothing about it.
+async function lowLimit(page) {
+  const buttons = page.locator('.terminal-choice')
+  const mark = channels().end
+  for (let i = 0; i < 8; i++) {
+    await buttons.nth(i).click()
+    await page.waitForFunction(i => document.querySelectorAll('.terminal-choice')[i]?.getAttribute('aria-current') === 'true', i)
+    await page.waitForSelector(LIVE, { timeout: 60_000 })
+  }
+  await page.waitForTimeout(500)
+  const opened = channels(mark)
+  if (opened.refused.length < 1) failures.push(`MaxSessions ${maxSessions} refused nothing for eight panes, so the check proved nothing`)
+  if (opened.refused.length > 1) failures.push(`${opened.refused.length} refusals for eight panes, and only the first is expected: ${opened.refused[1]}`)
+  if (opened.peak > maxSessions) failures.push(`eight panes held ${opened.peak} channels at once, and sshd allows ${maxSessions}`)
+  const note = await page.evaluate(() => document.querySelector('#pane-note')?.textContent ?? '')
+  if (note.trim()) failures.push(`the page said "${note}" about a refusal it recovered from`)
+  console.log(`csp-check: eight panes on MaxSessions ${maxSessions}: ${opened.refused.length} refusal, at most ${opened.peak} channels, the page silent`)
+}
+
 /// How many `seq 1 2000000` are started at once in the loaded pane.
 const LOADS = 4
 
@@ -713,6 +741,10 @@ try {
       await page.click('#show-terminals')
       await shoot(page, 'terminal')
 
+      if (maxSessions < 10) {
+        await lowLimit(page)
+        throw new LowLimitDone()
+      }
       await panes(page)
 
       // Each reconnect is one touch, counted on eight.
@@ -807,7 +839,7 @@ try {
     if (await device(page)) failures.push('Sign Out left the passkey and runners behind')
     else console.log('csp-check: Sign Out deleted the passkey and runners')
   } catch (e) {
-    failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)
+    if (!(e instanceof LowLimitDone)) failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)
   }
 
   await new Promise(r => setTimeout(r, 500))

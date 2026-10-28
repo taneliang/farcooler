@@ -31,7 +31,7 @@ import { type PlanTab, startPlanTab } from './plan-tab'
 import { ChatView } from './chat'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
-import { PaneSet } from './panes'
+import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { PaneView } from './terminal'
@@ -420,6 +420,8 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
 
 /// The terminals on the page, so a second visit to `work` replaces them.
 let panes: PaneSet<WebRunner> | null = null
+/// What each runner's sshd has shown it will hold, kept for the session.
+const paneBudgets = new Map<string, Budget>()
 
 // MARK: Needs You
 
@@ -663,13 +665,15 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   // its conversation (chat.ts), which rides the control session and holds no
   // channel.
   const agents = new Set(terminals.filter(t => t.agent).map(t => t.id))
+  const budget = paneBudgets.get(target.label) ?? { max: MAX_LIVE_PANES }
+  paneBudgets.set(target.label, budget)
   const set = new PaneSet<WebRunner>(id => {
     const host = document.createElement('div')
     host.className = 'terminal-host'
     $('terminal').append(host)
     if (agents.has(id)) return new ChatView(host, target.label)
     return new PaneView(host, word => paneNote(connectFailure(word, target.label)))
-  })
+  }, budget)
   panes = set
   const open = async (id: string, button: HTMLButtonElement) => {
     for (const b of list.querySelectorAll('button')) b.removeAttribute('aria-current')

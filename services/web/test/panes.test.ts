@@ -10,11 +10,15 @@ import { MAX_LIVE_PANES, type Pane, PaneSet } from '../src/client/panes'
 class Sshd {
   open = 0
   peak = 0
+  refused = 0
   /// Refuses a channel past this many, as `MaxSessions` does (the control
   /// channel is one of them, so 10 here is 9 panes).
   constructor(readonly sessions = 10) {}
   take(): boolean {
-    if (this.open + 1 >= this.sessions) return false
+    if (this.open + 1 >= this.sessions) {
+      this.refused++
+      return false
+    }
     this.open++
     this.peak = Math.max(this.peak, this.open + 1)
     return true
@@ -53,7 +57,7 @@ class Screen implements Pane<Sshd> {
   }
 }
 
-function rig(max?: number, sessions = 10) {
+function rig(max?: { max: number }, sessions = 10) {
   const sshd = new Sshd(sessions)
   const screens = new Map<string, Screen>()
   const set = new PaneSet<Sshd>(id => {
@@ -116,17 +120,35 @@ describe('the channel budget', () => {
 
   it('tries once more, after letting one go, when the runner refuses a channel', async () => {
     // A runner allowing fewer channels than the budget assumes.
-    const { sshd, screens, set, ids, open } = rig(8, 5)
+    const { sshd, screens, set, ids, open } = rig({ max: 8 }, 5)
     for (const id of ids.slice(0, 4)) await open(id)
     expect(set.live).toHaveLength(4)
     await open('t5')
     expect(screens.get('t5')?.active).toBe(true)
     expect(screens.get('t1')?.active).toBe(false)
-    expect(sshd.open).toBe(4)
+    // The four that worked taught the budget: three, one below.
+    expect(sshd.open).toBe(3)
+    expect(set.live).toHaveLength(3)
+  })
+
+  it('after a refusal, later opens are not refused again', async () => {
+    const { sshd, ids, open } = rig({ max: 8 }, 5)
+    for (const id of ids.slice(0, 8)) await open(id)
+    expect(sshd.refused).toBe(1)
+  })
+
+  it('a budget handed in is kept, so it outlives the set', async () => {
+    const budget = { max: 7 }
+    const first = rig(budget, 5)
+    for (const id of first.ids.slice(0, 5)) await first.open(id)
+    expect(budget.max).toBe(3)
+    const second = rig(budget, 5)
+    for (const id of second.ids.slice(0, 8)) await second.open(id)
+    expect(second.sshd.refused).toBe(0)
   })
 
   it('says so when no channel can be had', async () => {
-    const { open } = rig(8, 1)
+    const { open } = rig({ max: 8 }, 1)
     await expect(open('t1')).rejects.toThrow('exec_failed')
   })
 })

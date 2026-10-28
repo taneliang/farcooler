@@ -23,6 +23,13 @@
 /// The most panes attached at once on one connection.
 export const MAX_LIVE_PANES = 7
 
+/// How many panes one runner's sshd has shown it will hold. The page keeps one
+/// per runner for the session, so a reload of the terminal list, or a new
+/// connection, doesn't forget what a refusal taught.
+export interface Budget {
+  max: number
+}
+
 /// The part of a pane view the set drives.
 export interface Pane<R> {
   /// Attached, or attaching: it holds a channel, or is about to.
@@ -49,7 +56,7 @@ export class PaneSet<R> {
 
   constructor(
     private readonly make: (terminal: string) => Pane<R>,
-    private readonly max = MAX_LIVE_PANES,
+    private readonly budget: Budget = { max: MAX_LIVE_PANES },
   ) {}
 
   /// The terminal in front.
@@ -112,17 +119,22 @@ export class PaneSet<R> {
     try {
       await pane.attach(runner, id, told, pane.used)
     } catch (e) {
-      // A channel the runner refused: every other pane may be holding one it
-      // doesn't count (a stream that ended, a channel still closing). Give
-      // back the least recent and try once more.
-      if ((e as Error).message !== 'exec_failed' || !this.releaseOne(id)) throw e
+      // A channel the runner refused: its sshd allows fewer than the budget
+      // assumes. The panes holding a channel now are the number that worked;
+      // one fewer leaves room for a channel still closing. Keep that as the
+      // budget, give back down to it, and try once more.
+      const worked = this.live.filter(other => other !== id).length
+      if ((e as Error).message !== 'exec_failed' || worked === 0) throw e
+      this.budget.max = Math.max(1, Math.min(this.budget.max, worked - 1))
+      this.makeRoom(id)
+      if (this.live.filter(other => other !== id).length >= worked && !this.releaseOne(id)) throw e
       await pane.attach(runner, id, told, pane.used)
     }
   }
 
   /// Detach hidden panes, least recently shown first, until `id` fits.
   private makeRoom(id: string): void {
-    while (this.live.filter(other => other !== id).length >= this.max) {
+    while (this.live.filter(other => other !== id).length >= this.budget.max) {
       if (!this.releaseOne(id)) return
     }
   }
