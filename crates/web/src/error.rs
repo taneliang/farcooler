@@ -42,9 +42,12 @@ pub enum WebError {
     /// capability's name, for the log.
     #[error("the runner does not offer {0}")]
     Capability(String),
-    /// The daemon refused a call, with its own error code's name.
-    #[error("the runner refused: {0}")]
-    Refused(String),
+    /// The daemon refused a call. `code` is its error code as the phones
+    /// word it (`scope-denied`, `resource-conflict`) and `what` the daemon's
+    /// own word for which conflict or argument, else empty. Neither is for
+    /// reading: the page words a refusal from them (`copy.ts`).
+    #[error("the runner refused: {code} {what}")]
+    Refused { code: String, what: String },
     /// The connection ended.
     #[error("the connection closed")]
     Closed,
@@ -55,6 +58,15 @@ pub enum WebError {
 }
 
 impl WebError {
+    /// A refusal's error code and `what`, for the page to word an answer that
+    /// did not land. Nothing for any other failure.
+    pub fn refusal(&self) -> Option<(&str, &str)> {
+        match self {
+            WebError::Refused { code, what } => Some((code, what)),
+            _ => None,
+        }
+    }
+
     /// The word the page maps to a sentence.
     ///
     /// Stable in the way a proto field name is: the page matches on these.
@@ -69,7 +81,7 @@ impl WebError {
             WebError::Exec(_) => "exec_failed",
             WebError::Protocol(_) => "protocol",
             WebError::Capability(_) => "runner_too_old",
-            WebError::Refused(_) => "refused",
+            WebError::Refused { .. } => "refused",
             WebError::Closed => "closed",
             WebError::NoAnswer => "no_answer",
         }

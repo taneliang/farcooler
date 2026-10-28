@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, Event, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
+    Empty, Error as WireError, ErrorCode, Event, NeedsYouList, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
     TerminalOutput, TerminalState, WireEnvelope, event, request, response, result, terminal_frame, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
@@ -117,6 +117,17 @@ pub struct Seen {
     /// Set, the runner takes each hello and never answers it: a daemon that
     /// started and then went quiet (ov-834).
     pub mute_hello: AtomicBool,
+    /// What Needs You lists, when a test sets it: the runner answers
+    /// `needs_you.list` with it, and an answer takes its item off.
+    pub needs_you: Mutex<Option<NeedsYouList>>,
+    /// Every `terminal.agent_answer` as `(terminal, request id, option id,
+    /// actor)`, in arrival order.
+    pub answers: Mutex<Vec<(Vec<u8>, String, String, String)>>,
+    /// Every `task.note` as `(task, kind, body)`.
+    pub notes: Mutex<Vec<(Vec<u8>, i32, String)>>,
+    /// Set, the runner refuses every answer with this code and `what`: a
+    /// device enrolled to look, or an ask someone else got to first.
+    pub refuse_answers: Mutex<Option<(ErrorCode, &'static str)>>,
     /// The attach channel's write half, so a write can echo onto it.
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
     /// Told of each write as it arrives, for a caller watching from outside.
@@ -187,6 +198,19 @@ pub fn answer(req: &Request, value: result::Value) -> Vec<u8> {
     }))
 }
 
+/// The runner refusing a request, as the daemon's frame does.
+pub fn refusal(req: &Request, code: ErrorCode, what: &str) -> Vec<u8> {
+    envelope(wire_envelope::Body::Response(Response {
+        request_id: req.request_id.clone(),
+        outcome: Some(response::Outcome::Error(WireError {
+            code: code as i32,
+            retryable: false,
+            message: String::new(),
+            what: what.to_string(),
+        })),
+    }))
+}
+
 pub fn output(bytes: &[u8]) -> Vec<u8> {
     output_for(TERMINAL, bytes)
 }
@@ -232,7 +256,11 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                 }
                 envelope(wire_envelope::Body::ServerHello(ServerHello {
                 selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
-                capabilities: vec![capability::TERMINAL_STREAM.to_string()],
+                capabilities: vec![
+                    capability::TERMINAL_STREAM.to_string(),
+                    capability::NEEDS_YOU.to_string(),
+                    capability::TASKS.to_string(),
+                ],
                 ..Default::default()
             }))
             }
@@ -285,6 +313,32 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     ("terminal.resize", Some(request::Payload::TerminalResize(r))) => {
                         *seen.resized.lock().await = Some((r.columns, r.rows));
                         answer(&req, result::Value::Empty(Empty {}))
+                    }
+                    ("needs_you.list", _) => {
+                        let list = seen.needs_you.lock().await.clone().unwrap_or_default();
+                        answer(&req, result::Value::NeedsYouList(list))
+                    }
+                    ("terminal.agent_answer", Some(request::Payload::AgentAnswer(a))) => {
+                        seen.answers.lock().await.push((a.terminal_id.to_vec(), a.request_id.clone(), a.option_id, a.actor));
+                        if let Some((code, what)) = *seen.refuse_answers.lock().await {
+                            refusal(&req, code, what)
+                        } else {
+                            if let Some(list) = seen.needs_you.lock().await.as_mut() {
+                                list.items.retain(|i| i.ask_id.as_deref() != Some(a.request_id.as_str()));
+                            }
+                            answer(&req, result::Value::Terminal(Terminal { id: a.terminal_id, ..Default::default() }))
+                        }
+                    }
+                    ("task.note", Some(request::Payload::TaskNoteAppend(n))) => {
+                        seen.notes.lock().await.push((n.task_id.to_vec(), n.kind, n.body.clone()));
+                        if let Some((code, what)) = *seen.refuse_answers.lock().await {
+                            refusal(&req, code, what)
+                        } else {
+                            if let Some(list) = seen.needs_you.lock().await.as_mut() {
+                                list.items.retain(|i| i.task.as_ref().is_none_or(|t| t.id != n.task_id));
+                            }
+                            answer(&req, result::Value::TaskNote(Default::default()))
+                        }
                     }
                     (other, _) => panic!("the fake runner doesn't know {other}"),
                 }

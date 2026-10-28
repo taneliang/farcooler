@@ -121,3 +121,51 @@ export function linkNotice(
       }
   }
 }
+
+/// Why Needs You can't be shown, by the failure word of the read. A runner too
+/// old to send the list is the phones' sentence (AgentKit's olderRunnerNote).
+export function needsYouFailure(word: string, runner: string): string {
+  if (word === 'runner_too_old') return `Update Far Cooler on ${runner} to see decisions and asks here.`
+  if (word === 'closed' || word === 'no_answer') return `${runner} didn’t answer, so this list may be behind. Far Cooler is reconnecting.`
+  return `Far Cooler couldn’t read what needs you on ${runner}. It tries again in a few seconds.`
+}
+
+/// What an answer says when the runner didn't take it: by the runner's `what`
+/// where it named one, else by its code. `agent` is who the answer was for
+/// (`claude`). Mirrors AgentKit's PhoneAnswer.refusal, so a browser and a
+/// phone say the same thing; the runner's words (`scope-denied`) never reach
+/// the screen.
+///
+/// `not_held` is an ask nothing holds any more: someone got there first.
+/// `not_delivered` is one still held that the agent didn't take, so trying
+/// again can work. Both are one code on the wire.
+export function answerRefusal(failure: { word: string; code?: string; what?: string }, runner: string, agent: string): string {
+  switch (failure.what) {
+    case 'not_held':
+      return 'Someone already answered this.'
+    case 'not_delivered':
+      return `Couldn’t reach ${agent}. Try again.`
+    case 'too_soon':
+      return 'An answer was just sent. Check the terminal before answering again.'
+    case 'unconfirmed':
+      return `Sent, but ${agent} hasn’t moved on yet. Check the terminal before answering again.`
+    case 'not_on_yes':
+      return 'The prompt’s cursor isn’t on Yes. Answer it in the terminal.'
+  }
+  if (failure.word !== 'refused') {
+    // The connection, not the runner, said no.
+    return failure.word === 'closed' || failure.word === 'no_answer'
+      ? `${runner} didn’t answer. Your answer may not have arrived. Check the terminal, then try again.`
+      : 'Your answer may not have reached the runner. Try again.'
+  }
+  switch (failure.code) {
+    case 'scope-denied':
+      return `This browser can only look at ${runner}. Answering needs control, which is granted from a device that already has it.`
+    case 'capability-unsupported':
+      return `Far Cooler on ${runner} is too old for this. Update it there, then try again.`
+    case 'not-found':
+      return 'It isn’t on the runner anymore. Something else removed it while this was open.'
+    default:
+      return `${runner} didn’t take your answer. Try again.`
+  }
+}

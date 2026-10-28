@@ -25,6 +25,8 @@ import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, offerI
 
 import { connectFailure, joinDetail, joinTitle, linkNotice, replyRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
+import { Board, type BoardView, countLabel, countOf, pageTitle } from './needs'
+import { renderNeeds } from './needs-view'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneSet } from './panes'
@@ -266,6 +268,65 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
 /// The terminals on the page, so a second visit to `work` replaces them.
 let panes: PaneSet<WebRunner> | null = null
 
+// MARK: Needs You
+
+/// How often the list is read while the tab is in view. The runner pushes
+/// nothing a browser listens to yet, so this is what shows an answer made
+/// on another device.
+const NEEDS_POLL_MS = 5000
+
+/// The runner's Needs You on the page, read again every few seconds.
+let board: Board | null = null
+let boardTimer = 0
+let drawn = ''
+
+/// The terminal buttons by id, which is what an Open on an item can go to.
+const buttonFor = new Map<string, HTMLButtonElement>()
+
+/// Which half of the work screen is in front.
+function showTab(tab: 'terminals' | 'needs'): void {
+  const needs = tab === 'needs'
+  $('needs').hidden = !needs
+  $('pane').hidden = needs
+  $('terminal-list').hidden = needs
+  $('show-terminals').setAttribute('aria-pressed', String(!needs))
+  $('show-needs').setAttribute('aria-pressed', String(needs))
+  if (needs) void board?.refresh()
+}
+
+/// Put the board's view on the page: the list, the count on the button, the
+/// bar and the tab's title.
+function drawNeeds(view: BoardView): void {
+  const count = countOf(view.items)
+  $('show-needs').textContent = countLabel(count)
+  const bar = $<HTMLButtonElement>('bar-count')
+  bar.hidden = count === 0
+  bar.textContent = `${count} Waiting`
+  document.title = pageTitle(count)
+  drawn = renderNeeds(
+    $('needs'),
+    view,
+    Date.now(),
+    {
+      canOpen: terminal => buttonFor.has(terminal),
+      press: (item, press) => {
+        if (press.kind === 'open') showTab('terminals')
+        void board?.press(item, press)
+      },
+    },
+    drawn,
+  )
+}
+
+function stopNeeds(): void {
+  clearInterval(boardTimer)
+  board?.stop()
+  board = null
+  drawn = ''
+  document.title = pageTitle(0)
+  $('bar-count').hidden = true
+}
+
 async function work(session: Session): Promise<void> {
   const runners = session.device.runners ?? []
   const target = runners.find(r => r.why === '')
@@ -350,6 +411,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
     resume: async next => {
       await panes?.resume(next, () => ended(next))
+      void board?.refresh()
     },
     show: view => showLink(view, target.label),
     now: () => Date.now(),
@@ -396,6 +458,36 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const list = $('terminal-list')
   list.replaceChildren()
   show('work')
+
+  stopNeeds()
+  const opening = (id: string) => void buttonFor.get(id)?.click()
+  buttonFor.clear()
+  const mine = new Board({
+    runner: target.label,
+    list: async () => {
+      const current = reconnector.current
+      if (!current) throw new Error('closed')
+      return await current.needsYou()
+    },
+    ask: async (terminal, ask, option) => {
+      const current = reconnector.current
+      if (!current) throw new Error('closed')
+      await current.answer(terminal, ask, option)
+    },
+    decide: async (task, body) => {
+      const current = reconnector.current
+      if (!current) throw new Error('closed')
+      await current.answerDecision(task, body)
+    },
+    show: drawNeeds,
+    open: opening,
+  })
+  board = mine
+  showTab('terminals')
+  void mine.refresh()
+  boardTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && reconnector.current && !reconnector.hasLost(reconnector.current)) void mine.refresh()
+  }, NEEDS_POLL_MS)
   if (terminals.length === 0) {
     paneNote(`${target.label} has no terminals yet. Open one in Far Cooler on your Mac or phone, then reload.`)
     return
@@ -431,6 +523,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     button.textContent = t.title || 'Terminal'
     button.title = t.state
     button.onclick = () => void open(t.id, button)
+    buttonFor.set(t.id, button)
     list.append(button)
     return button
   })
@@ -452,6 +545,7 @@ function recheckLink(): void {
 
 async function addAgain(session: Session): Promise<void> {
   link = null
+  stopNeeds()
   panes?.dispose()
   panes = null
   delete session.device.runners
@@ -479,6 +573,9 @@ function signOutForgets(): void {
 
 async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
+  $('show-terminals').addEventListener('click', () => showTab('terminals'))
+  $('show-needs').addEventListener('click', () => showTab('needs'))
+  $('bar-count').addEventListener('click', () => showTab('needs'))
   window.addEventListener('focus', () => void checkVersion())
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') recheckLink()

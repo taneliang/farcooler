@@ -58,9 +58,12 @@ impl From<SessionError> for WebError {
             SessionError::Ssh(other) => WebError::Handshake(other.to_string()),
             // `--stdio` never said hello: the daemon is not there to start.
             missing @ SessionError::DaemonMissing { .. } => WebError::Exec(missing.to_string()),
-            SessionError::Refused { code, .. } => WebError::Refused(
-                ErrorCode::try_from(code).map(|c| c.as_str_name()).unwrap_or("ERROR_CODE_UNSPECIFIED").to_string(),
-            ),
+            SessionError::Refused { code, what, .. } => WebError::Refused {
+                code: ErrorCode::try_from(code)
+                    .map(|c| c.as_str_name().trim_start_matches("ERROR_CODE_").to_ascii_lowercase().replace('_', "-"))
+                    .unwrap_or_else(|_| "unspecified".into()),
+                what,
+            },
             SessionError::Disconnected(_) | SessionError::NotSent(_) => WebError::Closed,
             other => WebError::Protocol(other.to_string()),
         }
@@ -183,6 +186,24 @@ impl Runner {
     /// What needs this person, in the phones' shape (`needs_you_json`).
     pub async fn needs_you(&self) -> Result<serde_json::Value, WebError> {
         Ok(self.session.needs_you().await?)
+    }
+
+    /// Answer an ask Needs You lists, as the person at this browser
+    /// (`terminal.agent_answer`, the call a phone's Allow makes). `ask` is the
+    /// item's `ask_id` and `option` the action's `id`.
+    ///
+    /// Sent the moment it is called and answered when the runner has taken it,
+    /// which is when the runner drops the item from every device's list.
+    pub async fn answer_ask(&self, terminal: Uuid, ask: &str, option: &str) -> Result<(), WebError> {
+        self.session.agent_answer(terminal, ask, option, Default::default()).await?;
+        Ok(())
+    }
+
+    /// Answer a decision Needs You lists with the option's text, as a note on
+    /// its task (`task.note`, the call a phone's answer makes).
+    pub async fn answer_decision(&self, task: Uuid, body: &str) -> Result<(), WebError> {
+        self.session.task_note(farcooler_client::session::task_note_append(task, farcooler_protocol::v1::TaskNoteKind::Answer, body)).await?;
+        Ok(())
     }
 
     /// A workspace's plan, in the phones' shape (`plan_json`).

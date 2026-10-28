@@ -32,7 +32,13 @@ fn failure(word: &str, detail: &str) -> JsValue {
 }
 
 fn web_failure(e: WebError) -> JsValue {
-    failure(e.word(), &e.to_string())
+    let error = failure(e.word(), &e.to_string());
+    // A refusal also carries what the runner said it was, for the page to word.
+    if let Some((code, what)) = e.refusal() {
+        let _ = Reflect::set(&error, &"code".into(), &code.into());
+        let _ = Reflect::set(&error, &"what".into(), &what.into());
+    }
+    error
 }
 
 /// A browser future is not `Send`, and russh's signer must return one that is.
@@ -252,6 +258,21 @@ impl WebRunner {
     pub async fn needs_you(&self) -> Result<String, JsValue> {
         let value = self.0.needs_you().await.map_err(web_failure)?;
         Ok(value.to_string())
+    }
+
+    /// Answer an ask Needs You lists: its `ask_id` and the action's `id`, for
+    /// the terminal it is about. Rejects with `refused` and the runner's `code`
+    /// and `what` when it does not take the answer.
+    pub async fn answer(&self, terminal: String, ask: String, option: String) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.answer_ask(id, &ask, &option).await.map_err(web_failure)
+    }
+
+    /// Answer a decision Needs You lists, with the option's text, on its task.
+    #[wasm_bindgen(js_name = answerDecision)]
+    pub async fn answer_decision(&self, task: String, body: String) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&task).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.answer_decision(id, &body).await.map_err(web_failure)
     }
 
     /// A workspace's plan, as JSON in the phones' shape (`plan_json`).

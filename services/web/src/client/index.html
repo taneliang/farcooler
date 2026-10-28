@@ -11,6 +11,7 @@
 <body>
 <header class="bar">
   <span class="title">Far Cooler</span>
+  <button class="count" id="bar-count" type="button" hidden></button>
   <span class="who" id="who"></span>
   <form method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
 </header>
@@ -65,11 +66,16 @@
   </section>
 
   <section class="work" id="work" hidden>
-    <nav class="sidebar" aria-label="Terminals">
+    <nav class="sidebar" aria-label="Runner">
       <span class="runner" id="runner-name"></span>
+      <div class="seg" role="group" aria-label="Show">
+        <button type="button" id="show-terminals" aria-pressed="true">Terminals</button>
+        <button type="button" id="show-needs" aria-pressed="false">Needs You</button>
+      </div>
       <div class="terminal-list" id="terminal-list"></div>
     </nav>
-    <div class="pane">
+    <div class="needs" id="needs" aria-live="polite" hidden></div>
+    <div class="pane" id="pane">
       <p class="note" id="pane-note" hidden></p>
       <div class="note link-note" id="link-note" role="status" hidden>
         <p class="link-title" id="link-title"></p>

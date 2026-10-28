@@ -35,8 +35,14 @@ declare module 'fc-web' {
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>
     /// The phones' shapes (crates/client's needs_you_json, plan_json and
-    /// page_json), as JSON. Not shown by the page yet.
+    /// page_json), as JSON. Needs You is shown (needs.ts); the others are not yet.
     needsYou(): Promise<string>
+    /// Answer an ask Needs You lists (its `ask_id`, the action's `id`). A
+    /// refusal rejects with message `refused` and the runner's `code` and
+    /// `what`.
+    answer(terminal: string, ask: string, option: string): Promise<void>
+    /// Answer a decision with the option's text, on its task.
+    answerDecision(task: string, body: string): Promise<void>
     plan(workspace: string): Promise<string>
     page(workspace: string, slot: string): Promise<string>
     /// Whether the runner answers right now. False means the connection is
