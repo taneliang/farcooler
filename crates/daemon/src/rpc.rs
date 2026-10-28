@@ -1049,7 +1049,7 @@ impl Rpc {
                     "registering a device's node key"
                 );
                 Ok(result::Value::ClientSetNodeKey(
-                    crate::enrollment::set_node_key(svc, &self.peer, &p).await?,
+                    crate::enrollment::set_node_key_on(svc, &self.peer, &p, Some(self.session.clone())).await?,
                 ))
             }
 

@@ -53,8 +53,8 @@ pub fn peer_from_preamble(preamble: Option<&SessionPreamble>) -> Option<Peer> {
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<u64, Live>>,
-    /// Devices revoked since this daemon started, until each is enrolled
-    /// again (ov-820 review B1). A connection one of them opens later, a new
+    /// Devices revoked, until each is enrolled again (ov-820 review B1),
+    /// kept in the store across a restart when [`Sessions::persisted`]. A connection one of them opens later, a new
     /// channel on an ssh transport the revoke hasn't severed yet, say while a
     /// tunneled device's farewell is let through, starts closed: it is told
     /// its farewell and served nothing.
@@ -68,6 +68,9 @@ pub struct Sessions {
     /// Handed out in order and never reused, so a session that ends while a
     /// sweep is deciding cannot have its slot taken by a new one.
     next: AtomicU64,
+    /// Where `revoked` is kept across a restart (ov-832, the ov-826 review's
+    /// S2), or nowhere for a bare registry in a test.
+    kept: Option<Arc<farcooler_store::Store>>,
 }
 
 struct Live {
@@ -80,6 +83,16 @@ struct Live {
 impl Sessions {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// A registry whose revoked marks outlive the daemon (ov-832): loaded
+    /// from `store` now, each new one written there, and each lifted one
+    /// taken out. Without this a restart forgot every mark, so a revoked
+    /// Mac's still-open ssh master could open a fresh, unmarked session and
+    /// enroll its own line back. A store that can't be read refuses to open.
+    pub fn persisted(store: Arc<farcooler_store::Store>) -> farcooler_core::Result<Arc<Self>> {
+        let marked = store.revoked_marks()?;
+        Ok(Arc::new(Self { revoked: Mutex::new(marked.into_iter().collect()), kept: Some(store), ..Self::default() }))
     }
 
     /// Register a connection for as long as the returned handle is held.
@@ -123,13 +136,14 @@ impl Sessions {
     /// down a tunneled device's route waits on it first, so the
     /// `device_released` frame isn't cut off on its way.
     ///
-    /// And from now on, until [`readmit`](Self::readmit), every connection
-    /// this device opens starts closed (review B1).
+    /// It closes and marks nothing (ov-832, the ov-826 review's N2): every
+    /// caller has already marked the device with
+    /// [`mark_revoked`](Self::mark_revoked), so a connection it opens from
+    /// then on starts closed (review B1). Marking here too, after the
+    /// revoke's write and outside the fence lock, could land just after a
+    /// real re-enrollment and shut that device out, now past a restart.
     pub fn closing(&self, client_id: &str) -> Closing {
-        // Before the sweep, under the same lock `open` registers under, so a
-        // connection either is in `live` and closed below, or sees this.
         let live = self.live.lock().unwrap();
-        self.mark(client_id);
         let mut said = Vec::new();
         for session in live.values() {
             if session.client_id.as_deref() == Some(client_id) {
@@ -145,9 +159,20 @@ impl Sessions {
     /// This device is revoked: every connection it opens from now on starts
     /// closed, until [`readmit`](Self::readmit). Called by a revoke under the
     /// fence lock, before its write lands (ov-820 review S4).
+    ///
+    /// Kept in the store too (ov-832), so a restart doesn't forget it. A
+    /// store that can't be written is logged and the revoke goes on: taking
+    /// the line out matters more than remembering the mark.
     pub fn mark_revoked(&self, client_id: &str) {
-        let _live = self.live.lock().unwrap();
-        self.mark(client_id);
+        {
+            let _live = self.live.lock().unwrap();
+            self.mark(client_id);
+        }
+        if let Some(store) = &self.kept
+            && let Err(e) = store.keep_revoked_mark(client_id)
+        {
+            tracing::error!(client = %client_id, error = %e.what(), "a revoked mark wasn't kept; a restart would forget it");
+        }
     }
 
     /// The mark, and one more revocation counted. With `live` held, so the
@@ -163,8 +188,15 @@ impl Sessions {
 
     /// This device was enrolled again: its connections are served again.
     /// Only for a real enrollment write of this id, under the fence lock.
-    pub fn readmit(&self, client_id: &str) {
+    ///
+    /// The kept mark goes first (ov-832): when the store can't take it out,
+    /// this fails and the device stays marked, and the enroll writes nothing.
+    pub fn readmit(&self, client_id: &str) -> farcooler_core::Result<()> {
+        if let Some(store) = &self.kept {
+            store.lift_revoked_mark(client_id)?;
+        }
         self.revoked.lock().unwrap().remove(client_id);
+        Ok(())
     }
 }
 
@@ -368,7 +400,7 @@ mod tests {
         sessions.mark_revoked("phone");
         assert!(sessions.open(Some("phone".into())).is_closed(), "a revoked device's connection was served");
         assert!(!sessions.open(Some("laptop".into())).is_closed(), "another device was shut out");
-        sessions.readmit("phone");
+        sessions.readmit("phone").unwrap();
         assert!(!sessions.open(Some("phone".into())).is_closed(), "a readmitted device stayed shut out");
     }
 
@@ -382,7 +414,7 @@ mod tests {
         assert!(!before.revoked_since_open(), "a device nobody revoked reads as revoked");
         sessions.mark_revoked("phone");
         assert!(before.revoked_since_open(), "the mark went unseen");
-        sessions.readmit("phone");
+        sessions.readmit("phone").unwrap();
         assert!(before.revoked_since_open(), "a readmit made an older session's revoke unhappen");
         assert!(!sessions.open(Some("phone".into())).revoked_since_open(), "a session opened after the readmit reads as revoked");
         assert!(!local.revoked_since_open(), "a local session was matched by a device's revoke");

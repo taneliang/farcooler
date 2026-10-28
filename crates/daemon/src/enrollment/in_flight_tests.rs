@@ -85,7 +85,7 @@ async fn parked(
                 reached_tx.send(()).unwrap();
                 go_rx.recv().unwrap();
             };
-            super::enroll_held(&svc, &asked, None, Some(caller), held).await
+            super::enroll_held(&svc, &asked, None, Some(caller), held, None).await
         })
     };
     tokio::task::spawn_blocking(move || reached_rx.recv().unwrap()).await.unwrap();
@@ -166,4 +166,137 @@ async fn client_enroll_over_a_connection_carries_its_session() {
     let Some(response::Outcome::Error(error)) = answer else { panic!("the marked phone's enroll was served: {answer:?}") };
     assert_eq!(farcooler_core::error::word_for(error.code), "auth-required");
     assert_eq!(phone_lines(&svc).await, vec![(fingerprint(KEY_PHONE), false)], "a line was written");
+}
+
+/// Two node keys that decode, and differ (A and E: see
+/// `tests/a_sweep_rebuilds_the_tunnel_once.rs`).
+const NODE_PHONE: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const NODE_LAPTOP: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
+const KEY_LAPTOP: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz laptop";
+const KEY_BROWSER: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER browser";
+
+/// [`runner`], serving a recorded tunnel that admits the laptop, which a
+/// revoke's rebuild keeps.
+async fn tunneled() -> (tempfile::TempDir, Arc<Service>, Arc<crate::tunnel_gate::recording::Recording>) {
+    let (dir, svc) = runner().await;
+    let tunnel = Arc::new(crate::tunnel_gate::recording::Recording::default());
+    svc.tunnel.use_backend(tunnel.clone());
+    let laptop = ClientEnroll { node_key: NODE_LAPTOP.into(), scope: Scope::Control as i32, ..asking(KEY_LAPTOP, "laptop", false) };
+    let paired = super::enroll(&svc, &laptop).await.expect("the laptop enrolls");
+    assert_eq!(paired.conn_blob, "token", "the laptop's pairing started no tunnel");
+    assert_eq!(tunnel.admits(), Some(vec![NODE_LAPTOP.to_string()]));
+    (dir, svc, tunnel)
+}
+
+/// An enroll of `asked` that writes, then parks on its way to the tunnel.
+async fn parked_at_the_tunnel(
+    svc: &Arc<Service>,
+    asked: ClientEnroll,
+    caller: Option<Arc<Session>>,
+) -> (mpsc::Sender<()>, tokio::task::JoinHandle<farcooler_core::Result<pb::ClientEnrollResult>>) {
+    let (reached_tx, reached_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let enrolling = {
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            let pause: Box<dyn FnOnce() + Send> = Box::new(move || {
+                reached_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+            });
+            super::enroll_held(&svc, &asked, None, caller, || (), Some(pause)).await
+        })
+    };
+    tokio::task::spawn_blocking(move || reached_rx.recv().unwrap()).await.unwrap();
+    (go_tx, enrolling)
+}
+
+/// S1, the device's own key (ov-832): an enroll wrote the phone's line with
+/// a node key, and before it reached the tunnel a revoke took the line out
+/// and rebuilt the tunnel without it. The enroll then admits nothing: the
+/// key it would add is in no line any more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_key_written_before_a_revoke_never_reaches_the_tunnel_it_rebuilt() {
+    let (_dir, svc, tunnel) = tunneled().await;
+    let tablet = ClientEnroll { node_key: NODE_PHONE.into(), scope: Scope::Control as i32, ..asking(KEY_BROWSER, "tablet", false) };
+    let (go, enrolling) = parked_at_the_tunnel(&svc, tablet, None).await;
+
+    super::revoke(&svc, &ClientRevoke { client_id: "tablet".into() }).await.expect("the tablet is revoked");
+    assert_eq!(tunnel.served.lock().unwrap().last(), Some(&vec![NODE_LAPTOP.to_string()]), "the revoke didn't rebuild the tunnel");
+    go.send(()).unwrap();
+
+    let answer = enrolling.await.unwrap().expect("the write had landed");
+    assert_eq!(answer.conn_blob, "", "a revoked device was handed the tunnel");
+    assert_eq!(tunnel.admits(), Some(vec![NODE_LAPTOP.to_string()]), "a revoked device's node key reached the rebuilt tunnel");
+}
+
+/// S1, the caller (ov-832): the phone enrolled a browser and was revoked
+/// before the browser's key reached the tunnel. Its session is refused the
+/// admission under the tunnel's hold, as its enroll would be under the
+/// fence lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_revoked_sessions_enroll_admits_nothing_to_the_tunnel() {
+    let (_dir, svc, tunnel) = tunneled().await;
+    let session = svc.sessions().open(Some("phone".into()));
+    let browser = ClientEnroll { node_key: NODE_PHONE.into(), scope: Scope::Control as i32, ..asking(KEY_BROWSER, "browser", false) };
+    let (go, enrolling) = parked_at_the_tunnel(&svc, browser, Some(session)).await;
+
+    revoke(&svc).await;
+    go.send(()).unwrap();
+
+    let answer = enrolling.await.unwrap().expect("the write had landed");
+    assert_eq!(answer.conn_blob, "", "a revoked session was handed the tunnel");
+    assert_eq!(tunnel.admits(), Some(vec![NODE_LAPTOP.to_string()]), "a revoked session's enroll reached the tunnel");
+}
+
+/// The ordinary case still admits: nobody revoked anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_enroll_nobody_revoked_is_admitted_to_the_running_tunnel() {
+    let (_dir, svc, tunnel) = tunneled().await;
+    let session = svc.sessions().open(Some("phone".into()));
+    let browser = ClientEnroll { node_key: NODE_PHONE.into(), scope: Scope::Control as i32, ..asking(KEY_BROWSER, "browser", false) };
+    let (go, enrolling) = parked_at_the_tunnel(&svc, browser, Some(session)).await;
+    go.send(()).unwrap();
+    assert_eq!(enrolling.await.unwrap().unwrap().conn_blob, "token");
+    assert_eq!(tunnel.admits(), Some(vec![NODE_LAPTOP.to_string(), NODE_PHONE.to_string()]));
+}
+
+/// N4 (ov-832): `client.set_node_key` on a session whose device was revoked
+/// since it opened writes nothing, as an enroll does.
+#[tokio::test]
+async fn a_revoked_sessions_node_key_is_refused() {
+    let (_dir, svc) = runner().await;
+    let session = svc.sessions().open(Some("phone".into()));
+    let peer = Peer { client_id: Some("phone".into()), scope: Scope::Read };
+    let asked = pb::ClientSetNodeKey { node_key: NODE_PHONE.into(), ..Default::default() };
+    svc.sessions().mark_revoked("phone");
+    let answer = super::set_node_key_on(&svc, &peer, &asked, Some(session.clone())).await;
+    assert!(matches!(answer, Err(DomainError::AuthRequired)), "the revoked session's node key was taken: {answer:?}");
+    assert_eq!(phone_lines(&svc).await, vec![(fingerprint(KEY_PHONE), false)], "the phone's line changed");
+    let entries = farcooler_fence::read(svc.authorized_keys(), farcooler_fence::AUTHORIZED_KEYS).unwrap();
+    assert!(entries.iter().all(|e| e.node_key.is_empty()), "a node key was written for a revoked session");
+}
+
+/// S2 (ov-832): a revoke outlives a restart. The store is opened again, as
+/// a restarted daemon opens it, and the revoked phone's new session, a new
+/// channel on a still-open ssh master, starts closed and can't enroll its
+/// line back. A real enrollment lifts the mark, for good.
+#[tokio::test]
+async fn a_revoke_outlives_a_daemon_restart() {
+    let (dir, svc) = runner().await;
+    revoke(&svc).await;
+    drop(svc);
+
+    let state = dir.path().join("state");
+    let keys = dir.path().join("home").join(".ssh").join("authorized_keys");
+    let svc = Arc::new(Service::open_in(state.clone()).await.unwrap().enrolling_into(keys.clone()));
+    let session = svc.sessions().open(Some("phone".into()));
+    assert!(session.is_closed(), "after a restart, the revoked phone's session was served");
+    let answer = super::enroll_as(&svc, &asking(KEY_PHONE, "phone", false), None, Some(session)).await;
+    assert!(matches!(answer, Err(DomainError::AuthRequired)), "after a restart, the revoked phone enrolled itself: {answer:?}");
+    assert!(phone_lines(&svc).await.is_empty(), "the revoked phone's line came back");
+
+    super::enroll(&svc, &asking(KEY_PHONE_NEW, "phone", false)).await.expect("the owner enrolls the phone again");
+    drop(svc);
+    let svc = Arc::new(Service::open_in(state).await.unwrap().enrolling_into(keys));
+    assert!(!svc.sessions().open(Some("phone".into())).is_closed(), "a phone enrolled again was shut out after a restart");
 }

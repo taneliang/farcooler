@@ -1958,10 +1958,12 @@ pub struct Service {
     /// ones belonging to the device it revoked.
     ///
     /// Here rather than beside the listener because `enrollment::revoke` is
-    /// where the decision is made and a `Service` is what it is handed. It is
-    /// runtime truth, never stored: a session is a live connection and a
-    /// restarted daemon has none.
+    /// where the decision is made and a `Service` is what it is handed. Its
+    /// sessions are runtime truth, never stored; its revoked marks are kept
+    /// in the store, so a restart doesn't forget them (ov-832).
     sessions: Arc<crate::sessions::Sessions>,
+    /// The tunnel, behind one lock for rebuilds and admissions alike (ov-832).
+    pub(crate) tunnel: crate::tunnel_gate::Gate,
     /// Which agents are recognized, and how.
     ///
     /// Held rather than re-read per call, for the same reason `root` is: the
@@ -2145,7 +2147,8 @@ impl Service {
             claude_logins: crate::claude_logins::State::new(Some(root.join("home").join(".claude"))),
             rep_cli: Some(root.join("bin").join(farcooler_protocol::CHANNEL.cli_binary_name())),
             root,
-            sessions: crate::sessions::Sessions::new(),
+            sessions: crate::sessions::Sessions::persisted(store.clone())?,
+            tunnel: Default::default(),
             registry,
             read_only_folders: Vec::new(),
             agents: agent_supervisor::AgentSupervisor::new(),

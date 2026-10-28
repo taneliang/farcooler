@@ -51,6 +51,7 @@ mod compose_holds;
 mod compose_waits;
 pub mod people;
 mod device_enrollers;
+mod revoked_marks;
 pub use compose_holds::ComposeHold;
 pub use compose_waits::ComposeWait;
 pub use crash_signatures::{CrashFiling, CrashRecord};

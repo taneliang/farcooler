@@ -122,17 +122,19 @@ pub async fn enroll_as(
     by_member: Option<MemberEnrolled>,
     caller: Option<std::sync::Arc<crate::sessions::Session>>,
 ) -> Result<ClientEnrollResult> {
-    enroll_held(svc, request, by_member, caller, || ()).await
+    enroll_held(svc, request, by_member, caller, || (), None).await
 }
 
 /// [`enroll_as`], running `held` on the blocking thread just before it takes
-/// the fence lock: where a test parks an enroll while a revoke runs.
+/// the fence lock, and `before_tunnel` there after its write and before it
+/// waits on the tunnel: where a test parks an enroll while a revoke runs.
 async fn enroll_held(
     svc: &Service,
     request: &ClientEnroll,
     by_member: Option<MemberEnrolled>,
     caller: Option<std::sync::Arc<crate::sessions::Session>>,
     held: impl FnOnce() + Send + 'static,
+    before_tunnel: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
     // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
@@ -190,6 +192,8 @@ async fn enroll_held(
     // there.
     let admitting = request.node_key.clone();
     let sessions = svc.sessions().clone();
+    let asking = caller.clone();
+    let device = mine.client_id.clone();
     let (mut result, admitted) = blocking(move || {
         held();
         // Read and write under ONE lock hold. Two enrollments landing in the same
@@ -276,7 +280,7 @@ async fn enroll_held(
             // against a revoke's mark: a device revoked earlier is served
             // again (ov-820 review S4). Not on the path above, which writes
             // nothing and can match on a fingerprint alone.
-            sessions.readmit(&mine.client_id);
+            sessions.readmit(&mine.client_id).map_err(Refusal)?;
             Ok((
                 fence::Change::Write { entries: ours, foreign },
                 (
@@ -305,7 +309,10 @@ async fn enroll_held(
     // rather than never, because the token does not exist until a server is up,
     // and the token is the whole of what the paired device needs.
     if admitted {
-        result.conn_blob = tunnel_route(svc, &request.node_key).await;
+        if let Some(pause) = before_tunnel {
+            let _ = tokio::task::spawn_blocking(pause).await;
+        }
+        result.conn_blob = tunnel_route(svc, &request.node_key, &device, asking.as_deref()).await;
     }
     Ok(result)
 }
@@ -346,8 +353,21 @@ async fn enroll_held(
 /// phone whose own mint failed already does. Somebody who paired a phone and
 /// got a working direct runner has lost nothing; somebody whose pairing failed
 /// outright has lost the device.
-async fn tunnel_route(svc: &Service, node_key: &str) -> String {
-    if let Some(blob) = admit_to_a_running_tunnel(node_key).await {
+///
+/// **Under the tunnel's hold, and only for a key the fence still holds**
+/// (ov-832, the ov-826 review's S1). The fence lock is released by the time
+/// this runs, so a revoke may have written and rebuilt the tunnel since this
+/// enroll's write. Asked under the hold that every rebuild takes, with the
+/// file read again: the revoke's write comes before its rebuild, so either
+/// this sees the line gone and admits nothing, or it admits first and the
+/// rebuild drops it. A session whose device was revoked since it opened is
+/// admitted nothing either.
+async fn tunnel_route(svc: &Service, node_key: &str, client_id: &str, caller: Option<&crate::sessions::Session>) -> String {
+    let held = svc.tunnel.hold().await;
+    if !still_admitted(svc, client_id, node_key, caller).await {
+        return String::new();
+    }
+    if let Some(blob) = admit_to_a_running_tunnel(&held, node_key).await {
         return blob;
     }
 
@@ -355,9 +375,7 @@ async fn tunnel_route(svc: &Service, node_key: &str) -> String {
     // `tunnel_plan` will let `start_tunnel` past. Failing to create one is not
     // fatal: `start_tunnel` will answer `NoIdentity` immediately afterwards and
     // the pairing goes on as direct.
-    let key_path = svc.tailcat_key();
-    let creating = key_path.clone();
-    match tokio::task::spawn_blocking(move || farcooler_tailcat::ensure_identity(&creating)).await {
+    match held.ensure_identity(svc.tailcat_key()).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
             tracing::warn!(
@@ -370,9 +388,31 @@ async fn tunnel_route(svc: &Service, node_key: &str) -> String {
         }
     }
 
-    let outcome = crate::allowlist::start_tunnel(svc).await;
+    let outcome = crate::allowlist::start_tunnel_held(svc, &held).await;
     tracing::info!(?outcome, "started this runner's tunnel for a newly paired device");
     outcome.blob().unwrap_or_default()
+}
+
+/// Whether `client_id`'s Far Cooler line carries `node_key` now, and the
+/// session that asked (if any) wasn't revoked since it opened: what an
+/// admission asks under the tunnel's hold (ov-832). A file that can't be
+/// read admits nothing.
+async fn still_admitted(svc: &Service, client_id: &str, node_key: &str, caller: Option<&crate::sessions::Session>) -> bool {
+    if caller.is_some_and(|session| session.revoked_since_open()) {
+        tracing::warn!(client = %client_id, "admitted nothing to the tunnel for a session whose device was revoked while it ran");
+        return false;
+    }
+    let path = svc.authorized_keys().to_path_buf();
+    let (id, key) = (client_id.to_string(), node_key.to_string());
+    let holds = blocking(move || {
+        Ok(read(&path)?.iter().any(|e| e.client_id == id && !e.shell_access && !key.is_empty() && e.node_key == key))
+    })
+    .await
+    .unwrap_or(false);
+    if !holds {
+        tracing::info!(client = %client_id, "admitted nothing to the tunnel: the line carrying that node key is gone");
+    }
+    holds
 }
 
 /// Admit one node key to the tunnel this runner is ALREADY serving, and read
@@ -389,21 +429,20 @@ async fn tunnel_route(svc: &Service, node_key: &str) -> String {
 /// Both calls are synchronous and hold the Go side's package-wide mutex —
 /// `serve` on the same runner can hold it for 30-50 seconds — so neither may
 /// run on a runtime worker.
-async fn admit_to_a_running_tunnel(node_key: &str) -> Option<String> {
-    let admitting = node_key.to_string();
-    let outcome = tokio::task::spawn_blocking(move || {
+async fn admit_to_a_running_tunnel(held: &crate::tunnel_gate::Held<'_>, node_key: &str) -> Option<String> {
+    let outcome: std::result::Result<Option<String>, tokio::task::JoinError> = async {
         // A runner serving no tunnel answers `ENOTCONN` here, which is not a
         // failure worth logging as one: it is the ordinary state of a runner
         // nobody has paired against yet, and of every build carrying no tunnel
         // at all.
-        if let Err(error) = farcooler_tailcat::allow_add(&admitting) {
+        if let Err(error) = held.allow_add(node_key.to_string()).await? {
             tracing::debug!(
                 code = error.code(),
                 "no running tunnel admitted this node key"
             );
-            return None;
+            return Ok(None);
         }
-        match farcooler_tailcat::conn_blob() {
+        Ok(match held.conn_blob().await? {
             Ok(blob) => Some(blob),
             Err(error) => {
                 // The tunnel IS live — `allow_add` only succeeds against a
@@ -417,8 +456,8 @@ async fn admit_to_a_running_tunnel(node_key: &str) -> Option<String> {
                 );
                 Some(String::new())
             }
-        }
-    })
+        })
+    }
     .await;
     match outcome {
         Ok(blob) => blob,
@@ -488,6 +527,20 @@ pub async fn set_node_key(
     peer: &Peer,
     request: &ClientSetNodeKey,
 ) -> Result<ClientSetNodeKeyResult> {
+    set_node_key_on(svc, peer, request, None).await
+}
+
+/// [`set_node_key`], from `caller`'s session when it came over a connection.
+/// Refused under the fence lock when that device was revoked since the
+/// session opened, as an enroll is (ov-832, the ov-826 review's N4): a
+/// revoke and a re-enroll both landing while this was parked would
+/// otherwise put a node key on the new line.
+pub async fn set_node_key_on(
+    svc: &Service,
+    peer: &Peer,
+    request: &ClientSetNodeKey,
+    caller: Option<std::sync::Arc<crate::sessions::Session>>,
+) -> Result<ClientSetNodeKeyResult> {
     // A caller that named no device has no line here. That is every local
     // socket client — the owner's own Mac app talking to its own daemon — and
     // it is not an error worth guessing around: there is nothing to write onto,
@@ -507,9 +560,13 @@ pub async fn set_node_key(
     // before a concurrent enrollment would put the file back without that
     // device's key. See `fence::update`.
     let rewriting = node_key.clone();
+    let (writing, asking) = (client_id.clone(), caller.clone());
     blocking(move || {
         fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
-            Ok((rerender_with_node_key(entries, &client_id, &rewriting)?, ()))
+            if asking.as_ref().is_some_and(|session| session.revoked_since_open()) {
+                return Err(Refusal(DomainError::AuthRequired));
+            }
+            Ok((rerender_with_node_key(entries, &writing, &rewriting)?, ()))
         })
     })
     .await?;
@@ -523,7 +580,17 @@ pub async fn set_node_key(
     // it is registering a route for; enrollment is the call that has a reason
     // to pay for it, because the device it grants cannot reach this runner any
     // other way.
-    let conn_blob = admit_to_a_running_tunnel(&node_key).await.unwrap_or_default();
+    //
+    // Under the tunnel's hold, and only for a key the line still carries
+    // (ov-832), as `tunnel_route` says.
+    let conn_blob = {
+        let held = svc.tunnel.hold().await;
+        if still_admitted(svc, &client_id, &node_key, caller.as_deref()).await {
+            admit_to_a_running_tunnel(&held, &node_key).await.unwrap_or_default()
+        } else {
+            String::new()
+        }
+    };
 
     tracing::info!(client = %peer.client_id.as_deref().unwrap_or("-"), "registered a node key");
     Ok(ClientSetNodeKeyResult { conn_blob })

@@ -52,6 +52,8 @@ async fn sweep_with(svc: &Service, rebuild_tunnel: bool) -> Result<Swept> {
     let (with_line, without): (Vec<String>, Vec<String>) =
         candidates.into_iter().partition(|d| lines.items.iter().any(|e| e.client_id == *d));
     for device in without {
+        // Marked first, as a revoke does: `close` marks nothing (ov-832).
+        svc.sessions().mark_revoked(&device);
         if svc.sessions().close(&device) > 0 {
             swept.closed.push(device);
         }

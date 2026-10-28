@@ -152,10 +152,8 @@ pub fn tunnel_plan(key_path: &Path, entries: &[Entry]) -> Result<Allowlist, Tunn
 /// to start — so it is logged at `debug` and never as a tunnel that did not
 /// start. The one line a reader would take as a broken runner is the line this
 /// must never write.
-async fn withdraw(key_path: PathBuf, ssh_port: u16) {
-    let stopped =
-        tokio::task::spawn_blocking(move || farcooler_tailcat::serve(&key_path, ssh_port, &[]))
-            .await;
+async fn withdraw(held: &crate::tunnel_gate::Held<'_>, key_path: PathBuf, ssh_port: u16) {
+    let stopped = held.serve(key_path, ssh_port, Vec::new()).await;
     match stopped {
         Ok(Err(error)) => tracing::debug!(
             code = error.code(),
@@ -210,7 +208,16 @@ async fn withdraw(key_path: PathBuf, ssh_port: u16) {
 /// Callers must not `.await` this inline before the daemon binds its Unix
 /// socket: the same 30-50 seconds happens before this runner is reachable at
 /// all if they do. See the call site in `main.rs`.
+///
+/// Under the tunnel's hold (`tunnel_gate`, ov-832), so no admission lands
+/// between this read of the file and the server it builds from it.
 pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
+    let held = service.tunnel.hold().await;
+    start_tunnel_held(service, &held).await
+}
+
+/// [`start_tunnel`], by a caller already holding the tunnel.
+pub(crate) async fn start_tunnel_held(service: &crate::service::Service, held: &crate::tunnel_gate::Held<'_>) -> TunnelOutcome {
     let key_path = service.tailcat_key();
     let ssh_port = service.ssh_port();
 
@@ -249,7 +256,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
         // just deleted from that file peered to this host's sshd, while
         // `revoke` answers that it is out. Not knowing who is admitted is a
         // reason to admit nobody.
-        withdraw(key_path.clone(), ssh_port).await;
+        withdraw(held, key_path.clone(), ssh_port).await;
         return TunnelOutcome::FenceUnreadable;
     };
 
@@ -268,7 +275,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
             // both backends reject an empty allowlist above every use of the
             // path. See `withdraw`.
             tracing::debug!("no tailcat identity; this runner serves no tunnel");
-            withdraw(key_path.clone(), ssh_port).await;
+            withdraw(held, key_path.clone(), ssh_port).await;
             return TunnelOutcome::NoIdentity;
         }
         Err(TunnelOutcome::NobodyAdmitted) => {
@@ -285,7 +292,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
             // why it belongs here rather than in `enrollment::revoke`: the
             // function means "make the running tunnel match the file", and
             // that is the same sentence in both callers.
-            withdraw(key_path.clone(), ssh_port).await;
+            withdraw(held, key_path.clone(), ssh_port).await;
             tracing::info!("no enrolled device carries a node key; this runner serves no tunnel");
             return TunnelOutcome::NobodyAdmitted;
         }
@@ -296,10 +303,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
 
     let serve_key_path = key_path.clone();
     let allowed_keys = allowed.keys().to_vec();
-    let served = tokio::task::spawn_blocking(move || {
-        farcooler_tailcat::serve(&serve_key_path, ssh_port, &allowed_keys)
-    })
-    .await;
+    let served = held.serve(serve_key_path, ssh_port, allowed_keys).await;
     match served {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
@@ -312,7 +316,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
         }
     }
 
-    match tokio::task::spawn_blocking(farcooler_tailcat::conn_blob).await {
+    match held.conn_blob().await {
         Ok(Ok(blob)) => TunnelOutcome::Serving(blob),
         Ok(Err(error)) => {
             // The tunnel IS live at this point — `serve` already succeeded.
