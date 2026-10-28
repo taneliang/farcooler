@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -89,7 +90,9 @@ fun CodeImage(payload: String, modifier: Modifier = Modifier) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "A code for another device to scan",
-                modifier = Modifier.fillMaxWidth(),
+                // Fill the square, not just its width: with no height the image keeps the
+                // bitmap's own few-pixel height and sits small at the top (ov-849).
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
                 filterQuality = FilterQuality.None,
             )
