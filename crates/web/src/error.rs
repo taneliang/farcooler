@@ -48,6 +48,10 @@ pub enum WebError {
     /// The connection ended.
     #[error("the connection closed")]
     Closed,
+    /// Signing in waited on the runner past its allowance with nothing
+    /// heard: a tunnel that went quiet after it was dialed (ov-834).
+    #[error("the runner did not answer while signing in")]
+    NoAnswer,
 }
 
 impl WebError {
@@ -67,6 +71,7 @@ impl WebError {
             WebError::Capability(_) => "runner_too_old",
             WebError::Refused(_) => "refused",
             WebError::Closed => "closed",
+            WebError::NoAnswer => "no_answer",
         }
     }
 }

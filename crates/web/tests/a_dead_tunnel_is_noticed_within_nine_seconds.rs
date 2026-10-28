@@ -22,18 +22,15 @@
 
 mod support;
 
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use farcooler_ceremony::Liveness;
-use farcooler_web::liveness::{Clock, Link, Step, Watch};
+use farcooler_web::liveness::{Link, Step, Watch};
 use farcooler_web::ssh;
 use farcooler_web::wire::Runner;
-use support::{BROWSER_KEY, Ed25519InMemory, HOST_KEY, Seen, TERMINAL, key, line};
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+use support::{BROWSER_KEY, Ed25519InMemory, HOST_KEY, ManualClock, Seen, TERMINAL, Tunnel, Valve, key, line};
 
 // ---- the rule, on its own ----
 
@@ -100,78 +97,6 @@ fn the_watch_follows_the_numbers_it_is_given() {
 #[test]
 fn the_tunnels_setting_leaves_the_page_inside_twelve_seconds() {
     assert!(Liveness::TUNNEL.noticed_within() <= Duration::from_secs(12));
-}
-
-// ---- time, by hand ----
-
-#[derive(Default)]
-struct ManualClock {
-    now: AtomicU64,
-    sleepers: Mutex<Vec<(u64, tokio::sync::oneshot::Sender<()>)>>,
-}
-
-impl ManualClock {
-    fn advance(&self, ms: u64) {
-        let now = self.now.fetch_add(ms, Ordering::SeqCst) + ms;
-        let mut sleepers = self.sleepers.lock().unwrap();
-        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut *sleepers).into_iter().partition(|(t, _)| *t <= now);
-        *sleepers = later;
-        for (_, wake) in due {
-            let _ = wake.send(());
-        }
-    }
-}
-
-impl Clock for ManualClock {
-    fn now_ms(&self) -> u64 {
-        self.now.load(Ordering::SeqCst)
-    }
-    fn sleep(&self, ms: u64) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-        let (wake, woken) = tokio::sync::oneshot::channel();
-        self.sleepers.lock().unwrap().push((self.now_ms() + ms, wake));
-        Box::pin(async move {
-            let _ = woken.await;
-        })
-    }
-}
-
-// ---- a tunnel that can die ----
-
-#[derive(Default)]
-struct Tunnel {
-    dead: AtomicBool,
-    /// Writes swallowed since it died: what the page sent into the dark.
-    lost_writes: AtomicUsize,
-}
-
-struct Valve {
-    inner: DuplexStream,
-    tunnel: Arc<Tunnel>,
-}
-
-impl AsyncRead for Valve {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        if self.tunnel.dead.load(Ordering::SeqCst) {
-            return Poll::Pending;
-        }
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for Valve {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
-        if self.tunnel.dead.load(Ordering::SeqCst) {
-            self.tunnel.lost_writes.fetch_add(1, Ordering::SeqCst);
-            return Poll::Ready(Ok(buf.len()));
-        }
-        Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
-    }
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
 }
 
 struct Rig {

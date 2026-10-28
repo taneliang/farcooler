@@ -6,8 +6,10 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::task::{Context, Poll};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
@@ -18,7 +20,8 @@ use farcooler_protocol::{capability, framing};
 use russh::keys::{HashAlg, PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Session};
 use russh::{Channel, ChannelId, ChannelMsg};
-use tokio::io::{AsyncRead, AsyncWrite};
+use farcooler_web::liveness::Clock;
+use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
@@ -111,6 +114,9 @@ pub struct Seen {
     pub probes: AtomicUsize,
     /// The `client_name` of every hello, one per channel.
     pub hellos: Mutex<Vec<String>>,
+    /// Set, the runner takes each hello and never answers it: a daemon that
+    /// started and then went quiet (ov-834).
+    pub mute_hello: AtomicBool,
     /// The attach channel's write half, so a write can echo onto it.
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
     /// Told of each write as it arrives, for a caller watching from outside.
@@ -182,9 +188,14 @@ pub fn answer(req: &Request, value: result::Value) -> Vec<u8> {
 }
 
 pub fn output(bytes: &[u8]) -> Vec<u8> {
+    output_for(TERMINAL, bytes)
+}
+
+/// Output as terminal `id` prints it.
+pub fn output_for(id: Uuid, bytes: &[u8]) -> Vec<u8> {
     envelope(wire_envelope::Body::Event(Event {
         payload: Some(event::Payload::TerminalFrame(TerminalFrame {
-            terminal_id: Bytes::copy_from_slice(TERMINAL.as_bytes()),
+            terminal_id: Bytes::copy_from_slice(id.as_bytes()),
             kind: Some(terminal_frame::Kind::Output(TerminalOutput {
                 payload: Bytes::copy_from_slice(bytes),
                 ..Default::default()
@@ -216,6 +227,9 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
         let out = match env.body {
             Some(wire_envelope::Body::ClientHello(hello)) => {
                 seen.hellos.lock().await.push(hello.client_name);
+                if seen.mute_hello.load(Ordering::SeqCst) {
+                    continue;
+                }
                 envelope(wire_envelope::Body::ServerHello(ServerHello {
                 selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
                 capabilities: vec![capability::TERMINAL_STREAM.to_string()],
@@ -302,3 +316,76 @@ where
         }
     });
 }
+
+// ---- time, by hand ----
+
+#[derive(Default)]
+pub struct ManualClock {
+    pub now: AtomicU64,
+    sleepers: StdMutex<Vec<(u64, tokio::sync::oneshot::Sender<()>)>>,
+}
+
+impl ManualClock {
+    pub fn advance(&self, ms: u64) {
+        let now = self.now.fetch_add(ms, Ordering::SeqCst) + ms;
+        let mut sleepers = self.sleepers.lock().unwrap();
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut *sleepers).into_iter().partition(|(t, _)| *t <= now);
+        *sleepers = later;
+        for (_, wake) in due {
+            let _ = wake.send(());
+        }
+    }
+}
+
+impl Clock for ManualClock {
+    fn now_ms(&self) -> u64 {
+        self.now.load(Ordering::SeqCst)
+    }
+    fn sleep(&self, ms: u64) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        let (wake, woken) = tokio::sync::oneshot::channel();
+        self.sleepers.lock().unwrap().push((self.now_ms() + ms, wake));
+        Box::pin(async move {
+            let _ = woken.await;
+        })
+    }
+}
+
+// ---- a tunnel that can die ----
+
+#[derive(Default)]
+pub struct Tunnel {
+    pub dead: AtomicBool,
+    /// Writes swallowed since it died: what the page sent into the dark.
+    pub lost_writes: AtomicUsize,
+}
+
+pub struct Valve {
+    pub inner: DuplexStream,
+    pub tunnel: Arc<Tunnel>,
+}
+
+impl AsyncRead for Valve {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        if self.tunnel.dead.load(Ordering::SeqCst) {
+            return Poll::Pending;
+        }
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Valve {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        if self.tunnel.dead.load(Ordering::SeqCst) {
+            self.tunnel.lost_writes.fetch_add(1, Ordering::SeqCst);
+            return Poll::Ready(Ok(buf.len()));
+        }
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+

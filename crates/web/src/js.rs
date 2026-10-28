@@ -19,9 +19,10 @@ use farcooler_ceremony::Liveness;
 
 use crate::enroll;
 use crate::error::WebError;
+use crate::handshake;
 use crate::liveness::{Link, PageClock};
 use crate::passkey::{self, Assertion, Authenticate, PasskeySigner};
-use crate::ssh::{self, SignError};
+use crate::ssh::SignError;
 use crate::wire::{self, Pane, Runner, spawn};
 
 fn failure(word: &str, detail: &str) -> JsValue {
@@ -208,11 +209,11 @@ pub async fn connect(
     assert: Function,
     on_lost: Function,
 ) -> Result<WebRunner, JsValue> {
-    let link = Link::new(std::sync::Arc::new(PageClock), Liveness::TUNNEL);
+    let clock: std::sync::Arc<dyn crate::liveness::Clock> = std::sync::Arc::new(PageClock);
+    let link = Link::new(clock.clone(), Liveness::TUNNEL);
     let stream = link.tap(bridge(conn)?);
-    let mut signer = PasskeySigner(JsAuthenticator(assert));
-    let connection = ssh::connect(stream, &host_key, &user, &key_a, &mut signer).await.map_err(web_failure)?;
-    let runner = Runner::start_watched(connection, link, move || {
+    let signer = PasskeySigner(JsAuthenticator(assert));
+    let runner = handshake::sign_in(clock, handshake::HANDSHAKE, stream, &host_key, &user, &key_a, signer, link, move || {
         let _ = on_lost.call0(&JsValue::NULL);
     })
     .await
