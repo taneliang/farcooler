@@ -188,9 +188,10 @@ async fn an_ask_answered_through_the_runner_isnt_replayed() {
     let answers = HashMap::from([("Which color should the button be?".to_string(), "Blue".to_string())]);
     let answer = {
         let (asks, id) = (asks.clone(), id.clone());
-        tokio::spawn(async move { asks.answer_with(pane, &id, "allow", &answers, "Mac").await })
+        tokio::spawn(async move { asks.answer_with(pane, &id, "answer", &answers, "Mac").await })
     };
-    taken.await.expect("the hook took it");
+    // Bounded, so a refused answer fails here rather than hanging.
+    tokio::time::timeout(std::time::Duration::from_secs(30), taken).await.expect("the hook never took the answer").expect("the hook took it");
     projectors.open(pane, path);
     assert_eq!(held_ask(projectors, pane), None, "an answered ask came back held");
     let _ = looked.send(());
