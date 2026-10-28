@@ -113,6 +113,25 @@ impl server::Handler for Runner {
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
+
+    async fn channel_open_session(
+        &mut self,
+        _channel: russh::Channel<server::Msg>,
+        reply: server::ChannelOpenHandle,
+        _session: &mut server::Session,
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        Ok(())
+    }
+
+    async fn exec_request(
+        &mut self,
+        channel: russh::ChannelId,
+        _data: &[u8],
+        session: &mut server::Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)
+    }
 }
 
 fn random_key() -> PrivateKey {
@@ -256,4 +275,34 @@ async fn an_idle_tunnel_probes_every_three_seconds_and_nothing_more() {
     );
     assert_eq!(spent, (probe.0 * 20, probe.1 * 20), "not one probe and one answer every 3 s");
     assert!(!session.handle.is_closed(), "an answered probe ended the session");
+}
+
+/// The same card, one step on: the phones do not watch `handle.is_closed()`,
+/// they read the control stream, so the verdict has to reach that reader as
+/// the end of the stream, which is what `Session` turns into `Disconnected`
+/// and the apps into Reconnecting. Within 12 s of the tunnel going silent.
+///
+/// Red if `config_for` stops giving the tunnel its own setting (the stream
+/// then stays open for the direct 120 s) or if the pump stops ending the
+/// reader when the connection does.
+#[tokio::test(start_paused = true)]
+async fn a_dead_tunnel_ends_the_control_stream_within_twelve_seconds() {
+    use tokio::io::AsyncReadExt;
+
+    let (session, wire) = connected(tunnel()).await;
+    let mut streams = session.exec("farcoolerd --stdio").await.expect("the in-process server runs it");
+
+    wire.dead.store(true, Ordering::SeqCst);
+    let began = Instant::now();
+    let mut byte = [0u8; 1];
+    let read = tokio::time::timeout(Duration::from_secs(300), streams.reader.read(&mut byte))
+        .await
+        .expect("the control stream was still open five minutes after the tunnel died");
+    let waited = began.elapsed();
+    assert!(
+        matches!(read, Ok(0) | Err(_)),
+        "the stream delivered data from a dead tunnel: {read:?}"
+    );
+    assert!(waited <= Duration::from_secs(12), "the stream ended {waited:?} after the tunnel died");
+    assert!(waited >= Duration::from_secs(6), "the stream ended after {waited:?}, before two probes went unanswered");
 }
