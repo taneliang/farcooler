@@ -26,7 +26,7 @@ async fn connect() -> (Runner, Arc<Seen>) {
     let (browser_side, runner_side) = tokio::io::duplex(1 << 16);
     let seen = Arc::new(Seen::default());
     support::serve(runner_side, HOST_KEY, Some(key(BROWSER_KEY).public_key().clone()), seen.clone());
-    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY);
+    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY, &enroll::new_reply_secret()).unwrap();
     let entry = RunnerEntry {
         id: "01990000-0000-7000-8000-00000000a001".into(),
         label: "studio".into(),
