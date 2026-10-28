@@ -41,6 +41,9 @@ struct FarCoolerApp: App {
             // a connection or a poll anywhere near it: what it measures is one
             // `draw` and nothing else.
             TerminalBenchHarness()
+        } else if SealedReplyHarness.isRequested {
+            // The phone answering a browser's offer with a sealed reply (ov-770).
+            SealedReplyHarness()
         } else if NativeAgentHarness.isRequested {
             // A terminal-mode claude pane's conversation view (ov-373).
             NativeAgentHarness()

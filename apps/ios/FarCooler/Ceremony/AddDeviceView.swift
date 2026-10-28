@@ -204,6 +204,10 @@ struct AddDeviceView: View {
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
 
+            // A browser's offer: the reply went to it sealed, and this is the
+            // code to match against its screen (ov-770). Nothing otherwise.
+            SealedReplySection(reply: store.sealedReply, deviceName: store.offer?.name ?? "the new device")
+
             // The half that did not happen, named on the screen where it still
             // matters. A runner whose key was not written hands the new device
             // an address it cannot log in to, and finding that out later — as a

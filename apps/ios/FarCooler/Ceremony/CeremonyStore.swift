@@ -44,6 +44,8 @@ struct CeremonyOffer: Decodable, Equatable {
     /// as direct, which is what `can_be_granted_a_tunnel` reads the same field
     /// to decide on the other side of the exchange.
     let node_key: String?  // swiftlint:disable:this identifier_name
+    /// A browser's key to seal the reply to (ov-770), or nil: `SealedReply`.
+    let reply_key: String?  // swiftlint:disable:this identifier_name
 }
 
 // ``Reach`` — an address or the tunnel — lives in `Store.swift`, beside
@@ -307,7 +309,7 @@ enum CeremonyCore {
 
     /// The buffer contract, once: JSON into a buffer, the call reporting the
     /// bytes it needed and writing nothing when that is more than it was given.
-    private static func answer(_ call: (UnsafeMutablePointer<UInt8>?, Int) -> Int) -> Answer {
+    static func answer(_ call: (UnsafeMutablePointer<UInt8>?, Int) -> Int) -> Answer {
         var buffer = [UInt8](repeating: 0, count: 4096)
         var written = buffer.withUnsafeMutableBufferPointer { call($0.baseAddress, $0.count) }
         if written > buffer.count {
@@ -339,7 +341,7 @@ enum CeremonyCore {
     /// number. An infinite one is a caller saying it does not know when the
     /// code was read, and the honest answer to that is "older than any window",
     /// not a trap: `UInt64(Double.infinity)` crashes.
-    private static func milliseconds(_ interval: TimeInterval) -> UInt64 {
+    static func milliseconds(_ interval: TimeInterval) -> UInt64 {
         let ms = interval * 1000
         guard ms.isFinite else { return .max }
         guard ms > 0 else { return 0 }
@@ -524,6 +526,9 @@ final class CeremonyStore: ObservableObject {
     var confirmTap: (_ reason: String) async -> ConfirmingTap.Outcome = { await ConfirmingTap.ask(reason: $0) }
     /// The certification started by the last reply this phone built.
     private(set) var certification: Task<Void, Never>?
+
+    /// The reply sealed for a browser, when its offer asked (ov-770).
+    let sealedReply = SealedReply()
 
     /// This device's tunnel public key for its offer, minting one the first
     /// time. A harness answers nil, so drawing a screen mints nothing.
@@ -839,6 +844,8 @@ final class CeremonyStore: ObservableObject {
             // another account at the scan, and `certifyScanned` checks again.
             let (account, keyA, certify) = (offer.account, offer.key_a, self.certify)
             certification = Task { await certify(account, keyA) }
+            // A browser's offer: sealed to its key and posted too (ov-770).
+            sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity)
         }
     }
 
@@ -1041,6 +1048,7 @@ final class CeremonyStore: ObservableObject {
         declined = false
         pendingNote = nil
         addressOnlyNote = nil
+        sealedReply.reset()
     }
 }
 

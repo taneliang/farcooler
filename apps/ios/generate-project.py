@@ -270,6 +270,9 @@ SOURCES = [
     "NativeBringHere.swift",
     # The UI harnesses' clean start (ov-672).
     "HarnessDrafts.swift",
+    # The phone answering a browser's offer with a sealed reply (ov-770), for
+    # the UI suite. DEBUG only.
+    "SealedReplyHarness.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -285,6 +288,8 @@ CEREMONY_SOURCES = [
     "CeremonyStore.swift",
     "AddDeviceView.swift",
     "JoinView.swift",
+    # The reply sealed for a browser, and its code (ov-770).
+    "SealedReply.swift",
 ]
 
 # `AgentKit`'s own sources, compiled directly into this target rather than
@@ -640,6 +645,8 @@ AGENTKIT_SOURCES = [
     # (ov-550), and the account's device keys under Devices and runners, with
     # Remove (ov-549 review M1). `AccountDevicesView.swift` draws the latter.
     "DeviceCertification.swift",
+    # Posting a reply sealed for a browser (ov-770).
+    "CeremonyReplyPost.swift",
     "AccountDeviceKeys.swift",
     # Make a New Key (ov-569): the re-key's steps, which key a runner gets,
     # and its section under Devices and runners. The key slots and the
@@ -1215,6 +1222,10 @@ UI_TEST_SOURCES = [
     # The composer's gaps measured against Messages and Notes (ov-804),
     # opt-in by its own switch.
     "ComposerGapsCapturesUITests.swift",
+    # The phone answering a browser's offer: sealed, posted once, opened with
+    # the browser's key, and the QR-only ceremony unchanged (ov-770). Needs no
+    # runner: `-sealed-reply`.
+    "SealedReplyUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
