@@ -28,7 +28,7 @@ import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneSet } from './panes'
-import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
+import { confirmCodes, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
@@ -321,11 +321,13 @@ function compare(session: Session, opened: Opened): void {
   clearTimeout(retiring)
   $('compare-code').textContent = opened.code
   show('compare')
-  // Nothing was kept on a mismatch and the code is still unanswered: the QR
-  // reply and a later sealed one still work.
-  const buttons = comparisonButtons(opened, taken => keep(session, taken), () => void enroll(session, MISMATCH))
-  $<HTMLButtonElement>('compare-yes').onclick = buttons.yes
-  $<HTMLButtonElement>('compare-no').onclick = () => void buttons.no()
+  $<HTMLButtonElement>('compare-yes').onclick = () => void confirmCodes(opened, true, taken => keep(session, taken))
+  $<HTMLButtonElement>('compare-no').onclick = async () => {
+    await confirmCodes(opened, false, taken => keep(session, taken))
+    // Nothing was kept and the code is still unanswered: the QR reply and a
+    // later sealed one still work.
+    void enroll(session, MISMATCH)
+  }
 }
 
 /// Keep what a confirmed reply grants.

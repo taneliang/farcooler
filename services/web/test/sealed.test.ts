@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Signed } from '../src/client/device'
-import { type Answer, comparisonButtons, confirmCodes, type Opened, POLL_MS, type PollDeps, type RegisterDeps, registerDevice, WAIT_MS, waitForReply } from '../src/client/sealed'
+import { type Answer, confirmCodes, type Opened, POLL_MS, type PollDeps, type RegisterDeps, registerDevice, WAIT_MS, waitForReply } from '../src/client/sealed'
 
 const CEREMONY = '0123456789abcdef0123456789abcdef'
 const GOOD: Opened = { code: 'K7M2QX', granted_by: null, runners: [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'SHA256:real', token: 't', why: '' }] }
@@ -100,19 +100,6 @@ describe('the comparison code', () => {
     const kept: Opened[] = []
     for (const opened of [FORGED, GOOD]) expect(await confirmCodes(opened, false, async o => void kept.push(o))).toBe(false)
     expect(kept).toEqual([])
-  })
-})
-
-describe('the comparison buttons', () => {
-  it('They Don\'t Match keeps nothing and puts the code back; They Match keeps the reply', async () => {
-    const kept: Opened[] = []
-    let back = 0
-    const b = comparisonButtons(FORGED, async o => void kept.push(o), () => void back++)
-    await b.no()
-    expect([kept, back]).toEqual([[], 1])
-    b.yes()
-    await Promise.resolve()
-    expect([kept, back]).toEqual([[FORGED], 1])
   })
 })
 

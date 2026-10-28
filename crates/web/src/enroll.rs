@@ -34,8 +34,6 @@ pub fn new_reply_secret() -> String {
 #[derive(Debug, Deserialize)]
 struct Posted {
     sealed: String,
-    #[serde(default)]
-    posted_by: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,21 +41,16 @@ struct Replies {
     replies: Vec<Posted>,
 }
 
-/// The sealed reply this browser opens out of the relay's answer: the one the
-/// offer's own account posted (its owner's phone, which the relay always lets
-/// in), and only when there is none, the earliest teammate's.
+/// The sealed reply this browser opens out of the relay's answer: the
+/// EARLIEST, which the relay lists first, and no other.
 ///
-/// Anyone who saw the offer and may post can post a reply that opens, so which
-/// one is tried must not be the poster's choice. A teammate who posts first
-/// therefore cannot displace the owner's reply; the code still has to match.
-pub fn earliest(relay_answer: &str, account: &str) -> Result<String, CeremonyError> {
+/// Anyone who saw the offer and may post can post a reply that opens, so
+/// which one is tried must not be the poster's choice. The earliest is the one
+/// the account's own phone posted when nobody else was quicker; a later reply
+/// is never tried, so a forger gains nothing by posting several.
+pub fn earliest(relay_answer: &str) -> Result<String, CeremonyError> {
     let answer: Replies = serde_json::from_str(relay_answer).map_err(|_| CeremonyError::Unopened)?;
-    let mut replies = answer.replies;
-    let at = replies.iter().position(|r| r.posted_by == account).unwrap_or(0);
-    if at >= replies.len() {
-        return Err(CeremonyError::Unopened);
-    }
-    Ok(replies.swap_remove(at).sealed)
+    answer.replies.into_iter().next().map(|r| r.sealed).ok_or(CeremonyError::Unopened)
 }
 
 /// A reply opened, waiting for the person to match its code against the
@@ -80,7 +73,7 @@ pub fn open_earliest(
     shown_at_ms: f64,
     now_ms: f64,
 ) -> Result<Opened, CeremonyError> {
-    let sealed = earliest(relay_answer, &offer.account)?;
+    let sealed = earliest(relay_answer)?;
     let (manifest, code) = open(&sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms)?;
     Ok(Opened { code, taken: taken(&manifest) })
 }
@@ -309,12 +302,6 @@ mod tests {
         serde_json::json!({ "replies": replies }).to_string()
     }
 
-    /// The same, with who posted each: `(sealed, posted_by)`.
-    fn relay_says_by(posts: &[(&str, &str)]) -> String {
-        let replies: Vec<_> = posts.iter().map(|(s, by)| serde_json::json!({"sealed": s, "posted_by": by})).collect();
-        serde_json::json!({ "replies": replies }).to_string()
-    }
-
     const HOST: &str = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const FORGED: &str = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
@@ -359,20 +346,6 @@ mod tests {
         assert_eq!(first.code, honest_code);
         // None at all is not a reply.
         assert_eq!(open_earliest(&relay_says(&[]), &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::Unopened));
-    }
-
-    /// The owner's own reply wins over a teammate's that was posted first; with
-    /// no owner reply the earliest teammate's is opened.
-    #[test]
-    fn the_owners_reply_wins_over_a_teammate_who_posted_first() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        let (honest, honest_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let (forged, forged_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(FORGED)])).unwrap();
-        let won = open_earliest(&relay_says_by(&[(&forged, "mate"), (&honest, "acct")]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!((won.code.as_str(), won.taken.runners[0].host_key.as_str()), (honest_code.as_str(), HOST));
-        let only = open_earliest(&relay_says_by(&[(&forged, "mate"), (&honest, "mate2")]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(only.code, forged_code);
     }
 
     /// A reply sealed to another key, or held past the window or after one was
