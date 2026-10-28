@@ -314,6 +314,37 @@ def _positionals(args):
     return before, after
 
 
+def _manifest_arg(args):
+    """The --manifest-path value of a cargo command line (either spelling), or None. Stops at `--`."""
+    for i, a in enumerate(args):
+        if a == "--":
+            return None
+        if a == "--manifest-path":
+            return args[i + 1] if i + 1 < len(args) else ""
+        if a.startswith("--manifest-path="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def _has_table(manifest, table):
+    try:
+        return any(line.strip() == table for line in pathlib.Path(manifest).read_text().splitlines())
+    except OSError:
+        return False
+
+
+def _manifest_target(manifest, top):
+    """Where cargo puts target/ for `manifest` (ov-847): the target/ of the nearest workspace root at or above the
+    crate's directory, up to the repo top, else the crate's own. Crates/web is a workspace of its own."""
+    d = manifest.parent
+    while True:
+        if _has_table(d / "Cargo.toml", "[workspace]"):
+            return d / "target"
+        if d == top or d.parent == d:
+            return manifest.parent / "target"
+        d = d.parent
+
+
 def light_refusal(cmd, top=None):
     """None when `cmd` may run as a light run, else the reason it may not (a plain sentence)."""
     tool = os.path.basename(cmd[0]) if cmd else ""
@@ -331,12 +362,28 @@ def light_refusal(cmd, top=None):
             return "light cargo is `cargo test` or `cargo nextest run`; builds, clippy and the rest queue"
         if any(a in _WHOLE_FLAGS or a == "--exclude" or a.startswith("--exclude=") for a in rest):
             return "--workspace, --all and --exclude mean a whole-workspace run; it queues"
-        if not any(a in ("-p", "--package") or a.startswith("--package=") for a in rest):
-            return "light cargo needs -p <crate>; without it cargo may build the whole workspace"
+        manifest = _manifest_arg(rest)
+        target = None
+        if manifest is not None:
+            # A crate outside the root workspace (crates/web) is named by its manifest, not by -p (ov-847). The path must
+            # resolve (symlinks followed) to a Cargo.toml under the repo, and name a package, not a virtual workspace.
+            if top is None:
+                return "--manifest-path needs the repo top-level to check it against"
+            real_top = pathlib.Path(top).resolve()
+            mp = pathlib.Path(manifest).resolve()
+            if not manifest or mp.name != "Cargo.toml" or not mp.is_file():
+                return f"--manifest-path {manifest or '(empty)'} is not a Cargo.toml that exists; it queues"
+            if real_top != mp and real_top not in mp.parents:
+                return f"--manifest-path {manifest} is outside this repo; it queues"
+            if not _has_table(mp, "[package]"):
+                return f"--manifest-path {manifest} is a virtual workspace, which would build every member; it queues"
+            target = _manifest_target(mp, real_top)
+        elif not any(a in ("-p", "--package") or a.startswith("--package=") for a in rest):
+            return "light cargo needs -p <crate> or --manifest-path <crate>/Cargo.toml; without them cargo may build the whole workspace"
         before, after = _positionals(rest)
         if not (before or after or (nextest and any(a in ("-E", "--filter-expr") or a.startswith("--filter-expr=") for a in rest))):
             return "light cargo needs a test-name filter (or nextest -E); a whole crate's suite queues"
-        if top is not None and not (pathlib.Path(top) / "target" / "debug").is_dir():
+        if top is not None and not ((target or pathlib.Path(top) / "target") / "debug").is_dir():
             return "target/debug is not built here, so this would be a cold build; it queues"
         return None
     if tool == "swift":
@@ -738,9 +785,49 @@ def self_test():
         }
         for name, (c, ok) in shapes.items():
             expect(f"light accepts/refuses: {name}", light_refusal(c, lt) is None, ok)
+        # --manifest-path (ov-847): a crate outside the root workspace runs light, judged by its own warm target/.
+        web = lt / "crates" / "web"
+        web.mkdir(parents=True)
+        (web / "Cargo.toml").write_text('[package]\nname = "w"\n\n[workspace]\n')
+        (lt / "Cargo.toml").write_text('[workspace]\nmembers = []\n')
+        mcmd = ["cargo", "test", "--manifest-path", "crates/web/Cargo.toml", "f"]
+        cwd0 = os.getcwd()
+        os.chdir(lt)
+        try:
+            cold = light_refusal(mcmd, lt)
+            expect("--manifest-path to a crate with a cold target/ queues, whatever the root's target/ is", cold is not None and "cold" in cold, True)
+            (web / "target" / "debug").mkdir(parents=True)
+            expect("--manifest-path <crate>/Cargo.toml with a filter is light on that crate's own warm target/", light_refusal(mcmd, lt), None)
+            expect("--manifest-path=<crate>/Cargo.toml is light too", light_refusal(["cargo", "test", "--manifest-path=crates/web/Cargo.toml", "f"], lt), None)
+            expect("--manifest-path still needs a filter", light_refusal(["cargo", "test", "--manifest-path", "crates/web/Cargo.toml"], lt) is not None, True)
+            expect("--manifest-path with --workspace still queues", light_refusal([*mcmd, "--workspace"], lt) is not None, True)
+            outside = t / "elsewhere"
+            outside.mkdir()
+            (outside / "Cargo.toml").write_text('[package]\nname = "o"\n')
+            (outside / "target" / "debug").mkdir(parents=True)
+            why = light_refusal(["cargo", "test", "--manifest-path", str(outside / "Cargo.toml"), "f"], lt)
+            expect("a --manifest-path outside the repo is refused", why is not None and "outside" in why, True)
+            why = light_refusal(["cargo", "test", f"--manifest-path={outside}/Cargo.toml", "f"], lt)
+            expect("... in the = spelling too", why is not None and "outside" in why, True)
+            why = light_refusal(["cargo", "test", "--manifest-path", "../elsewhere/Cargo.toml", "f"], lt)
+            expect("... and by a relative .. path", why is not None and "outside" in why, True)
+            (lt / "crates" / "link").symlink_to(outside)
+            why = light_refusal(["cargo", "test", "--manifest-path", "crates/link/Cargo.toml", "f"], lt)
+            expect("a symlink under the repo that points outside is refused", why is not None and "outside" in why, True)
+            (lt / "Cargo.toml").write_text('[workspace]\nmembers = []\n')
+            expect("a virtual workspace manifest is refused", light_refusal(["cargo", "test", "--manifest-path", "Cargo.toml", "f"], lt) is not None, True)
+        finally:
+            os.chdir(cwd0)
         expect("a cold target/ is not light", light_refusal(lcmd, t / "nowhere") is not None, True)
         refused = subprocess.run([heavy, "--light", "--", "cargo", "test", "--workspace"], cwd=lt, env=lenv, capture_output=True, text=True, timeout=10)
         expect("scripts/heavy --light refuses a whole-workspace run with exit 2 and runs nothing", (refused.returncode, "queue" in refused.stderr), (2, True))
+        (t / "light-marks").unlink(missing_ok=True)
+        wp = start_light(cmd=mcmd)
+        wp.communicate(timeout=10)
+        expect("scripts/heavy --light -- cargo test --manifest-path crates/web/Cargo.toml f runs light", (wp.returncode, light_ran()), (0, 1))
+        (t / "light-marks").unlink(missing_ok=True)
+        wo = subprocess.run([heavy, "--light", "--", "cargo", "test", "--manifest-path", str(outside / "Cargo.toml"), "f"], cwd=lt, env=lenv, capture_output=True, text=True, timeout=10)
+        expect("scripts/heavy --light refuses a --manifest-path outside the repo with exit 2 and runs nothing", (wo.returncode, light_ran()), (2, 0))
     if fails:
         for line in fails:
             print(f"heavy_lock self-test: {line}", file=sys.stderr)
