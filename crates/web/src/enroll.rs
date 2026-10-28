@@ -5,95 +5,15 @@
 
 use std::time::Duration;
 
-use farcooler_ceremony::{CeremonyError, Manifest, Offer, Reach, ReplyKey};
-use serde::{Deserialize, Serialize};
+use farcooler_ceremony::{CeremonyError, Manifest, Offer, Reach};
+use serde::Serialize;
 
 /// The code this browser shows: today's v2 offer, with its node key.
 ///
 /// The channel is the build's (`farcooler_protocol::CHANNEL`), so a canary page
 /// makes a code only a canary phone accepts.
-///
-/// `reply_secret` is the secret half of this ceremony's [`ReplyKey`] (made by
-/// [`new_reply_secret`]); its public half goes in the offer, so a phone with no
-/// camera to read a reply back with can post one sealed to it.
-pub fn offer(name: &str, account: &str, key_a: &str, node_key: &str, reply_secret: &str) -> Result<Offer, CeremonyError> {
-    let reply_key = ReplyKey::from_secret(reply_secret)?;
-    Ok(Offer {
-        node_key: node_key.to_string(),
-        reply_key: Some(reply_key.public().to_string()),
-        ..farcooler_ceremony::offer(name, account, key_a, None)
-    })
-}
-
-/// A new ceremony's reply key, as the secret the page keeps while its code is up.
-pub fn new_reply_secret() -> String {
-    ReplyKey::generate().secret()
-}
-
-/// One reply as the relay's read returns it (`{replies: [{sealed, posted_by}]}`).
-#[derive(Debug, Deserialize)]
-struct Posted {
-    sealed: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Replies {
-    replies: Vec<Posted>,
-}
-
-/// The sealed reply this browser opens out of the relay's answer: the
-/// EARLIEST, which the relay lists first, and no other.
-///
-/// Anyone who saw the offer and may post can post a reply that opens, so
-/// which one is tried must not be the poster's choice. The earliest is the one
-/// the account's own phone posted when nobody else was quicker; a later reply
-/// is never tried, so a forger gains nothing by posting several.
-pub fn earliest(relay_answer: &str) -> Result<String, CeremonyError> {
-    let answer: Replies = serde_json::from_str(relay_answer).map_err(|_| CeremonyError::Unopened)?;
-    answer.replies.into_iter().next().map(|r| r.sealed).ok_or(CeremonyError::Unopened)
-}
-
-/// A reply opened, waiting for the person to match its code against the
-/// phone's. Held by the page in memory only: nothing here is kept until then.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Opened {
-    /// The six characters from this browser's own open of the reply.
-    pub code: String,
-    #[serde(flatten)]
-    pub taken: Taken,
-}
-
-/// The relay's answer to a read, down to what the earliest reply grants:
-/// [`earliest`], then [`open`], then [`taken`].
-pub fn open_earliest(
-    relay_answer: &str,
-    offer: &Offer,
-    reply_secret: &str,
-    already_taken: bool,
-    shown_at_ms: f64,
-    now_ms: f64,
-) -> Result<Opened, CeremonyError> {
-    let sealed = earliest(relay_answer)?;
-    let (manifest, code) = open(&sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms)?;
-    Ok(Opened { code, taken: taken(&manifest) })
-}
-
-/// A sealed reply, opened and judged by the ceremony's own order: already
-/// taken, too late, opened with this ceremony's key, then the reply's own rules.
-///
-/// Returns what the reply grants and the comparison code from THIS browser's
-/// own open. Nothing is kept by this: the page holds both until the person
-/// says the code matches the phone's.
-pub fn open(
-    sealed: &str,
-    offer: &Offer,
-    reply_secret: &str,
-    already_taken: bool,
-    shown_at_ms: f64,
-    now_ms: f64,
-) -> Result<(Manifest, String), CeremonyError> {
-    let key = ReplyKey::from_secret(reply_secret)?;
-    farcooler_ceremony::take_sealed_reply(sealed, &key, offer, already_taken, held_for(shown_at_ms, now_ms))
+pub fn offer(name: &str, account: &str, key_a: &str, node_key: &str) -> Offer {
+    Offer { node_key: node_key.to_string(), ..farcooler_ceremony::offer(name, account, key_a, None) }
 }
 
 /// How long the browser's code has been up, by its own clock, in milliseconds.
@@ -217,7 +137,7 @@ mod tests {
     /// went up is refused, however right it is.
     #[test]
     fn a_reply_after_the_window_is_refused() {
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
+        let o = offer("Chrome on Mac", "acct", KEY, NODE);
         let reply = reply_to(&o, None);
         let window = farcooler_ceremony::FRESHNESS.as_millis() as f64;
         assert!(accept(&reply, &o, false, SHOWN, SHOWN + window).is_ok());
@@ -242,7 +162,7 @@ mod tests {
     #[test]
     fn a_pending_runner_carries_the_phones_reason() {
         use farcooler_ceremony::RunnerEntry;
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
+        let o = offer("Chrome on Mac", "acct", KEY, NODE);
         let entry = |id: &str, pending: bool, why: Option<&str>| RunnerEntry {
             id: id.into(),
             label: id.into(),
@@ -272,108 +192,12 @@ mod tests {
     /// A teammate's reply says whose runners these are, so the page can ask.
     #[test]
     fn a_teammates_reply_names_who_granted_it() {
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
+        let o = offer("Chrome on Mac", "acct", KEY, NODE);
         let own = accept(&reply_to(&o, None), &o, false, SHOWN, SHOWN).unwrap();
         assert_eq!(taken(&own).granted_by, None);
         let blank = accept(&reply_to(&o, Some("  ")), &o, false, SHOWN, SHOWN).unwrap();
         assert_eq!(taken(&blank).granted_by, None);
         let theirs = accept(&reply_to(&o, Some("ana@example.com")), &o, false, SHOWN, SHOWN).unwrap();
         assert_eq!(taken(&theirs).granted_by.as_deref(), Some("ana@example.com"));
-    }
-
-    /// One runner whose host key prints as `host_key`, reached by tunnel.
-    fn runner(host_key: &str) -> farcooler_ceremony::RunnerEntry {
-        farcooler_ceremony::RunnerEntry {
-            id: "01990000-0000-7000-8000-00000000a001".into(),
-            label: "studio".into(),
-            alias: "studio".into(),
-            user: "owner".into(),
-            host_key: host_key.into(),
-            reach: Reach::Tailcat { token: "tc-token".into(), client_key: String::new() },
-            alternative: None,
-            pending: false,
-            pending_why: None,
-        }
-    }
-
-    /// What the relay's read answers with `sealed` replies, earliest first.
-    fn relay_says(sealed: &[&str]) -> String {
-        let replies: Vec<_> = sealed.iter().map(|s| serde_json::json!({"sealed": s, "posted_by": "acct"})).collect();
-        serde_json::json!({ "replies": replies }).to_string()
-    }
-
-    const HOST: &str = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const FORGED: &str = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-
-    /// Ov-771: a sealed reply opens with the offer's own key, and the code the
-    /// browser shows is the code the sealing phone showed.
-    #[test]
-    fn a_sealed_reply_opens_to_the_code_the_phone_shows() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        let (sealed, phone_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let opened = open_earliest(&relay_says(&[&sealed]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(opened.code, phone_code);
-        assert_eq!(opened.taken.runners[0].host_key, HOST);
-    }
-
-    /// The second acceptance line: a reply whose host key was altered (a
-    /// forger's own seal of it) opens, passes the ceremony's rules, and shows a
-    /// DIFFERENT code from the one the person's phone shows.
-    #[test]
-    fn a_reply_with_an_altered_host_key_shows_a_different_code() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        let (_, phone_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let (forged, _) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(FORGED)])).unwrap();
-        let opened = open_earliest(&relay_says(&[&forged]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(opened.taken.runners[0].host_key, FORGED, "the forgery opens, so the code is the only defense");
-        assert_ne!(opened.code, phone_code);
-    }
-
-    /// Only the earliest reply is opened. A later one, even the honest one, is
-    /// not tried, so the forger's earlier reply shows ITS code and the honest
-    /// reply behind it is not reached.
-    #[test]
-    fn only_the_earliest_reply_is_opened() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        let (honest, honest_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let (forged, forged_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(FORGED)])).unwrap();
-        let first = open_earliest(&relay_says(&[&forged, &honest]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!((first.code.as_str(), first.taken.runners[0].host_key.as_str()), (forged_code.as_str(), FORGED));
-        let first = open_earliest(&relay_says(&[&honest, &forged]), &o, &secret, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(first.code, honest_code);
-        // None at all is not a reply.
-        assert_eq!(open_earliest(&relay_says(&[]), &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::Unopened));
-    }
-
-    /// A reply sealed to another key, or held past the window or after one was
-    /// taken, is refused with the ceremony's own word.
-    #[test]
-    fn a_sealed_reply_is_refused_for_the_wrong_key_a_late_hour_or_a_second_take() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        let (sealed, _) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let answer = relay_says(&[&sealed]);
-        let other = new_reply_secret();
-        assert!(matches!(open_earliest(&answer, &o, &other, false, SHOWN, SHOWN), Err(CeremonyError::Malformed(_))));
-        let window = farcooler_ceremony::FRESHNESS.as_millis() as f64;
-        assert_eq!(open_earliest(&answer, &o, &secret, false, SHOWN, SHOWN + window + 1.0), Err(CeremonyError::Stale));
-        assert_eq!(open_earliest(&answer, &o, &secret, true, SHOWN, SHOWN), Err(CeremonyError::AlreadyTaken));
-        // A reply sealed to a different offer's key doesn't open for this one.
-        let elsewhere = offer("Chrome on Mac", "acct", KEY, NODE, &other).unwrap();
-        let (stray, _) = farcooler_ceremony::seal_reply(&elsewhere, &farcooler_ceremony::manifest(&elsewhere, vec![runner(HOST)])).unwrap();
-        assert!(open_earliest(&relay_says(&[&stray]), &o, &secret, false, SHOWN, SHOWN).is_err());
-    }
-
-    /// The offer this browser shows asks for a sealed reply, to the key it will
-    /// open with: without it a phone could only fall back to the QR code.
-    #[test]
-    fn the_offer_names_the_key_its_reply_is_sealed_to() {
-        let secret = new_reply_secret();
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
-        assert_eq!(o.reply_key.as_deref(), Some(farcooler_ceremony::ReplyKey::from_secret(&secret).unwrap().public()));
-        assert!(offer("Chrome on Mac", "acct", KEY, NODE, "not a key").is_err());
     }
 }
