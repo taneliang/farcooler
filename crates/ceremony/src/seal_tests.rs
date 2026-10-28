@@ -273,3 +273,70 @@ fn write_the_relays_fixture() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../services/relay/test/fixtures/ceremony-reply.json");
     std::fs::write(path, serde_json::to_string_pretty(&f).unwrap() + "\n").unwrap();
 }
+
+#[test]
+fn an_offer_whose_reply_key_is_not_a_key_does_not_decode() {
+    let o = offer("Chrome", "acct_1", KEY_A, None);
+    for bad in ["", "AAAA", "not base64 at all", &"A".repeat(44), "YwbAvkATmjREjY8yCsUr87XR8t4kv8l2bK516AhoEWQ="] {
+        let asked = Offer { reply_key: Some(bad.into()), ..o.clone() };
+        assert!(matches!(decode_offer(&encode_offer(&asked)), Err(CeremonyError::Malformed(_))), "{bad}");
+    }
+    let key = ReplyKey::generate();
+    let asked = asking(&key);
+    assert_eq!(decode_offer(&encode_offer(&asked)).unwrap(), asked);
+    assert_eq!(decode_offer(&encode_offer(&o)).unwrap(), o);
+}
+
+#[test]
+fn the_comparison_code_is_six_characters_a_person_can_read() {
+    let key = ReplyKey::generate();
+    let (m, _) = sealed_for(&asking(&key));
+    let code = comparison_code(&m);
+    assert_eq!(code.len(), CODE_LENGTH);
+    assert!(code.bytes().all(|c| CODE_ALPHABET.contains(&c)), "{code}");
+    assert!(!code.contains(['0', 'O', '1', 'I']), "{code}");
+    assert_eq!(comparison_code(&m), code, "the same manifest, the same code");
+}
+
+/// Both ends compute it: the phone over the manifest it sealed, the browser
+/// over the one it opened. They must agree for an honest reply.
+#[test]
+fn the_opened_reply_shows_the_code_the_phone_shows() {
+    let key = ReplyKey::generate();
+    let o = asking(&key);
+    let (m, sealed) = sealed_for(&o);
+    let taken = take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap();
+    assert_eq!(comparison_code(&taken), comparison_code(&m));
+}
+
+/// What a forger changes, the code shows: another runner's host key or
+/// address, another target, one runner more.
+#[test]
+fn a_forged_reply_shows_another_code() {
+    let key = ReplyKey::generate();
+    let (m, _) = sealed_for(&asking(&key));
+    let code = comparison_code(&m);
+
+    let mut host_key = m.clone();
+    host_key.runners[0].host_key = "SHA256:AAAAaxySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4".into();
+    let mut address = m.clone();
+    address.runners[0].reach = Reach::Direct { host: "evil.example".into(), port: 22 };
+    let mut target = m.clone();
+    target.target = fingerprint(KEY_B).unwrap();
+    let mut more = m.clone();
+    more.runners.push(runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4"));
+    for (what, forged) in [("host key", host_key), ("address", address), ("target", target), ("runner", more)] {
+        assert_ne!(comparison_code(&forged), code, "{what}");
+    }
+}
+
+/// Pinned, so a change to how the code is drawn is a change somebody made on
+/// purpose: a phone and a browser on two builds would show two codes for one
+/// honest reply.
+#[test]
+fn the_relays_fixture_has_a_known_code() {
+    let f: Fixture = serde_json::from_str(FIXTURE).unwrap();
+    let m: Manifest = serde_json::from_str(&f.manifest).unwrap();
+    assert_eq!(encode_manifest(&m), f.manifest);
+    assert_eq!(comparison_code(&m), "QLZJ7Y");
+}

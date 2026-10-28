@@ -52,6 +52,7 @@ use std::time::Duration;
 use base64ct::{Base64UrlUnpadded, Encoding};
 use hpke::kem::X25519HkdfSha256;
 use hpke::{Deserializable, Kem as _, OpModeR, OpModeS, Serializable};
+use sha2::{Digest, Sha256};
 
 use super::{BUDGET, CeremonyError, Manifest, Offer, accept_manifest, encode_manifest, fingerprint, still_fresh};
 
@@ -202,6 +203,63 @@ pub fn take_sealed_reply(
     still_fresh(held_for)?;
     let encoded = open_reply(sealed, key, expecting)?;
     accept_manifest(&encoded, expecting, already_taken)
+}
+
+/// Refuse an offer whose reply key is there and is not a key (ov-770).
+///
+/// [`decode_offer`] calls this, so every scan of such an offer is refused as
+/// `Malformed` before anything is enrolled, rather than a phone getting as far
+/// as granting runners and only then finding it has nothing to seal to. An
+/// offer with no reply key passes untouched: it is the QR-only ceremony.
+///
+/// [`decode_offer`]: super::decode_offer
+pub fn check_reply_key(offer: &Offer) -> Result<(), CeremonyError> {
+    let Some(reply_key) = offer.reply_key.as_deref() else { return Ok(()) };
+    let bytes = decode_exact(reply_key, "reply key")?;
+    <Kem as hpke::Kem>::PublicKey::from_bytes(&bytes)
+        .map(|_| ())
+        .map_err(|_| CeremonyError::Malformed("the reply key is not a key".into()))
+}
+
+/// What a comparison code is drawn from: no other code's alphabet.
+///
+/// Thirty-two symbols, so each is five bits, with 0, O, 1 and I left out
+/// because a person reads them off one screen and finds them on another.
+const CODE_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/// How many symbols a comparison code has: 30 bits.
+pub const CODE_LENGTH: usize = 6;
+
+/// Which use of SHA-256 a comparison code is, so no other hash of a
+/// manifest is ever the same six characters.
+const CODE_INFO: &[u8] = b"farcooler ceremony code v1\0";
+
+/// The six characters the granting phone and the browser both show for one
+/// reply, for a person to match before the browser keeps anything (ov-770).
+///
+/// The seal stops the relay reading a reply, not anyone who saw the offer
+/// writing one (see the module note). This is what does: it is SHA-256 over
+/// the whole manifest, so every runner's host key and address and the
+/// target, which is the browser's Key A, are in it. A forged reply with any
+/// other runner or key in it shows another code. One short code instead of a
+/// `SHA256:` fingerprint per runner, which nobody compares.
+///
+/// The manifest goes in as [`encode_manifest`] writes it, which is the text
+/// that is sealed and the text [`open_reply`] returns, so both ends hash the
+/// same bytes. Thirty bits is enough because an attacker gets one try per
+/// ceremony, made before the code is on either screen: they can't search for
+/// a forgery that matches a code nobody has seen.
+///
+/// [`encode_manifest`]: super::encode_manifest
+pub fn comparison_code(manifest: &Manifest) -> String {
+    let mut hash = Sha256::new();
+    hash.update(CODE_INFO);
+    hash.update(encode_manifest(manifest).as_bytes());
+    let digest = hash.finalize();
+    let bits = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
+    (0..CODE_LENGTH)
+        .map(|i| CODE_ALPHABET[((bits >> (27 - 5 * i)) & 0x1f) as usize] as char)
+        .collect()
 }
 
 /// The associated data: each echo, prefixed with its length.

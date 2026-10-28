@@ -72,7 +72,7 @@ use route::alternative_is_an_address_beside_a_tunnel;
 pub use route::usable_address;
 
 mod seal;
-pub use seal::{ReplyKey, open_reply, seal_reply, take_sealed_reply};
+pub use seal::{CODE_LENGTH, ReplyKey, check_reply_key, comparison_code, open_reply, seal_reply, take_sealed_reply};
 
 /// The payload version both codes carry.
 ///
@@ -392,7 +392,7 @@ pub fn decode_offer(s: &str) -> Result<Offer, CeremonyError> {
 
     let offer: Offer =
         serde_json::from_value(value).map_err(|e| CeremonyError::Malformed(e.to_string()))?;
-    check_channel(&offer.channel)?;
+    check_channel(&offer.channel).and_then(|()| check_reply_key(&offer))?;
     Ok(offer)
 }
 
