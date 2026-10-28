@@ -24,6 +24,18 @@ export function connectFailure(word: string, runner: string): string {
       return "This browser’s passkey couldn’t sign in. Reload the page and try again."
     case 'passkey_declined':
       return `Far Cooler didn’t get your passkey, so it didn’t connect to ${runner}. Select Connect, then touch your passkey when your browser asks.`
+    case 'io':
+      return `Far Cooler couldn’t open a path through the tunnel to ${runner}. Check that Far Cooler is running on ${runner}, then try again. If it keeps happening, add this browser again.`
+    case 'handshake_failed':
+      return `${runner} dropped the connection while Far Cooler was signing in. Try again.`
+    case 'exec_failed':
+      return `${runner} couldn’t open a channel for this terminal. Wait a moment, then try again.`
+    case 'protocol':
+      return `${runner} sent an answer this browser couldn’t read. Update Far Cooler on ${runner}, then reload this page.`
+    case 'refused':
+      return `${runner} refused the request. Update Far Cooler on ${runner}, then try again.`
+    case 'closed':
+      return `The connection to ${runner} closed. Select Connect to open it again.`
     default:
       return `The connection to ${runner} didn’t work. Try again.`
   }
