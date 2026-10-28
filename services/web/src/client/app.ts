@@ -27,6 +27,7 @@ import { connectFailure, joinDetail, joinTitle, linkNotice, replyRefusal, unreac
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
+import { PaneSet } from './panes'
 import { type LinkView, Reconnector } from './reconnect'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
@@ -262,8 +263,8 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
 
 // MARK: Working
 
-/// The terminal on the page, so a second visit to `work` replaces it.
-let shown: PaneView | null = null
+/// The terminals on the page, so a second visit to `work` replaces them.
+let panes: PaneSet<WebRunner> | null = null
 
 async function work(session: Session): Promise<void> {
   const runners = session.device.runners ?? []
@@ -328,7 +329,7 @@ let link: Reconnector<WebRunner, TunnelConn> | null = null
 /// notice above the terminal, with Reconnect when a click is wanted.
 function showLink(view: LinkView, label: string): void {
   // The first connection is still listing terminals; the screen is not up yet.
-  if (view.kind !== 'up' || shown) show('work')
+  if (view.kind !== 'up' || panes) show('work')
   const notice = linkNotice(view, label)
   $('link-note').hidden = !notice
   if (!notice) return
@@ -343,14 +344,12 @@ function showLink(view: LinkView, label: string): void {
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
   let runner: WebRunner
-  /// The terminal on the page, so a new connection can show it again.
-  let showing: string | null = null
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
     dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
     discard: conn => conn.close(),
     connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
     resume: async next => {
-      if (showing && shown) await shown.resume(next, showing, () => ended(next))
+      await panes?.resume(next, () => ended(next))
     },
     show: view => showLink(view, target.label),
     now: () => Date.now(),
@@ -402,18 +401,25 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
-  shown?.dispose()
-  const view = new PaneView($('terminal'), word => paneNote(connectFailure(word, target.label)))
-  shown = view
+  panes?.dispose()
+  // One xterm per terminal, each in a host of its own inside the stage. Only
+  // the one in front is displayed; the rest keep their screens and, up to the
+  // channel budget, their streams (panes.ts).
+  const set = new PaneSet<WebRunner>(() => {
+    const host = document.createElement('div')
+    host.className = 'terminal-host'
+    $('terminal').append(host)
+    return new PaneView(host, word => paneNote(connectFailure(word, target.label)))
+  })
+  panes = set
   const open = async (id: string, button: HTMLButtonElement) => {
     for (const b of list.querySelectorAll('button')) b.removeAttribute('aria-current')
     button.setAttribute('aria-current', 'true')
     paneNote('')
     const current = reconnector.current
     if (!current) return
-    showing = id
     try {
-      await view.attach(current, id, () => ended(current))
+      await set.open(id, current, () => ended(current))
     } catch (e) {
       paneNote(connectFailure((e as Error).message, target.label))
     }
@@ -446,8 +452,8 @@ function recheckLink(): void {
 
 async function addAgain(session: Session): Promise<void> {
   link = null
-  shown?.dispose()
-  shown = null
+  panes?.dispose()
+  panes = null
   delete session.device.runners
   delete session.device.offer
   delete session.device.offerShownAt

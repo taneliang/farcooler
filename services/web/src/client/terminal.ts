@@ -11,13 +11,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
 
+import type { Pane } from './panes'
 import { paneOutput, Replacement } from './reconnect'
 
 const SCROLLBACK = 5000
 /// The most typed before a pane is live that is held for it.
 const EARLY_LIMIT = 64 * 1024
 
-export class PaneView {
+export class PaneView implements Pane<WebRunner> {
   private readonly term: Terminal
   private readonly fit = new FitAddon()
   private pane: WebPane | null = null
@@ -27,6 +28,10 @@ export class PaneView {
   private typedEarly: Uint8Array[] | null = null
   private typedEarlyBytes = 0
   private generation = 0
+  /// Attached, or attaching: holding a channel, or about to (`Pane.active`).
+  private holding = false
+  /// Has shown a terminal, so the screen is worth keeping (`Pane.used`).
+  private shownBefore = false
   /// A resumed pane keeps showing what it had until the runner's replay
   /// arrives, and is cleared only then (`resume`).
   private replacement = new Replacement(false)
@@ -51,11 +56,30 @@ export class PaneView {
     this.watching.observe(host)
   }
 
+  get active(): boolean {
+    return this.holding
+  }
+
+  get used(): boolean {
+    return this.shownBefore
+  }
+
+  /// Put this pane in front, or out of sight. A pane out of sight keeps its
+  /// terminal, its scrollback and its channel; xterm measures nothing while
+  /// its host is not displayed, so the size is taken again when it returns.
+  show(on: boolean): void {
+    this.host.hidden = !on
+    if (!on) return
+    this.refit()
+    this.term.focus()
+  }
+
   /// Take the terminal off the page, with whatever pane it showed.
   dispose(): void {
     this.detach()
     this.watching.disconnect()
     this.term.dispose()
+    this.host.remove()
   }
 
   /// Show `terminal` from `runner`, replacing whatever was shown.
@@ -68,6 +92,8 @@ export class PaneView {
   /// the host says the pane is live.
   async attach(runner: WebRunner, terminal: string, ended: () => void, resuming = false): Promise<void> {
     this.detach()
+    this.holding = true
+    this.shownBefore = true
     // A fresh pane starts empty. A resumed one (after a dropped connection)
     // keeps its scrollback on screen until the runner's replay arrives, so the
     // person is never looking at a blank terminal, and the replay, which
@@ -84,13 +110,20 @@ export class PaneView {
     try {
       pane = await runner.attach(
         terminal,
-        paneOutput(replacement, current, () => this.term.reset(), bytes => this.term.write(bytes)),
+        paneOutput(replacement, current, () => this.term.reset(), bytes => this.write(bytes)),
         () => {
-          if (current()) ended()
+          if (!current()) return
+          // The stream stopped, so no channel is held; a set may attach it
+          // again, and a reconnect does.
+          this.holding = false
+          ended()
         },
       )
     } catch (e) {
-      if (current()) this.typedEarly = null
+      if (current()) {
+        this.typedEarly = null
+        this.holding = false
+      }
       throw e
     }
     if (!current()) {
@@ -107,13 +140,10 @@ export class PaneView {
     this.term.focus()
   }
 
-  /// Show `terminal` again from a new connection, as it was.
-  resume(runner: WebRunner, terminal: string, ended: () => void): Promise<void> {
-    return this.attach(runner, terminal, ended, true)
-  }
-
+  /// Let the channel go. The terminal keeps what it shows.
   detach(): void {
     this.generation++
+    this.holding = false
     this.typedEarly = null
     delete this.host.dataset.attached
     // close() hands the channel's closing to a task of its own, so the wasm
@@ -121,6 +151,15 @@ export class PaneView {
     this.pane?.close()
     this.pane?.free()
     this.pane = null
+  }
+
+  /// Output onto the screen. The page's measuring harness
+  /// (test/browser/csp-check.mjs) sets `__fcMeasure` to hear when each chunk
+  /// has been parsed and whether this pane was in front; nothing else does.
+  private write(bytes: Uint8Array): void {
+    const measure = (globalThis as { __fcMeasure?: (inFront: boolean) => void }).__fcMeasure
+    if (!measure) return void this.term.write(bytes)
+    this.term.write(bytes, () => measure(!this.host.hidden))
   }
 
   private send(bytes: Uint8Array): void {

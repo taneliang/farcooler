@@ -170,6 +170,8 @@ if (fakeDaemon) {
       'UsePAM no',
       'PasswordAuthentication no',
       'KbdInteractiveAuthentication no',
+      // The channel budget (ov-774) is checked against sshd's own default.
+      'MaxSessions 10',
       'LogLevel DEBUG1',
       '',
     ].join('\n'),
@@ -410,6 +412,9 @@ function replyVideo(offer, grantedBy, name) {
   return path
 }
 
+/// The terminal in front, once its runner has accepted the attach.
+const LIVE = '#terminal .terminal-host:not([hidden])[data-attached="true"]'
+
 /// Connect from the button, and wait for the terminal to take focus, which it
 /// does as its attach starts; `live` waits for the runner to accept it too.
 async function connect(page, live = true) {
@@ -417,7 +422,143 @@ async function connect(page, live = true) {
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
   await page.waitForFunction(() => document.activeElement?.closest('#terminal .xterm'), null, { timeout: 30_000 })
-  if (live) await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+  if (live) await page.waitForSelector(LIVE, { timeout: 60_000 })
+}
+
+/// Channels sshd has open for sessions from its log: the most at once after
+/// log offset `from`, and every refusal logged. A channel is counted from the
+/// line that opens it to the line that frees it.
+function channels(from = 0) {
+  const text = readFileSync(runner.log, 'utf8')
+  let open = 0
+  let peak = 0
+  const refused = []
+  let at = 0
+  for (const line of text.split('\n')) {
+    if (/channel \d+: new session|channel \d+: new \[server-session\]/.test(line)) open++
+    else if (/channel \d+: free: server-session/.test(line)) open--
+    if (at >= from) peak = Math.max(peak, open)
+    if (/no more sessions|open failed|administratively prohibited/.test(line)) refused.push(line.trim())
+    at += line.length + 1
+  }
+  return { peak, open, refused, end: text.length }
+}
+
+const sorted = xs => [...xs].sort((a, b) => a - b)
+const percentile = (xs, p) => sorted(xs)[Math.min(xs.length - 1, Math.ceil(xs.length * p) - 1)]
+
+/// Many panes on one connection (ov-774): twelve opened one after another
+/// never hold more than ten of sshd's channels, a pane let go of attaches
+/// again when it is returned to, Japanese IME text commits once and whole,
+/// and a keystroke's echo in one pane stays quick while `seq 1 2000000` fills
+/// another.
+async function panes(page) {
+  const buttons = page.locator('.terminal-choice')
+  const total = await buttons.count()
+  if (total !== 12) failures.push(`the runner lists ${total} terminals, not 12`)
+  await page.evaluate(() => {
+    const fc = (globalThis.__fc = { downs: [], echoes: [], load: [] })
+    document.addEventListener('keydown', e => fc.downs.push(e.timeStamp), true)
+    // Told by the pane after each chunk is parsed: in front, or hidden.
+    globalThis.__fcMeasure = inFront => (inFront ? fc.echoes : fc.load).push(performance.now())
+  })
+  const mark = channels().end
+
+  for (let i = 0; i < 12; i++) {
+    await buttons.nth(i).click()
+    await page.waitForFunction(i => document.querySelectorAll('.terminal-choice')[i]?.getAttribute('aria-current') === 'true', i)
+    await page.waitForSelector(LIVE, { timeout: 60_000 })
+  }
+  await page.waitForTimeout(500)
+  const opened = channels(mark)
+  if (opened.peak > 10) failures.push(`twelve panes held ${opened.peak} channels at once, and sshd allows 10`)
+  if (opened.refused.length) failures.push(`sshd refused a channel: ${opened.refused[0]}`)
+  const hosts = await page.evaluate(() => document.querySelectorAll('#terminal .terminal-host').length)
+  if (hosts !== 12) failures.push(`${hosts} terminals are on the page, not 12`)
+  console.log(`csp-check: twelve panes opened one after another held at most ${opened.peak} of sshd's 10 channels, with ${opened.refused.length} refusals`)
+
+  // The first was let go of for room; going back attaches it again.
+  await buttons.nth(0).click()
+  await page.waitForSelector(LIVE, { timeout: 60_000 })
+  await page.waitForTimeout(500)
+  const echoes = await page.evaluate(() => __fc.echoes.length)
+  await page.keyboard.type('x')
+  const back = await page
+    .waitForFunction(n => __fc.echoes.length > n, echoes, { timeout: 10_000 })
+    .then(
+      () => true,
+      () => false,
+    )
+  if (!back) failures.push('a pane that was let go of did not echo after it was returned to')
+  else console.log('csp-check: the first pane, let go of for room, attached again and echoed')
+
+  // IME: composition sends nothing, and the commit sends the text once.
+  const cdp = await session.context.newCDPSession(page)
+  const before = runner.typed()
+  for (const text of ['に', 'にほ', '日本']) await cdp.send('Input.imeSetComposition', { text, selectionStart: text.length, selectionEnd: text.length })
+  await page.waitForTimeout(300)
+  const composing = runner.typed().slice(before.length)
+  await cdp.send('Input.insertText', { text: '日本語' })
+  const deadline = Date.now() + 10_000
+  while (runner.typed().length === before.length + composing.length && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
+  await page.waitForTimeout(300)
+  const committed = runner.typed().slice(before.length)
+  if (composing !== '') failures.push(`composition sent ${JSON.stringify(composing)} before it was committed`)
+  if (committed !== '日本語') failures.push(`IME committed ${JSON.stringify(committed)}, not "日本語"`)
+  else console.log('csp-check: Japanese IME composition sent nothing, and its commit sent 日本語 once (Chromium; Safari is checked by hand)')
+
+  // A load in one pane, typing in another.
+  await buttons.nth(1).click()
+  await page.waitForSelector(LIVE, { timeout: 60_000 })
+  await page.waitForTimeout(500)
+  await page.keyboard.type('seq 1 2000000')
+  await page.keyboard.press('Enter')
+  await buttons.nth(2).click()
+  await page.waitForSelector(LIVE, { timeout: 60_000 })
+  await page.waitForTimeout(500)
+  const started = await page
+    .waitForFunction(() => __fc.load.length > 20, null, { timeout: 60_000 })
+    .then(
+      () => true,
+      () => false,
+    )
+  if (!started) {
+    failures.push('the load in the hidden pane never started')
+    return
+  }
+  const samples = []
+  let loaded = 0
+  for (let i = 0; i < 100; i++) {
+    const n = await page.evaluate(() => __fc.echoes.length)
+    await page.keyboard.press('a')
+    const ok = await page.waitForFunction(n => __fc.echoes.length > n, n, { timeout: 10_000 }).then(
+      () => true,
+      () => false,
+    )
+    if (!ok) {
+      failures.push('a keystroke under load was never echoed')
+      break
+    }
+    const got = await page.evaluate(n => {
+      const down = __fc.downs[__fc.downs.length - 1]
+      const load = __fc.load[__fc.load.length - 1] ?? 0
+      return { ms: __fc.echoes[n] - down, underLoad: performance.now() - load < 250, chunks: __fc.load.length }
+    }, n)
+    // The tunnel's own delay (--tunnel-delay, both ways) is the network's.
+    samples.push({ ms: got.ms - 2 * delay, underLoad: got.underLoad })
+    await page.waitForTimeout(40 + Math.floor(Math.random() * 40))
+  }
+  const under = samples.filter(s => s.underLoad).map(s => s.ms)
+  const chunks = await page.evaluate(() => __fc.load.length)
+  if (under.length < 20) failures.push(`only ${under.length} of ${samples.length} keystrokes were typed while the load was running`)
+  else {
+    const p95 = percentile(under, 0.95)
+    console.log(
+      `csp-check: echo while seq 1 2000000 ran in another pane, page time (tunnel delay ${2 * delay} ms taken off), cpu throttle ${throttle}x: ` +
+        `n=${under.length} p50=${percentile(under, 0.5).toFixed(1)} ms p95=${p95.toFixed(1)} ms max=${Math.max(...under).toFixed(1)} ms, ${chunks} chunks of load parsed`,
+    )
+    if (p95 > 100) failures.push(`keystroke echo under load was ${p95.toFixed(1)} ms at p95, over 100 ms`)
+  }
 }
 
 let session = await launch()
@@ -530,9 +671,9 @@ try {
       const before = touches
       await connect(page, false)
       if (touches - before !== 1) failures.push(`connecting cost ${touches - before} touches, not 1`)
-      const early = !(await page.$('#terminal[data-attached="true"]'))
+      const early = !(await page.$(LIVE))
       await page.keyboard.type('echo hi')
-      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+      await page.waitForSelector(LIVE, { timeout: 60_000 })
       // Then waited for, on the runner's own record of what arrived.
       const deadline = Date.now() + 30_000
       while (runner.typed() !== 'echo hi' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
@@ -542,6 +683,8 @@ try {
       if (!log.split('\n').some(l => l.includes('Accepted publickey') && l.includes('ECDSA-SK'))) failures.push('sshd logged no ECDSA-SK login')
       console.log(`csp-check: Connect opened a terminal through sshd with the passkey (ECDSA-SK), and the runner got the keystrokes${early ? ' typed before the pane was live' : ''}`)
       await shoot(page, 'terminal')
+
+      await panes(page)
 
       // Each reconnect is one touch, counted on eight.
       const counted = []
@@ -564,7 +707,7 @@ try {
       await statusSays(page, 'Sign in to studio')
       await shoot(page, 'use-passkey')
       await page.click('#status-action')
-      await page.waitForSelector('#terminal[data-attached="true"]', { timeout: 60_000 })
+      await page.waitForSelector(LIVE, { timeout: 60_000 })
       if (touches - at !== 1) failures.push(`Use Passkey cost ${touches - at} touches, not 1`)
       else console.log('csp-check: a refused prompt offered Use Passkey, which signed at one touch')
       // Its Cancel ends the attempt with the declined sentence and no touch.
