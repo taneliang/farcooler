@@ -809,6 +809,10 @@ AGENTKIT_SOURCES = [
     # Who's on a shared runner and whose Claude account it runs on (ov-508):
     # the runner settings' People section, in the Mac's words.
     "RunnerPeople.swift",
+    # The runner's enrolled devices, who added each, and what Revoke offers (ov-855), and the
+    # section both phone and Mac draw them with.
+    "EnrolledDevices.swift",
+    "EnrolledDevicesSection.swift",
     # A member's Claude sign-in on a runner: the page check, the sheet's steps
     # and the words, and People's lines about each login (ov-584).
     "ClaudeSignIn.swift",

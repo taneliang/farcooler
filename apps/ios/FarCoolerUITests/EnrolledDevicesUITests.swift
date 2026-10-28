@@ -64,7 +64,7 @@ final class EnrolledDevicesUITests: XCTestCase {
             // Just the one first: the browsers it added stay.
             app.buttons["Revoke This"].firstMatch.tap()
             XCTAssertTrue(
-                Self.holds { self.sent(app).contains("client.revoke phone-a withAdded=false") }, "\(self.sent(app))")
+                Self.eventually { self.sent(app).contains("client.revoke phone-a withAdded=false") }, "\(self.sent(app))")
             XCTAssertTrue(app.staticTexts["Added by a device that was removed"].firstMatch.waitForExistence(timeout: 10))
             app.terminate()
         }
@@ -74,7 +74,7 @@ final class EnrolledDevicesUITests: XCTestCase {
         revokes.element(boundBy: 1).tap()
         app.buttons["Revoke This and the 2 It Added"].firstMatch.tap()
         XCTAssertTrue(
-            Self.holds { self.sent(app).contains("client.revoke phone-a withAdded=true") }, "\(self.sent(app))")
+            Self.eventually { self.sent(app).contains("client.revoke phone-a withAdded=true") }, "\(self.sent(app))")
         XCTAssertFalse(app.staticTexts["Alexandra’s Browser at the Platform Team Office"].firstMatch.waitForExistence(timeout: 3))
     }
 
@@ -90,7 +90,7 @@ final class EnrolledDevicesUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Added by Studio Mac"].firstMatch.exists)
     }
 
-    private static func holds(within seconds: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
+    private static func eventually(within seconds: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
         let end = Date().addingTimeInterval(seconds)
         while Date() < end {
             if condition() { return true }
