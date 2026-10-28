@@ -1,6 +1,7 @@
 package com.farcooler.ceremony
 
 import com.farcooler.account.RelayAnswer
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -101,9 +102,34 @@ class SealedReplyTest {
         store.read(core.offer, emptyList(), null)
         store.confirm({ _, _ -> ConfirmingTap.Outcome.CONFIRMED }, Enroller { _, _, _, _, _ -> emptyMap() })
         assertEquals(SealedReply.State.NOT_SENT, store.sealedReply.state.value)
+        assertNull("a failed post shows the failure, never the code", store.sealedReply.code.value)
         store.reset()
         assertEquals(SealedReply.State.NONE, store.sealedReply.state.value)
         assertNull(store.sealedReply.code.value)
+    }
+
+    @Test
+    fun theCodeIsNotShownUntilTheRelayAnswers200() = runTest {
+        val core = Core(offer(replyKey), manifest, sealedAnswer)
+        val store = CeremonyStore(account = "user_bob", accountEmail = "bob@example.com", deviceName = "Bob’s Phone")
+        store.core = core
+        store.clock = { 0L }
+        val relay = kotlinx.coroutines.CompletableDeferred<SealedReplyPost.Outcome>()
+        var duringPost: Pair<SealedReply.State, String?>? = null
+        store.sealedReply.post = { _, _, _ ->
+            duringPost = store.sealedReply.state.value to store.sealedReply.code.value
+            relay.await()
+        }
+        store.read(core.offer, emptyList(), null)
+        val confirming = launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            store.confirm({ _, _ -> ConfirmingTap.Outcome.CONFIRMED }, Enroller { _, _, _, _, _ -> emptyMap() })
+        }
+        assertEquals("posting, with no code up", SealedReply.State.SENDING to null, duringPost)
+        assertNull(store.sealedReply.code.value)
+        relay.complete(SealedReplyPost.Outcome.POSTED)
+        confirming.join()
+        assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
+        assertEquals("ABC234", store.sealedReply.code.value)
     }
 
     @Test

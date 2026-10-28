@@ -53,7 +53,11 @@ class SealedReply {
     private val _state = MutableStateFlow(State.NONE)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    /** The six characters both screens show, as Rust computed them. */
+    /**
+     * The six characters both screens show, as Rust drew them from the seal's
+     * exporter secret. Null until the relay has stored the reply, and null
+     * after any failure: never up while it could still be ground against.
+     */
     private val _code = MutableStateFlow<String?>(null)
     val code: StateFlow<String?> = _code.asStateFlow()
 
@@ -79,12 +83,13 @@ class SealedReply {
             _state.value = State.NOT_SENT
             return
         }
-        _code.value = sealed.second
         _hostKeys.value = CeremonyCore.decode(replyJson, CeremonyManifest.serializer())
             ?.runners.orEmpty().map { it.label to it.hostKey }
         _state.value = State.SENDING
         val outcome = post(asked.ceremony, asked.account, sealed.first)
-        _state.value = if (outcome == SealedReplyPost.Outcome.POSTED) State.SENT else State.NOT_SENT
+        val posted = outcome == SealedReplyPost.Outcome.POSTED
+        _code.value = if (posted) sealed.second else null
+        _state.value = if (posted) State.SENT else State.NOT_SENT
     }
 
     fun reset() {

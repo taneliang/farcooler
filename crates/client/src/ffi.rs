@@ -3189,7 +3189,7 @@ use reach::push_connect;
 mod teammate;
 pub use teammate::{farcooler_client_ceremony_scan_teammate, farcooler_client_ceremony_teammate_reply};
 mod sealed_reply;
-pub use sealed_reply::{farcooler_client_ceremony_code, farcooler_client_ceremony_seal, farcooler_client_ceremony_take_sealed};
+pub use sealed_reply::{farcooler_client_ceremony_seal, farcooler_client_ceremony_take_sealed};
 mod device_keys;
 pub use device_keys::{farcooler_client_device_certificate, farcooler_client_device_registration, farcooler_client_rekey_proof};
 use board_reads_args::mark_read_of;

@@ -713,26 +713,9 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonySeal(
     })
 }
 
-/// A reply's comparison code: six characters, or null for text that is not
-/// a reply. Text, not JSON, like `nativeFingerprint`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyCode(
-    mut env: JNIEnv,
-    _class: JClass,
-    manifest_json: JString,
-) -> jstring {
-    guarded(std::ptr::null_mut(), || {
-        let Some(manifest) = c_string(&mut env, &manifest_json) else {
-            return std::ptr::null_mut();
-        };
-        ceremony_json(&mut env, |out, capacity| unsafe {
-            client::farcooler_client_ceremony_code(manifest.as_ptr(), out, capacity)
-        })
-    })
-}
-
 /// A sealed reply, opened with the reply key's secret half and taken, or
 /// refused: `nativeCeremonyAccept` for a reply that came through the relay.
+/// Answers `{"manifest","code"}`, the code from the opener's exporter.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyTakeSealed(
     mut env: JNIEnv,

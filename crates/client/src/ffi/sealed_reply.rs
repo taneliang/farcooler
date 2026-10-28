@@ -17,7 +17,7 @@ use farcooler_ffi_guard::guarded;
 use serde_json::json;
 
 use super::{read_str, refusal, spill};
-use crate::ceremony::{CeremonyError, Manifest, ReplyKey, comparison_code, decode_offer, encode_manifest, seal_reply, still_fresh, take_sealed_reply};
+use crate::ceremony::{CeremonyError, Manifest, ReplyKey, decode_offer, encode_manifest, seal_reply, still_fresh, take_sealed_reply};
 
 /// Seal a reply for the relay. Leg two, the trusted device's side, once the
 /// reply is built.
@@ -29,8 +29,8 @@ use crate::ceremony::{CeremonyError, Manifest, ReplyKey, comparison_code, decode
 /// and first, as the scan judges it.
 ///
 /// Writes `{"sealed": "<base64url>", "code": "<six characters>"}`. The code
-/// is over the manifest that was sealed, so it is the one the browser shows
-/// for this reply. A refusal is a word, as everywhere: `stale`, or
+/// is drawn from this seal's HPKE exporter secret, so it is the one the
+/// browser shows for this reply and nothing but this seal predicts it. A refusal is a word, as everywhere: `stale`, or
 /// `malformed` for an offer that asked for no sealed reply, a reply key that
 /// is not a key, or a manifest that answers another offer. Nothing is posted
 /// on a refusal; the reply's QR code is still on screen.
@@ -55,29 +55,10 @@ pub unsafe extern "C" fn farcooler_client_ceremony_seal(
             .and_then(|offer| {
                 let manifest: Manifest = serde_json::from_str(&manifest_json)
                     .map_err(|_| CeremonyError::Malformed("the reply is not a reply".into()))?;
-                let sealed = seal_reply(&offer, &manifest)?;
-                Ok(json!({ "sealed": sealed, "code": comparison_code(&manifest) }).to_string())
+                let (sealed, code) = seal_reply(&offer, &manifest)?;
+                Ok(json!({ "sealed": sealed, "code": code }).to_string())
             });
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
-    })
-}
-
-/// The comparison code for a reply, as plain text: the six characters, or
-/// nothing (0) for a string that is not a reply.
-///
-/// The same text contract as `farcooler_client_fingerprint`. For the device
-/// that took a sealed reply, to show beside it; the phone that sealed one has
-/// its code from `farcooler_client_ceremony_seal`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn farcooler_client_ceremony_code(
-    manifest_json: *const c_char,
-    out: *mut u8,
-    capacity: usize,
-) -> usize {
-    guarded(0, || {
-        let Some(text) = (unsafe { read_str(manifest_json) }) else { return 0 };
-        let Ok(manifest) = serde_json::from_str::<Manifest>(&text) else { return 0 };
-        spill(&comparison_code(&manifest), out, capacity)
     })
 }
 
@@ -87,8 +68,9 @@ pub unsafe extern "C" fn farcooler_client_ceremony_code(
 /// `farcooler_client_ceremony_accept`'s twin, in `take_sealed_reply`'s order:
 /// already taken, then freshness, then opening it with `secret` (the reply
 /// key's secret half, as `ReplyKey::secret` writes it) against the offer this
-/// device showed, then the reply's own rules. Writes the manifest, as
-/// `ceremony_accept` does, or a refusal; one that would not open is
+/// device showed, then the reply's own rules. Writes
+/// `{"manifest": <the manifest>, "code": "<six characters>"}`, the code being
+/// the opener's exporter draw, or a refusal; one that would not open is
 /// `{"error":"unopened"}`.
 ///
 /// A browser takes its reply through `crates/web`. This is the same function
@@ -119,7 +101,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_take_sealed(
                 let expecting = decode_offer(&expecting_json)?;
                 take_sealed_reply(&sealed, &key, &expecting, already_taken, Duration::from_millis(held_ms))
             })
-            .map(|m| encode_manifest(&m));
+            .map(|(m, code)| format!(r#"{{"manifest":{},"code":"{code}"}}"#, encode_manifest(&m)));
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
     })
 }

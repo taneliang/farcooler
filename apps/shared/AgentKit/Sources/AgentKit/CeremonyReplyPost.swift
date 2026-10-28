@@ -16,6 +16,14 @@ public enum CeremonyReplyPost: Equatable, Sendable {
     case failed
 }
 
+extension CeremonyReplyPost {
+    /// Whether the phone may show the comparison code (ov-770): only once the
+    /// relay has answered 200, so the honest reply is stored before anyone
+    /// can read a code to grind a forgery against. Every other outcome shows
+    /// the failure, never the code.
+    public var showsCode: Bool { self == .posted }
+}
+
 extension DirectoryClient {
     /// Post a reply the core sealed to a browser's key, for that browser to
     /// take (`POST /v1/ceremony/reply`).

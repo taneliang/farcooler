@@ -41,9 +41,6 @@ hpke = { version = "0.15", default-features = false, features = ["alloc", "x2551
 # that a full sealed manifest stays under the relay's 4 KB with room to
 # spare, and the encoder `ssh-key` already brings.
 base64ct = { version = "1.8", features = ["alloc"] }
-# The comparison code's hash (ov-770): the version crates/web and ssh-key
-# already bring, so no second copy.
-sha2 = { version = "0.11", default-features = false }
 
 # A browser has no OS RNG for rand to call, so wasm asks the page's
 # `crypto.getRandomValues` for the ceremony id's bits. Not a native build's

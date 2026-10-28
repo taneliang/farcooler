@@ -660,7 +660,8 @@ size_t farcooler_client_ceremony_teammate_reply(const char *offer_json,
  * `held_ms` is this device's own time since the scan; past the window it is
  * {"error":"stale"} and nothing is sealed.
  *
- * Writes {"sealed": "<base64url>", "code": "<six characters>"}, or a refusal:
+ * Writes {"sealed": "<base64url>", "code": "<six characters>"}, the code drawn
+ * from this seal's HPKE exporter secret, or a refusal:
  * malformed for an offer with no reply key, a reply key that is not a key, or
  * a reply that answers another offer. Never log `sealed`. 4096 is ample.
  */
@@ -668,17 +669,10 @@ size_t farcooler_client_ceremony_seal(const char *offer_json, const char *manife
                                       uint64_t held_ms, uint8_t *out, size_t capacity);
 
 /*
- * The six-character comparison code for a reply, as plain text, for the
- * device that took a sealed one. Same contract as farcooler_client_fingerprint:
- * 0 when the text is not a reply.
- */
-size_t farcooler_client_ceremony_code(const char *manifest_json, uint8_t *out,
-                                      size_t capacity);
-
-/*
  * farcooler_client_ceremony_accept for a sealed reply: opened with `secret`,
  * the reply key's secret half, against the offer this device showed. Writes
- * the manifest, or a refusal; one that won't open is {"error":"unopened"}.
+ * {"manifest": {...}, "code": "<six characters>"}, the code from the opener's
+ * HPKE exporter, or a refusal; one that won't open is {"error":"unopened"}.
  */
 size_t farcooler_client_ceremony_take_sealed(const char *sealed, const char *secret,
                                              const char *expecting_json, bool already_taken,

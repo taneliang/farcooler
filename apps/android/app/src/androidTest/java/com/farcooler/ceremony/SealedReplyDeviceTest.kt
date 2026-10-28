@@ -12,6 +12,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * This phone answering a browser's offer through the real core (ov-770): the
@@ -61,8 +64,9 @@ class SealedReplyDeviceTest {
 
         val opened = CeremonyCore.takeSealed(sealed, replySecret, offer) as CeremonyCore.Answer.Payload
         assertTrue(opened.json.contains(hostKey))
-        assertEquals(store.code.value, opened.json)
-        assertEquals(CeremonyCore.code(opened.json), store.sealedReply.code.value)
+        val body = Json.parseToJsonElement(opened.json).jsonObject
+        assertEquals(Json.parseToJsonElement(store.code.value), body["manifest"])
+        assertEquals("the opener's code is the phone's", body["code"]?.jsonPrimitive?.content, store.sealedReply.code.value)
         assertEquals(6, store.sealedReply.code.value?.length)
     }
 }

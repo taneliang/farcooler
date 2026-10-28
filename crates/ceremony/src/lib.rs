@@ -72,7 +72,7 @@ use route::alternative_is_an_address_beside_a_tunnel;
 pub use route::usable_address;
 
 mod seal;
-pub use seal::{CODE_LENGTH, ReplyKey, check_reply_key, comparison_code, open_reply, seal_reply, take_sealed_reply};
+pub use seal::{CODE_LENGTH, ReplyKey, check_reply_key, open_reply, seal_reply, take_sealed_reply};
 
 /// The payload version both codes carry.
 ///

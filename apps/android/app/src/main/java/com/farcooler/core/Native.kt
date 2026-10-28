@@ -245,10 +245,10 @@ internal object NativeClient {
         heldMs: Long,
     ): String?
 
-    /** A reply's six-character comparison code, or null for text that isn't one. */
-    external fun nativeCeremonyCode(manifestJson: String): String?
-
-    /** A sealed reply, opened with the reply key's secret half and taken, or refused. */
+    /**
+     * A sealed reply, opened with the reply key's secret half and taken, or
+     * refused: `{"manifest","code"}`, the code from the opener's exporter.
+     */
     external fun nativeCeremonyTakeSealed(
         sealed: String,
         secret: String,

@@ -27,9 +27,11 @@
 //! leg's residual risk is someone who "filmed the first code, is in the room";
 //! the relay removes "in the room", leaving whoever it lets post (the account
 //! and its teammates, `services/relay/src/ceremony-reply.ts`). What stops a
-//! forged reply is the comparison code the browser shows (slice 8): computed
-//! over the manifest, matched by the person against the granting phone's
-//! screen, before the browser keeps anything.
+//! forged reply is the comparison code the browser shows (slice 8): drawn from
+//! the HPKE exporter secret of this one seal, matched by the person against the
+//! granting phone's screen, before the browser keeps anything. The exporter is
+//! a secret only the sealer and the opener hold, so nobody who can predict the
+//! manifest can predict the code.
 //!
 //! The associated data is the reply's four echoes, `ceremony ‖ account ‖
 //! channel ‖ target`, each prefixed with its length as four big-endian bytes.
@@ -52,7 +54,6 @@ use std::time::Duration;
 use base64ct::{Base64UrlUnpadded, Encoding};
 use hpke::kem::X25519HkdfSha256;
 use hpke::{Deserializable, Kem as _, OpModeR, OpModeS, Serializable};
-use sha2::{Digest, Sha256};
 
 use super::{BUDGET, CeremonyError, Manifest, Offer, accept_manifest, encode_manifest, fingerprint, still_fresh};
 
@@ -124,7 +125,11 @@ impl std::fmt::Debug for ReplyKey {
 /// `Malformed`, and so is an offer that asked for no sealed reply. A manifest
 /// over [`BUDGET`] is refused as `TooLarge`, as it is on a screen: the relay's
 /// 4 KB is sized for one that fits.
-pub fn seal_reply(offer: &Offer, manifest: &Manifest) -> Result<String, CeremonyError> {
+///
+/// Returns the sealed reply and its comparison code, drawn from this seal's
+/// exporter secret: two seals of one manifest show two codes, and the opener
+/// of this one, and only that opener, shows the same.
+pub fn seal_reply(offer: &Offer, manifest: &Manifest) -> Result<(String, String), CeremonyError> {
     let Some(reply_key) = offer.reply_key.as_deref() else {
         return Err(CeremonyError::Malformed("this offer asked for no sealed reply".into()));
     };
@@ -141,32 +146,30 @@ pub fn seal_reply(offer: &Offer, manifest: &Manifest) -> Result<String, Ceremony
     let public = <Kem as hpke::Kem>::PublicKey::from_bytes(&bytes)
         .map_err(|_| CeremonyError::Malformed("the reply key is not a key".into()))?;
     let aad = associated(&offer.ceremony, &offer.account, &offer.channel, &target);
-    let (encapped, ciphertext) = hpke::single_shot_seal_with_rng::<Aead, Kdf, Kem>(
-        &OpModeS::Base,
-        &public,
-        INFO,
-        plaintext.as_bytes(),
-        &aad,
-        &mut rand::rng(),
-    )
     // An all-zero or low-order key, which no honest device generates.
-    .map_err(|_| CeremonyError::Malformed("the reply key cannot be sealed to".into()))?;
+    let unsealable = |_| CeremonyError::Malformed("the reply key cannot be sealed to".into());
+    let (encapped, mut context) =
+        hpke::setup_sender_with_rng::<Aead, Kdf, Kem>(&OpModeS::Base, &public, INFO, &mut rand::rng())
+            .map_err(unsealable)?;
+    let ciphertext = context.seal(plaintext.as_bytes(), &aad).map_err(unsealable)?;
+    let code = exported_code(|label, out| context.export(label, out))?;
     let mut sealed = encapped.to_bytes().to_vec();
     sealed.extend_from_slice(&ciphertext);
-    Ok(Base64UrlUnpadded::encode_string(&sealed))
+    Ok((Base64UrlUnpadded::encode_string(&sealed), code))
 }
 
 /// Open a sealed reply with this device's key, for the offer it showed.
 ///
 /// Returns the manifest as its encoded text, for [`accept_manifest`] to judge
-/// like one off a screen. The associated data comes from `expecting`, never
+/// like one off a screen, and the comparison code from this opening's exporter
+/// secret: the sealer's, for an honest reply. The associated data comes from `expecting`, never
 /// from the reply, so a reply for anything but this ceremony, account,
 /// channel and Key A fails here as `Unopened`, and so does one sealed to
 /// another key or changed by a single byte.
 ///
 /// `expecting` must name `key` as its reply key: an offer that asked for no
 /// sealed reply, or for one to another key, takes none.
-pub fn open_reply(sealed: &str, key: &ReplyKey, expecting: &Offer) -> Result<String, CeremonyError> {
+pub fn open_reply(sealed: &str, key: &ReplyKey, expecting: &Offer) -> Result<(String, String), CeremonyError> {
     if expecting.reply_key.as_deref() != Some(key.public()) {
         return Err(CeremonyError::Malformed("this offer asked for no reply sealed to this key".into()));
     }
@@ -179,14 +182,17 @@ pub fn open_reply(sealed: &str, key: &ReplyKey, expecting: &Offer) -> Result<Str
     let target = fingerprint(&expecting.key_a)
         .ok_or_else(|| CeremonyError::Malformed("this device's own key will not parse".into()))?;
     let aad = associated(&expecting.ceremony, &expecting.account, &expecting.channel, &target);
-    let plaintext = hpke::single_shot_open::<Aead, Kdf, Kem>(&OpModeR::Base, &key.secret, &encapped, INFO, ciphertext, &aad)
+    let mut context = hpke::setup_receiver::<Aead, Kdf, Kem>(&OpModeR::Base, &key.secret, &encapped, INFO)
         .map_err(|_| CeremonyError::Unopened)?;
-    String::from_utf8(plaintext).map_err(|_| CeremonyError::Malformed("the reply is not text".into()))
+    let plaintext = context.open(ciphertext, &aad).map_err(|_| CeremonyError::Unopened)?;
+    let code = exported_code(|label, out| context.export(label, out))?;
+    let text = String::from_utf8(plaintext).map_err(|_| CeremonyError::Malformed("the reply is not text".into()))?;
+    Ok((text, code))
 }
 
 /// Take a sealed reply on the new device's side: [`super::take_reply`]'s
 /// order, with opening it between the freshness window and the reply's own
-/// rules.
+/// rules. Returns the manifest and the comparison code to show beside it.
 ///
 /// One function for the same reason `take_reply` is one: a platform that
 /// spelled the order out could forget a step.
@@ -196,13 +202,13 @@ pub fn take_sealed_reply(
     expecting: &Offer,
     already_taken: bool,
     held_for: Duration,
-) -> Result<Manifest, CeremonyError> {
+) -> Result<(Manifest, String), CeremonyError> {
     if already_taken {
         return Err(CeremonyError::AlreadyTaken);
     }
     still_fresh(held_for)?;
-    let encoded = open_reply(sealed, key, expecting)?;
-    accept_manifest(&encoded, expecting, already_taken)
+    let (encoded, code) = open_reply(sealed, key, expecting)?;
+    Ok((accept_manifest(&encoded, expecting, already_taken)?, code))
 }
 
 /// Refuse an offer whose reply key is there and is not a key (ov-770).
@@ -230,36 +236,33 @@ const CODE_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 /// How many symbols a comparison code has: 30 bits.
 pub const CODE_LENGTH: usize = 6;
 
-/// Which use of SHA-256 a comparison code is, so no other hash of a
-/// manifest is ever the same six characters.
-const CODE_INFO: &[u8] = b"farcooler ceremony code v1\0";
+/// The HPKE exporter label a comparison code is drawn with, so no other
+/// export of the same context is ever the same six characters.
+const CODE_LABEL: &[u8] = b"farcooler ceremony code v1";
 
 /// The six characters the granting phone and the browser both show for one
 /// reply, for a person to match before the browser keeps anything (ov-770).
 ///
-/// The seal stops the relay reading a reply, not anyone who saw the offer
-/// writing one (see the module note). This is what does: it is SHA-256 over
-/// the whole manifest, so every runner's host key and address and the
-/// target, which is the browser's Key A, are in it. A forged reply with any
-/// other runner or key in it shows another code. One short code instead of a
-/// `SHA256:` fingerprint per runner, which nobody compares.
+/// They come from the HPKE exporter secret (RFC 9180 section 5.3) of the
+/// seal's own context, never from the manifest. The exporter is derived from
+/// the fresh encapsulated key and the recipient's key, so only the sealer and
+/// the holder of the reply key can compute it. The relay sees the encapsulated
+/// key and cannot. A teammate who can predict the manifest to the byte still
+/// cannot predict the code, and a reply sealed to any other key shows another
+/// one. An attacker who seals a forgery knows their own exporter and so their
+/// own code: each try matches the honest one with probability 2^-30.
 ///
-/// The manifest goes in as [`encode_manifest`] writes it, which is the text
-/// that is sealed and the text [`open_reply`] returns, so both ends hash the
-/// same bytes. Thirty bits is enough because an attacker gets one try per
-/// ceremony, made before the code is on either screen: they can't search for
-/// a forgery that matches a code nobody has seen.
-///
-/// [`encode_manifest`]: super::encode_manifest
-pub fn comparison_code(manifest: &Manifest) -> String {
-    let mut hash = Sha256::new();
-    hash.update(CODE_INFO);
-    hash.update(encode_manifest(manifest).as_bytes());
-    let digest = hash.finalize();
-    let bits = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
-    (0..CODE_LENGTH)
+/// Thirty bits is enough only because of that, and because the phone shows
+/// the code once the honest reply is already posted.
+fn exported_code(
+    export: impl FnOnce(&[u8], &mut [u8]) -> Result<(), hpke::HpkeError>,
+) -> Result<String, CeremonyError> {
+    let mut exporter = [0u8; 32];
+    export(CODE_LABEL, &mut exporter).map_err(|_| CeremonyError::Malformed("no code can be drawn".into()))?;
+    let bits = u32::from_be_bytes([exporter[0], exporter[1], exporter[2], exporter[3]]);
+    Ok((0..CODE_LENGTH)
         .map(|i| CODE_ALPHABET[((bits >> (27 - 5 * i)) & 0x1f) as usize] as char)
-        .collect()
+        .collect())
 }
 
 /// The associated data: each echo, prefixed with its length.

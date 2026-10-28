@@ -36,6 +36,12 @@ struct CeremonyReplyPostTests {
         #expect(relay.sent[0].body["sealed"] as? String == "c2VhbGVk")
     }
 
+    @Test("The comparison code is shown only after the relay stored the reply")
+    func theCodeWaitsForThePost() {
+        let outcomes: [CeremonyReplyPost] = [.posted, .alreadyPosted, .refused, .notSignedIn, .failed]
+        #expect(outcomes.filter(\.showsCode) == [.posted])
+    }
+
     @Test("Each of the relay's answers maps to its own outcome")
     func mapsTheRelaysAnswers() async {
         let cases: [(Result<DirectoryReply, AccountError>, CeremonyReplyPost)] = [

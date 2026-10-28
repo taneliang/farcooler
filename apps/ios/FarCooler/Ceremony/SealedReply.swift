@@ -39,6 +39,7 @@ extension CeremonyCore {
     /// Take a sealed reply with the reply key's secret half: the new device's
     /// side, which a phone never is today. The UI suite opens what the phone
     /// posted with it (`SealedReplyHarness`).
+    /// Answers `{"manifest", "code"}`.
     static func takeSealed(_ sealed: String, secret: String, expecting: String) -> Answer {
         sealed.withCString { sealed in
             secret.withCString { secret in
@@ -66,8 +67,10 @@ final class SealedReply: ObservableObject {
     }
 
     @Published private(set) var state: State = .none
-    /// The six characters both screens show, as Rust computed them over the
-    /// reply that was sealed. Nil unless a reply was sealed.
+    /// The six characters both screens show, as Rust drew them from the
+    /// seal's exporter secret. Nil until the relay has stored the reply (200),
+    /// and nil after any failure: the code is never up while it could still be
+    /// ground against.
     @Published private(set) var code: String?
     /// Each runner the reply grants and the host key it pins, for the person
     /// who wants the whole fingerprint rather than the code.
@@ -101,13 +104,14 @@ final class SealedReply: ObservableObject {
             state = .notSent
             return
         }
-        code = sealed.code
         hostKeys = ((try? JSONDecoder().decode(CeremonyManifest.self, from: reply))?.runners ?? [])
             .map { (label: $0.label, hostKey: $0.host_key) }
         state = .sending
         let post = self.post
         sending = Task {
             let outcome = await post(asked.ceremony, asked.account, sealed.sealed)
+            guard !Task.isCancelled else { return }
+            code = outcome.showsCode ? sealed.code : nil
             state = outcome == .posted ? .sent : .notSent
         }
     }
@@ -137,12 +141,14 @@ struct SealedReplySection: View {
     var body: some View {
         if reply.state != .none {
             VStack(spacing: 8) {
-                if let code = reply.code, reply.state != .notSent {
-                    Text(
-                        reply.state == .sent
-                            ? "Sent to \(deviceName). Check that it shows this code:"
-                            : "Sending to \(deviceName)…"
-                    )
+                if reply.state == .sending {
+                    Text("Sending to \(deviceName)…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("sealed-reply-status")
+                } else if let code = reply.code, reply.state == .sent {
+                    Text("Sent to \(deviceName). Check that it shows this code:")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -37,6 +37,12 @@ fun SealedReplySection(reply: SealedReply, deviceName: String) {
     val shown = code
     when {
         state == SealedReply.State.NONE -> Unit
+        state == SealedReply.State.SENDING -> Text(
+            "Sending to $name…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
         state == SealedReply.State.NOT_SENT || shown == null -> Text(
             "Couldn’t send this to $name. If it has a camera, scan the code above with it.",
             style = MaterialTheme.typography.bodySmall,
@@ -49,8 +55,7 @@ fun SealedReplySection(reply: SealedReply, deviceName: String) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                if (state == SealedReply.State.SENT) "Sent to $name. Check that it shows this code:"
-                else "Sending to $name…",
+                "Sent to $name. Check that it shows this code:",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

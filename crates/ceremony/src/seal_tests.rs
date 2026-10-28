@@ -37,9 +37,14 @@ fn asking(key: &ReplyKey) -> Offer {
 }
 
 fn sealed_for(o: &Offer) -> (Manifest, String) {
-    let m = manifest(o, vec![runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4")]);
-    let sealed = seal_reply(o, &m).unwrap();
+    let (m, sealed, _) = sealed_with_code(o);
     (m, sealed)
+}
+
+fn sealed_with_code(o: &Offer) -> (Manifest, String, String) {
+    let m = manifest(o, vec![runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4")]);
+    let (sealed, code) = seal_reply(o, &m).unwrap();
+    (m, sealed, code)
 }
 
 #[test]
@@ -48,8 +53,8 @@ fn a_sealed_reply_opens_to_the_manifest_it_sealed() {
     let o = asking(&key);
     let (m, sealed) = sealed_for(&o);
 
-    assert_eq!(open_reply(&sealed, &key, &o).unwrap(), encode_manifest(&m));
-    assert_eq!(take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap(), m);
+    assert_eq!(open_reply(&sealed, &key, &o).unwrap().0, encode_manifest(&m));
+    assert_eq!(take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap().0, m);
 }
 
 #[test]
@@ -250,7 +255,7 @@ struct Fixture {
 fn the_relays_fixture_is_a_real_sealed_reply() {
     let f: Fixture = serde_json::from_str(FIXTURE).unwrap();
     let key = ReplyKey::from_secret(&f.secret).unwrap();
-    let opened = open_reply(&f.sealed, &key, &f.offer).unwrap();
+    let (opened, _) = open_reply(&f.sealed, &key, &f.offer).unwrap();
     assert_eq!(opened, f.manifest);
     assert_eq!(f.host_key, FIXTURE_HOST_KEY);
     assert!(opened.contains(FIXTURE_HOST_KEY), "the fixture's reply must carry the key the relay looks for");
@@ -268,7 +273,7 @@ fn write_the_relays_fixture() {
     let key = ReplyKey::generate();
     let o = Offer { ceremony: "0123456789abcdef0123456789abcdef".into(), ..asking(&key) };
     let m = manifest(&o, vec![runner(FIXTURE_HOST_KEY)]);
-    let sealed = seal_reply(&o, &m).unwrap();
+    let (sealed, _) = seal_reply(&o, &m).unwrap();
     let f = Fixture { secret: key.secret(), offer: o, manifest: encode_manifest(&m), host_key: FIXTURE_HOST_KEY.into(), sealed };
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../services/relay/test/fixtures/ceremony-reply.json");
     std::fs::write(path, serde_json::to_string_pretty(&f).unwrap() + "\n").unwrap();
@@ -290,53 +295,71 @@ fn an_offer_whose_reply_key_is_not_a_key_does_not_decode() {
 #[test]
 fn the_comparison_code_is_six_characters_a_person_can_read() {
     let key = ReplyKey::generate();
-    let (m, _) = sealed_for(&asking(&key));
-    let code = comparison_code(&m);
+    let (_, _, code) = sealed_with_code(&asking(&key));
     assert_eq!(code.len(), CODE_LENGTH);
     assert!(code.bytes().all(|c| CODE_ALPHABET.contains(&c)), "{code}");
     assert!(!code.contains(['0', 'O', '1', 'I']), "{code}");
-    assert_eq!(comparison_code(&m), code, "the same manifest, the same code");
 }
 
-/// Both ends compute it: the phone over the manifest it sealed, the browser
-/// over the one it opened. They must agree for an honest reply.
+/// Both ends draw it from the exporter: the phone at the seal, the browser at
+/// the opening. They must agree for an honest reply.
 #[test]
 fn the_opened_reply_shows_the_code_the_phone_shows() {
     let key = ReplyKey::generate();
     let o = asking(&key);
-    let (m, sealed) = sealed_for(&o);
-    let taken = take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap();
-    assert_eq!(comparison_code(&taken), comparison_code(&m));
+    let (m, sealed, code) = sealed_with_code(&o);
+    let (taken, shown) = take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap();
+    assert_eq!(taken, m);
+    assert_eq!(shown, code);
+    assert_eq!(open_reply(&sealed, &key, &o).unwrap().1, code);
 }
 
-/// What a forger changes, the code shows: another runner's host key or
-/// address, another target, one runner more.
+/// The reason the code is not a hash of the manifest: everyone who can post
+/// can predict the manifest. Two seals of the very same one show two codes
+/// (one in a billion chance of a false failure, per run).
 #[test]
-fn a_forged_reply_shows_another_code() {
+fn the_code_is_not_a_function_of_the_manifest() {
     let key = ReplyKey::generate();
-    let (m, _) = sealed_for(&asking(&key));
-    let code = comparison_code(&m);
+    let o = asking(&key);
+    let m = manifest(&o, vec![runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4")]);
+    let codes: std::collections::HashSet<String> = (0..8).map(|_| seal_reply(&o, &m).unwrap().1).collect();
+    assert!(codes.len() > 1, "eight seals of one manifest all showed {codes:?}");
+}
 
-    let mut host_key = m.clone();
-    host_key.runners[0].host_key = "SHA256:AAAAaxySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4".into();
-    let mut address = m.clone();
-    address.runners[0].reach = Reach::Direct { host: "evil.example".into(), port: 22 };
-    let mut target = m.clone();
-    target.target = fingerprint(KEY_B).unwrap();
-    let mut more = m.clone();
-    more.runners.push(runner("SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4"));
-    for (what, forged) in [("host key", host_key), ("address", address), ("target", target), ("runner", more)] {
-        assert_ne!(comparison_code(&forged), code, "{what}");
-    }
+/// A reply sealed to another key shows another code, or does not open for
+/// this one; so does a reply with a changed ciphertext, which does not open.
+#[test]
+fn a_reply_to_another_key_or_changed_does_not_show_this_code() {
+    let key = ReplyKey::generate();
+    let o = asking(&key);
+    let (m, sealed, code) = sealed_with_code(&o);
+
+    let other = ReplyKey::generate();
+    let theirs = Offer { reply_key: Some(other.public().into()), ..o.clone() };
+    let (_, forged, forged_code) = sealed_with_code(&theirs);
+    assert_ne!(forged_code, code, "(one in a billion)");
+    assert_eq!(open_reply(&forged, &key, &o), Err(CeremonyError::Unopened), "sealed to another key");
+    assert_eq!(open_reply(&sealed, &other, &theirs), Err(CeremonyError::Unopened));
+
+    let mut bytes = Base64UrlUnpadded::decode_vec(&sealed).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    let changed = Base64UrlUnpadded::encode_string(&bytes);
+    assert_eq!(open_reply(&changed, &key, &o), Err(CeremonyError::Unopened), "changed ciphertext");
+
+    // The honest one still opens, or the refusals above test nothing.
+    assert_eq!(take_sealed_reply(&sealed, &key, &o, false, Duration::ZERO).unwrap(), (m, code));
 }
 
 /// Pinned, so a change to how the code is drawn is a change somebody made on
 /// purpose: a phone and a browser on two builds would show two codes for one
-/// honest reply.
+/// honest reply. The relay's fixture is one sealed reply, so opening it with
+/// its key always draws the same code.
 #[test]
 fn the_relays_fixture_has_a_known_code() {
     let f: Fixture = serde_json::from_str(FIXTURE).unwrap();
-    let m: Manifest = serde_json::from_str(&f.manifest).unwrap();
-    assert_eq!(encode_manifest(&m), f.manifest);
-    assert_eq!(comparison_code(&m), "QLZJ7Y");
+    let key = ReplyKey::from_secret(&f.secret).unwrap();
+    let (opened, code) = open_reply(&f.sealed, &key, &f.offer).unwrap();
+    assert_eq!(opened, f.manifest);
+    assert_eq!(code, "ZQ3YER");
 }

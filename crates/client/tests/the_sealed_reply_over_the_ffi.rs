@@ -8,10 +8,10 @@
 
 use std::ffi::CString;
 
-use farcooler_client::ceremony::{Manifest, Offer, ReplyKey, comparison_code, decode_offer, encode_offer, offer};
+use farcooler_client::ceremony::{Offer, ReplyKey, decode_offer, encode_offer, offer};
 use farcooler_client::ffi::{
-    farcooler_client_ceremony_code, farcooler_client_ceremony_reply, farcooler_client_ceremony_scan,
-    farcooler_client_ceremony_seal, farcooler_client_ceremony_take_sealed,
+    farcooler_client_ceremony_reply, farcooler_client_ceremony_scan, farcooler_client_ceremony_seal,
+    farcooler_client_ceremony_take_sealed,
 };
 use serde_json::Value;
 
@@ -89,11 +89,6 @@ fn take(sealed: &str, secret: &str, expecting: &str) -> Value {
     })
 }
 
-fn code_of(manifest_json: &str) -> String {
-    let manifest = CString::new(manifest_json).unwrap();
-    text(|out, capacity| unsafe { farcooler_client_ceremony_code(manifest.as_ptr(), out, capacity) })
-}
-
 #[test]
 fn a_scanned_offer_keeps_its_reply_key() {
     let key = ReplyKey::generate();
@@ -101,9 +96,10 @@ fn a_scanned_offer_keeps_its_reply_key() {
 }
 
 /// Acceptance 1 and 2, at the boundary: the phone's sealed reply opens with
-/// the browser's key to the reply it built, and its code is the crate's.
+/// the browser's key to the reply it built, and the code the browser's side
+/// draws is the one the phone shows.
 #[test]
-fn the_phones_sealed_reply_opens_to_its_reply_and_carries_the_crates_code() {
+fn the_phones_sealed_reply_opens_to_its_reply_and_the_browsers_code_is_the_phones() {
     let key = ReplyKey::generate();
     let shown = browser_offer(&key);
     let (scanned, reply) = scanned_and_replied(&shown);
@@ -113,13 +109,16 @@ fn the_phones_sealed_reply_opens_to_its_reply_and_carries_the_crates_code() {
     assert!(!body.contains(HOST_KEY) && !body.contains("runners"));
 
     let opened = take(body, &key.secret(), &shown);
-    assert_eq!(opened, serde_json::from_str::<Value>(&reply).unwrap());
+    assert_eq!(opened["manifest"], serde_json::from_str::<Value>(&reply).unwrap());
     assert!(opened.to_string().contains(HOST_KEY));
 
-    let manifest: Manifest = serde_json::from_str(&reply).unwrap();
     let code = sealed["code"].as_str().expect("code");
-    assert_eq!(code, comparison_code(&manifest));
-    assert_eq!(code_of(&opened.to_string()), code, "the browser's side shows the phone's code");
+    assert_eq!(code.len(), 6);
+    assert_eq!(opened["code"], code, "the browser's side shows the phone's code");
+
+    // A second seal of the same reply is another seal: another code.
+    let again = seal(&scanned, &reply, 1_000);
+    assert_ne!(again["sealed"], sealed["sealed"]);
 }
 
 #[test]
@@ -162,12 +161,4 @@ fn another_key_does_not_open_it() {
     let refused = take(sealed["sealed"].as_str().unwrap(), &other.secret(), &shown);
     assert!(refused.get("error").is_some(), "{refused}");
     assert!(decode_offer(&shown).is_ok());
-}
-
-#[test]
-fn the_code_of_something_that_is_not_a_reply_is_nothing() {
-    let manifest = CString::new("{}").unwrap();
-    let mut buffer = [0u8; 16];
-    let n = unsafe { farcooler_client_ceremony_code(manifest.as_ptr(), buffer.as_mut_ptr(), buffer.len()) };
-    assert_eq!(n, 0);
 }

@@ -14,6 +14,7 @@ import SwiftUI
 ///   -sealed-reply              the offer names a reply key
 ///   -sealed-reply-none         it names none: the QR-only ceremony
 ///   -sealed-reply-malformed    it names one that isn't a key
+///   -sealed-reply-refused      the relay refuses the post: no code is shown
 struct SealedReplyHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-sealed-reply") }
 
@@ -88,7 +89,7 @@ struct SealedReplyHarness: View {
         }
         store.sealedReply.post = { ceremony, account, sealed in
             posts.append((ceremony, account, sealed))
-            return .posted
+            return CommandLine.arguments.contains("-sealed-reply-refused") ? .alreadyPosted : .posted
         }
         store.read(offer, runners: [Self.cosmo], grantingFrom: Self.cosmo)
         if case .confirming = store.phase { await store.confirm() }
@@ -111,8 +112,9 @@ struct SealedReplyHarness: View {
         case .refused(let refusal):
             return "refused \(refusal)"
         case .payload(let data):
+            let taken = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let manifest = String(decoding: data, as: UTF8.self)
-            openedCode = CeremonyCore.text(of: manifest, farcooler_client_ceremony_code) ?? "none"
+            openedCode = taken?["code"] as? String ?? "none"
             return manifest.contains(Self.hostKey) && !posted.sealed.contains(Self.hostKey)
                 ? "opened with Cosmo’s host key" : "opened without it"
         }

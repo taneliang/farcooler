@@ -35,6 +35,15 @@ final class SealedReplyUITests: XCTestCase {
         XCTAssertEqual(label(app, "sealed-reply-status"), "Sent to Chrome on Mac. Check that it shows this code:")
     }
 
+    func testARefusedPostShowsTheFailureAndNeverTheCode() {
+        let app = launch(["-sealed-reply-refused"])
+        XCTAssertEqual(label(app, "sealed-posts"), "1")
+        XCTAssertEqual(label(app, "sealed-qr"), "reply on screen")
+        XCTAssertEqual(label(app, "sealed-phone-code"), "none")
+        XCTAssertTrue(label(app, "sealed-reply-status").hasPrefix("Couldn’t send this to Chrome on Mac"))
+        XCTAssertFalse(app.descendants(matching: .any)["sealed-reply-code"].exists)
+    }
+
     func testAnOfferWithoutAReplyKeyIsTheQrOnlyCeremony() {
         let app = launch(["-sealed-reply-none"])
         XCTAssertEqual(label(app, "sealed-posts"), "0")

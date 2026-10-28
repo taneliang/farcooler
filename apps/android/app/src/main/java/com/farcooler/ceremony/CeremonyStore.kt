@@ -447,15 +447,9 @@ object CeremonyCore : CeremonyCalls {
     override fun seal(offerJson: String, manifestJson: String, heldMs: Long): Answer =
         answer { NativeClient.nativeCeremonySeal(offerJson, manifestJson, heldMs.coerceAtLeast(0)) }
 
-    /** A sealed reply, taken with the reply key's secret half: the new device's side. */
+    /** A sealed reply, taken with the reply key's secret half: the new device's side. Answers `{"manifest","code"}`. */
     fun takeSealed(sealed: String, secret: String, expecting: String): Answer =
         answer { NativeClient.nativeCeremonyTakeSealed(sealed, secret, expecting, false, 0) }
-
-    /** A reply's comparison code, as Rust computes it, or null. */
-    fun code(manifestJson: String): String? {
-        if (!NativeLibrary.loaded) return null
-        return runCatching { NativeClient.nativeCeremonyCode(manifestJson) }.getOrNull()
-    }
 
     /**
      * A shim's answer, as a payload or a refusal.
