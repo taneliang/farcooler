@@ -344,6 +344,33 @@ impl WebRunner {
         Ok(self.0.plan(id).await.map_err(web_failure)?.to_string())
     }
 
+    /// `workspace.list`, as JSON in the phones' shape (`workspace_json`).
+    pub async fn workspaces(&self) -> Result<String, JsValue> {
+        Ok(self.0.workspaces().await.map_err(web_failure)?.to_string())
+    }
+
+    /// Write a theme's Next line (`board_theme.update`). Rejects with
+    /// `refused` and the runner's `code` and `what` when its gate says no.
+    #[wasm_bindgen(js_name = setThemeNext)]
+    pub async fn set_theme_next(&self, theme: String, next: String) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&theme).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.set_theme_next(id, &next).await.map_err(web_failure)
+    }
+
+    /// Keep one open ruling (`ruling.set`).
+    #[wasm_bindgen(js_name = keepRuling)]
+    pub async fn keep_ruling(&self, ruling: String) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&ruling).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.keep_ruling(id).await.map_err(web_failure)
+    }
+
+    /// Keep every open ruling on a board (`ruling.keep_all`); how many it kept.
+    #[wasm_bindgen(js_name = keepAllRulings)]
+    pub async fn keep_all_rulings(&self, workspace: String) -> Result<u32, JsValue> {
+        let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.keep_all_rulings(id).await.map_err(web_failure)? as u32)
+    }
+
     /// One orchestrator page, as JSON in the phones' shape (`page_json`).
     pub async fn page(&self, workspace: String, slot: String) -> Result<String, JsValue> {
         let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;

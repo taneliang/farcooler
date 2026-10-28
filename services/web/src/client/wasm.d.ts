@@ -54,7 +54,7 @@ declare module 'fc-web' {
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>
     /// The phones' shapes (crates/client's needs_you_json, plan_json and
-    /// page_json), as JSON. Needs You is shown (needs.ts); the others are not yet.
+    /// page_json), as JSON. Needs You (needs.ts) and the plan (plan.ts) are shown.
     needsYou(): Promise<string>
     /// Answer an ask Needs You lists (its `ask_id`, the action's `id`). A
     /// refusal rejects with message `refused` and the runner's `code` and
@@ -62,7 +62,15 @@ declare module 'fc-web' {
     answer(terminal: string, ask: string, option: string): Promise<void>
     /// Answer a decision with the option's text, on its task.
     answerDecision(task: string, body: string): Promise<void>
+    /// The plan (plan.ts): `plan_json`, the shape `farcooler plan --json` prints.
     plan(workspace: string): Promise<string>
+    /// `workspace.list` as `workspace_json`.
+    workspaces(): Promise<string>
+    /// The plan's edits, each the CLI's own RPC. A refusal rejects with message
+    /// `refused` and the runner's `code` and `what`.
+    setThemeNext(theme: string, next: string): Promise<void>
+    keepRuling(ruling: string): Promise<void>
+    keepAllRulings(workspace: string): Promise<number>
     page(workspace: string, slot: string): Promise<string>
     /// Whether the runner answers right now. False means the connection is
     /// over, and `onLost` is called.

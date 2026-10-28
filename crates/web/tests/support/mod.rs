@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, Error as WireError, ErrorCode, Event, NeedsYouList, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
+    Empty, Error as WireError, ErrorCode, Event, NeedsYouList, Plan, Workspace, WorkspaceList, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
     TerminalOutput, TerminalState, WireEnvelope, event, request, response, result, terminal_frame, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
@@ -54,6 +54,7 @@ h7DDD8nev+bIjsSCAucjAAAABW90aGVy
 -----END OPENSSH PRIVATE KEY-----
 ";
 pub const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+pub const WORKSPACE: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a1);
 pub const TERMINAL: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_0001);
 
 /// An Ed25519 key in memory as the browser's signer. The in-process russh
@@ -128,6 +129,18 @@ pub struct Seen {
     /// Set, the runner refuses every answer with this code and `what`: a
     /// device enrolled to look, or an ask someone else got to first.
     pub refuse_answers: Mutex<Option<(ErrorCode, &'static str)>>,
+    /// What the plan holds, when a test sets it: the runner answers
+    /// `workspace.list` with one board and `plan.get` with this, and an edit
+    /// to a theme's Next line changes it.
+    pub plan: Mutex<Option<Plan>>,
+    /// Every `board_theme.update` as `(theme, next, actor)`.
+    pub nexts: Mutex<Vec<(Vec<u8>, Option<String>, String)>>,
+    /// Every `ruling.set` as `(ruling, state, actor)`, and each `ruling.keep_all`'s board.
+    pub rulings_set: Mutex<Vec<(Vec<u8>, i32, String)>>,
+    pub kept_all: Mutex<Vec<Vec<u8>>>,
+    /// Set, the runner refuses every plan edit with this code and `what`: a
+    /// member's device asking for an owner's call.
+    pub refuse_plan: Mutex<Option<(ErrorCode, &'static str)>>,
     /// The attach channel's write half, so a write can echo onto it.
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
     /// Told of each write as it arrives, for a caller watching from outside.
@@ -260,6 +273,9 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     capability::TERMINAL_STREAM.to_string(),
                     capability::NEEDS_YOU.to_string(),
                     capability::TASKS.to_string(),
+                    capability::WORKSTREAMS.to_string(),
+                    capability::BOARD_PLAN.to_string(),
+                    capability::BOARD_RULING_ACTIONS.to_string(),
                 ],
                 ..Default::default()
             }))
@@ -338,6 +354,42 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                                 list.items.retain(|i| i.task.as_ref().is_none_or(|t| t.id != n.task_id));
                             }
                             answer(&req, result::Value::TaskNote(Default::default()))
+                        }
+                    }
+                    ("workspace.list", _) => answer(
+                        &req,
+                        result::Value::WorkspaceList(WorkspaceList {
+                            items: vec![Workspace { id: Bytes::copy_from_slice(WORKSPACE.as_bytes()), name: "Main".into(), is_main: true, ..Default::default() }],
+                        }),
+                    ),
+                    ("plan.get", _) => answer(&req, result::Value::Plan(seen.plan.lock().await.clone().unwrap_or_default())),
+                    ("board_theme.update", Some(request::Payload::BoardThemeUpdate(u))) => {
+                        seen.nexts.lock().await.push((u.theme_id.to_vec(), u.next.clone(), u.actor.clone()));
+                        if let Some((code, what)) = *seen.refuse_plan.lock().await {
+                            refusal(&req, code, what)
+                        } else {
+                            if let (Some(plan), Some(next)) = (seen.plan.lock().await.as_mut(), u.next) {
+                                for view in &mut plan.themes {
+                                    if let Some(theme) = view.theme.as_mut().filter(|t| t.id == u.theme_id) {
+                                        theme.next = next.clone();
+                                    }
+                                }
+                            }
+                            answer(&req, result::Value::BoardThemeView(Default::default()))
+                        }
+                    }
+                    ("ruling.set", Some(request::Payload::RulingSet(r))) => {
+                        seen.rulings_set.lock().await.push((r.ruling_id.to_vec(), r.state, r.actor));
+                        match *seen.refuse_plan.lock().await {
+                            Some((code, what)) => refusal(&req, code, what),
+                            None => answer(&req, result::Value::BoardRuling(Default::default())),
+                        }
+                    }
+                    ("ruling.keep_all", Some(request::Payload::RulingKeepAll(k))) => {
+                        seen.kept_all.lock().await.push(k.workspace_id.to_vec());
+                        match *seen.refuse_plan.lock().await {
+                            Some((code, what)) => refusal(&req, code, what),
+                            None => answer(&req, result::Value::RulingsKept(Default::default())),
                         }
                     }
                     (other, _) => panic!("the fake runner doesn't know {other}"),

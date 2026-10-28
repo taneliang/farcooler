@@ -211,6 +211,27 @@ impl Runner {
         Ok(farcooler_client::plan_json::plan_json(&self.session.plan(workspace).await?))
     }
 
+    /// The runner's workspaces, in the shape the phones and the Mac read
+    /// (`workspace_json`): the page picks the board whose plan it shows.
+    pub async fn workspaces(&self) -> Result<serde_json::Value, WebError> {
+        Ok(self.session.workspaces().await?.iter().map(farcooler_client::workspaces_json::workspace_json).collect())
+    }
+
+    /// Write a theme's Next line (`board_theme.update`).
+    pub async fn set_theme_next(&self, theme: Uuid, next: &str) -> Result<(), WebError> {
+        Ok(self.session.set_theme_next(theme, next).await?)
+    }
+
+    /// Keep one open ruling (`ruling.set`, as a person).
+    pub async fn keep_ruling(&self, ruling: Uuid) -> Result<(), WebError> {
+        Ok(self.session.keep_ruling(ruling).await?)
+    }
+
+    /// Keep every open ruling on a board (`ruling.keep_all`); how many it kept.
+    pub async fn keep_all_rulings(&self, workspace: Uuid) -> Result<usize, WebError> {
+        Ok(self.session.keep_all_rulings(workspace).await?)
+    }
+
     /// Attach a pane: a second channel carrying the terminal's bytes.
     ///
     /// `output` gets every byte the terminal prints, starting with the replay

@@ -27,6 +27,7 @@ import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, registerFa
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Board, type BoardView, countLabel, countOf, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
+import { type PlanTab, startPlanTab } from './plan-tab'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneSet } from './panes'
@@ -434,14 +435,21 @@ let drawn = ''
 /// The terminal buttons by id, which is what an Open on an item can go to.
 const buttonFor = new Map<string, HTMLButtonElement>()
 
-/// Which half of the work screen is in front.
-function showTab(tab: 'terminals' | 'needs'): void {
+/// The plan tab, while a runner is connected.
+let planTab: PlanTab | null = null
+
+/// Which part of the work screen is in front.
+function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
   const needs = tab === 'needs'
+  const plan = tab === 'plan'
   $('needs').hidden = !needs
-  $('pane').hidden = needs
-  $('terminal-list').hidden = needs
-  $('show-terminals').setAttribute('aria-pressed', String(!needs))
+  $('plan').hidden = !plan
+  $('pane').hidden = needs || plan
+  $('terminal-list').hidden = needs || plan
+  $('show-terminals').setAttribute('aria-pressed', String(tab === 'terminals'))
   $('show-needs').setAttribute('aria-pressed', String(needs))
+  $('show-plan').setAttribute('aria-pressed', String(plan))
+  planTab?.show(plan)
   if (needs) void board?.refresh()
 }
 
@@ -470,6 +478,8 @@ function drawNeeds(view: BoardView): void {
 }
 
 function stopNeeds(): void {
+  planTab?.stop()
+  planTab = null
   clearInterval(boardTimer)
   board?.stop()
   board = null
@@ -634,6 +644,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     open: opening,
   })
   board = mine
+  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null))
   showTab('terminals')
   void mine.refresh()
   boardTimer = window.setInterval(() => {
@@ -728,6 +739,7 @@ async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
   $('show-terminals').addEventListener('click', () => showTab('terminals'))
   $('show-needs').addEventListener('click', () => showTab('needs'))
+  $('show-plan').addEventListener('click', () => showTab('plan'))
   $('bar-count').addEventListener('click', () => showTab('needs'))
   window.addEventListener('focus', () => void checkVersion())
   document.addEventListener('visibilitychange', () => {

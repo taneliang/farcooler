@@ -220,3 +220,37 @@ export function registerFailure(word: string): string {
       return 'Far Cooler couldn’t add this browser to your account. Try again.'
   }
 }
+
+/// Why the plan can't be shown, by the failure word of the read.
+export function planFailure(word: string, runner: string): string {
+  if (word === 'runner_too_old') return `Update Far Cooler on ${runner} to see the plan here.`
+  if (word === 'closed' || word === 'no_answer') return `${runner} didn’t answer, so the plan may be behind. Far Cooler is reconnecting.`
+  return `Far Cooler couldn’t read the plan on ${runner}. It tries again in a few seconds.`
+}
+
+/// What a plan change says when the runner didn't take it: by the runner's
+/// code, in plain words, never the code itself. `what` is what the change was
+/// to ("The Next line", "That ruling"). `not-yours` is the runner's gate
+/// saying the call belongs to someone else (the owner's, on a member's
+/// device).
+export function planRefusal(failure: { word: string; code?: string; what?: string }, runner: string, what: string): string {
+  if (failure.word !== 'refused') {
+    return failure.word === 'closed' || failure.word === 'no_answer'
+      ? `${runner} didn’t answer. ${what} may not have changed. Check the plan, then try again.`
+      : `${what} may not have reached the runner. Try again.`
+  }
+  switch (failure.code) {
+    case 'not-yours':
+      return `${runner} says that one is the owner’s call. Ask the owner, or ask the orchestrator to change it.`
+    case 'scope-denied':
+      return `This browser can only look at ${runner}. Changing the plan needs control, which is granted from a device that already has it.`
+    case 'capability-unsupported':
+      return `Far Cooler on ${runner} is too old for this. Update it there, then try again.`
+    case 'not-found':
+      return 'It isn’t in the plan anymore. Something else removed it while this was open.'
+    case 'resource-conflict':
+      return 'Someone changed this first. The plan now shows their change.'
+    default:
+      return `${runner} didn’t take that change. Try again.`
+  }
+}

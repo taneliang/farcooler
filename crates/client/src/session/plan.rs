@@ -39,6 +39,24 @@ impl Session {
         }
     }
 
+    /// Write a theme's Next line (`board_theme.update`, ov-775), as the person
+    /// at this device. An empty line clears it. Refused without a round trip on
+    /// a runner without `board_plan`; the runner's own gate decides whose edit
+    /// it is, and a refusal comes back as `Refused`.
+    pub async fn set_theme_next(&self, theme: Uuid, next: &str) -> Result<(), SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::BOARD_PLAN, "board_theme.update")?;
+        let payload = request::Payload::BoardThemeUpdate(farcooler_protocol::v1::BoardThemeUpdate {
+            theme_id: bytes::Bytes::copy_from_slice(theme.as_bytes()),
+            next: Some(next.to_string()),
+            actor: "user".into(),
+            ..Default::default()
+        });
+        match self.value("board_theme.update", None, Some(payload)).await? {
+            result::Value::BoardThemeView(_) => Ok(()),
+            other => Err(wrong("board_theme_view", &other)),
+        }
+    }
+
     /// The owner keeps every open ruling on a board (`ruling.keep_all`,
     /// ov-333). Answers how many it kept.
     pub async fn keep_all_rulings(&self, workspace: Uuid) -> Result<usize, SessionError> {
