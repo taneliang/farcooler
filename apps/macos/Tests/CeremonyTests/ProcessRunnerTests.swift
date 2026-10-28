@@ -78,11 +78,17 @@ struct ProcessRunnerTests {
         #expect(ran.status == SIGKILL, "killed, status \(ran.status)")
     }
 
+    /// Cancels only once the child has proved it started (the marker), never
+    /// after a fixed sleep: on a loaded runner the run may not have launched
+    /// within that sleep, and a cancel that beats the launch correctly yields
+    /// no child at all (status -1), not a SIGTERM.
     @Test func cancellingTheTaskTerminatesTheChild() async {
+        let marker = NSTemporaryDirectory() + "pr-term-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: marker) }
         let task = Task {
-            await ProcessRunner.run(Self.sh, ["-c", "exec sleep 30"])
+            await ProcessRunner.run(Self.sh, ["-c", "touch \(marker); exec sleep 30"])
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        while !FileManager.default.fileExists(atPath: marker) { try? await Task.sleep(for: .milliseconds(10)) }
         task.cancel()
         let ran = await task.value
         #expect(ran.cancelled)
