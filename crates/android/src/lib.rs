@@ -686,6 +686,82 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyAccept
     })
 }
 
+/// The reply sealed to a browser's reply key, with the comparison code
+/// (ov-770): `{"sealed","code"}` or a refusal. `heldMs` is this device's own
+/// time since the scan, judged in Rust.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonySeal(
+    mut env: JNIEnv,
+    _class: JClass,
+    offer_json: JString,
+    manifest_json: JString,
+    held_ms: jlong,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let offer = c_string(&mut env, &offer_json);
+        let manifest = c_string(&mut env, &manifest_json);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_seal(
+                pointer(&offer),
+                pointer(&manifest),
+                held_ms.max(0) as u64,
+                out,
+                capacity,
+            )
+        })
+    })
+}
+
+/// A reply's comparison code: six characters, or null for text that is not
+/// a reply. Text, not JSON, like `nativeFingerprint`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyCode(
+    mut env: JNIEnv,
+    _class: JClass,
+    manifest_json: JString,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let Some(manifest) = c_string(&mut env, &manifest_json) else {
+            return std::ptr::null_mut();
+        };
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_code(manifest.as_ptr(), out, capacity)
+        })
+    })
+}
+
+/// A sealed reply, opened with the reply key's secret half and taken, or
+/// refused: `nativeCeremonyAccept` for a reply that came through the relay.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyTakeSealed(
+    mut env: JNIEnv,
+    _class: JClass,
+    sealed: JString,
+    secret: JString,
+    expecting_json: JString,
+    already_taken: jboolean,
+    held_ms: jlong,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let sealed = c_string(&mut env, &sealed);
+        let secret = c_string(&mut env, &secret);
+        let expecting = c_string(&mut env, &expecting_json);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_take_sealed(
+                pointer(&sealed),
+                pointer(&secret),
+                pointer(&expecting),
+                already_taken != 0,
+                held_ms.max(0) as u64,
+                out,
+                capacity,
+            )
+        })
+    })
+}
+
 // MARK: - Enrolling, once the ceremony has been agreed
 //
 // There is deliberately no shim here for `client.list`, `client.enroll` or
