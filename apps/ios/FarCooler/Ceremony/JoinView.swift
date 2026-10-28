@@ -78,7 +78,7 @@ struct JoinView: View {
                     dismiss()
                 }
 
-            case .mismatch, .confirming, .enrolling, .showingManifest:
+            case .mismatch, .checkingTeam, .confirming, .enrolling, .showingManifest:
                 // The other side of the ceremony. Unreachable here.
                 ProgressView()
             }

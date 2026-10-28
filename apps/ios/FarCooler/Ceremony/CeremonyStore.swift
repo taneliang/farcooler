@@ -110,6 +110,20 @@ enum Refusal: Equatable {
     /// and the core refuses the whole reply rather than hand this device a
     /// runner it could only fail to connect to.
     case noTunnel
+    /// The team directory couldn't be asked whether this code's account is on
+    /// one of yours, so it was refused rather than waved through (ov-525).
+    case directoryUnreachable
+    /// The code's account is on none of your teams. Carries the signed-in
+    /// email, for "sign in to … on that device", which is the other way in.
+    case notATeammate(String)
+    /// A teammate's Mac asked for shell access, which a teammate never gets.
+    case teammateShell
+    /// A teammate's device waiting out a trust reset's hold (R-76). A phone
+    /// can't confirm one in person, so it refuses and sends the person to the
+    /// Mac, which does.
+    case heldKey
+    /// The directory lists that teammate's devices, and this isn't one.
+    case unregisteredKey
     /// The core answered nothing readable at all. Not one of its words: this is
     /// the app failing, and it says so without saying how.
     case unknown
@@ -126,6 +140,12 @@ enum Refusal: Equatable {
         case "already_taken": self = .alreadyTaken
         case "too_large": self = .tooLarge
         case "no_tunnel": self = .noTunnel
+        case "directory_unreachable": self = .directoryUnreachable
+        // The email is the store's to fill in: see `CeremonyStore.checkTeammate`.
+        case "not_a_teammate": self = .notATeammate("")
+        case "teammate_shell": self = .teammateShell
+        case "held_key": self = .heldKey
+        case "unregistered_key": self = .unregisteredKey
         default: self = .unknown
         }
     }
@@ -145,6 +165,11 @@ enum Refusal: Equatable {
         case .alreadyTaken: return "This code was already used"
         case .tooLarge: return "Too many runners selected"
         case .noTunnel: return "This device can’t reach one of those runners"
+        case .directoryUnreachable: return TeammateRefusalCopy.directoryUnreachableTitle
+        case .notATeammate: return TeammateRefusalCopy.notATeammateTitle
+        case .teammateShell: return TeammateRefusalCopy.teammateShellTitle
+        case .heldKey: return TeammateRefusalCopy.heldKeyTitle
+        case .unregisteredKey: return TeammateRefusalCopy.unregisteredKeyTitle
         case .unknown: return "Couldn’t add this device"
         }
     }
@@ -175,6 +200,11 @@ enum Refusal: Equatable {
         case .noTunnel:
             return "One of them is reachable only through a tunnel, and this device "
                 + "isn’t on one. Try again, choosing runners it can reach."
+        case .directoryUnreachable: return TeammateRefusalCopy.directoryUnreachable
+        case .notATeammate(let email): return TeammateRefusalCopy.notATeammate(email: email)
+        case .teammateShell: return TeammateRefusalCopy.teammateShell
+        case .heldKey: return TeammateRefusalCopy.heldKeyOnAPhone
+        case .unregisteredKey: return TeammateRefusalCopy.unregisteredKey
         case .unknown:
             return "Try again."
         }
@@ -252,7 +282,14 @@ enum CeremonyCore {
     /// version-40 code, which is more than the default, so the smaller number
     /// is the safe one and the one that keeps three platforms agreeing about
     /// which manifests are too big.
-    static func reply(offer: Data, runners: [CeremonyRunner], budgetBytes: Int = 0) -> Answer {
+    ///
+    /// `grantedBy` is the email of the account granting, for a teammate's
+    /// reply (ov-525): written into it so their device can ask "Join …'s
+    /// runners?". Nil is one of your own devices, whose reply is built exactly
+    /// as it always was.
+    static func reply(
+        offer: Data, runners: [CeremonyRunner], budgetBytes: Int = 0, grantedBy: String? = nil
+    ) -> Answer {
         guard
             let runnersJSON = try? JSONEncoder().encode(runners),
             let runnersText = String(data: runnersJSON, encoding: .utf8),
@@ -261,7 +298,37 @@ enum CeremonyCore {
 
         return offerText.withCString { offer in
             runnersText.withCString { runners in
-                answer { farcooler_client_ceremony_reply(offer, runners, budgetBytes, $0, $1) }
+                guard let grantedBy else {
+                    return answer { farcooler_client_ceremony_reply(offer, runners, budgetBytes, $0, $1) }
+                }
+                return grantedBy.withCString { grantedBy in
+                    answer {
+                        farcooler_client_ceremony_teammate_reply(
+                            offer, runners, grantedBy, budgetBytes, $0, $1)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A code from another account, checked against the team directory's own
+    /// answers (`directory`, nil when it couldn't be asked): the core decides
+    /// whether it is a teammate's, and this passes the bytes along.
+    ///
+    /// `will_confirm_holds` is false: a phone has no way to confirm in person
+    /// a device that waits out a trust reset's hold, so the core refuses one
+    /// as `held_key` and the person is sent to their Mac.
+    static func scanTeammate(
+        _ encoded: String, expectingAccount: String, directory: String?, heldFor: TimeInterval
+    ) -> Answer {
+        encoded.withCString { encoded in
+            expectingAccount.withCString { account in
+                withOptionalCString(directory) { directory in
+                    answer {
+                        farcooler_client_ceremony_scan_teammate(
+                            encoded, account, directory, milliseconds(heldFor), false, $0, $1)
+                    }
+                }
             }
         }
     }
@@ -422,12 +489,24 @@ typealias Enroller = @MainActor (
     _ runners: [CeremonyRunner]
 ) async -> [String: Connection.Enrollment]
 
+/// What an Add Teammate writes (ov-854): the key `for_teammate` on each runner,
+/// bound to the teammate, answering what became of each. A runner with no
+/// entry was never asked.
+typealias TeammateEnroller = @MainActor (
+    _ publicKey: String, _ label: String, _ clientId: String, _ nodeKey: String,
+    _ teammate: TeammateChoice, _ runners: [CeremonyRunner]
+) async -> [String: TeammateAddOutcome]
+
 // MARK: - The state machine
 
 /// One runner, as a row someone can tick.
 struct RunnerRow: Identifiable, Equatable {
     let runner: Runner
     var picked: Bool
+    /// Why this runner can't be ticked, when it can't: an Add Teammate needs
+    /// a phone that administers the runner, and says so up front rather than
+    /// after a fingerprint (ov-854). Nil for every row of an ordinary Add.
+    var blocked: String? = nil
 
     var id: UUID { runner.id }
     var label: String { runner.label }
@@ -456,6 +535,10 @@ final class CeremonyStore: ObservableObject {
         /// runner list, so the runners are never on screen with only a
         /// fingerprint between a stranger and them.
         case mismatch
+        /// The scanned code is from another account, and the team directory
+        /// is being asked whether it is a teammate's (ov-854). Nothing about
+        /// the code is shown until the core has said yes.
+        case checkingTeam
         case confirming
         /// The tap has been confirmed and the reply is being built.
         case enrolling
@@ -506,6 +589,29 @@ final class CeremonyStore: ObservableObject {
     /// nil (ov-485 N1): never silent, because the new device can't use
     /// Tailcat for them.
     @Published private(set) var addressOnlyNote: String?
+    /// A teammate's code, once the directory has vouched for it (ov-854): who
+    /// they are, and what the person adding them chose. Nil for one of your
+    /// own devices.
+    @Published private(set) var teammate: TeammateChoice?
+
+    /// The team directory's answers, or nil when it couldn't be asked. A test
+    /// answers it; the app asks the relay.
+    var teamDirectory: () async -> Data? = { await Account.shared.directoryClient.teamDirectory() }
+    /// Whether this phone may add a teammate on `runner`: it administers the
+    /// runner. A harness answers it; the app asks the live connection.
+    var mayAddTeammate: (Runner) -> Bool = { runner in
+        guard let build = Connection.live(for: runner.id)?.knownBuild else { return false }
+        return build.mayAdministerRunner
+    }
+    /// The teammate check in flight after a code from another account.
+    private(set) var teamCheck: Task<Void, Never>?
+    /// Which scan the check in flight belongs to. Every scan takes a new one,
+    /// so a slow check for an earlier code can never open its teammate's
+    /// sheet over a later code.
+    private var scanNumber = 0
+    /// What an Add Teammate writes: the key `for_teammate`, bound to the member,
+    /// one runner at a time. Injected like ``enroller``.
+    var teammateEnroller: TeammateEnroller = CeremonyStore.teammatesThroughTheLiveConnection
 
     /// Where a grant actually lands.
     ///
@@ -680,9 +786,25 @@ final class CeremonyStore: ObservableObject {
     /// only thing left here is which screen a refusal leads to.
     func read(_ encoded: String, runners: [Runner], grantingFrom: Runner?) {
         let now = Date()
+        scanNumber += 1
+        teamCheck?.cancel()
+        teammate = nil
         switch CeremonyCore.scan(encoded, expectingAccount: account, heldFor: 0) {
         case .refused(.wrongAccount):
-            phase = .mismatch
+            // A code from another account goes on to the teammate check
+            // (ov-854), and nothing about it is shown until the core says yes:
+            // the runner list behind it would be on screen with only a
+            // fingerprint between a stranger and it. A phone signed in to
+            // nothing has no directory to ask, so it stays on the old screen.
+            guard !account.isEmpty else {
+                phase = .mismatch
+                return
+            }
+            phase = .checkingTeam
+            let number = scanNumber
+            teamCheck = Task {
+                await checkTeammate(encoded, at: now, runners: runners, scan: number)
+            }
         case .refused(let refusal):
             phase = .refused(refusal)
         case .payload(let data):
@@ -701,6 +823,62 @@ final class CeremonyStore: ObservableObject {
             fingerprint = Self.fingerprint(of: data)
             phase = .confirming
         }
+    }
+
+    /// Ask the directory, then let the core decide whether a code from another
+    /// account is a teammate's (ov-525, ov-854).
+    ///
+    /// The time the directory took counts against the code's freshness, since
+    /// the clock started at the scan. An unreachable directory is the core's
+    /// `directory_unreachable`, never a pass.
+    func checkTeammate(_ encoded: String, at: Date, runners: [Runner], scan: Int) async {
+        let directory = await teamDirectory().map { String(decoding: $0, as: UTF8.self) }
+        // Cancelled, or scanned again, while the directory was answering: an
+        // answer for an earlier code is dropped rather than opening that
+        // teammate's sheet over this one.
+        guard !Task.isCancelled, scan == scanNumber, phase == .checkingTeam else { return }
+        switch CeremonyCore.scanTeammate(
+            encoded, expectingAccount: account, directory: directory, heldFor: Date().timeIntervalSince(at))
+        {
+        case .refused(.notATeammate):
+            phase = .refused(.notATeammate(accountEmail))
+        case .refused(let refusal):
+            phase = .refused(refusal)
+        case .payload(let data):
+            guard let accepted = try? JSONDecoder().decode(TeammateAccepted.self, from: data),
+                let decoded = try? JSONDecoder().decode(CeremonyOffer.self, from: Data(accepted.offer.utf8))
+            else {
+                phase = .refused(.unknown)
+                return
+            }
+            scannedCode = encoded
+            scannedAt = at
+            offer = decoded
+            // Nothing is granted to someone else by default: which runners a
+            // teammate gets is a choice made on purpose, so none starts
+            // ticked. A runner this phone can't administer is listed with
+            // why, and can't be ticked.
+            rows = runners.map { runner in
+                RunnerRow(
+                    runner: runner, picked: false,
+                    blocked: mayAddTeammate(runner)
+                        ? nil
+                        : TeammateAddCopy.sentence(.needsAdmin, runner: runner.label, device: "iPhone"))
+            }
+            fingerprint = Self.fingerprint(of: Data(accepted.offer.utf8))
+            teammate = TeammateChoice(
+                who: accepted.teammate, directory: directory ?? "", scanner: account,
+                grantedBy: accountEmail, held: accepted.held ?? [])
+            phase = .confirming
+        }
+    }
+
+    /// The person adding a teammate edits what they'll be called, and what
+    /// they may do.
+    func setTeammate(_ change: (inout TeammateChoice) -> Void) {
+        guard phase == .confirming, var choice = teammate else { return }
+        change(&choice)
+        teammate = choice
     }
 
     /// The fingerprint of the key on offer, computed in Rust.
@@ -799,35 +977,13 @@ final class CeremonyStore: ObservableObject {
             outcomes = [:]
         }
 
-        let deviceHasNodeKey = !(offer.node_key ?? "").isEmpty
-        let granting = wanted.map { runner in
-            // Tunnel first (ov-485): a runner that answered with a token is
-            // granted through it, the address kept beside it. The rule is
-            // AgentKit's, under `TunnelRouteTests`.
-            let written = outcomes[runner.id]
-            let token: String = { if case .written(let token)? = written { return token } else { return "" } }()
-            let route = TunnelRoute.grant(
-                reach: runner.reach, kept: runner.alternative, token: token,
-                deviceHasNodeKey: deviceHasNodeKey,
-                isTunnel: { if case .tailcat = $0 { return true } else { return false } },
-                tunnel: { .tailcat(token: $0) })
-            return CeremonyRunner(
-                id: runner.id,
-                label: runner.label,
-                alias: runner.alias,
-                user: runner.user,
-                host_key: runner.host_key,
-                reach: route.reach,
-                // The FILE's state, not this app's intention: pending unless
-                // that runner answered that the line is there.
-                pending: { if case .written? = written { return false } else { return true } }(),
-                alternative: route.alternative,
-                // Why not, for the new device's screen: what the runner said,
-                // or that this phone never reached it (ov-828).
-                pending_why: { () -> String? in
-                    if let written { return written.pendingWhy }
-                    return askedAny ? "not_connected" : "failed"
-                }())
+        let granting = Self.granting(
+            wanted, deviceHasNodeKey: !(offer.node_key ?? "").isEmpty,
+            askedAny: askedAny
+        ) { runner in
+            guard let written = outcomes[runner.id] else { return nil }
+            if case .written(let token) = written { return (token, nil) }
+            return ("", written.pendingWhy)
         }
         pendingNote = Self.note(about: granting, outcomes: outcomes)
 
@@ -847,6 +1003,151 @@ final class CeremonyStore: ObservableObject {
             // A browser's offer: sealed to its key and posted too (ov-770).
             sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity)
         }
+    }
+
+    /// The picked runners as the reply's records, once each has answered.
+    ///
+    /// `answer` is what a runner said: nil when this phone never reached it,
+    /// else the tunnel token it gave (empty for none) and, for a runner that
+    /// did not take the key, the word the reply carries for why. Shared by an
+    /// ordinary Add and an Add Teammate, which differ only in what they ask.
+    ///
+    /// Tunnel first (ov-485): a runner that answered with a token is granted
+    /// through it, the address kept beside it. The rule is AgentKit's, under
+    /// `TunnelRouteTests`. `pending` is the FILE's state, not this app's
+    /// intention: pending unless that runner answered that the line is there.
+    private static func granting(
+        _ wanted: [CeremonyRunner], deviceHasNodeKey: Bool, askedAny: Bool,
+        answer: (CeremonyRunner) -> (token: String, why: String?)?
+    ) -> [CeremonyRunner] {
+        wanted.map { runner in
+            let said = answer(runner)
+            let route = TunnelRoute.grant(
+                reach: runner.reach, kept: runner.alternative, token: said?.token ?? "",
+                deviceHasNodeKey: deviceHasNodeKey,
+                isTunnel: { if case .tailcat = $0 { return true } else { return false } },
+                tunnel: { .tailcat(token: $0) })
+            return CeremonyRunner(
+                id: runner.id,
+                label: runner.label,
+                alias: runner.alias,
+                user: runner.user,
+                host_key: runner.host_key,
+                reach: route.reach,
+                pending: said == nil || said?.why != nil,
+                alternative: route.alternative,
+                // Why not, for the new device's screen: what the runner said,
+                // or that this phone never reached it (ov-828).
+                pending_why: { () -> String? in
+                    if let said { return said.why }
+                    return askedAny ? "not_connected" : "failed"
+                }())
+        }
+    }
+
+    /// Confirm adding a teammate's device (ov-854): the gate, the freshness
+    /// check against the directory's answers again, the key on each picked
+    /// runner for them, and the reply.
+    ///
+    /// The Mac's order (`CeremonyStore.confirm` there): the keys go in BEFORE
+    /// the reply is built, and the reply is built from what they did, so
+    /// `pending` is a fact. A teammate's device is never this phone's to vouch
+    /// for, so nothing is certified.
+    func confirmTeammate() async {
+        guard let offer, let teammate, !scannedCode.isEmpty else {
+            phase = .refused(.unknown)
+            return
+        }
+        // No usable handle or name can't be recorded on a runner, so nothing is
+        // asked of Face ID either; the button is off too.
+        guard teammate.isComplete else { return }
+
+        switch await confirmTap("Confirm adding \(offer.name) for \(teammate.who.email)") {
+        case .cancelled:
+            return
+        case .refused:
+            declined = true
+            return
+        case .confirmed:
+            break
+        }
+
+        phase = .enrolling
+
+        // Re-scanned rather than re-used: the answer is the same offer, and the
+        // point of the call is the freshness rule attached to it, against the
+        // same directory answers.
+        let heldFor = scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        let rescanned: Data
+        switch CeremonyCore.scanTeammate(
+            scannedCode, expectingAccount: teammate.scanner, directory: teammate.directory, heldFor: heldFor)
+        {
+        case .refused(let refusal):
+            phase = .refused(refusal)
+            return
+        case .payload(let data):
+            guard let accepted = try? JSONDecoder().decode(TeammateAccepted.self, from: data) else {
+                phase = .refused(.unknown)
+                return
+            }
+            rescanned = Data(accepted.offer.utf8)
+        }
+
+        let wanted = picked()
+        // Measured BEFORE anything is written, as an ordinary Add does.
+        if case .refused(let refusal) = CeremonyCore.reply(
+            offer: rescanned, runners: wanted, grantedBy: teammate.grantedBy)
+        {
+            phase = .refused(refusal)
+            return
+        }
+        let outcomes: [String: TeammateAddOutcome]
+        let clientId = Self.clientId(of: rescanned)
+        if let clientId {
+            outcomes = await teammateEnroller(
+                offer.key_a, offer.name, clientId, offer.node_key ?? "", teammate, wanted)
+        } else {
+            outcomes = [:]
+        }
+
+        let granting = Self.granting(
+            wanted, deviceHasNodeKey: !(offer.node_key ?? "").isEmpty, askedAny: clientId != nil
+        ) { runner in
+            guard let outcome = outcomes[runner.id] else { return nil }
+            if case .written(let token) = outcome { return (token, nil) }
+            return ("", outcome.pendingWhy)
+        }
+        pendingNote = TeammateAddCopy.note(
+            about: wanted.map { runner in (runner.label, outcomes[runner.id] ?? .notReached) },
+            device: "iPhone")
+
+        switch CeremonyCore.reply(offer: rescanned, runners: granting, grantedBy: teammate.grantedBy) {
+        case .refused(let refusal):
+            phase = .refused(refusal)
+        case .payload(let data):
+            code = String(decoding: data, as: UTF8.self)
+            addressOnlyNote = Self.addressOnlyNote(granting: granting, reply: data)
+            phase = .showingManifest
+        }
+    }
+
+    /// The live connection's half of Add Teammate: one runner at a time, for
+    /// the same reason an ordinary Add goes one at a time, and only to the
+    /// runners this phone holds a session to (`CeremonyReach.writable`).
+    @MainActor
+    private static func teammatesThroughTheLiveConnection(
+        publicKey: String, label: String, clientId: String, nodeKey: String,
+        teammate: TeammateChoice, runners: [CeremonyRunner]
+    ) async -> [String: TeammateAddOutcome] {
+        let writable = CeremonyReach.writable(
+            granted: runners.map(\.id), live: Connection.liveRunners.map(\.uuidString))
+        var written: [String: TeammateAddOutcome] = [:]
+        for id in writable {
+            guard let runner = UUID(uuidString: id), let connection = Connection.live(for: runner) else { continue }
+            written[id] = await connection.enrollTeammate(
+                publicKey: publicKey, label: label, clientId: clientId, nodeKey: nodeKey, teammate: teammate)
+        }
+        return written
     }
 
     /// Names the runners this reply carries as an address though the grant
@@ -1048,6 +1349,10 @@ final class CeremonyStore: ObservableObject {
         declined = false
         pendingNote = nil
         addressOnlyNote = nil
+        teammate = nil
+        teamCheck?.cancel()
+        teamCheck = nil
+        scanNumber += 1
         sealedReply.reset()
     }
 }
@@ -1103,6 +1408,21 @@ extension Connection.Enrollment {
         case .rejected(_, "not-yours", _)?: return .notOwner
         case .rejected(_, "scope-denied", _)?: return readOnly ? .readOnly : .notAllowed
         default: return .couldNotWrite
+        }
+    }
+}
+
+extension TeammateAddOutcome {
+    /// The reason a reply carries for a runner this left pending
+    /// (`RunnerEntry.pending_why`), or nil for a bound one. The words are
+    /// `Connection.Enrollment`'s, so the teammate's phone says the same.
+    var pendingWhy: String? {
+        switch self {
+        case .written: return nil
+        case .tooOld: return "too_old"
+        case .needsAdmin: return "not_allowed"
+        case .notReached: return "not_connected"
+        case .couldNotRead, .someoneElses, .notAdded, .notRecorded, .notUpdated: return "failed"
         }
     }
 }

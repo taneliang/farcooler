@@ -186,6 +186,9 @@ SOURCES = [
     # A teammate's phone asking before it joins (ov-525), for the UI suite.
     # DEBUG only.
     "TeammateJoinHarness.swift",
+    # The owner's phone adding a teammate's device (ov-854), for the UI suite.
+    # DEBUG only.
+    "TeammateAddHarness.swift",
     # The owner's phone adding a browser to a Tailcat-only runner (ov-828).
     "GrantBrowserHarness.swift",
     # A real notification to tap, for the UI suite (ov-787). DEBUG only.
@@ -661,6 +664,10 @@ AGENTKIT_SOURCES = [
     # What the phone says about a device waiting out the hold after a trust
     # reset (R-76, ov-565): its row and the banner read it.
     "DeviceHold.swift",
+    # Add Teammate (ov-854): who a teammate is, what they may do, and what to
+    # say about each runner. `TeammateNames` suggests their handle and name.
+    "TeammateNames.swift",
+    "TeammateAdd.swift",
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",
@@ -1138,6 +1145,8 @@ UI_TEST_SOURCES = [
     "MemberLoginsUITests.swift",
     # Runner Settings lists the runner's devices, who added each, and Revoke's two choices (ov-855).
     "EnrolledDevicesUITests.swift",
+    # The owner's phone adding a teammate's device (ov-854), over `-teammate-add`.
+    "TeammateAddUITests.swift",
     "NeedsYouTeamUITests.swift",
     # A member's writes carry their name, and a member is offered no Keep
     # (ov-707). Over the canned runner (`-phone-shared -phone-member-notes`).

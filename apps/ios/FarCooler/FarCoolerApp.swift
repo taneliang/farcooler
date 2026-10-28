@@ -56,6 +56,9 @@ struct FarCoolerApp: App {
         } else if GrantBrowserHarness.isRequested {
             // The owner's phone adding a browser to a Tailcat-only runner (ov-828).
             GrantBrowserHarness()
+        } else if TeammateAddHarness.isRequested {
+            // The owner's phone adding a teammate's device (ov-854).
+            TeammateAddHarness()
         } else if TeammateJoinHarness.isRequested {
             // A teammate's phone asking before it joins (ov-525).
             TeammateJoinHarness()

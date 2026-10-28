@@ -4,9 +4,11 @@ import SwiftUI
 /// runners it may reach, confirm, and show the reply back.
 ///
 /// The order of the screens is the security argument. A code from another
-/// account reaches the mismatch screen and stops there — the runner list is not
-/// behind it, because a list of addresses on screen with only a fingerprint
-/// between a stranger and them is the thing this flow exists to avoid.
+/// account is held while the team directory says whether it is a teammate's
+/// (ov-854), and stops at a refusal if it isn't — the runner list is not behind
+/// it, because a list of addresses on screen with only a fingerprint between a
+/// stranger and them is the thing this flow exists to avoid. A teammate's has
+/// its own confirmation: who they are, what they may do, and the runners.
 struct AddDeviceView: View {
     @ObservedObject var runners: RunnerStore
 
@@ -15,12 +17,19 @@ struct AddDeviceView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(runners: RunnerStore) {
-        self.runners = runners
-        _store = StateObject(
-            wrappedValue: CeremonyStore(
+        self.init(
+            runners: runners,
+            store: CeremonyStore(
                 account: Account.shared.userId,
                 accountEmail: Account.shared.email,
                 deviceName: UIDevice.current.name))
+    }
+
+    /// With a store of the caller's: the harness answers the directory, the
+    /// gate and the runners (`TeammateAddHarness`).
+    init(runners: RunnerStore, store: CeremonyStore) {
+        self.runners = runners
+        _store = StateObject(wrappedValue: store)
     }
 
     var body: some View {
@@ -54,8 +63,15 @@ struct AddDeviceView: View {
         case .mismatch:
             mismatch
 
+        case .checkingTeam:
+            checkingTeam
+
         case .confirming:
-            confirmation
+            if let teammate = store.teammate {
+                teammateConfirmation(teammate)
+            } else {
+                confirmation
+            }
 
         case .enrolling:
             waiting
@@ -106,6 +122,108 @@ struct AddDeviceView: View {
             .controlSize(.large)
         }
         .padding(24)
+    }
+
+    // MARK: - Is it a teammate's?
+
+    /// A code from another account is held here while the team directory is
+    /// asked (ov-854). Nothing about the code is shown until the core says yes.
+    private var checkingTeam: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+            Text("Checking your teams…").font(.callout).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("teammate-checking")
+    }
+
+    // MARK: - A teammate's device (ov-854)
+
+    /// The confirmation for a teammate's device, in the Mac's words: who the
+    /// directory says they are, the key to compare in person, what they'll be
+    /// called and may do, and the runners.
+    ///
+    /// The email is the directory's, never the code's: the code only named an
+    /// account, and anyone can show a code naming any account. What stops a
+    /// stranger is the person adding them checking it's really them, and that
+    /// the key matches the one under their code.
+    private func teammateConfirmation(_ teammate: TeammateChoice) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Add Your Teammate’s Device?")
+                    .font(.title3.weight(.semibold))
+                    .accessibilityIdentifier("teammate-title")
+
+                Text(
+                    "“\(store.offer?.name ?? "This device")” is signed in as \(teammate.who.email), "
+                        + "who’s on your team “\(teammate.who.team)”. Add it only if they’re with you and "
+                        + "the key below matches the one under their code."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("teammate-subtitle")
+
+                if let fingerprint = store.fingerprint {
+                    FingerprintRow(fingerprint: fingerprint, key: store.offer?.key_a ?? "", opened: true)
+                }
+
+                TeammateFields(teammate: teammate) { change in store.setTeammate(change) }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach($store.rows) { $row in
+                        Button {
+                            row.picked.toggle()
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Image(systemName: row.picked ? "checkmark.square.fill" : "square")
+                                    .foregroundStyle(row.picked ? Color.accentColor : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.label)
+                                    Text(row.blocked ?? row.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(row.blocked != nil)
+                        .opacity(row.blocked == nil ? 1 : 0.55)
+                        .accessibilityIdentifier("teammate-runner-\(row.label)")
+                    }
+                }
+
+                Text(
+                    "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected runner and "
+                        + "records it as your teammate’s. Work there runs on the Claude account signed in on "
+                        + "that runner, so its usage and limits are shared."
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: 12) {
+                    Button {
+                        Task { await store.confirmTeammate() }
+                    } label: {
+                        Text("Add Teammate").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!store.rows.contains(where: \.picked) || !teammate.isComplete)
+                    .accessibilityIdentifier("teammate-add")
+
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("teammate-cancel")
+                }
+                .padding(.top, 4)
+            }
+            .padding()
+        }
     }
 
     // MARK: - The confirmation
@@ -253,9 +371,14 @@ struct AddDeviceView: View {
 struct FingerprintRow: View {
     let fingerprint: String
     let key: String
+    /// Open to start with: a teammate's key is the one thing to compare, so
+    /// comparing it is not left behind a tap (ov-854).
+    var opened = false
+
+    @State private var expanded = false
 
     var body: some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $expanded) {
             Text(key.isEmpty ? fingerprint : key)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
@@ -264,6 +387,7 @@ struct FingerprintRow: View {
             Text(Self.abbreviated(fingerprint))
                 .font(.system(.footnote, design: .monospaced))
         }
+        .onAppear { expanded = opened }
     }
 
     /// The ends, which is what a person compares, and none of the middle,
@@ -316,5 +440,51 @@ struct RefusalScreen: View {
             }
         }
         .padding(24)
+    }
+}
+
+/// What a teammate will be called on the runners, and what they may do there
+/// (ov-854), as the Mac's `TeammateFields` has it.
+struct TeammateFields: View {
+    let teammate: TeammateChoice
+    let change: ((inout TeammateChoice) -> Void) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LabeledContent("Name") {
+                TextField("Name", text: bind(\.name))
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityIdentifier("teammate-name")
+            }
+            LabeledContent("Handle") {
+                TextField("Handle", text: bind(\.handle))
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+                    .accessibilityIdentifier("teammate-handle")
+            }
+            if !TeammateNames.isValidHandle(teammate.handle) {
+                Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("teammate-handle-note")
+            }
+            Picker("Access", selection: bind(\.scope)) {
+                ForEach(TeammateScope.allCases) { scope in Text(scope.title).tag(scope) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("teammate-scope")
+            Text(teammate.scope.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("teammate-scope-detail")
+        }
+    }
+
+    private func bind<Value>(_ path: WritableKeyPath<TeammateChoice, Value>) -> Binding<Value> {
+        Binding(get: { teammate[keyPath: path] }, set: { value in change { $0[keyPath: path] = value } })
     }
 }

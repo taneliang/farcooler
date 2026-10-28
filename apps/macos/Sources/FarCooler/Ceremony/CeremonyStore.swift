@@ -165,59 +165,6 @@ struct CeremonyManifest: Codable, Equatable {
     var granted_by: String? = nil
 }
 
-/// Who the team directory says a teammate is (ov-525): the account their
-/// code named, and the email and team the DIRECTORY has for it. Nothing here
-/// came from the code but the account it was looked up by.
-struct CeremonyTeammate: Codable, Equatable {
-    var account: String
-    var email: String
-    var team: String
-}
-
-/// A team whose roster holds a teammate's device while it waits out the hold
-/// after their account's trust reset (ruling R-76, ov-565), and when the hold
-/// ends, in milliseconds by the relay's clock. Shown, never judged here.
-struct CeremonyHold: Codable, Equatable {
-    var team: String
-    var until: Double
-
-    var ends: Date { Date(timeIntervalSince1970: until / 1000) }
-
-    /// What the confirmation says about it, above Add Teammate: why the
-    /// device is held, and what adding it now vouches for.
-    static func sentence(_ holds: [CeremonyHold], email: String) -> String {
-        let ends = (holds.map(\.ends).max() ?? Date()).formatted(date: .abbreviated, time: .shortened)
-        return "Their device is waiting out a hold until \(ends), because \(email)’s account had no confirmed "
-            + "device left and confirmed it when it signed in. That’s also what someone with a stolen sign-in "
-            + "could do. Add it only if \(email) is with you and says they did that themselves: adding it "
-            + "confirms the device for your team now."
-    }
-}
-
-/// A teammate's access on the runners they're added to: Control or Read,
-/// never a shell (ruling R-65). The core refuses a teammate's code that asks
-/// for a shell key, and this is the only choice left.
-enum TeammateScope: String, CaseIterable, Identifiable, Equatable {
-    case control, read
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .control: return "Control"
-        case .read: return "Read"
-        }
-    }
-
-    /// What it lets them do, under the picker.
-    var detail: String {
-        switch self {
-        case .control: return "They can run agents and commands on the runners you select."
-        case .read: return "They can follow the work on the runners you select, but can’t change it."
-        }
-    }
-}
-
 // MARK: - Refusals
 
 /// Why a code was refused, and the sentence that belongs to it.
@@ -274,12 +221,12 @@ enum Refusal: Equatable {
         case .alreadyTaken: return "This code was already used"
         case .tooLarge: return "Too many runners selected"
         case .noTunnel: return "This Mac can’t reach one of those runners"
-        case .directoryUnreachable: return "Couldn’t check your teams"
-        case .notATeammate: return "This device’s account isn’t on any of your teams"
-        case .teammateShell: return "Teammates can’t have shell access"
+        case .directoryUnreachable: return TeammateRefusalCopy.directoryUnreachableTitle
+        case .notATeammate: return TeammateRefusalCopy.notATeammateTitle
+        case .teammateShell: return TeammateRefusalCopy.teammateShellTitle
         case .holdNotConfirmed: return "Couldn’t confirm their device"
         case .heldKey: return "Their device is waiting out a hold"
-        case .unregisteredKey: return "Their account hasn’t confirmed that device"
+        case .unregisteredKey: return TeammateRefusalCopy.unregisteredKeyTitle
         case .unreadable: return "Couldn’t read this code"
         }
     }
@@ -310,13 +257,11 @@ enum Refusal: Equatable {
             return "One of them is reachable only through a tunnel, and this Mac isn’t on "
                 + "one. Try again, choosing runners it can reach."
         case .directoryUnreachable:
-            return "That device uses another account, and Far Cooler couldn’t reach your team directory to "
-                + "check it’s a teammate’s, so nothing was added. Check your connection, then try again."
+            return TeammateRefusalCopy.directoryUnreachable
         case .notATeammate(let email):
-            return "Invite its owner to one of your teams, or sign in to \(email) on that device, then show "
-                + "its code again."
+            return TeammateRefusalCopy.notATeammate(email: email)
         case .teammateShell:
-            return "On that Mac, turn off shell access, then show its code again."
+            return TeammateRefusalCopy.teammateShell
         case .heldKey:
             return "Their account confirmed it after it had no confirmed device left, so your team can add it once "
                 + "the hold ends. Update Far Cooler on this Mac, then scan its code again."
@@ -324,15 +269,7 @@ enum Refusal: Equatable {
             return "Far Cooler couldn’t record with your team that you confirmed their device, so nothing was "
                 + "added. Check your connection, then scan its code again."
         case .unregisteredKey:
-            // The next step, now there is one (review L2, ov-550). A first
-            // device is confirmed by signing in on it (`keys: []`); a later
-            // or reinstalled one by their scanning its code from a device
-            // already confirmed, in the same-account ceremony.
-            // "That device", never "this": this Mac is the admin's.
-            return "Far Cooler adds a teammate’s device only once their account has confirmed it. "
-                + "Ask them to sign in to Far Cooler on it, then scan its code from another of their "
-                + "devices that’s already confirmed. If it’s their first device, signing in is enough. "
-                + "Then scan its code here again."
+            return TeammateRefusalCopy.unregisteredKey
         case .unreadable:
             return "Show a new code, then try again."
         }
@@ -560,30 +497,8 @@ final class CeremonyStore: ObservableObject {
     }
 
     /// A teammate's code: who the directory says they are, and what the
-    /// person adding them chose.
-    struct TeammateChoice: Equatable {
-        var who: CeremonyTeammate
-        /// The directory's answers the scan was checked against, kept to
-        /// check the same code again at the tap, as the same-account path
-        /// re-scans.
-        var directory: String
-        /// The account signed in on this Mac, which the check is made for.
-        var scanner: String
-        /// This Mac's email, written into the reply as whose runners these are.
-        var grantedBy: String
-        /// The teams whose rosters hold this device while it waits out a
-        /// trust reset's hold (R-76): said on the sheet, and confirmed with
-        /// each team at the tap, before anything is written.
-        var held: [CeremonyHold] = []
-        var handle: String
-        var name: String
-        var scope: TeammateScope = .control
-
-        /// Whether what was typed is something a runner will take.
-        var isComplete: Bool {
-            TeammateNames.isValidHandle(handle) && !name.trimmingCharacters(in: .whitespaces).isEmpty
-        }
-    }
+    /// person adding them chose. Shared with the iPhone (`TeammateAdd.swift`).
+    typealias TeammateChoice = AgentKit.TeammateChoice
 
     /// One runner, and whether this ceremony grants it.
     struct RunnerRow: Equatable, Identifiable {
@@ -782,12 +697,7 @@ final class CeremonyStore: ObservableObject {
         else { return refuse(.unreadable) }
         if case .notATeammate = Refusal.from(answer) { return refuse(.notATeammate(email)) }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
-        struct Accepted: Decodable {
-            let offer: String
-            let teammate: CeremonyTeammate
-            let held: [CeremonyHold]?
-        }
-        guard let accepted = try? JSONDecoder().decode(Accepted.self, from: Data(answer.utf8)),
+        guard let accepted = try? JSONDecoder().decode(TeammateAccepted.self, from: Data(answer.utf8)),
             let offer = try? JSONDecoder().decode(CeremonyOffer.self, from: Data(accepted.offer.utf8))
         else { return refuse(.unreadable) }
         let who = accepted.teammate
@@ -801,9 +711,7 @@ final class CeremonyStore: ObservableObject {
                 offerJSON: accepted.offer, offer: offer, scannedAt: at, rows: rows, shell: nil,
                 teammate: TeammateChoice(
                     who: who, directory: directory ?? "", scanner: account, grantedBy: email,
-                    held: accepted.held ?? [],
-                    handle: TeammateNames.handle(email: who.email, taken: []),
-                    name: TeammateNames.name(email: who.email))))
+                    held: accepted.held ?? [])))
     }
 
     /// The person adding a teammate edits what they'll be called, and what

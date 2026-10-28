@@ -109,6 +109,7 @@ SHARDS = {
         "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
         "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
         "GrantBrowserUITests",  # 3 tests; -grant-browser (ov-828)
+        "TeammateAddUITests",  # 9 tests; -teammate-add (ov-854)
         "MemberLoginsUITests",  # ~95 s locally, 3 tests; -phone-harness -phone-shared -phone-own-logins (ov-652)
         "EnrolledDevicesUITests",  # 3 tests + opt-in captures; -phone-harness -phone-devices (ov-855)
         "NeedsYouTeamUITests",  # ~40 s locally, 1 test; -phone-harness -phone-team (ov-633)
