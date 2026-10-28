@@ -35,6 +35,7 @@ mod bring_draft;
 mod interrupt;
 mod members;
 pub(crate) mod step_up;
+pub mod teammate;
 mod node_key;
 mod rekey;
 mod pr_actions;
@@ -1444,7 +1445,28 @@ impl Session {
         shell_access: bool,
         node_key: &str,
     ) -> Result<serde_json::Value, SessionError> {
-        let payload = enroll_payload(public_key, label, client_id, scope, shell_access, node_key, false)?;
+        self.enroll_client_for(public_key, label, client_id, scope, shell_access, node_key, false).await
+    }
+
+    /// `enroll_client`, saying whose the new device is (ov-854).
+    ///
+    /// `for_teammate` is the owner's Add Teammate: the runner keeps the new
+    /// line nobody's, and released, until the `member.set` that follows binds
+    /// it (ov-828). It is the one flag this client never defaults on: a device
+    /// written without it is the owner's until somebody binds it, which is what
+    /// the owner's own devices want and a teammate's must never get.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn enroll_client_for(
+        &self,
+        public_key: &str,
+        label: &str,
+        client_id: &str,
+        scope: &str,
+        shell_access: bool,
+        node_key: &str,
+        for_teammate: bool,
+    ) -> Result<serde_json::Value, SessionError> {
+        let payload = enroll_payload(public_key, label, client_id, scope, shell_access, node_key, for_teammate)?;
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(enroll_json(&r)),
             other => Err(wrong("client_enroll", &other)),
@@ -1460,6 +1482,18 @@ impl Session {
     /// `with_added` also revokes every device this one added, and those they
     /// added in turn, in the same write (ov-838).
     pub async fn revoke_client(
+        &self,
+        client_id: &str,
+        with_added: bool,
+    ) -> Result<serde_json::Value, SessionError> {
+        self.revoke_client_with(client_id, false).await
+    }
+
+    /// `revoke_client`, taking with it every device the revoked one added that
+    /// still has a line (`with_added`, ov-838): what a teammate's key that
+    /// failed to bind is taken off with, since a key from before ov-828 read as
+    /// the owner's and could have added others.
+    pub async fn revoke_client_with(
         &self,
         client_id: &str,
         with_added: bool,

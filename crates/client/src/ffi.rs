@@ -1746,6 +1746,10 @@ async fn dispatch(
         "step_up.propose" => step_up_args::propose(session, args).await,
         // The owner gives a member a role, `{handle, role}` (ov-784).
         "member.set_role" => rep_args::set_role(session, args).await,
+        // The owner's Add Teammate, one runner's half (ov-854): not a wire
+        // method, so `route` has no entry; it is `client.enroll` for_teammate
+        // and `member.set`, in the Mac's order.
+        "teammate.enroll" => teammate_enroll_args::enroll(session, args).await,
         // A member's Talk starts their own rep (ov-526); `{workspace, handle}`.
         "rep.start" => rep_args::start(session, args).await,
         // A member signs in to Claude from their own device (ov-584).
@@ -3167,7 +3171,7 @@ mod tests {
 
 /// The agent screen's controls against a real daemon, as a phone sends them.
 #[cfg(test)]
-mod phone_path_tests;
+pub(crate) mod phone_path_tests;
 mod route;
 #[cfg(test)]
 mod board_reads_phone_tests;
@@ -3186,6 +3190,8 @@ mod members_phone_tests;
 #[cfg(test)]
 mod step_up_phone_tests;
 #[cfg(test)]
+mod teammate_enroll_tests;
+#[cfg(test)]
 mod rows_phone_tests;
 #[cfg(test)]
 mod rows_fixture_tests;
@@ -3196,6 +3202,7 @@ mod answers_args;
 mod rep_args;
 mod revoke_args;
 mod step_up_args;
+mod teammate_enroll_args;
 mod claude_sign_in_args;
 mod images_arg;
 mod reach;

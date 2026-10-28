@@ -22,10 +22,12 @@ use super::{dispatch, route::route};
 use crate::session::{Session, SessionError};
 
 /// A runner whose every connection is at one scope, with one agent pane.
-pub(super) struct Runner {
+pub(crate) struct Runner {
     _dir: tempfile::TempDir,
-    pub(super) socket: std::path::PathBuf,
-    pub(super) service: Arc<Service>,
+    pub(crate) socket: std::path::PathBuf,
+    pub(crate) service: Arc<Service>,
+    /// The runner's own `authorized_keys`, in its scratch home.
+    pub(crate) authorized_keys: std::path::PathBuf,
 }
 
 /// Take down any tmux server the service started, as the daemon's own
@@ -36,18 +38,18 @@ impl Drop for Runner {
     }
 }
 
-pub(super) async fn a_runner(scope: Scope) -> Runner {
+pub(crate) async fn a_runner(scope: Scope) -> Runner {
     a_runner_for(scope, None).await
 }
 
 /// `a_runner`, with the connection made as the enrolled device `client_id`
 /// (a member's, once the store binds it to one), not the owner's.
-pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runner {
+pub(crate) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runner {
     a_runner_with(scope, client_id, |service| service).await
 }
 
 /// `a_runner_for`, with `shape` applied to the service before it is shared.
-pub(super) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: impl FnOnce(Service) -> Service) -> Runner {
+pub(crate) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: impl FnOnce(Service) -> Service) -> Runner {
     let client_id = client_id.map(str::to_string);
     // Short, because the agent socket lives in it and macOS caps a socket path
     // at 104 bytes. The system temporary directory alone is most of that.
@@ -98,7 +100,7 @@ pub(super) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: 
             .await;
     });
     tokio::task::yield_now().await;
-    Runner { _dir: dir, socket, service }
+    Runner { _dir: dir, socket, service, authorized_keys: home.join(".ssh").join("authorized_keys") }
 }
 
 /// A runner that refuses every request it is sent, as `not_found`.
