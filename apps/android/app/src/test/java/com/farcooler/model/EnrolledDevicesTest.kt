@@ -5,7 +5,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,7 +26,7 @@ class EnrolledDevicesTest {
         ]}
     """.trimIndent()
 
-    private fun list() = assertNotNull(EnrolledDevices.of(Json.parseToJsonElement(answer).jsonObject)).let { it!! }
+    private fun list() = requireNotNull(EnrolledDevices.of(Json.parseToJsonElement(answer).jsonObject))
     private fun device(id: String) = list().devices.first { it.clientId == id }
 
     @Test

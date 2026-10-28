@@ -110,8 +110,9 @@ struct EnrolledDevicesSettingsTests {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for scheme in [ColorScheme.light, .dark] {
             let (ids, window) = await Self.drawn(scheme: scheme)
+            let view = try #require(window.contentView)
             try await Capture.keep(
-                window, to: out.appendingPathComponent("mac-enrolled-devices-\(scheme == .dark ? "dark" : "light").png"),
+                view, to: out.appendingPathComponent("mac-enrolled-devices-\(scheme == .dark ? "dark" : "light").png"),
                 expecting: "the devices section", until: { ids.contains("runner-enrolled-devices") })
             window.close()
         }
