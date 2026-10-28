@@ -3,6 +3,7 @@
 
     scripts/heavy -- cargo nextest run --profile ci --workspace
     scripts/heavy --no-lock -- swift test        # lock and load wait off
+    scripts/heavy --light -- cargo test -p X name  # short filtered run: no queue, 2 at a time (ov-843)
 
 Waits for the 5-minute load average to fall under 20, takes the same flock
 scripts/lane-gate.py takes (scripts/heavy_lock.py), writes the holder note
