@@ -81,7 +81,7 @@ const bundled = await build({
 })
 emit('app', 'js', bundled.outputFiles[0].contents)
 // xterm's own stylesheet first, so the page's rules come after it.
-emit('app', 'css', Buffer.concat([readFileSync('node_modules/@xterm/xterm/css/xterm.css'), readFileSync('src/client/app.css')]))
+emit('app', 'css', Buffer.concat([readFileSync('node_modules/@xterm/xterm/css/xterm.css'), readFileSync('src/client/app.css'), readFileSync('src/client/chat.css')]))
 
 let html = readFileSync('src/client/index.html', 'utf8')
 html = html.replace(/\{\{([a-z0-9_.-]+)\}\}/g, (_, key) => {

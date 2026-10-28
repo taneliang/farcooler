@@ -1,0 +1,108 @@
+/* An agent's conversation (ov-776, src/client/chat.ts). Colors come from
+   app.css's tokens; this file adds only what a conversation needs. */
+.chat-host { --chat-w: 760px; --bubble: var(--button-bg); --bubble-text: var(--button-text); --code-bg: var(--bg-alt); --ok: #30a46c; --bad: #e5484d; --run: #0a84ff; position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+@media (prefers-color-scheme: light) { .chat-host { --ok: #218358; --bad: #cd2b31; --run: #0071e3; --code-bg: #f5f5f7; } }
+.terminal { position: relative; }
+.chat-host[hidden] { display: none; }
+.chat-host[data-stale="true"] .chat-list { opacity: 0.6; }
+.chat-note { margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--rule); color: var(--text-2); font-size: 13px; }
+
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 16px 8px; scroll-padding-bottom: 8px; }
+.chat-scroll:focus-visible { outline: 2px solid var(--run); outline-offset: -2px; }
+.chat-scroll > * { max-width: var(--chat-w); margin-left: auto; margin-right: auto; }
+.chat-list { display: flex; flex-direction: column; gap: 10px; }
+.chat-list > * { margin: 0; min-width: 0; }
+.chat-list > .turn-end { margin-top: -4px; }
+.chat-empty { margin-top: 18vh; text-align: center; color: var(--text-2); }
+.chat-older { display: block; margin: 0 auto 16px; font-size: 13px; }
+.chat-latest { position: absolute; right: 16px; bottom: 118px; z-index: 2; padding: 6px 14px; font-size: 13px; box-shadow: 0 2px 10px rgb(0 0 0 / 0.3); }
+
+/* The person's words: a bubble on the right. */
+.bubble-row { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-top: 10px; }
+.bubble { max-width: min(82%, 560px); padding: 8px 14px; border-radius: 18px 18px 6px 18px; background: var(--bubble); color: var(--bubble-text); overflow-wrap: anywhere; }
+.bubble.provisional { opacity: 0.75; }
+.bubble.queued { background: none; color: var(--text); border: 1px dashed var(--text-2); }
+.bubble.queued.state-withdrawn { text-decoration: line-through; color: var(--text-2); }
+.bubble-text { margin: 0; white-space: pre-wrap; }
+.bubble-note { margin: 0 6px; font-size: 12px; color: var(--text-2); }
+
+/* The agent's words: plain, on the left. */
+.prose { overflow-wrap: anywhere; }
+.prose > * { margin: 0 0 8px; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p { white-space: pre-wrap; }
+.prose-heading { font-weight: 600; }
+.prose ul, .prose ol { padding-left: 22px; }
+.prose li { margin: 2px 0; }
+.prose code, .tool-summary code { font: 0.9em ui-monospace, "SF Mono", Menlo, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
+.code-block { margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); border: 1px solid var(--rule); font: 12.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.diff-add { color: var(--ok); }
+.diff-del { color: var(--bad); }
+
+.thinking { color: var(--text-2); font-size: 13px; }
+.thinking.live { animation: pulse 1.6s ease-in-out infinite; }
+.notice, .turn-end { color: var(--text-2); font-size: 12.5px; text-align: center; }
+.turn-end { margin-top: 0; }
+
+/* A tool call, or a run of them, as one line that opens. */
+.tool-line, .disclosure > summary { display: block; list-style: none; cursor: default; font-size: 13px; color: var(--text-2); }
+.disclosure > summary { cursor: pointer; border-radius: 8px; padding: 2px 0; }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::after { content: "›"; display: inline-block; margin-left: 6px; transition: transform 0.15s; }
+.disclosure[open] > summary::after { transform: rotate(90deg); }
+.disclosure > summary:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+.tool-head { display: inline-flex; align-items: baseline; gap: 8px; max-width: calc(100% - 20px); vertical-align: bottom; }
+.tool-name { font-weight: 600; color: var(--text); flex: none; }
+.tool-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disclosure-body { margin: 6px 0 4px 14px; }
+.tool-list { display: flex; flex-direction: column; gap: 6px; }
+.status { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.status-running { background: var(--run); animation: pulse 1.2s ease-in-out infinite; }
+.status-failed { background: var(--bad); }
+
+/* Cards: a subagent, an ask, a task list, a report. */
+.card { padding: 10px 14px; border-radius: 12px; background: var(--bg-alt); border: 1px solid var(--rule); overflow-wrap: anywhere; }
+.card > * { margin: 0 0 4px; }
+.card > :last-child { margin-bottom: 0; }
+.card-title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card-meta { color: var(--text-2); font-size: 13px; }
+.card.ask:not(.answered) { border-color: var(--run); }
+.ask-options { margin: 2px 0 6px; padding-left: 20px; color: var(--text-2); font-size: 13px; }
+.task-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.task { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+.task-box { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--text-2); border-radius: 4px; position: relative; top: 1px; }
+.task-completed { color: var(--text-2); text-decoration: line-through; }
+.task-completed .task-box { background: var(--ok); border-color: var(--ok); }
+.task-inprogress .task-box { border-color: var(--run); }
+
+/* Long messages fold to a few lines until Show More. */
+.fold-body { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden; }
+.fold.open .fold-body { display: block; }
+.fold-toggle { display: block; margin-top: 6px; padding: 2px 10px; font-size: 12px; background: none; color: inherit; border-color: currentColor; opacity: 0.85; }
+.bubble .fold-toggle { color: var(--bubble-text); }
+
+/* The foot: working, a problem, and the box. */
+.chat-foot { flex: none; padding: 6px 16px 14px; }
+.chat-foot > * { max-width: var(--chat-w); margin-left: auto; margin-right: auto; }
+.chat-working { display: flex; align-items: center; gap: 8px; padding: 0 4px 8px; color: var(--text-2); font-size: 13px; }
+.working-text { flex: 1; }
+.working-dots { width: 8px; height: 8px; border-radius: 50%; background: var(--run); animation: pulse 1.2s ease-in-out infinite; }
+.chat-stop { padding: 3px 12px; font-size: 13px; }
+.chat-problem { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--bad); font-size: 13px; }
+.chat-field { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 16px; border-radius: 22px; background: var(--bg-alt); border: 1px solid var(--rule); }
+.chat-field:focus-within { border-color: var(--run); }
+.chat-input { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none; color: var(--text); font: inherit; line-height: 1.4; padding: 6px 0; max-height: 200px; }
+.chat-input::placeholder { color: var(--text-2); }
+.chat-send { flex: none; width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+.chat-send:disabled { background: var(--rule); cursor: default; }
+.chat-send svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chat-host button:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .thinking.live, .status-running, .working-dots { animation: none; } .disclosure > summary::after { transition: none; } }
+@media (max-width: 640px) {
+  .chat-scroll { padding: 14px 12px 6px; }
+  .chat-foot { padding: 6px 12px max(12px, env(safe-area-inset-bottom)); }
+  .bubble { max-width: 88%; }
+  .chat-latest { right: 12px; bottom: 100px; }
+}

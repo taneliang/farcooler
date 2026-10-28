@@ -27,6 +27,7 @@ pub mod page_json;
 #[cfg(all(target_os = "macos", feature = "native"))]
 pub mod pipe;
 pub mod plan_json;
+pub mod rows_json;
 pub mod session;
 pub mod ssh;
 pub mod task_starts_json;

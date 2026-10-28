@@ -28,6 +28,7 @@ import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type
 import { Board, type BoardView, countLabel, countOf, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
+import { ChatView } from './chat'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { PaneSet } from './panes'
@@ -604,7 +605,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
-  let terminals: { id: string; title: string; state: string }[]
+  let terminals: { id: string; title: string; state: string; agent: boolean }[]
   try {
     terminals = JSON.parse(await runner.terminals())
   } catch (e) {
@@ -658,11 +659,15 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   panes?.dispose()
   // One xterm per terminal, each in a host of its own inside the stage. Only
   // the one in front is displayed; the rest keep their screens and, up to the
-  // channel budget, their streams (panes.ts).
-  const set = new PaneSet<WebRunner>(() => {
+  // channel budget, their streams (panes.ts). An agent's terminal opens as
+  // its conversation (chat.ts), which rides the control session and holds no
+  // channel.
+  const agents = new Set(terminals.filter(t => t.agent).map(t => t.id))
+  const set = new PaneSet<WebRunner>(id => {
     const host = document.createElement('div')
     host.className = 'terminal-host'
     $('terminal').append(host)
+    if (agents.has(id)) return new ChatView(host, target.label)
     return new PaneView(host, word => paneNote(connectFailure(word, target.label)))
   })
   panes = set
@@ -684,6 +689,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     button.className = 'terminal-choice'
     button.textContent = t.title || 'Terminal'
     button.title = t.state
+    if (t.agent) button.dataset.agent = 'true'
     button.onclick = () => void open(t.id, button)
     buttonFor.set(t.id, button)
     list.append(button)

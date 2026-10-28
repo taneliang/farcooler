@@ -61,40 +61,7 @@ fn wait_of(args: &Value) -> u32 {
     args.get("waitMs").and_then(Value::as_u64).map_or(DEFAULT_WAIT_MS, |ms| ms.min(u64::from(u32::MAX)) as u32)
 }
 
-fn row_of(row: &farcooler_protocol::v1::AgentRow) -> Value {
-    serde_json::from_str(&row.row_json).unwrap_or_else(|_| json!({ "id": row.id, "ord": row.ord, "rev": row.rev }))
-}
-
-/// A page as an app reads it: `{epoch, rev, moreBefore, rows: [row]}`.
-pub(super) fn page_of(page: &farcooler_protocol::v1::AgentRowPage) -> Value {
-    json!({
-        "epoch": page.epoch,
-        "rev": page.rev,
-        "moreBefore": page.more_before,
-        "rows": page.rows.iter().map(row_of).collect::<Vec<_>>(),
-    })
-}
-
-pub(super) fn changes_of(follow: &farcooler_protocol::v1::AgentRowChanges) -> Value {
-    use farcooler_protocol::v1::AgentRowChangeKind as Kind;
-    let changes: Vec<Value> = follow
-        .changes
-        .iter()
-        .map(|change| {
-            let kind = match Kind::try_from(change.kind) {
-                Ok(Kind::Insert) => "insert",
-                Ok(Kind::Remove) => "remove",
-                _ => "update",
-            };
-            let mut out = json!({ "kind": kind, "id": change.id, "rev": change.rev });
-            if let Some(row) = &change.row {
-                out["row"] = row_of(row);
-            }
-            out
-        })
-        .collect();
-    json!({ "epoch": follow.epoch, "rev": follow.rev, "reset": follow.reset, "changes": changes })
-}
+pub(super) use crate::rows_json::{changes_json as changes_of, rows_page_json as page_of};
 
 #[cfg(test)]
 #[path = "subagent_rows_tests.rs"]

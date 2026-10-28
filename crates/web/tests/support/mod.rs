@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, Error as WireError, ErrorCode, Event, NeedsYouList, Plan, Workspace, WorkspaceList, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
+    AgentRow, AgentRowChange, AgentRowChangeKind, AgentRowChanges, AgentRowPage, Empty, Error as WireError, ErrorCode, Event, NeedsYouList, Plan, Workspace, WorkspaceList, Request, Response, ServerHello, Terminal, TerminalAttachResult, TerminalFrame, TerminalList,
     TerminalOutput, TerminalState, WireEnvelope, event, request, response, result, terminal_frame, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
@@ -143,8 +143,53 @@ pub struct Seen {
     pub refuse_plan: Mutex<Option<(ErrorCode, &'static str)>>,
     /// The attach channel's write half, so a write can echo onto it.
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
+    /// The terminal's agent conversation, as the runner's projector holds it.
+    pub chat: Mutex<Chat>,
+    /// What `terminal.compose` carried, as the text of its first block.
+    pub composed: Mutex<Vec<String>>,
+    /// Set, the agent is mid-turn: a composed message waits in its queue.
+    pub busy: AtomicBool,
+    /// How many times `terminal.interrupt` was asked.
+    pub interrupts: AtomicUsize,
     /// Told of each write as it arrives, for a caller watching from outside.
     pub typing: std::sync::Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
+}
+
+/// The epoch of the fake projector.
+pub const EPOCH: u64 = 1_700_000_000_000_001;
+
+/// A fake projector: rows in `ord` order, and the log of changes a follow
+/// reads. A row put twice is an update the second time.
+#[derive(Default)]
+pub struct Chat {
+    pub rev: u64,
+    rows: Vec<AgentRow>,
+    log: Vec<AgentRowChange>,
+}
+
+impl Chat {
+    /// Put row `id` (its `row_json` is the projector's serialization).
+    pub fn put(&mut self, id: &str, row_json: &str) {
+        self.rev += 1;
+        let at = self.rows.iter().position(|r| r.id == id);
+        let row = AgentRow { id: id.into(), ord: at.unwrap_or(self.rows.len()) as u64, rev: self.rev, row_json: row_json.into() };
+        match at {
+            Some(i) => self.rows[i] = row.clone(),
+            None => self.rows.push(row.clone()),
+        }
+        let kind = if at.is_some() { AgentRowChangeKind::Update } else { AgentRowChangeKind::Insert };
+        self.log.push(AgentRowChange { kind: kind as i32, id: id.into(), rev: self.rev, row: Some(row) });
+    }
+
+    fn page(&self) -> AgentRowPage {
+        AgentRowPage { epoch: EPOCH, rev: self.rev, rows: self.rows.clone(), ..Default::default() }
+    }
+
+    fn follow(&self, epoch: u64, after: u64) -> AgentRowChanges {
+        let reset = epoch != EPOCH;
+        let changes = self.log.iter().filter(|c| c.rev > after).cloned().collect();
+        AgentRowChanges { epoch: EPOCH, rev: self.rev, changes, reset, ..Default::default() }
+    }
 }
 
 #[derive(Clone)]
@@ -276,6 +321,9 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     capability::WORKSTREAMS.to_string(),
                     capability::BOARD_PLAN.to_string(),
                     capability::BOARD_RULING_ACTIONS.to_string(),
+                    capability::AGENT_ROWS.to_string(),
+                    capability::AGENT_COMPOSE.to_string(),
+                    capability::TERMINAL_INTERRUPT.to_string(),
                 ],
                 ..Default::default()
             }))
@@ -289,6 +337,7 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                             items: vec![Terminal {
                                 id: Bytes::copy_from_slice(TERMINAL.as_bytes()),
                                 title: "shell".into(),
+                                role: farcooler_protocol::v1::TerminalRole::Agent as i32,
                                 state: TerminalState::Running as i32,
                                 columns: 80,
                                 rows: 24,
@@ -315,6 +364,23 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                             attached.data(&output(&w.payload)[..]).await.unwrap();
                         }
                         answer(&req, result::Value::Empty(Empty {}))
+                    }
+                    ("agent.rows", _) => answer(&req, result::Value::AgentRowPage(seen.chat.lock().await.page())),
+                    ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(f))) => {
+                        answer(&req, result::Value::AgentRowChanges(seen.chat.lock().await.follow(f.epoch, f.after_rev)))
+                    }
+                    ("terminal.compose", Some(request::Payload::AgentPrompt(p))) => {
+                        let text = p.blocks.into_iter().find_map(|b| match b.content {
+                            Some(farcooler_protocol::v1::agent_prompt_block::Content::Text(t)) => Some(t),
+                            _ => None,
+                        });
+                        seen.composed.lock().await.push(text.unwrap_or_default());
+                        let queued = seen.busy.load(Ordering::SeqCst);
+                        answer(&req, result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
+                    }
+                    ("terminal.interrupt", _) => {
+                        seen.interrupts.fetch_add(1, Ordering::SeqCst);
+                        answer(&req, result::Value::Terminal(Terminal::default()))
                     }
                     ("daemon.version", _) => {
                         seen.probes.fetch_add(1, Ordering::SeqCst);

@@ -15,6 +15,7 @@
 //! a page. Everything else builds natively too, which is how `tests/` drives it
 //! against an in-process SSH server.
 
+pub mod agent;
 pub mod enroll;
 pub mod error;
 pub mod handshake;

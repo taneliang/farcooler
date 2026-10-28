@@ -72,6 +72,15 @@ declare module 'fc-web' {
     keepRuling(ruling: string): Promise<void>
     keepAllRulings(workspace: string): Promise<number>
     page(workspace: string, slot: string): Promise<string>
+    /// An agent's rows in the apps' shape (crates/client's rows_json): the
+    /// newest, or up to `limit` before row `before`; and what changed after a
+    /// revision, held by the runner while nothing has.
+    agentRows(terminal: string, before: number | undefined, limit: number): Promise<string>
+    agentRowsFollow(terminal: string, epoch: number, afterRev: number, waitMs: number): Promise<string>
+    /// Send a message as the person's; true when the agent was busy and it waits.
+    compose(terminal: string, text: string): Promise<boolean>
+    /// Stop the turn the agent is working on.
+    interrupt(terminal: string): Promise<void>
     /// Whether the runner answers right now. False means the connection is
     /// over, and `onLost` is called.
     check(): Promise<boolean>

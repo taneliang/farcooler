@@ -58,6 +58,11 @@ impl From<SessionError> for WebError {
             SessionError::Ssh(other) => WebError::Handshake(other.to_string()),
             // `--stdio` never said hello: the daemon is not there to start.
             missing @ SessionError::DaemonMissing { .. } => WebError::Exec(missing.to_string()),
+            // A call the runner is too old for, said as such, so the page can
+            // tell its person to update the runner rather than "refused".
+            SessionError::Refused { code, message, .. } if code == ErrorCode::CapabilityUnsupported as i32 => {
+                WebError::Capability(message)
+            }
             SessionError::Refused { code, what, .. } => WebError::Refused {
                 code: ErrorCode::try_from(code)
                     .map(|c| c.as_str_name().trim_start_matches("ERROR_CODE_").to_ascii_lowercase().replace('_', "-"))
@@ -80,6 +85,10 @@ pub struct TerminalSummary {
     pub state: String,
     pub columns: u32,
     pub rows: u32,
+    /// An agent's pane rather than a shell's: the runner's role for it, else
+    /// an agent's activity (the apps' `RunningAgents.isAgent`). The page opens
+    /// an agent as a conversation.
+    pub agent: bool,
 }
 
 /// A connected runner: the client core's session over one SSH connection.
@@ -172,6 +181,7 @@ impl Runner {
             .await?
             .into_iter()
             .map(|t| TerminalSummary {
+                agent: is_agent(&t),
                 id: Uuid::from_slice(&t.id).map(|u| u.to_string()).unwrap_or_default(),
                 title: t.title,
                 state: TerminalState::try_from(t.state)
@@ -317,4 +327,12 @@ impl Pane {
         }
         async {}
     }
+}
+
+/// Whether a terminal is an agent's: the runner's role for it, else an
+/// activity that is not a plain shell's.
+fn is_agent(t: &farcooler_protocol::v1::Terminal) -> bool {
+    use farcooler_protocol::v1::{AgentActivity, TerminalRole};
+    matches!(TerminalRole::try_from(t.role), Ok(TerminalRole::Agent | TerminalRole::Orchestrator))
+        || !matches!(AgentActivity::try_from(t.activity), Ok(AgentActivity::None | AgentActivity::Unspecified) | Err(_))
 }
