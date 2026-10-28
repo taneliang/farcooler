@@ -124,7 +124,11 @@ fn main() {
             Some(wire_envelope::Body::ClientHello(_)) => {
                 vec![support::envelope(wire_envelope::Body::ServerHello(ServerHello {
                     selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
-                    capabilities: vec![capability::TERMINAL_STREAM.to_string()],
+                    capabilities: vec![
+                        capability::TERMINAL_STREAM.to_string(),
+                        capability::WORKSTREAMS.to_string(),
+                        capability::BOARD_PLAN.to_string(),
+                    ],
                     ..Default::default()
                 }))]
             }
@@ -165,6 +169,34 @@ fn main() {
                     }
                     vec![support::answer(&req, result::Value::Empty(Empty {}))]
                 }
+                // The plan tab's reads (ov-775): one board with one theme.
+                ("workspace.list", _) => vec![support::answer(
+                    &req,
+                    result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList {
+                        items: vec![farcooler_protocol::v1::Workspace {
+                            id: Bytes::copy_from_slice(support::WORKSPACE.as_bytes()),
+                            name: "Main".into(),
+                            is_main: true,
+                            ..Default::default()
+                        }],
+                    }),
+                )],
+                ("plan.get", _) => vec![support::answer(
+                    &req,
+                    result::Value::Plan(farcooler_protocol::v1::Plan {
+                        themes: vec![farcooler_protocol::v1::BoardThemeView {
+                            theme: Some(farcooler_protocol::v1::BoardTheme {
+                                id: Bytes::copy_from_slice(Uuid::from_u128(0xb01).as_bytes()),
+                                name: "Visual language".into(),
+                                next: "Frosted window plane".into(),
+                                state: farcooler_protocol::v1::BoardThemeState::Active as i32,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
+                )],
                 ("terminal.resize", _) => vec![support::answer(&req, result::Value::Empty(Empty {}))],
                 (other, _) => panic!("the fake daemon doesn't know {other}"),
             },

@@ -705,6 +705,12 @@ try {
       const log = readFileSync(runner.log, 'utf8')
       if (!log.split('\n').some(l => l.includes('Accepted publickey') && l.includes('ECDSA-SK'))) failures.push('sshd logged no ECDSA-SK login')
       console.log(`csp-check: Connect opened a terminal through sshd with the passkey (ECDSA-SK), and the runner got the keystrokes${early ? ' typed before the pane was live' : ''}`)
+
+      // The plan tab reads the board's plan over the same connection (ov-775).
+      await page.click('#show-plan')
+      await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Frosted window plane'), null, { timeout: 30_000 })
+      console.log('csp-check: the Plan tab showed the runner’s theme and its Next line')
+      await page.click('#show-terminals')
       await shoot(page, 'terminal')
 
       await panes(page)
