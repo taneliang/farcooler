@@ -38,9 +38,11 @@ public final class DraftImages: @unchecked Sendable {
     private static let types = [("image/png", "png"), ("image/jpeg", "jpg"), ("image/gif", "gif"), ("image/webp", "webp")]
 
     /// `<milliseconds>_<id>.<extension>`: files list in the order they were attached.
-    private static func name(_ image: OutgoingImage, millis: Int) -> String {
+    /// `%ld`, not `%d`: `%d` takes 32 bits, and a time in milliseconds needs 41, so
+    /// half the time the names went negative and sorted backwards (ov-844).
+    static func name(_ image: OutgoingImage, millis: Int) -> String {
         let ext = types.first { $0.0 == image.mime }?.1 ?? "png"
-        return String(format: "%013d_", millis) + "\(image.id.uuidString).\(ext)"
+        return String(format: "%013ld_", millis) + "\(image.id.uuidString).\(ext)"
     }
 
     /// Keep `image` for `terminal`'s draft.

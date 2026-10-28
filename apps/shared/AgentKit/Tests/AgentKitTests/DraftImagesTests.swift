@@ -39,6 +39,16 @@ struct DraftImagesTests {
         #expect(await Self.store(root).restored(terminal: "pane-2").isEmpty)
     }
 
+    @Test func namesSortInTimeOrderWhereTheLow32BitsGoNegative() {
+        // 1_763_084_076_008 ms is Nov 2025, and its low 32 bits are negative as an
+        // Int32: a 32-bit format printed "-…" names that sorted newest first (ov-844).
+        let image = Self.image(1)
+        let millis = [1_763_084_076_008, 1_763_084_076_009, 1_763_084_076_010, 9_999_999_999_999]
+        let names = millis.map { DraftImages.name(image, millis: $0) }
+        #expect(names == names.sorted())
+        #expect(names[0].hasPrefix("1763084076008_"))
+    }
+
     @Test func aPhotoTakenOutOrSentDoesNotComeBack() async {
         let root = Self.scratch()
         defer { try? FileManager.default.removeItem(at: root) }
