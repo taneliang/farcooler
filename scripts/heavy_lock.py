@@ -276,6 +276,124 @@ def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=prin
     finally:
         ticket.unlink(missing_ok=True)
 
+# ---- light runs (ov-843)
+#
+# A reviewer's two-minute filtered test waited an hour behind whole lane-gates. `scripts/heavy --light -- <command>`
+# skips the gate queue and takes one of LIGHT_SLOTS (2) light slots instead, still waiting for the load to be under the
+# limit. It is an explicit flag, not detection: guessing "this looks short" from a command line fails open (a missed
+# spelling slips a whole suite past the queue), while a flag the caller must type fails closed. The flag is also
+# checked: light_refusal() accepts only a recognized filtered shape (cargo test or nextest with -p and a filter, vitest
+# run with a file, swift test --filter) in a checkout whose target/ is already built (a cold build is not light), and
+# says why when it refuses. Full gates and everything else stay one at a time in the queue.
+
+LIGHT_SLOTS = 2
+LIGHT_SLOTS_ENV = "HEAVY_LIGHT_SLOTS"
+_CARGO_VALUE_FLAGS = {"-p", "--package", "-E", "--filter-expr", "--features", "-F", "--profile", "--cargo-profile", "-P", "--target",
+                      "--test", "--bin", "--example", "--bench", "--manifest-path", "-j", "--jobs", "--exclude", "--target-dir",
+                      "--config", "-Z", "--color", "--message-format", "--run-ignored", "--partition", "--test-threads",
+                      "--retries", "--max-fail", "-T", "--threads", "--build-jobs"}
+_WHOLE_FLAGS = {"--workspace", "--all"}
+
+
+def _positionals(args):
+    """Non-flag arguments of a cargo test or nextest command line, before and after `--`."""
+    before, after, i, dashed = [], [], 0, False
+    while i < len(args):
+        a = args[i]
+        if dashed:
+            if not a.startswith("-"):
+                after.append(a)
+        elif a == "--":
+            dashed = True
+        elif a.startswith("-"):
+            if a in _CARGO_VALUE_FLAGS:
+                i += 1
+        else:
+            before.append(a)
+        i += 1
+    return before, after
+
+
+def light_refusal(cmd, top=None):
+    """None when `cmd` may run as a light run, else the reason it may not (a plain sentence)."""
+    tool = os.path.basename(cmd[0]) if cmd else ""
+    if tool not in ("cargo", "vitest", "swift", "npx"):
+        return "only a direct cargo, vitest or swift test command can be light; anything else (a script, sh -c) queues"
+    rest = list(cmd[1:])
+    if tool == "cargo":
+        if rest[:1] and rest[0].startswith("+"):
+            rest = rest[1:]
+        if rest[:2] in (["nextest", "run"], ["nextest", "r"]):
+            rest, nextest = rest[2:], True
+        elif rest[:1] in (["test"], ["t"]):
+            rest, nextest = rest[1:], False
+        else:
+            return "light cargo is `cargo test` or `cargo nextest run`; builds, clippy and the rest queue"
+        if any(a in _WHOLE_FLAGS or a == "--exclude" or a.startswith("--exclude=") for a in rest):
+            return "--workspace, --all and --exclude mean a whole-workspace run; it queues"
+        if not any(a in ("-p", "--package") or a.startswith("--package=") for a in rest):
+            return "light cargo needs -p <crate>; without it cargo may build the whole workspace"
+        before, after = _positionals(rest)
+        if not (before or after or (nextest and any(a in ("-E", "--filter-expr") or a.startswith("--filter-expr=") for a in rest))):
+            return "light cargo needs a test-name filter (or nextest -E); a whole crate's suite queues"
+        if top is not None and not (pathlib.Path(top) / "target" / "debug").is_dir():
+            return "target/debug is not built here, so this would be a cold build; it queues"
+        return None
+    if tool == "swift":
+        if rest[:1] != ["test"] or not any(a == "--filter" or a.startswith("--filter=") for a in rest):
+            return "light swift is `swift test --filter <name>`"
+        return None
+    if tool == "npx":
+        if rest[:1] != ["vitest"]:
+            return "light npx is `npx vitest run <file>`"
+        rest = rest[1:]
+    if rest[:1] != ["run"] or not [a for a in rest[1:] if not a.startswith("-")]:
+        return "light vitest is `vitest run <file or name filter>`"
+    return None
+
+
+def light_dir(path=None):
+    path = path or lock_path()
+    return path.with_name(path.name + ".light")
+
+
+@contextlib.contextmanager
+def light_slot(job, path=None, slots=None, limit=LOAD_LIMIT, load=load5, poll=LOCK_POLL, announce=60, say=print):
+    """Hold one of `slots` light slots (default 2) for the block, taking it only while load() is under `limit`.
+
+    The count and the load are checked together under one flock, so two arrivals cannot both take the last slot.
+    A slot whose process died is dropped. The gate queue is never consulted."""
+    d = light_dir(path)
+    d.mkdir(parents=True, exist_ok=True)
+    slots = int(os.environ.get(LIGHT_SLOTS_ENV, LIGHT_SLOTS)) if slots is None else slots
+    mine = d / f"{os.getpid()}-{time.time_ns()}.slot"
+    started, announced = time.time(), -1
+    while True:
+        why = None
+        with open(d / ".enter", "a+") as enter:
+            fcntl.flock(enter, fcntl.LOCK_EX)
+            live = []
+            for s in sorted(d.glob("*.slot")):
+                if pid_alive(int(s.name.split("-")[0])):
+                    live.append(s)
+                else:
+                    s.unlink(missing_ok=True)
+            if len(live) >= slots:
+                why = f"all {slots} light slots are in use"
+            elif load() >= limit:
+                why = f"5-minute load average {load():.1f} is {limit:.0f} or more"
+            else:
+                mine.write_text(f"PID {os.getpid()}, running {job}\n")
+                break
+        if time.time() - started >= (announced + 1) * announce:
+            announced += 1
+            say(f"  light run waiting: {why} ({job})", flush=True)
+        time.sleep(poll)
+    try:
+        yield
+    finally:
+        mine.unlink(missing_ok=True)
+
 
 def self_test():
     import re
@@ -544,6 +662,85 @@ def self_test():
                 os.environ.pop(k, None)
                 if v is not None:
                     os.environ[k] = v
+
+        # Light runs (ov-843): a filtered run goes while a full gate holds the lock; the gate queue itself stays one at a time.
+        # The load is fixed by HEAVY_LOAD_LIMIT (100000 = never busy, 0 = always busy); the slot count by HEAVY_LIGHT_SLOTS.
+        lenv = {**env, "HEAVY_LIGHT_SLOTS": "2", "HEAVY_ANNOUNCE": "0.1"}
+        lt = t / "lightwt"
+        (lt / "target" / "debug").mkdir(parents=True)
+        bind = t / "lbin"
+        bind.mkdir()
+        (bind / "cargo").write_text(f'#!/bin/sh\necho "$$ $*" >> "{t}/light-marks"\nsleep "${{LIGHT_SLEEP:-0}}"\n')
+        (bind / "cargo").chmod(0o755)
+        lenv["PATH"] = f"{bind}{os.pathsep}{os.environ['PATH']}"
+        lcmd = ["cargo", "test", "-p", "x", "name_filter"]
+
+        def start_light(more=None, cmd=lcmd, **kw):
+            return subprocess.Popen([heavy, "--light", "--", *cmd], cwd=lt, env={**lenv, **(more or {})}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
+
+        def light_ran():
+            f = t / "light-marks"
+            return len(f.read_text().split("\n")) - 1 if f.exists() else 0
+
+        # 1. a light run starts while a (fake) full gate holds the lock
+        (t / "light-marks").unlink(missing_ok=True)
+        marks.write_text("")
+        gate = subprocess.Popen([heavy, "--", "sh", "-c", f'echo gate-in >> "{marks}"; while [ ! -e "{t}/release" ]; do sleep 0.05; done; echo gate-out >> "{marks}"'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.time() + 5
+        while "gate-in" not in marks.read_text() and time.time() < deadline:
+            time.sleep(0.02)
+        lp = start_light()
+        try:
+            lo = lp.communicate(timeout=10)[0]
+        except subprocess.TimeoutExpired:  # it queued behind the gate: that is the failure this check exists for
+            lp.kill()
+            lo = lp.communicate()[0]
+        expect("a light run starts and finishes while a full gate holds the lock", (lp.returncode, light_ran(), "gate-out" in marks.read_text()), (0, 1, False))
+        (t / "release").write_text("")
+        gate.wait()
+
+        # 2. two full gates never overlap (the wrappers' check above), and a light run never takes a gate's place in the queue
+        expect("a light run leaves no gate ticket and no slot behind", (list(queue_dir(lock).glob("*.ticket")), list(light_dir(lock).glob("*.slot"))), ([], []))
+
+        # 3. a light run waits when the load is at the limit, and when both slots are taken
+        (t / "light-marks").unlink(missing_ok=True)
+        lp = start_light(more={"HEAVY_LOAD_LIMIT": "0"})
+        time.sleep(0.6)
+        waiting = (lp.poll() is None, light_ran())
+        lp.terminate()
+        lo = lp.communicate()[0]
+        expect("a light run waits while the load is at the limit", waiting, (True, 0))
+        expect("... and says so", "light run waiting" in lo and "load average" in lo, True)
+        (t / "light-marks").unlink(missing_ok=True)
+        long_ones = [start_light(more={"LIGHT_SLEEP": "2"}) for _ in range(2)]
+        deadline = time.time() + 5
+        while light_ran() < 2 and time.time() < deadline:
+            time.sleep(0.02)
+        third = start_light()
+        time.sleep(0.6)
+        waiting = (third.poll() is None, light_ran())
+        for p in long_ones:
+            p.communicate(timeout=10)
+        to = third.communicate(timeout=10)[0]
+        expect("a third light run waits while both slots are taken, then runs", (waiting, third.returncode, light_ran()), ((True, 2), 0, 3))
+        expect("... and says the slots are full", "light slots are in use" in to, True)
+
+        # A light flag never carries a whole-suite or unrecognized command past the queue.
+        shapes = {
+            "filtered cargo test": (["cargo", "test", "-p", "x", "f"], True), "cargo test with a filter after --": (["cargo", "test", "-p", "x", "--", "f"], True),
+            "nextest with a filter": (["cargo", "nextest", "run", "-p", "x", "f"], True), "nextest -E": (["cargo", "nextest", "run", "-p", "x", "-E", "test(f)"], True),
+            "toolchain": (["cargo", "+stable", "test", "-p", "x", "f"], True), "vitest file": (["vitest", "run", "a.test.ts"], True),
+            "swift filter": (["swift", "test", "--filter", "A.b"], True),
+            "workspace": (["cargo", "test", "--workspace", "-p", "x", "f"], False), "no -p": (["cargo", "test", "f"], False),
+            "no filter": (["cargo", "test", "-p", "x"], False), "-p value is not a filter": (["cargo", "nextest", "run", "-p", "x", "--profile", "ci"], False),
+            "build": (["cargo", "build", "-p", "x", "f"], False), "bare vitest": (["vitest", "run"], False), "bare swift test": (["swift", "test"], False),
+            "a script": (["sh", "-c", "cargo test"], False), "lane-gate": (["scripts/lane-gate.py"], False),
+        }
+        for name, (c, ok) in shapes.items():
+            expect(f"light accepts/refuses: {name}", light_refusal(c, lt) is None, ok)
+        expect("a cold target/ is not light", light_refusal(lcmd, t / "nowhere") is not None, True)
+        refused = subprocess.run([heavy, "--light", "--", "cargo", "test", "--workspace"], cwd=lt, env=lenv, capture_output=True, text=True, timeout=10)
+        expect("scripts/heavy --light refuses a whole-workspace run with exit 2 and runs nothing", (refused.returncode, "queue" in refused.stderr), (2, True))
     if fails:
         for line in fails:
             print(f"heavy_lock self-test: {line}", file=sys.stderr)

@@ -24,8 +24,9 @@ import heavy_lock as hl  # noqa: E402
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description="Run a heavy command under the machine-wide lock.", usage="scripts/heavy [--no-lock] [--load-limit N] -- command ...")
+    ap = argparse.ArgumentParser(description="Run a heavy command under the machine-wide lock.", usage="scripts/heavy [--no-lock] [--light] [--load-limit N] -- command ...")
     ap.add_argument("--no-lock", action="store_true", help="skip the lock and the load wait (they are off already when CI is set)")
+    ap.add_argument("--light", action="store_true", help="a short filtered run (cargo test -p X name, vitest run file, swift test --filter): skip the gate queue, take one of 2 light slots while the load is under the limit; refused for anything else")
     ap.add_argument("--load-limit", type=float, default=float(os.environ.get("HEAVY_LOAD_LIMIT", hl.LOAD_LIMIT)), help="5-minute load average to wait under (default 20)")
     ap.add_argument("command", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
@@ -33,13 +34,21 @@ def main(argv):
     cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not cmd:
         ap.error("no command; usage: scripts/heavy -- <command...>")
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip() or os.getcwd()
+    if args.light:
+        why = hl.light_refusal(cmd, top)
+        if why:
+            print(f"scripts/heavy --light: {why}. Run it without --light to queue.", file=sys.stderr)
+            return 2
     if not hl.lock_wanted(args.no_lock) or os.environ.get(hl.HELD_ENV):
         return run(cmd)
     poll = float(os.environ.get("HEAVY_POLL", hl.LOCK_POLL))
     announce = float(os.environ.get("HEAVY_ANNOUNCE", 60))
+    if args.light:  # no place in the gate queue; the load wait above and a light slot are the whole gate (ov-843)
+        with hl.light_slot(shlex.join(cmd), slots=None, limit=args.load_limit, poll=poll, announce=announce, say=lambda m, **k: print(m, file=sys.stderr, **k)):
+            return run(cmd, held=True, extra=hl.lean_cargo_env(top) if hl.runs_cargo(cmd) else {})
     hl.wait_for_load(args.load_limit, load=hl.load5,
                      say=lambda m, **k: print(m.replace("load average", "5-minute load average"), file=sys.stderr, **k))
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip() or os.getcwd()
     with hl.machine_lock(top, shlex.join(cmd), poll=poll, announce=announce, say=lambda m, **k: print(m, file=sys.stderr, **k)):
         extra = hl.prepare_lane_build(top, say=lambda m, **k: print(m, file=sys.stderr, **k)) if hl.runs_cargo(cmd) else {}
         return run(cmd, held=True, extra=extra)
