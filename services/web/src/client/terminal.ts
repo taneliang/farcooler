@@ -155,7 +155,8 @@ export class PaneView implements Pane<WebRunner> {
 
   /// Output onto the screen. The page's measuring harness
   /// (test/browser/csp-check.mjs) sets `__fcMeasure` to hear when each chunk
-  /// has been parsed and whether this pane was in front; nothing else does.
+  /// has been parsed by xterm (its write callback, not when it is painted) and
+  /// whether this pane was in front; nothing else does.
   private write(bytes: Uint8Array): void {
     const measure = (globalThis as { __fcMeasure?: (inFront: boolean) => void }).__fcMeasure
     if (!measure) return void this.term.write(bytes)

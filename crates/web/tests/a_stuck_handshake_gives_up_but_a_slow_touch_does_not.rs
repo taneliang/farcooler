@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use farcooler_ceremony::Liveness;
 use farcooler_web::error::WebError;
-use farcooler_web::handshake::{self, Budget, HANDSHAKE};
+use farcooler_web::handshake::{self, Budget, HANDSHAKE, PAUSE_CAP};
 use farcooler_web::liveness::{Clock, Link};
 use farcooler_web::ssh::SignError;
 use farcooler_web::wire::Runner;
@@ -231,6 +231,31 @@ async fn a_tunnel_that_goes_silent_after_a_slow_touch_gets_a_full_allowance_afte
         assert_eq!(signing.await.unwrap().err(), Some(WebError::NoAnswer));
     })
     .await;
+}
+
+/// A signer that never settles (a browser that ignores the WebAuthn timeout)
+/// does not hold the sign-in open forever: the pause has a ceiling, and the
+/// sign-in ends `no_answer` when it is reached, not before.
+#[tokio::test(start_paused = true)]
+async fn a_signer_that_never_settles_ends_the_sign_in_at_the_pause_cap() {
+    local(async {
+        let rig = Rig::new();
+        // Longer than the cap by far, so only the cap can end it.
+        let signing = rig.sign_in(PAUSE_CAP.as_millis() as u64 * 10, false).await;
+        rig.seconds(PAUSE_CAP.as_secs() - 1).await;
+        assert!(!signing.is_finished(), "inside the cap the person may still be touching");
+        rig.second().await;
+        assert_eq!(signing.await.unwrap().err(), Some(WebError::NoAnswer));
+    })
+    .await;
+}
+
+/// The cap is the sum of the person's waits, and covers the page's own
+/// longest (120 s WebAuthn timeout, then the 60 s Use Passkey window).
+#[test]
+fn the_pause_cap_covers_the_pages_longest_legitimate_wait() {
+    assert_eq!(PAUSE_CAP, Duration::from_secs(200));
+    assert!(PAUSE_CAP >= Duration::from_secs(120 + 60));
 }
 
 /// The allowance itself, with no tunnel: waiting counts, a pause does not,

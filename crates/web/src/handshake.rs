@@ -36,6 +36,15 @@ use crate::wire::Runner;
 /// person gives up looking at the screen.
 pub const HANDSHAKE: Duration = Duration::from_secs(15);
 
+/// The most time the allowance's clock may be stopped in all. The signer's
+/// wait is the person's: `assertWith`'s WebAuthn call (the page asks for 120 s,
+/// which a browser may ignore) and then the Use Passkey window (60 s), 180 s in
+/// the worst case in sequence. 200 s covers that with room, and no more: a
+/// signer that never settles (a browser that ignores its timeout, a prompt
+/// nobody answers) must not hold a dead tunnel's sign-in open forever, since
+/// sshd's grace close is not heard over a tunnel that has gone silent.
+pub const PAUSE_CAP: Duration = Duration::from_secs(200);
+
 /// While paused, the clock is looked at this often, to see the pause end.
 const WHILE_PAUSED_MS: u64 = 1_000;
 
@@ -83,23 +92,26 @@ impl Budget {
     }
 
     /// Waiting that counts so far, and whether the clock is stopped.
-    fn counted(&self) -> (u64, bool) {
+    fn counted(&self) -> (u64, bool, u64) {
         let now = self.clock.now_ms();
         let spent = self.spent.lock().unwrap_or_else(|p| p.into_inner());
         let ongoing = spent.since.map_or(0, |s| now.saturating_sub(s));
-        ((now - self.started).saturating_sub(spent.paused + ongoing), spent.since.is_some())
+        let stopped = spent.paused + ongoing;
+        ((now - self.started).saturating_sub(stopped), spent.since.is_some(), stopped)
     }
 
     /// Run `work`, and give up (`None`, dropping it) once the allowance of
-    /// counted waiting is used.
+    /// counted waiting is used, or the clock has been stopped for
+    /// [`PAUSE_CAP`] in all.
     pub async fn run<T>(&self, work: impl Future<Output = T>) -> Option<T> {
         let mut work = std::pin::pin!(work);
         loop {
-            let (counted, paused) = self.counted();
-            if counted >= self.allowance_ms {
+            let (counted, paused, stopped) = self.counted();
+            let cap = PAUSE_CAP.as_millis() as u64;
+            if counted >= self.allowance_ms || stopped >= cap {
                 return None;
             }
-            let wait = if paused { WHILE_PAUSED_MS } else { self.allowance_ms - counted };
+            let wait = if paused { WHILE_PAUSED_MS.min(cap - stopped) } else { self.allowance_ms - counted };
             match futures::future::select(work.as_mut(), self.clock.sleep(wait)).await {
                 futures::future::Either::Left((done, _)) => return Some(done),
                 futures::future::Either::Right(_) => {}

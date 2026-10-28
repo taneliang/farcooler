@@ -474,6 +474,8 @@ async function panes(page) {
   }
   await page.waitForTimeout(500)
   const opened = channels(mark)
+  // A floor, so that a log wording the patterns don't match (peak 0) cannot pass.
+  if (opened.peak < 7) failures.push(`sshd's log showed ${opened.peak} channels at most for twelve panes, and at least 7 are expected (a control channel and 6 panes), so the log wording may have changed`)
   if (opened.peak > 10) failures.push(`twelve panes held ${opened.peak} channels at once, and sshd allows 10`)
   if (opened.refused.length) failures.push(`sshd refused a channel: ${opened.refused[0]}`)
   const hosts = await page.evaluate(() => document.querySelectorAll('#terminal .terminal-host').length)
@@ -564,7 +566,7 @@ async function panes(page) {
   else {
     const p95 = percentile(under, 0.95)
     console.log(
-      `csp-check: echo while ${LOADS} x seq 1 2000000 ran in another pane, page time (tunnel delay ${2 * delay} ms taken off), cpu throttle ${throttle}x: ` +
+      `csp-check: echo while ${LOADS} x seq 1 2000000 ran in another pane, keydown to xterm's parse callback, not paint, with the configured 2 x tunnel delay (${2 * delay} ms) taken off, not a measured one, cpu throttle ${throttle}x: ` +
         `n=${under.length} p50=${percentile(under, 0.5).toFixed(1)} ms p95=${p95.toFixed(1)} ms max=${Math.max(...under).toFixed(1)} ms, ${chunks} chunks of load parsed`,
     )
     if (p95 > 100) failures.push(`keystroke echo under load was ${p95.toFixed(1)} ms at p95, over 100 ms`)
