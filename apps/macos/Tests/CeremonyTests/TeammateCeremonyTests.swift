@@ -293,7 +293,7 @@ struct TeammateCeremonyTests {
             #"{"members":[{"handle":"carol","name":"Carol","devices":["farcooler-0c0d"],"reps":0,"rep_panes":[]}],"claude_account":"","you":""}"#
         await TeammateEnrollment.reconcile(journal: journal, using: { await runner.run($0) })
         let revokes = runner.calls.filter { $0.contains("revoke") }
-        #expect(revokes.count == 1 && revokes[0].last == "farcooler-0a0b", "\(revokes)")
+        #expect(revokes.count == 1 && Array(revokes[0].suffix(2)) == ["farcooler-0a0b", "--with-added"], "\(revokes)")
         #expect(journal.entries.isEmpty)
 
         // A runner that can't be reached stays noted for the launch after.
