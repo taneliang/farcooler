@@ -134,3 +134,9 @@ pub fn forget_terminal_logins(store: &crate::Store) {
 pub fn break_member_login_policy(store: &crate::Store) {
     store.conn().execute_batch("DROP TABLE member_login_policy").unwrap();
 }
+
+/// Make the kept revoked marks unwritable (ov-832): a lift of one fails as
+/// a damaged table would.
+pub fn break_revoked_marks(store: &crate::Store) {
+    store.conn().execute_batch("DROP TABLE revoked_marks").unwrap();
+}
