@@ -62,11 +62,16 @@ impl Caller {
 
 /// Whether `caller` may add a line under `client_id`, asked under the fence
 /// lock when a line is about to be written. `host_admin` and this runner's
-/// socket always may; below it, a marked id is `device_taken` and the
+/// socket always may; below it, an id that already has a line (`has_line`)
+/// or a marked id is `device_taken` and the
 /// [`ADD_LIMIT`]th device in a day is `add_limit`. A store that can't count
 /// refuses.
-pub(super) fn may_add(store: &farcooler_store::Store, sessions: &Sessions, caller: Option<&Caller>, client_id: &str) -> Result<()> {
+pub(super) fn may_add(store: &farcooler_store::Store, sessions: &Sessions, caller: Option<&Caller>, client_id: &str, has_line: bool) -> Result<()> {
     let Some(caller) = caller.filter(|c| c.below_host_admin()) else { return Ok(()) };
+    if has_line {
+        tracing::warn!(client = %client_id, "refused: a device below host_admin enrolling under an id that already has a line");
+        return Err(DomainError::Conflict { what: "device_taken" });
+    }
     if sessions.is_marked(client_id) {
         tracing::warn!(client = %client_id, "refused: a device below host_admin taking an id a revoke marked");
         return Err(DomainError::Conflict { what: "device_taken" });
@@ -111,13 +116,14 @@ pub(super) fn forget(svc: &Service, device: &str) {
 /// `client.revoke`, with `with_added` (ov-838): the device, and every device
 /// it added, and those they added, that still has a line and that `keep`
 /// lets go, in one write, decided under the fence lock. A member's device
-/// passes a `keep` that spares the owner's devices. With `with_added`, a
+/// passes a `keep` that spares the owner's devices; a `keep` that errs
+/// refuses the revoke, never spares. With `with_added`, a
 /// store that can't say who added whom refuses the revoke rather than taking
 /// less than it was asked to.
 pub async fn revoke_keeping(
     svc: &Service,
     request: &ClientRevoke,
-    keep: impl Fn(&str) -> bool + Send + 'static,
+    keep: impl Fn(&str) -> Result<bool> + Send + 'static,
 ) -> Result<ClientList> {
     let root = request.client_id.clone();
     let with_added = request.with_added;
@@ -127,7 +133,7 @@ pub async fn revoke_keeping(
         if with_added {
             let rows = store.added_by_all().map_err(Refusal)?;
             for id in farcooler_store::device_added_by::added_under(&rows, &root) {
-                if entries.iter().any(|e| e.client_id == id) && keep(&id) {
+                if entries.iter().any(|e| e.client_id == id) && keep(&id).map_err(Refusal)? {
                     gone.push(id);
                 }
             }
@@ -144,7 +150,7 @@ pub async fn revoke_keeping(
 pub async fn revoke_as(svc: &Service, request: &ClientRevoke, person: &crate::people::Person) -> Result<ClientList> {
     let spare_owners = person.is_someone_else();
     let store = svc.store.clone();
-    revoke_keeping(svc, request, move |id| !spare_owners || store.device_is_owners(id).is_ok_and(|owners| !owners)).await
+    revoke_keeping(svc, request, move |id| if spare_owners { store.device_is_owners(id).map(|owners| !owners) } else { Ok(true) }).await
 }
 
 #[cfg(test)]

@@ -212,7 +212,7 @@ async fn enroll_held(
         // Settings says is enrolled and that cannot connect. A Mac is two
         // enrollments of one client id, so the window was reachable from the
         // product's ordinary path, not only in theory. See `fence::update`.
-        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+        let out = fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
             // First, before either answer: a revoke marks under this lock,
             // so one that got here first is seen (ov-826). Refused as a
             // closed session's request is, and nothing is written or admitted.
@@ -280,7 +280,8 @@ async fn enroll_held(
 
             // Who may add another line, and how many, decided where the
             // write is, so two enrolls can't both count under the limit.
-            added::may_add(&store, &sessions, caller.as_ref(), &mine.client_id).map_err(Refusal)?;
+            let has_line = entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id);
+            added::may_add(&store, &sessions, caller.as_ref(), &mine.client_id, has_line).map_err(Refusal)?;
             if let Some(mark) = by_member {
                 if entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id) {
                     return Err(Refusal(DomainError::Conflict { what: "device_taken" }));
@@ -292,11 +293,6 @@ async fn enroll_held(
             store.record_added_by(&mine.client_id, caller.as_ref().and_then(|c| c.session.client_id()).unwrap_or("")).map_err(Refusal)?;
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
-            // A real enrollment of this id, under the fence lock that orders it
-            // against a revoke's mark: a device revoked earlier is served
-            // again (ov-820 review S4). Not on the path above, which writes
-            // nothing and can match on a fingerprint alone.
-            sessions.readmit(&mine.client_id).map_err(Refusal)?;
             Ok((
                 fence::Change::Write { entries: ours, foreign },
                 (
@@ -313,7 +309,14 @@ async fn enroll_held(
                     !admitting.is_empty(),
                 ),
             ))
-        })
+        })?;
+        // A real enrollment of this id: a device revoked earlier is served
+        // again (ov-820 review S4). Only once the write has landed, so a
+        // write that failed leaves the revoke's mark where it was.
+        if !out.0.already_enrolled {
+            sessions.readmit(&device).map_err(Refusal)?;
+        }
+        Ok(out)
     })
     .await?;
 
@@ -830,7 +833,7 @@ pub async fn revoke_many(
 /// named: the containment a runner can offer is per connection, so the
 /// connections must not be shared.
 pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList> {
-    revoke_keeping(svc, request, |_| true).await
+    revoke_keeping(svc, request, |_| Ok(true)).await
 }
 
 /// [`revoke`], for `targets` (the device, and with `with_added` what it

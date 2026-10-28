@@ -134,6 +134,19 @@ async fn a_control_device_cant_take_a_revoked_id() {
     super::super::enroll(&svc, &asking(3, "old", Scope::Control)).await.expect("the owner's socket may");
 }
 
+/// A device below `host_admin` can't enroll under an id that already has a
+/// line: the owner's line and its `added_by` stay as they were.
+#[tokio::test]
+async fn a_control_device_cant_reenroll_an_existing_id() {
+    let (_dir, svc) = runner().await;
+    super::super::enroll(&svc, &asking(1, "phone", Scope::Control)).await.unwrap();
+    super::super::enroll(&svc, &asking(2, "owners-mac", Scope::Control)).await.unwrap();
+    let before = lines(&svc).await;
+    let taken = add(&svc, &as_device(&svc, "phone", Scope::Control), 3, "owners-mac").await;
+    assert!(matches!(taken, Err(DomainError::Conflict { what: "device_taken" })), "{taken:?}");
+    assert_eq!(lines(&svc).await, before, "the owner's line or its added_by changed");
+}
+
 /// The ruling on N5 (ov-828): a device below `host_admin` is admitted to a
 /// tunnel that runs, and never starts one. `host_admin` does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
