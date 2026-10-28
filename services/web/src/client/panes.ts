@@ -3,10 +3,11 @@
 /// A pane's bytes ride an SSH channel of their own, and the runner's sshd
 /// allows `MaxSessions` (10) channels on a connection, one of which is the
 /// control channel every call and keystroke uses. So at most
-/// `MAX_LIVE_PANES` panes are attached at once: nine would fill the
-/// connection, and the last of them would be refused with a channel nobody
-/// can free; eight leaves one channel of room while a closing channel is
-/// still being acknowledged.
+/// `MAX_LIVE_PANES` panes are attached at once. Nine would fill the
+/// connection. sshd frees a closed channel only when the runner's side has
+/// closed too, so for a moment a pane that was let go and the one replacing it
+/// both count: with eight panes, twelve opened in a row reached ten of ten
+/// (ov-774's check). Seven leaves two channels of room for that.
 ///
 /// - **A pane stays attached when it is hidden**, so a build running in one
 ///   keeps scrolling there while another is in front.
@@ -20,7 +21,7 @@
 /// counts the channels with no browser.
 
 /// The most panes attached at once on one connection.
-export const MAX_LIVE_PANES = 8
+export const MAX_LIVE_PANES = 7
 
 /// The part of a pane view the set drives.
 export interface Pane<R> {

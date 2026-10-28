@@ -447,6 +447,9 @@ function channels(from = 0) {
 const sorted = xs => [...xs].sort((a, b) => a - b)
 const percentile = (xs, p) => sorted(xs)[Math.min(xs.length - 1, Math.ceil(xs.length * p) - 1)]
 
+/// How many `seq 1 2000000` are started at once in the loaded pane.
+const LOADS = 4
+
 /// Many panes on one connection (ov-774): twelve opened one after another
 /// never hold more than ten of sshd's channels, a pane let go of attaches
 /// again when it is returned to, Japanese IME text commits once and whole,
@@ -511,8 +514,13 @@ async function panes(page) {
   await buttons.nth(1).click()
   await page.waitForSelector(LIVE, { timeout: 60_000 })
   await page.waitForTimeout(500)
-  await page.keyboard.type('seq 1 2000000')
-  await page.keyboard.press('Enter')
+  // The command takes about three seconds to print, and a keystroke's echo
+  // takes a round trip, so one run would leave too few samples. Four at once
+  // make a load four times heavier than the one asked for, for about twelve.
+  for (let i = 0; i < LOADS; i++) {
+    await page.keyboard.type('seq 1 2000000')
+    await page.keyboard.press('Enter')
+  }
   await buttons.nth(2).click()
   await page.waitForSelector(LIVE, { timeout: 60_000 })
   await page.waitForTimeout(500)
@@ -549,12 +557,14 @@ async function panes(page) {
     await page.waitForTimeout(40 + Math.floor(Math.random() * 40))
   }
   const under = samples.filter(s => s.underLoad).map(s => s.ms)
-  const chunks = await page.evaluate(() => __fc.load.length)
+  const load = await page.evaluate(() => ({ chunks: __fc.load.length, first: __fc.load[0], last: __fc.load.at(-1), now: performance.now() }))
+  const chunks = load.chunks
+  console.log(`csp-check: the load parsed ${chunks} chunks from ${load.first.toFixed(0)} to ${load.last.toFixed(0)} ms, ${(load.now - load.last).toFixed(0)} ms before the last sample`)
   if (under.length < 20) failures.push(`only ${under.length} of ${samples.length} keystrokes were typed while the load was running`)
   else {
     const p95 = percentile(under, 0.95)
     console.log(
-      `csp-check: echo while seq 1 2000000 ran in another pane, page time (tunnel delay ${2 * delay} ms taken off), cpu throttle ${throttle}x: ` +
+      `csp-check: echo while ${LOADS} x seq 1 2000000 ran in another pane, page time (tunnel delay ${2 * delay} ms taken off), cpu throttle ${throttle}x: ` +
         `n=${under.length} p50=${percentile(under, 0.5).toFixed(1)} ms p95=${p95.toFixed(1)} ms max=${Math.max(...under).toFixed(1)} ms, ${chunks} chunks of load parsed`,
     )
     if (p95 > 100) failures.push(`keystroke echo under load was ${p95.toFixed(1)} ms at p95, over 100 ms`)

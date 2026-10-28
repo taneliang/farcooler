@@ -79,14 +79,14 @@ describe('the channel budget', () => {
   it('lets the least recently shown hidden pane go first', async () => {
     const { screens, set, ids, open } = rig()
     for (const id of ids) await open(id)
-    // t1..t4 were let go as t9..t12 came; t5..t12 are attached.
-    expect(set.live).toEqual(['t5', 't6', 't7', 't8', 't9', 't10', 't11', 't12'])
+    // t1..t5 were let go as t8..t12 came; t6..t12 are attached.
+    expect(set.live).toEqual(['t6', 't7', 't8', 't9', 't10', 't11', 't12'])
     expect(screens.get('t1')?.active).toBe(false)
-    await open('t5')
+    await open('t6')
     await open('t13')
-    // t5 was shown again, so t6 was the least recent, and went.
-    expect(screens.get('t5')?.active).toBe(true)
-    expect(screens.get('t6')?.active).toBe(false)
+    // t6 was shown again, so t7 was the least recent, and went.
+    expect(screens.get('t6')?.active).toBe(true)
+    expect(screens.get('t7')?.active).toBe(false)
   })
 
   it('keeps a hidden pane attached while there is room, so it goes on scrolling', async () => {
@@ -149,7 +149,7 @@ describe('a new connection', () => {
     }
     await set.resume(fresh, () => ended.push('resume'))
     expect(order[0]).toBe('t9')
-    expect(new Set(order)).toEqual(new Set(['t5', 't6', 't7', 't8', 't9', 't10', 't11', 't12']))
+    expect(new Set(order)).toEqual(new Set(['t6', 't7', 't8', 't9', 't10', 't11', 't12']))
     expect(fresh.peak).toBeLessThanOrEqual(10)
     expect(dropped.open).toBe(0)
     for (const id of order) expect(screens.get(id)?.attaches.at(-1)).toBe(true)
@@ -157,12 +157,12 @@ describe('a new connection', () => {
 
   it('does not count the lost connection’s channels against the new one', async () => {
     const { screens, set, ids, open } = rig()
-    for (const id of ids.slice(0, 8)) await open(id)
+    for (const id of ids.slice(0, MAX_LIVE_PANES)) await open(id)
     // The old connection died without its panes being told yet.
     const fresh = new Sshd()
     await set.resume(fresh, () => {})
-    expect(set.live).toHaveLength(8)
-    expect([...screens.values()].filter(s => s.active)).toHaveLength(8)
+    expect(set.live).toHaveLength(MAX_LIVE_PANES)
+    expect([...screens.values()].filter(s => s.active)).toHaveLength(MAX_LIVE_PANES)
   })
 
   it('reports the front pane’s failure and carries on with the rest', async () => {
