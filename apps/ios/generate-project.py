@@ -26,6 +26,8 @@ SOURCES = [
     "Connection.swift",
     # Quick Task's calls, out of `Connection.swift` for its size budget (ov-818).
     "ConnectionQuickTask.swift",
+    # Add Teammate's call to a runner (ov-854), out of `Connection.swift` for its size budget.
+    "ConnectionTeammate.swift",
     # A connection's board read state (ov-113): one keeper per board, the
     # runner's state when it keeps it and this phone's when it can't.
     "ConnectionBoardReads.swift",

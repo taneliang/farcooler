@@ -233,6 +233,31 @@ sealed interface Refusal {
     data object NoTunnel : Refusal
 
     /**
+     * The team directory couldn't be asked whether this code's account is on one
+     * of yours, so it was refused rather than waved through (ov-525).
+     */
+    data object DirectoryUnreachable : Refusal
+
+    /**
+     * The code's account is on none of your teams. Carries the signed-in email,
+     * for "sign in to … on that device", which is the other way in.
+     */
+    data class NotATeammate(val email: String) : Refusal
+
+    /** A teammate's Mac asked for shell access, which a teammate never gets. */
+    data object TeammateShell : Refusal
+
+    /**
+     * A teammate's device waiting out a trust reset's hold (R-76). A phone can't
+     * confirm one in person, so it refuses and sends the person to the Mac,
+     * which does.
+     */
+    data object HeldKey : Refusal
+
+    /** The directory lists that teammate's devices, and this isn't one. */
+    data object UnregisteredKey : Refusal
+
+    /**
      * The core answered nothing readable at all. Not one of its words: this is
      * the app failing, and it says so without saying how.
      */
@@ -252,6 +277,11 @@ sealed interface Refusal {
             AlreadyTaken -> "This code was already used"
             TooLarge -> "Too many runners selected"
             NoTunnel -> "This device can’t reach one of those runners"
+            DirectoryUnreachable -> TeammateRefusalCopy.DIRECTORY_UNREACHABLE_TITLE
+            is NotATeammate -> TeammateRefusalCopy.NOT_A_TEAMMATE_TITLE
+            TeammateShell -> TeammateRefusalCopy.TEAMMATE_SHELL_TITLE
+            HeldKey -> TeammateRefusalCopy.HELD_KEY_TITLE
+            UnregisteredKey -> TeammateRefusalCopy.UNREGISTERED_KEY_TITLE
             Unknown -> "Couldn’t add this device"
         }
 
@@ -278,6 +308,11 @@ sealed interface Refusal {
             NoTunnel ->
                 "One of them is reachable only through a tunnel, and this device isn’t on " +
                     "one. Try again, choosing runners it can reach."
+            DirectoryUnreachable -> TeammateRefusalCopy.DIRECTORY_UNREACHABLE
+            is NotATeammate -> TeammateRefusalCopy.notATeammate(email)
+            TeammateShell -> TeammateRefusalCopy.TEAMMATE_SHELL
+            HeldKey -> TeammateRefusalCopy.HELD_KEY_ON_A_PHONE
+            UnregisteredKey -> TeammateRefusalCopy.UNREGISTERED_KEY
             Unknown -> "Try again."
         }
 
@@ -294,6 +329,12 @@ sealed interface Refusal {
             "already_taken" -> AlreadyTaken
             "too_large" -> TooLarge
             "no_tunnel" -> NoTunnel
+            "directory_unreachable" -> DirectoryUnreachable
+            // The email is the store's to fill in: see `CeremonyStore.checkTeammate`.
+            "not_a_teammate" -> NotATeammate("")
+            "teammate_shell" -> TeammateShell
+            "held_key" -> HeldKey
+            "unregistered_key" -> UnregisteredKey
             else -> Unknown
         }
     }
@@ -309,6 +350,17 @@ interface CeremonyCalls {
     fun reply(offerJson: String, runners: List<CeremonyRunner>): CeremonyCore.Answer
     fun fingerprint(publicKey: String): String?
     fun clientId(publicKey: String): String?
+
+    /**
+     * A code from another account, checked against the team directory's own
+     * answers (ov-854). A fake that doesn't answer refuses, so nothing opens.
+     */
+    fun scanTeammate(encoded: String, expectingAccount: String, directory: String?, heldMs: Long): CeremonyCore.Answer =
+        CeremonyCore.Answer.Refused(Refusal.Unknown)
+
+    /** The reply for a teammate's device, naming [grantedBy] (ov-854). */
+    fun teammateReply(offerJson: String, runners: List<CeremonyRunner>, grantedBy: String): CeremonyCore.Answer =
+        CeremonyCore.Answer.Refused(Refusal.Unknown)
 
     /**
      * Seal a reply to its offer's reply key (ov-770). A fake that doesn't
@@ -379,6 +431,29 @@ object CeremonyCore : CeremonyCalls {
             json.encodeToString(ListSerializer(CeremonyRunner.serializer()), runners)
         }.getOrNull() ?: return Answer.Refused(Refusal.Unknown)
         return answer { NativeClient.nativeCeremonyReply(offerJson, encoded, 0) }
+    }
+
+    /**
+     * A code from another account, checked against the team directory's own
+     * answers ([directory] is `{"me","rosters"}` as the relay sent them, null
+     * when it couldn't be asked). The core decides; this passes the bytes along.
+     * A device waiting out a trust reset's hold is refused as `held_key`.
+     */
+    override fun scanTeammate(
+        encoded: String,
+        expectingAccount: String,
+        directory: String?,
+        heldMs: Long,
+    ): Answer = answer {
+        NativeClient.nativeCeremonyScanTeammate(encoded, expectingAccount, directory, heldMs.coerceAtLeast(0))
+    }
+
+    /** The reply for a teammate's device, with [grantedBy] written into it (ov-525). */
+    override fun teammateReply(offerJson: String, runners: List<CeremonyRunner>, grantedBy: String): Answer {
+        val encoded = runCatching {
+            json.encodeToString(ListSerializer(CeremonyRunner.serializer()), runners)
+        }.getOrNull() ?: return Answer.Refused(Refusal.Unknown)
+        return answer { NativeClient.nativeCeremonyTeammateReply(offerJson, encoded, grantedBy, 0) }
     }
 
     /**
@@ -601,10 +676,30 @@ fun interface Enroller {
     ): Map<String, String>
 }
 
+/**
+ * What an Add Teammate writes (ov-854): the key `for_teammate` on each runner,
+ * bound to the teammate, answering what became of each. A runner missing from
+ * the answer was never asked.
+ */
+fun interface TeammateEnroller {
+    suspend fun enroll(
+        publicKey: String,
+        label: String,
+        clientId: String,
+        nodeKey: String,
+        teammate: TeammateChoice,
+        runners: List<CeremonyRunner>,
+    ): Map<String, TeammateAddOutcome>
+}
+
 // MARK: - The state machine
 
-/** One runner, as a row someone can tick. */
-data class RunnerRow(val runner: Runner, val picked: Boolean) {
+/**
+ * One runner, as a row someone can tick. [blocked] is why it can't be, when it
+ * can't: an Add Teammate needs a phone that administers the runner, and says so
+ * up front rather than after a fingerprint (ov-854).
+ */
+data class RunnerRow(val runner: Runner, val picked: Boolean, val blocked: String? = null) {
     val label: String get() = runner.displayLabel
 
     /**
@@ -672,6 +767,13 @@ class CeremonyStore(
          */
         data object Mismatch : Phase
 
+        /**
+         * The scanned code is from another account, and the team directory is
+         * being asked whether it is a teammate's (ov-854). Nothing about the
+         * code is shown until the core has said yes.
+         */
+        data object CheckingTeam : Phase
+
         data object Confirming : Phase
 
         /** The tap was confirmed; the keys are going out and the reply is next. */
@@ -703,6 +805,45 @@ class CeremonyStore(
 
     /** The reply sealed for a browser, when its offer asked (ov-770). */
     val sealedReply = SealedReply()
+
+    /**
+     * The team directory's answers as `{"me","rosters"}`, or null when it
+     * couldn't be asked. A test answers it; the app asks the relay.
+     */
+    var teamDirectory: suspend () -> String? = { null }
+
+    /**
+     * Whether this phone may add a teammate on [runner]: it administers the
+     * runner. A test answers it; the app asks the live connection.
+     */
+    var mayAddTeammate: (Runner) -> Boolean = { false }
+
+    /**
+     * A teammate's code, once the directory has vouched for it (ov-854): who
+     * they are, and what the person adding them chose. Null for one of your own
+     * devices.
+     */
+    private val _teammate = MutableStateFlow<TeammateChoice?>(null)
+    val teammate: StateFlow<TeammateChoice?> = _teammate.asStateFlow()
+
+    /**
+     * What the Add Teammate reply couldn't do, one sentence per runner, or null
+     * when every runner took the device (ov-854).
+     */
+    private val _teammateNote = MutableStateFlow<String?>(null)
+    val teammateNote: StateFlow<String?> = _teammateNote.asStateFlow()
+
+    /** The code from another account waiting on the directory. */
+    private class Checking(val encoded: String, val at: Long, val runners: List<Runner>, val scan: Int)
+
+    private var checking: Checking? = null
+
+    /**
+     * Which scan the check belongs to. Every scan takes a new one, so a slow
+     * check for an earlier code can never open its teammate's sheet over a
+     * later code.
+     */
+    private var scanNumber = 0
 
     /** This device's elapsed clock, for the freshness window. A test answers it. */
     internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
@@ -924,13 +1065,25 @@ class CeremonyStore(
      */
     fun read(encoded: String, runners: List<Runner>, grantingFrom: Runner?) {
         val now = clock()
+        scanNumber += 1
+        _teammate.value = null
+        checking = null
         // Zero, because this is the scan. The elapsed reading that does work is
         // taken again at the confirmation, below.
         when (val answer = core.scan(encoded, account, 0)) {
-            is CeremonyCore.Answer.Refused ->
-                _phase.value =
-                    if (answer.refusal == Refusal.WrongAccount) Phase.Mismatch
-                    else Phase.Refused(answer.refusal)
+            is CeremonyCore.Answer.Refused -> when {
+                // A code from another account goes on to the teammate check
+                // (ov-854), and nothing about it is shown until the core says
+                // yes: the runner list behind it would be on screen with only a
+                // fingerprint between a stranger and it. A phone signed in to
+                // nothing has no directory to ask, so it stays on the old screen.
+                answer.refusal == Refusal.WrongAccount && account.isEmpty() -> _phase.value = Phase.Mismatch
+                answer.refusal == Refusal.WrongAccount -> {
+                    checking = Checking(encoded, now, runners, scanNumber)
+                    _phase.value = Phase.CheckingTeam
+                }
+                else -> _phase.value = Phase.Refused(answer.refusal)
+            }
 
             is CeremonyCore.Answer.Payload -> {
                 val decoded = CeremonyCore.decode(answer.json, CeremonyOffer.serializer())
@@ -951,9 +1104,69 @@ class CeremonyStore(
         }
     }
 
+    /**
+     * Ask the directory, then let the core decide whether a code from another
+     * account is a teammate's (ov-525, ov-854). Run by the screen while the
+     * phase is [Phase.CheckingTeam].
+     *
+     * The time the directory took counts against the code's freshness, since
+     * the clock started at the scan. An unreachable directory is the core's
+     * `directory_unreachable`, never a pass.
+     */
+    suspend fun checkTeammate() {
+        val waiting = checking ?: return
+        val directory = teamDirectory()
+        // Scanned again, or cancelled, while the directory was answering: an
+        // answer for an earlier code is dropped rather than opening that
+        // teammate's sheet over this one.
+        if (waiting.scan != scanNumber || _phase.value != Phase.CheckingTeam) return
+        checking = null
+        when (val answer = core.scanTeammate(waiting.encoded, account, directory, clock() - waiting.at)) {
+            is CeremonyCore.Answer.Refused ->
+                _phase.value = Phase.Refused(
+                    if (answer.refusal is Refusal.NotATeammate) Refusal.NotATeammate(accountEmail) else answer.refusal,
+                )
+
+            is CeremonyCore.Answer.Payload -> {
+                val accepted = CeremonyCore.decode(answer.json, TeammateAccepted.serializer())
+                val decoded = accepted?.let { CeremonyCore.decode(it.offer, CeremonyOffer.serializer()) }
+                if (accepted == null || decoded == null) {
+                    _phase.value = Phase.Refused(Refusal.Unknown)
+                    return
+                }
+                scannedCode = waiting.encoded
+                scannedAt = waiting.at
+                _offer.value = decoded
+                _fingerprint.value = core.fingerprint(decoded.keyA)
+                // Nothing is granted to someone else by default: which runners a
+                // teammate gets is a choice made on purpose, so none starts
+                // ticked. A runner this phone can't administer is listed with
+                // why, and can't be ticked.
+                _rows.value = waiting.runners.map { runner ->
+                    RunnerRow(
+                        runner, picked = false,
+                        blocked = if (mayAddTeammate(runner)) null
+                        else TeammateAddCopy.sentence(TeammateAddOutcome.NeedsAdmin, runner.displayLabel, DEVICE),
+                    )
+                }
+                _teammate.value = TeammateChoice(
+                    who = accepted.teammate, directory = directory.orEmpty(), grantedBy = accountEmail,
+                )
+                _phase.value = Phase.Confirming
+            }
+        }
+    }
+
+    /** The person adding a teammate edits what they'll be called, and what they may do. */
+    fun setTeammate(change: (TeammateChoice) -> TeammateChoice) {
+        if (_phase.value != Phase.Confirming) return
+        _teammate.value = _teammate.value?.let(change)
+    }
+
     fun toggle(runnerId: String) {
         _rows.value = _rows.value.map {
-            if (it.runner.id == runnerId) it.copy(picked = !it.picked) else it
+            // A runner this phone can't add a teammate on stays unticked (ov-854).
+            if (it.runner.id == runnerId && it.blocked == null) it.copy(picked = !it.picked) else it
         }
     }
 
@@ -1075,6 +1288,107 @@ class CeremonyStore(
     }
 
     /**
+     * Confirm adding a teammate's device (ov-854): the gate, the freshness check
+     * against the directory's answers again, the key on each picked runner for
+     * them, and the reply.
+     *
+     * The Mac's order: the keys go in BEFORE the reply is built, and the reply is
+     * built from what they did, so `pending` is a fact. A teammate's device is
+     * never this phone's to vouch for, so nothing is certified.
+     */
+    suspend fun confirmTeammate(
+        gate: suspend (title: String, subtitle: String) -> ConfirmingTap.Outcome,
+        enroller: TeammateEnroller,
+    ) {
+        val asking = _offer.value
+        val teammate = _teammate.value
+        if (asking == null || teammate == null || scannedCode.isEmpty()) {
+            _phase.value = Phase.Refused(Refusal.Unknown)
+            return
+        }
+        // No usable handle or name can't be recorded on a runner, so nothing is
+        // asked of the fingerprint either; the button is off too.
+        if (!teammate.isComplete) return
+
+        when (
+            gate(
+                "Add “${asking.name}” for ${teammate.who.email}?",
+                "Confirm adding ${asking.name} for ${teammate.who.email}",
+            )
+        ) {
+            ConfirmingTap.Outcome.CANCELLED -> return
+            ConfirmingTap.Outcome.REFUSED -> {
+                _declined.value = true
+                return
+            }
+            ConfirmingTap.Outcome.CONFIRMED -> Unit
+        }
+
+        _phase.value = Phase.Enrolling
+
+        // Re-scanned rather than re-used: the answer is the same offer, and the
+        // point of the call is the freshness rule attached to it, against the
+        // same directory answers.
+        val heldMs = scannedAt?.let { clock() - it } ?: Long.MAX_VALUE
+        val rescanned = when (
+            val answer = core.scanTeammate(scannedCode, account, teammate.directory.ifEmpty { null }, heldMs)
+        ) {
+            is CeremonyCore.Answer.Refused -> {
+                _phase.value = Phase.Refused(answer.refusal)
+                return
+            }
+            is CeremonyCore.Answer.Payload ->
+                CeremonyCore.decode(answer.json, TeammateAccepted.serializer())?.offer ?: run {
+                    _phase.value = Phase.Refused(Refusal.Unknown)
+                    return
+                }
+        }
+
+        val wanted = picked()
+        // Measured BEFORE anything is written, as an ordinary Add does.
+        val measured = core.teammateReply(rescanned, wanted, teammate.grantedBy)
+        if (measured is CeremonyCore.Answer.Refused) {
+            _phase.value = Phase.Refused(measured.refusal)
+            return
+        }
+        val clientId = core.clientId(asking.keyA)
+        val outcomes = if (clientId == null) {
+            emptyMap()
+        } else {
+            enroller.enroll(
+                publicKey = asking.keyA,
+                label = asking.name,
+                clientId = clientId,
+                nodeKey = asking.nodeKey,
+                teammate = teammate,
+                runners = wanted,
+            )
+        }
+        _teammateNote.value = TeammateAddCopy.note(
+            wanted.map { it.label to (outcomes[it.id] ?: TeammateAddOutcome.NotReached) }, DEVICE,
+        )
+        _someRunnersPending.value = wanted.any { outcomes[it.id]?.isWritten != true }
+        // Tunnel first (ov-485): a runner that answered with a token is granted
+        // through it, its address kept beside it. The rule is [DirectRoute.grant].
+        val granting = wanted.map { runner ->
+            val written = outcomes[runner.id] as? TeammateAddOutcome.Written
+            val (reach, beside) = DirectRoute.grant(
+                runner.reach, runner.alternative, written?.tunnel.orEmpty(), asking.nodeKey.isNotEmpty(),
+            )
+            runner.copy(pending = written == null, reach = reach, alternative = beside)
+        }
+
+        when (val answer = core.teammateReply(rescanned, granting, teammate.grantedBy)) {
+            is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)
+            is CeremonyCore.Answer.Payload -> {
+                _code.value = answer.json
+                _addressOnlyNote.value = addressOnlyNote(granting, answer.json)
+                _phase.value = Phase.ShowingManifest
+            }
+        }
+    }
+
+    /**
      * The runners the reply had to grant at their address alone, by name, or
      * null (ov-485 N1): the new device can't use Tailcat for them.
      */
@@ -1137,12 +1451,19 @@ class CeremonyStore(
         _declined.value = false
         _someRunnersPending.value = false
         _addressOnlyNote.value = null
+        _teammate.value = null
+        _teammateNote.value = null
+        checking = null
+        scanNumber += 1
         scannedCode = ""
         _code.value = ""
         sealedReply.reset()
     }
 
     companion object {
+        /** What this phone is called in a sentence about it (`TeammateAddCopy`). */
+        const val DEVICE = "phone"
+
         /**
          * What this device calls itself in the code it shows.
          *

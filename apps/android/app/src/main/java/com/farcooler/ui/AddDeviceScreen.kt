@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,10 @@ import com.farcooler.ceremony.Refusal
 import com.farcooler.ceremony.ScanScreen
 import com.farcooler.ceremony.SealedReply
 import com.farcooler.ceremony.SealedReplyPost
+import com.farcooler.ceremony.TeamDirectory
+import com.farcooler.ceremony.TeammateEnroller
+import com.farcooler.net.enrollTeammate
+import com.farcooler.net.mayAddTeammate
 import kotlinx.coroutines.launch
 
 /**
@@ -59,11 +64,13 @@ import kotlinx.coroutines.launch
  * may reach, confirm, and show the reply back.
  *
  * The ORDER of the screens is the security argument. A code from another account
- * reaches the mismatch screen and stops there — the runner list is not behind
- * it, because a list of addresses on screen with only a fingerprint between a
- * stranger and them is the thing this flow exists to avoid. That account rule is
- * Rust's, in `ceremony::accept_offer`; this screen only knows which word came
- * back.
+ * is held while the team directory says whether it is a teammate's (ov-854), and
+ * stops at a refusal if it isn't — the runner list is not behind it, because a
+ * list of addresses on screen with only a fingerprint between a stranger and
+ * them is the thing this flow exists to avoid. A teammate's has its own
+ * confirmation: who they are, what they may do, and the runners. Those rules
+ * are Rust's, in `ceremony::accept_offer` and `accept_teammate_offer`; this
+ * screen only knows which word came back.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,6 +89,11 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
             deviceName = CeremonyStore.thisDeviceName(),
         ).also {
             it.certify = model::certifyScanned
+            // A code from another account is a teammate's only if the team
+            // directory says so, and only runners this phone administers can
+            // have one added (ov-854).
+            it.teamDirectory = { TeamDirectory.fetch(model.account::directoryPost) }
+            it.mayAddTeammate = { runner -> model.fleet.connection(runner.id)?.mayAddTeammate() == true }
             // A browser's offer: its sealed reply goes to this account's relay (ov-770).
             it.sealedReply.post = { ceremony, account, sealed ->
                 SealedReplyPost.send(model.account::directoryPost, ceremony, account, sealed)
@@ -98,6 +110,8 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
     val declined by store.declined.collectAsStateWithLifecycle()
     val somePending by store.someRunnersPending.collectAsStateWithLifecycle()
     val addressOnlyNote by store.addressOnlyNote.collectAsStateWithLifecycle()
+    val teammate by store.teammate.collectAsStateWithLifecycle()
+    val teammateNote by store.teammateNote.collectAsStateWithLifecycle()
     val scanned by scanner.scanned.collectAsStateWithLifecycle()
 
     /**
@@ -118,8 +132,26 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
         }
     }
 
+    /**
+     * Writing a teammate's key for them, one runner at a time, to the runners
+     * this phone holds a session to (ov-854). A runner missing from the answer
+     * was never asked.
+     */
+    val teammateEnroller = remember(model) {
+        TeammateEnroller { publicKey, label, clientId, nodeKey, teammate, granted ->
+            granted.mapNotNull { entry ->
+                model.fleet.connection(entry.id)
+                    ?.enrollTeammate(publicKey, label, clientId, nodeKey, teammate)
+                    ?.let { outcome -> entry.id to outcome }
+            }.toMap()
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (phase is CeremonyStore.Phase.Idle) store.beginScanning()
+    }
+    LaunchedEffect(phase) {
+        if (phase is CeremonyStore.Phase.CheckingTeam) store.checkTeammate()
     }
     LaunchedEffect(scanned) {
         // The other route kept for each runner, which a grant hands on (ov-485).
@@ -159,7 +191,30 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
 
                 is CeremonyStore.Phase.Mismatch -> MismatchScreen(email, onDone = onBack)
 
-                is CeremonyStore.Phase.Confirming -> ConfirmScreen(
+                is CeremonyStore.Phase.CheckingTeam -> CheckingTeam()
+
+                is CeremonyStore.Phase.Confirming -> teammate?.let { choice ->
+                    TeammateConfirmScreen(
+                        deviceName = offer?.name.orEmpty(),
+                        teammate = choice,
+                        fingerprint = fingerprint,
+                        publicKey = offer?.keyA.orEmpty(),
+                        rows = rows,
+                        onToggle = { store.toggle(it) },
+                        onChange = { store.setTeammate(it) },
+                        onConfirm = {
+                            coroutines.launch {
+                                store.confirmTeammate(
+                                    gate = { title, subtitle ->
+                                        ConfirmingTap.ask(context, title, subtitle)
+                                    },
+                                    enroller = teammateEnroller,
+                                )
+                            }
+                        },
+                        onCancel = onBack,
+                    )
+                } ?: ConfirmScreen(
                     deviceName = offer?.name.orEmpty(),
                     accountEmail = email,
                     fingerprint = fingerprint,
@@ -185,6 +240,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                     deviceName = offer?.name.orEmpty(),
                     code = code,
                     somePending = somePending,
+                    teammateNote = teammateNote,
                     addressOnlyNote = addressOnlyNote,
                     sealedReply = store.sealedReply,
                     onDone = onBack,
@@ -369,8 +425,8 @@ private fun ConfirmScreen(
  * that matters is made in Rust, against a fingerprint it computes itself.
  */
 @Composable
-private fun FingerprintRow(fingerprint: String, publicKey: String) {
-    var expanded by remember { mutableStateOf(false) }
+internal fun FingerprintRow(fingerprint: String, publicKey: String, opened: Boolean = false) {
+    var expanded by remember { mutableStateOf(opened) }
     Column(
         Modifier
             .fillMaxWidth()
@@ -384,6 +440,24 @@ private fun FingerprintRow(fingerprint: String, publicKey: String) {
             else CeremonyStore.abbreviated(fingerprint),
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+/** A code from another account, held while the directory is asked (ov-854). */
+@Composable
+private fun CheckingTeam() {
+    Column(
+        Modifier.fillMaxSize().testTag("teammate-checking"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Checking your teams…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -412,6 +486,7 @@ private fun ReplyScreen(
     deviceName: String,
     code: String,
     somePending: Boolean,
+    teammateNote: String? = null,
     addressOnlyNote: String?,
     sealedReply: SealedReply,
     onDone: () -> Unit,
@@ -437,7 +512,17 @@ private fun ReplyScreen(
             textAlign = TextAlign.Center,
         )
         SealedReplySection(sealedReply, deviceName)
-        if (somePending) {
+        if (teammateNote != null) {
+            // An Add Teammate says which runner didn't take the device, and what
+            // to do about it (ov-854).
+            Text(
+                teammateNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("teammate-note"),
+            )
+        } else if (somePending) {
             // No cause given, because from here the cause is not knowable.
             Text(
                 "Some runners didn’t take the key. They’ll be added when this device next " +

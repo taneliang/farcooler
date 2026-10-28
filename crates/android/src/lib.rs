@@ -659,6 +659,72 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyReply(
     })
 }
 
+/// A scanned offer from another account, accepted only when the team
+/// directory says it shares a team with the account signed in here (ov-854).
+///
+/// `directoryJson` is `{"me": …, "rosters": […]}`, the relay's own answers; null
+/// means the directory couldn't be asked, which the core refuses as
+/// `directory_unreachable`, never a pass. A device waiting out a trust reset's
+/// hold is refused `held_key`: a phone can't confirm one in person, so the
+/// caller promises nothing (`will_confirm_holds` is false).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyScanTeammate(
+    mut env: JNIEnv,
+    _class: JClass,
+    encoded: JString,
+    expecting_account: JString,
+    directory_json: JString,
+    held_ms: jlong,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let encoded = c_string(&mut env, &encoded);
+        let account = c_string(&mut env, &expecting_account);
+        let directory = c_string(&mut env, &directory_json);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_scan_teammate(
+                pointer(&encoded),
+                pointer(&account),
+                pointer(&directory),
+                held_ms.max(0) as u64,
+                false,
+                out,
+                capacity,
+            )
+        })
+    })
+}
+
+/// The reply for a teammate's device, with `grantedBy`, the email of the
+/// account granting, written into it so their device can ask "Join …'s
+/// runners?" (ov-854).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyTeammateReply(
+    mut env: JNIEnv,
+    _class: JClass,
+    offer_json: JString,
+    runners_json: JString,
+    granted_by: JString,
+    budget_bytes: jint,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let offer = c_string(&mut env, &offer_json);
+        let runners = c_string(&mut env, &runners_json);
+        let granted_by = c_string(&mut env, &granted_by);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_teammate_reply(
+                pointer(&offer),
+                pointer(&runners),
+                pointer(&granted_by),
+                budget_bytes.max(0) as usize,
+                out,
+                capacity,
+            )
+        })
+    })
+}
+
 /// A scanned reply, taken or refused.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyAccept(

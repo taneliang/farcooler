@@ -226,6 +226,27 @@ internal object NativeClient {
         budgetBytes: Int,
     ): String?
 
+    /**
+     * A code from another account, checked against the team directory's own
+     * answers (ov-854): `{"offer","teammate","held"}` when the core says it is a
+     * teammate's, else a refusal. [directoryJson] is `{"me","rosters"}` as the
+     * relay sent them, or null when it couldn't be asked.
+     */
+    external fun nativeCeremonyScanTeammate(
+        encoded: String,
+        expectingAccount: String,
+        directoryJson: String?,
+        heldMs: Long,
+    ): String?
+
+    /** The reply for a teammate's device, naming [grantedBy], the email granting it (ov-854). */
+    external fun nativeCeremonyTeammateReply(
+        offerJson: String,
+        runnersJson: String,
+        grantedBy: String,
+        budgetBytes: Int,
+    ): String?
+
     /** A scanned reply, taken or refused. */
     external fun nativeCeremonyAccept(
         encoded: String,
