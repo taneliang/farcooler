@@ -47,7 +47,7 @@ describe('waiting for the sealed reply', () => {
     const waited = await waitForReply(t.deps, CEREMONY)
     expect(waited).toEqual({ kind: 'opened', opened: GOOD })
     expect(t.log.filter(l => l.startsWith('read'))).toEqual([`read ${CEREMONY} at 0`, `read ${CEREMONY} at ${POLL_MS}`, `read ${CEREMONY} at ${2 * POLL_MS}`])
-    // Both replies go to wasm in the relay's order: it takes the earliest, not this.
+    // Both replies go to wasm in the relay's order: wasm picks the owner's, or the earliest teammate's.
     expect(t.log.at(-1)).toBe(`open ${JSON.stringify({ replies: [{ sealed: 'AAAA', posted_by: 'user_OWNER' }, { sealed: 'BBBB', posted_by: 'user_OWNER' }] })}`)
   })
 
@@ -107,12 +107,31 @@ describe('the comparison buttons', () => {
   it('They Don\'t Match keeps nothing and puts the code back; They Match keeps the reply', async () => {
     const kept: Opened[] = []
     let back = 0
-    const b = comparisonButtons(FORGED, async o => void kept.push(o), () => void back++)
-    await b.no()
+    const no = comparisonButtons(FORGED, async o => void kept.push(o), () => void back++)
+    await no.no()
     expect([kept, back]).toEqual([[], 1])
-    b.yes()
+    const yes = comparisonButtons(FORGED, async o => void kept.push(o), () => void back++)
+    yes.yes()
     await Promise.resolve()
     expect([kept, back]).toEqual([[FORGED], 1])
+  })
+
+  it('a double tap on They Match saves once', async () => {
+    const kept: Opened[] = []
+    const b = comparisonButtons(GOOD, async o => void kept.push(o), () => {})
+    b.yes()
+    b.yes()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(kept).toEqual([GOOD])
+  })
+
+  it('a tap on They Match after They Don\'t Match saves nothing', async () => {
+    const kept: Opened[] = []
+    let back = 0
+    const b = comparisonButtons(GOOD, async o => void kept.push(o), () => void back++)
+    await b.no()
+    await b.yes()
+    expect([kept, back]).toEqual([[], 1])
   })
 })
 

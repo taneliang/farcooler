@@ -143,7 +143,7 @@ export function sealedRefusal(word: string): string {
 
 /// What the page says when the codes don’t match.
 export const MISMATCH =
-  'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just add this browser from your phone, someone else may have posted it. To start again, select Start Over.'
+  'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just add this browser from your phone, someone else may have posted it. Waiting for another reply…'
 
 /// Why this browser couldn’t be put on the account’s device list.
 export function registerFailure(word: string): string {
