@@ -234,6 +234,29 @@ internal object NativeClient {
         heldMs: Long,
     ): String?
 
+    /**
+     * The reply sealed to a browser's reply key, and the comparison code, as
+     * `{"sealed","code"}` or a refusal (ov-770). The seal and the code are
+     * Rust's; Kotlin posts and shows them.
+     */
+    external fun nativeCeremonySeal(
+        offerJson: String,
+        manifestJson: String,
+        heldMs: Long,
+    ): String?
+
+    /** A reply's six-character comparison code, or null for text that isn't one. */
+    external fun nativeCeremonyCode(manifestJson: String): String?
+
+    /** A sealed reply, opened with the reply key's secret half and taken, or refused. */
+    external fun nativeCeremonyTakeSealed(
+        sealed: String,
+        secret: String,
+        expectingJson: String,
+        alreadyTaken: Boolean,
+        heldMs: Long,
+    ): String?
+
     /** The themes compiled in, as JSON. No session needed. */
     external fun nativeBuiltinThemes(): String?
 }

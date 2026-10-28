@@ -73,6 +73,8 @@ data class CeremonyOffer(
      * only decides whether a tunnel is offered.
      */
     @SerialName("node_key") val nodeKey: String = "",
+    /** A browser's key to seal the reply to (ov-770), or null: [SealedReply]. */
+    @SerialName("reply_key") val replyKey: String? = null,
 )
 
 /**
@@ -307,6 +309,13 @@ interface CeremonyCalls {
     fun reply(offerJson: String, runners: List<CeremonyRunner>): CeremonyCore.Answer
     fun fingerprint(publicKey: String): String?
     fun clientId(publicKey: String): String?
+
+    /**
+     * Seal a reply to its offer's reply key (ov-770). A fake that doesn't
+     * answer refuses, so it posts nothing.
+     */
+    fun seal(offerJson: String, manifestJson: String, heldMs: Long): CeremonyCore.Answer =
+        CeremonyCore.Answer.Refused(Refusal.Unknown)
 }
 
 // MARK: - The four entry points
@@ -427,6 +436,25 @@ object CeremonyCore : CeremonyCalls {
         return runCatching { NativeClient.nativeClientId(publicKey) }
             .getOrNull()
             ?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Seal the reply built for a browser's offer to the key it named, with
+     * the comparison code: `{"sealed","code"}` (ov-770). [heldMs] is judged
+     * in Rust, so an offer read past the window is `stale` and nothing is
+     * sealed.
+     */
+    override fun seal(offerJson: String, manifestJson: String, heldMs: Long): Answer =
+        answer { NativeClient.nativeCeremonySeal(offerJson, manifestJson, heldMs.coerceAtLeast(0)) }
+
+    /** A sealed reply, taken with the reply key's secret half: the new device's side. */
+    fun takeSealed(sealed: String, secret: String, expecting: String): Answer =
+        answer { NativeClient.nativeCeremonyTakeSealed(sealed, secret, expecting, false, 0) }
+
+    /** A reply's comparison code, as Rust computes it, or null. */
+    fun code(manifestJson: String): String? {
+        if (!NativeLibrary.loaded) return null
+        return runCatching { NativeClient.nativeCeremonyCode(manifestJson) }.getOrNull()
     }
 
     /**
@@ -678,6 +706,9 @@ class CeremonyStore(
 
     /** The core, for reading a code and building the reply. A test answers it. */
     internal var core: CeremonyCalls = CeremonyCore
+
+    /** The reply sealed for a browser, when its offer asked (ov-770). */
+    val sealedReply = SealedReply()
 
     /** This device's elapsed clock, for the freshness window. A test answers it. */
     internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
@@ -1043,6 +1074,8 @@ class CeremonyStore(
                 // Your own device, confirmed just now: vouch for it in the
                 // directory too, with the key from the code this phone read.
                 certify(asking.account, asking.keyA)
+                // A browser's offer: sealed to its key and posted too (ov-770).
+                sealedReply.send(core, rescanned, answer.json, scannedAt?.let { clock() - it } ?: Long.MAX_VALUE)
             }
         }
     }
@@ -1112,6 +1145,7 @@ class CeremonyStore(
         _addressOnlyNote.value = null
         scannedCode = ""
         _code.value = ""
+        sealedReply.reset()
     }
 
     companion object {

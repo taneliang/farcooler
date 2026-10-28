@@ -50,6 +50,8 @@ import com.farcooler.ceremony.ConfirmingTap
 import com.farcooler.ceremony.Enroller
 import com.farcooler.ceremony.Refusal
 import com.farcooler.ceremony.ScanScreen
+import com.farcooler.ceremony.SealedReply
+import com.farcooler.ceremony.SealedReplyPost
 import kotlinx.coroutines.launch
 
 /**
@@ -78,7 +80,13 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
             account = userId,
             accountEmail = email,
             deviceName = CeremonyStore.thisDeviceName(),
-        ).also { it.certify = model::certifyScanned }
+        ).also {
+            it.certify = model::certifyScanned
+            // A browser's offer: its sealed reply goes to this account's relay (ov-770).
+            it.sealedReply.post = { ceremony, account, sealed ->
+                SealedReplyPost.send(model.account::directoryPost, ceremony, account, sealed)
+            }
+        }
     }
     val scanner = remember { CodeScanner() }
 
@@ -178,6 +186,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                     code = code,
                     somePending = somePending,
                     addressOnlyNote = addressOnlyNote,
+                    sealedReply = store.sealedReply,
                     onDone = onBack,
                 )
 
@@ -404,6 +413,7 @@ private fun ReplyScreen(
     code: String,
     somePending: Boolean,
     addressOnlyNote: String?,
+    sealedReply: SealedReply,
     onDone: () -> Unit,
 ) {
     Column(
@@ -426,6 +436,7 @@ private fun ReplyScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        SealedReplySection(sealedReply, deviceName)
         if (somePending) {
             // No cause given, because from here the cause is not knowable.
             Text(
