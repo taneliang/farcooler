@@ -41,7 +41,7 @@ fn runner(host_key: &str) -> (tokio::io::DuplexStream, Arc<Seen>) {
 /// tunneled runner whose host key prints as `host_key`, taken through the
 /// browser's own acceptance.
 fn granted_runner(host_key: &str) -> enroll::Granted {
-    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY);
+    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY, &enroll::new_reply_secret()).unwrap();
     let entry = RunnerEntry {
         id: "01990000-0000-7000-8000-00000000a001".into(),
         label: "studio".into(),
@@ -178,7 +178,7 @@ async fn the_pinned_runner_lists_attaches_and_takes_keystrokes_on_the_control_ch
 /// could not write its key to is listed but never dialed.
 #[test]
 fn only_a_written_tunneled_runner_is_dialable_from_a_browser() {
-    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY);
+    let offer = enroll::offer("Chrome on Linux", "acct-owner", &line(BROWSER_KEY), NODE_KEY, &enroll::new_reply_secret()).unwrap();
     let entry = |id: &str, reach: Reach, pending: bool| RunnerEntry {
         id: id.into(),
         label: id.into(),

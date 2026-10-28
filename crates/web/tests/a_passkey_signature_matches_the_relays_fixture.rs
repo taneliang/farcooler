@@ -166,3 +166,47 @@ fn a_passkey_for_the_parent_domain_is_never_sent() {
     let refused = passkey::signature_blob_for("app.canary.farcooler.com", &p.data, &p.assertion).unwrap_err();
     assert!(refused.contains("not for app.canary.farcooler.com"), "{refused}");
 }
+
+/// ov-771: the directory registration this browser builds is the fixture's
+/// register statement and its armored proof, byte for byte: the relay verified
+/// those bytes, so a proof built the same way registers.
+#[test]
+fn a_real_passkeys_registration_is_the_fixtures_statement_and_proof() {
+    use farcooler_web::register;
+
+    let f = fixture();
+    let (account, challenge) = (f["account"].as_str().unwrap(), f["challenge"].as_str().unwrap());
+    let entry = &f["exact"];
+    let p = proof(entry);
+    let statement = register::statement(account, challenge, &p.public_key).unwrap();
+    assert_eq!(statement, entry["statement"].as_str().unwrap());
+    // What the passkey is asked to sign is the data the browser really signed.
+    assert_eq!(register::signed_data(account, challenge, &p.public_key).unwrap(), p.data);
+    let armored = register::proof(account, challenge, &p.public_key, &p.assertion).unwrap();
+    assert_eq!(armored, entry["proof"].as_str().unwrap());
+}
+
+/// A challenge, account or assertion that isn't exactly right builds nothing:
+/// the relay can't slip a line into the statement, and an assertion over some
+/// other data, or for the parent domain, makes no proof.
+#[test]
+fn a_registration_refuses_a_challenge_an_account_or_an_assertion_that_is_not_its_own() {
+    use farcooler_web::register::{self, RegisterError};
+
+    let f = fixture();
+    let (account, challenge) = (f["account"].as_str().unwrap(), f["challenge"].as_str().unwrap());
+    let p = proof(&f["exact"]);
+    let key = &p.public_key;
+    let injected = format!("{challenge}\nkey-b SHA256:x");
+    assert_eq!(register::statement(account, &injected, key), Err(RegisterError::Challenge));
+    assert_eq!(register::statement(account, &challenge.to_uppercase(), key), Err(RegisterError::Challenge));
+    assert_eq!(register::statement("user_1\nchallenge x", challenge, key), Err(RegisterError::Account));
+    assert_eq!(register::statement("", challenge, key), Err(RegisterError::Account));
+    assert_eq!(register::statement(account, challenge, "not a key"), Err(RegisterError::Key));
+    // A different challenge changes the data, so the old assertion doesn't fit.
+    let other = "0".repeat(64);
+    assert_eq!(register::proof(account, &other, key, &p.assertion), Err(RegisterError::Assertion));
+    // The parent domain's assertion is for another host.
+    let parent = proof(&f["parent"]);
+    assert_eq!(register::proof(account, challenge, key, &parent.assertion), Err(RegisterError::Assertion));
+}
