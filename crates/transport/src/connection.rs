@@ -55,6 +55,20 @@ pub enum ConnectionError {
 }
 
 impl ConnectionError {
+    /// Why a session ended, as one stable word for the log. Never a message:
+    /// a codec error can carry bytes the peer sent.
+    pub fn word(&self) -> &'static str {
+        match self {
+            ConnectionError::Codec(_) => "protocol",
+            ConnectionError::Closed => "closed",
+            ConnectionError::TooSlow(_) => "too_slow",
+            ConnectionError::ExpectedHello => "expected_hello",
+            ConnectionError::UnexpectedFrame => "unexpected_frame",
+            ConnectionError::VersionIncompatible => "version_incompatible",
+            ConnectionError::Rejected { .. } => "rejected",
+        }
+    }
+
     /// Maps to the one domain error enum so a caller can hand this to
     /// `core`'s exhaustive wire-code mapping instead of inventing its own.
     pub fn domain(&self) -> Option<DomainError> {

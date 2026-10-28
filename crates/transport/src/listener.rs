@@ -177,6 +177,9 @@ impl UnixListenerServer {
                 // validates its arguments and exits with a message on stderr
                 // before it ever connects. Anything else reaching here wrote the
                 // line by hand.
+                // Only a device's relayed session names itself; a local
+                // caller (the Mac app, a pane) does not, and is not logged.
+                let device = preamble.as_ref().map(|p| (p.client.clone().unwrap_or_else(|| "-".into()), p.scope.clone()));
                 let Some((cfg, handler)) = session(preamble, pid) else {
                     tracing::warn!("refused a session whose preamble named no scope this daemon has");
                     return;
@@ -184,12 +187,31 @@ impl UnixListenerServer {
 
                 let reader = std::io::Cursor::new(buffered).chain(read_half);
                 let mut conn = Connection::new(reader, write_half);
-                if let Err(err) = serve_connection(&mut conn, &cfg, &handler).await {
+                if let Some((client, scope)) = &device {
+                    tracing::info!(%client, %scope, "a device session began");
+                }
+                let served = serve_connection(&mut conn, &cfg, &handler).await;
+                if let Err(err) = &served {
                     tracing::debug!(error = %err, "connection closed");
+                }
+                if let Some((client, _)) = &device {
+                    log_session_end(client, &served);
                 }
             });
         }
     }
+}
+
+/// Say, at INFO, that a device's session ended and why: the client id and the
+/// reason word, never a message, a key or a token. A browser's failed sign-in
+/// and a phone's reach this the same way, so this is where the next
+/// "the connection didn't work" gets its cause (ov-852).
+fn log_session_end(client: &str, served: &Result<(), crate::ConnectionError>) {
+    let reason = match served {
+        Ok(()) => "ended",
+        Err(err) => err.word(),
+    };
+    tracing::info!(%client, %reason, "a device session ended");
 }
 
 /// The process on the other end of a local connection, as the kernel says.
@@ -288,6 +310,75 @@ mod tests {
 
         let second = UnixListenerServer::bind(&sock_path);
         assert!(second.is_ok(), "a stale socket file must not block a fresh bind");
+    }
+
+    /// A handler that is never asked anything: the handshake fails first.
+    struct NoHandler;
+    impl crate::Handler for NoHandler {
+        fn peer(&self) -> crate::Peer {
+            crate::Peer { client_id: None, scope: farcooler_protocol::v1::Scope::Read }
+        }
+        fn handle(
+            &self,
+            _req: farcooler_protocol::v1::Request,
+        ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
+            async { unreachable!("the handshake fails first") }
+        }
+    }
+
+    /// Collects what the log says, to read it back.
+    #[derive(Clone, Default)]
+    struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Capture {
+            self.clone()
+        }
+    }
+
+    /// A device whose handshake fails leaves its client id and the reason in
+    /// the log at INFO (ov-852); a key or a token never does.
+    #[tokio::test]
+    async fn a_failed_device_handshake_logs_its_client_and_reason() {
+        use tokio::io::AsyncWriteExt;
+
+        let capture = Capture::default();
+        let _log = tracing::subscriber::set_default(
+            tracing_subscriber::fmt().with_writer(capture.clone()).with_ansi(false).with_max_level(tracing::Level::INFO).finish(),
+        );
+        let dir = tempdir().unwrap();
+        let sock_path = dir.path().join("farcooler.sock");
+        let server = UnixListenerServer::bind(&sock_path).unwrap();
+        let serving = tokio::spawn(async move {
+            server
+                .serve(|_| Some((HandshakeConfig { daemon_version: "t".into() }, NoHandler)))
+                .await
+        });
+        let mut stream = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        // A device's preamble, then bytes that are no ClientHello.
+        stream.write_all(b"farcooler-session read browser-7\n").await.unwrap();
+        stream.write_all(&[0, 0, 0, 3, 1, 2, 3]).await.unwrap();
+        for _ in 0..200 {
+            if String::from_utf8_lossy(&capture.0.lock().unwrap()).contains("ended") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        serving.abort();
+        let log = String::from_utf8_lossy(&capture.0.lock().unwrap()).to_string();
+        let ended = log.lines().find(|l| l.contains("a device session ended")).unwrap_or_else(|| panic!("no end line in {log:?}"));
+        assert!(ended.contains("INFO") && ended.contains("browser-7"), "{ended}");
+        assert!(ended.contains("reason=") && !ended.contains("reason=ended"), "{ended}");
+        assert!(log.contains("a device session began"), "{log:?}");
     }
 
     /// A daemon that cannot serve says why to whoever connects, with a
