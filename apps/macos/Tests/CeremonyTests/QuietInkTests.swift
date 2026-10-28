@@ -323,6 +323,7 @@ struct QuietInkTests {
     static let systemMaterial: [String: String] = [
         "PhoneRekeySection": "a Section of the iPhone's grouped Form",
         "AccountDevicesView": "Sections of a grouped Form",
+        "EnrolledDevicesSection": "a Section of a grouped Form",
         "AccountSection": "a Section of a grouped Form",
         "AccountDeviceKeys": "a Section of a grouped Form",
         "RendezvousSection": "a Section of a grouped Form",

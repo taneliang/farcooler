@@ -69,8 +69,8 @@ class EnrolledDevicesTest {
     @Test
     fun `a device that added others offers both choices, counted`() {
         val choices = list().revokeChoices(device("phone-1"))
-        assertEquals("Revoke This", EnrolledDevices.JUST_THIS_TITLE)
-        assertEquals("Revoke This and the 2 It Added", choices.withAddedTitle)
+        assertEquals("Revoke this", EnrolledDevices.JUST_THIS_TITLE)
+        assertEquals("Revoke this and the 2 it added", choices.withAddedTitle)
         assertTrue(choices.message, choices.message.contains("Alexandra’s Browser, web-2"))
     }
 

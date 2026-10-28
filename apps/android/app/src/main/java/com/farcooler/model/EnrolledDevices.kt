@@ -51,7 +51,7 @@ data class EnrolledDevices(val devices: List<Device>) {
         val title: String get() = "Revoke ${device.title}?"
 
         /** "Revoke This and the 2 It Added", or null when it added none: a second choice that does the same is no choice. */
-        val withAddedTitle: String? get() = if (added.isEmpty()) null else "Revoke This and the ${added.size} It Added"
+        val withAddedTitle: String? get() = if (added.isEmpty()) null else "Revoke this and the ${added.size} it added"
 
         val message: String
             get() = buildList {
@@ -63,8 +63,8 @@ data class EnrolledDevices(val devices: List<Device>) {
     }
 
     companion object {
-        const val JUST_THIS_TITLE = "Revoke This"
-        const val SECTION_TITLE = "Devices on This Runner"
+        const val JUST_THIS_TITLE = "Revoke this"
+        const val SECTION_TITLE = "Devices on this runner"
         const val EMPTY = "No other devices have access to this runner."
         const val ADDER_REMOVED = "Added by a device that was removed"
 
