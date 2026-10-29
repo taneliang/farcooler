@@ -71,6 +71,8 @@ pub struct Sessions {
     /// Where `revoked` is kept across a restart (ov-832, the ov-826 review's
     /// S2), or nowhere for a bare registry in a test.
     kept: Option<Arc<farcooler_store::Store>>,
+    /// The admin actions a Mac is waiting on an iPhone to approve (ov-858).
+    pub(crate) approvals: crate::approvals::Approvals,
 }
 
 struct Live {

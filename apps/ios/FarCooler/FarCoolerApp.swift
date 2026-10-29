@@ -163,6 +163,8 @@ struct ConnectedRoot: View {
         // A device added to or removed from the account since this phone
         // last said so (ov-550 review M1), until the person dismisses it.
         .safeAreaInset(edge: .top, spacing: 0) { DeviceNoticeBanner() }
+        // A Mac that isn't the runner asks this phone to approve an admin action (ov-858).
+        .modifier(ApprovalPrompts(fleet: fleet))
         .onChange(of: hosts.hosts.isEmpty) { was, now in
             if NotificationAsk.explainsAfterFirstRunner(hadRunners: !was, hasRunners: !now) {
                 explainingNotifications = true

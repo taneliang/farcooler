@@ -220,7 +220,7 @@ pub async fn ask(svc: &Service, peer: &Peer, p: pb::ApprovalAsk) -> Result<resul
         phase: Phase::Pending,
     };
     let answer = state_of(svc, &approval, now);
-    svc.approvals.add(approval, now);
+    svc.sessions().approvals.add(approval, now);
     tell_phone(svc, &person);
     tracing::info!(device, method = %asked.method, "asked a phone to approve an admin action");
     Ok(result::Value::ApprovalState(answer))
@@ -249,7 +249,7 @@ pub fn list(svc: &Service, peer: &Peer) -> Result<result::Value> {
     let now = crate::step_up_rpc::now_ms();
     let mut items = Vec::new();
     if may && person != Person::Released {
-        for a in svc.approvals.0.lock().unwrap().iter().rev() {
+        for a in svc.sessions().approvals.0.lock().unwrap().iter().rev() {
             if a.person == person && a.device != me && a.phase == Phase::Pending && a.live(now) {
                 items.push(state_of(svc, a, now));
             }
@@ -262,7 +262,7 @@ pub fn list(svc: &Service, peer: &Peer) -> Result<result::Value> {
 pub fn grant(svc: &Service, peer: &Peer, p: pb::ApprovalGrant) -> Result<result::Value> {
     let me = peer.client_id.as_deref().ok_or(DomainError::NotYours { what: "not_yours" })?;
     let now = crate::step_up_rpc::now_ms();
-    let a = svc.approvals.find(&p.id).filter(|a| a.phase == Phase::Pending && a.live(now)).ok_or(DomainError::Conflict { what: "approval_expired" })?;
+    let a = svc.sessions().approvals.find(&p.id).filter(|a| a.phase == Phase::Pending && a.live(now)).ok_or(DomainError::Conflict { what: "approval_expired" })?;
     // Another device of the same person, holding a trusted device key.
     let key = svc.store.step_up_key(me)?.filter(|k| k.trusted && k.alg == ALG_DEVICE).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
     if me == a.device || person_of_device(&svc.store, Some(me))? != a.person {
@@ -284,29 +284,29 @@ pub fn grant(svc: &Service, peer: &Peer, p: pb::ApprovalGrant) -> Result<result:
     // The statement names the Mac, not the phone: the phone approves for it.
     let context = Context { client_id: &a.device, host_pins: &pins, app_host: farcooler_fence::app_host() };
     step_up::verify(ALG_DEVICE, &key.public_key, &signed, &context).inspect_err(|_| tracing::warn!(device = me, "refused: an approval that didn't verify"))?;
-    if !svc.approvals.advance(&a.id, Phase::Pending, Phase::Granted, now) {
+    if !svc.sessions().approvals.advance(&a.id, Phase::Pending, Phase::Granted, now) {
         return Err(DomainError::Conflict { what: "approval_expired" });
     }
     tracing::info!(device = me, mac = %a.device, method = %a.method, "a phone approved an admin action");
-    Ok(result::Value::ApprovalState(state_of(svc, &svc.approvals.find(&a.id).unwrap_or(a), now)))
+    Ok(result::Value::ApprovalState(state_of(svc, &svc.sessions().approvals.find(&a.id).unwrap_or(a), now)))
 }
 
 /// `approval.deny`: the phone declines. Anyone of the person's devices may.
 pub fn deny(svc: &Service, peer: &Peer, p: pb::ApprovalId) -> Result<result::Value> {
     let me = peer.client_id.as_deref().ok_or(DomainError::NotYours { what: "not_yours" })?;
     let now = crate::step_up_rpc::now_ms();
-    let a = svc.approvals.find(&p.id).ok_or(DomainError::NotFound)?;
+    let a = svc.sessions().approvals.find(&p.id).ok_or(DomainError::NotFound)?;
     if person_of_device(&svc.store, Some(me))? != a.person {
         return Err(DomainError::NotYours { what: "not_yours" });
     }
-    svc.approvals.advance(&a.id, Phase::Pending, Phase::Denied, now);
-    Ok(result::Value::ApprovalState(state_of(svc, &svc.approvals.find(&a.id).unwrap_or(a), now)))
+    svc.sessions().approvals.advance(&a.id, Phase::Pending, Phase::Denied, now);
+    Ok(result::Value::ApprovalState(state_of(svc, &svc.sessions().approvals.find(&a.id).unwrap_or(a), now)))
 }
 
 /// `approval.status`: the asking Mac's own approval, to wait on.
 pub fn status(svc: &Service, peer: &Peer, p: pb::ApprovalId) -> Result<result::Value> {
     let me = peer.client_id.as_deref().ok_or(DomainError::NotYours { what: "not_yours" })?;
-    let a = svc.approvals.find(&p.id).filter(|a| a.device == me).ok_or(DomainError::NotFound)?;
+    let a = svc.sessions().approvals.find(&p.id).filter(|a| a.device == me).ok_or(DomainError::NotFound)?;
     Ok(result::Value::ApprovalState(state_of(svc, &a, crate::step_up_rpc::now_ms())))
 }
 

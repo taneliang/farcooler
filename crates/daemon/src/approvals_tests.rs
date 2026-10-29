@@ -191,7 +191,7 @@ async fn a_denied_or_expired_approval_runs_nothing_and_a_bad_ask_is_refused() {
     let state = asked(&r, MAC, &req).await;
     call(&r.conn("phone-d"), grant(&phone(), &r.pin, &state)).await.unwrap();
     let digest: [u8; 32] = Sha256::digest(step_up::action_bytes(&req)).into();
-    assert!(!r.svc.approvals.spend(&state.id, MAC, &digest, crate::step_up_rpc::now_ms() + TTL_MS + 1), "a lapsed approval is spent on nothing");
+    assert!(!r.svc.sessions().approvals.spend(&state.id, MAC, &digest, crate::step_up_rpc::now_ms() + TTL_MS + 1), "a lapsed approval is spent on nothing");
 
     let member = word(call(&r.conn("phone-b"), ask_req(&req)).await);
     assert!(member.ends_with("not_admin"), "{member}: a Member");

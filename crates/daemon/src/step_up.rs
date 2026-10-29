@@ -393,7 +393,7 @@ fn admit_approved(svc: &Service, peer: &Peer, req: Request, device: &str, now_ms
     let step_up = req.step_up.as_ref().expect("the caller saw a step_up");
     let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
     // Spent before the bytes are looked at again, and stays spent.
-    if !svc.approvals.spend(&step_up.approval_id, device, &digest, now_ms) {
+    if !svc.sessions().approvals.spend(&step_up.approval_id, device, &digest, now_ms) {
         tracing::warn!(device, method = %req.method, "refused: a phone approval that is spent, expired, unknown or for another action");
         return Err(DomainError::Conflict { what: "approval_expired" });
     }

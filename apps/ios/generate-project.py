@@ -30,6 +30,8 @@ SOURCES = [
     "ConnectionTeammate.swift",
     # This phone's step-up key and the calls it signs (ov-856), out of `Connection.swift` for its size budget.
     "ConnectionStepUp.swift",
+    # A Mac's ask for this phone to approve an admin action, and the sheet that shows it (ov-858).
+    "PhoneApprovals.swift",
     "PhoneAccessHarness.swift",
     "AppLockGate.swift",
     "PeopleAccessModel.swift",
@@ -317,6 +319,7 @@ AGENTKIT_SOURCES = [
     "PeopleAccessView.swift",
     "StepUp.swift",
     "StepUpSigner.swift",
+    "PhoneApproval.swift",
     "AppLock.swift",
     # The corner steps, `Radius.small`, `.medium` and `.large`, and the shapes
     # drawn from them (ov-226). The phone's views name a step by its job

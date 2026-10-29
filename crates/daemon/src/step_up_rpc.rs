@@ -105,8 +105,11 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
     Ok(state(target, &row))
 }
 
-/// The three calls, as the dispatcher runs them.
+/// The three calls, and phone approval's five (ov-858), as the dispatcher runs them.
 pub async fn dispatch(svc: &Service, peer: &Peer, caller_pid: Option<i32>, session: &Session, stepped: Option<&Stepped>, req: pb::Request) -> Result<result::Value> {
+    if req.method.starts_with("approval.") {
+        return crate::approvals::dispatch(svc, peer, req).await;
+    }
     match req.method.as_str() {
         "auth.challenge" => challenge(session),
         "client.set_step_up_key" => {
