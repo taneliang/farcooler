@@ -144,10 +144,12 @@ async function serve(route) {
 // The runner: a real sshd on a loopback port, whose one Key A line is written
 // once the page's offer names its passkey, in front of the fake daemon.
 const me = execFileSync('/usr/bin/id', ['-un']).toString().trim()
-let runner = null
-if (fakeDaemon) {
+/// A scratch sshd in front of the fake daemon, named `name` (its one ask says
+/// so), on its own loopback port. The walk uses one; the every-runner step
+/// (ov-861) uses a second.
+async function startRunner(name) {
   if (!existsSync('/usr/sbin/sshd')) throw new Error('no /usr/sbin/sshd here, so the passkey login cannot be checked')
-  const dir = join(scratch, 'sshd')
+  const dir = join(scratch, name === 'studio' ? 'sshd' : `sshd-${name}`)
   execFileSync('/bin/mkdir', [dir])
   execFileSync('/usr/bin/ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'host', '-f', join(dir, 'host')])
   const hostKey = execFileSync('/usr/bin/ssh-keygen', ['-lf', join(dir, 'host.pub')]).toString().split(' ')[1]
@@ -190,22 +192,29 @@ if (fakeDaemon) {
   }
   if (!pid) throw new Error(`sshd wrote no pid; see ${log}`)
   const typedLog = join(dir, 'typed')
-  runner = {
+  return {
+    name,
+    dir,
     pid,
     port,
     hostKey,
     log,
     /// The Key A line the phone's enrollment has the daemon write, in the
     /// fence's shape: restricted, with the daemon as its forced command.
-    enroll: keyA => writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog}" ${keyA}\n`),
+    enroll: keyA => writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog} ${name}" ${keyA}\n`),
     typed: () =>
       (existsSync(typedLog) ? readFileSync(typedLog, 'utf8') : '')
         .split('\n')
         .filter(Boolean)
         .map(hex => Buffer.from(hex, 'hex').toString())
         .join(''),
+    /// What the fake daemon was answered, one `<ask id> <option>` a line.
+    answers: () => (existsSync(join(dir, 'answers')) ? readFileSync(join(dir, 'answers'), 'utf8').trim().split('\n') : []),
   }
 }
+let runner = fakeDaemon ? await startRunner('studio') : null
+/// The second runner, started by the every-runner step.
+let second = null
 
 const failures = []
 const profile = mkdtempSync(join(tmpdir(), 'fc-csp-profile-'))
@@ -247,8 +256,11 @@ async function launch(video, secret) {
   await context.route(`${origin}/**`, serve)
   await context.route(`https://${SIBLING}/**`, serve)
   if (runner) {
-    await context.routeWebSocket(`wss://${HOST}/test-tunnel`, ws => {
-      const tcp = createConnection({ host: '127.0.0.1', port: runner.port })
+    // The path names the runner by the token its enrollment carries.
+    await context.routeWebSocket(url => url.host === HOST && url.pathname.startsWith('/test-tunnel/'), ws => {
+      const token = new URL(ws.url()).pathname.split('/').pop()
+      const target = token === 'test2' && second ? second : runner
+      const tcp = createConnection({ host: '127.0.0.1', port: target.port })
       tcp.on('data', data => later(() => ws.send(data)))
       tcp.on('close', () => later(() => ws.close()))
       tcp.on('error', () => ws.close())
@@ -293,9 +305,9 @@ function swapDial() {
     set: value => {
       real = {
         mintNodeKey: () => value.mintNodeKey(),
-        dial: () =>
+        dial: token =>
           new Promise((resolve, reject) => {
-            const ws = new WebSocket(`wss://${location.host}/test-tunnel`)
+            const ws = new WebSocket(`wss://${location.host}/test-tunnel/${token}`)
             ws.binaryType = 'arraybuffer'
             const queue = []
             let waiting = null
@@ -612,6 +624,64 @@ async function panes(page) {
   }
 }
 
+/// Needs You across every runner this browser is enrolled on (ov-861): two
+/// real sshds, each in front of a fake daemon with one ask waiting. One
+/// Connect and one touch for each shows both asks, each row naming its runner;
+/// an answer reaches only the runner the row is on; and with the second runner
+/// gone, the first one's ask is still listed, with a line saying the second
+/// can't be reached.
+async function everyRunner(page) {
+  second = await startRunner('build-box')
+  second.enroll(JSON.parse((await device(page)).offer).key_a)
+  await edit(page, {
+    runners: [
+      { id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' },
+      { id: 'r2', label: 'build-box', user: me, host_key: second.hostKey, token: 'test2', why: '' },
+    ],
+  })
+  await page.reload()
+  const before = touches
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.click('#show-needs')
+  const rows = () => page.$$eval('#needs .need', rows => rows.map(r => ({ text: r.textContent, runner: r.querySelector('.need-runner')?.textContent ?? '' })))
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 60_000 })
+  const both = await rows()
+  const names = both.map(r => r.runner).sort()
+  if (JSON.stringify(names) !== JSON.stringify(['build-box', 'studio'])) failures.push(`the rows name ${JSON.stringify(names)}, not both runners`)
+  for (const r of both) if (!r.text.includes(`Run the tests on ${r.runner}?`)) failures.push(`the ${r.runner} row says ${JSON.stringify(r.text)}`)
+  if (touches - before !== 2) failures.push(`connecting to two runners cost ${touches - before} touches, not 2`)
+  if ((await page.textContent('#show-needs')) !== 'Needs You (2)') failures.push(`the Needs You button says ${await page.textContent('#show-needs')}`)
+  await shoot(page, 'every-runner')
+  console.log('csp-check: Needs You listed both runners’ asks, each row naming its runner, at one touch each')
+
+  // An answer reaches the runner the row is on, and only that one.
+  const card = page.locator('#needs .need', { hasText: 'Run the tests on build-box?' })
+  await card.getByRole('button', { name: 'Allow' }).click()
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
+  const left = (await rows())[0]
+  if (left.runner !== 'studio') failures.push(`after answering build-box's ask the list holds ${JSON.stringify(left)}`)
+  if (JSON.stringify(second.answers()) !== JSON.stringify(['ask-build-box allow'])) failures.push(`build-box was answered ${JSON.stringify(second.answers())}`)
+  if (runner.answers().length) failures.push(`studio was answered ${JSON.stringify(runner.answers())} for build-box's ask`)
+  else console.log('csp-check: an answer reached build-box and not studio')
+
+  // The second runner goes away: the first's ask stays, and the page says so.
+  spawnSync('/bin/kill', [String(second.pid)])
+  await page.reload()
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.click('#show-needs')
+  await page.waitForFunction(() => document.querySelector('.need-runner-note')?.textContent?.includes('build-box'), null, { timeout: 60_000 })
+  const note = await page.textContent('.need-runner-note')
+  const kept = await rows()
+  if (kept.length !== 1 || kept[0].runner !== 'studio') failures.push(`with build-box unreachable the list holds ${JSON.stringify(kept)}`)
+  if (!(await page.locator('.need-runner-note button', { hasText: 'Connect' }).count())) failures.push(`the note for the unreachable runner has no Connect button: ${note}`)
+  await shoot(page, 'runner-unreachable')
+  console.log(`csp-check: with build-box unreachable, studio's ask stayed listed and the page said "${note.trim()}"`)
+}
+
 let session = await launch()
 try {
   // A step that times out stops the walk, and the violations it caused are
@@ -800,6 +870,8 @@ try {
       if (touches !== pinned) failures.push('the passkey was asked to sign for a runner whose pin was altered')
       console.log('csp-check: an altered pin was refused with the host-key sentence, without a touch')
       await shoot(page, 'refused')
+
+      await everyRunner(page)
     }
 
     // ov-767 acceptance 2: the passkey, made for the app host, can't be used
@@ -855,7 +927,7 @@ try {
 } finally {
   await session.context.close()
   // By pid, never by pattern: this machine may run other sshds.
-  if (runner) spawnSync('/bin/kill', [String(runner.pid)])
+  for (const r of [runner, second]) if (r) spawnSync('/bin/kill', [String(r.pid)])
   rmSync(scratch, { recursive: true, force: true })
   rmSync(profile, { recursive: true, force: true })
 }
