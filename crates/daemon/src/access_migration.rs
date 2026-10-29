@@ -29,9 +29,15 @@
 //!
 //! The migration is computed and checked under the fence lock, from the
 //! lines as they are read there, and refuses to write anything if the plan
-//! would not reproduce a line exactly ([`verify`]). It runs once
-//! (`Store::access_migrated`); a failed run changes nothing and tries again
-//! at the next start.
+//! would not reproduce a line exactly ([`verify`]). The first run derives the
+//! tables from the lines alone (`Store::access_migrated`); a failed run
+//! changes nothing and tries again at the next start.
+//!
+//! **Every later start refreshes the tables** (slice 2, the slice 1 review's
+//! SF1): it adds what the lines have and the tables lack (a member added, a
+//! device an older build enrolled), drops what no line backs, and keeps every
+//! row that already has a say. Then it lowers any line that sits above what
+//! the tables say: a reconcile never raises one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -58,7 +64,7 @@ pub fn ceiling(access: Access) -> Scope {
     }
 }
 
-fn rank(scope: Scope) -> u8 {
+pub(crate) fn rank(scope: Scope) -> u8 {
     match scope {
         Scope::Unspecified => 0,
         Scope::Read => 1,
@@ -67,7 +73,7 @@ fn rank(scope: Scope) -> u8 {
     }
 }
 
-fn lower(a: Scope, b: Scope) -> Scope {
+pub(crate) fn lower(a: Scope, b: Scope) -> Scope {
     if rank(a) <= rank(b) { a } else { b }
 }
 
@@ -90,6 +96,7 @@ fn key_a(entry: &Entry) -> bool {
 #[derive(Debug, Default, Clone)]
 pub struct View {
     owners: BTreeSet<String>,
+    released: BTreeSet<String>,
     member_of: BTreeMap<String, String>,
     access: BTreeMap<String, Access>,
     caps: BTreeMap<String, Cap>,
@@ -101,6 +108,7 @@ impl View {
         let stored = store.stored_access()?;
         let mut view = View {
             owners: stored.owner_devices.into_iter().map(|(d, _)| d).collect(),
+            released: store.released_all()?,
             access: stored.member_access.into_iter().collect(),
             caps: stored.caps.into_iter().collect(),
             ..View::default()
@@ -131,11 +139,53 @@ impl View {
 
     /// The access of whoever `device` is bound to, or `None` for a device
     /// nobody is bound to (released, unknown) or a member with no access.
+    /// A released device is checked before any owner row, as `person_of`
+    /// does: a stale row for an id that was revoked and enrolled again for a
+    /// teammate must not read as the owner's (the slice 1 review's SF2).
     pub fn access_of(&self, device: &str) -> Option<Access> {
         match self.member_of.get(device) {
             Some(handle) => self.access.get(handle).copied(),
+            None if self.released.contains(device) => None,
             None => self.owners.contains(device).then_some(Access::Owner),
         }
+    }
+
+    /// A stale owner row, for a test of what a released device reads as.
+    #[cfg(test)]
+    pub(crate) fn owners_insert_for_tests(&mut self, device: &str) {
+        self.owners.insert(device.to_string());
+    }
+
+    /// `handle`'s access in this view.
+    pub fn access_of_member(&self, handle: &str) -> Option<Access> {
+        self.access.get(handle).copied()
+    }
+
+    /// This view, with `handle`'s access as `access`: what a change would
+    /// leave.
+    pub fn with_access(&self, handle: &str, access: Access) -> View {
+        let mut view = self.clone();
+        view.access.insert(handle.to_string(), access);
+        view
+    }
+
+    /// This view, with `device`'s cap as `cap`.
+    pub fn with_cap(&self, device: &str, cap: Option<Cap>) -> View {
+        let mut view = self.clone();
+        match cap {
+            Some(cap) => view.caps.insert(device.to_string(), cap),
+            None => view.caps.remove(device),
+        };
+        view
+    }
+
+    /// Every device `person` holds: a member's handle, or the owner's with
+    /// the empty string.
+    pub fn devices_of(&self, person: &str) -> BTreeSet<String> {
+        if person.is_empty() {
+            return self.owners.iter().filter(|d| !self.member_of.contains_key(*d) && !self.released.contains(*d)).cloned().collect();
+        }
+        self.member_of.iter().filter(|(_, h)| *h == person).map(|(d, _)| d.clone()).collect()
     }
 
     /// The scope a rebuild gives `device`'s line: `min(ceiling, cap)`.
@@ -156,6 +206,11 @@ pub struct Facts<'a> {
     pub released: &'a dyn Fn(&str) -> bool,
     /// `(device, added_by)`, as `Store::added_by_all`.
     pub added_by: &'a [(String, String)],
+    /// The access already stored, which a refresh keeps (empty on the first
+    /// run).
+    pub access: &'a BTreeMap<String, Access>,
+    /// The caps already stored: they win over a cap worked out from a line.
+    pub caps: &'a BTreeMap<String, Cap>,
 }
 
 /// The migration for `entries`, by today's rules for whose a device is
@@ -187,7 +242,8 @@ pub fn plan(entries: &[Entry], facts: &Facts) -> AccessPlan {
             .filter(|e| member.devices.contains(&e.client_id))
             .map(|e| e.scope)
             .max_by_key(|s| rank(*s));
-        out.member_access.push((member.handle.clone(), highest.map_or(Access::Member, access_for)));
+        let access = facts.access.get(&member.handle).copied();
+        out.member_access.push((member.handle.clone(), access.unwrap_or_else(|| highest.map_or(Access::Member, access_for))));
     }
     let view = View::from_plan(&out, facts.members);
     let mut seen = BTreeSet::new();
@@ -205,16 +261,32 @@ pub fn plan(entries: &[Entry], facts: &Facts) -> AccessPlan {
 /// The block as a rebuild writes it: every line a person owns, with the
 /// scope the view gives it, and every other line as it was, byte for byte.
 ///
-/// A rebuild never decides to raise a line. Today nothing calls it outside
-/// [`verify`] and the tests; the enforcement slice rebuilds with it.
-pub fn rebuild(entries: &[Entry], view: &View) -> Result<Vec<String>> {
+/// **A rebuild never raises a line unless it is told to** (B1 of the
+/// security review). A line moves to the view's scope only downward; one of
+/// the `raise` devices, the ones a promotion or an uncap names, may also
+/// move up, as far as `control` and no further (`host_admin` arrives with
+/// step-up). A line that doesn't change is returned as it was, so one this
+/// build can't rewrite is no obstacle until it has to be lowered.
+pub fn rebuild(entries: &[Entry], view: &View, raise: &BTreeSet<String>) -> Result<Vec<String>> {
     entries
         .iter()
-        .map(|entry| match view.scope_of(&entry.client_id).filter(|_| key_a(entry)) {
-            Some(scope) => fence::with_scope(entry, scope).map_err(|_| DomainError::OperationFailed),
-            None => Ok(entry.line.clone()),
+        .map(|entry| {
+            let Some(target) = view.scope_of(&entry.client_id).filter(|_| key_a(entry)) else { return Ok(entry.line.clone()) };
+            let up = lower(target, Scope::Control);
+            let scope = if raise.contains(&entry.client_id) && rank(up) > rank(entry.scope) { up } else { lower(entry.scope, target) };
+            if scope == entry.scope {
+                return Ok(entry.line.clone());
+            }
+            fence::with_scope(entry, scope).map_err(|_| DomainError::OperationFailed)
         })
         .collect()
+}
+
+/// `entries` with the lines of `rebuilt`, and whether any differs: what a
+/// write of them would be.
+pub fn relined(entries: &[Entry], rebuilt: Vec<String>) -> (Vec<Entry>, bool) {
+    let changed = entries.iter().zip(&rebuilt).any(|(entry, line)| entry.line != *line);
+    (entries.iter().zip(rebuilt).map(|(entry, line)| Entry { line, ..entry.clone() }).collect(), changed)
 }
 
 /// Every line a person owns keeps its scope under `view`: what a plan must
@@ -280,20 +352,13 @@ impl From<FenceError> for Skipped {
     }
 }
 
-/// Run the migration once, as the daemon starts. Under the fence lock, from
-/// the lines as read there, checked before it writes; the file is never
-/// written. Logged, never fatal: a run that can't finish changes nothing and
-/// the next start tries again.
+/// Run the migration as the daemon starts: the first time it derives the
+/// tables from the lines, every later start refreshes them and lowers any
+/// line above them. Under the fence lock, from the lines as read there,
+/// checked before it writes. Logged, never fatal: a run that can't finish
+/// changes nothing and the next start tries again.
 pub async fn migrate_at_start(svc: &Arc<Service>) {
     let store = svc.store.clone();
-    match store.access_migrated() {
-        Ok(false) => {}
-        Ok(true) => return,
-        Err(err) => {
-            tracing::warn!(error = %err.what(), "the access migration couldn't read whether it ran");
-            return;
-        }
-    }
     let path = svc.authorized_keys().to_path_buf();
     let done = tokio::task::spawn_blocking(move || migrate_in(&store, &path)).await;
     match done {
@@ -308,17 +373,53 @@ pub async fn migrate_at_start(svc: &Arc<Service>) {
     }
 }
 
+/// One run, answering whether it was the first.
+///
+/// The lines come first and the store second, both inside the lock: a line
+/// lowered with the tables not yet refreshed is the safe way round, and a
+/// failed file write changes nothing at all.
 fn migrate_in(store: &Store, path: &std::path::Path) -> std::result::Result<bool, Skipped> {
-    // `update` for its lock, not for a write: `Change::Leave` touches nothing.
-    fence::update(path, fence::AUTHORIZED_KEYS, Placement::Last, |entries| {
-        let members = store.members().map_err(Skipped::Store)?;
-        let added_by = store.added_by_all().map_err(Skipped::Store)?;
-        let released = |id: &str| store.device_released(id).unwrap_or(true);
-        let plan = plan(entries, &Facts { members: &members, released: &released, added_by: &added_by });
-        verify(entries, &View::from_plan(&plan, &members)).map_err(Skipped::Breaks)?;
-        let wrote = store.apply_access_plan(&plan).map_err(Skipped::Store)?;
-        Ok((Change::Leave, wrote))
-    })
+    let first = !store.access_migrated().map_err(Skipped::Store)?;
+    fence::update_then(
+        path,
+        fence::AUTHORIZED_KEYS,
+        Placement::Last,
+        |entries| {
+            let members = store.members().map_err(Skipped::Store)?;
+            let added_by = store.added_by_all().map_err(Skipped::Store)?;
+            let released = |id: &str| store.device_released(id).unwrap_or(true);
+            let stored = store.stored_access().map_err(Skipped::Store)?;
+            let (access, caps): (BTreeMap<_, _>, BTreeMap<_, _>) = match first {
+                true => Default::default(),
+                false => (stored.member_access.into_iter().collect(), stored.caps.into_iter().collect()),
+            };
+            let plan = plan(entries, &Facts { members: &members, released: &released, added_by: &added_by, access: &access, caps: &caps });
+            let mut view = View::from_plan(&plan, &members);
+            view.caps.extend(caps);
+            if first {
+                verify(entries, &view).map_err(Skipped::Breaks)?;
+            }
+            let rebuilt = rebuild(entries, &view, &BTreeSet::new()).map_err(Skipped::Store)?;
+            let (lowered, changed) = relined(entries, rebuilt);
+            let live: BTreeSet<String> = entries.iter().filter(|e| key_a(e)).map(|e| e.client_id.clone()).collect();
+            let change = match changed {
+                true => {
+                    let (ours, foreign) = crate::enrollment::sorted(&lowered);
+                    Change::Write { entries: ours, foreign }
+                }
+                false => Change::Leave,
+            };
+            Ok((change, (plan, live)))
+        },
+        |(plan, live)| {
+            match first {
+                true => store.apply_access_plan(plan).map(|_| ()),
+                false => store.refresh_access(plan, live),
+            }
+            .map_err(Skipped::Store)
+        },
+    )
+    .map(|_| first)
 }
 
 #[cfg(test)]

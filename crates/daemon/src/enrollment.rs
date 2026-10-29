@@ -35,6 +35,7 @@ mod added;
 mod grant;
 mod rekey;
 pub use added::{ADD_LIMIT, Caller, revoke_as, revoke_keeping};
+pub(crate) use added::{Guard, revoke_guarded};
 pub use grant::{Attempt, may_grant};
 pub use rekey::rekey;
 
@@ -134,6 +135,28 @@ pub async fn enroll_as(
     enroll_held(svc, request, by_member, caller, || (), None).await
 }
 
+/// [`enroll_held`] for another module's race tests (ov-856): `caller` on its
+/// session, parked at `held` on its way into the fence lock.
+#[cfg(test)]
+pub(crate) async fn enroll_held_for_tests(
+    svc: &Service,
+    request: &ClientEnroll,
+    caller: Caller,
+    held: impl FnOnce() + Send + 'static,
+) -> Result<ClientEnrollResult> {
+    enroll_held(svc, request, None, Some(caller), held, None).await
+}
+
+/// [`enroll_held`] for the socket, parked at `before_tunnel` after its write.
+#[cfg(test)]
+pub(crate) async fn enroll_at_tunnel_for_tests(
+    svc: &Service,
+    request: &ClientEnroll,
+    before_tunnel: Box<dyn FnOnce() + Send>,
+) -> Result<ClientEnrollResult> {
+    enroll_held(svc, request, None, None, || (), Some(before_tunnel)).await
+}
+
 /// [`enroll_as`], running `held` on the blocking thread just before it takes
 /// the fence lock, and `before_tunnel` there after its write and before it
 /// waits on the tunnel: where a test parks an enroll while a revoke runs.
@@ -204,21 +227,33 @@ async fn enroll_held(
     let asking = caller.clone();
     let device = mine.client_id.clone();
     let store = svc.store.clone();
+    // A line this call writes for the runner's owner is bound to them, and an
+    // owner's device is one that no member's device and no Add Teammate made
+    // (ov-856): the enroller is the owner's own device or this runner's socket.
+    let member_enrolls = by_member.is_some();
+    let owner_binds = by_member.is_none() && !request.for_teammate;
     let (mut result, admitted) = blocking(move || {
         held();
+        let bind = std::cell::Cell::new(None);
         // Read and write under ONE lock hold. Two enrollments landing in the same
         // instant used to each rebuild the block from a snapshot taken before the
         // other's write, and the loser's key was silently gone — a device
         // Settings says is enrolled and that cannot connect. A Mac is two
         // enrollments of one client id, so the window was reachable from the
         // product's ordinary path, not only in theory. See `fence::update`.
-        let out = fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+        let out = fence::update_then(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
             // First, before either answer: a revoke marks under this lock,
             // so one that got here first is seen (ov-826). Refused as a
             // closed session's request is, and nothing is written or admitted.
             if caller.as_ref().is_some_and(|c| c.session.revoked_since_open()) {
                 tracing::warn!(client = %mine.client_id, "refused an enroll from a session whose device was revoked while it ran");
                 return Err(Refusal(DomainError::AuthRequired));
+            }
+            // And what the caller was when it was decided is still what it is:
+            // an access, a cap or a binding changed since is `access_changed`
+            // (ov-856, S2).
+            if let Some(c) = caller.as_ref() {
+                c.recheck(&store).map_err(Refusal)?;
             }
             let entries = attributed(entries);
             // Either identity already being present is "already enrolled".
@@ -282,6 +317,21 @@ async fn enroll_held(
             // write is, so two enrolls can't both count under the limit.
             let has_line = entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id);
             added::may_add(&store, &sessions, caller.as_ref(), &mine.client_id, has_line).map_err(Refusal)?;
+            // A bind is insert-only (ov-856, S5): a new line under an id with
+            // any row left (a binding, a cap, a key, a mark) is refused, even
+            // from the socket, so it can't inherit an earlier person or key.
+            // A Mac's second key, in the other shape, is the same device.
+            let fresh_key_a = !mine.shell_access && !entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id && !e.shell_access);
+            let leftover = match member_enrolls {
+                // A member's enroll supersedes the older marks itself.
+                true => store.device_has_access_rows(&mine.client_id),
+                false => store.device_has_rows(&mine.client_id),
+            };
+            if (!has_line || fresh_key_a) && leftover.map_err(Refusal)? {
+                tracing::warn!(client = %mine.client_id, "refused: an enrollment under an id that still has rows");
+                return Err(Refusal(DomainError::Conflict { what: "device_taken" }));
+            }
+            bind.set((owner_binds && fresh_key_a).then_some(mine.scope));
             if let Some(mark) = by_member {
                 if entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id) {
                     return Err(Refusal(DomainError::Conflict { what: "device_taken" }));
@@ -309,6 +359,16 @@ async fn enroll_held(
                     !admitting.is_empty(),
                 ),
             ))
+        }, |(done, _)| {
+            // The owner's positive binding, once the line has landed: a line
+            // with no row reads as the owner's anyway, while a row with no
+            // line would keep the id taken.
+            match (bind.get(), done.already_enrolled) {
+                (Some(scope), false) if store.access_migrated()? => {
+                    store.bind_owner_device(&mine.client_id, crate::person_access::owner_cap(scope)).map_err(Refusal)
+                }
+                _ => Ok(()),
+            }
         })?;
         // A real enrollment of this id: a device revoked earlier is served
         // again (ov-820 review S4). Only once the write has landed, so a
@@ -738,8 +798,9 @@ pub async fn revoke_many(
 ) -> Result<Vec<String>> {
     let path = svc.authorized_keys().to_path_buf();
     let sessions = svc.sessions().clone();
+    let store = svc.store.clone();
     let (revoked, was_tunneled) = blocking(move || {
-        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+        fence::update_then(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
             let entries = attributed(entries);
             // Never an empty id: a foreign line has none (see `revoke`).
             let revoked: Vec<String> = client_ids
@@ -758,7 +819,7 @@ pub async fn revoke_many(
             let remaining: Vec<Entry> = entries.into_iter().filter(|e| !revoked.contains(&e.client_id)).collect();
             let (ours, foreign) = sorted(&remaining);
             Ok::<_, Refusal>((fence::Change::Write { entries: ours, foreign }, (revoked, was_tunneled)))
-        })
+        }, |(revoked, _)| revoked.iter().try_for_each(|id| store.clear_device_rows(id)).map_err(Refusal))
     })
     .await?;
     // After the write, for `revoke`'s reason: the file is the authority.
@@ -838,10 +899,12 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
 
 /// [`revoke`], for `targets` (the device, and with `with_added` what it
 /// added, ov-838) decided under the fence lock, and the store's leftovers
-/// about each cleared after the write (`added::forget`).
+/// about each cleared with its line (`Store::clear_device_rows`).
 async fn revoke_targets(
     svc: &Service,
     request: &ClientRevoke,
+    guard: Guard,
+    held: impl FnOnce() + Send + 'static,
     targets: impl FnOnce(&[Entry]) -> std::result::Result<Vec<String>, Refusal> + Send + 'static,
 ) -> Result<ClientList> {
     let path = svc.authorized_keys().to_path_buf();
@@ -853,15 +916,20 @@ async fn revoke_targets(
     }
     let closing_id = client_id.clone();
     let sessions = svc.sessions().clone();
+    let store = svc.store.clone();
     let (remaining, was_tunneled) = blocking(move || {
+        held();
         // Read and write under one lock hold, so that a revocation cannot rebuild
         // the block from a snapshot taken before a concurrent enrollment landed
         // and put the enrolled key back. See `fence::update`.
-        let was_tunneled = fence::update(
+        let was_tunneled = fence::update_then(
             &path,
             fence::AUTHORIZED_KEYS,
             fence::Placement::Last,
             |entries| {
+                // Whether the caller is still who they were, and may take this
+                // device, decided where the write is (ov-856, S2).
+                guard(&store).map_err(Refusal)?;
                 let entries = attributed(entries);
                 // NOT_FOUND rather than a cheerful success. "Revoked" from a runner
                 // that revoked nothing is the one answer a person must never be given
@@ -890,6 +958,10 @@ async fn revoke_targets(
                 let (ours, foreign) = sorted(&remaining);
                 Ok((fence::Change::Write { entries: ours, foreign }, (was_tunneled, gone)))
             },
+            // Every row about each device goes with its line, in the same hold
+            // and only once the line is gone (ov-856, S5): a later enroll of
+            // the id inherits no person, cap or key.
+            |(_, gone)| gone.iter().try_for_each(|id| store.clear_device_rows(id)).map_err(Refusal),
         )?;
         // Read back rather than answering with what was just computed, the same
         // way a settings write does: what the file now says is the only claim
@@ -919,7 +991,6 @@ async fn revoke_targets(
         let closing = svc.sessions().closing(device);
         tracing::info!(client = %device, asked = %closing_id, closed = closing.count(), "revoked a device and closed its live sessions");
         closed = closed.and(closing);
-        added::forget(svc, device);
     }
 
     // Then the tunnel route, and still before the answer.
@@ -981,7 +1052,7 @@ fn read(path: &std::path::Path) -> std::result::Result<Vec<Entry>, FenceError> {
 /// that opened the file is the only one that knows. Which is also why the entries
 /// `fence::update` hands a closure arrive without it, and every closure that
 /// reports one puts it on first.
-fn attributed(entries: &[Entry]) -> Vec<Entry> {
+pub(crate) fn attributed(entries: &[Entry]) -> Vec<Entry> {
     let account = local_account();
     entries
         .iter()
@@ -1025,7 +1096,7 @@ fn local_account() -> Option<String> {
 ///
 /// Foreign lines are carried through verbatim rather than dropped: dropping one
 /// would delete a key somebody added by hand inside our block.
-fn sorted(entries: &[Entry]) -> (Vec<String>, Vec<String>) {
+pub(crate) fn sorted(entries: &[Entry]) -> (Vec<String>, Vec<String>) {
     let (ours, foreign): (Vec<&Entry>, Vec<&Entry>) =
         entries.iter().partition(|e| !e.client_id.is_empty());
     (
@@ -1077,7 +1148,7 @@ fn passkey_takes(public_key: &str) -> bool {
 /// `DomainError` lives in `core`, which knows nothing about `authorized_keys`
 /// and should not: an error type with a variant per file this daemon touches
 /// would be a domain vocabulary defined by its plumbing.
-struct Refusal(DomainError);
+pub(crate) struct Refusal(pub(crate) DomainError);
 
 impl From<DomainError> for Refusal {
     fn from(error: DomainError) -> Self {
@@ -1107,7 +1178,7 @@ impl From<FenceError> for Refusal {
 ///
 /// The closure answers in `Refusal` so `?` works on both error types inside it;
 /// callers all speak `DomainError`.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> std::result::Result<T, Refusal> + Send + 'static,
 ) -> Result<T> {
     match tokio::task::spawn_blocking(work).await {

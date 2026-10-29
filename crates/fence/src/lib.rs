@@ -31,6 +31,8 @@ mod rekey;
 pub use rekey::{rekey_statement, REKEY_NAMESPACE};
 mod scope;
 pub use scope::with_scope;
+mod then;
+pub use then::update_then;
 mod passkey;
 pub use passkey::{admits_as_key_a, app_host, app_host_for, holds_ed25519};
 
@@ -893,22 +895,7 @@ pub fn update<T, E>(
 where
     E: From<FenceError>,
 {
-    let name = path.file_name().ok_or(FenceError::Missing)?;
-    let directory = open_fence_dir(path.parent().ok_or(FenceError::Missing)?)?;
-    let _lock = hold_lock(&directory, name)?;
-
-    // Inside the lock, and that is the entire point of this function. Moving
-    // these three lines above `hold_lock` restores the old shape, and
-    // `two_concurrent_enrollments_both_survive` fails when they are.
-    let current = read_at(&directory, name)?;
-    let text = current.as_ref().map(|(text, _)| text.as_str()).unwrap_or_default();
-    let entries = parse_within(text, markers)?;
-
-    let (change, answer) = decide(&entries)?;
-    if let Change::Write { entries, foreign } = change {
-        write_locked(&directory, name, current.as_ref(), markers, &entries, &foreign, placement)?;
-    }
-    Ok(answer)
+    update_then(path, markers, placement, decide, |_| Ok(()))
 }
 
 /// The write itself, with the lock already held and the file already read.

@@ -240,7 +240,9 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
 
-        M::MemberSetRole => Owners(Why::Grants),
+        // An access or a cap is the owner's alone too, and the runner's own
+        // socket's: `person_access::socket_person_only` (ov-856).
+        M::MemberSetRole | M::MemberSetAccess | M::ClientSetCap => Owners(Why::Grants),
 
         M::CrashReport => Owners(Why::OwnersDevice),
 

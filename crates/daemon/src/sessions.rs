@@ -16,7 +16,7 @@
 //! what is actually open.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use farcooler_protocol::v1::Scope;
@@ -78,6 +78,9 @@ struct Live {
     gate: Arc<tokio::sync::Semaphore>,
     /// Closed once the connection has said its farewell (ov-820), or ended.
     said: Arc<tokio::sync::Semaphore>,
+    /// Closed because its person's access changed, not because the device was
+    /// revoked: it says no `device_released` and just reconnects (ov-856).
+    quiet: Arc<AtomicBool>,
 }
 
 impl Sessions {
@@ -113,9 +116,10 @@ impl Sessions {
             gate.close();
         }
         let revocations_at_open = client_id.as_deref().map_or(0, |id| self.revocations_of(id));
-        live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone() });
+        let quiet = Arc::new(AtomicBool::new(false));
+        live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone(), quiet: quiet.clone() });
         drop(live);
-        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said })
+        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -129,6 +133,22 @@ impl Sessions {
     /// Those are the local callers, including the one doing the revoking.
     pub fn close(&self, client_id: &str) -> usize {
         self.closing(client_id).count()
+    }
+
+    /// Close every connection this device is holding because its person's
+    /// access changed (ov-856, `access_changed`): no farewell, since the device
+    /// isn't released, and it reconnects at the scope its line now carries.
+    /// Answers with how many. Marks nothing revoked.
+    pub fn reconnect(&self, client_id: &str) -> usize {
+        let live = self.live.lock().unwrap();
+        let mut closed = 0;
+        for session in live.values().filter(|s| s.client_id.as_deref() == Some(client_id)) {
+            session.quiet.store(true, Ordering::SeqCst);
+            session.said.close();
+            session.gate.close();
+            closed += 1;
+        }
+        closed
     }
 
     /// [`close`](Self::close), keeping what it takes to wait for each closed
@@ -268,9 +288,16 @@ pub struct Session {
     revocations_at_open: u64,
     gate: Arc<tokio::sync::Semaphore>,
     said: Arc<tokio::sync::Semaphore>,
+    quiet: Arc<AtomicBool>,
 }
 
 impl Session {
+    /// Whether this session was closed for an access change, so it says no
+    /// farewell: the device is still welcome and reconnects at its new scope.
+    pub fn closed_quietly(&self) -> bool {
+        self.quiet.load(Ordering::SeqCst)
+    }
+
     /// Resolves once this session has been closed, and never otherwise.
     pub async fn closed(&self) {
         // The error IS the signal: `acquire` on a zero-permit semaphore can

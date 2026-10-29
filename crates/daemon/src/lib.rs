@@ -59,6 +59,7 @@ pub mod read_only_folders;
 pub mod reconcile;
 pub mod refusal;
 pub mod access_migration;
+pub mod person_access;
 pub mod release_sweep;
 pub mod registry_binding;
 pub mod resync;

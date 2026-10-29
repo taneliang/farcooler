@@ -32,8 +32,18 @@ async fn a_failed_revoke() -> Failed {
     call(&admin, set("bob", &["phone-b", "pad-b"], "", "")).await.expect("Bob bound");
     call(&admin, set("alice", &["phone-a"], "", "")).await.expect("Alice bound");
     // Enrolled by Alice's device, as `client.enroll` from it records it.
-    svc.store.record_member_enrolled("pad-new", "alice").unwrap();
-    enroll(&svc, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV new", "pad-new").await;
+    let request = pb::ClientEnroll {
+        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV new".into(),
+        label: "pad-new".into(),
+        client_id: "pad-new".into(),
+        scope: Scope::Control as i32,
+        ..Default::default()
+    };
+    let mark: crate::enrollment::MemberEnrolled = {
+        let svc = svc.clone();
+        Box::new(move |id: &str| svc.store.record_member_enrolled(id, "alice"))
+    };
+    crate::enrollment::enroll_as(&svc, &request, Some(mark), None).await.expect("enrolled by Alice's device");
     let sessions = ["pad-b", "phone-b", "phone-a", "phone-o", "pad-new"]
         .into_iter()
         .map(|d| (d, svc.sessions().open(Some(d.to_string()))))

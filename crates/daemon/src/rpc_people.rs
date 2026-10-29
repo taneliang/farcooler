@@ -40,25 +40,17 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
         "member.list" => Ok(result::Value::MemberList(list(svc, peer)?)),
         "member.set" => {
             let Some(request::Payload::MemberSet(p)) = req.payload else { return Err(payload_missing()) };
-            // Only devices this runner enrolled: a typo bound to a member would
-            // leave their real phone the owner's.
-            let enrolled = crate::enrollment::list(svc).await?;
-            let known = |d: &String| enrolled.items.iter().any(|e| !e.client_id.is_empty() && e.client_id == d.trim());
-            if !p.client_ids.iter().filter(|d| !d.trim().is_empty()).all(known) {
-                return Err(DomainError::InvalidArgument { what: "device" });
-            }
-            // Who they are in the team directory, when the Mac that added
-            // them by QR says (ov-525). Stored as told: a runner admin's
-            // word, like the name, and what offboarding will look them up by.
-            let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
-            // What the caller read as theirs, checked with the write (ov-786):
-            // a list built from an older read would take off, and revoke, a
-            // device another admin added since. Refused as `devices_changed`.
-            let read = p.devices_read.as_ref().map(|r| r.client_ids.as_slice());
+            // An admin request: never from a pane (S4, ov-856).
+            crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
+            // Decided under the fence lock, by a caller still who they were:
+            // the devices named have lines, the caller manages everyone it
+            // touches, and the members' access and caps are recorded with the
+            // binding (ov-832, ov-856).
+            let authority = crate::person_access::Authority::read(&svc.store, peer.client_id.as_deref())?;
             // What they had before is read with the write, so the people log's
             // `from` is never another admin's list.
             let farcooler_store::people::MemberWrite { member: after, released, before } =
-                svc.store.set_member_releasing(p.handle.trim(), &p.name, &p.client_ids, who, read)?;
+                crate::person_access::member_set(svc, peer.client_id.as_deref(), authority, p, || ()).await?;
             match before {
                 None => log(svc, peer, caller_pid, &after.handle, "added", serde_json::json!({ "name": after.name, "devices": after.devices })),
                 Some(had) if had != after.devices => {
@@ -83,8 +75,41 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             }
             Ok(result::Value::MemberList(list(svc, peer)?))
         }
+        "member.set_access" => {
+            let Some(request::Payload::MemberSetAccess(p)) = req.payload else { return Err(payload_missing()) };
+            crate::person_access::socket_person_only(svc, peer, caller_pid).await?;
+            let access = farcooler_store::access::Access::parse(p.access.trim()).ok_or(DomainError::InvalidArgument { what: "access" })?;
+            let handle = p.handle.trim();
+            let had = svc.store.member_access(handle)?;
+            crate::person_access::set_access(svc, handle, access, || ()).await?;
+            if had != Some(access) {
+                let word = |a: Option<farcooler_store::access::Access>| a.map(|a| a.as_str()).unwrap_or_default();
+                log(svc, peer, caller_pid, handle, "access", serde_json::json!({ "from": word(had), "to": access.as_str() }));
+                watcher.announce_fleet_changed();
+            }
+            Ok(result::Value::MemberList(list(svc, peer)?))
+        }
+        "client.set_cap" => {
+            let Some(request::Payload::ClientSetCap(p)) = req.payload else { return Err(payload_missing()) };
+            crate::person_access::socket_person_only(svc, peer, caller_pid).await?;
+            let cap = match p.cap.trim() {
+                "" => None,
+                word => Some(farcooler_store::access::Cap::parse(word).ok_or(DomainError::InvalidArgument { what: "cap" })?),
+            };
+            let device = p.client_id.trim();
+            let had = svc.store.device_cap(device)?;
+            crate::person_access::set_cap(svc, device, cap, || ()).await?;
+            if had != cap {
+                let word = |c: Option<farcooler_store::access::Cap>| c.map(|c| c.as_str()).unwrap_or_default();
+                let handle = svc.store.member_of_device(device)?.unwrap_or_default();
+                log(svc, peer, caller_pid, &handle, "cap", serde_json::json!({ "device": device, "from": word(had), "to": word(cap) }));
+                watcher.announce_fleet_changed();
+            }
+            Ok(result::Value::MemberList(list(svc, peer)?))
+        }
         "member.remove" => {
             let Some(request::Payload::MemberRemove(p)) = req.payload else { return Err(payload_missing()) };
+            crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
             let handle = p.handle.trim();
             let member = match svc.store.member(handle) {
                 Err(DomainError::NotFound) => {

@@ -36,11 +36,31 @@ pub const ADD_WINDOW: std::time::Duration = std::time::Duration::from_secs(24 * 
 pub struct Caller {
     pub session: Arc<Session>,
     pub scope: Scope,
+    /// Who the caller was, and their access generation, when the request was
+    /// decided (ov-856, S2): checked again under the fence lock.
+    pub authority: Option<crate::person_access::Authority>,
 }
 
 impl Caller {
     pub fn new(session: Arc<Session>, scope: Scope) -> Self {
-        Caller { session, scope }
+        Caller { session, scope, authority: None }
+    }
+
+    /// This caller, with the authority its request was decided under.
+    pub fn with_authority(mut self, authority: crate::person_access::Authority) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
+    /// Refuse `access_changed` when who the caller is, or their generation,
+    /// is no longer what it was when the request was decided. Asked inside the
+    /// fence lock, where the write is. A caller with no authority recorded
+    /// (this runner's own tests, in-process callers) is always current.
+    pub fn recheck(&self, store: &farcooler_store::Store) -> Result<()> {
+        match &self.authority {
+            Some(authority) => authority.recheck(store, self.session.client_id()),
+            None => Ok(()),
+        }
     }
 
     /// Whether this caller's enroll may start this runner's tunnel when none
@@ -103,16 +123,6 @@ pub(super) fn with_added_by(svc: &Service, mut list: ClientList) -> ClientList {
     list
 }
 
-/// After a revoke's write: what the store kept about `device` alone goes
-/// (the ov-828 re-review's R4). Its line is gone, so a row left would only
-/// wait on a bind that can't come. A store that can't be written is
-/// logged: every row it leaves keeps the device refused.
-pub(super) fn forget(svc: &Service, device: &str) {
-    if let Err(e) = svc.store.forget_revoked_device(device) {
-        tracing::warn!(client = %device, error = %e.what(), "a revoked device's pending rows stayed");
-    }
-}
-
 /// `client.revoke`, with `with_added` (ov-838): the device, and every device
 /// it added, and those they added, that still has a line and that `keep`
 /// lets go, in one write, decided under the fence lock. A member's device
@@ -125,10 +135,27 @@ pub async fn revoke_keeping(
     request: &ClientRevoke,
     keep: impl Fn(&str) -> Result<bool> + Send + 'static,
 ) -> Result<ClientList> {
+    revoke_guarded(svc, request, keep, Box::new(|_| Ok(())), || ()).await
+}
+
+/// What a revoke asks inside the fence lock before it takes anything: whether
+/// the caller is still who they were, and may manage the device they name.
+pub(crate) type Guard = Box<dyn FnOnce(&farcooler_store::Store) -> Result<()> + Send>;
+
+/// [`revoke_keeping`], asking `guard` first inside the lock, and running
+/// `held` just before it takes the lock: where a test parks a revoke while a
+/// change to the caller's access lands (ov-856).
+pub(crate) async fn revoke_guarded(
+    svc: &Service,
+    request: &ClientRevoke,
+    keep: impl Fn(&str) -> Result<bool> + Send + 'static,
+    guard: Guard,
+    held: impl FnOnce() + Send + 'static,
+) -> Result<ClientList> {
     let root = request.client_id.clone();
     let with_added = request.with_added;
     let store = svc.store.clone();
-    super::revoke_targets(svc, request, move |entries| {
+    super::revoke_targets(svc, request, guard, held, move |entries| {
         let mut gone = vec![root.clone()];
         if with_added {
             let rows = store.added_by_all().map_err(Refusal)?;

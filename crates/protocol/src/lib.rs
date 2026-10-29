@@ -795,6 +795,11 @@ pub mod capability {
     /// changes go to the people log. An app offers a Maintainer those
     /// controls only on a runner with it; an older one refuses them.
     pub const WORKSPACE_MAINTAINERS: &str = "workspace_maintainers";
+    /// A person's access and a device's cap are recorded (ov-856):
+    /// `Member.access` and `DeviceAccess` in `member.list`, and the runner's
+    /// own socket's `member.set_access` and `client.set_cap`. An app shows a
+    /// person's access only on a runner with it.
+    pub const PERSON_ACCESS: &str = "person_access";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -818,7 +823,7 @@ pub mod capability {
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
-            MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS,
+            MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1098,6 +1103,8 @@ pub mod method {
         MemberEvents = "member.events" => MEMBER_ROLES,
         WorkspaceSetCharter = "workspace.set_charter" => MEMBER_ROLES,
         CrashReport = "crash.report" => CRASH_REPORTS,
+        MemberSetAccess = "member.set_access" => PERSON_ACCESS,
+        ClientSetCap = "client.set_cap" => PERSON_ACCESS,
     }
 }
 

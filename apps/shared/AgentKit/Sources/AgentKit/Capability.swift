@@ -81,4 +81,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case memberDevicesRead = "member_devices_read"
     case crashReports = "crash_reports"
     case workspaceMaintainers = "workspace_maintainers"
+    case personAccess = "person_access"
 }

@@ -21,7 +21,7 @@
 //! fence lock, in the daemon (`access_migration`): the lines are where the
 //! per-device scopes live.
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::error::map_err;
 use crate::store::Store;
@@ -76,7 +76,13 @@ impl Access {
         }
     }
 
-    fn from_stored(word: &str) -> Option<Access> {
+    /// The access a wire word names. Never `owner`: that is not a word
+    /// anyone can be given.
+    pub fn parse(word: &str) -> Option<Access> {
+        Access::from_stored(word)
+    }
+
+    pub(crate) fn from_stored(word: &str) -> Option<Access> {
         Some(match word {
             "viewer" => Access::Viewer,
             "member" => Access::Member,
@@ -101,7 +107,12 @@ impl Cap {
         }
     }
 
-    fn from_stored(word: &str) -> Option<Cap> {
+    /// The cap a wire word names.
+    pub fn parse(word: &str) -> Option<Cap> {
+        Cap::from_stored(word)
+    }
+
+    pub(crate) fn from_stored(word: &str) -> Option<Cap> {
         match word {
             "viewer" => Some(Cap::Viewer),
             "member" => Some(Cap::Member),
@@ -154,6 +165,12 @@ impl Store {
         if crate::migrate::read_meta_u32(&tx, MIGRATED)?.is_some() {
             return Ok(false);
         }
+        // The first run derives the tables from the lines alone (the slice 1
+        // review's SF1): a binding written before it, by an enroll of this
+        // build, is re-derived rather than trusted.
+        for table in ["owner_devices", "member_access", "device_caps"] {
+            tx.execute(&format!("DELETE FROM {table}"), []).map_err(map_err)?;
+        }
         for (device, state) in &plan.owner_devices {
             let state = if *state == OwnerDeviceState::Check { "check" } else { "confirmed" };
             tx.execute("INSERT OR IGNORE INTO owner_devices (client_id, state) VALUES (?1, ?2)", params![device, state])
@@ -173,6 +190,24 @@ impl Store {
         tx.execute("INSERT INTO meta (key, value) VALUES (?1, '1')", [MIGRATED]).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(true)
+    }
+
+    /// `handle`'s stored access, or `None` when they have none (a member
+    /// from before the migration ran).
+    pub fn member_access(&self, handle: &str) -> Result<Option<Access>> {
+        let stored: Option<String> = self
+            .conn()
+            .query_row("SELECT access FROM member_access WHERE handle = ?1", [handle], |r| r.get(0))
+            .optional()
+            .map_err(map_err)?;
+        Ok(stored.as_deref().and_then(Access::from_stored))
+    }
+
+    /// `device`'s stored cap, if it has one.
+    pub fn device_cap(&self, device: &str) -> Result<Option<Cap>> {
+        let stored: Option<String> =
+            self.conn().query_row("SELECT cap FROM device_caps WHERE client_id = ?1", [device], |r| r.get(0)).optional().map_err(map_err)?;
+        Ok(stored.as_deref().and_then(Cap::from_stored))
     }
 
     /// Everything the access tables hold, sorted.

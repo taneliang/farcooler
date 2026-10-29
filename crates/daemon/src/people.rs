@@ -75,7 +75,12 @@ impl Person {
 /// Who `peer` is. A store that can't be read refuses the call rather than
 /// guessing the owner.
 pub fn person_of(store: &Store, peer: &Peer) -> Result<Person> {
-    let Some(device) = peer.client_id.as_deref() else { return Ok(Person::Owner) };
+    person_of_device(store, peer.client_id.as_deref())
+}
+
+/// [`person_of`] for a device id, `None` being the local socket (ov-856).
+pub fn person_of_device(store: &Store, device: Option<&str>) -> Result<Person> {
+    let Some(device) = device else { return Ok(Person::Owner) };
     if let Some(handle) = store.member_of_device(device)? {
         return Ok(Person::Member(handle));
     }

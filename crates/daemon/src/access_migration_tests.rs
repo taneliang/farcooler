@@ -143,16 +143,24 @@ async fn a_rebuild_after_the_migration_writes_exactly_todays_lines() {
     migrate(&r.svc);
     assert_eq!(std::fs::read(r.svc.authorized_keys()).unwrap(), file_before, "the migration wrote no line");
     let view = View::from_store(&r.svc.store).unwrap();
-    let rebuilt = rebuild(&before, &view).unwrap();
+    let rebuilt = rebuild(&before, &view, &BTreeSet::new()).unwrap();
     let today: Vec<String> = before.iter().map(|e| e.line.clone()).collect();
     assert_eq!(rebuilt, today);
     assert!(before.iter().any(|e| e.shell_access) && before.iter().any(|e| !e.node_key.is_empty()), "the fixture has both");
-    // And the rebuild is not a copy: with the iPad's cap gone, the same
-    // rebuild would raise the owner's read-only device to control.
+    // And the rebuild is not a copy: with the iPad's cap gone, the view says
+    // host_admin for it, and a rebuild told to raise it would write control
+    // (never host_admin)...
     let mut uncapped = view.clone();
     uncapped.caps.remove("ipad-o");
-    assert_ne!(rebuild(&before, &uncapped).unwrap(), today);
     assert_eq!(uncapped.scope_of("ipad-o"), Some(Scope::HostAdmin));
+    let raise = BTreeSet::from(["ipad-o".to_string()]);
+    let raised = rebuild(&before, &uncapped, &raise).unwrap();
+    assert_ne!(raised, today);
+    let ipad = before.iter().position(|e| e.client_id == "ipad-o").unwrap();
+    assert!(raised[ipad].contains("--scope control"), "{}", raised[ipad]);
+    // ...but one that wasn't told to raise it never does (B1, the slice 1
+    // review's SF2): a stale or missing cap can't widen a line.
+    assert_eq!(rebuild(&before, &uncapped, &BTreeSet::new()).unwrap(), today);
 }
 
 /// A plan that would raise a line is never written (B1): it's refused
@@ -164,7 +172,7 @@ async fn a_plan_that_would_raise_a_line_is_refused() {
     let members = r.svc.store.members().unwrap();
     let added_by = r.svc.store.added_by_all().unwrap();
     let released = |id: &str| r.svc.store.device_released(id).unwrap();
-    let mut plan = plan(&entries, &Facts { members: &members, released: &released, added_by: &added_by });
+    let mut plan = plan(&entries, &Facts { members: &members, released: &released, added_by: &added_by, access: &Default::default(), caps: &Default::default() });
     assert!(verify(&entries, &View::from_plan(&plan, &members)).is_ok());
     plan.caps.retain(|(d, _)| d != "ipad-o");
     assert_eq!(verify(&entries, &View::from_plan(&plan, &members)), Err("ipad-o".to_string()));
@@ -183,7 +191,7 @@ async fn a_cap_or_access_that_misreads_a_line_is_refused() {
     let members = r.svc.store.members().unwrap();
     let added_by = r.svc.store.added_by_all().unwrap();
     let released = |id: &str| r.svc.store.device_released(id).unwrap();
-    let good = plan(&entries, &Facts { members: &members, released: &released, added_by: &added_by });
+    let good = plan(&entries, &Facts { members: &members, released: &released, added_by: &added_by, access: &Default::default(), caps: &Default::default() });
     let mut raised = good.clone();
     for cap in raised.caps.iter_mut().filter(|(d, _)| d == "ipad-o") {
         cap.1 = Cap::Member;
@@ -196,19 +204,27 @@ async fn a_cap_or_access_that_misreads_a_line_is_refused() {
     assert_eq!(verify(&entries, &View::from_plan(&lowered, &members)), Err("phone-d".to_string()), "an admin phone is not lowered");
 }
 
-/// Once it has run it doesn't run again: a restart keeps what a later
-/// change decided, and writes no line.
+/// The first run derives the tables and later starts only refresh them: a
+/// restart keeps what a later change decided, adds the device an enroll
+/// bound since, and writes no line.
 #[tokio::test]
-async fn the_migration_runs_once() {
+async fn the_migration_runs_once_and_later_starts_refresh() {
     let r = runner().await;
     assert!(migrate(&r.svc));
     assert!(r.svc.store.access_migrated().unwrap());
     let first = r.svc.store.stored_access().unwrap();
     enroll(&r.svc, 13, "phone-new", Scope::Control, false, "").await;
-    assert!(!migrate(&r.svc), "the second run writes nothing");
-    assert_eq!(r.svc.store.stored_access().unwrap(), first);
+    let file = std::fs::read(r.svc.authorized_keys()).unwrap();
+    assert!(!migrate(&r.svc), "the second run isn't the first");
     migrate_at_start(&r.svc).await;
-    assert_eq!(r.svc.store.stored_access().unwrap(), first);
+    assert_eq!(std::fs::read(r.svc.authorized_keys()).unwrap(), file, "a refresh writes no line");
+    let now = r.svc.store.stored_access().unwrap();
+    let mut expected = first;
+    expected.owner_devices.push(("phone-new".into(), OwnerDeviceState::Confirmed));
+    expected.owner_devices.sort_by(|a, b| a.0.cmp(&b.0));
+    expected.caps.push(("phone-new".into(), Cap::Member));
+    expected.caps.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(now, expected, "the new device is the owner's, with its cap; nothing else moved");
 }
 
 /// Every Key A scope in the file is what the view says, device by device.

@@ -54,6 +54,7 @@ mod device_enrollers;
 mod revoked_marks;
 pub mod device_added_by;
 pub mod access;
+pub mod access_ops;
 pub use compose_holds::ComposeHold;
 pub use compose_waits::ComposeWait;
 pub use crash_signatures::{CrashFiling, CrashRecord};

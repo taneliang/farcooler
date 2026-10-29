@@ -243,7 +243,7 @@ impl Handler for RpcFactory {
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
-        let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), self.peer.clone(), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
+        let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
         rpc.caller_pid = self.caller_pid;
         rpc.caller_pane = self.caller_pane.clone();
         async move {
@@ -302,7 +302,7 @@ impl Handler for RpcFactory {
 
     /// `device_released` (ov-820): see `sessions::farewell`.
     fn farewell(&self) -> Option<farcooler_protocol::v1::Event> {
-        Some(crate::sessions::farewell())
+        (!self.session.closed_quietly()).then(crate::sessions::farewell)
     }
 
     fn farewell_said(&self) { self.session.said_farewell() }
@@ -606,7 +606,7 @@ fn scope_of(method: Method) -> Scope {
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
         // own device, checked in `rpc_people` (ov-494).
         Method::MemberList | Method::ClaudeSignIn | Method::ClaudeSignInFinish | Method::ClaudeSignInCancel | Method::ClaudeSignOut => Scope::Read, // sign-in: theirs alone (`may_sign_in`, ov-584)
-        Method::MemberSet | Method::MemberRemove | Method::MemberSetRole => Scope::HostAdmin, // a role: the owner's alone (ov-757)
+        Method::MemberSet | Method::MemberRemove | Method::MemberSetRole | Method::MemberSetAccess | Method::ClientSetCap => Scope::HostAdmin, // a role, an access, a cap: the owner's alone (ov-757, ov-856)
         // A crash's signature from the owner's own phone (ov-797): a board
         // write in the runner's own words, at the board writes' scope. The
         // owner's alone (`people_rulings`).
@@ -991,30 +991,9 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 // Who granted access to whom is logged in `handle`, asked and
-                // answered, by `enrollment::Attempt` (ov-828). Who MAY grant is
-                // `may_grant`: the gate lets `control` this far.
-                // From a member's device, the device is nobody's until a runner
-                // admin binds it (ov-719): bound to nobody, it would be the owner's.
-                let person = crate::people::person_of(&svc.store, &self.peer)?;
-                crate::enrollment::may_grant(self.peer.scope, &person, &p)?;
-                let by_member = match person {
-                    // A member's own `control` device adds a device of theirs (ov-838, R-88).
-                    crate::people::Person::Member(handle) if self.peer.scope != Scope::HostAdmin => {
-                        let svc = svc.clone();
-                        Some(Box::new(move |id: &str| svc.store.record_member_device_added(id, &handle)) as crate::enrollment::MemberEnrolled)
-                    }
-                    crate::people::Person::Member(handle) => {
-                        let svc = svc.clone();
-                        Some(Box::new(move |id: &str| svc.store.record_member_enrolled(id, &handle)) as crate::enrollment::MemberEnrolled)
-                    }
-                    // The owner's Add Teammate: nobody's until bound (ov-828 S1).
-                    _ if p.for_teammate => {
-                        let svc = svc.clone();
-                        Some(Box::new(move |id: &str| svc.store.record_teammate_pending(id)) as crate::enrollment::MemberEnrolled)
-                    }
-                    _ => None,
-                };
-                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(crate::enrollment::Caller::new(self.session.clone(), self.peer.scope))).await?))
+                // answered, by `enrollment::Attempt` (ov-828). Who MAY grant, and
+                // to whom the new line is bound, is `person_access::enroll`.
+                crate::person_access::enroll(svc, &self.peer, self.caller_pid, &self.session, p).await
             }
 
             // Removes the line AND closes what the line let in — see
@@ -1025,8 +1004,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 tracing::info!(by = self.who(), client = %p.client_id, with_added = p.with_added, "revoking a device");
-                let person = crate::people::person_of(&svc.store, &self.peer)?;
-                Ok(result::Value::ClientList(crate::enrollment::revoke_as(svc, &p, &person).await?))
+                Ok(result::Value::ClientList(crate::person_access::revoke(svc, self.peer.client_id.as_deref(), &p).await?))
             }
 
             // A device registers its own node key over the access it already
@@ -1995,7 +1973,7 @@ impl Rpc {
             }
 
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
-            "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
+            "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await

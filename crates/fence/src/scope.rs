@@ -3,7 +3,7 @@
 
 use farcooler_protocol::v1::Scope;
 
-use super::{Entry, Grant, Rejected, key_a_line, passkey, split_options, usable_client_id};
+use super::{Entry, Grant, Rejected, key_a_line, key_a_options, passkey, split_options, usable_client_id};
 
 /// One of our own Key A lines, rewritten to carry `scope` (ov-856).
 ///
@@ -12,6 +12,12 @@ use super::{Entry, Grant, Rejected, key_a_line, passkey, split_options, usable_c
 /// same `key_a_line` that wrote the line. Rebuilt, never spliced, as
 /// [`with_node_key`] is, and refusing the same lines it refuses (a plain
 /// line, a foreign one, one whose scope word this build can't read).
+///
+/// **Refused unless the options are exactly the ones this build writes** for
+/// that entry (the slice 1 review's SF3): a line with another program, an
+/// extra option or another spelling would otherwise come back rewritten to
+/// ours, which is more than the scope word changing. Such a line is left
+/// alone by the caller.
 ///
 /// It does not decide whether `scope` may be higher than the line's: that
 /// is the caller's rule (a rebuild only lowers; a promotion names who).
@@ -22,7 +28,11 @@ pub fn with_scope(entry: &Entry, scope: Scope) -> Result<String, Rejected> {
     if matches!(entry.scope, Scope::Unspecified) || matches!(scope, Scope::Unspecified) {
         return Err(Rejected::Unscoped);
     }
-    let (_, rest) = split_options(&entry.line).ok_or(Rejected::Unparseable)?;
+    let (options, rest) = split_options(&entry.line).ok_or(Rejected::Unparseable)?;
+    let node = (!entry.node_key.is_empty()).then_some(entry.node_key.as_str());
+    if options != key_a_options(&entry.client_id, entry.scope, node) {
+        return Err(Rejected::Unparseable);
+    }
     let parsed = ssh_key::PublicKey::from_openssh(rest).map_err(|e| {
         tracing::debug!(error = %e, "a line in the fence did not parse back as a key");
         Rejected::Unparseable
@@ -35,7 +45,6 @@ pub fn with_scope(entry: &Entry, scope: Scope) -> Result<String, Rejected> {
         tracing::debug!(error = %e, "a parsed key could not be re-encoded");
         Rejected::Unparseable
     })?;
-    let node = (!entry.node_key.is_empty()).then_some(entry.node_key.as_str());
     let line = key_a_line(&body, &entry.client_id, scope, node);
     debug_assert!(!line.contains(['\r', '\n']));
     Ok(line)
@@ -66,6 +75,20 @@ mod tests {
             let back = parse(&format!("{BEGIN}\n{read}\n{END}\n")).unwrap().remove(0);
             assert_eq!((back.scope, back.client_id, back.node_key, back.label), (Scope::Read, e.client_id, e.node_key, e.label));
         }
+    }
+
+    /// A line whose options aren't the ones this build writes (another program,
+    /// an added option) is refused, not rewritten to ours.
+    #[test]
+    fn a_line_with_other_options_is_refused() {
+        let e = entry(Scope::Control, None);
+        let other = e.line.replace("restrict,", "restrict,no-pty,");
+        let mut changed = e.clone();
+        changed.line = other;
+        assert!(with_scope(&changed, Scope::Read).is_err());
+        let mut elsewhere = e.clone();
+        elsewhere.line = e.line.replace("--stdio", "--stdio --extra");
+        assert!(with_scope(&elsewhere, Scope::Read).is_err());
     }
 
     /// A plain line, a line this build can't read, and a scope it can't
