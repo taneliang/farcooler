@@ -327,10 +327,15 @@ struct Next {
     reconnect: BTreeSet<String>,
 }
 
+/// Computes what an edit does from the current view.
+type NextFn = Box<dyn Fn(&View) -> Result<Next> + Send>;
+/// Records an edit in the store.
+type WriteFn = Box<dyn Fn(&Store) -> Result<()> + Send>;
+
 /// An edit, and the store write that records it.
 struct Edit {
-    next: Box<dyn Fn(&View) -> Result<Next> + Send>,
-    write: Box<dyn Fn(&Store) -> Result<()> + Send>,
+    next: NextFn,
+    write: WriteFn,
 }
 
 /// Apply `edit` under the fence lock, in the order its direction asks, and

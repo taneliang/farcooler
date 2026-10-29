@@ -297,7 +297,7 @@ fn a_rebuild_returns_lines_in_other_shapes_as_they_were() {
         ours(2, "mac-legacy", Scope::HostAdmin),
         ours(3, "twin", Scope::Control),
         ours(4, "twin", Scope::Read),
-        ours(5, "pending-t", Scope::Control).replace("--scope control", "--scope control"),
+        ours(5, "pending-t", Scope::Control),
         ours(6, "older", Scope::Control).replace("--stdio", "--stdio --legacy"),
         ours(7, "idless", Scope::Control).replace("--client idless ", ""),
         format!("ssh-ed25519 {} by-hand", key(8).split_whitespace().nth(1).unwrap()),
