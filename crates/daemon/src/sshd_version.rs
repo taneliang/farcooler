@@ -144,6 +144,7 @@ mod tests {
             node_key: String::new(),
             for_teammate: false,
             step_up_key: None,
+            teammate: None,
         };
 
         capability::withhold(PASSKEY_KEYS);

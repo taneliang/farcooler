@@ -72,6 +72,7 @@ fn enroll(key: &str, client_id: &str, scope: Scope, shell_access: bool) -> Reque
             node_key: String::new(),
             for_teammate: false,
             step_up_key: None,
+            teammate: None,
         })),
         ..Default::default()
     }
@@ -322,6 +323,7 @@ async fn removing_a_member_revokes_a_device_whose_line_lands_late() {
                 node_key: String::new(),
                 for_teammate: false,
                 step_up_key: None,
+                teammate: None,
             };
             crate::enrollment::enroll_as(&svc, &request, Some(by_bob), None).await
         })

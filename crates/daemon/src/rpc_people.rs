@@ -31,7 +31,7 @@ fn payload_missing() -> DomainError {
 }
 
 /// One people route, as `Rpc::dispatch` hands it over, from `peer`.
-pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, caller_pid: Option<i32>, stepped: Option<&crate::step_up::Stepped>, req: Request) -> Result<result::Value> {
     match req.method.as_str() {
         // A member's own Claude login (ov-584).
         "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => {
@@ -77,11 +77,11 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
         }
         "member.set_access" => {
             let Some(request::Payload::MemberSetAccess(p)) = req.payload else { return Err(payload_missing()) };
-            crate::person_access::socket_person_only(svc, peer, caller_pid).await?;
             let access = farcooler_store::access::Access::parse(p.access.trim()).ok_or(DomainError::InvalidArgument { what: "access" })?;
             let handle = p.handle.trim();
+            let guard = crate::person_access_change::authorize(svc, peer, caller_pid, stepped, "member.set_access", crate::person_access_change::Change::Access { handle, access }).await?;
             let had = svc.store.member_access(handle)?;
-            crate::person_access::set_access(svc, handle, access, || ()).await?;
+            crate::person_access::set_access_guarded(svc, handle, access, guard, || ()).await?;
             if had != Some(access) {
                 let word = |a: Option<farcooler_store::access::Access>| a.map(|a| a.as_str()).unwrap_or_default();
                 log(svc, peer, caller_pid, handle, "access", serde_json::json!({ "from": word(had), "to": access.as_str() }));
@@ -91,14 +91,14 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
         }
         "client.set_cap" => {
             let Some(request::Payload::ClientSetCap(p)) = req.payload else { return Err(payload_missing()) };
-            crate::person_access::socket_person_only(svc, peer, caller_pid).await?;
             let cap = match p.cap.trim() {
                 "" => None,
                 word => Some(farcooler_store::access::Cap::parse(word).ok_or(DomainError::InvalidArgument { what: "cap" })?),
             };
             let device = p.client_id.trim();
+            let guard = crate::person_access_change::authorize(svc, peer, caller_pid, stepped, "client.set_cap", crate::person_access_change::Change::Cap { device, cap }).await?;
             let had = svc.store.device_cap(device)?;
-            crate::person_access::set_cap(svc, device, cap, || ()).await?;
+            crate::person_access::set_cap_guarded(svc, device, cap, guard, || ()).await?;
             if had != cap {
                 let word = |c: Option<farcooler_store::access::Cap>| c.map(|c| c.as_str()).unwrap_or_default();
                 let handle = svc.store.member_of_device(device)?.unwrap_or_default();

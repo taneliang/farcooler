@@ -61,7 +61,17 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
             flag("shellAccess"),
             &text("nodeKey"),
             flag("forTeammate"),
+            teammate_bind(args),
         )?,
+        "member.set_access" => request::Payload::MemberSetAccess(farcooler_protocol::v1::MemberSetAccess {
+            handle: need("handle")?,
+            access: need("access")?,
+        }),
+        "client.set_cap" => request::Payload::ClientSetCap(farcooler_protocol::v1::ClientSetCap {
+            client_id: need("clientId")?,
+            // Empty lifts the limit.
+            cap: text("cap"),
+        }),
         "client.approve_step_up" => {
             request::Payload::ClientApproveStepUp(farcooler_protocol::v1::ClientApproveStepUp { client_id: need("clientId")?, code: need("code")? })
         }
@@ -72,8 +82,26 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
     };
     let mut built = farcooler_transport::request(method);
     built.required_capabilities = vec![farcooler_protocol::capability::STEP_UP.to_string()];
+    if matches!(method, "member.set_access" | "client.set_cap") || args.get("teammate").is_some() {
+        built.required_capabilities.push(farcooler_protocol::capability::PERSON_ACCESS.to_string());
+    }
     built.payload = Some(payload);
     Ok(built)
+}
+
+/// `args.teammate`, when Add Teammate names a person and an access: the
+/// runner binds the new device to them in the same write, so the signature
+/// covers the person, the access and the device together.
+fn teammate_bind(args: &serde_json::Value) -> Option<farcooler_protocol::v1::TeammateBind> {
+    let t = args.get("teammate")?;
+    let text = |key: &str| t.get(key).and_then(|v| v.as_str()).map(str::trim).unwrap_or_default().to_string();
+    Some(farcooler_protocol::v1::TeammateBind {
+        handle: text("handle"),
+        name: text("name"),
+        account: text("account"),
+        email: text("email"),
+        access: text("access"),
+    })
 }
 
 /// The request as it is signed: `request_id` and `step_up` cleared.
@@ -148,9 +176,15 @@ impl Session {
     /// trusted key of its own sends, while the transition lasts. A runner that
     /// wants one answers `step_up_needed`, and the app then signs.
     pub async fn approve_step_up_plain(&self, args: &serde_json::Value) -> Result<result::Value, SessionError> {
-        let built = build("client.approve_step_up", args)?;
-        let payload = built.payload;
-        self.value("client.approve_step_up", None, payload).await
+        self.admin_plain("client.approve_step_up", args).await
+    }
+
+    /// An admin action without a signature, in the one spelling a signed one
+    /// uses: what a device with no trusted key sends while the transition
+    /// lasts, and what a runner that wants a signature refuses.
+    pub async fn admin_plain(&self, method: &str, args: &serde_json::Value) -> Result<result::Value, SessionError> {
+        let built = build(method, args)?;
+        self.value(method, None, built.payload).await
     }
 
     /// Propose this device's own step-up key (`client.set_step_up_key`):

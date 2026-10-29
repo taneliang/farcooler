@@ -62,7 +62,10 @@ pub const ALG_WEBAUTHN: &str = "webauthn-es256";
 
 /// The methods that take a step-up from a remote device. `step_up` on any
 /// other is refused (S9).
-pub const METHODS: [&str; 6] = ["client.revoke", "client.enroll", "member.set", "member.remove", "member.set_role", "client.approve_step_up"];
+pub const METHODS: [&str; 8] = [
+    "client.revoke", "client.enroll", "member.set", "member.remove", "member.set_role", "client.approve_step_up",
+    "member.set_access", "client.set_cap",
+];
 
 /// What a browser's key may do (decision 2): take access away. Never add,
 /// bind, raise, propose or approve a key.
@@ -382,4 +385,4 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
 
 #[cfg(test)]
 #[path = "step_up_tests.rs"]
-mod tests;
+pub(crate) mod tests;

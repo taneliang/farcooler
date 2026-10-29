@@ -1468,7 +1468,7 @@ impl Session {
         node_key: &str,
         for_teammate: bool,
     ) -> Result<serde_json::Value, SessionError> {
-        let payload = enroll_payload(public_key, label, client_id, scope, shell_access, node_key, for_teammate)?;
+        let payload = enroll_payload(public_key, label, client_id, scope, shell_access, node_key, for_teammate, None)?;
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(enroll_json(&r)),
             other => Err(wrong("client_enroll", &other)),

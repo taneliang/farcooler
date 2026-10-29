@@ -23,6 +23,7 @@ async fn enroll(svc: &Service, n: u8, id: &str, scope: Scope, shell: bool, node:
         node_key: node.into(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     };
     crate::enrollment::enroll(svc, &request).await.expect("enrolled");
 }

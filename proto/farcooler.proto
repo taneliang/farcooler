@@ -3246,6 +3246,26 @@ message ClientEnroll {
   // stepped up by a trusted key of the caller's person; otherwise stored as a
   // proposal that waits for an approval. A runner from before it drops it.
   optional StepUpKey step_up_key = 8;
+  // Add Teammate in one write (ov-856, behind `person_access`): with
+  // `for_teammate`, bind the new device to this person with this access, in
+  // the same lock hold as the line. One step-up then covers the person, the
+  // access and the device together, because all three are in the signed
+  // bytes. Absent, the device waits for a `member.set` as before.
+  optional TeammateBind teammate = 9;
+}
+
+// Whom `client.enroll` binds a teammate's new device to, and with what access
+// (ov-856). `handle` names an existing member (whose `account` must match
+// theirs, empty included) or a new one. `access` is `admin`, `member` or
+// `viewer`; only the owner may give `admin`, and an existing member keeps the
+// access they have (a different one is refused `access_exists`). The line's
+// scope must fit it: `read` for a viewer, `control` otherwise.
+message TeammateBind {
+  string handle = 1;
+  string name = 2;
+  string account = 3;
+  string email = 4;
+  string access = 5;
 }
 
 message ClientEnrollResult {

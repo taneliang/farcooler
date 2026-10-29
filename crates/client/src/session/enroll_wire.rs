@@ -18,6 +18,7 @@ pub(super) fn enroll_payload(
     shell_access: bool,
     node_key: &str,
     for_teammate: bool,
+    teammate: Option<farcooler_protocol::v1::TeammateBind>,
 ) -> Result<request::Payload, SessionError> {
     let Some(scope) = scope_from_word(scope) else {
         return Err(SessionError::Protocol("a device is enrolled at read, control or host_admin".into()));
@@ -36,6 +37,7 @@ pub(super) fn enroll_payload(
         node_key: node_key.to_string(),
         for_teammate,
         step_up_key: None,
+        teammate,
     }))
 }
 

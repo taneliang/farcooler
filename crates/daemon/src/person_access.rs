@@ -54,7 +54,7 @@ pub fn owner_cap(scope: Scope) -> Option<Cap> {
 }
 
 /// The cap that reproduces a line at `scope` under `ceiling`, or none.
-fn cap_below(scope: Scope, ceiling: Scope) -> Option<Cap> {
+pub(crate) fn cap_below(scope: Scope, ceiling: Scope) -> Option<Cap> {
     match (rank(scope) < rank(ceiling), scope) {
         (false, _) => None,
         (true, Scope::Read) => Some(Cap::Viewer),
@@ -198,7 +198,30 @@ pub async fn enroll(
     }
     let authority = Authority::read(&svc.store, peer.client_id.as_deref())?;
     let person = authority.person.clone();
-    crate::enrollment::may_grant(peer.scope, &person, &p)?;
+    // Add Teammate in one write: the owner's, or an Admin's stepped up for
+    // exactly this request. The grant rules below see an Admin as the owner's
+    // hand, since adding a teammate is what an Admin is for.
+    let binding = match &p.teammate {
+        None => None,
+        Some(_) if !p.for_teammate => return Err(DomainError::InvalidArgument { what: "teammate" }),
+        Some(bind) => {
+            let held = match &person {
+                Person::Member(handle) => svc.store.member_access(handle)?,
+                _ => None,
+            };
+            let asked = Scope::try_from(p.scope).unwrap_or(Scope::Unspecified);
+            let binding = crate::teammate_bind::plan(&person, held, asked, bind)?;
+            // A remote `control` line adds a person only with Face ID over this
+            // request. A `host_admin` line is the legacy shape and keeps its rules.
+            if peer.client_id.is_some() && peer.scope != Scope::HostAdmin && stepped.is_none_or(|s| s.method != "client.enroll") {
+                tracing::info!("refused: Add Teammate from a device that didn't step up");
+                return Err(DomainError::Conflict { what: "step_up_needed" });
+            }
+            Some(binding)
+        }
+    };
+    let granting = if binding.is_some() && matches!(person, Person::Member(_)) { Person::Owner } else { person.clone() };
+    crate::enrollment::may_grant(peer.scope, &granting, &p)?;
     // Past the grant rules, which refuse a `control` line these in their own
     // words: a remote device never writes a shell line or a `host_admin` one, stepped
     // up or not (B2): a plain line has no forced command, so its session is
@@ -217,10 +240,10 @@ pub async fn enroll(
     if access.is_some_and(|access| rank(asked) > rank(ceiling(access))) {
         return Err(DomainError::ScopeDenied { needed: "host_admin" });
     }
-    let by_member = match person {
+    let by_member = match person.clone() {
         // A member's own `control` device adds a device of theirs (ov-838, R-88),
         // capped where its line is below their ceiling.
-        Person::Member(handle) if peer.scope != Scope::HostAdmin => {
+        Person::Member(handle) if peer.scope != Scope::HostAdmin && !p.for_teammate => {
             let svc = svc.clone();
             let cap = cap_below(asked, ceiling(access.unwrap_or(Access::Member)));
             Some(Box::new(move |id: &str| {
@@ -240,6 +263,14 @@ pub async fn enroll(
         _ => None,
     };
     let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority).with_stepped_up(stepped.cloned());
+    if let Some(binding) = binding {
+        // Add Teammate marks the device pending first (the `for_teammate` arm
+        // above), then binds it, both before the line is written.
+        let pending = by_member.ok_or(DomainError::InvalidArgument { what: "teammate" })?;
+        let (store, who) = (svc.store.clone(), person.clone());
+        let bind: crate::enrollment::MemberEnrolled = Box::new(move |id: &str| binding.bind(&store, &who, id));
+        return Ok(result::Value::ClientEnroll(crate::enrollment::enroll_bound(svc, &p, pending, bind, Some(caller)).await?));
+    }
     Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(caller)).await?))
 }
 
@@ -367,7 +398,14 @@ type WriteFn = Box<dyn Fn(&Store) -> Result<()> + Send>;
 struct Edit {
     next: NextFn,
     write: WriteFn,
+    /// A device's request decides again under the lock that the caller is
+    /// still who they were and still may make this change.
+    guard: Option<Guard>,
 }
+
+/// What a remote device's access change is checked against under the fence
+/// lock ([`crate::person_access_change`]).
+pub(crate) type Guard = Box<dyn Fn(&Store) -> Result<()> + Send>;
 
 /// Apply `edit` under the fence lock, in the order its direction asks, and
 /// reconnect the sessions it touches.
@@ -381,6 +419,9 @@ async fn apply(svc: &Service, edit: Edit, held: impl FnOnce() + Send + 'static) 
             fence::AUTHORIZED_KEYS,
             Placement::Last,
             |entries| {
+                if let Some(guard) = &edit.guard {
+                    guard(&store)?;
+                }
                 let entries = attributed(entries);
                 let next = (edit.next)(&View::from_store(&store)?)?;
                 let (rebuilt, stuck) = rebuild_skipping(&entries, &next.view, &next.raise);
@@ -426,6 +467,11 @@ async fn apply(svc: &Service, edit: Edit, held: impl FnOnce() + Send + 'static) 
 
 /// `member.set_access`: give `handle` `access`.
 pub async fn set_access(svc: &Service, handle: &str, access: Access, held: impl FnOnce() + Send + 'static) -> Result<()> {
+    set_access_guarded(svc, handle, access, None, held).await
+}
+
+/// [`set_access`], by a device that is checked again under the lock.
+pub(crate) async fn set_access_guarded(svc: &Service, handle: &str, access: Access, guard: Option<Guard>, held: impl FnOnce() + Send + 'static) -> Result<()> {
     let handle = handle.to_string();
     svc.store.member(&handle)?;
     let (h1, h2) = (handle.clone(), handle);
@@ -442,12 +488,18 @@ pub async fn set_access(svc: &Service, handle: &str, access: Access, held: impl 
             })
         }),
         write: Box::new(move |store| store.set_member_access(&h2, access).map(|_| ())),
+        guard,
     };
     apply(svc, edit, held).await
 }
 
 /// `client.set_cap`: hold `device` at `cap`, or `None` to clear it.
 pub async fn set_cap(svc: &Service, device: &str, cap: Option<Cap>, held: impl FnOnce() + Send + 'static) -> Result<()> {
+    set_cap_guarded(svc, device, cap, None, held).await
+}
+
+/// [`set_cap`], by a device that is checked again under the lock.
+pub(crate) async fn set_cap_guarded(svc: &Service, device: &str, cap: Option<Cap>, guard: Option<Guard>, held: impl FnOnce() + Send + 'static) -> Result<()> {
     let (d1, d2) = (device.to_string(), device.to_string());
     let edit = Edit {
         next: Box::new(move |now| {
@@ -462,6 +514,7 @@ pub async fn set_cap(svc: &Service, device: &str, cap: Option<Cap>, held: impl F
             })
         }),
         write: Box::new(move |store| store.set_device_cap(&d2, cap).map(|_| ())),
+        guard,
     };
     apply(svc, edit, held).await
 }

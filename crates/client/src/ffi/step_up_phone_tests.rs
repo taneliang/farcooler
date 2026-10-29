@@ -20,18 +20,18 @@ const VICTIM_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINqoX514r9TsikukQR
 
 /// A device key in software, signing as an enclave would: DER over the
 /// SHA-256 of the statement.
-struct Key(SigningKey);
+pub(super) struct Key(SigningKey);
 
 impl Key {
-    fn new(n: u8) -> Key {
+    pub(super) fn new(n: u8) -> Key {
         Key(SigningKey::from_bytes(&[n; 32].into()).unwrap())
     }
 
-    fn public(&self) -> Vec<u8> {
+    pub(super) fn public(&self) -> Vec<u8> {
         self.0.verifying_key().to_sec1_point(false).as_bytes().to_vec()
     }
 
-    fn sign(&self, statement: &[u8]) -> String {
+    pub(super) fn sign(&self, statement: &[u8]) -> String {
         let signature: Signature = self.0.sign_prehash(&Sha256::digest(statement)).unwrap();
         base64::encode(signature.to_der().as_bytes())
     }
@@ -39,7 +39,7 @@ impl Key {
 
 /// A runner whose connection is `phone-o`, the owner's `control` phone, with
 /// a host key to pin and a second device (`pad-x`) to act on.
-async fn a_runner_with_an_owners_phone() -> (Runner, Session, String) {
+pub(super) async fn a_runner_with_an_owners_phone() -> (Runner, Session, String) {
     // In the runner's own scratch directory, which is removed with it.
     let runner = a_runner_with(Scope::Control, Some("phone-o"), |s, scratch| {
         let hostkeys = scratch.join("etc-ssh");
@@ -63,16 +63,16 @@ async fn a_runner_with_an_owners_phone() -> (Runner, Session, String) {
     (runner, session, pin)
 }
 
-fn trust(runner: &Runner, key: &Key) {
+pub(super) fn trust(runner: &Runner, key: &Key) {
     runner.service.store.put_step_up_key("phone-o", "p256-sha256", &key.public(), true, 1).unwrap();
 }
 
-async fn begin(session: &Session, method: &str, args: Value, pin: &str) -> Value {
+pub(super) async fn begin(session: &Session, method: &str, args: Value, pin: &str) -> Value {
     dispatch(session, "step_up.begin", &json!({ "method": method, "args": args, "clientId": "phone-o", "hostPin": pin })).await.expect("begin")
 }
 
 /// What a refused call said, or a failure that it was served.
-fn refusal(result: Result<Value, crate::session::SessionError>) -> String {
+pub(super) fn refusal(result: Result<Value, crate::session::SessionError>) -> String {
     match result {
         Ok(served) => panic!("served: {served}"),
         // The word the runner named, which is what an app reads.
@@ -171,3 +171,6 @@ async fn a_trusted_device_approves_the_others_code() {
     let state = dispatch(&session, "step_up.finish", &json!({ "token": right["token"], "signature": signed })).await.expect("approved");
     assert_eq!(state["state"], "trusted", "{state}");
 }
+
+#[path = "step_up_access_tests.rs"]
+mod access;

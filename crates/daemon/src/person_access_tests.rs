@@ -33,6 +33,7 @@ fn asking(n: u8, id: &str, scope: Scope, node: &str) -> pb::ClientEnroll {
         node_key: node.into(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     }
 }
 
@@ -350,7 +351,7 @@ async fn access_and_caps_are_set_from_the_runner_socket_alone() {
     let r = runner().await;
     // The owner's own phone passes the gate and is refused here; an Admin's
     // is the owner's alone by the gate.
-    for (device, word) in [("phone-d", "not-yours:not_yours"), ("admin-o", "not-yours:socket_only")] {
+    for (device, word) in [("phone-d", "not-yours:socket_only"), ("admin-o", "not-yours:socket_only")] {
         let remote = factory(&r.svc, Some(device), Scope::HostAdmin);
         for req in [set_access_req("bob", "viewer"), set_cap_req("phone-b", "viewer")] {
             assert_eq!(call(&remote, req).await.err().as_deref(), Some(word), "{device}");

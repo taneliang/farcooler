@@ -142,6 +142,7 @@ async fn enroll(admin: &mut SocketClient, key: &str, label: &str, client_id: &st
         node_key: String::new(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     }));
     admin.call(req).await.expect("client.enroll");
 }
@@ -339,6 +340,7 @@ async fn assert_served_nothing(device: &mut SocketClient) {
         node_key: String::new(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     }));
     for call in [enrolling, request("client.list"), request("member.list")] {
         let method = call.method.clone();

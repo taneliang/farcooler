@@ -15,12 +15,12 @@ use crate::step_up_rpc::now_ms;
 use farcooler_store::access::Access;
 use crate::rpc_people::tests::{call, factory, set};
 
-fn key(n: u8) -> String {
+pub(crate) fn key(n: u8) -> String {
     use ssh_key::public::{Ed25519PublicKey, KeyData};
     ssh_key::PublicKey::new(KeyData::Ed25519(Ed25519PublicKey([n; 32])), "x").to_openssh().unwrap()
 }
 
-fn asking(n: u8, id: &str, scope: Scope) -> pb::ClientEnroll {
+pub(crate) fn asking(n: u8, id: &str, scope: Scope) -> pb::ClientEnroll {
     pb::ClientEnroll {
         public_key: key(n),
         label: id.into(),
@@ -30,25 +30,26 @@ fn asking(n: u8, id: &str, scope: Scope) -> pb::ClientEnroll {
         node_key: String::new(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     }
 }
 
 /// A device's key, in software, as a Secure Enclave's would sign.
-struct Device {
-    id: &'static str,
+pub(crate) struct Device {
+    pub(crate) id: &'static str,
     key: SigningKey,
 }
 
 impl Device {
-    fn new(id: &'static str, n: u8) -> Device {
+    pub(crate) fn new(id: &'static str, n: u8) -> Device {
         Device { id, key: SigningKey::from_bytes(&[n; 32].into()).unwrap() }
     }
 
-    fn public(&self) -> Vec<u8> {
+    pub(crate) fn public(&self) -> Vec<u8> {
         self.key.verifying_key().to_sec1_point(false).as_bytes().to_vec()
     }
 
-    fn wire_key(&self, alg: &str) -> pb::StepUpKey {
+    pub(crate) fn wire_key(&self, alg: &str) -> pb::StepUpKey {
         pb::StepUpKey { alg: alg.into(), public_key: self.public().into() }
     }
 
@@ -58,7 +59,7 @@ impl Device {
     }
 
     /// `req`, carrying a `p256-sha256` step-up made with `nonce`.
-    fn step(&self, pin: &str, req: Request, nonce: &[u8]) -> Request {
+    pub(crate) fn step(&self, pin: &str, req: Request, nonce: &[u8]) -> Request {
         let bytes = action_bytes(&req);
         let statement = farcooler_protocol::step_up_statement(pin, self.id, &Sha256::digest(&bytes).into(), nonce);
         let step_up = pb::StepUp {
@@ -99,29 +100,29 @@ impl Device {
 
 const UP_UV: u8 = 0x05;
 
-struct Runner {
-    _dir: tempfile::TempDir,
-    svc: Arc<Service>,
-    pin: String,
+pub(crate) struct Runner {
+    pub(crate) _dir: tempfile::TempDir,
+    pub(crate) svc: Arc<Service>,
+    pub(crate) pin: String,
 }
 
 impl Runner {
-    fn socket(&self) -> crate::rpc::RpcFactory {
+    pub(crate) fn socket(&self) -> crate::rpc::RpcFactory {
         factory(&self.svc, None, Scope::HostAdmin)
     }
 
     /// A connection as `id`'s line makes it: `control`.
-    fn conn(&self, id: &str) -> crate::rpc::RpcFactory {
+    pub(crate) fn conn(&self, id: &str) -> crate::rpc::RpcFactory {
         factory(&self.svc, Some(id), Scope::Control)
     }
 
     /// The device's key, trusted as the socket would.
-    fn trust(&self, device: &Device, alg: &str) {
+    pub(crate) fn trust(&self, device: &Device, alg: &str) {
         self.svc.store.put_step_up_key(device.id, alg, &device.public(), true, now_ms()).unwrap();
     }
 }
 
-async fn nonce(conn: &crate::rpc::RpcFactory) -> Vec<u8> {
+pub(crate) async fn nonce(conn: &crate::rpc::RpcFactory) -> Vec<u8> {
     match call(conn, Request { method: "auth.challenge".into(), ..Default::default() }).await.expect("a challenge") {
         result::Value::AuthChallenge(c) => c.nonce.to_vec(),
         other => panic!("{other:?}"),
@@ -130,7 +131,7 @@ async fn nonce(conn: &crate::rpc::RpcFactory) -> Vec<u8> {
 
 /// The owner has a control phone and an iPad and a browser; Bob is a Member
 /// with a phone and a pad; Carol a Viewer; Dan an Admin with a control phone.
-async fn runner() -> Runner {
+pub(crate) async fn runner() -> Runner {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     std::fs::create_dir_all(&state).unwrap();
@@ -187,11 +188,11 @@ fn enroll_req(n: u8, id: &str, scope: Scope, shell: bool, key: Option<pb::StepUp
     Request { method: "client.enroll".into(), payload: Some(request::Payload::ClientEnroll(p)), ..Default::default() }
 }
 
-fn lines(r: &Runner) -> Vec<String> {
+pub(crate) fn lines(r: &Runner) -> Vec<String> {
     farcooler_fence::read(r.svc.authorized_keys(), farcooler_fence::AUTHORIZED_KEYS).unwrap().into_iter().map(|e| e.client_id).collect()
 }
 
-fn word(result: std::result::Result<result::Value, String>) -> String {
+pub(crate) fn word(result: std::result::Result<result::Value, String>) -> String {
     result.err().unwrap_or_else(|| "(served)".into())
 }
 

@@ -245,9 +245,12 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
 
-        // An access or a cap is the owner's alone too, and the runner's own
-        // socket's: `person_access::socket_person_only` (ov-856).
-        M::MemberSetRole | M::MemberSetAccess | M::ClientSetCap => Owners(Why::Grants),
+        // A role is the owner's alone to give.
+        M::MemberSetRole => Owners(Why::Grants),
+        // An access or a cap is the runner's own socket's, or a device's that
+        // an Admin or the Owner signed for: the scope gate lets nothing else
+        // by, and `person_access_change` decides who may change whom (ov-856).
+        M::MemberSetAccess | M::ClientSetCap => Members,
 
         M::CrashReport => Owners(Why::OwnersDevice),
 

@@ -135,6 +135,26 @@ pub async fn enroll_as(
     enroll_held(svc, request, by_member, caller, || (), None).await
 }
 
+/// [`enroll_as`] for Add Teammate in one write (ov-856): `by_member` marks the
+/// device pending, as ever, and `bind` then binds it to the person and access
+/// the request names, in the same lock hold and before the line is written. A
+/// refusal from either writes nothing; a write that then fails leaves a
+/// binding with no line, which grants nothing and which the same enroll
+/// replaces.
+pub(crate) async fn enroll_bound(
+    svc: &Service,
+    request: &ClientEnroll,
+    by_member: MemberEnrolled,
+    bind: MemberEnrolled,
+    caller: Option<Caller>,
+) -> Result<ClientEnrollResult> {
+    let marks: MemberEnrolled = Box::new(move |id: &str| {
+        by_member(id)?;
+        bind(id)
+    });
+    enroll_held(svc, request, Some(marks), caller, || (), None).await
+}
+
 /// [`enroll_held`] for another module's race tests (ov-856): `caller` on its
 /// session, parked at `held` on its way into the fence lock.
 #[cfg(test)]

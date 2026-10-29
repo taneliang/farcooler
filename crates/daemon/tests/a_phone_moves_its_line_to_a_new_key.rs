@@ -60,6 +60,7 @@ fn enrolling(seed: u8, name: &str, scope: Scope, node_key: &str) -> ClientEnroll
         node_key: node_key.into(),
         for_teammate: false,
         step_up_key: None,
+        teammate: None,
     }
 }
 

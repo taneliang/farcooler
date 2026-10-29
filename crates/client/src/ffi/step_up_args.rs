@@ -22,7 +22,11 @@ pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Resul
     match method {
         "step_up.begin" => begin(session, args).await,
         "step_up.finish" => finish(session, args).await,
-        "client.approve_step_up" => step_up::value_json(&session.approve_step_up_plain(args).await?),
+        // Plain, which a runner refuses a phone with a trusted key (`step_up_needed`):
+        // the app signs it through `step_up.begin` and `step_up.finish`.
+        "client.approve_step_up" | "member.set_access" | "client.set_cap" => {
+            step_up::value_json(&session.admin_plain(method, args).await?)
+        }
         _ => propose(session, args).await,
     }
 }

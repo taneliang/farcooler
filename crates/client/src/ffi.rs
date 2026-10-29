@@ -1738,7 +1738,7 @@ async fn dispatch(
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
         // A runner admin's switch: members' own logins, `{harness, on}` (ov-652).
         "member.set_own_login" => rep_args::set_own_login(session, args).await,
-        "step_up.begin" | "step_up.finish" | "step_up.propose" | "client.approve_step_up" => step_up_args::call(session, method, args).await,
+        "step_up.begin" | "step_up.finish" | "step_up.propose" | "client.approve_step_up" | "member.set_access" | "client.set_cap" => step_up_args::call(session, method, args).await,
         // The owner gives a member a role, `{handle, role}` (ov-784).
         "member.set_role" => rep_args::set_role(session, args).await,
         // The owner's Add Teammate, one runner's half (ov-854): not a wire
