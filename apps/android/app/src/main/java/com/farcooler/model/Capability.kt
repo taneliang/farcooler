@@ -84,5 +84,6 @@ enum class Capability(val wire: String) {
     MEMBER_DEVICES_READ("member_devices_read"),
     CRASH_REPORTS("crash_reports"),
     WORKSPACE_MAINTAINERS("workspace_maintainers"),
-    PERSON_ACCESS("person_access");
+    PERSON_ACCESS("person_access"),
+    STEP_UP("step_up");
 }

@@ -155,6 +155,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // A person's access and a device's cap come from the runner's own
         // socket alone (ov-856): no remote app can call them.
         Method::MemberSetAccess | Method::ClientSetCap => None,
+        // The app's step-up arrives with its Face ID prompt (ov-856, slice 4).
+        Method::AuthChallenge | Method::ClientSetStepUpKey | Method::ClientApproveStepUp => None,
         // A rep's search, through the CLI in its pane (ov-555).
         Method::WorktreeGrep => None,
         // A crash's signature from the owner's own phone (ov-797).

@@ -33,7 +33,7 @@ use farcooler_store::Store;
 use farcooler_store::access::{Access, Cap};
 use farcooler_transport::Peer;
 
-use crate::access_migration::{View, ceiling, lower, rank, rebuild, relined};
+use crate::access_migration::{View, ceiling, lower, rank, rebuild_skipping, relined};
 use crate::enrollment::{Refusal, attributed, blocking};
 use crate::people::{Person, person_of_device};
 use crate::service::Service;
@@ -172,8 +172,26 @@ pub async fn refuse_admin_from_pane(svc: &Service, caller_pid: Option<i32>) -> R
 /// `client.enroll`, as the dispatcher runs it: the grant rules (`may_grant`),
 /// what the caller's person may hand out, who the new line is bound to, and
 /// the authority the request was decided under, rechecked in the lock.
-pub async fn enroll(svc: &Arc<Service>, peer: &Peer, caller_pid: Option<i32>, session: &Arc<Session>, p: ClientEnroll) -> Result<result::Value> {
+pub async fn enroll(
+    svc: &Arc<Service>,
+    peer: &Peer,
+    caller_pid: Option<i32>,
+    session: &Arc<Session>,
+    stepped: Option<&crate::step_up::Stepped>,
+    p: ClientEnroll,
+) -> Result<result::Value> {
     refuse_admin_from_pane(svc, caller_pid).await?;
+    // A remote device never writes a shell line or a `host_admin` one, stepped
+    // up or not (B2): a plain line has no forced command, so its session is
+    // the owner's outside every check, and no later change could close it.
+    // Only the runner's own socket does.
+    if peer.client_id.is_some() && (p.shell_access || Scope::try_from(p.scope) == Ok(Scope::HostAdmin)) {
+        tracing::warn!(by = ?peer.client_id, "refused: a remote device enrolling a shell or host_admin line");
+        return Err(DomainError::NotYours { what: "socket_only" });
+    }
+    if let Some(key) = &p.step_up_key {
+        crate::step_up::check_key(&key.alg, &key.public_key)?;
+    }
     let authority = Authority::read(&svc.store, peer.client_id.as_deref())?;
     let person = authority.person.clone();
     crate::enrollment::may_grant(peer.scope, &person, &p)?;
@@ -208,7 +226,7 @@ pub async fn enroll(svc: &Arc<Service>, peer: &Peer, caller_pid: Option<i32>, se
         }
         _ => None,
     };
-    let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority);
+    let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority).with_stepped_up(stepped.cloned());
     Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(caller)).await?))
 }
 
@@ -352,7 +370,14 @@ async fn apply(svc: &Service, edit: Edit, held: impl FnOnce() + Send + 'static) 
             |entries| {
                 let entries = attributed(entries);
                 let next = (edit.next)(&View::from_store(&store)?)?;
-                let rebuilt = rebuild(&entries, &next.view, &next.raise)?;
+                let (rebuilt, stuck) = rebuild_skipping(&entries, &next.view, &next.raise);
+                // Only a line the change names has to be rewritten: one that
+                // can't be is refused by name so People can say "Re-pair this
+                // device". Anyone else's is left, and the live check covers it.
+                if stuck.iter().any(|id| next.reconnect.contains(id)) {
+                    tracing::warn!(devices = ?stuck, "refused: a line the change names can't be rewritten");
+                    return Err(Refusal(DomainError::Conflict { what: "repair_device" }));
+                }
                 let (relined, changed) = relined(&entries, rebuilt);
                 // A promotion is recorded before its lines are raised: if the
                 // file can't be written, the device keeps the lower line.

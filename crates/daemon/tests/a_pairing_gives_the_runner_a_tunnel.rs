@@ -173,6 +173,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str) -> ClientEnroll {
         shell_access: false,
         node_key: node_key.into(),
         for_teammate: false,
+        step_up_key: None,
     }
 }
 

@@ -800,6 +800,13 @@ pub mod capability {
     /// own socket's `member.set_access` and `client.set_cap`. An app shows a
     /// person's access only on a runner with it.
     pub const PERSON_ACCESS: &str = "person_access";
+    /// An admin action is signed by the device's step-up key with the person's
+    /// own user verification, bound to the exact request (ov-856):
+    /// `Request.step_up`, `auth.challenge`, `client.set_step_up_key` and
+    /// `client.approve_step_up`. An app asks for a fingerprint or face on an
+    /// admin action only on a runner with it; an older one is refused with a
+    /// word.
+    pub const STEP_UP: &str = "step_up";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -824,6 +831,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
+            STEP_UP,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1105,6 +1113,9 @@ pub mod method {
         CrashReport = "crash.report" => CRASH_REPORTS,
         MemberSetAccess = "member.set_access" => PERSON_ACCESS,
         ClientSetCap = "client.set_cap" => PERSON_ACCESS,
+        AuthChallenge = "auth.challenge" => STEP_UP,
+        ClientSetStepUpKey = "client.set_step_up_key" => STEP_UP,
+        ClientApproveStepUp = "client.approve_step_up" => STEP_UP,
     }
 }
 
@@ -1204,3 +1215,22 @@ mod task_starts_tests;
 
 #[cfg(test)]
 mod tests;
+
+/// What a device signs for one step-up (ov-856), spelled once for the two
+/// sides that need it: the app, which signs it, and the runner, which rebuilds
+/// it and checks the signature. Two spellings of a signed statement are two
+/// answers about what was signed.
+///
+/// Version 1, as length-prefixed fields so no field can borrow another's
+/// bytes: `host_pin` is the SHA256 fingerprint of the runner's sshd host key
+/// as the client has pinned it (never a value the server supplied), `client_id`
+/// the device, `action_digest` the SHA-256 of `StepUp.action_bytes` and
+/// `nonce` the runner's `auth.challenge`.
+pub fn step_up_statement(host_pin: &str, client_id: &str, action_digest: &[u8; 32], nonce: &[u8]) -> Vec<u8> {
+    let mut out = b"farcooler-step-up-v1".to_vec();
+    for field in [host_pin.as_bytes(), client_id.as_bytes(), action_digest, nonce] {
+        out.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        out.extend_from_slice(field);
+    }
+    out
+}

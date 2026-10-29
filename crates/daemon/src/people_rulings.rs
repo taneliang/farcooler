@@ -119,7 +119,12 @@ pub fn member_ruling(method: M) -> Ruling {
         // (`rep_may`) read it.
         | M::WorkspaceCharter => Reads,
 
-        M::ClientSetNodeKey
+        // A device's own step-up (ov-856): a nonce, its key, and an approval
+        // that `step_up_rpc` holds to the same person.
+        M::AuthChallenge
+        | M::ClientSetStepUpKey
+        | M::ClientApproveStepUp
+        | M::ClientSetNodeKey
         | M::ClientRekey
         | M::ClaudeSignIn
         | M::ClaudeSignInFinish

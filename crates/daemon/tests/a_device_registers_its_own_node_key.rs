@@ -95,6 +95,7 @@ async fn enroll(service: &Service, public_key: &str, client_id: &str, shell_acce
         // the very thing `set_node_key` is here to add.
         node_key: String::new(),
         for_teammate: false,
+        step_up_key: None,
     };
     let out = enrollment::enroll(service, &request).await.expect("the fixture enrolls");
     assert!(!out.already_enrolled, "the fixture enrolled {client_id} twice");
@@ -414,6 +415,7 @@ async fn the_dispatch_table_writes_onto_the_connections_own_line() {
                 // in the field already has.
                 node_key: String::new(),
                 for_teammate: false,
+                step_up_key: None,
             }));
         admin.call(req).await.expect("client.enroll");
     }
@@ -455,6 +457,7 @@ async fn a_local_caller_is_refused_over_the_socket_too() {
         shell_access: false,
         node_key: String::new(),
         for_teammate: false,
+        step_up_key: None,
     }));
     admin.call(req).await.expect("client.enroll");
 
