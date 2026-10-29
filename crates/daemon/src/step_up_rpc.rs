@@ -105,6 +105,21 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
     Ok(state(target, &row))
 }
 
+/// The three calls, as the dispatcher runs them.
+pub async fn dispatch(svc: &Service, peer: &Peer, caller_pid: Option<i32>, session: &Session, stepped: Option<&Stepped>, req: pb::Request) -> Result<result::Value> {
+    match req.method.as_str() {
+        "auth.challenge" => challenge(session),
+        "client.set_step_up_key" => {
+            let p = payload(|p| if let request::Payload::ClientSetStepUpKey(p) = p { Some(p) } else { None }, req)?;
+            set_key(svc, peer, caller_pid, p).await
+        }
+        _ => {
+            let p = payload(|p| if let request::Payload::ClientApproveStepUp(p) = p { Some(p) } else { None }, req)?;
+            approve(svc, peer, caller_pid, stepped, p).await
+        }
+    }
+}
+
 /// The payload of `req` as `p`, or the refusal for one that isn't.
 pub fn payload<T>(extract: impl FnOnce(request::Payload) -> Option<T>, req: pb::Request) -> Result<T> {
     req.payload.and_then(extract).ok_or(DomainError::InvalidArgument { what: "payload" })
