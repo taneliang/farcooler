@@ -11,14 +11,6 @@ import XCTest
 final class NotificationTapTests: XCTestCase {
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-    /// Whether a test in this run has already waited out the permission
-    /// alert. A fresh simulator asks once, and on CI the alert took more than
-    /// five seconds to come: the wait ended, the app was closed with the
-    /// question open, nothing was filed, and no banner came for a minute
-    /// (red on every nightly from 26 Oct). The first test waits long enough
-    /// for it; the rest find it answered and look for five seconds.
-    private static var askedOnce = false
-
     override func setUp() {
         continueAfterFailure = false
     }
@@ -46,11 +38,23 @@ final class NotificationTapTests: XCTestCase {
     private func tapBanner(leaving leave: (XCUIApplication) -> Void) throws {
         let app = XCUIApplication()
         app.launchArguments = ["-notification-tap-harness"]
+        // Left running, this app was the one the next class's launch failed
+        // to terminate ("Failed to terminate", ov-722): it is closed here,
+        // whether the test passed or not.
+        addTeardownBlock { if app.state != .notRunning { app.terminate() } }
         app.launchDrawn()
         // The first run on a device asks; every later one has its answer.
+        // Either way the app marks its window once the notification is
+        // filed, and the banner comes fifteen seconds after that: answer the
+        // alert while waiting for the mark, then leave.
+        let scheduled = app.descendants(matching: .any)["notification-tap-scheduled"]
         let allow = springboard.alerts.buttons["Allow"]
-        if allow.waitForExistence(timeout: Self.askedOnce ? 5 : 45) { allow.tap() }
-        Self.askedOnce = true
+        let deadline = Date().addingTimeInterval(90)
+        while !scheduled.exists, Date() < deadline {
+            if allow.exists { allow.tap() }
+            _ = scheduled.waitForExistence(timeout: 1)
+        }
+        guard scheduled.exists else { throw HarnessFailure("the app never filed a notification") }
         leave(app)
 
         // Filed fifteen seconds after launch: found by what it says, wherever

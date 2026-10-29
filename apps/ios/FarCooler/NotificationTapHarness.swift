@@ -1,4 +1,5 @@
 #if DEBUG
+import UIKit
 import UserNotifications
 
 /// A real notification for the UI suite to tap (ov-787), under
@@ -35,7 +36,30 @@ enum NotificationTapHarness {
             center.add(
                 UNNotificationRequest(
                     identifier: "notification-tap-harness", content: content,
-                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 15, repeats: false)))
+                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 15, repeats: false))
+            ) { _ in
+                DispatchQueue.main.async { markScheduled(scheduledIdentifier) }
+            }
+        }
+    }
+
+    /// What the test waits for before it closes or leaves the app: the
+    /// notification is filed, so fifteen seconds from now it is a banner.
+    /// A fresh simulator asks permission first and the answer can take any
+    /// time; one that has answered never asks, and the test can't tell which
+    /// from the outside. Waiting a fixed 45 s for an alert that never came
+    /// let the banner fire over the open app and vanish (red locally).
+    static let scheduledIdentifier = "notification-tap-scheduled"
+
+    @MainActor private static func markScheduled(_ id: String) {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows {
+                let mark = UILabel(frame: CGRect(x: 0, y: 0, width: 4, height: 4))
+                mark.isAccessibilityElement = true
+                mark.accessibilityIdentifier = id
+                mark.accessibilityLabel = id
+                window.addSubview(mark)
+            }
         }
     }
 }

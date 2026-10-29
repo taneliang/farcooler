@@ -51,6 +51,13 @@ extension XCUIApplication {
         // Not retried: on CI a launch the simulator failed ended the test
         // there, so a retry never ran, and absorbing the error made that
         // ending green (FailedLaunchTests, ov-703).
+        // An instance an earlier test left running is closed here, where it
+        // can be waited on: `launch()` closes it itself and CI's simulator
+        // failed to ("Failed to terminate", ov-722), ending the test.
+        if [.runningForeground, .runningBackground, .runningBackgroundSuspended].contains(state) {
+            terminate()
+            _ = wait(for: .notRunning, timeout: 30)
+        }
         launch()
         _ = descendants(matching: .any)
             .matching(NSPredicate(format: "identifier != ''"))

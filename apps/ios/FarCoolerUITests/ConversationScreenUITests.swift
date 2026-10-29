@@ -458,11 +458,34 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue(time.label.hasPrefix("Working"), "read as \"\(time.label)\"")
     }
 
+    /// Waits until the screen's rows and the composer hold still: two reads a
+    /// second apart agree, at most 20 s. The audit judges texts against the
+    /// rows' frames read before it runs, and on CI's three cores the
+    /// transcript was still settling when it began, so three texts of a row
+    /// the scroll had moved were judged outside it: "Dynamic Type partially
+    /// unsupported" on plain `.callout` text that scales, once in the light
+    /// theme and never locally (ov-721).
+    private func settle(_ app: XCUIApplication) {
+        func frames() -> [CGRect] {
+            app.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier BEGINSWITH 'native-subagent-open' OR identifier BEGINSWITH 'native-row' OR identifier BEGINSWITH 'native-tool' OR identifier == 'native-composer-stack'"))
+                .allElementsBoundByIndex.map(\.frame)
+        }
+        var last = frames()
+        for _ in 0..<20 {
+            Thread.sleep(forTimeInterval: 1)
+            let now = frames()
+            if now == last { return }
+            last = now
+        }
+    }
+
     /// Every kind of finding, judged everywhere on the screen. What it lets
     /// pass is named element by element, with its reason: a new finding
     /// anywhere else fails this.
     private func assertAuditClean(_ app: XCUIApplication, shot: String? = nil, large: Bool = false) throws {
         Thread.sleep(forTimeInterval: 2)
+        settle(app)
         if let shot, let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
             try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-685-\(shot).png"))
         }
