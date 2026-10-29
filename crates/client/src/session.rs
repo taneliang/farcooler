@@ -1488,7 +1488,7 @@ impl Session {
         client_id: &str,
         with_added: bool,
     ) -> Result<serde_json::Value, SessionError> {
-        self.revoke_client_with(client_id, false).await
+        self.revoke_client_with(client_id, with_added).await
     }
 
     /// `revoke_client`, taking with it every device the revoked one added that

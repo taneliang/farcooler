@@ -190,7 +190,7 @@ impl Session {
             client_ids: devices,
             account: member.account.trim().to_string(),
             email: member.email.trim().to_string(),
-            devices_read: checked.then(|| pb::MemberDevicesRead { client_ids: read }),
+            devices_read: checked.then_some(pb::MemberDevicesRead { client_ids: read }),
         });
         let mut required = vec![
             farcooler_protocol::capability::REPRESENTATIVES.to_string(),

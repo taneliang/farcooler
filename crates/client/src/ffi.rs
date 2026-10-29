@@ -2301,21 +2301,6 @@ async fn dispatch(
     }
 }
 
-/// Themes as every client already decodes them, so a write's answer and
-/// `themes`'s answer are the same shape.
-fn theme_json(items: &[farcooler_protocol::v1::Theme]) -> Value {
-    json!({
-        "themes": items.iter().map(|t| json!({
-            "name": t.name,
-            "dark": t.dark,
-            "background": t.background,
-            "foreground": t.foreground,
-            "cursor": t.cursor,
-            "ansi": t.ansi,
-        })).collect::<Vec<_>>()
-    })
-}
-
 fn parse_destination(config: &str) -> Result<Destination, String> {
     let value: Value = serde_json::from_str(config).map_err(|e| format!("bad config: {e}"))?;
     let text = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_string);
@@ -3196,6 +3181,8 @@ mod rows_args;
 mod answers_args;
 mod rep_args;
 mod revoke_args;
+mod theme_json;
+use theme_json::theme_json;
 mod step_up_args;
 mod teammate_enroll_args;
 mod claude_sign_in_args;
