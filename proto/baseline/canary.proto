@@ -1,4 +1,4 @@
-// Shipped by Canary at db2972f93ed50a09361526018c349a35bcf2a298. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 852156069d6f9dcb89f67a44ddba8bc82fd7e4c7. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -5386,6 +5386,16 @@ message DeviceAccess {
   // A legacy line the owner has yet to confirm (ov-828's R3): added by a
   // member's or a released device, and bound to no one.
   bool check = 5;
+  // This device's step-up key (ov-856, slice 4): `trusted` when it signs admin
+  // actions, `proposed` while it waits for an approval, empty when it has
+  // none. Told to the owner for every device and to a member for their own.
+  string step_up = 6;
+  // The six digits the proposing device shows and an approver checks, for a
+  // `proposed` key; empty otherwise.
+  string step_up_code = 7;
+  // Milliseconds since the epoch when the key was proposed or trusted, or 0.
+  // A proposal is good for ten minutes from this.
+  int64 step_up_at = 8;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're
