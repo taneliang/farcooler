@@ -91,7 +91,6 @@ fn request_envelope(method: &str) -> WireEnvelope {
             idempotency_key: None,
             required_capabilities: Vec::new(),
             accepts: Vec::new(),
-            step_up: None,
             payload: Some(v1::request::Payload::Empty(v1::Empty {})),
         })),
     }

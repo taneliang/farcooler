@@ -63,13 +63,6 @@ farcooler-review.workspace = true
 # an empty allowlist to the world. See `allowlist::start_tunnel`.
 farcooler-tailcat.workspace = true
 sha2 = "0.10"
-# Step-up (ov-856): the runner checks a device's ECDSA P-256 signature, and a
-# passkey's, with the RustCrypto crates the web client already signs with,
-# and reads a WebAuthn challenge as base64url. Both are in the lock already.
-p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
-base64ct = { version = "1.8", features = ["alloc"] }
-# The signed bytes of a request (ov-856, S1), and a reply's real encoded size in tests.
-prost.workspace = true
 # Recursive filesystem watching for the three session-log roots. Not already
 # in the tree (checked `Cargo.lock` and every crate's `Cargo.toml` first).
 notify = "8"
@@ -149,6 +142,8 @@ farcooler-ffi-guard.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# To measure a reply's real encoded size against the envelope cap, not an estimate.
+prost.workspace = true
 # Parses `rpc.rs` so `every_method_is_dispatched` reads the arms off the syntax
 # tree rather than scanning the text. Already in the lockfile through the
 # derive macros; a dev-dependency only.
@@ -179,3 +174,4 @@ farcooler-store = { workspace = true, features = ["testing"] }
 # a browser runs, and p256 signs as the authenticator would. Both already in
 # the lock at these versions, through `farcooler-client`.
 russh = "0.62"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }

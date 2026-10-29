@@ -2137,7 +2137,6 @@ fn enrollment_of(
         // join the tunnel network, which none of these tests is about.
         node_key: String::new(),
         for_teammate: false,
-        step_up_key: None,
     }));
     req
 }
@@ -2199,7 +2198,6 @@ fn the_enrollment_request_cannot_ask_for_a_line_far_cooler_did_not_render() {
             shell_access: false,
             node_key: String::new(),
             for_teammate: false,
-            step_up_key: None,
         }
     );
     for forbidden in ["restrict", "unrestricted", "raw", "options", "command", "force", "line"] {

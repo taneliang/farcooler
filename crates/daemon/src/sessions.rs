@@ -119,7 +119,7 @@ impl Sessions {
         let quiet = Arc::new(AtomicBool::new(false));
         live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone(), quiet: quiet.clone() });
         drop(live);
-        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet, challenges: Default::default() })
+        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -289,17 +289,9 @@ pub struct Session {
     gate: Arc<tokio::sync::Semaphore>,
     said: Arc<tokio::sync::Semaphore>,
     quiet: Arc<AtomicBool>,
-    /// The step-up challenges this connection asked for (ov-856, S9): never
-    /// shared with another connection, so one session's nonce is no other's.
-    challenges: crate::step_up::Challenges,
 }
 
 impl Session {
-    /// This connection's step-up challenges.
-    pub fn challenges(&self) -> &crate::step_up::Challenges {
-        &self.challenges
-    }
-
     /// Whether this session was closed for an access change, so it says no
     /// farewell: the device is still welcome and reconnects at its new scope.
     pub fn closed_quietly(&self) -> bool {

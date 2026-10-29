@@ -45,7 +45,6 @@ async fn a_runner(label: &str) -> Runner {
             shell_access: false,
             node_key: String::new(),
             for_teammate: false,
-            step_up_key: None,
         },
     )
     .await

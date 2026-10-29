@@ -106,7 +106,6 @@ async fn a_runner_with_stale_lines(root: &Path) -> Service {
             shell_access: false,
             node_key: NODES[i].into(),
             for_teammate: false,
-            step_up_key: None,
         };
         enrollment::enroll(&service, &pairing).await.expect("the device pairs");
     }

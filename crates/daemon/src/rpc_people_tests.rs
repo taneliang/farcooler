@@ -58,7 +58,6 @@ pub(crate) async fn with_bobs_phone_enrolled() -> (tempfile::TempDir, Arc<Servic
         shell_access: false,
         node_key: String::new(),
         for_teammate: false,
-        step_up_key: None,
     };
     crate::enrollment::enroll(&svc, &enroll).await.expect("the phone enrolls");
     (dir, svc)
@@ -131,7 +130,6 @@ pub(crate) async fn enroll(svc: &Service, key: &str, client_id: &str) {
         shell_access: false,
         node_key: String::new(),
         for_teammate: false,
-        step_up_key: None,
     };
     crate::enrollment::enroll(svc, &enroll).await.expect("enrolled");
 }

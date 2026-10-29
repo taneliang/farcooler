@@ -62,7 +62,6 @@ fn enroll(key: &str, client_id: &str, scope: Scope, node_key: &str) -> Request {
         shell_access: false,
         node_key: node_key.into(),
         for_teammate: false,
-        step_up_key: None,
     };
     Request { method: "client.enroll".into(), payload: Some(request::Payload::ClientEnroll(p)), ..Default::default() }
 }

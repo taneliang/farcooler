@@ -89,10 +89,6 @@ message Request {
   // A daemon that predates the field drops it, which is what an old daemon
   // would have done anyway: nothing is added.
   repeated string accepts = 8;
-  // Proof that a person with a user-verification gesture asked for exactly
-  // this request (ov-856, behind `step_up`): see `StepUp`. Absent on every
-  // request that needs none.
-  optional StepUp step_up = 9;
 
   oneof payload {
     Empty empty = 20;
@@ -329,11 +325,6 @@ message Request {
     // below.
     MemberSetAccess member_set_access = 570;
     ClientSetCap client_set_cap = 571;
-    // `client.set_step_up_key` and `client.approve_step_up` (ov-856), behind
-    // `step_up`. `auth.challenge` takes an `empty`. 582-589 are their block,
-    // held by `reserved` below.
-    ClientSetStepUpKey client_set_step_up_key = 580;
-    ClientApproveStepUp client_approve_step_up = 581;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -379,8 +370,6 @@ message Request {
   reserved 561 to 569;
   // The rest of person access' block (ov-856).
   reserved 572 to 579;
-  // The rest of step-up's block (ov-856).
-  reserved 582 to 589;
 }
 
 message Response {
@@ -554,10 +543,6 @@ message Result {
     // `crash.report` (ov-797), behind `crash_reports`: what the runner kept.
     // 561-569 are its block, held by `reserved` below.
     CrashRecorded crash_recorded = 560;
-    // `auth.challenge` and the step-up key calls (ov-856), behind `step_up`.
-    // 582-589 are their block, held by `reserved` below.
-    AuthChallenge auth_challenge = 580;
-    StepUpKeyState step_up_key_state = 581;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -602,8 +587,6 @@ message Result {
   reserved 551 to 559;
   // The rest of crash reports' block (ov-797).
   reserved 561 to 569;
-  // The rest of step-up's block (ov-856).
-  reserved 582 to 589;
 }
 
 // ---------------------------------------------------------------------------
@@ -3241,11 +3224,6 @@ message ClientEnroll {
   // `host_admin` may enroll at all, so an unbound device there can grant
   // nothing either.
   bool for_teammate = 7;
-  // The key the new device will sign admin actions with (ov-856, behind
-  // `step_up`). Trusted from this write only when the enroll was itself
-  // stepped up by a trusted key of the caller's person; otherwise stored as a
-  // proposal that waits for an approval. A runner from before it drops it.
-  optional StepUpKey step_up_key = 8;
 }
 
 message ClientEnrollResult {
@@ -5306,69 +5284,6 @@ message MemberSetAccess {
 message ClientSetCap {
   string client_id = 1;
   string cap = 2;
-}
-
-// What a device signs to prove a person approved exactly one admin request
-// (ov-856, behind `step_up`; `reports/ov-856/design.md` section 3).
-//
-// `action_bytes` is this request serialized with `request_id` and `step_up`
-// cleared. The runner executes the request it decodes from those bytes, and
-// refuses one whose envelope differs or that carries a field it doesn't know.
-// The statement the key signs is `farcooler_protocol::step_up_statement`: the
-// runner's host key fingerprint the client has pinned, the device's id, the
-// SHA-256 of `action_bytes` and the nonce from `auth.challenge`.
-//
-// `alg` is `p256-sha256` (a Secure Enclave or Keystore key; `signature` is
-// the 64-byte r||s over the statement, made with user verification) or
-// `webauthn-es256` (a passkey; `signature` is its DER signature over
-// `authenticator_data || SHA-256(client_data_json)`, and the client data's
-// challenge is the base64url of SHA-256 of the statement).
-message StepUp {
-  bytes action_bytes = 1;
-  string alg = 2;
-  bytes nonce = 3;
-  string host_pin = 4;
-  bytes signature = 5;
-  bytes authenticator_data = 6;
-  bytes client_data_json = 7;
-}
-
-// A device's step-up public key: `p256-sha256` as the 65-byte uncompressed
-// point, `webauthn-es256` as the passkey's, the same point.
-message StepUpKey {
-  string alg = 1;
-  bytes public_key = 2;
-}
-
-// `client.set_step_up_key` (ov-856): record the key a device signs admin
-// actions with. From a device, its own, stored as a proposal that waits for an
-// approval (never from a browser). From the runner's own socket, for
-// `client_id`, trusted at once.
-message ClientSetStepUpKey {
-  string client_id = 1;
-  StepUpKey key = 2;
-}
-
-// `client.approve_step_up` (ov-856): trust a proposed key. `code` is the six
-// digits the proposing device shows. From another trusted device of the same
-// person, stepped up, or from the runner's own socket.
-message ClientApproveStepUp {
-  string client_id = 1;
-  string code = 2;
-}
-
-// `auth.challenge`: a fresh 32-byte nonce for one step-up, good for 60 seconds.
-message AuthChallenge {
-  bytes nonce = 1;
-}
-
-// A device's step-up key as the runner holds it. `code` is the six digits the
-// proposing device shows and an approver checks.
-message StepUpKeyState {
-  string client_id = 1;
-  // `proposed` or `trusted`.
-  string state = 2;
-  string code = 3;
 }
 
 // One device's place in the people's access (ov-856, read only): whose it is,

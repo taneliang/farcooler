@@ -32,7 +32,6 @@ fn asking(n: u8, id: &str, scope: Scope, node: &str) -> pb::ClientEnroll {
         shell_access: false,
         node_key: node.into(),
         for_teammate: false,
-        step_up_key: None,
     }
 }
 

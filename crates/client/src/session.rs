@@ -1465,7 +1465,6 @@ impl Session {
                 // differently, and refuses only the second.
                 node_key: node_key.to_string(),
                 for_teammate: false,
-                step_up_key: None,
             });
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(json!({

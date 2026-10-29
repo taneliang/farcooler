@@ -50,7 +50,6 @@ fn asking(key: &str, client_id: &str, shell_access: bool) -> ClientEnroll {
         shell_access,
         node_key: String::new(),
         for_teammate: false,
-        step_up_key: None,
     }
 }
 

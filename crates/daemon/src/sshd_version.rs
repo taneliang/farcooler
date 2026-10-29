@@ -143,7 +143,6 @@ mod tests {
             shell_access: false,
             node_key: String::new(),
             for_teammate: false,
-            step_up_key: None,
         };
 
         capability::withhold(PASSKEY_KEYS);

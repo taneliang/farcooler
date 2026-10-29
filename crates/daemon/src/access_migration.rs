@@ -278,39 +278,21 @@ pub fn plan(entries: &[Entry], facts: &Facts) -> AccessPlan {
 /// step-up). A line that doesn't change is returned as it was, so one this
 /// build can't rewrite is no obstacle until it has to be lowered.
 pub fn rebuild(entries: &[Entry], view: &View, raise: &BTreeSet<String>) -> Result<Vec<String>> {
-    let (lines, stuck) = rebuild_skipping(entries, view, raise);
-    match stuck.is_empty() {
-        true => Ok(lines),
-        false => Err(DomainError::OperationFailed),
-    }
-}
-
-/// [`rebuild`], except that a line this build can't rewrite (an unusual option
-/// set, another channel's program) is returned as it was and named in the
-/// second list instead of failing every other line with it (slice 2 review,
-/// N3). The caller decides whether that matters: it does for a device the
-/// change names, and not for anyone else's.
-pub fn rebuild_skipping(entries: &[Entry], view: &View, raise: &BTreeSet<String>) -> (Vec<String>, Vec<String>) {
     let twice = duplicated(entries);
-    let mut stuck = Vec::new();
-    let lines = entries
+    entries
         .iter()
         .map(|entry| {
             let Some(target) = view.scope_of(&entry.client_id).filter(|_| key_a(entry) && !twice.contains(entry.client_id.as_str())) else {
-                return entry.line.clone();
+                return Ok(entry.line.clone());
             };
             let up = lower(target, Scope::Control);
             let scope = if raise.contains(&entry.client_id) && rank(up) > rank(entry.scope) { up } else { lower(entry.scope, target) };
             if scope == entry.scope {
-                return entry.line.clone();
+                return Ok(entry.line.clone());
             }
-            fence::with_scope(entry, scope).unwrap_or_else(|_| {
-                stuck.push(entry.client_id.clone());
-                entry.line.clone()
-            })
+            fence::with_scope(entry, scope).map_err(|_| DomainError::OperationFailed)
         })
-        .collect();
-    (lines, stuck)
+        .collect()
 }
 
 /// `entries` with the lines of `rebuilt`, and whether any differs: what a
@@ -431,10 +413,7 @@ fn migrate_in(store: &Store, path: &std::path::Path) -> std::result::Result<bool
             if first {
                 verify(entries, &view).map_err(Skipped::Breaks)?;
             }
-            let (rebuilt, stuck) = rebuild_skipping(entries, &view, &BTreeSet::new());
-            if !stuck.is_empty() {
-                tracing::warn!(devices = ?stuck, "lines this build can't rewrite were left as they are; re-pair these devices");
-            }
+            let rebuilt = rebuild(entries, &view, &BTreeSet::new()).map_err(Skipped::Store)?;
             let (lowered, changed) = relined(entries, rebuilt);
             let live: BTreeSet<String> = entries.iter().filter(|e| key_a(e)).map(|e| e.client_id.clone()).collect();
             let change = match changed {

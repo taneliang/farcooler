@@ -421,7 +421,6 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
             shell_access: false,
             node_key: String::new(),
             for_teammate: false,
-            step_up_key: None,
         },
     )
     .await

@@ -991,7 +991,6 @@ dependencies = [
 name = "farcooler-daemon"
 version = "0.1.0"
 dependencies = [
- "base64ct",
  "bytes",
  "directories",
  "farcooler-agent-core",

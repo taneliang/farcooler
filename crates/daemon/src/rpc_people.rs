@@ -112,10 +112,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
             let handle = p.handle.trim();
             // An Admin removes Members and Viewers, and themselves: not another
-            // Admin (ov-856, S2). Decided for the authority read here, and
-            // checked again before anything is stopped or revoked.
-            let authority = crate::person_access::Authority::read(&svc.store, peer.client_id.as_deref())?;
-            if !crate::person_access::may_manage_member(&svc.store, &authority.person, handle)? {
+            // Admin (ov-856, S2).
+            if !crate::person_access::may_manage_member(&svc.store, &person_of(&svc.store, peer)?, handle)? {
                 return Err(DomainError::NotYours { what: "not_yours" });
             }
             let member = match svc.store.member(handle) {
@@ -128,12 +126,6 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
                 }
                 other => other?,
             };
-            // A demotion that landed since: nothing has been touched yet, so
-            // the removal is refused whole (slice 2 review, N1).
-            authority.recheck(&svc.store, peer.client_id.as_deref())?;
-            if !crate::person_access::may_manage_member(&svc.store, &authority.person, handle)? {
-                return Err(DomainError::NotYours { what: "not_yours" });
-            }
             // Their Claude login, read before the row that names it goes,
             // and what runs on it now (ov-588).
             let login = svc.store.member_login(handle)?;
