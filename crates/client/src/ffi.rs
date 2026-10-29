@@ -1738,6 +1738,12 @@ async fn dispatch(
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
         // A runner admin's switch: members' own logins, `{harness, on}` (ov-652).
         "member.set_own_login" => rep_args::set_own_login(session, args).await,
+        // An admin action signed with this device's step-up key (ov-856):
+        // `begin` builds it and answers the statement to sign, `finish` sends it
+        // with the signature, `propose` offers this device's key for approval.
+        "step_up.begin" => step_up_args::begin(session, args).await,
+        "step_up.finish" => step_up_args::finish(session, args).await,
+        "step_up.propose" => step_up_args::propose(session, args).await,
         // The owner gives a member a role, `{handle, role}` (ov-784).
         "member.set_role" => rep_args::set_role(session, args).await,
         // A member's Talk starts their own rep (ov-526); `{workspace, handle}`.
@@ -3178,6 +3184,8 @@ mod page_phone_tests;
 #[cfg(test)]
 mod members_phone_tests;
 #[cfg(test)]
+mod step_up_phone_tests;
+#[cfg(test)]
 mod rows_phone_tests;
 #[cfg(test)]
 mod rows_fixture_tests;
@@ -3187,6 +3195,7 @@ mod rows_args;
 mod answers_args;
 mod rep_args;
 mod revoke_args;
+mod step_up_args;
 mod claude_sign_in_args;
 mod images_arg;
 mod reach;

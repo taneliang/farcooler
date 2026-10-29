@@ -383,7 +383,20 @@ async fn a_proposed_key_signs_nothing_until_it_is_approved() {
         other => panic!("{other:?}"),
     };
     assert_eq!(code, code_of(ALG_DEVICE, &dan.public()), "the code the device shows is the key's");
-    assert!(word(call(&conn, propose).await).ends_with("key_exists"), "one key per device");
+    // A proposal signs nothing, so asking again replaces it (and changes its code).
+    let again = Request {
+        method: "client.set_step_up_key".into(),
+        payload: Some(request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey { client_id: String::new(), key: Some(Device::new("phone-d", 22).wire_key(ALG_DEVICE)) })),
+        ..Default::default()
+    };
+    match call(&conn, again).await.expect("a second proposal") {
+        result::Value::StepUpKeyState(s) => assert_ne!(s.code, code, "a new key, a new code"),
+        other => panic!("{other:?}"),
+    }
+    match call(&conn, propose).await.expect("the first key again") {
+        result::Value::StepUpKeyState(s) => assert_eq!(s.code, code),
+        other => panic!("{other:?}"),
+    }
 
     let n = nonce(&conn).await;
     let proposed = word(call(&conn, dan.step(&r.pin, remove_req("carol"), &n)).await);

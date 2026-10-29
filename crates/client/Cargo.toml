@@ -75,6 +75,9 @@ farcooler-ceremony.workspace = true
 # build. `native` adds the rest.
 tokio = { version = "1", default-features = false, features = ["sync", "io-util", "macros"] }
 bytes.workspace = true
+prost.workspace = true
+# The digest of a step-up's signed bytes (ov-856); pure Rust, so the browser's tree is unchanged.
+sha2 = "0.10"
 uuid.workspace = true
 # Derived, for the two ceremony payloads. Hand-written encoders for a struct
 # that must round-trip byte-for-byte between three platforms is a second place
@@ -123,6 +126,8 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# A software key signs as the Secure Enclave would, for the step-up tests (ov-856).
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
 # `test-util` for tokio's pausable clock: the foreground probe's deadline
 # (ov-613) tested in no wall time. A dev-dependency, so nothing ships with it.
 tokio = { workspace = true, features = ["test-util"] }

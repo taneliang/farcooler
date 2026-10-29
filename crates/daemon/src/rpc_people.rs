@@ -388,7 +388,15 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let viewer_is_owner = viewer == Person::Owner;
+    // Every device's place in the people's access (ov-856): the owner is told
+    // everyone's, a member their own devices' (their other devices approve a
+    // key by the code these rows carry), and a released device none.
+    let now = crate::step_up_rpc::now_ms();
+    let device_access = match &viewer {
+        Person::Owner => crate::access_migration::device_access(&svc.store, None, now)?,
+        Person::Member(handle) => crate::access_migration::device_access(&svc.store, Some(handle), now)?,
+        Person::Released => Vec::new(),
+    };
     let you = match viewer {
         Person::Owner => String::new(),
         Person::Member(handle) => handle,
@@ -401,12 +409,6 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         _ => String::new(),
     };
     let own_logins = Some(svc.own_logins_wire(peer.scope));
-    // Every device's place in the people's access, for the owner alone
-    // (ov-856, read only).
-    let device_access = match viewer_is_owner {
-        true => crate::access_migration::device_access(&svc.store)?,
-        false => Vec::new(),
-    };
     Ok(pb::MemberList { members, claude_account, you, removed: None, own_logins, device_access })
 }
 

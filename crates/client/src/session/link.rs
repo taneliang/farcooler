@@ -134,6 +134,7 @@ impl Session {
             link: Some(link),
             client_name,
             events: std::sync::Mutex::new(None),
+            step_ups: std::sync::Mutex::new(Vec::new()),
             #[cfg(feature = "native")]
             socket: None,
         })
@@ -426,6 +427,7 @@ impl Session {
             link: None,
             client_name: NATIVE_CLIENT,
             events: std::sync::Mutex::new(None),
+            step_ups: std::sync::Mutex::new(Vec::new()),
             socket: Some(socket.to_path_buf()),
         })
     }

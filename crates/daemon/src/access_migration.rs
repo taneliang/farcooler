@@ -334,36 +334,60 @@ pub fn verify(entries: &[Entry], view: &View) -> std::result::Result<(), String>
     Ok(())
 }
 
-/// The People view's rows (read only): every device the store has a person
-/// for, sorted by device. Empty until the migration has run.
-pub fn device_access(store: &Store) -> Result<Vec<farcooler_protocol::v1::DeviceAccess>> {
+/// The People view's rows: every device the store has a person for, sorted
+/// by device. Empty until the migration has run. `only` is whose rows to tell:
+/// `None` is everyone's (the owner's view), `Some(handle)` one member's own.
+///
+/// Each row says what its device's step-up key is (`trusted`, `proposed`, or
+/// `expired` for a proposal past its ten minutes) and, for a proposal, the six
+/// digits to check: what lets another device of the same person approve it.
+pub fn device_access(store: &Store, only: Option<&str>, now_ms: i64) -> Result<Vec<farcooler_protocol::v1::DeviceAccess>> {
     use farcooler_protocol::v1::DeviceAccess;
     let stored = store.stored_access()?;
     let caps: BTreeMap<&str, Cap> = stored.caps.iter().map(|(d, c)| (d.as_str(), *c)).collect();
     let access: BTreeMap<&str, Access> = stored.member_access.iter().map(|(h, a)| (h.as_str(), *a)).collect();
     let cap_word = |device: &str| caps.get(device).map(|c| c.as_str().to_string()).unwrap_or_default();
-    let mut rows: Vec<DeviceAccess> = stored
-        .owner_devices
-        .iter()
-        .map(|(device, state)| DeviceAccess {
-            client_id: device.clone(),
-            person: String::new(),
-            access: Access::Owner.as_str().to_string(),
-            cap: cap_word(device),
-            check: *state == OwnerDeviceState::Check,
+    // The key's state, code and time, for a row.
+    let key = |device: &str, row: DeviceAccess| -> Result<DeviceAccess> {
+        let Some(k) = store.step_up_key(device)? else { return Ok(row) };
+        let expired = !k.trusted && now_ms - k.registered_at > farcooler_store::step_up::PROPOSAL_MS;
+        Ok(DeviceAccess {
+            step_up: if k.trusted { "trusted" } else if expired { "expired" } else { "proposed" }.to_string(),
+            step_up_code: if k.trusted || expired { String::new() } else { crate::step_up::code_of(&k.alg, &k.public_key) },
+            step_up_at: k.registered_at,
+            ..row
         })
-        .collect();
+    };
+    let mut rows: Vec<DeviceAccess> = Vec::new();
+    if only.is_none() {
+        for (device, state) in &stored.owner_devices {
+            rows.push(key(
+                device,
+                DeviceAccess {
+                    client_id: device.clone(),
+                    person: String::new(),
+                    access: Access::Owner.as_str().to_string(),
+                    cap: cap_word(device),
+                    check: *state == OwnerDeviceState::Check,
+                    ..Default::default()
+                },
+            )?);
+        }
+    }
     if !stored.owner_devices.is_empty() || !access.is_empty() {
-        for member in store.members()? {
+        for member in store.members()?.into_iter().filter(|m| only.is_none_or(|h| h == m.handle)) {
             let Some(theirs) = access.get(member.handle.as_str()) else { continue };
             for device in &member.devices {
-                rows.push(DeviceAccess {
-                    client_id: device.clone(),
-                    person: member.handle.clone(),
-                    access: theirs.as_str().to_string(),
-                    cap: cap_word(device),
-                    check: false,
-                });
+                rows.push(key(
+                    device,
+                    DeviceAccess {
+                        client_id: device.clone(),
+                        person: member.handle.clone(),
+                        access: theirs.as_str().to_string(),
+                        cap: cap_word(device),
+                        ..Default::default()
+                    },
+                )?);
             }
         }
     }

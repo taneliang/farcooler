@@ -34,6 +34,7 @@ mod files;
 mod bring_draft;
 mod interrupt;
 mod members;
+pub(crate) mod step_up;
 mod node_key;
 mod rekey;
 mod pr_actions;
@@ -210,6 +211,8 @@ pub struct Session {
     /// it. A desktop client on a local runner gets the same channel for free.
     #[cfg(feature = "native")]
     socket: Option<std::path::PathBuf>,
+    /// Admin actions built and waiting for their signature (`step_up`).
+    step_ups: std::sync::Mutex<Vec<step_up::Prepared>>,
 }
 
 /// What a client is told when the runner says something changed.
@@ -1441,48 +1444,9 @@ impl Session {
         shell_access: bool,
         node_key: &str,
     ) -> Result<serde_json::Value, SessionError> {
-        let Some(scope) = scope_from_word(scope) else {
-            return Err(SessionError::Protocol(
-                "a device is enrolled at read, control or host_admin".into(),
-            ));
-        };
-        let payload =
-            request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
-                public_key: public_key.to_string(),
-                label: label.to_string(),
-                client_id: client_id.to_string(),
-                scope: scope as i32,
-                // False is the restricted line and the proto's default, so a
-                // caller that omits the argument at the FFI asks for exactly what
-                // this call always asked for. True is the plain line, and the
-                // daemon refuses it unless the scope beside it is host_admin — a
-                // request asking for a shell while saying `read` does not agree
-                // with itself, and the daemon is the one that says so.
-                shell_access,
-                // Empty means "this device asked for no tunnel", which is what
-                // a v=1 offer and a phone whose own mint failed both send. It is
-                // NOT an unusable key: the daemon reads absence and presence
-                // differently, and refuses only the second.
-                node_key: node_key.to_string(),
-                for_teammate: false,
-                step_up_key: None,
-            });
+        let payload = enroll_payload(public_key, label, client_id, scope, shell_access, node_key, false)?;
         match self.value("client.enroll", None, Some(payload)).await? {
-            result::Value::ClientEnroll(r) => Ok(json!({
-                "client": r.client.as_ref().map(enrolled_client_json),
-                // Its own field rather than an error, because it is the ordinary
-                // outcome of enrolling a Mac on itself and of a ceremony offered
-                // a runner the device can already reach. The `client` beside it
-                // is then the grant it HAS, not the one that was asked for.
-                "alreadyEnrolled": r.already_enrolled,
-                // This runner's tunnel token, when the node key sent above was
-                // just admitted to one. Empty for every enrollment that carried
-                // no key, for a runner that has no tunnel and could not start
-                // one, and for a device whose line already carried a different
-                // key — all of which pair as direct, which is the outcome a
-                // device that cannot be given a tunnel is entitled to.
-                "connBlob": r.conn_blob,
-            })),
+            result::Value::ClientEnroll(r) => Ok(enroll_json(&r)),
             other => Err(wrong("client_enroll", &other)),
         }
     }
@@ -1867,6 +1831,55 @@ fn scope_label(scope: i32) -> &'static str {
     }
 }
 
+/// The `client.enroll` request an app asks for: also what a step-up signs
+/// (`session::step_up`), so the plain call and the signed one are one spelling.
+///
+/// `scope` is a word, and an unknown one is refused here rather than sent:
+/// a key with no scope at all already means host_admin to sshd, so rounding a
+/// misspelling up would turn a typo into the whole runner. The pairing rule
+/// (`shell_access` demands `host_admin`) is NOT re-checked: the daemon owns
+/// every rule about what may be written into `authorized_keys`.
+fn enroll_payload(
+    public_key: &str,
+    label: &str,
+    client_id: &str,
+    scope: &str,
+    shell_access: bool,
+    node_key: &str,
+    for_teammate: bool,
+) -> Result<request::Payload, SessionError> {
+    let Some(scope) = scope_from_word(scope) else {
+        return Err(SessionError::Protocol("a device is enrolled at read, control or host_admin".into()));
+    };
+    Ok(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        public_key: public_key.to_string(),
+        label: label.to_string(),
+        client_id: client_id.to_string(),
+        scope: scope as i32,
+        // False is the restricted line and the proto's default; true is the
+        // plain line, which the daemon refuses unless the scope beside it is
+        // host_admin.
+        shell_access,
+        // Empty means "this device asked for no tunnel", which is NOT an
+        // unusable key: the daemon reads absence and presence differently.
+        node_key: node_key.to_string(),
+        for_teammate,
+        step_up_key: None,
+    }))
+}
+
+/// `client.enroll`'s answer as an app reads it. `alreadyEnrolled` is its own
+/// field rather than an error: it is the ordinary outcome of enrolling a Mac on
+/// itself. `connBlob` is this runner's tunnel token, empty for an enrollment
+/// that carried no node key.
+fn enroll_json(r: &farcooler_protocol::v1::ClientEnrollResult) -> serde_json::Value {
+    json!({
+        "client": r.client.as_ref().map(enrolled_client_json),
+        "alreadyEnrolled": r.already_enrolled,
+        "connBlob": r.conn_blob,
+    })
+}
+
 /// The same words going the other way, for an enrollment request.
 ///
 /// `None` is a word this build does not have, and the caller refuses rather than
@@ -1883,6 +1896,8 @@ fn scope_from_word(word: &str) -> Option<farcooler_protocol::v1::Scope> {
         _ => None,
     }
 }
+
+
 
 fn terminal_label(s: TerminalState) -> &'static str {
     match s {

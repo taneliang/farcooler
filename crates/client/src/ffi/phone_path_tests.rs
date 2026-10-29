@@ -43,6 +43,11 @@ pub(super) async fn a_runner(scope: Scope) -> Runner {
 /// `a_runner`, with the connection made as the enrolled device `client_id`
 /// (a member's, once the store binds it to one), not the owner's.
 pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runner {
+    a_runner_with(scope, client_id, |service| service).await
+}
+
+/// `a_runner_for`, with `shape` applied to the service before it is shared.
+pub(super) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: impl FnOnce(Service) -> Service) -> Runner {
     let client_id = client_id.map(str::to_string);
     // Short, because the agent socket lives in it and macOS caps a socket path
     // at 104 bytes. The system temporary directory alone is most of that.
@@ -53,7 +58,7 @@ pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runne
     std::fs::create_dir(&home).unwrap();
     // The runner's Claude account, in the scratch home, never the real one (ov-508).
     std::fs::write(home.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"owner@example.com"}}"#).unwrap();
-    let service = Arc::new(
+    let service = Arc::new(shape(
         Service::open_in(dir.path().to_path_buf())
             .await
             .expect("service")
@@ -62,7 +67,7 @@ pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runne
             // A member's launch meets the claude floor on a claimed version,
             // never by asking the claude on this machine (ov-583).
             .claiming_claude_version(Some(farcooler_daemon::claude_logins::MIN_MEMBER_CLAUDE)),
-    );
+    ));
 
     // A repository, its checkout and a claude pane, made in the store: nothing
     // here needs git or tmux, only a pane id the daemon can find.

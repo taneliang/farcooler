@@ -281,7 +281,32 @@ async fn member_list_shows_the_owner_the_peoples_access_and_nobody_else() {
     let access = |handle: &str| owner.members.iter().find(|m| m.handle == handle).unwrap().access.clone();
     assert_eq!((access("bob"), access("carol"), access("dan")), ("member".into(), "viewer".into(), "admin".into()));
     let bob = list(call(&factory(&r.svc, Some("phone-b"), Scope::Control), ask()).await);
-    assert!(bob.device_access.is_empty(), "a member isn't told the owner's devices");
+    assert!(!bob.device_access.is_empty() && bob.device_access.iter().all(|d| d.person == "bob"), "a member is told their own devices, never the owner's or another member's");
+}
+
+/// Each People row says what its device's step-up key is: trusted, proposed
+/// with the code to check, or expired once its ten minutes pass (slice 4).
+#[tokio::test]
+async fn people_rows_carry_each_devices_step_up_key() {
+    use farcooler_store::step_up::PROPOSAL_MS;
+    let r = runner().await;
+    migrate(&r.svc);
+    let t0 = 5_000_000_i64;
+    r.svc.store.put_step_up_key("ipad-o", "p256-sha256", &[4; 65], true, t0).unwrap();
+    r.svc.store.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, t0).unwrap();
+    let rows = |only: Option<&str>, now: i64| device_access(&r.svc.store, only, now).unwrap();
+    let row = |rows: &[pb::DeviceAccess], id: &str| rows.iter().find(|d| d.client_id == id).cloned().unwrap_or_else(|| panic!("no row for {id}"));
+    let all = rows(None, t0 + 1);
+    assert_eq!(row(&all, "ipad-o").step_up, "trusted");
+    assert_eq!(row(&all, "ipad-o").step_up_code, "", "a trusted key shows no code");
+    let waiting = row(&all, "pad-b");
+    assert_eq!((waiting.step_up.as_str(), waiting.step_up_at), ("proposed", t0));
+    assert_eq!(waiting.step_up_code, crate::step_up::code_of("p256-sha256", &[4; 65]));
+    assert_eq!(row(&all, "phone-o").step_up, "", "no key, no state");
+    let late = rows(None, t0 + PROPOSAL_MS + 1);
+    assert_eq!((row(&late, "pad-b").step_up.as_str(), row(&late, "pad-b").step_up_code.as_str()), ("expired", ""));
+    let mine = rows(Some("bob"), t0 + 1);
+    assert!(!mine.is_empty() && mine.iter().all(|d| d.person == "bob"), "one member's rows are theirs alone");
 }
 
 /// The slice 1 review's SF4: a rebuild returns every other shape of line

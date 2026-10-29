@@ -10,7 +10,9 @@ use farcooler_protocol::v1 as pb;
 use serde_json::{Value, json};
 
 /// `{members: [{handle, name, devices, reps, rep_panes: [{terminal,
-/// workspace}], account, email, role, claude_login}], claude_account, you}`,
+/// workspace}], account, email, role, access, claude_login}], claude_account,
+/// you, device_access}`, with `device_access` as `device_access_json` says,
+/// and absent from a runner before person access (ov-856),
 /// with `claude_login` as `claude_login_json` says. `role` (ov-757) is
 /// `member` or `maintainer`, and "" from a runner before it. A rep's `workspace`
 /// is "" from a runner before ov-508 sent it, and `account` and `email` are ""
@@ -42,6 +44,7 @@ pub fn members_json(list: &pb::MemberList) -> Value {
             let mut member = json!({
                 "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len(),
                 "rep_panes": panes, "account": m.account, "email": m.email, "role": m.role,
+                "access": m.access,
             });
             if let Some(login) = &m.claude_login {
                 member["claude_login"] = claude_login_json(login);
@@ -50,6 +53,9 @@ pub fn members_json(list: &pb::MemberList) -> Value {
         })
         .collect();
     let mut answer = json!({ "members": members, "claude_account": list.claude_account, "you": list.you });
+    if !list.device_access.is_empty() {
+        answer["device_access"] = Value::Array(list.device_access.iter().map(device_access_json).collect());
+    }
     if let Some(own) = &list.own_logins {
         answer["own_logins"] = json!({ "claude": own.claude, "codex": own.codex, "cursor": own.cursor, "may_change": own.may_change });
     }
@@ -57,6 +63,17 @@ pub fn members_json(list: &pb::MemberList) -> Value {
         answer["removed"] = removal_json(removed);
     }
     answer
+}
+
+/// One device's place in the people's access (ov-856): `{client_id, person,
+/// access, cap, check, step_up, step_up_code, step_up_at}`. `person` is the
+/// member's handle, "" for the owner; `cap` is `viewer`, `member` or "";
+/// `step_up` is `trusted`, `proposed`, `expired` or "" for none.
+pub fn device_access_json(d: &pb::DeviceAccess) -> Value {
+    json!({
+        "client_id": d.client_id, "person": d.person, "access": d.access, "cap": d.cap, "check": d.check,
+        "step_up": d.step_up, "step_up_code": d.step_up_code, "step_up_at": d.step_up_at,
+    })
 }
 
 /// A member's own Claude login (ov-584): `{state: none|signed_in|
@@ -105,15 +122,30 @@ mod tests {
                     state: pb::ClaudeLoginState::SignedIn as i32,
                     email: "alice@claude.example".into(),
                 }),
-                access: String::new(),
+                access: "member".into(),
             }],
             claude_account: "team@example.com".into(),
             you: "alice".into(),
             removed: None,
             own_logins: Some(pb::MemberOwnLogins { claude: false, codex: true, cursor: false, may_change: true }),
-            device_access: Vec::new(),
+            device_access: vec![pb::DeviceAccess {
+                client_id: "phone-a".into(),
+                person: "alice".into(),
+                access: "member".into(),
+                cap: "viewer".into(),
+                check: true,
+                step_up: "proposed".into(),
+                step_up_code: "418207".into(),
+                step_up_at: 77,
+            }],
         };
         let v = members_json(&list);
+        assert_eq!(v["members"][0]["access"], "member");
+        assert_eq!(
+            v["device_access"][0],
+            json!({ "client_id": "phone-a", "person": "alice", "access": "member", "cap": "viewer", "check": true, "step_up": "proposed", "step_up_code": "418207", "step_up_at": 77 })
+        );
+        assert!(members_json(&pb::MemberList::default()).get("device_access").is_none(), "none from a runner before it");
         assert!(v.get("removed").is_none(), "only a removal's answer says what it removed");
         assert_eq!(v["own_logins"], json!({ "claude": false, "codex": true, "cursor": false, "may_change": true }));
         assert!(members_json(&pb::MemberList::default()).get("own_logins").is_none(), "none from a runner before ov-652");

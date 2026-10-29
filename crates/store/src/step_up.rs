@@ -61,14 +61,19 @@ impl Store {
             .map_err(map_err)
     }
 
-    /// Record `device`'s key, `trusted` or proposed, insert-only: refused
-    /// `key_exists` when it already has one. Bumps nothing: see the module.
+    /// Record `device`'s key, `trusted` or proposed. A device with a trusted
+    /// key is refused `key_exists`: rotating needs the socket or a revoke and
+    /// a new enroll. A proposal is replaceable, by a new proposal or by the
+    /// socket's trusted key, because it signs nothing and expires after
+    /// [`PROPOSAL_MS`]; were it not, a device whose proposal went stale could
+    /// never ask again. Bumps nothing: see the module.
     pub fn put_step_up_key(&self, device: &str, alg: &str, public_key: &[u8], trusted: bool, now_ms: i64) -> Result<()> {
         let conn = self.conn();
         let state = if trusted { "trusted" } else { "proposed" };
         let added = conn
             .execute(
-                "INSERT OR IGNORE INTO step_up_keys (client_id, alg, pubkey, state, registered_at, sign_count) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                "INSERT INTO step_up_keys (client_id, alg, pubkey, state, registered_at, sign_count) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+                 ON CONFLICT (client_id) DO UPDATE SET alg = ?2, pubkey = ?3, state = ?4, registered_at = ?5, sign_count = 0 WHERE state = 'proposed'",
                 params![device, alg, public_key, state, now_ms],
             )
             .map_err(map_err)?;
@@ -134,7 +139,6 @@ mod tests {
     fn a_proposal_is_trusted_once_inside_its_window() {
         let s = store();
         s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, 1_000).unwrap();
-        assert!(matches!(s.put_step_up_key("pad-b", "p256-sha256", &[5; 65], true, 1_000), Err(DomainError::Conflict { what: "key_exists" })));
         assert!(!s.step_up_key("pad-b").unwrap().unwrap().trusted);
         let before = s.access_generation("bob").unwrap();
         assert!(matches!(s.trust_step_up_key("pad-b", 1_000 + PROPOSAL_MS + 1), Err(DomainError::Conflict { what: "proposal_expired" })));
@@ -142,6 +146,23 @@ mod tests {
         assert!(s.step_up_key("pad-b").unwrap().unwrap().trusted);
         assert_eq!(s.access_generation("bob").unwrap(), before + 1);
         assert!(matches!(s.trust_step_up_key("nowhere", 0), Err(DomainError::NotFound)));
+    }
+
+    /// A proposal is replaced by a new one, however old; a trusted key is
+    /// never replaced by a write, so a stale proposal can be asked again and a
+    /// trusted key cannot be swapped.
+    #[test]
+    fn a_proposal_is_replaceable_and_a_trusted_key_is_not() {
+        let s = store();
+        s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, 1_000).unwrap();
+        s.put_step_up_key("pad-b", "p256-sha256", &[5; 65], false, 2_000).unwrap();
+        let row = s.step_up_key("pad-b").unwrap().unwrap();
+        assert_eq!((row.public_key, row.registered_at, row.trusted), (vec![5; 65], 2_000, false));
+        s.trust_step_up_key("pad-b", 2_000).unwrap();
+        for trusted in [false, true] {
+            assert!(matches!(s.put_step_up_key("pad-b", "p256-sha256", &[6; 65], trusted, 3_000), Err(DomainError::Conflict { what: "key_exists" })));
+        }
+        assert_eq!(s.step_up_key("pad-b").unwrap().unwrap().public_key, vec![5; 65]);
     }
 
     /// A counter that stands still or goes back is refused; one that never

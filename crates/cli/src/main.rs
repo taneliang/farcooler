@@ -226,8 +226,11 @@ enum Command {
     #[command(subcommand)]
     Member(people::MemberCmd),
     /// Who has what access on this runner, and which devices are held below
-    /// it. Read only: what the runner has recorded (ov-856).
-    People,
+    /// it, with the changes only the runner's own socket makes (ov-856).
+    People {
+        #[command(subcommand)]
+        command: Option<people_access::PeopleCmd>,
+    },
     /// Start a person's rep: the agent that carries their asks to the
     /// orchestrator and its questions back, and never answers for them.
     Rep(people::RepArgs),
@@ -1250,7 +1253,7 @@ async fn run() -> Fallible {
         Command::Search(a) => rep_search::search(runner, a, cli.json).await,
         Command::Member(c) => people::member(runner, c, cli.json).await,
         Command::Rep(a) => people::rep(runner, a, cli.json).await,
-        Command::People => people_access::people(runner, cli.json).await,
+        Command::People { command } => people_access::people(runner, command, cli.json).await,
         Command::Page(a) => page::page(runner, a, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
