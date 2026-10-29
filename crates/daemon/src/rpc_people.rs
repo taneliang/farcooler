@@ -130,10 +130,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             };
             // A demotion that landed since: nothing has been touched yet, so
             // the removal is refused whole (slice 2 review, N1).
-            authority.recheck(&svc.store, peer.client_id.as_deref())?;
-            if !crate::person_access::may_manage_member(&svc.store, &authority.person, handle)? {
-                return Err(DomainError::NotYours { what: "not_yours" });
-            }
+            crate::person_access::recheck_removal(&svc.store, &authority, peer.client_id.as_deref(), handle)?;
             // Their Claude login, read before the row that names it goes,
             // and what runs on it now (ov-588).
             let login = svc.store.member_login(handle)?;

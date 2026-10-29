@@ -165,7 +165,7 @@ async fn client_enroll_over_a_connection_carries_its_session() {
     svc.sessions().mark_revoked("phone");
     let req = Request {
         method: "client.enroll".into(),
-        payload: Some(request::Payload::ClientEnroll(asking(KEY_MAC_SHELL, "phone", true))),
+        payload: Some(request::Payload::ClientEnroll(ClientEnroll { scope: Scope::Control as i32, ..asking(KEY_MAC_SHELL, "phone", false) })),
         ..Default::default()
     };
     let answer = phone.handle(req).await.outcome;

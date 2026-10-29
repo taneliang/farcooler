@@ -153,6 +153,18 @@ pub fn may_manage_member(store: &Store, caller: &Person, handle: &str) -> Result
     })
 }
 
+/// `member.remove`'s second look, taken before anything is stopped or revoked
+/// (slice 2 review, N1): the caller must still be who they were at the same
+/// generation, and still manage `handle`. A removal decided for an Admin who
+/// was demoted since is refused `access_changed`, and nothing has been touched.
+pub fn recheck_removal(store: &Store, authority: &Authority, device: Option<&str>, handle: &str) -> Result<()> {
+    authority.recheck(store, device)?;
+    if !may_manage_member(store, &authority.person, handle)? {
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    Ok(())
+}
+
 /// Refuse `person_only` an admin request from a caller inside a pane, or one
 /// the runner can't tell is a person (S4): a prompt-injected agent in a pane
 /// reaches the socket as the owner, and these are the calls where that
@@ -181,7 +193,14 @@ pub async fn enroll(
     p: ClientEnroll,
 ) -> Result<result::Value> {
     refuse_admin_from_pane(svc, caller_pid).await?;
-    // A remote device never writes a shell line or a `host_admin` one, stepped
+    if let Some(key) = &p.step_up_key {
+        crate::step_up::check_key(&key.alg, &key.public_key)?;
+    }
+    let authority = Authority::read(&svc.store, peer.client_id.as_deref())?;
+    let person = authority.person.clone();
+    crate::enrollment::may_grant(peer.scope, &person, &p)?;
+    // Past the grant rules, which refuse a `control` line these in their own
+    // words: a remote device never writes a shell line or a `host_admin` one, stepped
     // up or not (B2): a plain line has no forced command, so its session is
     // the owner's outside every check, and no later change could close it.
     // Only the runner's own socket does.
@@ -189,12 +208,6 @@ pub async fn enroll(
         tracing::warn!(by = ?peer.client_id, "refused: a remote device enrolling a shell or host_admin line");
         return Err(DomainError::NotYours { what: "socket_only" });
     }
-    if let Some(key) = &p.step_up_key {
-        crate::step_up::check_key(&key.alg, &key.public_key)?;
-    }
-    let authority = Authority::read(&svc.store, peer.client_id.as_deref())?;
-    let person = authority.person.clone();
-    crate::enrollment::may_grant(peer.scope, &person, &p)?;
     let asked = Scope::try_from(p.scope).unwrap_or(Scope::Unspecified);
     let access = match &person {
         Person::Member(handle) => svc.store.member_access(handle)?,

@@ -117,3 +117,45 @@ impl Store {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        store.set_member("bob", "Bob", &["pad-b".into()]).unwrap();
+        store
+    }
+
+    /// One key a device, insert-only; a proposal trusts once, inside its ten
+    /// minutes, and trusting moves the holder's generation.
+    #[test]
+    fn a_proposal_is_trusted_once_inside_its_window() {
+        let s = store();
+        s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, 1_000).unwrap();
+        assert!(matches!(s.put_step_up_key("pad-b", "p256-sha256", &[5; 65], true, 1_000), Err(DomainError::Conflict { what: "key_exists" })));
+        assert!(!s.step_up_key("pad-b").unwrap().unwrap().trusted);
+        let before = s.access_generation("bob").unwrap();
+        assert!(matches!(s.trust_step_up_key("pad-b", 1_000 + PROPOSAL_MS + 1), Err(DomainError::Conflict { what: "proposal_expired" })));
+        s.trust_step_up_key("pad-b", 1_000 + PROPOSAL_MS).unwrap();
+        assert!(s.step_up_key("pad-b").unwrap().unwrap().trusted);
+        assert_eq!(s.access_generation("bob").unwrap(), before + 1);
+        assert!(matches!(s.trust_step_up_key("nowhere", 0), Err(DomainError::NotFound)));
+    }
+
+    /// A counter that stands still or goes back is refused; one that never
+    /// leaves zero is an authenticator that keeps none.
+    #[test]
+    fn a_sign_count_only_moves_forward() {
+        let s = store();
+        s.put_step_up_key("pad-b", "webauthn-es256", &[4; 65], true, 0).unwrap();
+        s.use_sign_count("pad-b", 0).unwrap();
+        s.use_sign_count("pad-b", 0).unwrap();
+        s.use_sign_count("pad-b", 5).unwrap();
+        for stale in [5, 4, 0] {
+            assert!(matches!(s.use_sign_count("pad-b", stale), Err(DomainError::Conflict { what: "step_up_replayed" })), "{stale}");
+        }
+        s.use_sign_count("pad-b", 6).unwrap();
+    }
+}

@@ -517,6 +517,58 @@ async fn member_set_binds_a_new_members_devices_with_their_access_and_caps() {
     assert!(owners.iter().all(|(d, _)| d != "phone-g" && d != "tablet-g"), "no longer the owner's: {owners:?}");
 }
 
+/// Slice 2 review N1: `member.remove` looks at its caller again before it
+/// stops or revokes anything. An Admin's removal decided before they were made
+/// a Member is refused `access_changed`; a demoted one's fresh call is refused
+/// at the gate; and Carol is still a member afterwards.
+#[tokio::test]
+async fn a_removal_decided_before_a_demotion_is_refused() {
+    let r = runner().await;
+    let authority = Authority::read(&r.svc.store, Some("phone-d")).unwrap();
+    recheck_removal(&r.svc.store, &authority, Some("phone-d"), "carol").expect("nothing changed yet");
+    set_access(&r.svc, "dan", Member, || ()).await.unwrap();
+    let late = recheck_removal(&r.svc.store, &authority, Some("phone-d"), "carol");
+    assert!(matches!(late, Err(DomainError::Conflict { what: "access_changed" })), "{late:?}");
+    let other = Authority::read(&r.svc.store, Some("phone-d")).unwrap();
+    let admin = recheck_removal(&r.svc.store, &other, Some("phone-d"), "fay");
+    assert!(matches!(admin, Err(DomainError::NotYours { what: "not_yours" })), "an Admin is not a Member's to remove: {admin:?}");
+    let remove = Request {
+        method: "member.remove".into(),
+        payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: "carol".into() })),
+        ..Default::default()
+    };
+    assert!(call(&factory(&r.svc, Some("phone-d"), Scope::HostAdmin), remove).await.is_err(), "a demoted Admin's removal");
+    assert!(r.svc.store.member("carol").is_ok());
+}
+
+/// Slice 2 review N3: one line this build can't rewrite blocks only the
+/// change that names it. Another person's access change is served and leaves
+/// that line as it was; a change to the odd line's own device is refused
+/// `repair_device`, and nothing is written.
+#[tokio::test]
+async fn a_line_that_cant_be_rewritten_blocks_only_its_own_device() {
+    let r = runner().await;
+    enroll(&r.svc, 70, "odd-o", Scope::Control).await;
+    let text = std::fs::read_to_string(r.svc.authorized_keys()).unwrap();
+    let odd = text.lines().find(|l| l.contains("odd-o")).unwrap().to_string();
+    assert!(odd.starts_with("restrict,command="), "{odd}");
+    std::fs::write(r.svc.authorized_keys(), text.replace(&odd, &odd.replacen("restrict,", "restrict,pty,", 1))).unwrap();
+    // The store says this device is a Viewer's; its line says `control`.
+    r.svc.store.set_device_cap("odd-o", Some(Cap::Viewer)).unwrap();
+    let before = r.file();
+
+    set_access(&r.svc, "bob", Viewer, || ()).await.expect("Bob's change is not blocked by someone else's odd line");
+    assert_eq!(r.lines()["phone-b"], Scope::Read, "Bob's phone was lowered");
+    let after = String::from_utf8(r.file()).unwrap();
+    assert!(after.contains(&odd.replacen("restrict,", "restrict,pty,", 1)), "the odd line was left as it was");
+    assert_ne!(r.file(), before);
+
+    let before = r.file();
+    let refused = set_cap(&r.svc, "odd-o", Some(Cap::Viewer), || ()).await;
+    assert!(matches!(refused, Err(DomainError::Conflict { what: "repair_device" })), "{refused:?}");
+    assert_eq!(r.file(), before, "a refused change wrote a line");
+}
+
 // MARK: - What an Admin manages
 
 /// An Admin manages Members, Viewers and themselves: not another Admin and
