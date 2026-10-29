@@ -1738,6 +1738,7 @@ async fn dispatch(
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
         // A runner admin's switch: members' own logins, `{harness, on}` (ov-652).
         "member.set_own_login" => rep_args::set_own_login(session, args).await,
+        "approval.ask" | "approval.status" | "approval.finish" | "approval.list" | "approval.grant" | "approval.deny" => approval_args::call(session, method, args).await,
         "step_up.begin" | "step_up.finish" | "step_up.propose" | "client.approve_step_up" | "member.set_access" | "client.set_cap" => step_up_args::call(session, method, args).await,
         // The owner gives a member a role, `{handle, role}` (ov-784).
         "member.set_role" => rep_args::set_role(session, args).await,
@@ -3184,6 +3185,7 @@ mod revoke_args;
 mod theme_json;
 use theme_json::theme_json;
 mod step_up_args;
+mod approval_args;
 mod teammate_enroll_args;
 mod claude_sign_in_args;
 mod images_arg;

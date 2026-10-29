@@ -133,6 +133,38 @@ async function audited(team: string): Promise<string[]> {
   return rows.results.map(r => r.subject)
 }
 
+describe('a member whose Mac waits for their phone (ov-858)', () => {
+  it("is told to approve a change, in the relay's words, and the words never name the action", async () => {
+    const { runner } = await acme()
+    const sent = await notice(runner.token, 'bob', { kind: 'approval', runner: 'RUN-1', title: 'Remove Cosmo', task: 'x' })
+    expect(JSON.parse(sent.text)).toEqual({ ok: true })
+    expect(pushes.map(p => p.token)).toEqual(['bobs-iphone'])
+    const apple = pushes[0].body
+    expect(apple.aps.alert).toEqual({ title: 'Approve a change on build-box.', body: 'Open Far Cooler to review it.' })
+    expect([apple.kind, apple.runner, apple.task]).toEqual(['approval', 'run-1', undefined])
+  })
+
+  it('reaches an install that keeps every class off, and the owner and strangers hear nothing', async () => {
+    const { runner } = await acme()
+    await install('bob', 'bobs-quiet', 'apns', '')
+    await notice(runner.token, 'bob', { kind: 'approval' })
+    await notice(runner.token, 'alice', { kind: 'approval' })
+    await notice(runner.token, 'mallory', { kind: 'approval' })
+    expect(pushes.map(p => p.token).sort()).toEqual(['bobs-iphone', 'bobs-quiet'])
+  })
+
+  it('is throttled to one in ten seconds, and a retried event sends nothing', async () => {
+    const { runner } = await acme()
+    await post('/v1/notify/member', { account: 'bob', kind: 'approval', event: 'same' }, runner.token)
+    await post('/v1/notify/member', { account: 'bob', kind: 'approval', event: 'same' }, runner.token)
+    await notice(runner.token, 'bob', { kind: 'approval' })
+    expect(pushes.length).toBe(1)
+    await env.DB.prepare(`UPDATE member_notices SET sent_at = sent_at - ? WHERE kind = 'approval'`).bind(11_000).run()
+    await notice(runner.token, 'bob', { kind: 'approval' })
+    expect(pushes.length).toBe(2)
+  })
+})
+
 describe('a member whose login stopped', () => {
   it("gets one push on each of their devices, and nobody else's devices hear it", async () => {
     const { team, runner } = await acme()

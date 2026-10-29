@@ -22,6 +22,11 @@
 /// name from the relay's own record, never from the request:
 ///
 ///   - `login`: "Your Claude login on <Runner> stopped working."
+///   - `approval` (ov-858): "Approve a change on <Runner>." Sent when a member's
+///     Mac, which can't hold a step-up key, asks their phone to approve an admin
+///     action. It never names the action, goes to every install of the account
+///     whatever its settings (only the person can approve), at most once in ten
+///     seconds, and a tap opens the app, which lists what is waiting.
 ///   - `needs_you` (ov-633): "Something on <Runner> needs you." Sent when an
 ///     agent, a decision or a review that is that member's (they started the
 ///     agent, or it is their rep's or lane's) is waiting on a person; the
@@ -58,7 +63,7 @@
 ///     POST /v1/notify/member
 ///     authorization: Bearer <the runner's daemon token>
 ///     { "account": "<the member's relay account id, `members.account`>",
-///       "kind": "login" | "needs_you",
+///       "kind": "login" | "needs_you" | "approval",
 ///       "event": "<the stoppage's id: [A-Za-z0-9:._-], 1-128 chars>",
 ///       "class": "<needs_you only, optional: decision | blocked | review>",
 ///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>",
@@ -68,7 +73,7 @@
 ///     200 {"ok":true}             taken: sent, or dropped for any reason below
 ///     200 {"ok":true,"sent":b}    the same, for needs_you: see `sent` above
 ///     400 {"error":"account"}     `account` missing or not an account id's shape
-///     400 {"error":"kind"}        `kind` is neither "login" nor "needs_you"
+///     400 {"error":"kind"}        `kind` is none of "login", "needs_you" and "approval"
 ///     400 {"error":"event"}       `event` missing or the wrong shape
 ///     400 {"error":"class"}       `class` present and not one of the three
 ///     400 {"error":"body"}        not a JSON object
@@ -115,8 +120,17 @@ export const MEMBER_NOTICE_EVERY_MS = 6 * 60 * 60 * 1000
 /// member at most this often, with fixed words.
 export const NEEDS_YOU_NOTICE_EVERY_MS = 2 * 60 * 1000
 
+/// How long after one approval push a runner may push the same member again
+/// (ov-858): an approval waits two minutes at most, so a Mac asking again
+/// inside the window is the same buzz.
+export const APPROVAL_NOTICE_EVERY_MS = 10 * 1000
+
 /// Each kind a runner may push a member about, and its window.
-const KINDS: Record<string, number> = { login: MEMBER_NOTICE_EVERY_MS, needs_you: NEEDS_YOU_NOTICE_EVERY_MS }
+const KINDS: Record<string, number> = {
+  login: MEMBER_NOTICE_EVERY_MS,
+  needs_you: NEEDS_YOU_NOTICE_EVERY_MS,
+  approval: APPROVAL_NOTICE_EVERY_MS,
+}
 
 /// How long a sent notice's row is kept. Past this an event id could be used
 /// again, which only an honest retry would ever do, and a retry is minutes late,
@@ -156,6 +170,16 @@ export function needsYouNotice(runner: string): { title: string; subtitle: strin
   return { title: `Something on ${name} needs you.`, subtitle: 'See it in Needs You.' }
 }
 
+/// The push a member gets when a Mac of theirs is waiting for their phone to
+/// approve an admin action on `runner` (ov-858). The words never name the
+/// action: the phone shows it, behind Face ID. The runner's name as
+/// `loginNotice` cuts it.
+export function approvalNotice(runner: string): { title: string; subtitle: string } {
+  const plain = withoutUnshown(runner).replace(/\s+/g, ' ').trim()
+  const name = [...plain].slice(0, 40).join('').trim() || 'a runner'
+  return { title: `Approve a change on ${name}.`, subtitle: 'Open Far Cooler to review it.' }
+}
+
 /// The one answer to every request the relay took, sent or not.
 const TAKEN = () => json({ ok: true })
 
@@ -176,7 +200,7 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   const account = typeof body.account === 'string' && ACCOUNT.test(body.account) ? body.account : null
   if (!account) return json({ error: 'account' }, 400)
   if (typeof body.kind !== 'string' || !Object.hasOwn(KINDS, body.kind)) return json({ error: 'kind' }, 400)
-  const kind = body.kind as 'login' | 'needs_you'
+  const kind = body.kind as 'login' | 'needs_you' | 'approval'
   const every = KINDS[kind]
   const event = typeof body.event === 'string' && EVENT.test(body.event) ? body.event : null
   if (!event) return json({ error: 'event' }, 400)
@@ -250,7 +274,8 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   }
   const [claimed] = await env.DB.batch([claim, line, prune])
   if ((claimed.meta.changes ?? 0) === 1) {
-    const sending = tellAccount(env, account, loginNotice(runner.name), { kind, runner: phoneRunner })
+    const words = kind === 'approval' ? approvalNotice(runner.name) : loginNotice(runner.name)
+    const sending = tellAccount(env, account, words, { kind, runner: phoneRunner })
     if (ctx) ctx.waitUntil(sending)
     else await sending
   }

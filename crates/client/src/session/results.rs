@@ -80,6 +80,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::CrashRecorded(_) => "crash_recorded",
         result::Value::AuthChallenge(_) => "auth_challenge",
         result::Value::StepUpKeyState(_) => "step_up_key_state",
+        result::Value::ApprovalState(_) => "approval_state",
+        result::Value::ApprovalList(_) => "approval_list",
         result::Value::RepositorySurvey(_) => "repository_survey",
         result::Value::CharterWritten(_) => "charter_written",
         result::Value::WorkspaceCharter(_) => "workspace_charter",

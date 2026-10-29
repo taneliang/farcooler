@@ -53,7 +53,7 @@ impl Device {
         pb::StepUpKey { alg: alg.into(), public_key: self.public().into() }
     }
 
-    fn sign(&self, statement: &[u8]) -> Vec<u8> {
+    pub(crate) fn sign(&self, statement: &[u8]) -> Vec<u8> {
         let signature: Signature = self.key.sign_prehash(&Sha256::digest(statement)).unwrap();
         signature.to_der().as_bytes().to_vec()
     }
@@ -93,6 +93,7 @@ impl Device {
             signature: self.sign(&signed).into(),
             authenticator_data: auth.into(),
             client_data_json: client_data.into(),
+            ..Default::default()
         };
         Request { step_up: Some(step_up), ..req }
     }
@@ -167,7 +168,7 @@ pub(crate) async fn runner() -> Runner {
     Runner { _dir: dir, svc, pin }
 }
 
-fn revoke_req(device: &str, with_added: bool) -> Request {
+pub(crate) fn revoke_req(device: &str, with_added: bool) -> Request {
     Request {
         method: "client.revoke".into(),
         payload: Some(request::Payload::ClientRevoke(pb::ClientRevoke { client_id: device.into(), with_added })),

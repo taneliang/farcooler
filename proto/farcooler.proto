@@ -334,6 +334,12 @@ message Request {
     // held by `reserved` below.
     ClientSetStepUpKey client_set_step_up_key = 580;
     ClientApproveStepUp client_approve_step_up = 581;
+    // `approval.ask`, `approval.grant`, `approval.status` and `approval.deny`
+    // (ov-858), behind `phone_approval`. `approval.list` takes an `empty`.
+    // 596-599 are their block, held by `reserved` below.
+    ApprovalAsk approval_ask = 590;
+    ApprovalGrant approval_grant = 591;
+    ApprovalId approval_id = 592;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -381,6 +387,8 @@ message Request {
   reserved 572 to 579;
   // The rest of step-up's block (ov-856).
   reserved 582 to 589;
+  // The rest of phone approval's block (ov-858).
+  reserved 593 to 599;
 }
 
 message Response {
@@ -558,6 +566,9 @@ message Result {
     // 582-589 are their block, held by `reserved` below.
     AuthChallenge auth_challenge = 580;
     StepUpKeyState step_up_key_state = 581;
+    // `approval.*` (ov-858), behind `phone_approval`.
+    ApprovalState approval_state = 590;
+    ApprovalList approval_list = 591;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -5351,6 +5362,55 @@ message StepUp {
   bytes signature = 5;
   bytes authenticator_data = 6;
   bytes client_data_json = 7;
+  // `phone-approval` only (ov-858): the approval the person's iPhone granted
+  // for exactly `action_bytes`. Replaces the signature, the nonce and the pin,
+  // which the phone signed when it granted.
+  string approval_id = 8;
+}
+
+// `approval.ask` (ov-858): a Mac that isn't the runner, and holds no step-up
+// key of its own, asks the person's iPhone to approve one admin action.
+// `action_bytes` is the request exactly as `StepUp.action_bytes` spells it.
+// Answers an `ApprovalState`.
+message ApprovalAsk {
+  bytes action_bytes = 1;
+}
+
+// `approval.grant` (ov-858): the person's iPhone approves what it was shown.
+// `signature` is the DER ECDSA signature of the statement
+// `farcooler_protocol::step_up_statement(host_pin, <the asking device's id>,
+// sha256(action_bytes), nonce)`, made with the phone's trusted step-up key and
+// the person's own face. `host_pin` is the phone's own pin of this runner.
+message ApprovalGrant {
+  string id = 1;
+  string host_pin = 2;
+  bytes signature = 3;
+}
+
+// `approval.status` and `approval.deny` (ov-858): one approval, by id.
+message ApprovalId {
+  string id = 1;
+}
+
+// One approval as the runner holds it (ov-858). `state` is `pending`,
+// `granted`, `denied` or `expired`. `device_name` and `target_name` are the
+// runner's own words for the asking Mac and what it acts on, never the asker's.
+// `action_bytes`, `nonce` and `device_id` are what a phone signs over.
+message ApprovalState {
+  string id = 1;
+  string state = 2;
+  string method = 3;
+  bytes action_bytes = 4;
+  bytes nonce = 5;
+  string device_id = 6;
+  string device_name = 7;
+  string target_name = 8;
+  int64 expires_at = 9;
+}
+
+// `approval.list` (ov-858): the pending approvals of the caller's person.
+message ApprovalList {
+  repeated ApprovalState items = 1;
 }
 
 // A device's step-up public key: `p256-sha256` as the 65-byte uncompressed

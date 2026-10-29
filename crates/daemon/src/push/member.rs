@@ -35,6 +35,8 @@ pub enum MemberKind {
     /// task notice's class (`decision`, `blocked` or `review`): the relay
     /// sends it only to the member's devices that keep that class on.
     NeedsYou(&'static str),
+    /// A Mac is waiting for this person's phone to approve an admin action (ov-858).
+    Approval,
 }
 
 impl MemberKind {
@@ -43,13 +45,14 @@ impl MemberKind {
         match self {
             MemberKind::Login => "login",
             MemberKind::NeedsYou(_) => "needs_you",
+            MemberKind::Approval => "approval",
         }
     }
 
     /// The wire's `class`, for a Needs You push.
     pub fn class(self) -> Option<&'static str> {
         match self {
-            MemberKind::Login => None,
+            MemberKind::Login | MemberKind::Approval => None,
             MemberKind::NeedsYou(class) => Some(class),
         }
     }
@@ -120,7 +123,7 @@ pub async fn notify_member(
     let body = MemberNotice { account, kind: kind.word(), event, class: kind.class(), runner, task, terminal };
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
         Ok(response) if response.status().is_success() => match kind {
-            MemberKind::Login => true,
+            MemberKind::Login | MemberKind::Approval => true,
             MemberKind::NeedsYou(_) => {
                 let answer: serde_json::Value = response.json().await.unwrap_or_default();
                 answer.get("sent").and_then(serde_json::Value::as_bool).unwrap_or(false)

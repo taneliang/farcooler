@@ -156,6 +156,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Reached through `step_up.begin`, `step_up.finish` and `step_up.propose`,
         // which build them with the bytes a key signs.
         Method::AuthChallenge | Method::ClientSetStepUpKey => None,
+        // A Mac's ask for its iPhone to approve an admin action, and the
+        // iPhone's side of it (ov-858): `approval_args`.
+        Method::ApprovalAsk | Method::ApprovalList | Method::ApprovalGrant | Method::ApprovalStatus | Method::ApprovalDeny => Some(method.name()),
         // Plain while a phone has no trusted key; signed through `step_up.begin` after.
         // A person's access and a device's cap are an Owner's or an Admin's, signed (ov-856).
         Method::ClientApproveStepUp | Method::MemberSetAccess | Method::ClientSetCap => Some(method.name()),

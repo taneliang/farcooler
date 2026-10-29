@@ -38,6 +38,7 @@ pub(crate) mod step_up;
 mod enroll_wire;
 use enroll_wire::{enroll_json, enroll_payload};
 pub mod teammate;
+mod approval;
 mod node_key;
 mod rekey;
 mod pr_actions;

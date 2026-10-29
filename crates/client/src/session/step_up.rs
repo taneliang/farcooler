@@ -24,18 +24,18 @@ use sha2::{Digest, Sha256};
 use super::*;
 
 /// How many prepared actions wait for a signature; the oldest is dropped.
-const KEPT: usize = 4;
+pub(super) const KEPT: usize = 4;
 
 /// The algorithm a Secure Enclave or Keystore key signs with.
 pub const ALG: &str = "p256-sha256";
 
 /// An admin action built and waiting for its signature.
 pub(super) struct Prepared {
-    token: String,
-    request: farcooler_protocol::v1::Request,
-    action_bytes: Vec<u8>,
-    nonce: Vec<u8>,
-    host_pin: String,
+    pub(super) token: String,
+    pub(super) request: farcooler_protocol::v1::Request,
+    pub(super) action_bytes: Vec<u8>,
+    pub(super) nonce: Vec<u8>,
+    pub(super) host_pin: String,
 }
 
 /// The request for `method` with `args`, or the refusal for a method that
@@ -167,6 +167,7 @@ impl Session {
             signature: signature.into(),
             authenticator_data: Default::default(),
             client_data_json: Default::default(),
+            approval_id: String::new(),
         });
         let answer = self.client.send(request, crate::deadlines::for_method(&method))?;
         Pending { answer, method }.value().await

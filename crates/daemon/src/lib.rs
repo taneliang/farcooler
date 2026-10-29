@@ -64,6 +64,7 @@ mod person_access_change;
 mod teammate_bind;
 pub mod step_up;
 mod step_up_rpc;
+mod approvals;
 pub mod release_sweep;
 pub mod registry_binding;
 pub mod resync;

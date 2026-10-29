@@ -124,6 +124,13 @@ pub fn member_ruling(method: M) -> Ruling {
         M::AuthChallenge
         | M::ClientSetStepUpKey
         | M::ClientApproveStepUp
+        // A Mac's ask for its person's phone to approve an action, and that
+        // phone's answer (ov-858): `approvals` holds each to the same person.
+        | M::ApprovalAsk
+        | M::ApprovalList
+        | M::ApprovalGrant
+        | M::ApprovalStatus
+        | M::ApprovalDeny
         | M::ClientSetNodeKey
         | M::ClientRekey
         | M::ClaudeSignIn

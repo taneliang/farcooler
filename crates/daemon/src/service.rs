@@ -1952,6 +1952,8 @@ pub struct Service {
     pub(crate) orchestrator_locks: crate::lead_change::Locks,
     /// Each member's Claude login: the runner's own dir, the version check.
     pub(crate) claude_logins: crate::claude_logins::State,
+    /// The admin actions a Mac is waiting on an iPhone to approve (ov-858).
+    pub(crate) approvals: crate::approvals::Approvals,
     /// The CLI a rep's gate runs and a rep may run, by its absolute path
     /// (`reps::Service::rep_launch`): beside the daemon in `open`, and a
     /// path under the root in a test's service, which never runs it.
@@ -2148,6 +2150,7 @@ impl Service {
             rep_resumes: Default::default(),
             orchestrator_locks: Default::default(),
             claude_logins: crate::claude_logins::State::new(Some(root.join("home").join(".claude"))),
+            approvals: Default::default(),
             rep_cli: Some(root.join("bin").join(farcooler_protocol::CHANNEL.cli_binary_name())),
             root,
             sessions: crate::sessions::Sessions::persisted(store.clone())?,

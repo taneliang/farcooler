@@ -807,6 +807,12 @@ pub mod capability {
     /// admin action only on a runner with it; an older one is refused with a
     /// word.
     pub const STEP_UP: &str = "step_up";
+    /// A Mac that isn't the runner, with no step-up key of its own, has an
+    /// admin action approved on the person's iPhone (ov-858): `approval.ask`,
+    /// `approval.list`, `approval.grant`, `approval.status` and
+    /// `approval.deny`, and `StepUp.approval_id`. A Mac offers the iPhone
+    /// route only on a runner with it.
+    pub const PHONE_APPROVAL: &str = "phone_approval";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -831,7 +837,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            STEP_UP,
+            STEP_UP, PHONE_APPROVAL,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1116,6 +1122,11 @@ pub mod method {
         AuthChallenge = "auth.challenge" => STEP_UP,
         ClientSetStepUpKey = "client.set_step_up_key" => STEP_UP,
         ClientApproveStepUp = "client.approve_step_up" => STEP_UP,
+        ApprovalAsk = "approval.ask" => PHONE_APPROVAL,
+        ApprovalList = "approval.list" => PHONE_APPROVAL,
+        ApprovalGrant = "approval.grant" => PHONE_APPROVAL,
+        ApprovalStatus = "approval.status" => PHONE_APPROVAL,
+        ApprovalDeny = "approval.deny" => PHONE_APPROVAL,
     }
 }
 

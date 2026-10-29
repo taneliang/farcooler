@@ -607,6 +607,9 @@ fn scope_of(method: Method) -> Scope {
         // A nonce and a key are a device's own business (ov-856): the calls
         // check who may do what themselves, and a step-up carries the rest.
         Method::AuthChallenge | Method::ClientSetStepUpKey | Method::ClientApproveStepUp => Scope::Control,
+        // A Mac's ask and its phone's answer are both a device's own business
+        // (ov-858): `approvals` checks the person and the key itself.
+        Method::ApprovalAsk | Method::ApprovalList | Method::ApprovalGrant | Method::ApprovalStatus | Method::ApprovalDeny => Scope::Control,
         Method::ClientRevoke => Scope::HostAdmin,
         // Who is on the runner, as the device list is; saying so is who may log
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
@@ -1995,6 +1998,7 @@ impl Rpc {
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, self.stepped.get(), req).await, // ov-494, ov-584
             // Step-up (ov-856): `step_up_rpc`.
+            "approval.ask" | "approval.list" | "approval.grant" | "approval.status" | "approval.deny" => crate::approvals::dispatch(svc, &self.peer, req).await, // ov-858
             "auth.challenge" | "client.set_step_up_key" | "client.approve_step_up" => crate::step_up_rpc::dispatch(svc, &self.peer, self.caller_pid, &self.session, self.stepped.get(), req).await,
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {

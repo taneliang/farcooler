@@ -134,7 +134,7 @@ impl Challenges {
     }
 }
 
-fn fresh_nonce() -> Result<[u8; 32]> {
+pub(crate) fn fresh_nonce() -> Result<[u8; 32]> {
     use std::io::Read as _;
     let mut nonce = [0u8; 32];
     std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut nonce)).map_err(|_| DomainError::OperationFailed)?;
@@ -166,7 +166,7 @@ pub fn may_admin(store: &Store, peer: &Peer, stepped: Option<&Stepped>, method: 
     Ok(method == "client.approve_step_up" || is_admin(store, &stepped.device)?)
 }
 
-fn is_admin(store: &Store, device: &str) -> Result<bool> {
+pub(crate) fn is_admin(store: &Store, device: &str) -> Result<bool> {
     Ok(match person_of_device(store, Some(device))? {
         Person::Owner => true,
         Person::Member(handle) => store.member_access(&handle)? == Some(Access::Admin),
@@ -354,6 +354,9 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
     let Some(device) = peer.client_id.as_deref() else {
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
     };
+    if step_up.alg == crate::approvals::ALG_APPROVAL {
+        return admit_approved(svc, peer, req, device, now_ms);
+    }
     let key = svc.store.step_up_key(device)?.filter(|k| k.trusted).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
     // The nonce is spent before the signature is looked at, and stays spent.
     if !session.challenges().take(&step_up.nonce, now_ms) {
@@ -377,6 +380,25 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
     }
     let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
     let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser };
+    if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
+        return Err(DomainError::NotYours { what: "not_admin" });
+    }
+    Ok((executed, Some(stepped)))
+}
+
+/// A request the person's phone approved (ov-858): the approval is spent, once,
+/// for this device and these exact action bytes, and the request run is the
+/// one those bytes decode to.
+fn admit_approved(svc: &Service, peer: &Peer, req: Request, device: &str, now_ms: i64) -> Result<(Request, Option<Stepped>)> {
+    let step_up = req.step_up.as_ref().expect("the caller saw a step_up");
+    let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
+    // Spent before the bytes are looked at again, and stays spent.
+    if !svc.approvals.spend(&step_up.approval_id, device, &digest, now_ms) {
+        tracing::warn!(device, method = %req.method, "refused: a phone approval that is spent, expired, unknown or for another action");
+        return Err(DomainError::Conflict { what: "approval_expired" });
+    }
+    let executed = signed_request(&req, &step_up.action_bytes)?;
+    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser: false };
     if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
         return Err(DomainError::NotYours { what: "not_admin" });
     }
