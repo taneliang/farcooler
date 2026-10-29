@@ -37,6 +37,8 @@ pub struct Runner {
     /// The private half of the key the fence enrolled.
     pub identity: PathBuf,
     pub port: u16,
+    /// sshd's own log, read back when a wait gives up.
+    pub log: PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -215,7 +217,7 @@ pub async fn start_with(received: Option<&str>, client_id: &str, scope: Scope) -
     let daemon = listening_daemon_in(&runtime, &home).await;
     let sshd = Sshd { pid: await_sshd(&pid_file, port, &log).await };
 
-    Runner { _daemon: daemon, _sshd: sshd, runtime, identity: root.join("id"), port, _dir: dir }
+    Runner { _daemon: daemon, _sshd: sshd, runtime, identity: root.join("id"), port, log, _dir: dir }
 }
 
 /// The daemon that owns this runtime directory, with a home it may write into.
@@ -368,4 +370,22 @@ fn mode_of(path: &Path) -> u32 {
 /// tmux's sockets somewhere else (ov-207).
 fn tmux_tmpdir_option() -> String {
     std::env::var("TMUX_TMPDIR").map(|d| format!(",environment=\"TMUX_TMPDIR={d}\"")).unwrap_or_default()
+}
+
+/// How long any one wait on sshd, the forced command or the daemon may take.
+pub const WAIT: Duration = Duration::from_secs(30);
+
+/// `step` bounded by `WAIT`: a stuck sshd or daemon fails the test with the
+/// step's name and the tail of sshd's log, not at the runner's 600 s ceiling
+/// (ov-857).
+pub async fn within<T>(runner: &Runner, what: &str, step: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(WAIT, step).await {
+        Ok(done) => done,
+        Err(_) => {
+            let log = std::fs::read_to_string(&runner.log).unwrap_or_default();
+            let tail: Vec<&str> = log.lines().rev().take(15).collect();
+            let tail: Vec<&str> = tail.into_iter().rev().collect();
+            panic!("{what} did not finish within {}s; sshd log tail:\n{}", WAIT.as_secs(), tail.join("\n"))
+        }
+    }
 }

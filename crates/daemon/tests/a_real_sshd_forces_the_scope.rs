@@ -74,7 +74,7 @@ use tokio::process::{ChildStdin, ChildStdout, Command};
 
 mod common;
 mod real_sshd;
-use real_sshd::{start, Runner};
+use real_sshd::{start, within, Runner};
 
 /// A read-scoped line in `authorized_keys` produces a read session.
 ///
@@ -97,7 +97,7 @@ async fn a_read_scoped_forced_command_yields_a_read_session() {
     // And the dispatcher refuses, which is the half the hello cannot see: a
     // hello only REPORTS a scope, and a scope that is reported and not enforced
     // is a settings screen telling somebody a comforting thing.
-    match client.call(request("worktree.discover")).await {
+    match within(&runner, "client call", client.call(request("worktree.discover"))).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_eq!(code, ErrorCode::ScopeDenied as i32, "a read session reached host paths");
         }
@@ -131,7 +131,7 @@ async fn the_client_cannot_upgrade_its_own_scope() {
         Scope::Read as i32,
         "a client talked past the forced command and chose its own scope"
     );
-    match client.call(request("worktree.discover")).await {
+    match within(&runner, "client call", client.call(request("worktree.discover"))).await {
         Err(ClientError::Daemon { code, .. }) => {
             let denied = ErrorCode::ScopeDenied as i32;
             assert_eq!(code, denied, "a session that asked for more reached host paths");
@@ -162,20 +162,24 @@ async fn the_client_cannot_upgrade_its_own_scope() {
 async fn the_daemon_learns_the_client_id_from_the_forced_command() {
     let runner = start("phone-7", Scope::Read).await;
     let (_ssh, mut phone) = connect(&runner, "farcoolerd --stdio").await;
-    phone.call(request("client.list")).await.expect("a read session may list clients");
+    within(&runner, "phone call", phone.call(request("client.list"))).await.expect("a read session may list clients");
 
     // The socket, which is this machine's owning user and therefore host_admin —
     // `client.revoke` has always required it. Nothing about this connection names
     // a device, which is also what keeps the revoke below from closing it.
     let mut admin =
-        Client::connect(runner.runtime.join("farcoolerd.sock"), "test-admin", "0.0.0")
-            .await
+        within(
+        &runner,
+        "the admin handshake on the runner's socket",
+        Client::connect(runner.runtime.join("farcoolerd.sock"), "test-admin", "0.0.0"),
+    )
+    .await
             .expect("handshake on the runner's own socket");
 
     // First that the daemon and sshd are reading ONE file. They are the same file
     // on a real runner, and a test in which they were two would prove nothing
     // about revocation reaching the session sshd authenticated.
-    let enrolled = client_ids(&mut admin).await;
+    let enrolled = client_ids(&runner, &mut admin).await;
     assert!(
         enrolled.contains(&"phone-7".to_string()),
         "the daemon does not read the authorized_keys sshd authenticated against: {enrolled:?}"
@@ -185,16 +189,14 @@ async fn the_daemon_learns_the_client_id_from_the_forced_command() {
     revoke.payload = Some(farcooler_protocol::v1::request::Payload::ClientRevoke(
         farcooler_protocol::v1::ClientRevoke { client_id: "phone-7".into(), with_added: false },
     ));
-    admin.call(revoke).await.expect("client.revoke");
+    within(&runner, "admin call", admin.call(revoke)).await.expect("client.revoke");
 
-    let outcome = phone.call(request("client.list")).await;
+    let outcome = within(&runner, "phone call", phone.call(request("client.list"))).await;
     assert!(
         matches!(outcome, Err(ClientError::Closed | ClientError::Codec(_))),
         "the session sshd started was not attributed to the device its line names: {outcome:?}"
     );
-    admin
-        .call(request("client.list"))
-        .await
+    within(&runner, "admin call", admin.call(request("client.list"))).await
         .expect("the local caller's own connection was closed by its own revoke");
 }
 
@@ -210,24 +212,28 @@ async fn the_daemon_learns_the_client_id_from_the_forced_command() {
 async fn a_device_taken_off_a_members_list_cannot_log_in_again() {
     let runner = start("pad-b", Scope::Control).await;
     let mut admin =
-        Client::connect(runner.runtime.join("farcoolerd.sock"), "test-admin", "0.0.0")
-            .await
+        within(
+        &runner,
+        "the admin handshake on the runner's socket",
+        Client::connect(runner.runtime.join("farcoolerd.sock"), "test-admin", "0.0.0"),
+    )
+    .await
             .expect("handshake on the runner's own socket");
-    admin.call(member_set("bob", &["pad-b"])).await.expect("the pad bound to Bob");
+    within(&runner, "admin call", admin.call(member_set("bob", &["pad-b"]))).await.expect("the pad bound to Bob");
     assert!(log_in(&runner).is_ok(), "the pad could not log in while it was Bob's");
     let (_ssh, mut pad) = connect(&runner, "farcoolerd --stdio").await;
-    pad.call(request("member.list")).await.expect("Bob's pad reads who's here");
+    within(&runner, "pad call", pad.call(request("member.list"))).await.expect("Bob's pad reads who's here");
 
-    admin.call(member_set("bob", &[])).await.expect("the pad taken off Bob's list");
+    within(&runner, "admin call", admin.call(member_set("bob", &[]))).await.expect("the pad taken off Bob's list");
 
-    let outcome = pad.call(request("member.list")).await;
+    let outcome = within(&runner, "pad call", pad.call(request("member.list"))).await;
     assert!(
         matches!(outcome, Err(ClientError::Closed | ClientError::Codec(_))),
         "the pad's open session outlived its release: {outcome:?}"
     );
     let refused = log_in(&runner).expect_err("sshd still lets the released pad in");
     assert!(refused.contains("Permission denied"), "refused for some other reason: {refused}");
-    assert!(!client_ids(&mut admin).await.contains(&"pad-b".to_string()), "the pad is still enrolled");
+    assert!(!client_ids(&runner, &mut admin).await.contains(&"pad-b".to_string()), "the pad is still enrolled");
 }
 
 /// `member.set` of `handle` with exactly `devices`.
@@ -253,6 +259,7 @@ fn log_in(runner: &Runner) -> Result<(), String> {
         .arg("-i")
         .arg(&runner.identity)
         .args(["-o", "IdentitiesOnly=yes", "-o", "ControlMaster=no", "-o", "BatchMode=yes"])
+        .args(["-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=4"])
         .args(["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"])
         .arg("127.0.0.1")
         .stdin(std::process::Stdio::null())
@@ -266,9 +273,10 @@ fn log_in(runner: &Runner) -> Result<(), String> {
 
 /// The devices this runner's fence enrolls, as the daemon reads the file.
 async fn client_ids(
+    runner: &Runner,
     admin: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
 ) -> Vec<String> {
-    let result = admin.call(request("client.list")).await.expect("client.list");
+    let result = within(&runner, "admin call", admin.call(request("client.list"))).await.expect("client.list");
     let Some(result::Value::ClientList(list)) = result.value else { panic!("wrong result") };
     list.items.into_iter().map(|c| c.client_id).collect()
 }
@@ -292,7 +300,7 @@ async fn connect(
         // never multiplexed, never interactive.
         .args(["-o", "IdentitiesOnly=yes"])
         .args(["-o", "ControlMaster=no"])
-        .args(["-o", "BatchMode=yes"])
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=20"])
         // A throwaway host key on a throwaway port. Recording it would write into
         // the developer's own known_hosts, and refusing it would fail every run
         // after the first.
@@ -313,7 +321,7 @@ async fn connect(
 
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
-    let client = Client::over(stdout, stdin, "test-client", "0.0.0")
+    let client = within(runner, "the handshake through ssh", Client::over(stdout, stdin, "test-client", "0.0.0"))
         .await
         .expect("handshake over a real sshd");
     (child, client)
