@@ -645,6 +645,56 @@ async fn a_browser_attempts_only_defensive_actions() {
     assert!(r.svc.store.member("carol").is_err());
 }
 
+/// Makes `id`'s line a browser's passkey line on a `host_admin` Key A line, as
+/// `fence::render` writes it.
+fn make_browser(r: &Runner, id: &str) {
+    let blob = if farcooler_fence::app_host() == "app.farcooler.com" {
+        "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAARYXBwLmZhcmNvb2xlci5jb20="
+    } else {
+        "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAAYYXBwLmNhbmFyeS5mYXJjb29sZXIuY29t"
+    };
+    let passkey = farcooler_fence::render(&format!("sk-ecdsa-sha2-nistp256@openssh.com {blob} webauthn@browser"), "Browser", id, Scope::HostAdmin, farcooler_fence::Grant::FarCooler, None).expect("a passkey line");
+    let path = r.svc.authorized_keys();
+    let kept: Vec<String> = farcooler_fence::read(path, farcooler_fence::AUTHORIZED_KEYS).unwrap().into_iter().map(|e| if e.client_id == id { passkey.clone() } else { e.line }).collect();
+    farcooler_fence::write(path, farcooler_fence::AUTHORIZED_KEYS, &kept, &[], farcooler_fence::Placement::Last).unwrap();
+    r.svc.store.set_device_cap(id, None).unwrap(); // the owner's line, held to nothing below `host_admin`
+}
+
+/// A browser has no key to ask for and can never register one, so it has no
+/// transition: with no step-up it is refused every admin action that isn't
+/// defensive, and allowed the ones that are. A phone with no key is not.
+#[tokio::test]
+async fn a_keyless_browser_may_only_take_access_away() {
+    let r = runner().await;
+    make_browser(&r, "web-o");
+    // A `host_admin` line is where a keyless device does admin today.
+    let conn = factory(&r.svc, Some("web-o"), Scope::HostAdmin);
+    let before = lines(&r);
+    let refused = word(call(&conn, enroll_req(61, "new-o", Scope::Control, false, None)).await);
+    assert!(refused.ends_with("defensive_only"), "{refused}");
+    let refused = word(call(&conn, set("dan", &["pad-b"], "", "")).await);
+    assert!(refused.ends_with("defensive_only"), "{refused}");
+    assert_eq!(lines(&r), before, "nothing was written");
+
+    call(&conn, revoke_req("pad-b", false)).await.expect("a keyless browser revokes");
+    assert!(!lines(&r).contains(&"pad-b".to_string()));
+    call(&conn, remove_req("carol")).await.expect("a keyless browser removes a person");
+}
+
+/// A browser with a valid passkey step-up for the exact action is served.
+#[tokio::test]
+async fn a_browser_with_a_step_up_for_that_action_is_served() {
+    let r = runner().await;
+    make_browser(&r, "web-o");
+    let web = Device::new("web-o", 15);
+    r.trust(&web, ALG_WEBAUTHN);
+    let conn = r.conn("web-o");
+    let origin = format!("https://{}", farcooler_fence::app_host());
+    let n = nonce(&conn).await;
+    call(&conn, web.assert(&r.pin, revoke_req("pad-b", false), &n, UP_UV, 1, &origin)).await.expect("a stepped-up browser");
+    assert!(!lines(&r).contains(&"pad-b".to_string()));
+}
+
 // MARK: - The verifiers alone
 
 /// A challenge is 32 random bytes, and two are never alike.
