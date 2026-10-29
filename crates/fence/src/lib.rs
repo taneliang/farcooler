@@ -29,6 +29,8 @@ mod inventory;
 pub use inventory::{inventory, inventory_of, Inventory, Listed, MAX_FILE_BYTES};
 mod rekey;
 pub use rekey::{rekey_statement, REKEY_NAMESPACE};
+mod scope;
+pub use scope::with_scope;
 mod passkey;
 pub use passkey::{admits_as_key_a, app_host, app_host_for, holds_ed25519};
 

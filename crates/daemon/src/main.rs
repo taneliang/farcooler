@@ -247,6 +247,10 @@ async fn run() -> Result<(), i32> {
     // most, with no tunnel to rebuild yet, and never past
     // `release_sweep::START_LIMIT` (the fence's lock has no timeout).
     farcooler_daemon::release_sweep::sweep_at_start(&service).await;
+    // Whose each device is, and what each person may do, written down once
+    // from the lines as they are (ov-856, slice 1). Nothing enforces from it
+    // yet, and it writes no line.
+    farcooler_daemon::access_migration::migrate_at_start(&service).await;
     // A pane still in chat mode from the build before moves to its TUI at
     // its next idle (ov-376).
     farcooler_daemon::chat_migration::start(&service);

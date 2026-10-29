@@ -105,11 +105,13 @@ mod tests {
                     state: pb::ClaudeLoginState::SignedIn as i32,
                     email: "alice@claude.example".into(),
                 }),
+                access: String::new(),
             }],
             claude_account: "team@example.com".into(),
             you: "alice".into(),
             removed: None,
             own_logins: Some(pb::MemberOwnLogins { claude: false, codex: true, cursor: false, may_change: true }),
+            device_access: Vec::new(),
         };
         let v = members_json(&list);
         assert!(v.get("removed").is_none(), "only a removal's answer says what it removed");

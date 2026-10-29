@@ -5249,6 +5249,27 @@ message Member {
   // who edits any workspace's charter. Only the owner changes it
   // (`member.set_role`). Empty from a runner before `member_roles`.
   string role = 9;
+  // What they may do on this runner (ov-856): `admin`, `member` or `viewer`.
+  // Read only for now: no call changes it, and enforcement is still per
+  // device. Empty from a runner before it, or before it has moved the
+  // devices' scopes over.
+  string access = 10;
+}
+
+// One device's place in the people's access (ov-856, read only): whose it is,
+// what that person may do, and the cap that keeps this device below it.
+message DeviceAccess {
+  string client_id = 1;
+  // The member's handle, or empty for the runner's owner.
+  string person = 2;
+  // The person's access: `owner`, `admin`, `member` or `viewer`.
+  string access = 3;
+  // `viewer` or `member` when this device is held below its person's access,
+  // else empty.
+  string cap = 4;
+  // A legacy line the owner has yet to confirm (ov-828's R3): added by a
+  // member's or a released device, and bound to no one.
+  bool check = 5;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're
@@ -5329,6 +5350,10 @@ message MemberList {
   // (ov-652). Absent from a runner before it, whose members' Claude needs
   // their own login and whose Codex and Cursor are refused.
   MemberOwnLogins own_logins = 5;
+  // Every device's place in the people's access (ov-856), told to the owner
+  // alone. Empty from a runner before it, and until it has moved the
+  // devices' scopes over.
+  repeated DeviceAccess device_access = 6;
 }
 
 // Per agent, whether this runner's admins require members to sign in with

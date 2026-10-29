@@ -66,6 +66,7 @@ use needs_you::needs_you;
 #[cfg(test)]
 use needs_you::{NEEDS_YOU_UNREAD, NO_NEEDS_YOU, needs_you_output, needs_you_read};
 mod people;
+mod people_access;
 mod member_connectors;
 mod claude_sign_in;
 mod rep_pane;
@@ -224,6 +225,9 @@ enum Command {
     /// The people on a shared runner, and whose devices are whose (ov-494).
     #[command(subcommand)]
     Member(people::MemberCmd),
+    /// Who has what access on this runner, and which devices are held below
+    /// it. Read only: what the runner has recorded (ov-856).
+    People,
     /// Start a person's rep: the agent that carries their asks to the
     /// orchestrator and its questions back, and never answers for them.
     Rep(people::RepArgs),
@@ -1246,6 +1250,7 @@ async fn run() -> Fallible {
         Command::Search(a) => rep_search::search(runner, a, cli.json).await,
         Command::Member(c) => people::member(runner, c, cli.json).await,
         Command::Rep(a) => people::rep(runner, a, cli.json).await,
+        Command::People => people_access::people(runner, cli.json).await,
         Command::Page(a) => page::page(runner, a, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,

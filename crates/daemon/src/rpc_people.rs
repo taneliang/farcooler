@@ -328,6 +328,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         return Ok(pb::MemberList { you: RELEASED.to_string(), ..Default::default() });
     }
     let roles = svc.store.member_roles()?;
+    let access = svc.store.stored_access()?.member_access;
     let members = svc
         .store
         .members()?
@@ -340,6 +341,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             let claude_login = Some(svc.member_claude_login(&m.handle, own));
             Ok(pb::Member {
                 role: roles.get(&m.handle).copied().unwrap_or_default().as_str().to_string(),
+                access: access.iter().find(|(h, _)| *h == m.handle).map(|(_, a)| a.as_str().to_string()).unwrap_or_default(),
                 claude_login,
                 rep_terminal_ids: reps.iter().map(|r| id_bytes(r.terminal)).collect(),
                 rep_workspace_ids: reps.iter().map(|r| id_bytes(r.workspace)).collect(),
@@ -351,6 +353,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let viewer_is_owner = viewer == Person::Owner;
     let you = match viewer {
         Person::Owner => String::new(),
         Person::Member(handle) => handle,
@@ -363,7 +366,13 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         _ => String::new(),
     };
     let own_logins = Some(svc.own_logins_wire(peer.scope));
-    Ok(pb::MemberList { members, claude_account, you, removed: None, own_logins })
+    // Every device's place in the people's access, for the owner alone
+    // (ov-856, read only).
+    let device_access = match viewer_is_owner {
+        true => crate::access_migration::device_access(&svc.store)?,
+        false => Vec::new(),
+    };
+    Ok(pb::MemberList { members, claude_account, you, removed: None, own_logins, device_access })
 }
 
 #[cfg(test)]
