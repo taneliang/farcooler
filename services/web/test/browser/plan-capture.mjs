@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Captures the Plan as the work screen draws it (ov-775): desktop in light,
-// and a phone in dark through CDP mobile emulation (headless Chrome's
+// Captures the Plan as the work screen draws it (ov-775): desktop and a 375 px phone, each in light and dark, through CDP mobile emulation (headless Chrome's
 // --window-size can't go below about 500 px).
 //
 //   node test/browser/plan-capture.mjs OUT_DIR
@@ -40,6 +39,8 @@ async function shoot(name, { colorScheme, metrics, refuse = false }) {
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: false })
   await context.close()
 }
-await shoot('plan-desktop-light', { colorScheme: 'light', metrics: { width: 1280, height: 800, mobile: false } })
-await shoot('plan-phone-dark', { colorScheme: 'dark', metrics: { width: 390, height: 844, mobile: true }, refuse: true })
+for (const scheme of ['light', 'dark']) {
+  await shoot(`plan-desktop-${scheme}`, { colorScheme: scheme, metrics: { width: 1280, height: 800, mobile: false } })
+  await shoot(`plan-phone-${scheme}`, { colorScheme: scheme, metrics: { width: 375, height: 812, mobile: true }, refuse: true })
+}
 await browser.close()

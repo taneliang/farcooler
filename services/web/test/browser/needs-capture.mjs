@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Captures Needs You as the work screen draws it (ov-773): desktop in light,
-// and a phone in dark through CDP mobile emulation (headless Chrome's
+// Captures Needs You as the work screen draws it (ov-773): desktop and a 375 px phone, each in light and dark, through CDP mobile emulation (headless Chrome's
 // --window-size can't go below about 500 px).
 //
 //   node test/browser/needs-capture.mjs OUT_DIR
@@ -40,6 +39,8 @@ async function shoot(name, { colorScheme, metrics }) {
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: false })
   await context.close()
 }
-await shoot('needs-desktop-light', { colorScheme: 'light', metrics: { width: 1280, height: 800, mobile: false } })
-await shoot('needs-phone-dark', { colorScheme: 'dark', metrics: { width: 390, height: 844, mobile: true } })
+for (const scheme of ['light', 'dark']) {
+  await shoot(`needs-desktop-${scheme}`, { colorScheme: scheme, metrics: { width: 1280, height: 800, mobile: false } })
+  await shoot(`needs-phone-${scheme}`, { colorScheme: scheme, metrics: { width: 375, height: 812, mobile: true } })
+}
 await browser.close()

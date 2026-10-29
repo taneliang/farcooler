@@ -1,11 +1,11 @@
 /* An agent's conversation (ov-776, src/client/chat.ts). Colors come from
    app.css's tokens; this file adds only what a conversation needs. */
-.chat-host { --chat-w: 760px; --bubble: var(--button-bg); --bubble-text: var(--button-text); --code-bg: var(--bg-alt); --ok: #30a46c; --bad: #e5484d; --run: #0a84ff; position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
-@media (prefers-color-scheme: light) { .chat-host { --ok: #218358; --bad: #cd2b31; --run: #0071e3; --code-bg: #f5f5f7; } }
+.chat-host { --chat-w: 760px; --bubble: var(--button-bg); --bubble-text: var(--button-text); --code-bg: var(--card); --ok: #32d74b; --bad: #ff6961; --run: #0a84ff; position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+@media (prefers-color-scheme: light) { .chat-host { --ok: #1f8a3a; --bad: #d70015; --run: #0071e3; --code-bg: #ececf0; } }
 .terminal { position: relative; }
 .chat-host[hidden] { display: none; }
 .chat-host[data-stale="true"] .chat-list { opacity: 0.6; }
-.chat-note { margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--rule); color: var(--text-2); font-size: 13px; }
+.chat-note { margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: var(--card); color: var(--text-2); font-size: 13px; }
 
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 16px 8px; scroll-padding-bottom: 8px; }
 .chat-scroll:focus-visible { outline: 2px solid var(--run); outline-offset: -2px; }
@@ -61,7 +61,7 @@
 .status-failed { background: var(--bad); }
 
 /* Cards: a subagent, an ask, a task list, a report. */
-.card { padding: 10px 14px; border-radius: 12px; background: var(--bg-alt); border: 1px solid var(--rule); overflow-wrap: anywhere; }
+.card { padding: 12px 16px; border-radius: 14px; background: var(--card); border: 1px solid transparent; overflow-wrap: anywhere; }
 .card > * { margin: 0 0 4px; }
 .card > :last-child { margin-bottom: 0; }
 .card-title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -88,8 +88,8 @@
 .working-text { flex: 1; }
 .working-dots { width: 8px; height: 8px; border-radius: 50%; background: var(--run); animation: pulse 1.2s ease-in-out infinite; }
 .chat-stop { padding: 3px 12px; font-size: 13px; }
-.chat-problem { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--bad); font-size: 13px; }
-.chat-field { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 16px; border-radius: 22px; background: var(--bg-alt); border: 1px solid var(--rule); }
+.chat-problem { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--bad); font-size: 13px; }
+.chat-field { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 16px; border-radius: 22px; background: var(--card); border: 1px solid transparent; }
 .chat-field:focus-within { border-color: var(--run); }
 .chat-input { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none; color: var(--text); font: inherit; line-height: 1.4; padding: 6px 0; max-height: 200px; }
 .chat-input::placeholder { color: var(--text-2); }
