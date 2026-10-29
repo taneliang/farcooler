@@ -71,13 +71,13 @@ public struct PeopleAccessSections: View {
                     Text(PeopleAccess.checkFooter).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if !access.waiting.isEmpty {
+            if !access.shownWaiting.isEmpty {
                 Section {
-                    ForEach(access.waiting) { WaitingRow(device: $0, from: access.thisDevice, access: access, actions: actions) }
+                    ForEach(access.shownWaiting) { WaitingRow(device: $0, access: access, actions: actions) }
                 } header: {
                     Text(PeopleAccess.waitingHeader).accessibilityIdentifier("people-waiting")
                 } footer: {
-                    Text(PeopleAccess.waitingFooter).fixedSize(horizontal: false, vertical: true)
+                    Text(PeopleAccess.waitingFooter(isSocket: access.isSocket)).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let me = access.thisDevice, access.yourAccess == .owner || access.yourAccess == .admin {
@@ -180,8 +180,11 @@ private struct DeviceRow: View {
                         .accessibilityIdentifier("device-viewer-\(device.id)")
                 }
                 if device.hasShell {
-                    Label(PeopleAccess.shellBadge, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.medium)).foregroundStyle(.orange)
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(PeopleAccess.shellBadge)
+                    }
+                    .font(.caption.weight(.medium)).foregroundStyle(.orange)
                     Text(PeopleAccess.shellWarning(runner: runner))
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("device-shell-\(device.id)")
@@ -210,15 +213,19 @@ private struct DeviceRow: View {
 
 private struct WaitingRow: View {
     let device: PeopleAccess.Device
-    let from: PeopleAccess.Device?
     let access: PeopleAccess
     let actions: PeopleAccessActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(device.personName.isEmpty ? "" : device.personName + "’s ")\(device.name)").lineLimit(2)
-                    .accessibilityIdentifier("waiting-\(device.id)")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name).lineLimit(2).accessibilityIdentifier("waiting-\(device.id)")
+                    if !device.personName.isEmpty {
+                        Text(device.personName).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("waiting-person-\(device.id)")
+                    }
+                }
                 Spacer(minLength: 8)
                 Text(PeopleAccess.spoken(device.code))
                     .font(.title3.monospacedDigit().weight(.semibold))
@@ -227,7 +234,7 @@ private struct WaitingRow: View {
             }
             Text(PeopleAccess.approvalPrompt(for: device))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let approve = actions.approve, access.mayApprove(device, from: from) || from == nil {
+            if let approve = actions.approve, access.mayAllow(device) {
                 Button("Allow") { Task { await approve(device) } }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("waiting-allow-\(device.id)")

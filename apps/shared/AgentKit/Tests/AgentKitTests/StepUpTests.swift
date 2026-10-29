@@ -207,6 +207,22 @@ struct AppLockTests {
         #expect(!AppLock().covers(.terminal), "unlocked")
     }
 
+    @Test("A tap or a link waits while the lock covers terminals, and opens when it doesn't")
+    func entriesWaitForTheLock() {
+        var lock = AppLock.atLaunch()
+        #expect(!lock.admits(.terminal) && !lock.admits(.admin), "a notification or link can't open a terminal under the lock")
+        lock.unlock()
+        #expect(lock.admits(.terminal))
+        #expect(AppLock(isOn: false, isLocked: true).admits(.terminal), "off means off")
+    }
+
+    @Test("Turning the lock off needs a face first; turning it on never does")
+    func turningOffAsks() {
+        #expect(AppLock.setting(wanting: false, verified: false), "unverified: it stays on")
+        #expect(!AppLock.setting(wanting: false, verified: true))
+        #expect(AppLock.setting(wanting: true, verified: false))
+    }
+
     @Test("A resume with no record of leaving is locked, never open")
     func noRecord() {
         var lock = AppLock()

@@ -187,12 +187,26 @@ struct SettingsView: View {
     /// feels like it.
     @State private var tunnelKey: NodeKeyStatus?
 
+    /// Turning the lock off asks for Face ID or the passcode first, so a phone
+    /// left unlocked can't have its lock switched off.
+    private var lockSwitch: Binding<Bool> {
+        Binding(
+            get: { appLock },
+            set: { wanted in
+                if wanted { appLock = true; return }
+                Task {
+                    let verified = await AppLockAuth.verify(AppLock.turnOffPrompt)
+                    appLock = AppLock.setting(wanting: false, verified: verified)
+                }
+            })
+    }
+
     var body: some View {
         Form {
             AccountSection()
             // The app lock (ov-856, §3a).
             Section {
-                Toggle("Lock Far Cooler", isOn: $appLock)
+                Toggle("Lock Far Cooler", isOn: lockSwitch)
                     .accessibilityIdentifier("settings-app-lock")
             } header: {
                 Text("Security")

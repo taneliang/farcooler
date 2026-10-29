@@ -109,4 +109,18 @@ final class PeopleAccessUITests: XCTestCase {
         waitForSent(app, "prompt Allow iPad to approve changes to who has access.")
         waitForSent(app, "approve ipad-o")
     }
+
+    /// **The app lock stands above a link that names a terminal** (ov-856,
+    /// §3a). `-appLockHold` keeps the lock up without a face to give it, and
+    /// `-deep-link` is a link to an agent's pane. The terminal's cover would
+    /// have been drawn above a plain overlay; the lock shows, and no terminal
+    /// does, until the person unlocks.
+    func testALinkToATerminalWaitsBehindTheLock() {
+        let app = XCUIApplication.phoneHarness(["-appLock", "YES", "-appLockHold", "-deep-link", "0198f2c0-0000-7000-8000-00000000d002"])
+        XCTAssertTrue(element(app, "app-lock").waitForExistence(timeout: 30), "no lock: \(app.debugDescription)")
+        XCTAssertFalse(
+            app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 8),
+            "a terminal opened under the lock: \(app.debugDescription)")
+        XCTAssertTrue(element(app, "app-lock").exists, "the lock went away")
+    }
 }

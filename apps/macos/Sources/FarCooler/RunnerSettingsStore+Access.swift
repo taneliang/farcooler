@@ -17,7 +17,7 @@ extension RunnerSettingsStore {
             return
         }
         let clients = await cli(hostArguments + ["--json", "client", "list"])
-        setAccess(PeopleAccess(members: members, clients: clients.ok ? Data(clients.output.utf8) : nil))
+        setAccess(PeopleAccess(members: members, clients: clients.ok ? Data(clients.output.utf8) : nil, isSocket: true))
     }
 
     /// What the section can do here: everything, through the socket.

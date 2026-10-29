@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import com.farcooler.model.AppLock
 import com.farcooler.model.FirstRunCopy
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -624,7 +625,17 @@ fun SettingsScreen(
 
             Separator()
             SectionTitle("Security")
-            SettingRow("Lock Far Cooler", appLock) { model.settings.setAppLock(it) }
+            SettingRow("Lock Far Cooler", appLock) { wanted ->
+                if (wanted) {
+                    model.settings.setAppLock(true)
+                } else {
+                    // Off only after the screen lock is asked, so an unlocked phone can't be unlocked for good.
+                    scope.launch {
+                        val verified = !AppLockAuth.canAsk(context) || AppLockAuth.ask(context, AppLock.TURN_OFF_PROMPT)
+                        model.settings.setAppLock(AppLock.setting(wanting = false, verified = verified))
+                    }
+                }
+            }
             Text(
                 "Asks for your fingerprint, face or screen lock when you come back after 5 minutes away, so a lost " +
                     "phone can’t reach your terminals.",

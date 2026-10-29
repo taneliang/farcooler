@@ -92,10 +92,10 @@ fun PeopleAccessSection(
         }
         Text(PeopleAccess.CHECK_FOOTER, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (access.waiting.isNotEmpty()) {
+    if (access.shownWaiting.isNotEmpty()) {
         SectionTitle(PeopleAccess.WAITING_HEADER)
         Column(Modifier.testTag("people-waiting"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            for (device in access.waiting) WaitingRow(device, access, actions)
+            for (device in access.shownWaiting) WaitingRow(device, access, actions)
         }
         Text(PeopleAccess.WAITING_FOOTER, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -199,8 +199,17 @@ private fun DeviceRow(
 private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, actions: PeopleAccessActions) {
     Column(Modifier.fillMaxWidth().testTag("waiting-${device.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            val whose = if (device.personName.isEmpty()) "" else "${device.personName}’s "
-            Text("$whose${device.name}", maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(device.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (device.personName.isNotEmpty()) {
+                    Text(
+                        device.personName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("waiting-person-${device.id}"),
+                    )
+                }
+            }
             Text(
                 PeopleAccess.spoken(device.code),
                 style = MaterialTheme.typography.titleMedium,

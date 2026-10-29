@@ -99,6 +99,21 @@ struct PeopleAccessTests {
         #expect(!b.mayApprove(theirs, from: nil))
     }
 
+    @Test("Allow shows on the owner's Mac for any request, and on a phone only for its own person's other device")
+    func allowOnlyWhereTheRunnerWillTakeIt() throws {
+        let theirs = try #require(try board().waiting.first)
+        let mac = try #require(PeopleAccess(members: Self.members, clients: Self.clients, isSocket: true))
+        #expect(mac.shownWaiting.map(\.id) == ["phone-d"] && mac.mayAllow(theirs), "the socket takes the owner's word")
+        // A phone whose own id the runner doesn't list has no device row, and
+        // that is not the socket: it must offer no Allow, and list no one's.
+        let unlisted = try board(you: "not-in-the-list")
+        #expect(unlisted.thisDevice == nil && !unlisted.isSocket)
+        #expect(!unlisted.mayAllow(theirs) && unlisted.shownWaiting.isEmpty)
+        let cosmo = try board(you: "phone-c")
+        #expect(!cosmo.mayAllow(theirs) && cosmo.shownWaiting.isEmpty, "Dan's request is not Cosmo's phone's to list or allow")
+        #expect(PeopleAccess.waitingFooter(isSocket: true) != PeopleAccess.waitingFooter(isSocket: false))
+    }
+
     @Test("The approval sheet reads the code in two halves and says to hold the device")
     func approvalWords() throws {
         let waiting = try #require(try board().waiting.first)

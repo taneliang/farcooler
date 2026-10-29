@@ -5,12 +5,15 @@ import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
+import com.farcooler.model.AppLock
 import com.farcooler.ui.AppLockGate
 import com.farcooler.ui.FarCoolerTheme
 import org.junit.Assert.assertEquals
@@ -58,7 +61,7 @@ class AppLockGateTest {
             scenario.onActivity {
                 it.setContent {
                     FarCoolerTheme {
-                        AppLockGate(on = on, canAsk = { canAsk }, ask = { asked += 1; answers.getOrElse(asked.size - 1) { false } }) { Text("the runners") }
+                        AppLockGate(on = on, canAsk = { canAsk }, ask = { asked += 1; answers.getOrElse(asked.size - 1) { false } }) { Text("the runners", Modifier.testTag("the-runners")) }
                     }
                 }
             }
@@ -79,12 +82,21 @@ class AppLockGateTest {
     fun `a launch is locked until the prompt is answered`() = withGate(on = true, canAsk = true, answers = listOf(false, true)) { s ->
         assertEquals("asked at launch", 1, s.asked.size)
         assertNotNull("covered", tagged(s.root(), "app-lock"))
+        assertNull("the app is not even composed under the lock, so no dialog or terminal can escape it", tagged(s.root(), "the-runners"))
         val said = mutableListOf<String>().also { texts(s.root(), it) }
         assertTrue("$said", "Your fingerprint, face or screen lock didn’t work. Try again." in said)
         tagged(s.root(), "app-lock-unlock")!!.config[SemanticsActions.OnClick].action!!.invoke()
         ShadowLooper.idleMainLooper(500, java.util.concurrent.TimeUnit.MILLISECONDS)
         assertEquals(2, s.asked.size)
         assertNull("open once the device says yes", tagged(s.root(), "app-lock"))
+        assertNotNull(tagged(s.root(), "the-runners"))
+    }
+
+    @Test
+    fun `turning the lock off needs a prompt first`() {
+        assertTrue("unverified: it stays on", AppLock.setting(wanting = false, verified = false))
+        assertTrue(!AppLock.setting(wanting = false, verified = true))
+        assertTrue(AppLock.setting(wanting = true, verified = false))
     }
 
     @Test

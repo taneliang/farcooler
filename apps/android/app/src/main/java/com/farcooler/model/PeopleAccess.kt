@@ -83,6 +83,10 @@ class PeopleAccess private constructor(
         val key: String get() = handle.ifEmpty { "(owner)" }
     }
 
+    /** The waiting keys to list: this phone's own person's only, since it can approve no one else's. */
+    val shownWaiting: List<Device>
+        get() = waiting.filter { thisDevice != null && it.person == thisDevice.person }
+
     /** Whether this device may approve [other]'s key: another device of the same person, with a trusted key. */
     fun mayApprove(other: Device, from: Device?): Boolean =
         from != null && from.id != other.id && from.stepUp == StepUpKeyStanding.TRUSTED &&
@@ -95,7 +99,7 @@ class PeopleAccess private constructor(
         const val CHECK_FOOTER = "A teammate’s device added these. Remove any you don’t recognize."
         const val WAITING_HEADER = "Waiting for approval"
         const val WAITING_FOOTER =
-            "These devices asked to approve changes to who has access. Allow one only from another device of the same person."
+            "These devices asked to approve changes to who has access. Allow one only from another device of your own, while you’re holding the one that asked."
         const val LIMIT_TO_VIEWER = "Limit to viewer"
         const val REMOVE_DEVICE = "Remove device…"
 

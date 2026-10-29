@@ -49,12 +49,12 @@ object AppLockAuth {
     fun canAsk(context: Context): Boolean =
         context.getSystemService(BiometricManager::class.java)?.canAuthenticate(ALLOWED) == BiometricManager.BIOMETRIC_SUCCESS
 
-    suspend fun ask(context: Context): Boolean = suspendCancellableCoroutine { continuation ->
+    suspend fun ask(context: Context, reason: String = AppLock.PROMPT): Boolean = suspendCancellableCoroutine { continuation ->
         val cancel = CancellationSignal()
         continuation.invokeOnCancellation { cancel.cancel() }
         BiometricPrompt.Builder(context)
             .setTitle("Far Cooler is locked")
-            .setSubtitle(AppLock.PROMPT)
+            .setSubtitle(reason)
             .setAllowedAuthenticators(ALLOWED)
             .setConfirmationRequired(false)
             .build()
@@ -131,9 +131,20 @@ fun AppLockGate(
     }
     LaunchedEffect(Unit) { if (lock.isLocked) attempt() }
 
+    // Recents shows no terminal while locked.
+    val activity = context as? android.app.Activity
+    val covered = locked && on
+    DisposableEffect(covered) {
+        if (covered) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { if (covered) activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+
     Box(Modifier.fillMaxSize()) {
-        content()
-        if (locked && on) {
+        // Not composed at all while locked: a dialog, a bottom sheet or a focused terminal takes a window or the
+        // keyboard of its own, which no Surface over the content would cover. What was asked to open waits in the
+        // model and opens once this does.
+        if (!covered) content()
+        if (covered) {
             Surface(Modifier.fillMaxSize().testTag("app-lock"), color = MaterialTheme.colorScheme.background) {
                 Column(
                     Modifier.padding(32.dp),

@@ -87,6 +87,13 @@ class AppLock(var isOn: Boolean = true, locked: Boolean = false) {
     fun covers(screen: Screen): Boolean = isOn && isLocked && screen != Screen.OTHER
 
     companion object {
+        /**
+         * What the lock setting is after the person flips it to [wanted]. Turning it off needs a screen-lock prompt
+         * just passed, or a stolen unlocked phone could switch the lock off.
+         */
+        fun setting(wanting: Boolean, verified: Boolean): Boolean = wanting || !verified
+
+        const val TURN_OFF_PROMPT = "Turn off the lock on Far Cooler."
         const val IDLE_LIMIT_MS = 5 * 60 * 1000L
         const val PROMPT = "Unlock Far Cooler to use your terminals and change who has access."
         const val UNLOCK_BUTTON = "Unlock"

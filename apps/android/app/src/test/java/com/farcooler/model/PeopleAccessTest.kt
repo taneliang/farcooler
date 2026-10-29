@@ -103,6 +103,14 @@ class PeopleAccessTest {
     }
 
     @Test
+    fun aPhoneListsOnlyItsOwnPersonsRequests() {
+        val theirs = board().waiting.first()
+        assertEquals("Dan's request is not Cosmo's phone's to list", emptyList<String>(), board("phone-c").shownWaiting.map { it.id })
+        assertEquals("a phone the runner doesn't list shows none", emptyList<String>(), board("not-in-the-list").shownWaiting.map { it.id })
+        assertFalse(board("not-in-the-list").mayApprove(theirs, board("not-in-the-list").thisDevice))
+    }
+
+    @Test
     fun theApprovalSheetReadsTheCodeInTwoHalvesAndSaysToHoldTheDevice() {
         val waiting = board().waiting.first()
         assertEquals("418 207", PeopleAccess.spoken("418207"))

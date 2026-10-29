@@ -149,6 +149,7 @@ class PeopleAccessViewTest {
         val offered = mutableListOf<String>()
         shown(screen(PeopleAccessActions(approve = { offered += it.id }))) { root, said ->
             assertTrue("Only allow this if you’re holding iPad right now. Check that it shows 418 207." in said)
+            assertNull("Dan's request isn't listed on the owner's phone", tagged(root, "waiting-phone-d"))
             assertNull("Dan's key is Dan's to approve", tagged(root, "waiting-allow-phone-d"))
             tagged(root, "waiting-allow-ipad-o")!!.config[SemanticsActions.OnClick].action!!.invoke()
         }

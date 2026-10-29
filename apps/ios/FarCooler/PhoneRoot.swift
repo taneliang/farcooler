@@ -402,6 +402,8 @@ struct PhoneRoot: View {
     @Binding var pendingDestination: Destination?
 
     @StateObject private var navigator = PhoneNavigator()
+    /// While it is locked a tapped notification or link waits (`takeArrival`).
+    @ObservedObject private var appLock = AppLockCenter.shared
     @Namespace private var zoom
     /// What waits for its runner to open: the tap just taken up, or the place
     /// the last run was in. One at a time, and a tap outranks a relaunch.
@@ -469,6 +471,7 @@ struct PhoneRoot: View {
         .task(id: waiting?.id) { await follow() }
         .onChange(of: fleet.needsYouReadings) { _, _ in decideLaunch() }
         .onChange(of: pendingDestination) { _, _ in takeArrival() }
+        .onChange(of: appLock.lock.isLocked) { _, _ in takeArrival() }
     }
 
     /// Whether `place`'s Plan is a sheet over its conversation (ov-616): on
@@ -528,6 +531,8 @@ struct PhoneRoot: View {
     /// `FleetView`, which holds it from the moment it arrives, a cold launch
     /// included. It outranks a relaunch still waiting.
     private func takeArrival() {
+        // Locked: it stays held in `pendingDestination` and opens on unlock.
+        guard appLock.lock.admits(.terminal) else { return }
         guard let destination = pendingDestination else { return }
         pendingDestination = nil
         waiting = PhoneWaiting(destination: destination, arrival: .notification)

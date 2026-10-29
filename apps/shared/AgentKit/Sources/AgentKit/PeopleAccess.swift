@@ -104,6 +104,11 @@ public struct PeopleAccess: Equatable, Sendable {
     public let waiting: [Device]
     /// This device's own row, when the runner lists it.
     public let thisDevice: Device?
+    /// Whether this is the owner's Mac, which talks to its runner through the
+    /// socket and so has no device of its own. Said by the caller, never
+    /// guessed from `thisDevice` being nil: a phone whose id the runner doesn't
+    /// list has no `thisDevice` either, and is not the socket.
+    public let isSocket: Bool
     /// Whether the runner has recorded the people's access at all. False
     /// from a runner before it, which has no Access to show.
     public let recorded: Bool
@@ -115,7 +120,8 @@ public struct PeopleAccess: Equatable, Sendable {
     /// prints them, with `thisDevice` the client id of the device asking
     /// (empty on the owner's Mac, which is the socket). Nil when `members`
     /// isn't a member list.
-    public init?(members: Data, clients: Data? = nil, thisDevice me: String = "", ownerName: String = "You") {
+    public init?(members: Data, clients: Data? = nil, thisDevice me: String = "", ownerName: String = "You", isSocket: Bool = false) {
+        self.isSocket = isSocket
         guard let wire = try? JSONDecoder().decode(MembersWire.self, from: members) else { return nil }
         let lines = clients.flatMap { try? JSONDecoder().decode(ClientsWire.self, from: $0) }?.clients ?? []
         let access: [DeviceAccessWire] = wire.device_access ?? []
@@ -183,6 +189,20 @@ public struct PeopleAccess: Equatable, Sendable {
         return from.stepUp == .trusted && from.person == other.person && other.stepUp == .proposed
     }
 
+    /// The waiting keys this screen lists. The Mac, which is the owner's socket,
+    /// lists them all; a phone lists only its own person's, since it can
+    /// approve no one else's.
+    public var shownWaiting: [Device] {
+        isSocket ? waiting : waiting.filter { $0.person == thisDevice?.person && thisDevice != nil }
+    }
+
+    /// Whether to offer Allow on `other`'s request: on the Mac always (the
+    /// runner takes the owner's socket), on a phone only from another trusted
+    /// device of the viewer's own person.
+    public func mayAllow(_ other: Device) -> Bool {
+        isSocket ? other.stepUp == .proposed : mayApprove(other, from: thisDevice)
+    }
+
     /// The code as it is read aloud and compared: "418 207".
     public static func spoken(_ code: String) -> String {
         guard code.count == 6 else { return code }
@@ -205,8 +225,11 @@ public struct PeopleAccess: Equatable, Sendable {
     public static let checkFooter =
         "A teammate’s device added these. Remove any you don’t recognize."
     public static let waitingHeader = "Waiting for Approval"
-    public static let waitingFooter =
-        "These devices asked to approve changes to who has access. Allow one only from another device of the same person."
+    public static func waitingFooter(isSocket: Bool) -> String {
+        isSocket
+            ? "Only allow a device you’re holding. Check that it shows the same code."
+            : "These devices asked to approve changes to who has access. Allow one only from another device of your own, while you’re holding the one that asked."
+    }
     public static let limitToViewer = "Limit to Viewer"
     public static let removeDevice = "Remove Device…"
 

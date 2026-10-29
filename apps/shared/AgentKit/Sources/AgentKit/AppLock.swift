@@ -58,6 +58,20 @@ public struct AppLock: Equatable, Sendable {
         isOn && isLocked && screen != .other
     }
 
+    /// Whether a notification tap, a link or any other way in may open `screen`
+    /// now. While it is covered the way in waits, held where it arrived, and
+    /// opens when the lock does.
+    public func admits(_ screen: Screen) -> Bool { !covers(screen) }
+
+    /// What the lock setting is after the person flips it to `wanted`. Turning
+    /// it on needs nothing; turning it off needs the person to have just
+    /// passed Face ID or the passcode, or a stolen unlocked phone could switch
+    /// the lock off.
+    public static func setting(wanting wanted: Bool, verified: Bool) -> Bool {
+        wanted || !verified
+    }
+
+    public static let turnOffPrompt = "Turn off the lock on Far Cooler."
     public static let prompt = "Unlock Far Cooler to use your terminals and change who has access."
     public static let unlockButton = "Unlock"
 }
