@@ -42,7 +42,7 @@ fn state(device: &str, key: &farcooler_store::step_up::StepUpKeyRow) -> result::
 
 /// Whether the device behind `peer` holds a Key A line that isn't an SSH key
 /// of ours: a passkey, which is a browser's (decision 2).
-pub(crate) fn is_browser(svc: &Service, device: &str) -> Result<bool> {
+fn is_browser(svc: &Service, device: &str) -> Result<bool> {
     let entries = farcooler_fence::read(svc.authorized_keys(), farcooler_fence::AUTHORIZED_KEYS).map_err(|_| DomainError::OperationFailed)?;
     Ok(entries.iter().any(|e| e.client_id == device && !e.shell_access && !farcooler_fence::holds_ed25519(e)))
 }
