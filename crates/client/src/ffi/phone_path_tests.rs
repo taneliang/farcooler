@@ -45,11 +45,12 @@ pub(crate) async fn a_runner(scope: Scope) -> Runner {
 /// `a_runner`, with the connection made as the enrolled device `client_id`
 /// (a member's, once the store binds it to one), not the owner's.
 pub(crate) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runner {
-    a_runner_with(scope, client_id, |service| service).await
+    a_runner_with(scope, client_id, |service, _| service).await
 }
 
-/// `a_runner_for`, with `shape` applied to the service before it is shared.
-pub(crate) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: impl FnOnce(Service) -> Service) -> Runner {
+/// `a_runner_for`, with `shape` applied to the service before it is shared. It
+/// is given the runner's scratch directory, which goes with the runner.
+pub(crate) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: impl FnOnce(Service, &std::path::Path) -> Service) -> Runner {
     let client_id = client_id.map(str::to_string);
     // Short, because the agent socket lives in it and macOS caps a socket path
     // at 104 bytes. The system temporary directory alone is most of that.
@@ -69,6 +70,7 @@ pub(crate) async fn a_runner_with(scope: Scope, client_id: Option<&str>, shape: 
             // A member's launch meets the claude floor on a claimed version,
             // never by asking the claude on this machine (ov-583).
             .claiming_claude_version(Some(farcooler_daemon::claude_logins::MIN_MEMBER_CLAUDE)),
+        dir.path(),
     ));
 
     // A repository, its checkout and a claude pane, made in the store: nothing

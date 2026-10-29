@@ -40,12 +40,12 @@ impl Key {
 /// A runner whose connection is `phone-o`, the owner's `control` phone, with
 /// a host key to pin and a second device (`pad-x`) to act on.
 async fn a_runner_with_an_owners_phone() -> (Runner, Session, String) {
-    let hostkeys = tempfile::tempdir().unwrap();
-    std::fs::write(hostkeys.path().join("ssh_host_ed25519_key.pub"), HOST_KEY).unwrap();
-    let dir = hostkeys.path().to_path_buf();
-    let runner = a_runner_with(Scope::Control, Some("phone-o"), move |s| {
-        std::mem::forget(hostkeys);
-        s.with_ssh_host_dir(dir)
+    // In the runner's own scratch directory, which is removed with it.
+    let runner = a_runner_with(Scope::Control, Some("phone-o"), |s, scratch| {
+        let hostkeys = scratch.join("etc-ssh");
+        std::fs::create_dir(&hostkeys).unwrap();
+        std::fs::write(hostkeys.join("ssh_host_ed25519_key.pub"), HOST_KEY).unwrap();
+        s.with_ssh_host_dir(hostkeys)
     })
     .await;
     farcooler_daemon::access_migration::migrate_at_start(&runner.service).await;

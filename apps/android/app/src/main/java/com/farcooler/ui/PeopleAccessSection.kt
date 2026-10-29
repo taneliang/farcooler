@@ -154,6 +154,7 @@ private fun DeviceRow(
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
             }
             if (device.viewerOnThisDevice) {
+                // style-exempt: a capsule badge, fully round at any height
                 Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.testTag("device-viewer-${device.id}")) {
                     Text(
                         PeopleAccess.VIEWER_BADGE,

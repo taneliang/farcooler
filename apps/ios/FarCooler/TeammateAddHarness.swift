@@ -50,6 +50,7 @@ struct TeammateAddHarness: View {
         }
         .overlay(alignment: .bottom) {
             Color.clear
+                // style-exempt: an invisible test probe, not a rule
                 .frame(width: 1, height: 1)
                 .accessibilityElement()
                 .accessibilityIdentifier("teammate-asked")
