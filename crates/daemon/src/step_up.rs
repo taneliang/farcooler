@@ -398,6 +398,10 @@ fn admit_approved(svc: &Service, peer: &Peer, req: Request, device: &str, now_ms
         return Err(DomainError::Conflict { what: "approval_expired" });
     }
     let executed = signed_request(&req, &step_up.action_bytes)?;
+    // Defense in depth: `approval.ask` refuses these, and so does the spend.
+    if !crate::approvals::ASKABLE.contains(&executed.method.as_str()) || crate::step_up_rpc::is_browser(svc, device)? {
+        return Err(DomainError::Conflict { what: "defensive_only" });
+    }
     let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser: false };
     if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
         return Err(DomainError::NotYours { what: "not_admin" });

@@ -91,6 +91,8 @@ public struct PhoneApprovalItem: Identifiable, Equatable, Sendable {
             let method = action["method"] as? String, let encoded = json["statement"] as? String,
             let statement = Data(base64Encoded: encoded)
         else { return nil }
+        // Only what the runner lets a Mac ask for; anything else is left out.
+        guard Self.approvable.contains(method) else { return nil }
         let detail = action["detail"] as? [String: Any] ?? [:]
         let text = { (key: String) in detail[key] as? String ?? "" }
         self.id = id
@@ -106,7 +108,18 @@ public struct PhoneApprovalItem: Identifiable, Equatable, Sendable {
         self.targetName = json["targetName"] as? String ?? ""
         self.expiresAt = (json["expiresAt"] as? NSNumber)?.int64Value ?? 0
         self.statement = statement
+        // Never shown unless the screen can name the whole of it: the person
+        // or device, and for an access change the level.
+        guard !targetName.isEmpty else { return nil }
+        switch method {
+        case "member.set_access": guard PersonAccess(rawValue: access) != nil else { return nil }
+        case "client.set_cap": guard cap == "viewer" || cap.isEmpty else { return nil }
+        default: break
+        }
     }
+
+    /// The actions a phone approves for a Mac: the runner's `approvals::ASKABLE`.
+    static let approvable: Set<String> = ["client.revoke", "client.set_cap", "member.set_access", "client.approve_step_up"]
 
     /// The Mac, as the sheet names it.
     public var mac: String { deviceName.isEmpty ? "A Mac" : deviceName }
@@ -114,24 +127,16 @@ public struct PhoneApprovalItem: Identifiable, Equatable, Sendable {
     /// What approving does, in a sentence, for `runner`: the action and its
     /// target. The prompt for Face ID says it too.
     public func sentence(runner: String) -> String {
-        let target = targetName.isEmpty ? "that device" : targetName
+        let target = targetName
         switch method {
-        case "client.revoke":
-            return withAdded ? "Remove \(target) and the devices it added." : StepUpReason.removeDevice(target, alsoRemoving: 0, runner: runner)
         case "client.set_cap":
-            return cap == "viewer" ? StepUpReason.limit(target, runner: runner)
-                : cap.isEmpty ? "Lift the limit on \(target) on \(runner)." : "Limit \(target) on \(runner) to Member."
+            return cap == "viewer" ? StepUpReason.limit(target, runner: runner) : "Lift the limit on \(target) on \(runner)."
         case "member.set_access":
-            guard let new = PersonAccess(rawValue: access) else { return "Change \(target)’s access on \(runner)." }
-            return StepUpReason.setAccess(target, to: new, runner: runner)
+            return StepUpReason.setAccess(target, to: PersonAccess(rawValue: access) ?? .viewer, runner: runner)
         case "client.approve_step_up":
             return StepUpReason.approve(device: target)
-        case "client.enroll":
-            return "Add \(label.isEmpty ? "a new device" : label) to \(runner)."
-        case "member.set_role":
-            return "Change \(target)’s role on \(runner)."
         default:
-            return "Change who has access to \(runner)."
+            return withAdded ? "Remove \(target) and the devices it added." : StepUpReason.removeDevice(target, alsoRemoving: 0, runner: runner)
         }
     }
 }

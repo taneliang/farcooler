@@ -184,7 +184,7 @@ fn remove_req(handle: &str) -> Request {
     }
 }
 
-fn enroll_req(n: u8, id: &str, scope: Scope, shell: bool, key: Option<pb::StepUpKey>) -> Request {
+pub(crate) fn enroll_req(n: u8, id: &str, scope: Scope, shell: bool, key: Option<pb::StepUpKey>) -> Request {
     let p = pb::ClientEnroll { shell_access: shell, step_up_key: key, ..asking(n, id, scope) };
     Request { method: "client.enroll".into(), payload: Some(request::Payload::ClientEnroll(p)), ..Default::default() }
 }
@@ -662,7 +662,7 @@ async fn a_browser_attempts_only_defensive_actions() {
 
 /// Makes `id`'s line a browser's passkey line on a `host_admin` Key A line, as
 /// `fence::render` writes it.
-fn make_browser(r: &Runner, id: &str) {
+pub(crate) fn make_browser(r: &Runner, id: &str) {
     let blob = if farcooler_fence::app_host() == "app.farcooler.com" {
         "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAARYXBwLmZhcmNvb2xlci5jb20="
     } else {

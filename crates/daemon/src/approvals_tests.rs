@@ -3,12 +3,12 @@
 //! (`phone-d`) holds a trusted one. Every test goes through `Rpc` as each
 //! device's connection would.
 
-use farcooler_protocol::v1::{self as pb, Request, request, result};
+use farcooler_protocol::v1::{self as pb, Request, Scope, request, result};
 use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::rpc_people::tests::call;
-use crate::step_up::tests::{Device, Runner, lines, revoke_req, runner, word};
+use crate::step_up::tests::{Device, Runner, enroll_req, lines, make_browser, revoke_req, runner, word};
 
 const MAC: &str = "pad-d";
 
@@ -206,4 +206,34 @@ async fn a_mac_with_no_phone_key_has_nobody_to_ask() {
     let r = runner().await;
     let none = word(call(&r.conn(MAC), ask_req(&revoke_req("pad-b", false))).await);
     assert!(none.ends_with("no_approver"), "{none}");
+}
+
+/// A browser can't widen its defensive-only limit by asking the phone: it is
+/// refused outright, whatever it asks for, and nothing is raised.
+#[tokio::test]
+async fn a_browser_cannot_ask_the_phone() {
+    let r = ready().await;
+    make_browser(&r, "web-o");
+    let before = r.svc.sessions().approvals.0.lock().unwrap().len();
+    for req in [revoke_req("pad-b", false), enroll_req(61, "new-o", Scope::Control, false, None)] {
+        let refused = word(call(&r.conn("web-o"), ask_req(&req)).await);
+        assert!(refused.ends_with("defensive_only") || refused.ends_with("not_approvable"), "{refused}");
+    }
+    let refused = word(call(&r.conn("web-o"), ask_req(&revoke_req("pad-b", false))).await);
+    assert!(refused.ends_with("defensive_only"), "{refused}: a browser asking for even a defensive action");
+    assert_eq!(r.svc.sessions().approvals.0.lock().unwrap().len(), before, "no approval was raised");
+}
+
+/// Trusting a step-up key is never a phone approval: `client.enroll` (with or
+/// without a key), `member.set` and the rest are refused, and so is a spend of
+/// one.
+#[tokio::test]
+async fn an_ask_for_key_trust_is_refused() {
+    let r = ready().await;
+    let key = pb::StepUpKey { alg: "p256-sha256".into(), public_key: vec![4; 65].into() };
+    for req in [enroll_req(61, "new-o", Scope::Control, false, Some(key)), enroll_req(62, "new-p", Scope::Control, false, None)] {
+        let refused = word(call(&r.conn(MAC), ask_req(&req)).await);
+        assert!(refused.ends_with("not_approvable"), "{refused}");
+    }
+    assert!(r.svc.sessions().approvals.0.lock().unwrap().is_empty(), "no approval was raised");
 }

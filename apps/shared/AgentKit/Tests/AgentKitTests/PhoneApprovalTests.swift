@@ -78,6 +78,20 @@ struct PhoneApprovalTests {
         #expect(try item("client.revoke", "{}").mac == "A Mac")
     }
 
+    @Test("The screen's text names the whole target, and an action it can't name is never shown")
+    func theFullTargetOrNothing() throws {
+        func items(_ method: String, _ detail: String, target: String = "Cosmo") -> [PhoneApprovalItem] {
+            let json = #"{"items":[{"id":"a","action":{"method":"\#(method)","detail":\#(detail)},"deviceName":"Mac","targetName":"\#(target)","statement":"AA=="}]}"#
+            return PhoneApprovalItem.items(in: Data(json.utf8))
+        }
+        let said = try #require(items("member.set_access", #"{"access":"admin"}"#).first).sentence(runner: "box")
+        #expect(said.contains("Cosmo") && said.contains("Admin"), "\(said): who and which access")
+        #expect(items("client.enroll", #"{"label":"X"}"#).isEmpty, "a key's registration is never shown")
+        #expect(items("member.set", "{}").isEmpty && items("member.set_role", "{}").isEmpty)
+        #expect(items("member.set_access", #"{"access":"nonsense"}"#).isEmpty, "an access it can't name")
+        #expect(items("client.revoke", "{}", target: "").isEmpty, "a target it can't name")
+    }
+
     @Test("Each refusal has a sentence with no runner word in it")
     func words() {
         for word in ["no_approver", "approval_denied", "approval_expired"] {

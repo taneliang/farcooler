@@ -189,6 +189,11 @@ fn approvers(svc: &Service, person: &Person, not: &str) -> Result<Vec<String>> {
     Ok(found)
 }
 
+/// The admin actions a phone approves for a Mac, the ones the Mac's UI offers
+/// and the phone's screen states in full: what, who or which device, and which
+/// access. `client.enroll`, `member.set` and the like are not here.
+pub(crate) const ASKABLE: [&str; 4] = ["client.revoke", "client.set_cap", "member.set_access", "client.approve_step_up"];
+
 /// `approval.ask`.
 pub async fn ask(svc: &Service, peer: &Peer, p: pb::ApprovalAsk) -> Result<result::Value> {
     // The runner's own socket needs no approval.
@@ -200,6 +205,19 @@ pub async fn ask(svc: &Service, peer: &Peer, p: pb::ApprovalAsk) -> Result<resul
     }
     if !step_up::METHODS.contains(&asked.method.as_str()) {
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
+    }
+    // Only the actions the Mac offers, each of which the phone can state in
+    // full. Never a key's registration or trust: that would make a software
+    // key an admin for good on one vague "Add X".
+    if !ASKABLE.contains(&asked.method.as_str()) {
+        tracing::warn!(device, method = %asked.method, "refused: an approval ask for an action a phone doesn't approve");
+        return Err(DomainError::Conflict { what: "not_approvable" });
+    }
+    // Only a Mac asks. A browser keeps its own rules (defensive actions, or a
+    // passkey for that exact action) and can't widen them through the phone.
+    if crate::step_up_rpc::is_browser(svc, device)? {
+        tracing::warn!(device, method = %asked.method, "refused: a browser asking a phone to approve");
+        return Err(DomainError::Conflict { what: "defensive_only" });
     }
     let person = person_of_device(&svc.store, Some(device))?;
     if !step_up::is_admin(&svc.store, device)? {
