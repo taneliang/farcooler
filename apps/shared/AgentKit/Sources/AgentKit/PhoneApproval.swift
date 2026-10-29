@@ -128,8 +128,6 @@ public struct PhoneApprovalItem: Identifiable, Equatable, Sendable {
             return StepUpReason.approve(device: target)
         case "client.enroll":
             return "Add \(label.isEmpty ? "a new device" : label) to \(runner)."
-        case "member.remove":
-            return StepUpReason.remove(person: target, runner: runner)
         case "member.set_role":
             return "Change \(target)’s role on \(runner)."
         default:
