@@ -111,6 +111,11 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             let Some(request::Payload::MemberRemove(p)) = req.payload else { return Err(payload_missing()) };
             crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
             let handle = p.handle.trim();
+            // An Admin removes Members and Viewers, and themselves: not another
+            // Admin (ov-856, S2).
+            if !crate::person_access::may_manage_member(&svc.store, &person_of(&svc.store, peer)?, handle)? {
+                return Err(DomainError::NotYours { what: "not_yours" });
+            }
             let member = match svc.store.member(handle) {
                 Err(DomainError::NotFound) => {
                     // Removed already: run again, it wipes what's left of

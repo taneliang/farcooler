@@ -282,3 +282,32 @@ async fn member_list_shows_the_owner_the_peoples_access_and_nobody_else() {
     let bob = list(call(&factory(&r.svc, Some("phone-b"), Scope::Control), ask()).await);
     assert!(bob.device_access.is_empty(), "a member isn't told the owner's devices");
 }
+
+/// The slice 1 review's SF4: a rebuild returns every other shape of line
+/// byte for byte as well: an id-less forced command, a foreign key, a line
+/// another build spelled differently (another program, an extra option), a
+/// `host_admin` line of a legacy teammate's, and two lines for one id.
+#[test]
+fn a_rebuild_returns_lines_in_other_shapes_as_they_were() {
+    use farcooler_fence::{BEGIN, END, Grant, parse, render};
+    let key = |n: u8| self::key(n);
+    let ours = |n: u8, id: &str, scope: Scope| render(&key(n), id, id, scope, Grant::FarCooler, None).unwrap();
+    let lines = vec![
+        ours(1, "phone-o", Scope::Control),
+        ours(2, "mac-legacy", Scope::HostAdmin),
+        ours(3, "twin", Scope::Control),
+        ours(4, "twin", Scope::Read),
+        ours(5, "pending-t", Scope::Control).replace("--scope control", "--scope control"),
+        ours(6, "older", Scope::Control).replace("--stdio", "--stdio --legacy"),
+        ours(7, "idless", Scope::Control).replace("--client idless ", ""),
+        format!("ssh-ed25519 {} by-hand", key(8).split_whitespace().nth(1).unwrap()),
+    ];
+    let entries = parse(&format!("{BEGIN}\n{}\n{END}\n", lines.join("\n"))).unwrap();
+    let released = |id: &str| id == "pending-t";
+    let added_by = vec![("mac-legacy".to_string(), "someone".to_string())];
+    let planned = plan(&entries, &Facts { members: &[], released: &released, added_by: &added_by, access: &Default::default(), caps: &Default::default() });
+    let view = View::from_plan(&planned, &[]);
+    verify(&entries, &view).expect("the plan reproduces every line it reads");
+    assert_eq!(rebuild(&entries, &view, &BTreeSet::new()).unwrap(), lines);
+    assert!(planned.owner_devices.iter().all(|(d, _)| d != "pending-t" && d != "idless"), "a released or id-less line isn't the owner's");
+}

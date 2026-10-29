@@ -142,6 +142,17 @@ pub fn may_manage(store: &Store, caller: &Person, device: &str) -> Result<bool> 
     }
 }
 
+/// Whether `caller` may manage the member `handle`: the owner does; a member
+/// does themselves and anyone who isn't an Admin. A handle nobody holds is
+/// anyone's to manage (its removal is a no-op or a retry).
+pub fn may_manage_member(store: &Store, caller: &Person, handle: &str) -> Result<bool> {
+    Ok(match caller {
+        Person::Owner => true,
+        Person::Released => false,
+        Person::Member(me) => me == handle || store.member_access(handle)? != Some(Access::Admin),
+    })
+}
+
 /// Refuse `person_only` an admin request from a caller inside a pane, or one
 /// the runner can't tell is a person (S4): a prompt-injected agent in a pane
 /// reaches the socket as the owner, and these are the calls where that
@@ -258,17 +269,14 @@ pub(crate) async fn member_set(
             };
             // An Admin manages Members, Viewers and themselves: not another
             // Admin, and not a device bound to one (S2).
-            if let Person::Member(me) = &authority.person {
-                let theirs = before.as_ref().map(|m| m.handle != *me && store.member_access(&m.handle).ok().flatten() == Some(Access::Admin));
-                let touched = named.iter().map(|d| d.to_string()).chain(before.iter().flat_map(|m| m.devices.clone()));
-                for id in touched {
-                    if !may_manage(&store, &authority.person, &id)? {
-                        return Err(Refusal(DomainError::NotYours { what: "not_yours" }));
-                    }
-                }
-                if theirs == Some(true) {
+            let touched = named.iter().map(|d| d.to_string()).chain(before.iter().flat_map(|m| m.devices.clone()));
+            for id in touched {
+                if !may_manage(&store, &authority.person, &id)? {
                     return Err(Refusal(DomainError::NotYours { what: "not_yours" }));
                 }
+            }
+            if !may_manage_member(&store, &authority.person, handle)? {
+                return Err(Refusal(DomainError::NotYours { what: "not_yours" }));
             }
             let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
             // What the caller read as theirs, checked with the write (ov-786).

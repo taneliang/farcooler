@@ -541,11 +541,20 @@ async fn an_admin_manages_members_viewers_and_themselves() {
     call(&dan, revoke_req("tv-c", false)).await.unwrap();
     assert!(!r.lines().contains_key("tv-c"));
 
+    let remove = |handle: &str| Request {
+        method: "member.remove".into(),
+        payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: handle.into() })),
+        ..Default::default()
+    };
+    assert_eq!(call(&dan, remove("fay")).await.err().as_deref(), Some("not-yours:not_yours"), "removing another Admin");
+    assert!(r.svc.store.member("fay").is_ok());
     let name_fays = set("bob", &["phone-b", "kid-f"], "", "");
     assert_eq!(call(&dan, name_fays).await.err().as_deref(), Some("not-yours:not_yours"), "binding another Admin's device to Bob");
     assert_eq!(call(&dan, set("fay", &["phone-f", "kid-f"], "", "")).await.err().as_deref(), Some("not-yours:not_yours"), "editing another Admin");
     assert_eq!(r.svc.store.member("bob").unwrap().devices, ["pad-b", "phone-b"], "Bob's list is as it was");
     assert!(call(&dan, set("bob", &["phone-b"], "", "")).await.is_ok(), "editing a Member");
+    call(&dan, remove("bob")).await.expect("removing a Member");
+    assert!(r.svc.store.member("bob").is_err());
 }
 
 // MARK: - A rebuild keeps the tunnel

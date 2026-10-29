@@ -91,6 +91,15 @@ fn key_a(entry: &Entry) -> bool {
     !entry.shell_access && !entry.client_id.is_empty() && !matches!(entry.scope, Scope::Unspecified)
 }
 
+/// The device ids that have more than one Key A line. `enroll` never writes a
+/// second line in one shape under an id, so only a hand edit does; which of
+/// the two a session arrived on is a guess, so such an id is left out of the
+/// plan, `verify` and `rebuild` and its lines stay as they are.
+fn duplicated(entries: &[Entry]) -> BTreeSet<&str> {
+    let mut seen = BTreeSet::new();
+    entries.iter().filter(|e| key_a(e)).filter(|e| !seen.insert(e.client_id.as_str())).map(|e| e.client_id.as_str()).collect()
+}
+
 /// Who owns each device, what each person may do, and each device's cap:
 /// what a rebuild reads.
 #[derive(Debug, Default, Clone)]
@@ -221,7 +230,8 @@ pub fn plan(entries: &[Entry], facts: &Facts) -> AccessPlan {
         .iter()
         .flat_map(|m| m.devices.iter().map(move |d| (d.as_str(), m.handle.as_str())))
         .collect();
-    let lines: Vec<&Entry> = entries.iter().filter(|e| key_a(e)).collect();
+    let twice = duplicated(entries);
+    let lines: Vec<&Entry> = entries.iter().filter(|e| key_a(e) && !twice.contains(e.client_id.as_str())).collect();
     let released = |id: &str| !member_of.contains_key(id) && (facts.released)(id);
     let owners: BTreeSet<&str> = lines
         .iter()
@@ -268,10 +278,13 @@ pub fn plan(entries: &[Entry], facts: &Facts) -> AccessPlan {
 /// step-up). A line that doesn't change is returned as it was, so one this
 /// build can't rewrite is no obstacle until it has to be lowered.
 pub fn rebuild(entries: &[Entry], view: &View, raise: &BTreeSet<String>) -> Result<Vec<String>> {
+    let twice = duplicated(entries);
     entries
         .iter()
         .map(|entry| {
-            let Some(target) = view.scope_of(&entry.client_id).filter(|_| key_a(entry)) else { return Ok(entry.line.clone()) };
+            let Some(target) = view.scope_of(&entry.client_id).filter(|_| key_a(entry) && !twice.contains(entry.client_id.as_str())) else {
+                return Ok(entry.line.clone());
+            };
             let up = lower(target, Scope::Control);
             let scope = if raise.contains(&entry.client_id) && rank(up) > rank(entry.scope) { up } else { lower(entry.scope, target) };
             if scope == entry.scope {
@@ -292,7 +305,8 @@ pub fn relined(entries: &[Entry], rebuilt: Vec<String>) -> (Vec<Entry>, bool) {
 /// Every line a person owns keeps its scope under `view`: what a plan must
 /// satisfy before it is written. The device that breaks it, if any.
 pub fn verify(entries: &[Entry], view: &View) -> std::result::Result<(), String> {
-    for entry in entries.iter().filter(|e| key_a(e)) {
+    let twice = duplicated(entries);
+    for entry in entries.iter().filter(|e| key_a(e) && !twice.contains(e.client_id.as_str())) {
         if let Some(scope) = view.scope_of(&entry.client_id) {
             if scope != entry.scope {
                 return Err(entry.client_id.clone());
