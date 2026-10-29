@@ -63,6 +63,8 @@ import com.farcooler.net.memberOwnLogins
 import com.farcooler.net.enrolledDevices
 import com.farcooler.net.revokeDevice
 import com.farcooler.net.runnerTeam
+import com.farcooler.net.peopleAccess
+import com.farcooler.net.stepUp
 import com.farcooler.net.setOwnLogin
 import com.farcooler.net.setRole
 import com.farcooler.net.rethrowIfCancellation
@@ -113,6 +115,16 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
     // The devices that may log in here and who added each (ov-855), and why the last revoke didn't take.
     var enrolled by remember { mutableStateOf<EnrolledDevices?>(null) }
     var revokeFailure by remember { mutableStateOf<String?>(null) }
+    // Each person's Access and devices, and the keys behind them (ov-856).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val runnerLabel = connection.host.label
+    val accessController = remember(connection) {
+        com.farcooler.net.PeopleAccessController(
+            read = { connection.peopleAccess() },
+            stepUp = { connection.stepUp(context) },
+            runner = runnerLabel,
+        )
+    }
     // The section whose read is `Scope::HostAdmin` while this app enrolls at
     // `control`. Its own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
@@ -319,6 +331,25 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                         val updated = connection.revokeDevice(device.clientId, withAdded)
                         if (updated == null) revokeFailure = EnrolledDevices.NOT_REVOKED else { revokeFailure = null; enrolled = updated }
                     }
+                }
+            }
+
+            // Who may do what, and on which devices (ov-856), as on the Mac and the iPhone.
+            val offersAccess = daemon?.can(Capability.PERSON_ACCESS) == true
+            LaunchedEffect(offersAccess, team) { if (offersAccess) accessController.load() }
+            accessController.access?.let { access ->
+                if (team?.isShared == true) {
+                    Separator()
+                    val canSign = daemon?.can(Capability.STEP_UP) == true
+                    PeopleAccessSection(
+                        access, runnerLabel,
+                        if (!canSign) PeopleAccessActions() else PeopleAccessActions(
+                            removeDevice = { device, withAdded -> scope.launch { accessController.remove(device, withAdded) } },
+                            approve = { device -> scope.launch { accessController.approve(device) } },
+                            allowAdminActions = { scope.launch { accessController.allowAdminActions() } },
+                        ),
+                        accessController.shownCode, accessController.note,
+                    )
                 }
             }
 

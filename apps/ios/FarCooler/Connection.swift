@@ -248,6 +248,9 @@ final class Connection: ObservableObject {
     /// a handle on it.
     var hostId: UUID? { host?.id }
 
+    /// The runner's host key as this phone pinned it (ov-856): what a step-up signs.
+    var hostPin: String? { host?.fingerprint }
+
     /// Every connection the app is currently running, by runner id.
     ///
     /// **This was one slot**, and it was one because the app ran one session:

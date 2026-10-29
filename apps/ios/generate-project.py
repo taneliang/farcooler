@@ -28,6 +28,11 @@ SOURCES = [
     "ConnectionQuickTask.swift",
     # Add Teammate's call to a runner (ov-854), out of `Connection.swift` for its size budget.
     "ConnectionTeammate.swift",
+    # This phone's step-up key and the calls it signs (ov-856), out of `Connection.swift` for its size budget.
+    "ConnectionStepUp.swift",
+    "PhoneAccessHarness.swift",
+    "AppLockGate.swift",
+    "PeopleAccessModel.swift",
     # A connection's board read state (ov-113): one keeper per board, the
     # runner's state when it keeps it and this phone's when it can't.
     "ConnectionBoardReads.swift",
@@ -307,6 +312,12 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    # The People screen (ov-856): Access, each person's devices, the step-up flow and its key, and the app lock.
+    "PeopleAccess.swift",
+    "PeopleAccessView.swift",
+    "StepUp.swift",
+    "StepUpSigner.swift",
+    "AppLock.swift",
     # The corner steps, `Radius.small`, `.medium` and `.large`, and the shapes
     # drawn from them (ov-226). The phone's views name a step by its job
     # instead of spelling a number, as the Mac's do. It reads `GlancePalette`,
@@ -1149,6 +1160,8 @@ UI_TEST_SOURCES = [
     "EnrolledDevicesUITests.swift",
     # The owner's phone adding a teammate's device (ov-854), over `-teammate-add`.
     "TeammateAddUITests.swift",
+    # The People screen's Access and the step-up behind it (ov-856), over `-phone-access`.
+    "PeopleAccessUITests.swift",
     "NeedsYouTeamUITests.swift",
     # A member's writes carry their name, and a member is offered no Keep
     # (ov-707). Over the canned runner (`-phone-shared -phone-member-notes`).

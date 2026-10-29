@@ -471,6 +471,7 @@ fun SettingsScreen(
     val onDone by model.settings.notifyOnDone.collectAsStateWithLifecycle()
     val taskEvents by model.settings.taskEvents.collectAsStateWithLifecycle()
     val allRunners by model.settings.allRunnersAtOnce.collectAsStateWithLifecycle()
+    val appLock by model.settings.appLock.collectAsStateWithLifecycle()
     val reshape by model.settings.reshapePanes.collectAsStateWithLifecycle()
     val email by model.account.email.collectAsStateWithLifecycle()
     val signingIn by model.account.signingIn.collectAsStateWithLifecycle()
@@ -617,6 +618,16 @@ fun SettingsScreen(
             }
             Text(
                 "A working agent never notifies you.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Separator()
+            SectionTitle("Security")
+            SettingRow("Lock Far Cooler", appLock) { model.settings.setAppLock(it) }
+            Text(
+                "Asks for your fingerprint, face or screen lock when you come back after 5 minutes away, so a lost " +
+                    "phone can’t reach your terminals.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

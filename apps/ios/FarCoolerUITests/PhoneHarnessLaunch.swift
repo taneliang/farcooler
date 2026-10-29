@@ -46,6 +46,8 @@ extension XCUIApplication {
     /// launch. Returns at once on a warm launch.
     func launchDrawn() {
         withoutLogMirroring()
+        // The app lock would cover every screen a test looks at (ov-856).
+        if !launchArguments.contains("-appLock") { launchArguments += ["-appLock", "NO"] }
         // Not retried: on CI a launch the simulator failed ended the test
         // there, so a retry never ran, and absorbing the error made that
         // ending green (FailedLaunchTests, ov-703).

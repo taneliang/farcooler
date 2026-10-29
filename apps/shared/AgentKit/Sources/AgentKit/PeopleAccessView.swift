@@ -1,0 +1,283 @@
+import SwiftUI
+
+/// What the People screen can do, per platform (ov-856). A closure left nil
+/// draws no control for it, so a screen never offers what the runner would
+/// refuse from this device.
+public struct PeopleAccessActions {
+    /// Remove a device, and with it what it added when `withAdded`.
+    public var removeDevice: ((PeopleAccess.Device, Bool) async -> Void)?
+    /// Hold a device at Viewer (the runner's own Mac sets it).
+    public var limitToViewer: ((PeopleAccess.Device) async -> Void)?
+    /// Give a person another Access (the runner's own Mac sets it).
+    public var setAccess: ((PeopleAccess.Person, PersonAccess) async -> Void)?
+    /// Trust a device's waiting key.
+    public var approve: ((PeopleAccess.Device) async -> Void)?
+    /// Offer this device's own key for approval.
+    public var allowAdminActions: (() async -> Void)?
+
+    public init(
+        removeDevice: ((PeopleAccess.Device, Bool) async -> Void)? = nil,
+        limitToViewer: ((PeopleAccess.Device) async -> Void)? = nil,
+        setAccess: ((PeopleAccess.Person, PersonAccess) async -> Void)? = nil,
+        approve: ((PeopleAccess.Device) async -> Void)? = nil,
+        allowAdminActions: (() async -> Void)? = nil
+    ) {
+        self.removeDevice = removeDevice
+        self.limitToViewer = limitToViewer
+        self.setAccess = setAccess
+        self.approve = approve
+        self.allowAdminActions = allowAdminActions
+    }
+}
+
+/// The People screen's sections (ov-856, §8): each person with their Access
+/// and their devices under them, then **Check These Devices** and **Waiting
+/// for Approval** when they have any. The same view on the Mac's Settings and
+/// the iPhone's Runner > People, so the words and the order are one.
+public struct PeopleAccessSections: View {
+    let access: PeopleAccess
+    let runner: String
+    let actions: PeopleAccessActions
+    /// The code this device shows while its own key waits, when it just asked.
+    let shownCode: String?
+
+    @State private var removing: PeopleAccess.Device?
+
+    public init(access: PeopleAccess, runner: String, actions: PeopleAccessActions, shownCode: String? = nil) {
+        self.access = access
+        self.runner = runner
+        self.actions = actions
+        self.shownCode = shownCode
+    }
+
+    public var body: some View {
+        Group {
+            Section {
+                ForEach(access.people) { person in
+                    PersonRows(person: person, runner: runner, actions: actions, remove: { removing = $0 })
+                }
+            } header: {
+                Text("Access")
+            } footer: {
+                Text("Admins can add and remove people and their devices. A Viewer can see the board, never a terminal.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !access.toCheck.isEmpty {
+                Section {
+                    ForEach(access.toCheck) { DeviceRow(device: $0, runner: runner, actions: actions, remove: { removing = $0 }) }
+                } header: {
+                    Text(PeopleAccess.checkHeader)
+                } footer: {
+                    Text(PeopleAccess.checkFooter).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("people-check")
+            }
+            if !access.waiting.isEmpty {
+                Section {
+                    ForEach(access.waiting) { WaitingRow(device: $0, from: access.thisDevice, access: access, actions: actions) }
+                } header: {
+                    Text(PeopleAccess.waitingHeader)
+                } footer: {
+                    Text(PeopleAccess.waitingFooter).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("people-waiting")
+            }
+            if let me = access.thisDevice, access.yourAccess == .owner || access.yourAccess == .admin {
+                ThisDeviceAdminSection(device: me, shownCode: shownCode, actions: actions)
+            }
+        }
+        .confirmationDialog(
+            removing.map { "Remove \($0.name)?" } ?? "", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible, presenting: removing
+        ) { device in
+            Button("Remove Device", role: .destructive) { run(device, false) }
+            if device.added > 0 {
+                Button("Remove Device and \(device.added) It Added", role: .destructive) { run(device, true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { device in
+            Text(Self.removalMessage(device, runner: runner))
+        }
+    }
+
+    /// What removing a device does, said before it is done.
+    public static func removalMessage(_ device: PeopleAccess.Device, runner: String) -> String {
+        var line = "\(device.name) loses its access to \(runner) right away."
+        if device.hasShell { line += " Its shell goes too: it can no longer use ssh, git or Zed here." }
+        if device.added > 0 {
+            line += device.added == 1 ? " It added one other device." : " It added \(device.added) other devices."
+        }
+        return line
+    }
+
+    private func run(_ device: PeopleAccess.Device, _ withAdded: Bool) {
+        Task { await actions.removeDevice?(device, withAdded) }
+    }
+}
+
+private struct PersonRows: View {
+    let person: PeopleAccess.Person
+    let runner: String
+    let actions: PeopleAccessActions
+    let remove: (PeopleAccess.Device) -> Void
+    @State private var choosing: PersonAccess?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name).lineLimit(2)
+                    Text(person.access.summary)
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                if person.isYou && person.access != .owner { Text("You").font(.caption).foregroundStyle(.secondary) }
+                accessControl
+            }
+            ForEach(person.devices) { device in
+                DeviceRow(device: device, runner: runner, actions: actions, remove: remove)
+                    .padding(.leading, 14)
+            }
+        }
+        .accessibilityIdentifier("people-person-\(person.handle.isEmpty ? "owner" : person.handle)")
+    }
+
+    @ViewBuilder private var accessControl: some View {
+        if let setAccess = actions.setAccess, person.access != .owner, !PersonAccess.choices(for: .owner).isEmpty {
+            Picker("Access", selection: Binding(get: { choosing ?? person.access }, set: { new in
+                choosing = new
+                Task { await setAccess(person, new); choosing = nil }
+            })) {
+                ForEach(PersonAccess.choices(for: .owner)) { Text($0.title).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.menu).fixedSize().disabled(choosing != nil)
+            .accessibilityLabel("\(person.name)’s access")
+            .accessibilityIdentifier("people-access-\(person.handle)")
+        } else {
+            Text(person.access.title).font(.callout).foregroundStyle(.secondary)
+                .accessibilityIdentifier("people-access-\(person.handle.isEmpty ? "owner" : person.handle)")
+        }
+    }
+}
+
+private struct DeviceRow: View {
+    let device: PeopleAccess.Device
+    let runner: String
+    let actions: PeopleAccessActions
+    let remove: (PeopleAccess.Device) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.name).font(.subheadline).lineLimit(2)
+                if let by = device.addedBy {
+                    Text(by).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if device.viewerOnThisDevice {
+                    Text(PeopleAccess.viewerBadge)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                        .accessibilityIdentifier("device-viewer-\(device.id)")
+                }
+                if device.hasShell {
+                    Label(PeopleAccess.shellBadge, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.medium)).foregroundStyle(.orange)
+                    Text(PeopleAccess.shellWarning(runner: runner))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("device-shell-\(device.id)")
+                }
+            }
+            Spacer(minLength: 4)
+            if actions.removeDevice != nil || actions.limitToViewer != nil {
+                Menu {
+                    if let limit = actions.limitToViewer, !device.viewerOnThisDevice {
+                        Button(PeopleAccess.limitToViewer) { Task { await limit(device) } }
+                    }
+                    if actions.removeDevice != nil {
+                        Button(PeopleAccess.removeDevice, role: .destructive) { remove(device) }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle").imageScale(.large)
+                }
+                .menuStyle(.button).buttonStyle(.borderless).fixedSize()
+                .accessibilityLabel("\(device.name) options")
+                .accessibilityIdentifier("device-menu-\(device.id)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("device-\(device.id)")
+    }
+}
+
+private struct WaitingRow: View {
+    let device: PeopleAccess.Device
+    let from: PeopleAccess.Device?
+    let access: PeopleAccess
+    let actions: PeopleAccessActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(device.personName.isEmpty ? "" : device.personName + "’s ")\(device.name)").lineLimit(2)
+                Spacer(minLength: 8)
+                Text(PeopleAccess.spoken(device.code))
+                    .font(.title3.monospacedDigit().weight(.semibold))
+                    .accessibilityLabel("Code \(device.code.map(String.init).joined(separator: " "))")
+                    .accessibilityIdentifier("waiting-code-\(device.id)")
+            }
+            Text(PeopleAccess.approvalPrompt(for: device))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let approve = actions.approve, access.mayApprove(device, from: from) || from == nil {
+                Button("Allow") { Task { await approve(device) } }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("waiting-allow-\(device.id)")
+            }
+        }
+        .accessibilityIdentifier("waiting-\(device.id)")
+    }
+}
+
+private struct ThisDeviceAdminSection: View {
+    let device: PeopleAccess.Device
+    let shownCode: String?
+    let actions: PeopleAccessActions
+
+    var body: some View {
+        Section {
+            switch device.stepUp {
+            case .trusted:
+                Label("Admin actions are on", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+                    .accessibilityIdentifier("admin-actions-on")
+            case .proposed:
+                waiting(code: shownCode ?? device.code)
+            case .none, .expired:
+                if let shownCode { waiting(code: shownCode) } else if let allow = actions.allowAdminActions {
+                    Button("Allow Admin Actions") { Task { await allow() } }
+                        .accessibilityIdentifier("admin-actions-allow")
+                }
+            }
+        } header: {
+            Text("This Device")
+        } footer: {
+            Text(Self.footer(for: device.stepUp)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func waiting(code: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Approve on another device").font(.subheadline)
+            Text(PeopleAccess.spoken(code)).font(.title2.monospacedDigit().weight(.semibold))
+                .accessibilityIdentifier("admin-actions-code")
+        }
+    }
+
+    static func footer(for standing: StepUpKeyStanding) -> String {
+        switch standing {
+        case .trusted: "Changes to who has access ask for Face ID or your passcode first."
+        case .proposed: "Open People on another of your devices and allow this one. It checks this code."
+        case .none, .expired:
+            "Changes to who has access then ask for Face ID or your passcode on this device."
+        }
+    }
+}

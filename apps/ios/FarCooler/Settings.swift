@@ -178,6 +178,7 @@ struct SettingsView: View {
     @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
     @AppStorage(NotificationSettings.onDoneKey) private var notifyOnDone = true
     @AppStorage(FleetSettings.allRunnersAtOnceKey) private var allRunnersAtOnce = true
+    @AppStorage(AppLockSetting.key) private var appLock = true
     @Environment(\.dismiss) private var dismiss
     @State private var showAdd = false
     /// Whether this device can offer a tunnel key, established once when the
@@ -189,6 +190,15 @@ struct SettingsView: View {
     var body: some View {
         Form {
             AccountSection()
+            // The app lock (ov-856, §3a).
+            Section {
+                Toggle("Lock Far Cooler", isOn: $appLock)
+                    .accessibilityIdentifier("settings-app-lock")
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("Asks for Face ID or your passcode when you come back after 5 minutes away, so a lost phone can’t reach your terminals.")
+            }
             // "Settings > Devices", which the confirmation screen names as
             // where a grant can be changed later. It has to be called that and
             // it has to be here, or that sentence sends someone looking for a

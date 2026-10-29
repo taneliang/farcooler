@@ -429,7 +429,9 @@ final class HarnessRunner {
         id: UUID(uuidString: "0198F2C0-0000-7000-8000-00000000FACE")!,
         label: CommandLine.arguments.contains("-phone-host-long")
             ? "Elias’s Mac Studio in the Platform Infrastructure Lab" : "studio",
-        address: "harness.invalid", user: "harness")
+        address: "harness.invalid", user: "harness",
+        // A pinned host key, which a step-up signs (ov-856).
+        fingerprint: CommandLine.arguments.contains("-phone-access") ? "SHA256:harnessharnessharnessharnessharnessharness0" : nil)
 
     static let repository = "0198f2c0-0000-7000-8000-00000000a001"
     static let main = "0198f2c0-0000-7000-8000-00000000b001"
@@ -480,6 +482,8 @@ final class HarnessRunner {
     private let native = NativeHarnessRunner()
 
     private let connection: Connection
+    /// The people's access, under `-phone-access` (ov-856).
+    private lazy var accessStandIn: AccessStandIn? = AccessStandIn.isOn ? AccessStandIn(own: connection.ownClientId ?? "phone-o") : nil
     /// Whether Billing has an orchestrator yet. It starts without one,
     /// unless `-phone-billing-led`.
     private var billingLed =
@@ -590,7 +594,8 @@ final class HarnessRunner {
                         + (Self.nativeOrchestrator && CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
                         + (Self.claudeSignIn ? ["claude_sign_in"] : [])
                         + (Self.ownLogins ? ["member_own_logins"] : [])
-                        + (Self.roles ? ["member_roles"] : [])),
+                        + (Self.roles ? ["member_roles"] : [])
+                        + (AccessStandIn.isOn ? AccessStandIn.capabilities : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -637,12 +642,13 @@ final class HarnessRunner {
     /// `-phone-shared`: see the launch arguments above.
     static var shared: Bool {
         CommandLine.arguments.contains("-phone-shared") || CommandLine.arguments.contains("-phone-rep") || claudeSignIn
-            || roles || released
+            || roles || released || AccessStandIn.isOn
     }
 
     /// The owner's own phone: `you` is empty.
     static var ownerPhone: Bool {
         CommandLine.arguments.contains("-phone-rep-owner") || CommandLine.arguments.contains("-phone-claude-owner")
+            || AccessStandIn.isOn
     }
 
     /// `-phone-claude`: see the launch arguments above.
@@ -785,6 +791,10 @@ final class HarnessRunner {
     private struct Refused: Error {}
 
     private func answer(_ method: String, _ args: [String: Any]) async throws -> Data {
+        // The people's access and the step-up calls (`-phone-access`, ov-856).
+        if let access = accessStandIn, let said = try access.answer(method, args, record: { sent.append($0) }) {
+            return try json(said)
+        }
         switch method {
         case "needs_you":
             if CommandLine.arguments.contains("-phone-list-fails") {

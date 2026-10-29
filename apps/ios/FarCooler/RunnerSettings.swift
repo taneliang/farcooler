@@ -51,9 +51,12 @@ final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var signInOffered = false
 
     private let connection: Connection
+    /// Each person's Access and devices, and the keys behind them (ov-856).
+    let accessModel: PeopleAccessModel
 
-    init(connection: Connection) {
+    init(connection: Connection, runner: String = "") {
         self.connection = connection
+        self.accessModel = PeopleAccessModel(connection: connection, runner: runner.isEmpty ? connection.hostLabel : runner)
     }
 
     func load() async {
@@ -124,6 +127,7 @@ final class RunnerSettingsModel: ObservableObject {
             let data = try? await connection.rpc("member.list")
         else { return }
         people = RunnerPeople(json: data)
+        await accessModel.load(members: data)
         signInOffered = connection.daemon?.can(.claudeSignIn) == true
         workspaceNames = Dictionary(
             connection.boardList.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -336,7 +340,7 @@ struct RunnerSettingsView: View {
     init(name: String, connection: Connection, signInOnOpen: Bool = false) {
         self.name = name
         self.signInOnOpen = signInOnOpen
-        _model = StateObject(wrappedValue: RunnerSettingsModel(connection: connection))
+        _model = StateObject(wrappedValue: RunnerSettingsModel(connection: connection, runner: name))
     }
 
     var body: some View {
@@ -357,6 +361,8 @@ struct RunnerSettingsView: View {
                     people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered,
                     setRole: people.offersRoles(runnerHasRoles: model.hasRoles)
                         ? { handle, role in await model.setRole(handle, role) } : nil)
+                // Who may do what, and on which devices (ov-856).
+                PeopleAccessBlock(model: model.accessModel, runner: name)
                 // Whether members share this runner's logins (ov-652).
                 if let logins = people.ownLogins {
                     MemberLoginsSection(

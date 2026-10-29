@@ -63,9 +63,13 @@ class MainActivity : ComponentActivity() {
             val appearance by model.settings.appearance.collectAsStateWithLifecycle()
             FarCoolerTheme(appearance = appearance) {
                 SystemBarsFollowTheApp()
-                RootScreen(model)
-                DeviceNoticeDialog(model)
-                NotificationExplainer(model) { askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                val lockOn by model.settings.appLock.collectAsStateWithLifecycle()
+                // A screen-lock prompt after five minutes away (ov-856, §3a).
+                AppLockGate(on = lockOn) {
+                    RootScreen(model)
+                    DeviceNoticeDialog(model)
+                    NotificationExplainer(model) { askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                }
             }
         }
 

@@ -42,6 +42,10 @@ final class RunnerSettingsStore: ObservableObject {
     @Published private(set) var enrolled: EnrolledDevices?
     /// Why the last revoke didn't take, in this app's words, or nil.
     @Published private(set) var revokeFailure: String?
+    /// Each person's Access and devices (ov-856), or nil from a runner that
+    /// hasn't recorded the people's access.
+    @Published private(set) var access: PeopleAccess?
+    func setAccess(_ new: PeopleAccess?) { access = new }
     /// The owner's warning that their shell's startup files export a Claude
     /// key (ov-651), worded by the runner, or nil: none set, no members, or a
     /// runner from before.
@@ -63,7 +67,7 @@ final class RunnerSettingsStore: ObservableObject {
     /// Named for the flag it builds, and the flag is still spelled `--host`: it
     /// lives in shell history and in scripts, the CLI understands it forever,
     /// and a vocabulary change is no reason for this app to be what breaks it.
-    private var hostArguments: [String] {
+    var hostArguments: [String] {
         target.isEmpty ? [] : ["--host", target]
     }
 
@@ -87,6 +91,7 @@ final class RunnerSettingsStore: ObservableObject {
         let result = await cli(hostArguments + ["--json", "member", "list"])
         guard result.ok else { return }
         people = RunnerPeople(json: Data(result.output.utf8))
+        await loadAccess(members: Data(result.output.utf8))
     }
 
     /// `client list`: quiet on a failure, like the people above. A runner that
@@ -240,7 +245,7 @@ final class RunnerSettingsStore: ObservableObject {
 
     // MARK: - Plumbing
 
-    private func cli(_ args: [String], stdin: String? = nil) async -> CLI.Result {
+    func cli(_ args: [String], stdin: String? = nil) async -> CLI.Result {
         if let stdin, let cliWithInputForTesting { return await cliWithInputForTesting(args, stdin) }
         if let cliForTesting { return await cliForTesting(args) }
         return await CLI.run(args, stdin: stdin)
@@ -273,7 +278,7 @@ final class RunnerSettingsStore: ObservableObject {
     /// Never a raw multi-line dump: the first meaningful line is the one that
     /// says what went wrong, and the rest is usage text nobody in a settings
     /// window asked for.
-    private static func tidy(_ output: String) -> String {
+    static func tidy(_ output: String) -> String {
         let line = output
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

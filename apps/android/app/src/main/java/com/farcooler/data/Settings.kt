@@ -137,6 +137,18 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory, com.farcool
         preferences.edit().putBoolean(KEY_ATTENTION, on).apply()
     }
 
+    /**
+     * Whether the app lock is on (ov-856, §3a): a screen-lock prompt when the app resumes after five minutes away.
+     * On unless the person turned it off.
+     */
+    private val _appLock = MutableStateFlow(preferences.getBoolean(KEY_APP_LOCK, true))
+    val appLock: StateFlow<Boolean> = _appLock.asStateFlow()
+
+    fun setAppLock(on: Boolean) {
+        _appLock.value = on
+        preferences.edit().putBoolean(KEY_APP_LOCK, on).apply()
+    }
+
     fun setNotifyOnDone(on: Boolean) {
         _notifyOnDone.value = on
         preferences.edit().putBoolean(KEY_DONE, on).apply()
@@ -301,6 +313,7 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory, com.farcool
         private const val KEY_FONT_SIZE = "terminalFontSize"
         private const val KEY_ATTENTION = "notifyOnAttention"
         private const val KEY_DONE = "notifyOnDone"
+        private const val KEY_APP_LOCK = "appLock"
         /** The stored spelling stays, so an existing install keeps its answer. */
         private const val KEY_ALL_RUNNERS = "allMachinesAtOnce"
         private const val KEY_RESHAPE = "reshapePanes"
