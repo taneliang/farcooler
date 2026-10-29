@@ -10,6 +10,7 @@ use super::*;
 /// misspelling up would turn a typo into the whole runner. The pairing rule
 /// (`shell_access` demands `host_admin`) is NOT re-checked: the daemon owns
 /// every rule about what may be written into `authorized_keys`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn enroll_payload(
     public_key: &str,
     label: &str,

@@ -54,3 +54,4 @@ apps/ios/FarCooler/TalkSeats.swift :: noticeRemoval :: try? await connection.rpc
 apps/ios/FarCooler/ConnectionStepUp.swift :: loadPeopleAccess :: try? await rpc("client.list") :: nil leaves the People rows without devices; the screen's member.list read reports a dropped link
 apps/ios/FarCooler/PeopleAccessModel.swift :: reload :: try? await connection.rpc("member.list") :: a failed re-read keeps the rows as they were; the screen's own poll reports a dropped link
 apps/android/app/src/main/java/com/farcooler/net/KeystoreStepUpSigner.kt :: deleteKey :: runCatching { store.deleteEntry(alias) } :: forgetting a key that is already gone is the goal; nothing to show
+apps/ios/FarCooler/ConnectionTeammate.swift :: teammateFacts :: try? await rpc("member.list") :: nil means Add Teammate offers no person or access choice, and the runner is not asked; the screen's own member.list read reports a dropped link
