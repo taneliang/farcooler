@@ -155,6 +155,63 @@ extension NativeSelectionTests {
             #expect(scroller.doubleValue < 0.001, "at the first row the knob is at the top: \(scroller.doubleValue)")
         }
 
+        /// As a window's width changes, the stack lays the rows on screen out
+        /// at the new width and they report a pass before the clip takes it;
+        /// a row it builds after that reports with the clip at the new width.
+        /// The rows that reported first are kept: the reader's row isn't let
+        /// go while on screen, and the knob is placed from it (ov-842).
+        /// Driven by hand, a plain document under our scroller.
+        @Test("Rows laid out at a new width before the clip takes it are kept when the next row reports")
+        func rowsReportedBeforeTheClipResizesAreKept() async throws {
+            let store = AgentRowStore(key: "scroller-\(UUID())", cache: nil)
+            store.apply(try await store.ledger.page(T.page(RealSession.rows(200, of: 200))))
+            try #require(store.items.count >= 120, "the session has \(store.items.count) items")
+            let window = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: 720, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
+            scroll.hasVerticalScroller = true
+            scroll.automaticallyAdjustsContentInsets = false
+            let doc = FlippedView(frame: NSRect(x: 0, y: 0, width: 720, height: 30_000))
+            scroll.documentView = doc
+            window.contentView = scroll
+            TestWindow.show(window)
+            defer { window.close() }
+            let layout = TranscriptLayout(store: store, spacing: Spacing.inset)
+            let driver = TranscriptScroller(layout: layout)
+            layout.scroller = driver
+            driver.attach(scroll)
+            defer { driver.detach() }
+            let pad = TranscriptLayout.padding
+
+            // Rows 100 to 107 built 720 wide, 120 pt each, the clip 200 pt
+            // into them.
+            let built = (100..<108).map { store.items[$0].id }
+            func report(width: CGFloat, height: CGFloat) {
+                for (k, id) in built.enumerated() {
+                    let frame = CGRect(x: pad, y: 12_000 + CGFloat(k) * (height + Spacing.inset), width: width - pad * 2, height: height)
+                    layout.place(id, frame, in: width)
+                }
+            }
+            report(width: 720, height: 120)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200))
+            driver.apply()
+            try #require(layout.top(scroll)?.id == built[1])
+
+            // Narrowed to 600: the rows laid out 600 wide, 150 pt each, and
+            // reported while the clip is still 720 wide; then the clip takes
+            // the width, and a row above, built at it, reports.
+            report(width: 600, height: 150)
+            scroll.setFrameSize(NSSize(width: 600, height: 900))
+            doc.setFrameSize(NSSize(width: 600, height: 30_000))
+            layout.place(store.items[99].id, CGRect(x: pad, y: 12_000 - 150 - Spacing.inset, width: 600 - pad * 2, height: 150), in: 600)
+            for id in built {
+                #expect(layout.has(id), "\(id), on screen, was let go")
+            }
+            #expect(layout.top(scroll)?.id == built[1], "the reader's row is \(layout.top(scroll)?.id ?? "none"), not \(built[1])")
+            let knob = try #require(layout.knob(scroll), "no row to place the knob from")
+            #expect(knob.onScreen, "the knob was placed from a row off screen")
+        }
+
         /// The stack sizes its content again and moves the clip with it,
         /// and the rows haven't yet reported where they went: the knob,
         /// read from rows the clip has left, is held where it was. Once the
