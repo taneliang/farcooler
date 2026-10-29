@@ -192,6 +192,7 @@ async function startRunner(name) {
   }
   if (!pid) throw new Error(`sshd wrote no pid; see ${log}`)
   const typedLog = join(dir, 'typed')
+  let enrolled = ''
   return {
     name,
     dir,
@@ -201,13 +202,14 @@ async function startRunner(name) {
     log,
     /// The Key A line the phone's enrollment has the daemon write, in the
     /// fence's shape: restricted, with the daemon as its forced command.
-    enroll: keyA => writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog} ${name}" ${keyA}\n`),
+    enroll: keyA => (enrolled = keyA) && writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog} ${name}" ${keyA}\n`),
     typed: () =>
       (existsSync(typedLog) ? readFileSync(typedLog, 'utf8') : '')
         .split('\n')
         .filter(Boolean)
         .map(hex => Buffer.from(hex, 'hex').toString())
         .join(''),
+    keyA: () => enrolled,
     /// What the fake daemon was answered, one `<ask id> <option>` a line.
     answers: () => (existsSync(join(dir, 'answers')) ? readFileSync(join(dir, 'answers'), 'utf8').trim().split('\n') : []),
   }
@@ -632,7 +634,7 @@ async function panes(page) {
 /// can't be reached.
 async function everyRunner(page) {
   second = await startRunner('build-box')
-  second.enroll(JSON.parse((await device(page)).offer).key_a)
+  second.enroll(runner.keyA())
   await edit(page, {
     runners: [
       { id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' },
