@@ -142,6 +142,12 @@ export function needsYouFailure(word: string, runner: string): string {
   return `Far Cooler couldn’t read what needs you on ${runner}. It tries again in a few seconds.`
 }
 
+/// A runner behind the one in front stopped answering (ov-861). Its
+/// connection is made again from a click, since a passkey prompt wants one.
+export function runnerStopped(runner: string): string {
+  return `${runner} stopped answering, so its list may be behind. Select Reconnect, then touch your passkey when your browser asks.`
+}
+
 /// What an answer says when the runner didn't take it: by the runner's `what`
 /// where it named one, else by its code. `agent` is who the answer was for
 /// (`claude`). Mirrors AgentKit's PhoneAnswer.refusal, so a browser and a

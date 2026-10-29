@@ -21,7 +21,13 @@
 //! with Return starts the output that command would make (2,000,000 lines),
 //! which is how the check loads one pane while it types in another.
 //!
-//!   fake_daemon <typed-log>
+//! **One ask waiting** (ov-861), named for the runner (`fake_daemon <typed-log>
+//! <runner>`), so the check can run two runners and see each one's item and
+//! which of them an answer reached. `terminal.agent_answer` appends the ask's
+//! id and the option to `answers` beside the typed log, and the ask is gone
+//! from the next `needs_you.list`.
+//!
+//!   fake_daemon <typed-log> [runner]
 
 #[path = "../tests/support/mod.rs"]
 mod support;
@@ -33,7 +39,8 @@ use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, ServerHello, Terminal, TerminalAttachResult, TerminalList, TerminalState, request, result, wire_envelope,
+    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, ServerHello, Terminal, TerminalAttachResult, TerminalList, TerminalRef,
+    TerminalState, request, result, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
 use uuid::Uuid;
@@ -51,6 +58,29 @@ fn terminal(n: u8) -> Uuid {
 /// short name: a unix socket's path is limited to about a hundred bytes.
 fn socket(typed_log: &Path, n: u8) -> PathBuf {
     typed_log.with_file_name(format!("p{n}"))
+}
+
+/// The ask waiting on this runner, unless it has been answered.
+fn waiting(typed_log: &Path, runner: &str) -> NeedsYouList {
+    let answered = std::fs::read_to_string(typed_log.with_file_name("answers")).unwrap_or_default();
+    let ask = format!("ask-{runner}");
+    if answered.lines().any(|l| l.split(' ').next() == Some(ask.as_str())) {
+        return NeedsYouList::default();
+    }
+    let action = |id: &str, title: &str, primary: bool| NeedsYouAction { id: id.into(), title: title.into(), primary, ..Default::default() };
+    NeedsYouList {
+        items: vec![NeedsYouItem {
+            id: format!("ask:{runner}"),
+            kind: NeedsYouKind::Ask as i32,
+            rank: 1,
+            workspace_name: "Main".into(),
+            question: format!("Run the tests on {runner}?"),
+            ask_id: Some(ask),
+            terminal: Some(TerminalRef { id: Bytes::copy_from_slice(terminal(1).as_bytes()), label: "shell 1".into(), ..Default::default() }),
+            actions: vec![action("allow", "Allow", true), action("deny", "Deny", false)],
+            ..Default::default()
+        }],
+    }
 }
 
 /// The output of `seq 1 2000000`, in frames of about 16 KiB.
@@ -104,6 +134,7 @@ fn pane(typed_log: &Path, n: u8, out: Arc<Mutex<std::io::Stdout>>) {
 
 fn main() {
     let typed_log = PathBuf::from(std::env::args().nth(1).expect("fake_daemon <typed-log>"));
+    let runner = std::env::args().nth(2).unwrap_or_else(|| "studio".into());
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
     let mut stdin = std::io::stdin().lock();
     let mut buf = BytesMut::new();
@@ -128,6 +159,7 @@ fn main() {
                         capability::TERMINAL_STREAM.to_string(),
                         capability::WORKSTREAMS.to_string(),
                         capability::BOARD_PLAN.to_string(),
+                        capability::NEEDS_YOU.to_string(),
                     ],
                     ..Default::default()
                 }))]
@@ -197,6 +229,12 @@ fn main() {
                         ..Default::default()
                     }),
                 )],
+                ("needs_you.list", _) => vec![support::answer(&req, result::Value::NeedsYouList(waiting(&typed_log, &runner)))],
+                ("terminal.agent_answer", Some(request::Payload::AgentAnswer(a))) => {
+                    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("answers")).unwrap();
+                    writeln!(log, "{} {}", a.request_id, a.option_id).unwrap();
+                    vec![support::answer(&req, result::Value::Terminal(Terminal { id: a.terminal_id, ..Default::default() }))]
+                }
                 ("terminal.resize", _) => vec![support::answer(&req, result::Value::Empty(Empty {}))],
                 // The page's liveness probe (ov-772): a link that never
                 // answers it is given up on after nine quiet seconds.

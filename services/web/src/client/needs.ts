@@ -42,6 +42,11 @@ export interface Item {
   link: string | null
   actions: Action[]
   concern: { name: string; yours: boolean } | null
+  /// Which runner the item is on, when the page lists more than one
+  /// (fleet.ts): its id, and the name its rows carry. Absent from a list read
+  /// from a single runner.
+  runner?: string
+  runnerName?: string
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -184,11 +189,11 @@ export function pressFor(item: Item, action: Action): Press | null {
 ///
 /// An Open is drawn only where `canOpen` says the terminal is one this page
 /// lists, so no button leads nowhere.
-export function buttonsFor(item: Item, canOpen: (terminal: string) => boolean = () => true): { action: Action; press: Press }[] {
+export function buttonsFor(item: Item, canOpen: (terminal: string, item: Item) => boolean = () => true): { action: Action; press: Press }[] {
   const buttons: { action: Action; press: Press }[] = []
   for (const action of item.actions) {
     const press = pressFor(item, action)
-    if (press && (press.kind !== 'open' || canOpen(press.terminal))) buttons.push({ action, press })
+    if (press && (press.kind !== 'open' || canOpen(press.terminal, item))) buttons.push({ action, press })
   }
   return buttons
 }
@@ -207,6 +212,17 @@ export interface BoardView {
   /// Said above the list: a read that failed after a good one, or a runner
   /// that can't show this.
   banner: string
+  /// What is wrong with one runner of several, each its own line (fleet.ts):
+  /// a runner that can't be reached, or whose list may be behind. `retry`
+  /// draws a button that asks that runner again.
+  runners?: RunnerNote[]
+}
+
+export interface RunnerNote {
+  runner: string
+  text: string
+  /// What the button says, or none for a note nothing can be done about here.
+  retry?: string
 }
 
 /// How a rejection reaches here from wasm: the word as the message, and for a

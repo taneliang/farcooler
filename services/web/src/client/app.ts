@@ -23,9 +23,10 @@
 
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, registerFailure, replyRefusal, sealedRefusal, unreachable } from './copy'
+import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
-import { Board, type BoardView, countLabel, countOf, pageTitle } from './needs'
+import { Fleet, type RunnerDeps } from './fleet'
+import { type BoardView, countLabel, countOf, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { ChatView } from './chat'
@@ -430,9 +431,14 @@ const paneBudgets = new Map<string, Budget>()
 /// on another device.
 const NEEDS_POLL_MS = 5000
 
-/// The runner's Needs You on the page, read again every few seconds.
-let board: Board | null = null
+/// Every enrolled runner's Needs You on the page, read again every few seconds.
+let fleet: Fleet | null = null
 let boardTimer = 0
+/// The connections made to the runners other than the one in front, which
+/// carry Needs You and nothing else (ov-861).
+let others: Reconnector<WebRunner, TunnelConn>[] = []
+/// What a runner's note button does, by runner id.
+const retries = new Map<string, () => void>()
 let drawn = ''
 
 /// The terminal buttons by id, which is what an Open on an item can go to.
@@ -453,7 +459,7 @@ function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
   $('show-needs').setAttribute('aria-pressed', String(needs))
   $('show-plan').setAttribute('aria-pressed', String(plan))
   planTab?.show(plan)
-  if (needs) void board?.refresh()
+  if (needs) void fleet?.refresh()
 }
 
 /// Put the board's view on the page: the list, the count on the button, the
@@ -470,11 +476,12 @@ function drawNeeds(view: BoardView): void {
     view,
     Date.now(),
     {
-      canOpen: terminal => buttonFor.has(terminal),
+      canOpen: (terminal, item) => fleet?.canOpenItem(terminal, item) ?? false,
       press: (item, press) => {
         if (press.kind === 'open') showTab('terminals')
-        void board?.press(item, press)
+        void fleet?.press(item, press)
       },
+      retry: runner => retries.get(runner)?.(),
     },
     drawn,
   )
@@ -484,8 +491,11 @@ function stopNeeds(): void {
   planTab?.stop()
   planTab = null
   clearInterval(boardTimer)
-  board?.stop()
-  board = null
+  fleet?.stop()
+  fleet = null
+  for (const rec of others) rec.current?.free()
+  others = []
+  retries.clear()
   drawn = ''
   document.title = pageTitle(0)
   $('bar-count').hidden = true
@@ -569,15 +579,21 @@ function showLink(view: LinkView, label: string): void {
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
   let runner: WebRunner
+  let mineFleet: Fleet | null = null
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
     dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
     discard: conn => conn.close(),
     connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
     resume: async next => {
       await panes?.resume(next, () => ended(next))
-      void board?.refresh()
     },
-    show: view => showLink(view, target.label),
+    show: view => {
+      showLink(view, target.label)
+      // Its list is read as soon as the connection is up, and set aside while
+      // it is not.
+      if (view.kind === 'up') mineFleet?.up(target.id)
+      else mineFleet?.unreachable(target.id, needsYouFailure('closed', target.label))
+    },
     now: () => Date.now(),
   })
   /// A pane's stream ended: said so unless the whole connection did, which
@@ -626,32 +642,29 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   stopNeeds()
   const opening = (id: string) => void buttonFor.get(id)?.click()
   buttonFor.clear()
-  const mine = new Board({
-    runner: target.label,
-    list: async () => {
-      const current = reconnector.current
-      if (!current) throw new Error('closed')
-      return await current.needsYou()
+  const mine = new Fleet(
+    drawNeeds,
+    (runner, terminal) => {
+      if (runner === target.id) opening(terminal)
     },
-    ask: async (terminal, ask, option) => {
-      const current = reconnector.current
-      if (!current) throw new Error('closed')
-      await current.answer(terminal, ask, option)
-    },
-    decide: async (task, body) => {
-      const current = reconnector.current
-      if (!current) throw new Error('closed')
-      await current.answerDecision(task, body)
-    },
-    show: drawNeeds,
-    open: opening,
-  })
-  board = mine
+    (runner, terminal) => runner === target.id && buttonFor.has(terminal),
+  )
+  mineFleet = mine
+  fleet = mine
+  // Every enrolled runner, in the order they were enrolled: this one is read
+  // now, the rest are connected to one after another (one passkey touch each)
+  // and each holds one channel on its own connection (ov-861).
+  const runners = session.device.runners ?? []
+  for (const r of runners) {
+    if (r.id === target.id) mine.add(r.id, r.label, depsOf(reconnector))
+    else if (r.why !== '') mine.addUnreachable(r.id, r.label, unreachable(r.why, r.label, r.cause))
+    else joinRunner(session, r, mine)
+  }
+  mine.up(target.id)
   planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null))
   showTab('terminals')
-  void mine.refresh()
   boardTimer = window.setInterval(() => {
-    if (document.visibilityState === 'visible' && reconnector.current && !reconnector.hasLost(reconnector.current)) void mine.refresh()
+    if (document.visibilityState === 'visible') void mine.refresh()
   }, NEEDS_POLL_MS)
   if (terminals.length === 0) {
     paneNote(`${target.label} has no terminals yet. Open one in Far Cooler on your Mac or phone, then reload.`)
@@ -703,6 +716,78 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   void open(terminals[first].id, buttons[first])
 }
 
+/// What reads and answers for the runner `rec` is connected to.
+function depsOf(rec: Reconnector<WebRunner, TunnelConn>): RunnerDeps {
+  const live = (): WebRunner => {
+    const current = rec.current
+    if (!current) throw new Error('closed')
+    return current
+  }
+  return {
+    list: async () => await live().needsYou(),
+    ask: async (terminal, ask, option) => await live().answer(terminal, ask, option),
+    decide: async (task, body) => await live().answerDecision(task, body),
+  }
+}
+
+/// Passkey touches are asked one at a time: the connections to the runners
+/// behind the one in front wait their turn.
+let turn: Promise<void> = Promise.resolve()
+
+/// Connect to a runner behind the one in front, for its Needs You alone: its
+/// panes and plan stay with the runner in front. If it can't be reached the
+/// list says so and offers Connect (or Reconnect, once it has been up), whose
+/// click is also what Safari wants before it prompts for a passkey.
+function joinRunner(session: Session, target: Granted, into: Fleet): void {
+  let everUp = false
+  const passkey = session.device.passkey as Passkey
+  const rp = rpId()
+  const rec = new Reconnector<WebRunner, TunnelConn>({
+    dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
+    discard: conn => conn.close(),
+    connect: (conn, onLost) =>
+      connect(
+        conn,
+        target.host_key,
+        target.user,
+        session.keyLine,
+        async challenge => {
+          try {
+            return await assertWith(passkey, rp, challenge)
+          } catch (e) {
+            throw new Error((e as Error).message === 'declined' ? 'passkey_declined' : (e as Error).message)
+          }
+        },
+        onLost,
+      ),
+    resume: async () => {},
+    show: view => {
+      if (view.kind === 'up') {
+        everUp = true
+        into.up(target.id)
+      } else if (view.kind === 'connecting') into.connecting(target.id)
+      else if (view.kind === 'failed') into.unreachable(target.id, connectFailure(view.word, target.label), 'Reconnect')
+      else into.unreachable(target.id, runnerStopped(target.label), 'Reconnect')
+    },
+    now: () => Date.now(),
+  })
+  into.add(target.id, target.label, depsOf(rec))
+  others.push(rec)
+  const attempt = async () => {
+    into.connecting(target.id)
+    let dialed: TunnelConn | null = null
+    try {
+      dialed = await session.tailcat.dial(target.token, session.device.nodePriv)
+      await rec.open(dialed)
+    } catch (e) {
+      dialed?.close()
+      into.unreachable(target.id, connectFailure((e as Error).message, target.label), 'Connect')
+    }
+  }
+  retries.set(target.id, () => void (everUp ? rec.reconnect() : attempt()))
+  turn = turn.then(attempt)
+}
+
 function paneNote(text: string): void {
   const note = $('pane-note')
   note.textContent = text
@@ -713,10 +798,12 @@ function paneNote(text: string): void {
 /// rather than wait out the probe interval.
 function recheckLink(): void {
   void link?.recheck()
+  for (const rec of others) void rec.recheck()
 }
 
 async function addAgain(session: Session): Promise<void> {
   link = null
+  turn = Promise.resolve()
   stopNeeds()
   panes?.dispose()
   panes = null

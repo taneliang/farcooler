@@ -8,8 +8,10 @@ import { age, type BoardView, buttonsFor, githubLink, groups, type Item, kindLab
 
 export interface Handlers {
   /// Whether a terminal is one the page lists, so an Open can go to it.
-  canOpen(terminal: string): boolean
+  canOpen(terminal: string, item: Item): boolean
   press(item: Item, press: Press): void
+  /// A runner's note button was pressed (a Connect or Reconnect).
+  retry?(runner: string): void
 }
 
 const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -47,6 +49,7 @@ function card(item: Item, view: BoardView, now: number, on: Handlers): HTMLEleme
     }
     li.append(lane)
   }
+  if (item.runnerName) li.append(make('p', 'need-where need-runner', item.runnerName))
   if (item.concern && !item.concern.yours) li.append(make('p', 'need-where', item.concern.name ? `${item.concern.name}’s` : 'The owner’s'))
 
   const busy = view.busy.has(item.id)
@@ -90,7 +93,7 @@ function section(title: string, items: Item[], view: BoardView, now: number, on:
 /// poll that found nothing new must not take a button out from under a click).
 /// Returns what was drawn, to hand back as `last`.
 export function renderNeeds(root: HTMLElement, view: BoardView, now: number, on: Handlers, last = ''): string {
-  const signature = JSON.stringify([view.state, view.banner, view.items.map(i => [i, age(i.since, now)]), [...view.busy], [...view.notices]])
+  const signature = JSON.stringify([view.state, view.banner, view.runners ?? [], view.items.map(i => [i, age(i.since, now)]), [...view.busy], [...view.notices]])
   if (signature === last) return last
 
   const children: HTMLElement[] = []
@@ -98,6 +101,17 @@ export function renderNeeds(root: HTMLElement, view: BoardView, now: number, on:
     const banner = make('p', 'note need-banner', view.banner)
     banner.setAttribute('role', 'status')
     children.push(banner)
+  }
+  for (const note of view.runners ?? []) {
+    const p = make('p', 'note need-banner need-runner-note', note.text)
+    p.setAttribute('role', 'status')
+    if (note.retry) {
+      const button = make('button', 'quiet', note.retry)
+      button.type = 'button'
+      button.onclick = () => on.retry?.(note.runner)
+      p.append(' ', button)
+    }
+    children.push(p)
   }
   if (view.state === 'loading') {
     children.push(make('p', 'need-empty', 'Checking what needs you…'))
