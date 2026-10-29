@@ -47,7 +47,17 @@ async fn main() {
         None => builder.with_writer(std::io::stderr).init(),
     }
 
-    if let Err(code) = run().await {
+    let ran = run().await;
+    // A `--stdio` session that is over ends this process, now. Returning from
+    // `main` instead drops the runtime, which waits for its blocking threads,
+    // and `tokio::io::stdin()` keeps one parked in a `read` until the device's
+    // ssh closes its end: so a daemon that hung up on a revoked device left
+    // the relay alive, ssh open, and the device waiting on a close that never
+    // came (ov-856: the CI flake in `a_real_sshd_forces_the_scope`).
+    if std::env::args().any(|a| a == "--stdio") {
+        std::process::exit(ran.err().unwrap_or(0));
+    }
+    if let Err(code) = ran {
         std::process::exit(code);
     }
 }
