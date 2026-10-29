@@ -23,6 +23,9 @@ name: CI
 on:
   push:
     branches: [main]
+    # The canary workflow's own baseline commit touches only this file. Without
+    # this, its run supersedes and cancels the CI of the commit it records.
+    paths-ignore: ['proto/baseline/canary.proto']
   pull_request:
 
 concurrency:
