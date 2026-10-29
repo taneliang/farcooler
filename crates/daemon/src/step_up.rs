@@ -68,6 +68,15 @@ pub const METHODS: [&str; 6] = ["client.revoke", "client.enroll", "member.set", 
 /// bind, raise, propose or approve a key.
 pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
 
+/// Whether a phone or Mac with no trusted key still does admin actions
+/// without a step-up. True only for the transition: no app can mint a key
+/// until slice 4 (iOS, Mac) and slice 5 (Android) ship, so a keyless phone
+/// would otherwise lose admin outright. Slice 4's release flips this to
+/// false (`reports/ov-856/slice3-review.md` section 1), after which a remote
+/// device with no trusted key gets no admin. A browser is never in this
+/// transition: it can't hold a key to ask for, see [`browser_refused`].
+pub const KEYLESS_PHONES_ALLOWED: bool = true;
+
 /// How long a challenge lives.
 pub const CHALLENGE_MS: i64 = 60_000;
 
@@ -150,6 +159,16 @@ pub fn needs_step_up(store: &Store, device: &str, method: &str) -> Result<bool> 
         return Ok(false);
     }
     Ok(store.step_up_key(device)?.is_some_and(|k| k.trusted) && (method == "client.approve_step_up" || is_admin(store, device)?))
+}
+
+/// Whether `device` is a browser's and `method` an admin action that is not
+/// defensive. A browser can never register a key, so unlike a phone it has no
+/// transition: without a WebAuthn step-up it may only revoke or remove.
+pub fn browser_refused(svc: &Service, device: &str, method: &str) -> Result<bool> {
+    if !METHODS.contains(&method) || DEFENSIVE.contains(&method) {
+        return Ok(false);
+    }
+    crate::step_up_rpc::is_browser(svc, device)
 }
 
 /// The six digits a proposing device shows and an approver checks: derived
@@ -289,11 +308,18 @@ fn signed_request(outer: &Request, bytes: &[u8]) -> Result<Request> {
 /// checked, and the request returned is the one the signature covers.
 pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, now_ms: i64) -> Result<(Request, Option<Stepped>)> {
     let Some(step_up) = req.step_up.as_ref() else {
-        if let Some(device) = peer.client_id.as_deref()
-            && needs_step_up(&svc.store, device, &req.method)?
-        {
-            tracing::info!(method = %req.method, "refused: this device must step up for that");
-            return Err(DomainError::Conflict { what: "step_up_needed" });
+        if let Some(device) = peer.client_id.as_deref() {
+            if needs_step_up(&svc.store, device, &req.method)? {
+                tracing::info!(method = %req.method, "refused: this device must step up for that");
+                return Err(DomainError::Conflict { what: "step_up_needed" });
+            }
+            if browser_refused(svc, device, &req.method)? {
+                tracing::warn!(method = %req.method, "refused: a browser without a step-up for an action that isn't defensive");
+                return Err(DomainError::Conflict { what: "defensive_only" });
+            }
+            if !KEYLESS_PHONES_ALLOWED && METHODS.contains(&req.method.as_str()) && is_admin(&svc.store, device)? {
+                return Err(DomainError::Conflict { what: "step_up_needed" });
+            }
         }
         return Ok((req, None));
     };
