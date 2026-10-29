@@ -35,6 +35,9 @@ enum PhoneZoom {
 
 extension View {
     /// Grow out of the card `id` names, when there's a namespace for it.
+    /// Not used on the Plan and agents sheets: a zoom transition turns a
+    /// drag down from large into a dismissal, so the sheet could never be
+    /// pulled back to medium (PlanSheetAppearanceUITests went red).
     @ViewBuilder
     func zooms(from id: String, in namespace: Namespace.ID?) -> some View {
         if let namespace {
@@ -434,13 +437,11 @@ struct PhoneRoot: View {
                 .sheet(item: $navigator.agents, onDismiss: navigator.dismissed) { sheet in
                     AgentsSheetScreen(fleet: fleet, navigator: navigator, place: sheet.place)
                         .environment(\.phoneNavigator, navigator)
-                        .zooms(from: PhoneZoom.agents(sheet.place), in: zoom)
                 }
         }
         .sheet(item: $navigator.plan, onDismiss: navigator.dismissed) { sheet in
             PlanSheetScreen(fleet: fleet, hosts: hosts, navigator: navigator, place: sheet.place)
                 .environment(\.phoneNavigator, navigator)
-                .zooms(from: PhoneZoom.plan(sheet.place), in: zoom)
                 #if DEBUG
                 .overlay(alignment: .topLeading) { PhoneProbeView() }
                 #endif

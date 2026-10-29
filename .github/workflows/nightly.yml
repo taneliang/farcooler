@@ -257,9 +257,12 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- \
-            cargo nextest run --profile ci -p farcooler-daemon --run-ignored only \
+            cargo nextest run --color never --profile ci -p farcooler-daemon --run-ignored only \
             -E 'test(a_message_sent_during_a_five_minute_turn_with_a_dialog_is_sent_when_it_ends)' \
             2>&1 | tee "$RUNNER_TEMP/nextest.log"
+          # `--color never`: the job's CARGO_TERM_COLOR=always put escape codes
+          # between the words of the summary, and this grep missed a pass
+          # (nightly 40543895510: the test passed in 302 s, the step failed).
           grep -q 'Summary.* 1 test run: 1 passed' "$RUNNER_TEMP/nextest.log"
 
   # Always runs, and decides for itself from the run's jobs, so a cancelled or

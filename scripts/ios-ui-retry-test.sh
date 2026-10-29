@@ -27,6 +27,7 @@ cat >"$scratch/bin/xcodebuild" <<'STUB'
 #!/bin/bash
 n=$(($(cat "$SCRATCH/calls" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$SCRATCH/calls"
+echo "$*" >"$SCRATCH/args.$n"
 cat "$SCRATCH/log.$n"
 exit "$(cat "$SCRATCH/status.$n")"
 STUB
@@ -76,7 +77,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 # run <retry-env> <log1> <status1> [<log2> <status2>]; sets CODE, OUT, CALLS, SUMMARY.
 run() {
     local retry="$1"; shift
-    rm -f "$scratch"/calls "$scratch"/log.* "$scratch"/status.* "$scratch/summary" "$scratch/xcrun.calls"
+    rm -f "$scratch"/calls "$scratch"/args.* "$scratch"/log.* "$scratch"/status.* "$scratch/summary" "$scratch/xcrun.calls"
     local n=1
     while [ $# -gt 0 ]; do
         printf '%s\n' "$1" >"$scratch/log.$n"; echo "$2" >"$scratch/status.$n"; shift 2; n=$((n + 1))
@@ -98,6 +99,19 @@ for infra in "$LAUNCH" "$BOOTSTRAP" "$TERMINATE"; do
     grep -q 'RETRYING' <<<"$OUT" || fail "the retry was silent in the log"
     grep -q 'retried once' <<<"$SUMMARY" || fail "the retry is not in the job summary"
 done
+
+# The retry skips what passed and nothing else (ov-722): a test that passed is
+# not run again, a test that failed on infrastructure (A testA) and one that
+# never started (not in the log at all) both are.
+WITH_PASSES="Test Case '-[FarCoolerUITests.A testPassed]' passed (1.0 seconds).
+Test Case '-[FarCoolerUITests.C testAlsoPassed]' passed (2.0 seconds).
+$TERMINATE"
+run 1 "$WITH_PASSES" 65 "$PASS" 0
+[ "$CALLS" -eq 2 ] || fail "the retry with passes ran xcodebuild $CALLS time(s), wanted 2"
+! grep -q -- '-skip-testing' "$scratch/args.1" || fail "the first attempt skipped tests"
+grep -q -- '-skip-testing:FarCoolerUITests/A/testPassed' "$scratch/args.2" || fail "the retry ran a test that passed: $(cat "$scratch/args.2")"
+grep -q -- '-skip-testing:FarCoolerUITests/C/testAlsoPassed' "$scratch/args.2" || fail "the retry ran a second test that passed"
+! grep -q -- '-skip-testing:FarCoolerUITests/A/testA\b' "$scratch/args.2" || fail "the retry skipped the test that failed"
 
 run 1 "$ASSERT" 65 "$PASS" 0
 [ "$CALLS" -eq 1 ] || fail "an assertion failure was retried ($CALLS calls)"

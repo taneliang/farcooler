@@ -212,15 +212,11 @@ impl Board {
     /// of `terminal`'s output says `known`: the bytes reach it a moment after
     /// the program writes them. Panics if it never does.
     async fn stream_says(&self, terminal: Uuid, known: Option<bool>) {
-        if tmux_tells_bracketing() {
-            return;
-        }
+        if tmux_tells_bracketing() { return; }
         let mut now = None;
         for _ in 0..750 {
             now = self.svc.streamed_bracketed_paste(terminal).await;
-            if now == known {
-                return;
-            }
+            if now == known { return; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("the stream record says {now:?}, not {known:?}");
@@ -261,20 +257,23 @@ impl Board {
     /// Wait for a stand-in to draw its box, then draw it again: the redraw
     /// sets bracketing after the daemon has subscribed, which a stand-in's
     /// start may have beaten (`stand_in_set_bracketing_before_anyone_followed`
-    /// is what that costs).
+    /// is what that costs): drawn again, up to three times, while the record
+    /// is unset (it read None for 15 s in nightly 40733569282).
     async fn settle_stand_in(&self, terminal: &Terminal, si: &StandIn) {
         self.screen_with(terminal.id, "stand-in").await;
         for _ in 0..750 {
-            if si.log().contains("MODE idle") {
-                break;
-            }
+            if si.log().contains("MODE idle") { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        si.show("working").await;
-        si.show("idle").await;
-        if self.follows(terminal.id) {
-            self.stream_says(terminal.id, Some(true)).await;
+        for _ in 0..3 {
+            si.show("working").await;
+            si.show("idle").await;
+            for _ in 0..250 {
+                if !self.follows(terminal.id) || self.svc.streamed_bracketed_paste(terminal.id).await == Some(true) { return; }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
         }
+        panic!("the stream record never said Some(true), in three redraws");
     }
 
     /// The stand-in run as Node runs an npm install: a copy of perl named

@@ -11,6 +11,14 @@ import XCTest
 final class NotificationTapTests: XCTestCase {
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
+    /// Whether a test in this run has already waited out the permission
+    /// alert. A fresh simulator asks once, and on CI the alert took more than
+    /// five seconds to come: the wait ended, the app was closed with the
+    /// question open, nothing was filed, and no banner came for a minute
+    /// (red on every nightly from 26 Oct). The first test waits long enough
+    /// for it; the rest find it answered and look for five seconds.
+    private static var askedOnce = false
+
     override func setUp() {
         continueAfterFailure = false
     }
@@ -41,7 +49,8 @@ final class NotificationTapTests: XCTestCase {
         app.launchDrawn()
         // The first run on a device asks; every later one has its answer.
         let allow = springboard.alerts.buttons["Allow"]
-        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        if allow.waitForExistence(timeout: Self.askedOnce ? 5 : 45) { allow.tap() }
+        Self.askedOnce = true
         leave(app)
 
         // Filed fifteen seconds after launch: found by what it says, wherever

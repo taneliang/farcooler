@@ -326,11 +326,15 @@ WATCHDOG=$!
 # "Failed to launch <XCUIApplicationImpl…>" or "Early unexpected exit, operation
 # never finished bootstrapping", about 25 to 35 minutes each.
 #
-# THE WHOLE SHARD, not only the failed classes. A runner crash kills the run
+# THE WHOLE SHARD, less what PASSED (ov-722). A runner crash kills the run
 # mid-flight, so the classes that never started have no result at all and a
 # "retry what failed" list would silently drop them: a green that skipped half
-# a shard, the failure mode this script exists to prevent. A shard is the unit
-# CI already schedules, and the retry costs one shard, not the whole suite.
+# a shard, the failure mode this script exists to prevent. So the retry runs
+# the same selection and skips only the tests the first attempt logged as
+# passed (`-skip-testing`), which leaves every failed and every unstarted test
+# in. It used to run the whole shard again: a failure to terminate the app
+# 30 minutes in put a second 30 minutes after it, and the job was cancelled at
+# its 45-minute limit with no verdict (nightly 40733569282, captures).
 #
 # NEVER AN ASSERTION. Every `error:` line a test reports must match a signature;
 # one that does not (an XCTAssert, a timeout, a crash in the app) means a real
@@ -366,6 +370,16 @@ infra_only_failure() {
     ! grep -E ': error: ' "$1" | grep -vE "$INFRA_SIGNATURES" | grep -q .
 }
 
+# The tests the log shows as passed, as -skip-testing arguments, for the retry.
+RETRY_SKIP=()
+skip_passed() {
+    RETRY_SKIP=()
+    local line
+    while IFS= read -r line; do
+        RETRY_SKIP+=("-skip-testing:FarCoolerUITests/$line")
+    done < <(sed -nE "s|^Test Case '-\[FarCoolerUITests\.([A-Za-z0-9_]+) ([A-Za-z0-9_]+)\]' passed .*|\1/\2|p" "$1" | sort -u)
+}
+
 run_xcodebuild() {
     env \
         TEST_RUNNER_DEMO_USER="$DEMO_USER" \
@@ -377,7 +391,7 @@ run_xcodebuild() {
         -test-timeouts-enabled YES \
         -default-test-execution-time-allowance "$TEST_TIME_LIMIT" \
         -maximum-test-execution-time-allowance "$TEST_TIME_LIMIT" \
-        ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
+        ${ONLY[@]+"${ONLY[@]}"} ${RETRY_SKIP[@]+"${RETRY_SKIP[@]}"} 2>&1 | tee "$LOG"
     STATUS=${PIPESTATUS[0]}
 }
 
@@ -389,7 +403,8 @@ if [ "$STATUS" -ne 0 ] && [ "${IOS_UI_RETRY_INFRA:-}" = 1 ] && infra_only_failur
     SIGNATURE=$(grep -E "$INFRA_SIGNATURES" "$LOG" | head -1 | cut -c1-200)
     echo
     echo "::warning title=iOS UI shard retried::Infrastructure failure, not a test failure: $SIGNATURE"
-    echo "ios-ui-tests: RETRYING THE WHOLE RUN ONCE. Infrastructure failure (exit $STATUS): $SIGNATURE"
+    skip_passed "$LOG"
+    echo "ios-ui-tests: RETRYING ONCE, without the ${#RETRY_SKIP[@]} tests that passed. Infrastructure failure (exit $STATUS): $SIGNATURE"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         {
             echo "### iOS UI shard retried once"
@@ -400,7 +415,7 @@ if [ "$STATUS" -ne 0 ] && [ "${IOS_UI_RETRY_INFRA:-}" = 1 ] && infra_only_failur
             echo "$SIGNATURE"
             echo '```'
             echo
-            echo "The whole shard ran again. A second failure of any kind fails the job."
+            echo "The shard ran again, without the ${#RETRY_SKIP[@]} tests that had passed. A second failure of any kind fails the job."
         } >>"$GITHUB_STEP_SUMMARY"
     fi
     echo

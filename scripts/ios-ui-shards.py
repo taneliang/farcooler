@@ -99,13 +99,14 @@ SHARDS = {
         "TaskScreenTests",  # 225 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
         "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
         "HarnessResetTests",  # ~120 s: two harnesses, four launches each (ov-672). Moved from shell (ov-722)
+        "ChangesLfsNoticeTests",  # 61 s; -changes-layout-harness -lfs-pointers (ov-199). Moved from phone3 (ov-722)
+        "TunnelRouteOfferTests",  # 34 s; seeded -hosts and -runnerAlternatives (ov-485). Moved from phone3 (ov-722)
     ],
     "phone": [
         "PagesUITests",  # 479 s; -phone-harness -phone-plan -phone-pages (ov-285)
         "WorkspaceScreenTests",  # 218 s; -phone-harness
         "ChangesPatchNoticeTests",  # 85 s; -changes-layout-harness
         "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
-        "RunnerPeopleUITests",  # 102 s; -phone-harness -phone-shared (ov-508)
         "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
         "GrantBrowserUITests",  # 3 tests; -grant-browser (ov-828)
         "MemberLoginsUITests",  # ~95 s locally, 3 tests; -phone-harness -phone-shared -phone-own-logins (ov-652)
@@ -120,13 +121,12 @@ SHARDS = {
         "TalkToRepUITests",  # 243 s; -phone-harness -phone-rep (ov-526)
         "TerminalLigatureTests",  # 9 s; -terminal-ligature
         "ActionFailureTests",  # 93 s; -phone-harness
-        "NotificationTapTests",  # untimed, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
+        "RunnerPeopleUITests",  # 348 s, mean of nights 40368881613 to 40733569282; -phone-harness -phone-shared (ov-508). Moved from phone (ov-722)
+        "NotificationTapTests",  # about 60 s, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
     ],
     "phone3": [
         "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)
-        "ChangesLfsNoticeTests",  # 52 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
-        "TunnelRouteOfferTests",  # 33 s; seeded -hosts and -runnerAlternatives (ov-485)
         "SealedReplyUITests",  # 4 tests; -sealed-reply (ov-770)
         "FailedLaunchTests",  # under 1 s; launches no app of ours (ov-703)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
@@ -177,10 +177,21 @@ LOCAL = {
 # line by two points, and PolishSweep alone grew from 477 s in the Oct 23 estimate. Three jobs:
 # 1,304 + 334 = 1,638 s (61%), 1,001 + 334 = 1,335 s (49%) and 764 + 334 = 1,098 s (41%). Each
 # is a macOS runner for under half an hour, which the night has the pool for.
+#
+# Oct 26 to 28 (ov-722 again; nightlies 40368881613, 40543895510, 40733569282): `captures` was
+# cancelled at the timeout on Oct 28 and `phone` on Oct 27. Neither was slow tests. Each had
+# an infrastructure failure ("Failed to terminate com.farcooler.ios.local") late in its run,
+# and scripts/ios-ui-tests.sh then ran the WHOLE shard a second time: 1,840 s of Navigation
+# captures in the first pass and the retry still going at 45 minutes. The retry now skips
+# what passed. The class means over those three nights are below, with the failing tests
+# of the three nights at their failing times (NotificationTapTests 170 s, about 60 s passing).
+# Tests per shard: shell 1,494, agent 1,565, phone 1,483, phone2 1,504, phone3 1,531, phone4
+# 1,551 (were 1,496, 1,471, 1,831, 1,266, 1,628, 1,551); captures 1,348, captures2 1,195,
+# captures3 1,220 (were 1,871, 1,047, 844). A shard's job adds 230 to 400 s.
 CAPTURE_SHARDS = {
-    "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 870 + 434 s
-    "captures2": ["PolishSweepUITests"],  # 1,001 s
-    "captures3": ["ConversationCapturesUITests", "GlassCapturesUITests", "ComposerGapsCapturesUITests"],  # 764 s, and four short launches; the gaps skip without their own switch
+    "captures": ["NavigationCapturesUITests"],  # 1,348 s (996 to 1,840)
+    "captures2": ["PolishSweepUITests", "GlassCapturesUITests"],  # 1,047 + 148 s
+    "captures3": ["ConversationCapturesUITests", "PlanSectionsCapturesUITests", "ComposerGapsCapturesUITests"],  # 697 + 523 s, and four short launches; the gaps skip without their own switch
 }
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
