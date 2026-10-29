@@ -158,8 +158,8 @@ struct StepUpTests {
     @Test("A refusal is a sentence, and closing the prompt is silence")
     func refusals() {
         let say = { (word: String) in StepUpWords.sentence(for: .refused(word), runner: "studio", device: "iPhone") }
-        #expect(say("step_up_needed") == "Allow admin actions on this iPhone from your Mac first.")
-        #expect(say("key_untrusted") == "Allow admin actions on this iPhone from your Mac first.")
+        #expect(say("step_up_needed") == "Allow admin actions on this iPhone from studio first.")
+        #expect(say("key_untrusted") == "Allow admin actions on this iPhone from studio first.")
         #expect(say("step_up") == "Update Far Cooler on studio to change access here.")
         #expect(say("challenge_expired") == "That took too long. Try again.")
         #expect(say("unheard_of") == "Couldn’t do that. Try again.")

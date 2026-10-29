@@ -146,7 +146,7 @@ public enum StepUpWords {
     public static func sentence(forRefusal word: String, runner: String, device: String) -> String {
         switch word {
         case "step_up_needed", "key_untrusted", "key_untrusted_here":
-            "Allow admin actions on this \(device) from your Mac first."
+            "Allow admin actions on this \(device) from \(runner) first."
         case "step_up_unneeded", "step_up_unavailable", "step_up":
             "Update Far Cooler on \(runner) to change access here."
         case "challenge_expired":
@@ -164,7 +164,7 @@ public enum StepUpWords {
         case "handle_taken", "device_taken":
             "That person or device is already on \(runner), under another name."
         case "scope_access":
-            "That access doesn’t fit the device’s line. Try again."
+            "A Viewer’s device can only look. Choose Viewer, or add it as a Member."
         case "wrong_code":
             "That code doesn’t match. Check the other device and try again."
         case "proposal_expired":

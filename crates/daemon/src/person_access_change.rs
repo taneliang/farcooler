@@ -55,7 +55,8 @@ pub(crate) fn allowed(store: &Store, caller: &Person, change: &Change<'_>) -> Re
         Change::Cap { device, cap } => {
             if store.member_of_device(device)?.as_deref() == Some(me.as_str()) {
                 // Their own device: held lower, never freed.
-                return if cap.is_some() { Ok(()) } else { Err(refused) };
+                let raising = matches!((store.device_cap(device)?, cap), (Some(Cap::Viewer), Some(Cap::Member)));
+                return if cap.is_some() && !raising { Ok(()) } else { Err(refused) };
             }
             if !may_manage(store, caller, device)? {
                 return Err(refused);

@@ -80,7 +80,7 @@ public enum TeammateAccessRules {
         switch facts?.caller {
         case .owner, .admin: nil
         case .member, .viewer:
-            "Only an Owner or an Admin can add people to \(runner)."
+            "Only the Owner or an Admin can add people to \(runner)."
         case nil:
             "Update Far Cooler on \(runner) to add people from here."
         }
@@ -121,7 +121,7 @@ public enum TeammateAccessRules {
     public static func refusal(_ word: String, runner: String, device: String) -> String {
         switch word {
         case "not_admin", "not_owners_device":
-            "Only an Owner or an Admin can add people to \(runner)."
+            "Only the Owner or an Admin can add people to \(runner)."
         default:
             StepUpWords.sentence(forRefusal: word, runner: runner, device: device)
         }

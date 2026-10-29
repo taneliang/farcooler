@@ -114,6 +114,8 @@ async fn an_admin_manages_members_and_viewers_and_lowers_only_themselves() {
     assert_eq!(r.svc.store.member_access("dan").unwrap(), Some(Access::Admin));
 
     send(&r, &dan, set_cap_req("pad-d", "viewer")).await.expect("their own device lowered");
+    let raised = word(send(&r, &dan, set_cap_req("pad-d", "member")).await);
+    assert!(raised.ends_with("not_yours"), "raising their own device: {raised}");
     send(&r, &dan, set_access_req("dan", "member")).await.expect("themselves lowered");
     assert_eq!(r.svc.store.member_access("dan").unwrap(), Some(Access::Member));
 }
