@@ -129,9 +129,18 @@ final class TranscriptLayout {
         cached = nil
     }
 
-    /// An item laid out at `frame`, in the content's space.
-    func place(_ id: String, _ frame: CGRect) {
-        let width = contentWidth() ?? self.width
+    /// An item laid out at `frame`, in the content's space, which the stack
+    /// laid out `space` wide, padding and all.
+    ///
+    /// The width is the stack's, not the clip's: as the window's width
+    /// changes, the stack lays rows out at the new width and they report a
+    /// pass before the clip takes it. Taken as at the clip's old width, the
+    /// reader's row and those around it were let go when the next row
+    /// reported, and none reported again, their places unchanged: the
+    /// reader's row lost while on screen, and the knob placed from rows
+    /// far from it (ov-842).
+    func place(_ id: String, _ frame: CGRect, in space: CGFloat? = nil) {
+        let width = space.map { $0 - Self.padding * 2 }.flatMap { $0 > 0 ? $0 : nil } ?? contentWidth() ?? self.width
         if abs(width - framesWidth) > 0.5 {
             frames = [:]
             framesWidth = width
@@ -148,6 +157,12 @@ final class TranscriptLayout {
         }
         if id == items.first?.id { head = frame.minY }
         scroller?.needsApply = true
+    }
+
+    /// An item's frame in the content's space, and the content's width.
+    struct Placed: Equatable {
+        var frame: CGRect
+        var space: CGFloat?
     }
 
     /// An item the stack let go of: its height is kept.
@@ -947,9 +962,13 @@ struct TranscriptScrollerInstaller: NSViewRepresentable {
 }
 
 extension View {
-    /// The item's frame, for the scroller's heights (ov-701).
+    /// The item's frame, for the scroller's heights (ov-701), with the
+    /// width the stack laid it out at (ov-842).
     func placed(_ id: String, in layout: TranscriptLayout) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptLayout.space)) } action: { layout.place(id, $0) }
+        onGeometryChange(for: TranscriptLayout.Placed.self) { proxy in
+            let space = NamedCoordinateSpace.named(TranscriptLayout.space)
+            return TranscriptLayout.Placed(frame: proxy.frame(in: space), space: proxy.bounds(of: space)?.width)
+        } action: { layout.place(id, $0.frame, in: $0.space) }
             .onDisappear { layout.drop(id) }
     }
 }
