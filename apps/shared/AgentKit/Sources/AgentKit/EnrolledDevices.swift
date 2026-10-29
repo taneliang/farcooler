@@ -128,6 +128,49 @@ public struct EnrolledDevices: Equatable, Sendable {
         withAdded ? ["clientId": device.clientId, "withAdded": true] : ["clientId": device.clientId]
     }
 
+    /// What a list read came to: the list, or why there isn't one (ov-855).
+    public struct ListRead: Equatable {
+        public let list: EnrolledDevices?
+        public let failure: String?
+    }
+
+    /// Runs `client.list` and keeps a failure instead of dropping it. `sentence`
+    /// turns the thrown error into this app's words.
+    public static func read(
+        _ call: () async throws -> Data, sentence: (Error) -> String
+    ) async -> ListRead {
+        do {
+            guard let list = EnrolledDevices(json: try await call()) else {
+                return ListRead(list: nil, failure: listNotRead)
+            }
+            return ListRead(list: list, failure: nil)
+        } catch {
+            return ListRead(list: nil, failure: sentence(error))
+        }
+    }
+
+    /// What a revoke came to: the list as it now stands, or why it didn't take.
+    public struct RevokeResult: Equatable {
+        public let list: EnrolledDevices?
+        public let failure: String?
+    }
+
+    /// Runs `client.revoke` and says why it failed rather than that it did.
+    public static func revoke(
+        _ call: () async throws -> Data, sentence: (Error) -> String
+    ) async -> RevokeResult {
+        do {
+            guard let list = EnrolledDevices(json: try await call()) else {
+                return RevokeResult(list: nil, failure: notRevoked)
+            }
+            return RevokeResult(list: list, failure: nil)
+        } catch {
+            return RevokeResult(list: nil, failure: sentence(error))
+        }
+    }
+
+    /// A list read that failed. No cause invented, no raw error.
+    public static let listNotRead = "Couldn’t read the list of devices on this runner."
     /// The runner has no one else to list.
     public static let emptySentence = "No other devices have access to this runner."
     /// A revoke the runner didn't take. No cause invented, no raw error.

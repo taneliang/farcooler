@@ -43,6 +43,8 @@ final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var enrolled: EnrolledDevices?
     /// Why the last revoke didn't take, in this app's words, or nil.
     @Published private(set) var revokeFailure: String?
+    /// Why the device list couldn't be read, or nil (ov-855).
+    @Published private(set) var enrolledFailure: String?
     /// Each workspace's name by id, for where a member's rep works.
     @Published private(set) var workspaceNames: [String: String] = [:]
     /// Whether the runner signs a member in to Claude (`claude_sign_in`, ov-584).
@@ -83,27 +85,35 @@ final class RunnerSettingsModel: ObservableObject {
         }
     }
 
-    /// `client.list`. Quiet on a refusal, like the people below: a runner that
-    /// won't list its devices to this phone has nothing to show.
-    private func loadEnrolled() async {
-        guard let data = try? await connection.rpc("client.list") else { return }
-        enrolled = EnrolledDevices(json: data)
+    /// `client.list`. A failure is kept in `enrolledFailure` for the section to
+    /// say, with Try Again (ov-855).
+    func loadEnrolled() async {
+        let connection = self.connection
+        let read = await EnrolledDevices.read(
+            { try await connection.rpc("client.list") },
+            sentence: Self.sentence(for:))
+        enrolled = read.list
+        enrolledFailure = read.failure
     }
 
     /// `client.revoke`, taking the devices it added too when asked (ov-855).
     /// The answer is the list as it now stands; a refusal leaves the list as it
-    /// was and says so in `revokeFailure`.
+    /// was and says why in `revokeFailure`.
     func revoke(_ device: EnrolledDevices.Device, withAdded: Bool) async {
-        guard
-            let data = try? await connection.rpc(
-                "client.revoke", EnrolledDevices.revokeArguments(for: device, withAdded: withAdded)),
-            let updated = EnrolledDevices(json: data)
-        else {
-            revokeFailure = EnrolledDevices.notRevoked
-            return
-        }
-        revokeFailure = nil
-        enrolled = updated
+        let connection = self.connection
+        let result = await EnrolledDevices.revoke(
+            {
+                try await connection.rpc(
+                    "client.revoke", EnrolledDevices.revokeArguments(for: device, withAdded: withAdded))
+            },
+            sentence: Self.sentence(for:))
+        revokeFailure = result.failure
+        if let list = result.list { enrolled = list }
+    }
+
+    /// The runner's reason in plain words, or this screen's own sentence.
+    static func sentence(for error: Error) -> String {
+        ActionFailure(error, title: "", otherwise: EnrolledDevices.notRevoked).sentence
     }
 
     /// `member.list`, on a runner that knows its people. A refusal leaves
@@ -358,6 +368,14 @@ struct RunnerSettingsView: View {
                 EnrolledDevicesSection(
                     devices: enrolled, failure: model.revokeFailure,
                     revoke: { device, withAdded in await model.revoke(device, withAdded: withAdded) })
+            }
+            // Not for a connection below the admin grant: the runner refuses it
+            // the list by design, and the screen already says why (ov-179).
+            if model.mayAdminister, let why = model.enrolledFailure {
+                Section(EnrolledDevices.sectionTitle) {
+                    Text(why).foregroundStyle(.secondary)
+                    Button("Try Again") { Task { await model.loadEnrolled() } }
+                }
             }
             repositoriesSection
 

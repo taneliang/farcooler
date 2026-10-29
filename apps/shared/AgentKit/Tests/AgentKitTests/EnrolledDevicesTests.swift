@@ -115,4 +115,29 @@ private let answer = Data(
         let other = RunnerRefusal.trouble(forWord: "not-found", what: "add_limit", message: "raw", otherwise: "g")
         #expect(other.sentence == RunnerRefusal.notFound.sentence)
     }
+
+    private struct Refused: Error {}
+
+    @Test("A revoke that throws says why and keeps no list")
+    func revokeFailureIsShown() async {
+        let result = await EnrolledDevices.revoke(
+            { throw Refused() }, sentence: { _ in "That device is already gone." })
+        #expect(result.failure == "That device is already gone.")
+        #expect(result.list == nil)
+    }
+
+    @Test("A revoke that works hands back the list and no failure")
+    func revokeWorks() async throws {
+        let result = await EnrolledDevices.revoke({ answer }, sentence: { _ in "no" })
+        #expect(result.failure == nil)
+        #expect(result.list != nil)
+    }
+
+    @Test("A list read that throws says so, and an unreadable answer says it too")
+    func listFailureIsShown() async {
+        let thrown = await EnrolledDevices.read({ throw Refused() }, sentence: { _ in "Offline." })
+        #expect(thrown.failure == "Offline.")
+        let garbled = await EnrolledDevices.read({ Data("nope".utf8) }, sentence: { _ in "x" })
+        #expect(garbled.failure == EnrolledDevices.listNotRead)
+    }
 }

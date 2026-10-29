@@ -1809,7 +1809,7 @@ async fn dispatch(
             // `withAdded` also takes the devices this one added, and those they
             // added in turn (ov-838, ov-855). Absent is false: the one device.
             id => {
-                session.revoke_client(&id, revoke_args::with_added(&args)).await
+                session.revoke_client(&id, revoke_args::with_added(args)).await
             }
         },
 
