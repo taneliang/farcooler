@@ -230,7 +230,7 @@ pub fn verify(alg: &str, public_key: &[u8], step_up: &StepUp, context: &Context)
     if step_up.alg != alg {
         return Err(failed());
     }
-    if !context.host_pins.iter().any(|pin| *pin == step_up.host_pin) {
+    if !context.host_pins.contains(&step_up.host_pin) {
         return Err(DomainError::Conflict { what: "host_pin_mismatch" });
     }
     let key = verifying_key(public_key).map_err(|_| failed())?;
