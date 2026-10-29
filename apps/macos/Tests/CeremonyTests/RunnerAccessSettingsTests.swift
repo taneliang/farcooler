@@ -112,89 +112,109 @@ struct RunnerAccessSettingsTests {
 
     // MARK: - A Mac that isn't the runner (ov-856)
 
-    /// The client core, as a paired Mac's step-up calls it: it answers the lists,
-    /// the statement to sign and the signed action, and remembers every call.
+    /// The client core, as a paired Mac's phone approval calls it: it answers the
+    /// lists, an approval that is pending for `pendingLooks` looks and then
+    /// granted, and the approved action, and remembers every call.
     final class PairedCalls: StepUpCalling, @unchecked Sendable {
         var made: [(method: String, args: [String: Any])] = []
         var refuse: String?
+        var pendingLooks = 2
+        /// What the store's `waitingOnPhone` read at each look.
+        var waitingAtLook: [Bool] = []
+        var waiting: (() async -> Bool)?
+        /// Answers every look with this state instead of waiting for the grant.
+        var always: String?
         struct Refusal: Error { let word: String }
         func call(_ method: String, _ args: [String: Any]) async throws -> Data {
             made.append((method, args))
-            if let refuse, method == "step_up.finish" { throw Refusal(word: refuse) }
+            if let refuse, method == "approval.ask" { throw Refusal(word: refuse) }
             switch method {
             case "member.list":
                 return Data(RunnerAccessSettingsTests.members.replacingOccurrences(of: "\"you\":\"\"", with: "\"you\":\"dan\"").utf8)
             case "client.list": return Data(RunnerAccessSettingsTests.clients.utf8)
-            case "step_up.begin": return Data(#"{"token":"t-1","statement":"c3RhdGVtZW50"}"#.utf8)
+            case "approval.ask": return Data(#"{"id":"a-1","state":"pending","expiresAt":9}"#.utf8)
+            case "approval.status":
+                waitingAtLook.append(await waiting?() ?? false)
+                let granted = made.filter { $0.method == "approval.status" }.count > pendingLooks
+                let state = always ?? (granted ? "granted" : "pending")
+                return Data(#"{"id":"a-1","state":"\#(state)","expiresAt":9}"#.utf8)
             default: return Data("{}".utf8)
             }
         }
         func refusalWord(_ error: Error) -> String? { (error as? Refusal)?.word }
     }
 
-    final class FakeSigner: StepUpSigning, @unchecked Sendable {
-        var prompts: [String] = []
-        var publicKey: Data? { Data(repeating: 4, count: 65) }
-        func makeKey() throws -> Data { publicKey! }
-        func sign(_ statement: Data, reason: String) async throws -> Data {
-            prompts.append(reason)
-            return Data([1])
-        }
-    }
-
     /// A store for a runner the owner's ssh can't reach, but this Mac is paired with.
-    static func pairedStore(_ paired: PairedCalls, _ signer: FakeSigner) -> RunnerSettingsStore {
+    static func pairedStore(_ paired: PairedCalls) -> RunnerSettingsStore {
         let store = RunnerSettingsStore(target: "box")
         store.cliForTesting = { _ in CLI.Result(ok: false, output: "", errors: "Permission denied (publickey).") }
         store.stepUpOpener = { _ in
-            RemoteStepUp(
-                stepUp: StepUp(core: paired, signer: signer, clientId: "mac-d", hostPin: "SHA256:host"), core: paired,
-                clientID: "mac-d")
+            RemoteStepUp(approval: PhoneApproval(core: paired, pause: 1_000_000, looks: 20), core: paired, clientID: "mac-d")
         }
+        paired.waiting = { [weak store] in await MainActor.run { store?.waitingOnPhone ?? false } }
         return store
     }
 
     @Test("A Mac with no shell on the runner reads the people as its paired device")
     func pairedRead() async throws {
-        let store = Self.pairedStore(PairedCalls(), FakeSigner())
+        let store = Self.pairedStore(PairedCalls())
         await store.loadPeople()
         let access = try #require(store.access)
-        #expect(access.yourAccess == .admin && access.thisDevice?.stepUp == .trusted)
+        #expect(access.yourAccess == .admin)
     }
 
-    @Test("Each admin action is one signed request, with Touch ID for exactly that action")
-    func pairedActionsAreSigned() async throws {
+    @Test("The Mac waits for the iPhone, then sends the very request it asked about")
+    func pairedActionWaitsThenCompletes() async throws {
         let paired = PairedCalls()
-        let signer = FakeSigner()
-        let store = Self.pairedStore(paired, signer)
+        let store = Self.pairedStore(paired)
         await store.loadPeople()
         let access = try #require(store.access)
-        let actions = store.accessActions()
         let cosmo = try #require(access.people.first { $0.handle == "cosmo" })
-        await actions.limitToViewer?(cosmo.devices[0])
-        await actions.setAccess?(cosmo, .viewer)
-        await actions.removeDevice?(cosmo.devices[0], false)
-        let begun = paired.made.filter { $0.method == "step_up.begin" }
-        #expect(begun.compactMap { $0.args["method"] as? String } == ["client.set_cap", "member.set_access", "client.revoke"])
-        #expect((begun[0].args["args"] as? [String: Any])?["clientId"] as? String == "phone-c")
-        #expect((begun[0].args["args"] as? [String: Any])?["cap"] as? String == "viewer")
-        #expect(begun[0].args["hostPin"] as? String == "SHA256:host" && begun[0].args["clientId"] as? String == "mac-d")
-        #expect(
-            signer.prompts == [
-                "Limit Cosmos-iPhone on box to Viewer.", "Make Cosmo a Viewer on box.", "Remove Cosmos-iPhone from box.",
-            ], "\(signer.prompts)")
-        #expect(paired.made.filter { $0.method == "step_up.finish" }.count == 3, "each prompt sent its own action")
+        #expect(store.waitingOnPhone == false)
+        await store.accessActions().limitToViewer?(cosmo.devices[0])
+        let methods = paired.made.map(\.method).filter { $0.hasPrefix("approval") }
+        #expect(methods == ["approval.ask", "approval.status", "approval.status", "approval.status", "approval.finish"], "\(methods)")
+        let asked = try #require(paired.made.first { $0.method == "approval.ask" })
+        #expect(asked.args["method"] as? String == "client.set_cap")
+        #expect((asked.args["args"] as? [String: Any])?["clientId"] as? String == "phone-c")
+        #expect((asked.args["args"] as? [String: Any])?["cap"] as? String == "viewer")
+        #expect(paired.waitingAtLook.allSatisfy { $0 } && !paired.waitingAtLook.isEmpty, "the Mac said it was waiting while it waited")
+        #expect(paired.made.last?.method == "member.list" || paired.made.last?.method == "client.list", "and read the people again after")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(store.waitingOnPhone == false && store.failure == nil)
     }
 
-    @Test("A refused signed action is a sentence on the Mac")
+    @Test("This Mac makes no key of its own, and asks no one to approve one")
+    func pairedMacKeepsNoKey() async throws {
+        let store = Self.pairedStore(PairedCalls())
+        await store.loadPeople()
+        let actions = store.accessActions()
+        #expect(actions.asksPhone && actions.allowAdminActions == nil)
+    }
+
+    @Test("An iPhone with no key, or one that said no, is a sentence on the Mac")
     func pairedRefusal() async throws {
         let paired = PairedCalls()
-        let store = Self.pairedStore(paired, FakeSigner())
+        let store = Self.pairedStore(paired)
         await store.loadPeople()
-        paired.refuse = "admin_is_owners"
+        paired.refuse = "no_approver"
         let cosmo = try #require(store.access?.people.first { $0.handle == "cosmo" })
         await store.accessActions().setAccess?(cosmo, .member)
-        #expect(store.failure == "Only the Owner can make someone an Admin.", "\(store.failure ?? "")")
+        #expect(store.failure == "Open Far Cooler on your iPhone and allow admin actions there first.", "\(store.failure ?? "")")
+        #expect(paired.made.contains { $0.method == "approval.finish" } == false, "nothing was sent")
+    }
+
+    @Test("An iPhone that says no sends nothing, and the Mac says so")
+    func pairedDenied() async throws {
+        let paired = PairedCalls()
+        paired.always = "denied"
+        let store = Self.pairedStore(paired)
+        await store.loadPeople()
+        let cosmo = try #require(store.access?.people.first { $0.handle == "cosmo" })
+        await store.accessActions().setAccess?(cosmo, .viewer)
+        #expect(store.failure == "Your iPhone didn’t approve it.", "\(store.failure ?? "")")
+        #expect(paired.made.contains { $0.method == "approval.finish" } == false)
+        #expect(store.waitingOnPhone == false)
     }
 
     // MARK: - Drawn

@@ -167,6 +167,12 @@ public enum StepUpWords {
             "A Viewer’s device can only look. Choose Viewer, or add it as a Member."
         case "wrong_code":
             "That code doesn’t match. Check the other device and try again."
+        case "no_approver":
+            "Open Far Cooler on your iPhone and allow admin actions there first."
+        case "approval_denied":
+            "Your iPhone didn’t approve it."
+        case "approval_expired":
+            "Your iPhone didn’t approve it in time. Try again."
         case "proposal_expired":
             "That request timed out. Ask again on the other device."
         default:

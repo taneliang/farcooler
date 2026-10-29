@@ -7,8 +7,8 @@ import Foundation
 /// `people limit`, `people approve`, `client revoke`), so none of them asks
 /// for a face: this Mac is where the runner's owner is. A runner reached over
 /// ssh as the owner needs none either. A Mac that is not the runner and has no
-/// shell on it (a teammate's, paired at `control`) steps up like a phone does,
-/// with Touch ID once for each action (`MacRemoteStepUp`).
+/// shell on it (a teammate's, paired at `control`) asks the person's iPhone to
+/// approve each action, with Face ID there (`MacRemoteStepUp`, ov-858).
 extension RunnerSettingsStore {
     /// Read the devices behind `members` (`member list --json`) when the
     /// runner records the people's access.
@@ -50,55 +50,40 @@ extension RunnerSettingsStore {
             approve: { [weak self] device in await self?.change(["people", "approve", device.id, device.code]) })
     }
 
-    /// The actions a paired Mac signs, each with Touch ID for exactly that
-    /// action. Limit and Access are offered once this Mac's key is trusted.
+    /// The actions a paired Mac asks its person's iPhone to approve, each for
+    /// exactly that action (ov-858). Nothing here signs: this Mac holds no key.
     private func signedActions(_ remote: RemoteStepUp) -> PeopleAccessActions {
-        let trusted = access?.thisDevice?.stepUp == .trusted
         let runner = target.isEmpty ? "this Mac" : target
         return PeopleAccessActions(
             removeDevice: { [weak self] device, withAdded in
-                let reason = StepUpReason.removeDevice(device.name, alsoRemoving: withAdded ? device.added : 0, runner: runner)
-                await self?.sign("client.revoke", ["clientId": device.id, "withAdded": withAdded], reason, remote)
+                await self?.ask("client.revoke", ["clientId": device.id, "withAdded": withAdded], remote)
             },
-            limitToViewer: trusted
-                ? { [weak self] device in
-                    await self?.sign("client.set_cap", ["clientId": device.id, "cap": "viewer"], StepUpReason.limit(device.name, runner: runner), remote)
-                } : nil,
-            setAccess: trusted
-                ? { [weak self] person, new in
-                    await self?.sign("member.set_access", ["handle": person.handle, "access": new.rawValue], StepUpReason.setAccess(person.name, to: new, runner: runner), remote)
-                } : nil,
+            limitToViewer: { [weak self] device in
+                await self?.ask("client.set_cap", ["clientId": device.id, "cap": "viewer"], remote)
+            },
+            setAccess: { [weak self] person, new in
+                await self?.ask("member.set_access", ["handle": person.handle, "access": new.rawValue], remote)
+            },
             approve: { [weak self] device in
-                await self?.sign("client.approve_step_up", ["clientId": device.id, "code": device.code], StepUpReason.approve(device: device.name), remote)
+                await self?.ask("client.approve_step_up", ["clientId": device.id, "code": device.code], remote)
             },
-            allowAdminActions: { [weak self] in await self?.offerKey(remote) })
+            asksPhone: true)
     }
 
-    /// One signed action, then the list as the runner has it now. A refusal is a
-    /// sentence in `failure`, never the runner's own words.
-    private func sign(_ method: String, _ args: [String: Any], _ reason: String, _ remote: RemoteStepUp) async {
+    /// One action, approved on the iPhone, then the list as the runner has it
+    /// now. While it waits `waitingOnPhone` says so. A refusal is a sentence in
+    /// `failure`, never the runner's own words.
+    private func ask(_ method: String, _ args: [String: Any], _ remote: RemoteStepUp) async {
         let runner = target.isEmpty ? "this Mac" : target
+        let call = Unchecked((remote.approval, args))
+        let flag = Unchecked(self)
         do {
-            let trusted = access?.thisDevice?.stepUp == .trusted
-            let call = Unchecked((remote.stepUp, args))
-            // Off the main actor: the prompt waits for a finger, and the lists are read again after.
-            _ = try await Task.detached { try await call.value.0.perform(method, call.value.1, reason: reason, hasTrustedKey: trusted) }.value
-            failure = nil
-            await loadPeople()
-        } catch let error as StepUpError {
-            failure = StepUpWords.sentence(for: error, runner: runner, device: "Mac")
-        } catch {
-            let word = remote.core.refusalWord(error) ?? Self.word(of: error.localizedDescription)
-            failure = StepUpWords.sentence(forRefusal: word, runner: runner, device: "Mac")
-        }
-    }
-
-    /// Offer this Mac's key for another of the person's devices to approve.
-    private func offerKey(_ remote: RemoteStepUp) async {
-        let runner = target.isEmpty ? "this Mac" : target
-        do {
-            let stepUp = Unchecked(remote.stepUp)
-            shownCode = try await Task.detached { try await stepUp.value.register() }.value
+            // Off the main actor: the wait is as long as the person takes.
+            _ = try await Task.detached {
+                try await call.value.0.perform(method, call.value.1, waiting: { on in
+                    Task { @MainActor in flag.value.waitingOnPhone = on }
+                })
+            }.value
             failure = nil
             await loadPeople()
         } catch let error as StepUpError {
@@ -123,7 +108,7 @@ extension RunnerSettingsStore {
 
     /// The runner's word in a CLI refusal, or "".
     static func word(of said: String) -> String {
-        for word in ["step_up_needed", "key_untrusted", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
+        for word in ["no_approver", "approval_expired", "approval_denied", "step_up_needed", "key_untrusted", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
             return word
         }
         return ""

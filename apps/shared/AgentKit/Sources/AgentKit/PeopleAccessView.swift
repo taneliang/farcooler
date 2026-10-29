@@ -14,14 +14,19 @@ public struct PeopleAccessActions {
     public var approve: ((PeopleAccess.Device) async -> Void)?
     /// Offer this device's own key for approval.
     public var allowAdminActions: (() async -> Void)?
+    /// This device asks the person's iPhone to approve its admin actions
+    /// (ov-858), as a Mac that isn't the runner does: it keeps no key of its own.
+    public var asksPhone: Bool
 
     public init(
         removeDevice: ((PeopleAccess.Device, Bool) async -> Void)? = nil,
         limitToViewer: ((PeopleAccess.Device) async -> Void)? = nil,
         setAccess: ((PeopleAccess.Person, PersonAccess) async -> Void)? = nil,
         approve: ((PeopleAccess.Device) async -> Void)? = nil,
-        allowAdminActions: (() async -> Void)? = nil
+        allowAdminActions: (() async -> Void)? = nil,
+        asksPhone: Bool = false
     ) {
+        self.asksPhone = asksPhone
         self.removeDevice = removeDevice
         self.limitToViewer = limitToViewer
         self.setAccess = setAccess
@@ -40,10 +45,13 @@ public struct PeopleAccessSections: View {
     let actions: PeopleAccessActions
     /// The code this device shows while its own key waits, when it just asked.
     let shownCode: String?
+    /// The iPhone has been asked, and the Mac is waiting for its answer.
+    let waitingOnPhone: Bool
 
     @State private var removing: PeopleAccess.Device?
 
-    public init(access: PeopleAccess, runner: String, actions: PeopleAccessActions, shownCode: String? = nil) {
+    public init(access: PeopleAccess, runner: String, actions: PeopleAccessActions, shownCode: String? = nil, waitingOnPhone: Bool = false) {
+        self.waitingOnPhone = waitingOnPhone
         self.access = access
         self.runner = runner
         self.actions = actions
@@ -81,7 +89,11 @@ public struct PeopleAccessSections: View {
                 }
             }
             if let me = access.thisDevice, access.yourAccess == .owner || access.yourAccess == .admin {
-                ThisDeviceAdminSection(device: me, shownCode: shownCode, actions: actions)
+                if actions.asksPhone {
+                    PhoneApprovesSection(waiting: waitingOnPhone)
+                } else {
+                    ThisDeviceAdminSection(device: me, shownCode: shownCode, actions: actions)
+                }
             }
         }
         .confirmationDialog(
@@ -245,6 +257,34 @@ private struct WaitingRow: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// This Mac's place in admin actions (ov-858): it keeps no key, so the
+/// person's iPhone approves each one, and says so while it waits.
+private struct PhoneApprovesSection: View {
+    let waiting: Bool
+
+    var body: some View {
+        Section {
+            if waiting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(PhoneApprovalWords.waiting)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("phone-approval-waiting")
+            } else {
+                Label("Your iPhone Approves Admin Actions", systemImage: "iphone")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("phone-approval-on")
+            }
+        } header: {
+            Text("This Device")
+        } footer: {
+            Text("Changes to who has access ask your iPhone first. Open Far Cooler there and approve with Face ID.")
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

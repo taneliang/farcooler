@@ -95,7 +95,7 @@ struct RunnerSettingsSheet: View {
                             ? { handle, role in await store.setRole(handle, role) } : nil)
                     // Who may do what, and on which devices (ov-856).
                     if let access = store.access {
-                        PeopleAccessSections(access: access, runner: name, actions: store.accessActions(), shownCode: store.shownCode)
+                        PeopleAccessSections(access: access, runner: name, actions: store.accessActions(), shownCode: store.shownCode, waitingOnPhone: store.waitingOnPhone)
                     }
                     // Whether members share this runner's logins (ov-652).
                     if let logins = people.ownLogins {

@@ -1,4 +1,4 @@
-#if os(iOS) || os(macOS)
+#if os(iOS)
 import Foundation
 import LocalAuthentication
 import Security
@@ -12,6 +12,11 @@ import Security
 ///   with the passcode as the fallback, on the key itself; and each signature
 ///   gets a fresh `LAContext` with no reuse window, so one prompt is one
 ///   action and nothing is remembered between two.
+/// - **iPhone and iPad only (ov-858).** The Mac app is signed ad hoc, with no
+///   `application-identifier` or provisioning profile, so macOS refuses it a
+///   Secure Enclave keychain key. A Mac that isn't the runner asks the
+///   person's iPhone to approve instead (`PhoneApproval`); this type isn't
+///   compiled for macOS, so no Mac path can reach a key it can't have.
 /// - **The Simulator has no enclave.** There the key is an ordinary keychain
 ///   key with no prompt, so the flows can be driven; a device never takes
 ///   that path.
@@ -45,9 +50,6 @@ public final class SecureEnclaveStepUpSigner: StepUpSigning, @unchecked Sendable
         else { throw StepUpError.noPasscode }
         privateAttributes[kSecAttrAccessControl as String] = control
         attributes[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave
-        #endif
-        #if os(macOS)
-        attributes[kSecUseDataProtectionKeychain as String] = true
         #endif
         attributes[kSecPrivateKeyAttrs as String] = privateAttributes
         var made: Unmanaged<CFError>?
@@ -92,9 +94,6 @@ public final class SecureEnclaveStepUpSigner: StepUpSigning, @unchecked Sendable
             quiet.interactionNotAllowed = true
             query[kSecUseAuthenticationContext as String] = quiet
         }
-        #if os(macOS)
-        query[kSecUseDataProtectionKeychain as String] = true
-        #endif
         var found: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess else { return nil }
         // swiftlint:disable:next force_cast
@@ -104,9 +103,6 @@ public final class SecureEnclaveStepUpSigner: StepUpSigning, @unchecked Sendable
     /// Forget the key (a device removed from its runner, or a reset).
     public func deleteKey() {
         var query: [String: Any] = [kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: tag]
-        #if os(macOS)
-        query[kSecUseDataProtectionKeychain as String] = true
-        #endif
         SecItemDelete(query as CFDictionary)
     }
 }

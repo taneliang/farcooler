@@ -147,3 +147,36 @@ impl Session {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    fn revoke() -> Vec<u8> {
+        action_bytes(&build("client.revoke", &serde_json::json!({ "clientId": "pad-b", "withAdded": true })).unwrap())
+    }
+
+    /// What the phone shows is read from the bytes it signs, and the statement
+    /// it signs is the runner's, for the asking Mac.
+    #[test]
+    fn the_phone_shows_and_signs_the_bytes_it_was_given() {
+        let state = ApprovalState { id: "a1".into(), action_bytes: revoke().into(), nonce: vec![9; 32].into(), device_id: "mac-d".into(), ..Default::default() };
+        let item = item_json(&state, "SHA256:pin").expect("a plain admin request");
+        assert_eq!(item["action"], serde_json::json!({ "method": "client.revoke", "detail": { "clientId": "pad-b", "withAdded": true } }));
+        let digest: [u8; 32] = Sha256::digest(revoke()).into();
+        let expected = farcooler_protocol::step_up_statement("SHA256:pin", "mac-d", &digest, &[9; 32]);
+        assert_eq!(item["statement"], farcooler_core::base64::encode(&expected));
+    }
+
+    /// Bytes that aren't a plain admin request, or aren't the way a runner
+    /// writes one, are never shown.
+    #[test]
+    fn bytes_that_are_not_a_plain_admin_request_are_not_shown() {
+        let mut padded = revoke();
+        padded.extend_from_slice(&[0xf8, 0x01, 0x01]);
+        assert!(describe(&padded).is_none(), "an unknown field");
+        assert!(describe(&action_bytes(&farcooler_transport::request("daemon.shutdown"))).is_none(), "no payload");
+        assert!(describe(&[0xff, 0xff]).is_none(), "not a request");
+    }
+}

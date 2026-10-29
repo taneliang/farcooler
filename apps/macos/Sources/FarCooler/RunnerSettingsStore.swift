@@ -49,12 +49,15 @@ final class RunnerSettingsStore: ObservableObject {
     func setPeople(_ new: RunnerPeople?) { people = new }
     /// The runner reached as this Mac's paired device, when the owner's ssh
     /// can't answer and this Mac is paired with it (ov-856): its admin actions
-    /// are then signed with Touch ID. Nil otherwise.
+    /// are then approved on the person's iPhone (ov-858). Nil otherwise.
     var remote: RemoteStepUp?
     /// Opens that connection. A test answers it.
     var stepUpOpener: (String) async -> RemoteStepUp? = { await MacRemoteStepUp.open(target: $0) }
     /// The six digits this Mac shows while its own key waits for an approval.
     @Published var shownCode: String?
+    /// An action has been asked of the person's iPhone, and this Mac waits for
+    /// the answer (ov-858).
+    @Published var waitingOnPhone = false
     /// The owner's warning that their shell's startup files export a Claude
     /// key (ov-651), worded by the runner, or nil: none set, no members, or a
     /// runner from before.
