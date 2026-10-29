@@ -76,11 +76,14 @@ struct TranscriptJumpTests {
         /// Asked and not yet applied: what the clip moves by next.
         private(set) var owed: CGFloat = 0
         private var before: [String: CGRect]
+        /// Whether the last tick shared a row with the one before.
+        private(set) var shared = true
 
         init(_ shown: [String: CGRect]) { before = shown }
 
         mutating func add(asked asking: CGFloat, clip: CGFloat, resized: Bool = false, shown now: [String: CGRect]) {
             let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
+            shared = !moves.isEmpty
             // Scrolled up, the clip's origin falls and the rows move down.
             moved += !moves.isEmpty ? moves[moves.count / 2] : resized ? -owed : -clip
             // Never from the rows' move, so a jump isn't owed back later.
@@ -111,6 +114,9 @@ struct TranscriptJumpTests {
         /// The frames where the knob moved more than 2% beyond the scroll:
         /// what moved, for a failure's message.
         var over: [String] = []
+        /// The ticks that shared no row with the one before, or resized the
+        /// content: where a loss comes from, for a failure's message.
+        var trace: [String] = []
     }
 
     /// Where the scroller draws its knob's top, as a share of its track:
@@ -138,6 +144,7 @@ struct TranscriptJumpTests {
             var placeWas = Self.knob(scroll)
             var originWas = scroll.contentView.bounds.minY
             var over: [String] = []
+            var trace: [String] = []
             func track(_ asking: CGFloat) {
                 let doc = scroll.documentView?.frame.height ?? 0
                 let owed = tally.owed
@@ -170,6 +177,12 @@ struct TranscriptJumpTests {
                         ours?.onScreen == false ? " off screen" : "", driver?.aimed.map { String(format: "%.4f", $0) } ?? "none",
                         docWas, doc, originWas, scroll.contentView.bounds.minY, LiveScroll.scrolls(scroll) ? "yes" : "no"))
                 }
+                if !tally.shared || doc != docWas {
+                    trace.append(String(
+                        format: "tick %d asked %.0f owed %.0f clip %.0f doc %.0f>%.0f shared %@ lost %.0f",
+                        fling.stamps.count, asking, owed, scroll.contentView.bounds.minY - originWas, docWas, doc,
+                        tally.shared ? "yes" : "no", tally.lost))
+                }
                 resized = max(resized, abs(doc - docWas))
                 docWas = doc
                 placeWas = place
@@ -190,7 +203,7 @@ struct TranscriptJumpTests {
             await T.settle(window, 200)  // capture-exempt: not a capture; the clip catching up with the fling's last frames
             track(0)
             let top = scroll.contentView.bounds.origin.y < -scroll.contentInsets.top + 200
-            flung.append(Flung(velocity: velocity, lost: tally.lost, top: top, knob: knob, resized: resized, over: over))
+            flung.append(Flung(velocity: velocity, lost: tally.lost, top: top, knob: knob, resized: resized, over: over, trace: trace))
         }
         print("ov-699: " + flung.map {
             String(format: "%.0f pt/s lost %.0f knob %.1f%% resized %.0f%@", $0.velocity, $0.lost, $0.knob * 100, $0.resized, $0.top ? " (top)" : "")
@@ -281,7 +294,7 @@ struct TranscriptJumpTests {
         let flung = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (4, 150))
         let fling = try #require(flung.first)
         #expect(!fling.top, "the fling reached the first row: this checked nothing")
-        #expect(abs(fling.lost) <= 12, "a late tick read as a \(Int(fling.lost)) pt jump")
+        #expect(abs(fling.lost) <= 12, "a late tick read as a \(Int(fling.lost)) pt jump: \(fling.trace.suffix(12).joined(separator: "; "))")
     }
 
     /// A fling ends when its next move would pass the first row. That
