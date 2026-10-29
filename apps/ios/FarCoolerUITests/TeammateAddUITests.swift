@@ -63,7 +63,7 @@ final class TeammateAddUITests: XCTestCase {
         XCTAssertTrue(blocked.exists, app.debugDescription)
         XCTAssertFalse(blocked.isEnabled, "a runner this phone can't add a teammate on was tickable")
         XCTAssertTrue(
-            app.staticTexts["Only an Owner or an Admin can add people to gpu-workstation."].exists,
+            app.staticTexts["Only the Owner or an Admin can add people to gpu-workstation."].exists,
             "the row didn't say why: \(app.debugDescription)")
         XCTAssertTrue(element(app, "teammate-runner-build-box").isEnabled)
     }

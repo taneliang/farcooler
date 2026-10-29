@@ -58,7 +58,7 @@ struct TeammateAccessTests {
         let owner = try Self.facts(you: "", device: "phone-o")
         let member = try Self.facts(you: "bob", device: "phone-b")
         #expect(TeammateAccessRules.blocked(owner, runner: "studio") == nil)
-        #expect(TeammateAccessRules.blocked(member, runner: "studio") == "Only an Owner or an Admin can add people to studio.")
+        #expect(TeammateAccessRules.blocked(member, runner: "studio") == "Only the Owner or an Admin can add people to studio.")
         #expect(TeammateAccessRules.blocked(nil, runner: "studio") == "Update Far Cooler on studio to add people from here.")
     }
 
@@ -112,7 +112,7 @@ struct TeammateAccessTests {
                 == "Only the Owner can make someone an Admin.")
         #expect(
             TeammateAccessRules.refusal("not_admin", runner: "studio", device: "iPhone")
-                == "Only an Owner or an Admin can add people to studio.")
+                == "Only the Owner or an Admin can add people to studio.")
         #expect(StepUpReason.limit("Cy’s iPad", runner: "studio") == "Limit Cy’s iPad on studio to Viewer.")
         let bob = ExistingPerson(handle: "bob", name: "Bob", access: .member)
         #expect(TeammateAccessRules.keeps(bob, runner: "studio") == "Bob is already on studio as a Member, and keeps that access.")
