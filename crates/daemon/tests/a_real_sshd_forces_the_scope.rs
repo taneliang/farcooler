@@ -276,7 +276,7 @@ async fn client_ids(
     runner: &Runner,
     admin: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
 ) -> Vec<String> {
-    let result = within(&runner, "admin call", admin.call(request("client.list"))).await.expect("client.list");
+    let result = within(runner, "admin call", admin.call(request("client.list"))).await.expect("client.list");
     let Some(result::Value::ClientList(list)) = result.value else { panic!("wrong result") };
     list.items.into_iter().map(|c| c.client_id).collect()
 }
