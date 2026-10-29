@@ -216,8 +216,8 @@ extension NativeSelectionTests {
         /// times its real height. Let go at that height, it threw the knob
         /// off for good: 0.4794 for a true 0.4998. It goes back to the last
         /// height taken at a settled width (ov-842). Driven by hand.
-        @Test("A row let go with a height taken mid-resize goes back to its settled height")
-        func aHeightTakenMidResizeIsNotKept() async throws {
+        @Test("A row let go with a height taken mid-resize goes back to its settled height", arguments: [NSScroller.Style.overlay, .legacy])
+        func aHeightTakenMidResizeIsNotKept(style: NSScroller.Style) async throws {
             let store = AgentRowStore(key: "scroller-\(UUID())", cache: nil)
             store.apply(try await store.ledger.page(T.page(RealSession.rows(200, of: 200))))
             try #require(store.items.count >= 120, "the session has \(store.items.count) items")
@@ -231,6 +231,7 @@ extension NativeSelectionTests {
                 window.isReleasedWhenClosed = false
                 let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
                 scroll.hasVerticalScroller = true
+                scroll.scrollerStyle = style
                 scroll.automaticallyAdjustsContentInsets = false
                 let doc = FlippedView(frame: NSRect(x: 0, y: 0, width: 720, height: 30_000))
                 scroll.documentView = doc
@@ -244,14 +245,17 @@ extension NativeSelectionTests {
                 defer { driver.detach() }
 
                 let built = (100..<108).map { store.items[$0].id }
-                func report(_ width: CGFloat) {
+                /// The stack lays rows out at the clip's width, which a legacy
+                /// scroller takes 15 pt off the window's.
+                func report() {
+                    let width = scroll.contentView.bounds.width
                     for (k, id) in built.enumerated() {
                         layout.place(id, CGRect(x: pad, y: 12_000 + CGFloat(k) * (120 + Spacing.inset), width: width - pad * 2, height: 120), in: width)
                     }
                 }
                 let above = store.items[50].id
-                layout.place(above, CGRect(x: pad, y: 5_000, width: 720 - pad * 2, height: 120), in: 720)
-                report(720)
+                layout.place(above, CGRect(x: pad, y: 5_000, width: 720 - pad * 2, height: 120), in: scroll.contentView.bounds.width)
+                report()
                 scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200))
                 driver.apply()
                 _ = layout.knob(scroll)
@@ -261,7 +265,7 @@ extension NativeSelectionTests {
                 }
                 scroll.setFrameSize(NSSize(width: 600, height: 900))
                 doc.setFrameSize(NSSize(width: 600, height: 30_000))
-                report(600)
+                report()
                 return try #require(layout.knob(scroll), "no knob").place
             }
             let settled = try place(transient: nil)
