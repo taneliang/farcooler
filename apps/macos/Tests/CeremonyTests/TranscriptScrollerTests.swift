@@ -212,6 +212,63 @@ extension NativeSelectionTests {
             #expect(knob.onScreen, "the knob was placed from a row off screen")
         }
 
+        /// A row laid out in a transient pass of a resize can be several
+        /// times its real height. Let go at that height, it threw the knob
+        /// off for good: 0.4794 for a true 0.4998. It goes back to the last
+        /// height taken at a settled width (ov-842). Driven by hand.
+        @Test("A row let go with a height taken mid-resize goes back to its settled height")
+        func aHeightTakenMidResizeIsNotKept() async throws {
+            let store = AgentRowStore(key: "scroller-\(UUID())", cache: nil)
+            store.apply(try await store.ledger.page(T.page(RealSession.rows(200, of: 200))))
+            try #require(store.items.count >= 120, "the session has \(store.items.count) items")
+            let pad = TranscriptLayout.padding
+
+            /// The clip's place in our heights after a row above the reader
+            /// is let go, having been laid out `transient` tall while the
+            /// clip was still 720 wide, and the clip then narrows to 600.
+            func place(transient: CGFloat?) throws -> CGFloat {
+                let window = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: 720, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
+                scroll.hasVerticalScroller = true
+                scroll.automaticallyAdjustsContentInsets = false
+                let doc = FlippedView(frame: NSRect(x: 0, y: 0, width: 720, height: 30_000))
+                scroll.documentView = doc
+                window.contentView = scroll
+                TestWindow.show(window)
+                defer { window.close() }
+                let layout = TranscriptLayout(store: store, spacing: Spacing.inset)
+                let driver = TranscriptScroller(layout: layout)
+                layout.scroller = driver
+                driver.attach(scroll)
+                defer { driver.detach() }
+
+                let built = (100..<108).map { store.items[$0].id }
+                func report(_ width: CGFloat) {
+                    for (k, id) in built.enumerated() {
+                        layout.place(id, CGRect(x: pad, y: 12_000 + CGFloat(k) * (120 + Spacing.inset), width: width - pad * 2, height: 120), in: width)
+                    }
+                }
+                let above = store.items[50].id
+                layout.place(above, CGRect(x: pad, y: 5_000, width: 720 - pad * 2, height: 120), in: 720)
+                report(720)
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200))
+                driver.apply()
+                _ = layout.knob(scroll)
+                if let transient {
+                    layout.place(above, CGRect(x: pad, y: 5_000, width: 388 - pad * 2, height: transient), in: 388)
+                    layout.drop(above)
+                }
+                scroll.setFrameSize(NSSize(width: 600, height: 900))
+                doc.setFrameSize(NSSize(width: 600, height: 30_000))
+                report(600)
+                return try #require(layout.knob(scroll), "no knob").place
+            }
+            let settled = try place(transient: nil)
+            let after = try place(transient: 400)
+            #expect(abs(after - settled) < 1, "the clip's place moved \(after - settled) pt for a row's height taken mid-resize")
+        }
+
         /// The stack sizes its content again and moves the clip with it,
         /// and the rows haven't yet reported where they went: the knob,
         /// read from rows the clip has left, is held where it was. Once the

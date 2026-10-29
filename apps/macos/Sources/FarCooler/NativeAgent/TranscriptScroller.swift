@@ -51,6 +51,10 @@ final class TranscriptLayout {
     private var shapes: [String: Shape] = [:]
     /// Heights as laid out, by item id, and the width they were laid out at.
     private var measured: [String: (height: CGFloat, width: CGFloat)] = [:]
+    /// The last height reported while the clip was at the width it was laid
+    /// out at: what `measured` goes back to if the stack lets the row go
+    /// while its newer height was taken mid-resize (ov-842).
+    private var steady: [String: (height: CGFloat, width: CGFloat)] = [:]
     /// The transcript's width the sums below were made at.
     private var width: CGFloat = 0
     /// Each item's height and the spacing after it, at `width`, and their
@@ -149,6 +153,7 @@ final class TranscriptLayout {
         cached = nil
         if measured[id].map({ abs($0.height - frame.height) > 0.25 || abs($0.width - width) > 0.5 }) ?? true {
             measured[id] = (frame.height, width)
+            if let clip = contentWidth(), abs(clip - width) <= 0.5 { steady[id] = (frame.height, width) }
             // Its own entry, if the sums are at this width; otherwise they
             // are built again on the next ask.
             if built, abs(width - self.width) <= 0.5, let i = index[id] {
@@ -165,9 +170,17 @@ final class TranscriptLayout {
         var space: CGFloat?
     }
 
-    /// An item the stack let go of: its height is kept.
+    /// An item the stack let go of: its height is kept, unless it was taken
+    /// mid-resize, at a width the clip never held (a row laid out in a
+    /// transient pass can be several times its real height): then the last
+    /// height taken at a settled width comes back, or, with none, the
+    /// estimate (ov-842).
     func drop(_ id: String) {
         frames[id] = nil
+        if let m = measured[id], let clip = contentWidth(), abs(m.width - clip) > 0.5, steady[id].map({ $0.width != m.width }) ?? true {
+            measured[id] = steady[id]
+            built = false
+        }
         cached = nil
         scroller?.needsApply = true
     }
