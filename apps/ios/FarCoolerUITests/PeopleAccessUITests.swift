@@ -123,4 +123,33 @@ final class PeopleAccessUITests: XCTestCase {
             "a terminal opened under the lock: \(app.debugDescription)")
         XCTAssertTrue(element(app, "app-lock").exists, "the lock went away")
     }
+
+    /// **A terminal already open is covered when the lock engages** (ov-856,
+    /// §3a), the case a plain overlay lost: the terminal's cover sat above it.
+    /// The link opens the terminal at launch (the simulator has no passcode, so
+    /// the launch unlocks), the app goes away, and `-appLockIdle 3` makes three
+    /// seconds the limit. On return the lock shows and the terminal does not.
+    func testATerminalAlreadyOpenIsCoveredWhenTheLockEngages() {
+        let app = XCUIApplication.phoneHarness(["-appLock", "YES", "-appLockHoldResume", "-appLockIdle", "3", "-deep-link", "0198f2c0-0000-7000-8000-00000000d002"])
+        let back = app.buttons["worktree-back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 30), "no terminal to cover: \(app.debugDescription)")
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 5)
+        app.activate()
+        let lock = element(app, "app-lock")
+        XCTAssertTrue(lock.waitForExistence(timeout: 15), "no lock on return: \(app.debugDescription)")
+        XCTAssertTrue(lock.isHittable, "the lock is not on top: \(app.debugDescription)")
+        XCTAssertFalse(back.isHittable, "the terminal's Back is reachable under the lock")
+    }
+
+    /// **A kept terminal does not reopen under the lock** (ov-856, §3a). The
+    /// last run was in a worktree; the lock is held at launch. The place is
+    /// kept for the unlock, and no terminal is opened before it.
+    func testARestoredTerminalWaitsBehindTheLock() {
+        let app = XCUIApplication.phoneHarness(["-appLock", "YES", "-appLockHold", "-phone-reopen-worktree"])
+        XCTAssertTrue(element(app, "app-lock").waitForExistence(timeout: 30), "no lock: \(app.debugDescription)")
+        XCTAssertFalse(
+            app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 8),
+            "the kept terminal opened under the lock: \(app.debugDescription)")
+    }
 }

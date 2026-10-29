@@ -56,6 +56,7 @@ struct AppLockGate: ViewModifier {
     @ObservedObject private var center = AppLockCenter.shared
     @State private var asking = false
     @State private var declined = false
+    @State private var unlockedOnce = false
     @State private var window = LockWindow()
 
     func body(content: Content) -> some View {
@@ -64,7 +65,7 @@ struct AppLockGate: ViewModifier {
                 switch now {
                 case .background:
                     center.lock.isOn = AppLockSetting.isOn
-                    center.lock.didLeave(at: .now)
+                    center.lock.didLeave(at: Self.leftAt())
                 case .active:
                     center.lock.didReturn(at: .now)
                     if center.lock.isLocked { attempt() }
@@ -93,13 +94,41 @@ struct AppLockGate: ViewModifier {
         }
     }
 
+    /// When the app left. A UI test can't wait five minutes: `-appLockIdle N`
+    /// makes N seconds away count as the limit.
+    private static func leftAt() -> Date {
+        #if DEBUG
+        if let raw = UserDefaults.standard.string(forKey: "appLockIdle"), let seconds = Double(raw) {
+            return Date.now.addingTimeInterval(seconds - AppLock.idleLimit)
+        }
+        #endif
+        return .now
+    }
+
     private func attempt() {
         guard !asking else { return }
         #if DEBUG
         // A UI test that must see the lock stay up: no face to give it.
-        if CommandLine.arguments.contains("-appLockHold") { return }
+        // `-appLockHoldResume` opens the launch with no face, two seconds in
+        // (after the scene's first activation, which locks a launch that has
+        // no record of leaving), and holds every lock after.
+        let args = CommandLine.arguments
+        if args.contains("-appLockHold") { return }
+        if args.contains("-appLockHoldResume") {
+            if !unlockedOnce, !asking {
+                asking = true
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    asking = false
+                    unlockedOnce = true
+                    center.lock.unlock()
+                }
+            }
+            return
+        }
         #endif
         guard AppLockAuth.canAsk else {
+            unlockedOnce = true
             center.lock.unlock()
             return
         }
@@ -108,7 +137,10 @@ struct AppLockGate: ViewModifier {
             let opened = await AppLockAuth.ask()
             asking = false
             declined = !opened
-            if opened { center.lock.unlock() }
+            if opened {
+                unlockedOnce = true
+                center.lock.unlock()
+            }
         }
     }
 }

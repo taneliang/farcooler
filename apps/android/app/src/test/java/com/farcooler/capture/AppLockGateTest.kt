@@ -57,11 +57,12 @@ class AppLockGateTest {
         check: (steps: Steps) -> Unit,
     ) {
         val asked = mutableListOf<Int>()
+        recents.clear()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity {
                 it.setContent {
                     FarCoolerTheme {
-                        AppLockGate(on = on, canAsk = { canAsk }, ask = { asked += 1; answers.getOrElse(asked.size - 1) { false } }) { Text("the runners", Modifier.testTag("the-runners")) }
+                        AppLockGate(on = on, canAsk = { canAsk }, ask = { asked += 1; answers.getOrElse(asked.size - 1) { false } }, hideRecents = { _, hidden -> recents += hidden }) { Text("the runners", Modifier.testTag("the-runners")) }
                     }
                 }
             }
@@ -69,6 +70,8 @@ class AppLockGateTest {
             check(Steps(scenario, asked))
         }
     }
+
+    private val recents = mutableListOf<Boolean>()
 
     private class Steps(val scenario: ActivityScenario<ComponentActivity>, val asked: List<Int>)
 
@@ -109,5 +112,15 @@ class AppLockGateTest {
     fun `turned off in Settings it never covers the app`() = withGate(on = false, canAsk = true, answers = emptyList()) { s ->
         assertNull(tagged(s.root(), "app-lock"))
         assertTrue(s.asked.isEmpty())
+    }
+
+    @Test
+    fun `Recents is blanked from the first frame while the lock is on`() = withGate(on = true, canAsk = true, answers = listOf(true)) { _ ->
+        assertEquals("hidden once the gate is up, not when it locks", listOf(true), recents)
+    }
+
+    @Test
+    fun `Recents is left alone when the lock is off`() = withGate(on = false, canAsk = true, answers = emptyList()) { _ ->
+        assertEquals(listOf(false), recents)
     }
 }

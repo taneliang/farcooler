@@ -84,6 +84,7 @@ fun AppLockGate(
     now: () -> Long = System::currentTimeMillis,
     canAsk: (Context) -> Boolean = AppLockAuth::canAsk,
     ask: suspend (Context) -> Boolean = AppLockAuth::ask,
+    hideRecents: (android.app.Activity?, Boolean) -> Unit = { activity, hidden -> activity?.setRecentsScreenshotEnabled(!hidden) },
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -131,12 +132,15 @@ fun AppLockGate(
     }
     LaunchedEffect(Unit) { if (lock.isLocked) attempt() }
 
-    // Recents shows no terminal while locked.
+    // Recents shows no terminal. The snapshot is taken at ON_STOP, before the lock engages at the next ON_START, so
+    // the gate cannot wait for `locked`: it holds for as long as the lock is on. `setRecentsScreenshotEnabled(false)`
+    // over FLAG_SECURE because it blanks only the Recents thumbnail; FLAG_SECURE would also block the person's own
+    // screenshots and screen sharing for a whole session. It needs API 33, and `minSdk` is 37.
     val activity = context as? android.app.Activity
     val covered = locked && on
-    DisposableEffect(covered) {
-        if (covered) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { if (covered) activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+    DisposableEffect(on) {
+        hideRecents(activity, on)
+        onDispose { hideRecents(activity, false) }
     }
 
     Box(Modifier.fillMaxSize()) {

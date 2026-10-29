@@ -96,7 +96,7 @@ final class PhoneNavigator: ObservableObject {
     /// Whether the launch has been decided. Once, and never again.
     var decided = false
     /// When the launch began, for `PhoneLaunch.decideWithin`.
-    let began = Date()
+    var began = Date()
 
     /// The stack as `PhoneLaunch.stackKey` keeps it: the pushed screens,
     /// then the sheet's, or the worktree over them.
@@ -471,7 +471,11 @@ struct PhoneRoot: View {
         .task(id: waiting?.id) { await follow() }
         .onChange(of: fleet.needsYouReadings) { _, _ in decideLaunch() }
         .onChange(of: pendingDestination) { _, _ in takeArrival() }
-        .onChange(of: appLock.lock.isLocked) { _, _ in takeArrival() }
+        .onChange(of: appLock.lock.isLocked) { _, locked in
+            if !locked, !navigator.decided { navigator.began = Date() }
+            takeArrival()
+            decideLaunch()
+        }
     }
 
     /// Whether `place`'s Plan is a sheet over its conversation (ov-616): on
@@ -497,6 +501,9 @@ struct PhoneRoot: View {
     /// `PhoneLaunch.decide` says.
     private func decideLaunch() {
         guard !navigator.decided, waiting == nil else { return }
+        // Locked: a kept stack's terminal would connect under the lock, so
+        // the restore waits, and its clock starts when the lock opens.
+        guard appLock.lock.admits(.terminal) else { return }
         let saved = PhoneLaunch.decode(UserDefaults.standard.data(forKey: PhoneLaunch.stackKey))
         if let kept = Destination(phoneStack: saved) {
             waiting = PhoneWaiting(destination: kept, arrival: .restore, stack: saved)
@@ -563,6 +570,13 @@ struct PhoneRoot: View {
     /// opens late, over something somebody has gone on to read.
     private func follow() async {
         while let current = waiting, !Task.isCancelled {
+            if !appLock.lock.admits(.terminal) {
+                // Engaged after this was taken up: nothing opens until it
+                // opens, and the deadline starts over then.
+                waiting?.began = Date()
+                try? await Task.sleep(for: .milliseconds(500))
+                continue
+            }
             let sources = destinationSources()
             let deadline =
                 current.arrival == .restore
@@ -668,7 +682,7 @@ struct PhoneWaiting: Identifiable, Equatable {
     /// The stack a relaunch kept, whole, for `follow` to reopen when its
     /// deepest screen is still there.
     let stack: [PhoneRoute]?
-    let began = Date()
+    var began = Date()
 
     init(destination: Destination, arrival: DestinationResolver.Arrival, stack: [PhoneRoute]? = nil) {
         self.destination = destination
