@@ -198,6 +198,12 @@ fn main() {
                     }),
                 )],
                 ("terminal.resize", _) => vec![support::answer(&req, result::Value::Empty(Empty {}))],
+                // The page's liveness probe (ov-772): a link that never
+                // answers it is given up on after nine quiet seconds.
+                ("daemon.version", _) => vec![support::answer(
+                    &req,
+                    result::Value::DaemonVersion(farcooler_protocol::v1::DaemonVersion { daemon_version: "fake".into(), ..Default::default() }),
+                )],
                 (other, _) => panic!("the fake daemon doesn't know {other}"),
             },
             _ => continue,

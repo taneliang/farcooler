@@ -1453,3 +1453,9 @@ jobs:
       # attaching when the check types: keystrokes typed then must be held
       # and sent, never dropped (train 307 found them dropped on this runner).
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
+      # A tab that sleeps (ov-840): idle past the probe's nine seconds, hidden
+      # and woken after 1 and 10 minutes on the page's clock, with the tunnel
+      # alive (no help needed) and dead (the notice within 5 s of waking, one
+      # touch back to a working pane). Chromium only here; WebKit passes the
+      # same cases locally (--engines webkit).
+      - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium
