@@ -174,23 +174,6 @@ fn verifying_key(public_key: &[u8]) -> std::result::Result<VerifyingKey, ()> {
     VerifyingKey::from_sec1_bytes(public_key).map_err(|_| ())
 }
 
-/// The fingerprints (`SHA256:...`) of the sshd host keys in `dir`, which a
-/// step-up's statement must name one of (S1). Empty when none can be read; a
-/// step-up is then refused rather than guessed. Ed25519 keys only, the kind
-/// the daemon's `ssh-key` reads.
-pub fn host_pins(dir: &std::path::Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut pins: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("ssh_host_") && e.file_name().to_string_lossy().ends_with("_key.pub"))
-        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-        .filter_map(|text| ssh_key::PublicKey::from_openssh(text.trim()).ok())
-        .map(|key| key.fingerprint(ssh_key::HashAlg::Sha256).to_string())
-        .collect();
-    pins.sort();
-    pins
-}
-
 fn failed() -> DomainError {
     DomainError::Conflict { what: "step_up_failed" }
 }
@@ -313,7 +296,7 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         return Err(DomainError::Conflict { what: "challenge_expired" });
     }
     let executed = signed_request(&req, &step_up.action_bytes)?;
-    let pins = host_pins(&svc.ssh_host_dir);
+    let pins = svc.host_pins();
     if pins.is_empty() {
         return Err(DomainError::Conflict { what: "step_up_unavailable" });
     }

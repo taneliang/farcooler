@@ -81,7 +81,9 @@ pub struct Rpc {
     caller_pid: Option<i32>,
     /// The pane that pid runs in, once found (`RpcFactory::caller_pane`).
     caller_pane: Arc<std::sync::OnceLock<Uuid>>,
-    /// The step-up this request carried, once checked (ov-856); never `peer`'s scope (B2).
+    /// The step-up this request carried, once checked (ov-856): the signature
+    /// covered exactly this request. Never the connection's scope: `peer`
+    /// keeps what its line grants (B2).
     stepped: std::sync::OnceLock<crate::step_up::Stepped>,
 }
 
@@ -675,9 +677,15 @@ impl Handler for Rpc {
 
     async fn handle(&self, req: Request) -> Response {
         let request_id = req.request_id.clone();
-        // A step-up is checked first; what runs is the request it covers (ov-856, S1).
-        let req = match self.admitted(req).await {
-            Ok(req) => req,
+        // A step-up is checked first, and what runs is the request its
+        // signature covers (ov-856, S1).
+        let req = match crate::step_up::admit(&self.service, &self.peer, &self.session, req, crate::step_up_rpc::now_ms()).await {
+            Ok((req, stepped)) => {
+                if let Some(stepped) = stepped {
+                    let _ = self.stepped.set(stepped);
+                }
+                req
+            }
             Err(err) => return error_response(request_id, err),
         };
         let enrolling = crate::enrollment::Attempt::of(&req, &self.peer); // logged asked and answered (ov-828)
@@ -694,7 +702,7 @@ impl Handler for Rpc {
             None => Err(DomainError::CapabilityUnsupported {
                 needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
             }),
-            Some(required) if !satisfies(self.peer.scope, required) && !crate::step_up::may_admin(&self.service.store, &self.peer, self.stepped.get(), &req.method).unwrap_or(false) => Err(DomainError::ScopeDenied { needed: scope_name(required) }),
+            Some(required) if !satisfies(self.peer.scope, required) && !self.may_admin(&req.method) => Err(DomainError::ScopeDenied { needed: scope_name(required) }),
             // The envelope's capability precondition, checked here beside scope
             // and before any domain logic — the same rule the target id and
             // expected version follow, and for the same reason.
@@ -728,13 +736,11 @@ impl Handler for Rpc {
 }
 
 impl Rpc {
-    /// The request to run, once its step-up (if any) is checked (`step_up::admit`).
-    async fn admitted(&self, req: Request) -> Result<Request> {
-        let (req, stepped) = crate::step_up::admit(&self.service, &self.peer, &self.session, req, crate::step_up_rpc::now_ms()).await?;
-        if let Some(stepped) = stepped {
-            let _ = self.stepped.set(stepped);
-        }
-        Ok(req)
+    /// Whether this request's step-up lets a `control` line past the gate for
+    /// `method` (`step_up::may_admin`). The gate is the only place it widens
+    /// anything: the handlers see the line's own scope.
+    fn may_admin(&self, method: &str) -> bool {
+        crate::step_up::may_admin(&self.service.store, &self.peer, self.stepped.get(), method).unwrap_or(false)
     }
 
     /// The first capability this daemon does not have, if the request names one.
@@ -1995,7 +2001,15 @@ impl Rpc {
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
             // Step-up (ov-856): `step_up_rpc`.
-            "auth.challenge" | "client.set_step_up_key" | "client.approve_step_up" => crate::step_up_rpc::dispatch(svc, &self.peer, self.caller_pid, &self.session, self.stepped.get(), req).await,
+            "auth.challenge" => crate::step_up_rpc::challenge(&self.session),
+            "client.set_step_up_key" => {
+                let p = crate::step_up_rpc::payload(|p| if let request::Payload::ClientSetStepUpKey(p) = p { Some(p) } else { None }, req)?;
+                crate::step_up_rpc::set_key(svc, &self.peer, self.caller_pid, p).await
+            }
+            "client.approve_step_up" => {
+                let p = crate::step_up_rpc::payload(|p| if let request::Payload::ClientApproveStepUp(p) = p { Some(p) } else { None }, req)?;
+                crate::step_up_rpc::approve(svc, &self.peer, self.caller_pid, self.stepped.get(), p).await
+            }
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await

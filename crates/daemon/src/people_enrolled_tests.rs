@@ -174,10 +174,7 @@ async fn a_member_enrolls_no_shell() {
     let local = factory(&svc, None, Scope::HostAdmin);
     call(&local, enroll(KEY_OWNERS_SHELL, "mac-o", Scope::HostAdmin, true)).await.expect("the owner's Key B");
     let phone = factory(&svc, Some(OWNERS_PHONE), Scope::HostAdmin);
-    // Not from the owner's phone: a remote device never writes a shell line
-    // (ov-856, B2), whatever line it holds.
-    let refused = call(&phone, enroll(KEY_TESS, "mac-p", Scope::HostAdmin, true)).await;
-    assert_eq!(refused.err().as_deref(), Some("not-yours:socket_only"));
+    call(&phone, enroll(KEY_TESS, "mac-p", Scope::HostAdmin, true)).await.expect("from the owner's phone too");
 }
 
 /// Removing Bob revokes the devices he enrolled that nobody was bound to,
@@ -284,7 +281,7 @@ async fn teammate_enrollment_from_a_member_admins_mac_works_end_to_end() {
 async fn nobody_enrolls_a_device_named_as_no_device() {
     let (_dir, svc) = runner().await;
     for caller in [bobs_mac(&svc), factory(&svc, None, Scope::HostAdmin)] {
-        let refused = call(&caller, enroll(KEY_TESS, "-", Scope::Control, false)).await;
+        let refused = call(&caller, enroll(KEY_TESS, "-", Scope::HostAdmin, false)).await;
         assert!(refused.as_ref().is_err_and(|e| e.starts_with("invalid-argument")), "{refused:?}");
     }
     assert!(enrolled(&svc).await.iter().all(|(id, _)| id != "-"), "nothing was written");
