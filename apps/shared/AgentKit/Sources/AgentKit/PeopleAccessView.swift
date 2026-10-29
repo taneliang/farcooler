@@ -66,21 +66,19 @@ public struct PeopleAccessSections: View {
                 Section {
                     ForEach(access.toCheck) { DeviceRow(device: $0, runner: runner, actions: actions, remove: { removing = $0 }) }
                 } header: {
-                    Text(PeopleAccess.checkHeader)
+                    Text(PeopleAccess.checkHeader).accessibilityIdentifier("people-check")
                 } footer: {
                     Text(PeopleAccess.checkFooter).fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityIdentifier("people-check")
             }
             if !access.waiting.isEmpty {
                 Section {
                     ForEach(access.waiting) { WaitingRow(device: $0, from: access.thisDevice, access: access, actions: actions) }
                 } header: {
-                    Text(PeopleAccess.waitingHeader)
+                    Text(PeopleAccess.waitingHeader).accessibilityIdentifier("people-waiting")
                 } footer: {
                     Text(PeopleAccess.waitingFooter).fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityIdentifier("people-waiting")
             }
             if let me = access.thisDevice, access.yourAccess == .owner || access.yourAccess == .admin {
                 ThisDeviceAdminSection(device: me, shownCode: shownCode, actions: actions)
@@ -127,6 +125,7 @@ private struct PersonRows: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(person.name).lineLimit(2)
+                        .accessibilityIdentifier("people-person-\(person.handle.isEmpty ? "owner" : person.handle)")
                     Text(person.access.summary)
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -139,7 +138,7 @@ private struct PersonRows: View {
                     .padding(.leading, 14)
             }
         }
-        .accessibilityIdentifier("people-person-\(person.handle.isEmpty ? "owner" : person.handle)")
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder private var accessControl: some View {
@@ -169,7 +168,7 @@ private struct DeviceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(device.name).font(.subheadline).lineLimit(2)
+                Text(device.name).font(.subheadline).lineLimit(2).accessibilityIdentifier("device-\(device.id)")
                 if let by = device.addedBy {
                     Text(by).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -206,7 +205,6 @@ private struct DeviceRow: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("device-\(device.id)")
     }
 }
 
@@ -220,6 +218,7 @@ private struct WaitingRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("\(device.personName.isEmpty ? "" : device.personName + "’s ")\(device.name)").lineLimit(2)
+                    .accessibilityIdentifier("waiting-\(device.id)")
                 Spacer(minLength: 8)
                 Text(PeopleAccess.spoken(device.code))
                     .font(.title3.monospacedDigit().weight(.semibold))
@@ -234,7 +233,7 @@ private struct WaitingRow: View {
                     .accessibilityIdentifier("waiting-allow-\(device.id)")
             }
         }
-        .accessibilityIdentifier("waiting-\(device.id)")
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -247,7 +246,7 @@ private struct ThisDeviceAdminSection: View {
         Section {
             switch device.stepUp {
             case .trusted:
-                Label("Admin actions are on", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+                Label("Admin Actions Are On", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
                     .accessibilityIdentifier("admin-actions-on")
             case .proposed:
                 waiting(code: shownCode ?? device.code)
@@ -270,6 +269,7 @@ private struct ThisDeviceAdminSection: View {
             Text(PeopleAccess.spoken(code)).font(.title2.monospacedDigit().weight(.semibold))
                 .accessibilityIdentifier("admin-actions-code")
         }
+        .accessibilityElement(children: .contain)
     }
 
     static func footer(for standing: StepUpKeyStanding) -> String {

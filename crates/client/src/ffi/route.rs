@@ -158,7 +158,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The app's step-up arrives with its Face ID prompt (ov-856, slice 4).
         // Reached through `step_up.begin`, `step_up.finish` and `step_up.propose`,
         // which build them with the bytes a key signs.
-        Method::AuthChallenge | Method::ClientSetStepUpKey | Method::ClientApproveStepUp => None,
+        Method::AuthChallenge | Method::ClientSetStepUpKey => None,
+        // Plain while a phone has no trusted key; signed through `step_up.begin` after.
+        Method::ClientApproveStepUp => Some(method.name()),
         // A rep's search, through the CLI in its pane (ov-555).
         Method::WorktreeGrep => None,
         // A crash's signature from the owner's own phone (ov-797).

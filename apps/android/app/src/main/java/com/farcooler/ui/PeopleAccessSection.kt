@@ -81,7 +81,7 @@ fun PeopleAccessSection(
         }
     }
     Text(
-        "Admins can add and remove people and their devices. A Viewer can see the board, never a terminal.",
+        "Admins can add and remove people and their devices. A viewer can see the board, never a terminal.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -107,29 +107,33 @@ fun PeopleAccessSection(
         Text(note, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("people-access-note"))
     }
     removing?.let { device ->
-        AlertDialog(
-            onDismissRequest = { removing = null },
-            title = { Text("Remove ${device.name}?") },
-            text = { Text(removalMessage(device, runner)) },
-            confirmButton = {
-                Column {
-                    TextButton(onClick = { removing = null; actions.removeDevice?.invoke(device, false) }) { Text("Remove Device") }
-                    if (device.added > 0) {
-                        TextButton(onClick = { removing = null; actions.removeDevice?.invoke(device, true) }) {
-                            Text("Remove Device and ${device.added} It Added")
-                        }
-                    }
-                }
-            },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
-        )
+        RemoveDeviceDialog(device, runner, onDismiss = { removing = null }) { withAdded -> actions.removeDevice?.invoke(device, withAdded) }
     }
+}
+
+/** What removing [device] takes, asked before the runner is. [remove] is told whether what it added goes too. */
+@Composable
+fun RemoveDeviceDialog(device: PeopleAccess.Device, runner: String, onDismiss: () -> Unit, remove: (Boolean) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remove ${device.name}?") },
+        text = { Text(removalMessage(device, runner)) },
+        confirmButton = {
+            Column {
+                TextButton(onClick = { onDismiss(); remove(false) }) { Text("Remove device") }
+                if (device.added > 0) {
+                    TextButton(onClick = { onDismiss(); remove(true) }) { Text("Remove device and ${device.added} it added") }
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** What removing a device does, said before it is done. */
 fun removalMessage(device: PeopleAccess.Device, runner: String): String {
     var line = "${device.name} loses its access to $runner right away."
-    if (device.hasShell) line += " Its shell goes too: it can no longer use ssh, git or Zed here."
+    if (device.hasShell) line += " Its shell goes too: it can no longer use ssh, git or Zed here." // casing ok: Zed is a product name
     if (device.added > 0) line += if (device.added == 1) " It added one other device." else " It added ${device.added} other devices."
     return line
 }
@@ -218,7 +222,7 @@ private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, action
 
 @Composable
 private fun ThisDeviceAdmin(device: PeopleAccess.Device, shownCode: String?, actions: PeopleAccessActions) {
-    SectionTitle("This Device")
+    SectionTitle("This device")
     Column(Modifier.testTag("people-this-device"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (device.stepUp) {
             StepUpKeyStanding.TRUSTED ->
@@ -229,14 +233,14 @@ private fun ThisDeviceAdmin(device: PeopleAccess.Device, shownCode: String?, act
                 if (shownCode != null) {
                     Waiting(shownCode)
                 } else if (allow != null) {
-                    OutlinedButton(onClick = allow, modifier = Modifier.testTag("admin-actions-allow")) { Text("Allow Admin Actions") }
+                    OutlinedButton(onClick = allow, modifier = Modifier.testTag("admin-actions-allow")) { Text("Allow admin actions") }
                 }
             }
         }
         Text(
             when (device.stepUp) {
                 StepUpKeyStanding.TRUSTED -> "Changes to who has access ask for your fingerprint, face or screen lock first."
-                StepUpKeyStanding.PROPOSED -> "Open People on another of your devices and allow this one. It checks this code."
+                StepUpKeyStanding.PROPOSED -> "Open People on another of your devices and allow this one. It checks this code." // casing ok: People is the screen's name
                 else -> "Changes to who has access then ask for your fingerprint, face or screen lock on this device."
             },
             style = MaterialTheme.typography.bodySmall,

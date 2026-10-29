@@ -2267,19 +2267,6 @@ impl Service {
         self
     }
 
-    /// A service that reads its sshd host keys from `dir`, for a test: a
-    /// step-up's statement names one of their fingerprints (`step_up::host_pins`),
-    /// and `/etc/ssh` is no place for a test to depend on.
-    pub fn with_ssh_host_dir(mut self, dir: PathBuf) -> Self {
-        self.ssh_host_dir = dir;
-        self
-    }
-
-    /// Where this runner's sshd host keys are read from.
-    pub fn ssh_host_dir(&self) -> &Path {
-        &self.ssh_host_dir
-    }
-
     /// The file this runner's device keys live in.
     pub fn authorized_keys(&self) -> &Path {
         &self.authorized_keys

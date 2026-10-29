@@ -15,6 +15,18 @@ fn bytes(method: &str, args: &Value, key: &str) -> Result<Vec<u8>, SessionError>
     base64::decode(text(args, key)).filter(|b| !b.is_empty()).ok_or_else(|| SessionError::Protocol(format!("{method} needs a {key} in base64")))
 }
 
+/// An admin action signed with this device's step-up key: `begin` builds it and
+/// answers the statement to sign, `finish` sends it with the signature, and
+/// `propose` offers this device's key for approval.
+pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Result<Value, SessionError> {
+    match method {
+        "step_up.begin" => begin(session, args).await,
+        "step_up.finish" => finish(session, args).await,
+        "client.approve_step_up" => step_up::value_json(&session.approve_step_up_plain(args).await?),
+        _ => propose(session, args).await,
+    }
+}
+
 /// `{method, args, clientId, hostPin}`: prepare an admin action. Answers
 /// `{token, statement}`, the statement in base64 for the device key to sign.
 /// `args` are the ones the plain call takes.

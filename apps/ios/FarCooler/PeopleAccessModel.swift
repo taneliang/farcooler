@@ -1,4 +1,3 @@
-import AgentKit
 import Foundation
 import SwiftUI
 import UIKit
@@ -40,7 +39,7 @@ final class PeopleAccessModel: ObservableObject {
         await load(members: data)
     }
 
-    private var device: String { UIDeviceName.kind }
+    private var device: String { HardwareKind.kind }
 
     /// What this phone can offer, by what the runner would accept from it.
     func actions() -> PeopleAccessActions {
@@ -111,7 +110,7 @@ enum StepUpRefusals {
 }
 
 /// "iPhone" or "iPad": how a sentence names this device.
-enum UIDeviceName {
+enum HardwareKind {
     static var kind: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
 }
 

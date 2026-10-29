@@ -69,12 +69,16 @@ pub const METHODS: [&str; 6] = ["client.revoke", "client.enroll", "member.set", 
 pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
 
 /// Whether a phone or Mac with no trusted key still does admin actions
-/// without a step-up. True only for the transition: no app can mint a key
-/// until slice 4 (iOS, Mac) and slice 5 (Android) ship, so a keyless phone
-/// would otherwise lose admin outright. Slice 4's release flips this to
-/// false (`reports/ov-856/slice3-review.md` section 1), after which a remote
-/// device with no trusted key gets no admin. A browser is never in this
-/// transition: it can't hold a key to ask for, see [`browser_refused`].
+/// without a step-up: the transition. The apps (slice 4: the Mac, the iPhone
+/// and Android) can now register a key, so for a device it ends by itself the
+/// moment its key is trusted ([`needs_step_up`] asks for a signature from then
+/// on, whatever this says). What this constant decides is the rest: a device
+/// that has registered nothing. Left true, such a device keeps the admin it
+/// has; false, a remote device with no trusted key gets no admin
+/// (`reports/ov-856/slice3-review.md` section 1). Which release flips it, and
+/// whether it follows a minimum app version, is the coordinator's call, not a
+/// slice's. A browser is never in this transition: it can't hold a key to ask
+/// for, see [`browser_refused`].
 pub const KEYLESS_PHONES_ALLOWED: bool = true;
 
 /// How long a challenge lives.
@@ -82,6 +86,21 @@ pub const CHALLENGE_MS: i64 = 60_000;
 
 /// How many challenges one session may hold; the oldest goes first.
 pub const LIVE_CHALLENGES: usize = 4;
+
+impl Service {
+    /// A service that reads its sshd host keys from `dir`, for a test: a
+    /// step-up's statement names one of their fingerprints ([`host_pins`]),
+    /// and `/etc/ssh` is no place for a test to depend on.
+    pub fn with_ssh_host_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.ssh_host_dir = dir;
+        self
+    }
+
+    /// Where this runner's sshd host keys are read from.
+    pub fn ssh_host_dir(&self) -> &std::path::Path {
+        &self.ssh_host_dir
+    }
+}
 
 /// One session's live challenges.
 #[derive(Default)]

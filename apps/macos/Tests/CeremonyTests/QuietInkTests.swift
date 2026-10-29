@@ -328,6 +328,7 @@ struct QuietInkTests {
         "AccountDeviceKeys": "a Section of a grouped Form",
         "RendezvousSection": "a Section of a grouped Form",
         "RelaySection": "a Section of a grouped Form",
+        "PeopleAccessView": "Sections of a grouped Form (the People screen, ov-856)",
         "TaskKeyCardView": "the hovercard is a Mac popover and an iOS dialog, both system material",
     ]
 

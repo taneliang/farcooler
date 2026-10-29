@@ -144,6 +144,15 @@ impl Session {
         Pending { answer, method }.value().await
     }
 
+    /// `client.approve_step_up` without a signature: what a device with no
+    /// trusted key of its own sends, while the transition lasts. A runner that
+    /// wants one answers `step_up_needed`, and the app then signs.
+    pub async fn approve_step_up_plain(&self, args: &serde_json::Value) -> Result<result::Value, SessionError> {
+        let built = build("client.approve_step_up", args)?;
+        let payload = built.payload;
+        self.value("client.approve_step_up", None, payload).await
+    }
+
     /// Propose this device's own step-up key (`client.set_step_up_key`):
     /// `public_key` is the 65-byte uncompressed P-256 point. Answers the key's
     /// state (`proposed`) and the six digits the device shows and an approver

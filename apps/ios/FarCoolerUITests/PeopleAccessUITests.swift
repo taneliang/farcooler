@@ -92,7 +92,7 @@ final class PeopleAccessUITests: XCTestCase {
         XCTAssertTrue(app.reveal(allow), "no Allow Admin Actions: \(app.debugDescription)")
         allow.tap()
         let code = element(app, "admin-actions-code")
-        XCTAssertTrue(code.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.reveal(code), app.debugDescription)
         XCTAssertEqual(code.label, "273 905")
         waitForSent(app, "propose key")
         keep(app, "people-allow-admin-iphone-light", expecting: .reads(code, "273 905"))

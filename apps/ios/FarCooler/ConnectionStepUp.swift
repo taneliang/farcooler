@@ -1,4 +1,3 @@
-import AgentKit
 import FarCoolerClient
 import Foundation
 

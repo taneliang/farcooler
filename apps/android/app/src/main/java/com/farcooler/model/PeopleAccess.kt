@@ -89,15 +89,15 @@ class PeopleAccess private constructor(
             from.person == other.person && other.stepUp == StepUpKeyStanding.PROPOSED
 
     companion object {
-        const val VIEWER_BADGE = "Viewer on This Device"
-        const val SHELL_BADGE = "Has a Shell"
-        const val CHECK_HEADER = "Check These Devices"
+        const val VIEWER_BADGE = "Viewer on this device"
+        const val SHELL_BADGE = "Has a shell"
+        const val CHECK_HEADER = "Check these devices"
         const val CHECK_FOOTER = "A teammate’s device added these. Remove any you don’t recognize."
-        const val WAITING_HEADER = "Waiting for Approval"
+        const val WAITING_HEADER = "Waiting for approval"
         const val WAITING_FOOTER =
             "These devices asked to approve changes to who has access. Allow one only from another device of the same person."
-        const val LIMIT_TO_VIEWER = "Limit to Viewer"
-        const val REMOVE_DEVICE = "Remove Device…"
+        const val LIMIT_TO_VIEWER = "Limit to viewer"
+        const val REMOVE_DEVICE = "Remove device…"
 
         /** The code as it is read aloud and compared: "418 207". */
         fun spoken(code: String): String = if (code.length == 6) "${code.take(3)} ${code.takeLast(3)}" else code
