@@ -345,6 +345,11 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                         access, runnerLabel,
                         if (!canSign) PeopleAccessActions() else PeopleAccessActions(
                             removeDevice = { device, withAdded -> scope.launch { accessController.remove(device, withAdded) } },
+                            // Signed by this phone's own key, so offered once it holds one (§8).
+                            limitToViewer = if (access.thisDevice?.stepUp != com.farcooler.model.StepUpKeyStanding.TRUSTED) null
+                            else { device -> scope.launch { accessController.limit(device) } },
+                            setAccess = if (access.thisDevice?.stepUp != com.farcooler.model.StepUpKeyStanding.TRUSTED) null
+                            else { person, new -> scope.launch { accessController.setAccess(person, new) } },
                             approve = { device -> scope.launch { accessController.approve(device) } },
                             allowAdminActions = { scope.launch { accessController.allowAdminActions() } },
                         ),

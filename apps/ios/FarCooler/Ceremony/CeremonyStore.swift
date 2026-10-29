@@ -494,7 +494,7 @@ typealias Enroller = @MainActor (
 /// entry was never asked.
 typealias TeammateEnroller = @MainActor (
     _ publicKey: String, _ label: String, _ clientId: String, _ nodeKey: String,
-    _ teammate: TeammateChoice, _ runners: [CeremonyRunner]
+    _ teammate: TeammateChoice, _ runners: [CeremonyRunner], _ facts: [String: TeammateRunnerFacts]
 ) async -> [String: TeammateAddOutcome]
 
 // MARK: - The state machine
@@ -597,12 +597,15 @@ final class CeremonyStore: ObservableObject {
     /// The team directory's answers, or nil when it couldn't be asked. A test
     /// answers it; the app asks the relay.
     var teamDirectory: () async -> Data? = { await Account.shared.directoryClient.teamDirectory() }
-    /// Whether this phone may add a teammate on `runner`: it administers the
-    /// runner. A harness answers it; the app asks the live connection.
-    var mayAddTeammate: (Runner) -> Bool = { runner in
-        guard let build = Connection.live(for: runner.id)?.knownBuild else { return false }
-        return build.mayAdministerRunner
+    /// What this phone is on `runner` and who is there already (ov-856): only
+    /// an Owner or an Admin adds people. A harness answers it; the app asks the
+    /// live connection. Nil when the runner can't be asked.
+    var teammateFacts: (Runner, _ account: String) async -> TeammateRunnerFacts? = { runner, account in
+        await Connection.live(for: runner.id)?.teammateFacts(account: account)
     }
+    /// What each runner said, by runner id, for the sheet that is open.
+    @Published private(set) var facts: [String: TeammateRunnerFacts] = [:]
+    private var suggested: String?
     /// The teammate check in flight after a code from another account.
     private(set) var teamCheck: Task<Void, Never>?
     /// Which scan the check in flight belongs to. Every scan takes a new one,
@@ -858,17 +861,26 @@ final class CeremonyStore: ObservableObject {
             // teammate gets is a choice made on purpose, so none starts
             // ticked. A runner this phone can't administer is listed with
             // why, and can't be ticked.
+            var told: [String: TeammateRunnerFacts] = [:]
+            for runner in runners {
+                if let said = await teammateFacts(runner, accepted.teammate.account) { told[runner.id.uuidString] = said }
+            }
+            // Scanned again, or cancelled, while the runners answered.
+            guard !Task.isCancelled, scan == scanNumber, phase == .checkingTeam else { return }
+            facts = told
+            // The person already under this account is the one picked to start.
+            suggested = told.values.compactMap(\.matching).first
             rows = runners.map { runner in
                 RunnerRow(
                     runner: runner, picked: false,
-                    blocked: mayAddTeammate(runner)
-                        ? nil
-                        : TeammateAddCopy.sentence(.needsAdmin, runner: runner.label, device: "iPhone"))
+                    blocked: TeammateAccessRules.blocked(told[runner.id.uuidString], runner: runner.label))
             }
             fingerprint = Self.fingerprint(of: Data(accepted.offer.utf8))
-            teammate = TeammateChoice(
+            var choice = TeammateChoice(
                 who: accepted.teammate, directory: directory ?? "", scanner: account,
                 grantedBy: accountEmail, held: accepted.held ?? [])
+            choice.person = suggested
+            teammate = choice
             phase = .confirming
         }
     }
@@ -1062,7 +1074,12 @@ final class CeremonyStore: ObservableObject {
         // asked of Face ID either; the button is off too.
         guard teammate.isComplete else { return }
 
-        switch await confirmTap("Confirm adding \(offer.name) for \(teammate.who.email)") {
+        // Face ID once, for the request itself, where this phone signs it
+        // (ov-856); a runner it can't sign for gets the plain confirmation.
+        let signing = !picked().isEmpty && picked().allSatisfy { facts[$0.id]?.signs == true }
+        let tap: ConfirmingTap.Outcome =
+            signing ? .confirmed : await confirmTap("Confirm adding \(offer.name) for \(teammate.who.email)")
+        switch tap {
         case .cancelled:
             return
         case .refused:
@@ -1105,7 +1122,7 @@ final class CeremonyStore: ObservableObject {
         let clientId = Self.clientId(of: rescanned)
         if let clientId {
             outcomes = await teammateEnroller(
-                offer.key_a, offer.name, clientId, offer.node_key ?? "", teammate, wanted)
+                offer.key_a, offer.name, clientId, offer.node_key ?? "", teammate, wanted, facts)
         } else {
             outcomes = [:]
         }
@@ -1137,7 +1154,7 @@ final class CeremonyStore: ObservableObject {
     @MainActor
     private static func teammatesThroughTheLiveConnection(
         publicKey: String, label: String, clientId: String, nodeKey: String,
-        teammate: TeammateChoice, runners: [CeremonyRunner]
+        teammate: TeammateChoice, runners: [CeremonyRunner], facts: [String: TeammateRunnerFacts]
     ) async -> [String: TeammateAddOutcome] {
         let writable = CeremonyReach.writable(
             granted: runners.map(\.id), live: Connection.liveRunners.map(\.uuidString))
@@ -1145,7 +1162,8 @@ final class CeremonyStore: ObservableObject {
         for id in writable {
             guard let runner = UUID(uuidString: id), let connection = Connection.live(for: runner) else { continue }
             written[id] = await connection.enrollTeammate(
-                publicKey: publicKey, label: label, clientId: clientId, nodeKey: nodeKey, teammate: teammate)
+                publicKey: publicKey, label: label, clientId: clientId, nodeKey: nodeKey, teammate: teammate,
+                facts: facts[id])
         }
         return written
     }
@@ -1422,7 +1440,7 @@ extension TeammateAddOutcome {
         case .tooOld: return "too_old"
         case .needsAdmin: return "not_allowed"
         case .notReached: return "not_connected"
-        case .couldNotRead, .someoneElses, .notAdded, .notRecorded, .notUpdated: return "failed"
+        case .couldNotRead, .someoneElses, .notAdded, .notRecorded, .notUpdated, .declined: return "failed"
         }
     }
 }

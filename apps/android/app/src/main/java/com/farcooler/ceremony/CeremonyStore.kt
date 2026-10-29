@@ -676,22 +676,6 @@ fun interface Enroller {
     ): Map<String, String>
 }
 
-/**
- * What an Add Teammate writes (ov-854): the key `for_teammate` on each runner,
- * bound to the teammate, answering what became of each. A runner missing from
- * the answer was never asked.
- */
-fun interface TeammateEnroller {
-    suspend fun enroll(
-        publicKey: String,
-        label: String,
-        clientId: String,
-        nodeKey: String,
-        teammate: TeammateChoice,
-        runners: List<CeremonyRunner>,
-    ): Map<String, TeammateAddOutcome>
-}
-
 // MARK: - The state machine
 
 /**
@@ -813,10 +797,15 @@ class CeremonyStore(
     var teamDirectory: suspend () -> String? = { null }
 
     /**
-     * Whether this phone may add a teammate on [runner]: it administers the
-     * runner. A test answers it; the app asks the live connection.
+     * What this phone is on [runner] and who is there already (ov-856): only an Owner or an Admin adds people. A test
+     * answers it; the app asks the live connection. Null when the runner can't be asked.
      */
-    var mayAddTeammate: (Runner) -> Boolean = { false }
+    var teammateFacts: suspend (Runner, String) -> TeammateRunnerFacts? = { _, _ -> null }
+
+    private val _facts = MutableStateFlow<Map<String, TeammateRunnerFacts>>(emptyMap())
+
+    /** What each runner said, by runner id, for the sheet that is open. */
+    val facts: StateFlow<Map<String, TeammateRunnerFacts>> = _facts.asStateFlow()
 
     /**
      * A teammate's code, once the directory has vouched for it (ov-854): who
@@ -1142,15 +1131,19 @@ class CeremonyStore(
                 // teammate gets is a choice made on purpose, so none starts
                 // ticked. A runner this phone can't administer is listed with
                 // why, and can't be ticked.
+                val told = waiting.runners.mapNotNull { runner ->
+                    teammateFacts(runner, accepted.teammate.account)?.let { runner.id to it }
+                }.toMap()
+                // Scanned again, or cancelled, while the runners answered.
+                if (waiting.scan != scanNumber || _phase.value != Phase.CheckingTeam) return
+                _facts.value = told
                 _rows.value = waiting.runners.map { runner ->
-                    RunnerRow(
-                        runner, picked = false,
-                        blocked = if (mayAddTeammate(runner)) null
-                        else TeammateAddCopy.sentence(TeammateAddOutcome.NeedsAdmin, runner.displayLabel, DEVICE),
-                    )
+                    RunnerRow(runner, picked = false, blocked = TeammateAccessRules.blocked(told[runner.id], runner.displayLabel))
                 }
                 _teammate.value = TeammateChoice(
                     who = accepted.teammate, directory = directory.orEmpty(), grantedBy = accountEmail,
+                    // The person already under this account is the one picked to start.
+                    person = told.values.firstNotNullOfOrNull { it.matching },
                 )
                 _phase.value = Phase.Confirming
             }
@@ -1310,12 +1303,18 @@ class CeremonyStore(
         // asked of the fingerprint either; the button is off too.
         if (!teammate.isComplete) return
 
-        when (
+        // One prompt, for the request itself, where this phone signs it (ov-856); a runner it can't sign for gets
+        // the plain confirmation.
+        val signing = picked().isNotEmpty() && picked().all { _facts.value[it.id]?.signs == true }
+        val tap = if (signing) {
+            ConfirmingTap.Outcome.CONFIRMED
+        } else {
             gate(
                 "Add “${asking.name}” for ${teammate.who.email}?",
                 "Confirm adding ${asking.name} for ${teammate.who.email}",
             )
-        ) {
+        }
+        when (tap) {
             ConfirmingTap.Outcome.CANCELLED -> return
             ConfirmingTap.Outcome.REFUSED -> {
                 _declined.value = true
@@ -1362,6 +1361,7 @@ class CeremonyStore(
                 nodeKey = asking.nodeKey,
                 teammate = teammate,
                 runners = wanted,
+                facts = _facts.value,
             )
         }
         _teammateNote.value = TeammateAddCopy.note(

@@ -16,6 +16,9 @@ final class AccessStandIn {
     static var trusted: Bool { CommandLine.arguments.contains("-phone-access-trusted") }
 
     private var removed: Set<String> = []
+    /// What the runner has recorded: each person's access, and the devices held at Viewer.
+    private var access: [String: String] = ["cosmo": "member", "dan": "admin"]
+    private var capped: Set<String> = ["pad-c"]
     private var trustedKeys: Set<String> = trusted ? ["self"] : []
     private var proposedSelf = false
     private var prepared: [String: (method: String, args: [String: Any])] = [:]
@@ -48,10 +51,10 @@ final class AccessStandIn {
             row("mac-o", "", "owner", key: "trusted"),
             row("ipad-o", "", "owner", key: trustedKeys.contains("ipad-o") ? "trusted" : "proposed", code: trustedKeys.contains("ipad-o") ? "" : "418207"),
             row("legacy-t", "", "owner", cap: "member", check: true),
-            row("phone-c", "cosmo", "member", key: "trusted"),
-            row("pad-c", "cosmo", "member", cap: "viewer"),
-            row("phone-d", "dan", "admin", key: trustedKeys.contains("phone-d") ? "trusted" : "proposed", code: trustedKeys.contains("phone-d") ? "" : "730412"),
-            row("mac-d", "dan", "admin", key: "trusted"),
+            row("phone-c", "cosmo", access["cosmo"]!, cap: capped.contains("phone-c") ? "viewer" : "", key: "trusted"),
+            row("pad-c", "cosmo", access["cosmo"]!, cap: capped.contains("pad-c") ? "viewer" : ""),
+            row("phone-d", "dan", access["dan"]!, key: trustedKeys.contains("phone-d") ? "trusted" : "proposed", code: trustedKeys.contains("phone-d") ? "" : "730412"),
+            row("mac-d", "dan", access["dan"]!, key: "trusted"),
         ]
         rows.removeAll { removed.contains($0["client_id"] as! String) }
         func devices(_ person: String) -> [String] {
@@ -59,8 +62,8 @@ final class AccessStandIn {
         }
         return [
             "members": [
-                ["handle": "cosmo", "name": "Cosmo", "devices": devices("cosmo"), "reps": 0, "rep_panes": [Any](), "access": "member", "role": "member"],
-                ["handle": "dan", "name": "Dan", "devices": devices("dan"), "reps": 0, "rep_panes": [Any](), "access": "admin", "role": "member"],
+                ["handle": "cosmo", "name": "Cosmo", "devices": devices("cosmo"), "reps": 0, "rep_panes": [Any](), "access": access["cosmo"]!, "role": "member"],
+                ["handle": "dan", "name": "Dan", "devices": devices("dan"), "reps": 0, "rep_panes": [Any](), "access": access["dan"]!, "role": "member"],
             ],
             "claude_account": "owner@example.com", "you": "", "device_access": rows,
         ]
@@ -101,7 +104,7 @@ final class AccessStandIn {
             }
             record("prompt \(HarnessStepUpSigner.last)")
             return try apply(action.method, action.args, record: record)
-        case "client.revoke", "client.approve_step_up":
+        case "client.revoke", "client.approve_step_up", "member.set_access", "client.set_cap":
             // The plain call: a phone with a trusted key must sign.
             if trustedKeys.contains("self") {
                 throw ClientCore.CoreError.rejected("step up", word: "resource-conflict", what: "step_up_needed")
@@ -119,6 +122,16 @@ final class AccessStandIn {
             if args["withAdded"] as? Bool == true, id == "phone-c" { removed.insert("pad-c") }
             record("revoke \(id) withAdded=\(args["withAdded"] as? Bool ?? false)")
             return clients()
+        case "member.set_access":
+            let handle = args["handle"] as? String ?? ""
+            access[handle] = args["access"] as? String ?? ""
+            record("access \(handle)=\(access[handle] ?? "")")
+            return members()
+        case "client.set_cap":
+            let id = args["clientId"] as? String ?? ""
+            if args["cap"] as? String == "viewer" { capped.insert(id) } else { capped.remove(id) }
+            record("cap \(id)=\(args["cap"] as? String ?? "")")
+            return members()
         case "client.approve_step_up":
             let id = args["clientId"] as? String ?? ""
             guard args["code"] as? String == (id == "ipad-o" ? "418207" : "730412") else {

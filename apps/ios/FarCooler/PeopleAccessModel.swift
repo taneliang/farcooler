@@ -46,6 +46,9 @@ final class PeopleAccessModel: ObservableObject {
         guard connection.daemon?.can(.stepUp) == true else { return PeopleAccessActions() }
         return PeopleAccessActions(
             removeDevice: { [weak self] device, withAdded in await self?.remove(device, withAdded: withAdded) },
+            // Signed by this phone's own key, so offered once it holds one (§8).
+            limitToViewer: hasTrustedKey ? { [weak self] device in await self?.limit(device) } : nil,
+            setAccess: hasTrustedKey ? { [weak self] person, new in await self?.setAccess(person, to: new) } : nil,
             approve: { [weak self] device in await self?.approve(device) },
             allowAdminActions: { [weak self] in await self?.allowAdminActions() })
     }
@@ -74,6 +77,20 @@ final class PeopleAccessModel: ObservableObject {
         let reason = StepUpReason.removeDevice(target.name, alsoRemoving: withAdded ? target.added : 0, runner: runner)
         let args: [String: Any] = ["clientId": target.id, "withAdded": withAdded]
         if await perform("client.revoke", args, reason: reason) { await reload() }
+    }
+
+    /// Hold one device at Viewer, with Face ID for exactly that device.
+    func limit(_ target: PeopleAccess.Device) async {
+        let reason = StepUpReason.limit(target.name, runner: runner)
+        let args: [String: Any] = ["clientId": target.id, "cap": "viewer"]
+        if await perform("client.set_cap", args, reason: reason) { await reload() }
+    }
+
+    /// Give a person another Access, with Face ID for exactly that person and access.
+    func setAccess(_ person: PeopleAccess.Person, to new: PersonAccess) async {
+        let reason = StepUpReason.setAccess(person.name, to: new, runner: runner)
+        let args: [String: Any] = ["handle": person.handle, "access": new.rawValue]
+        if await perform("member.set_access", args, reason: reason) { await reload() }
     }
 
     func approve(_ target: PeopleAccess.Device) async {

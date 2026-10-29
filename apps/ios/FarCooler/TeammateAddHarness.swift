@@ -18,6 +18,11 @@ import SwiftUI
 ///   -teammate-add-stranger   the directory doesn't list Bob
 ///   -teammate-add-offline    the directory can't be asked
 ///   -teammate-add-refused    build-box's Far Cooler is too old to bind
+///   -teammate-add-admin      the phone is an Admin on build-box, not the Owner
+///   -teammate-add-existing   build-box already has Bob under this account
+///
+/// The phone is the Owner on build-box and only a Member on gpu-workstation,
+/// where adding people is refused up front.
 struct TeammateAddHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-teammate-add") }
     private static func has(_ flag: String) -> Bool { CommandLine.arguments.contains(flag) }
@@ -68,16 +73,23 @@ struct TeammateAddHarness: View {
         else { return }
         store.teamDirectory = { Self.has("-teammate-add-offline") ? nil : Self.directory }
         store.confirmTap = { _ in .confirmed }
-        store.mayAddTeammate = { $0.id != Self.gpu.id }
-        store.teammateEnroller = { _, _, _, _, teammate, wanted in
+        store.teammateFacts = { runner, _ in
+            if runner.id == Self.gpu.id { return TeammateRunnerFacts(caller: .member) }
+            let bob = ExistingPerson(handle: "bob", name: "Bob", access: .member)
+            return TeammateRunnerFacts(
+                caller: Self.has("-teammate-add-admin") ? .admin : .owner,
+                candidates: Self.has("-teammate-add-existing") ? [bob] : [],
+                matching: Self.has("-teammate-add-existing") ? "bob" : nil, taken: ["dan"])
+        }
+        store.teammateEnroller = { _, _, _, _, teammate, wanted, facts in
+            let bound = wanted.first.map { TeammateAccessRules.bind(teammate, facts: facts[$0.id]) } ?? [:]
             asked =
-                "scope=\(teammate.scope.rawValue) handle=\(teammate.handle) name=\(teammate.name) "
+                "access=\(bound["access"] ?? "") handle=\(bound["handle"] ?? "") name=\(bound["name"] ?? "") "
                 + "account=\(teammate.who.account) runners=\(wanted.map(\.label).joined(separator: ","))"
             let outcome: TeammateAddOutcome = Self.has("-teammate-add-refused") ? .tooOld : .written(tunnel: "")
             return Dictionary(uniqueKeysWithValues: wanted.map { ($0.id, outcome) })
         }
         let runnersOnPhone = Self.has("-teammate-add-long") ? [Self.platform, Self.gpu] : [Self.buildBox, Self.gpu]
-        store.mayAddTeammate = { $0.id != Self.gpu.id }
         store.read(String(decoding: offer, as: UTF8.self), runners: runnersOnPhone, grantingFrom: nil)
     }
 

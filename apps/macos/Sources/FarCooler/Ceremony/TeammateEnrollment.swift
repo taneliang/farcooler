@@ -31,6 +31,20 @@ enum TeammateEnrollment {
         var name: String
         var account: String
         var email: String
+        /// What they may do (ov-856). Viewer is written as a read line, so the
+        /// runner records it by itself; Admin is given afterwards, once they are
+        /// bound, by the owner's socket. A person already here keeps theirs.
+        var access: PersonAccess = .member
+        /// The handle of the person already on the runner this device is
+        /// added to; nil is a New Person (or whoever already has this account).
+        var person: String? = nil
+    }
+
+    /// Who is already there for `member`: the holder of the device, the person
+    /// picked, or whoever has the teammate's account.
+    private static func existing(_ member: Member, holder: RunnerPeople.Member?, in people: RunnerPeople) -> RunnerPeople.Member? {
+        holder ?? member.person.flatMap { handle in people.members.first { $0.handle == handle } }
+            ?? people.members.first { !member.account.isEmpty && $0.account == member.account }
     }
 
     /// Enroll Key A at `scope` on each runner (never Key B: a teammate gets
@@ -105,6 +119,7 @@ enum TeammateEnrollment {
             return await takeOff(clientID, from: runner, journal: journal, because: Self.notAdded, written.output, run)
         }
 
+        let newcomer = Self.existing(member, holder: holder, in: people) == nil
         var added = await bind(
             clientID, to: member, holder: holder, people: people, checked: checksRead(listed.output), on: runner,
             using: run)
@@ -146,6 +161,14 @@ enum TeammateEnrollment {
         if case .tailcat(let token) = Enrollment.reach(granting: runner, token: Enrollment.token(in: written.output)) {
             outcome.tunneled[runner.id] = token
         }
+        // Admin is the owner's to give, and a new person is a Member until it
+        // is: this Mac is the owner's, so it asks the runner's socket. The
+        // device is there either way; a failure says what is left to do.
+        if newcomer, member.access == .admin {
+            let handle = TeammateNames.unique(member.handle, taken: Set(people.members.map(\.handle)))
+            let promoted = await run(arguments(["people", "access", handle, "admin"], runner: runner.id))
+            if !promoted.ok { return Self.adminNotGiven(member.name) }
+        }
         return nil
     }
 
@@ -159,7 +182,7 @@ enum TeammateEnrollment {
         _ clientID: String, to member: Member, holder: RunnerPeople.Member?, people: RunnerPeople, checked: Bool,
         on runner: CeremonyRunner, using run: Enrollment.Writer
     ) async -> (ok: Bool, output: String) {
-        let existing = holder ?? people.members.first { $0.account == member.account }
+        let existing = Self.existing(member, holder: holder, in: people)
         let handle =
             existing?.handle ?? TeammateNames.unique(member.handle, taken: Set(people.members.map(\.handle)))
         var devices = existing?.devices ?? []
@@ -322,6 +345,11 @@ enum TeammateEnrollment {
     static let journalUnwritable =
         "Far Cooler couldn’t save a note of this change on this Mac, so it didn’t add your teammate’s "
         + "device here. Check that your disk has space, then try again."
+    /// The device was added as a Member, and making them an Admin failed.
+    static func adminNotGiven(_ name: String) -> String {
+        "\(name)’s device was added, but Far Cooler couldn’t make them an Admin here, so they’re a Member for now. "
+            + "Change their access in People."
+    }
     /// Taking the key off worked.
     static let takenOff = "It took the device’s key off again, so it has no access here."
     /// Taking the key off failed too: loud, with what happens next.

@@ -189,6 +189,33 @@ public struct PeopleAccess: Equatable, Sendable {
         return from.stepUp == .trusted && from.person == other.person && other.stepUp == .proposed
     }
 
+    /// What the Access menu offers for `person`, as the runner will allow it:
+    /// the Owner sets anyone but the Owner to Admin, Member or Viewer; an
+    /// Admin sets Members and Viewers to Member or Viewer, and lowers only
+    /// themselves; a Member or a Viewer sets no one's.
+    public func accessChoices(for person: Person) -> [PersonAccess] {
+        guard person.access != .owner else { return [] }
+        switch yourAccess {
+        case .owner: return PersonAccess.choices(for: .owner)
+        case .admin:
+            if person.isYou { return PersonAccess.choices(for: .admin) }
+            return person.access == .admin ? [] : PersonAccess.choices(for: .admin)
+        case .member, .viewer: return []
+        }
+    }
+
+    /// Whether Limit to Viewer is offered on `device`: the Owner limits any;
+    /// an Admin limits their own and those of people who aren't Admins.
+    public func mayLimit(_ device: Device) -> Bool {
+        switch yourAccess {
+        case .owner: return true
+        case .admin:
+            let holder = people.first { $0.handle == device.person }
+            return holder?.isYou == true || (holder?.access != .admin && holder?.access != .owner)
+        case .member, .viewer: return false
+        }
+    }
+
     /// The waiting keys this screen lists. The Mac, which is the owner's socket,
     /// lists them all; a phone lists only its own person's, since it can
     /// approve no one else's.

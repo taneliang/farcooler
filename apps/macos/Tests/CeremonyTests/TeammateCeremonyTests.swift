@@ -41,12 +41,15 @@ struct TeammateCeremonyTests {
     }
 
     /// Scan Bob's code on Alice's Mac, with the directory answering `directory`.
-    private func scanned(keyB: String? = nil, directory: Data?) async throws -> CeremonyStore {
+    private func scanned(
+        keyB: String? = nil, directory: Data?, facts: TeammateRunnerFacts? = TeammateRunnerFacts(caller: .owner)
+    ) async throws -> CeremonyStore {
         let code = try #require(
             CeremonyFFI.offer(name: "Bob’s iPhone", account: "user_bob", keyA: Self.keyA, keyB: keyB))
         let store = CeremonyStore()
         store.authenticate = { _ in true }
         store.teamDirectory = { directory }
+        store.teammateFacts = { _, _ in facts }
         store.scan(code, at: Date(), account: "user_alice", email: "alice@example.com", runners: [Self.row])
         #expect(store.phase == .checkingTeam, "nothing about another account's code is shown before the check")
         await store.teamCheck?.value
@@ -66,6 +69,24 @@ struct TeammateCeremonyTests {
         // Nothing is granted to a teammate by default, this Mac included,
         // though the rows arrived checked (review F1).
         #expect(Self.row.granted && confirmation.rows.allSatisfy { !$0.granted })
+    }
+
+    /// The sheet knows who is on each runner: the person under Bob's account is
+    /// picked to start, and Admin is offered because this is the owner's Mac.
+    @Test func thePersonUnderTheAccountIsPickedAndTheOwnerIsOfferedAdmin() async throws {
+        let existing = ExistingPerson(handle: "bobby", name: "Bobby", access: .member)
+        let store = try await scanned(
+            directory: Self.directory(),
+            facts: TeammateRunnerFacts(caller: .owner, candidates: [existing], matching: "bobby", taken: ["bobby"]))
+        guard case .confirming(let confirmation) = store.phase else {
+            Issue.record("not confirming")
+            return
+        }
+        #expect(confirmation.teammate?.person == "bobby")
+        #expect(confirmation.facts[Self.row.id]?.candidates == [existing])
+        #expect(
+            TeammateAccessRules.choices(callers: confirmation.rows.map { confirmation.facts[$0.runner.id]?.caller })
+                == [.admin, .member, .viewer])
     }
 
     @Test func anUnreachableDirectoryRefusesAndWritesNothing() async throws {
@@ -149,6 +170,7 @@ struct TeammateCeremonyTests {
         /// What `client enroll` answers.
         var enrolls: [(ok: Bool, output: String)] = [(true, #"{"client":{"scope":"control"},"alreadyEnrolled":false,"connBlob":""}"#)]
         var addFails = false
+        var peopleFails = false
         var revokeFails = false
         var listFails = false
         /// A runner from before member accounts: its list doesn't say it keeps them.
@@ -173,6 +195,7 @@ struct TeammateCeremonyTests {
             if arguments.contains("enroll") { return enrolls.count > 1 ? enrolls.removeFirst() : enrolls[0] }
             if arguments.contains("add"), !adds.isEmpty { return adds.removeFirst() }
             if arguments.contains("add") { return addFails ? (false, "error: handle") : (true, "{}") }
+            if arguments.contains("people") { return peopleFails ? (false, "error: access") : (true, "{}") }
             if arguments.contains("revoke") { return revokeFails ? (false, "Could not reach build-box over ssh.") : (true, "{}") }
             return (true, "{}")
         }
@@ -222,6 +245,77 @@ struct TeammateCeremonyTests {
                 ])
         #expect(runner.call("revoke") == nil)
         #expect(journal.entries.isEmpty, "a bound key stays noted")
+    }
+
+    /// Admin is the owner's to give, and a new person is a Member until it is:
+    /// the owner's Mac asks the runner's socket once they are bound.
+    @Test func aNewAdminIsGivenAfterTheyAreBound() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        var admin = Self.bob
+        admin.access = .admin
+        let outcome = await TeammateEnrollment.enroll(
+            keyA: Self.keyA, label: "Bob’s iPhone", clientID: "farcooler-0a0b", scope: .control, nodeKey: "",
+            member: admin, on: [Self.runner], journal: journal, using: { await runner.run($0) })
+        #expect(outcome.written == [Self.runner.id] && outcome.transcript == nil)
+        #expect(runner.verbs() == ["list", "enroll", "add", "?"])
+        let promote = try #require(runner.calls.last)
+        #expect(Array(promote.suffix(4)) == ["people", "access", "bob", "admin"])
+    }
+
+    @Test func aMemberIsNeverMadeAnAdmin() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        _ = await enroll(runner, journal: journal)
+        #expect(runner.verbs() == ["list", "enroll", "add"])
+        #expect(runner.calls.allSatisfy { !$0.contains("people") })
+    }
+
+    @Test func aPersonAlreadyHereKeepsTheirAccessAndIsNotMadeAnAdminAgain() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        runner.listed =
+            #"{"members":[{"handle":"bobby","name":"Bobby","devices":["farcooler-old"],"reps":0,"rep_panes":[],"account":"user_bob","email":"bob@example.com","access":"member"}],"claude_account":"","you":""}"#
+        var admin = Self.bob
+        admin.access = .admin
+        _ = await TeammateEnrollment.enroll(
+            keyA: Self.keyA, label: "Bob’s iPhone", clientID: "farcooler-0a0b", scope: .control, nodeKey: "",
+            member: admin, on: [Self.runner], journal: journal, using: { await runner.run($0) })
+        #expect(runner.calls.allSatisfy { !$0.contains("people") }, "changing their access is People's, not Add Teammate's")
+    }
+
+    @Test func anAdminThatCouldNotBeGivenIsSaidAndTheDeviceStays() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        runner.peopleFails = true
+        var admin = Self.bob
+        admin.access = .admin
+        let outcome = await TeammateEnrollment.enroll(
+            keyA: Self.keyA, label: "Bob’s iPhone", clientID: "farcooler-0a0b", scope: .control, nodeKey: "",
+            member: admin, on: [Self.runner], journal: journal, using: { await runner.run($0) })
+        #expect(outcome.written == [Self.runner.id], "the device is there as a Member")
+        #expect(outcome.transcript?.contains(TeammateEnrollment.adminNotGiven("Bob Smith")) == true)
+        #expect(runner.call("revoke") == nil)
+    }
+
+    /// The person picked is the one bound, whatever the account says.
+    @Test func thePersonPickedIsTheOneTheDeviceIsBoundTo() async throws {
+        let (journal, folder) = Self.journal()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runner = Runner()
+        runner.listed =
+            #"{"members":[{"handle":"cy","name":"Cy","devices":["farcooler-cy"],"reps":0,"rep_panes":[]}],"claude_account":"","you":""}"#
+        var picked = Self.bob
+        picked.person = "cy"
+        _ = await TeammateEnrollment.enroll(
+            keyA: Self.keyA, label: "Bob’s iPhone", clientID: "farcooler-0a0b", scope: .control, nodeKey: "",
+            member: picked, on: [Self.runner], journal: journal, using: { await runner.run($0) })
+        let add = try #require(runner.call("add"))
+        #expect(add.contains("cy") && add.contains("Cy") && add.contains("farcooler-cy") && add.contains("farcooler-0a0b"))
     }
 
     /// One runner at a time: each is read, written and bound before the next

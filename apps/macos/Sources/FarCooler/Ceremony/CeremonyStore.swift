@@ -494,6 +494,8 @@ final class CeremonyStore: ObservableObject {
         var shell: ShellKeyChoice?
         /// Present when the code came from a teammate's account (ov-525).
         var teammate: TeammateChoice? = nil
+        /// What each runner said about the people on it, by runner id (ov-856).
+        var facts: [String: TeammateRunnerFacts] = [:]
     }
 
     /// A teammate's code: who the directory says they are, and what the
@@ -541,6 +543,17 @@ final class CeremonyStore: ObservableObject {
     /// The team directory's answers, or nil when it couldn't be asked. A test
     /// answers it; the app asks the relay.
     var teamDirectory: () async -> Data? = { await Account.shared.directoryClient.teamDirectory() }
+    /// Who is on `runner` and what this Mac is there (ov-856): read from its
+    /// member list. This is the owner's Mac, so a runner that records no access
+    /// can't make an Admin, which is what `.admin` stands for here. A test answers it.
+    var teammateFacts: (_ runner: String, _ account: String) async -> TeammateRunnerFacts? = { runner, account in
+        let listed = await CLI.run(TeammateEnrollment.arguments(["member", "list"], runner: runner))
+        guard listed.ok, let line = listed.output.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("{") }),
+            var facts = TeammateRunnerFacts(members: Data(line.utf8), account: account, isSocket: true)
+        else { return nil }
+        facts.caller = facts.caller == nil ? .admin : .owner
+        return facts
+    }
     /// The teammate check in flight after a code from another account.
     private(set) var teamCheck: Task<Void, Never>?
     /// Vouch for the device just added to this Mac's own account (ov-550):
@@ -706,12 +719,19 @@ final class CeremonyStore: ObservableObject {
         // purpose. This Mac doesn't know which runners are in a team the two
         // share, so none starts checked.
         let rows = runners.map { RunnerRow(runner: $0.runner, granted: false, note: $0.note) }
+        var told: [String: TeammateRunnerFacts] = [:]
+        for row in runners {
+            if let said = await teammateFacts(row.runner.id, who.account) { told[row.runner.id] = said }
+        }
+        guard !Task.isCancelled, scan == scanNumber, phase == .checkingTeam else { return }
+        var choice = TeammateChoice(
+            who: who, directory: directory ?? "", scanner: account, grantedBy: email, held: accepted.held ?? [])
+        // The person already under this account is the one picked to start.
+        choice.person = told.values.compactMap(\.matching).first
         phase = .confirming(
             Confirmation(
                 offerJSON: accepted.offer, offer: offer, scannedAt: at, rows: rows, shell: nil,
-                teammate: TeammateChoice(
-                    who: who, directory: directory ?? "", scanner: account, grantedBy: email,
-                    held: accepted.held ?? [])))
+                teammate: choice, facts: told))
     }
 
     /// The person adding a teammate edits what they'll be called, and what

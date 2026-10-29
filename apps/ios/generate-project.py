@@ -681,6 +681,7 @@ AGENTKIT_SOURCES = [
     # say about each runner. `TeammateNames` suggests their handle and name.
     "TeammateNames.swift",
     "TeammateAdd.swift",
+    "TeammateAccess.swift",
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",

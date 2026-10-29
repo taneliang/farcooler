@@ -46,6 +46,15 @@ final class RunnerSettingsStore: ObservableObject {
     /// hasn't recorded the people's access.
     @Published private(set) var access: PeopleAccess?
     func setAccess(_ new: PeopleAccess?) { access = new }
+    func setPeople(_ new: RunnerPeople?) { people = new }
+    /// The runner reached as this Mac's paired device, when the owner's ssh
+    /// can't answer and this Mac is paired with it (ov-856): its admin actions
+    /// are then signed with Touch ID. Nil otherwise.
+    var remote: RemoteStepUp?
+    /// Opens that connection. A test answers it.
+    var stepUpOpener: (String) async -> RemoteStepUp? = { await MacRemoteStepUp.open(target: $0) }
+    /// The six digits this Mac shows while its own key waits for an approval.
+    @Published var shownCode: String?
     /// The owner's warning that their shell's startup files export a Claude
     /// key (ov-651), worded by the runner, or nil: none set, no members, or a
     /// runner from before.
@@ -89,7 +98,13 @@ final class RunnerSettingsStore: ObservableObject {
     /// know them, which isn't a failure of this screen, so nothing is said.
     func loadPeople() async {
         let result = await cli(hostArguments + ["--json", "member", "list"])
-        guard result.ok else { return }
+        guard result.ok else {
+            // Not reachable as the owner (a teammate's Mac has no shell here):
+            // as a paired device, if this Mac is paired with it.
+            if !target.isEmpty { await loadAsPairedDevice() }
+            return
+        }
+        remote = nil
         people = RunnerPeople(json: Data(result.output.utf8))
         await loadAccess(members: Data(result.output.utf8))
     }

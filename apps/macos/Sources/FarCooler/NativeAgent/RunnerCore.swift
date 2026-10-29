@@ -113,6 +113,18 @@ actor RunnerCore {
         }
     }
 
+    /// Arguments built by `StepUp`, which are JSON values and nothing else.
+    struct JSONArguments: @unchecked Sendable {
+        let value: [String: Any]
+    }
+
+    /// [call(_:_:)], for arguments that arrive as plain JSON values.
+    func call(_ method: String, json args: JSONArguments) async throws -> Data {
+        try await submit { handle in
+            Self.json(args.value).withCString { json in method.withCString { farcooler_client_call(handle, $0, json) } }
+        }
+    }
+
     private func submit(connect: Bool = false, _ start: (UnsafeMutableRawPointer) -> UInt64) async throws -> Data {
         guard let handle else { throw Failure.notConnected }
         let ticket = start(handle)

@@ -88,7 +88,18 @@ public struct TeammateChoice: Equatable, Sendable {
     public var held: [CeremonyHold] = []
     public var handle: String
     public var name: String
-    public var scope: TeammateScope = .control
+    /// What they may do (ov-856): Admin (only the Owner offers it), Member
+    /// or Viewer. A person already on a runner keeps the access they have there.
+    public var access: PersonAccess = .member
+    /// The handle of the person already on the runners this device is added
+    /// to, or nil for a New Person.
+    public var person: String?
+
+    /// The line this access is written at: Viewer reads, everyone else controls.
+    public var scope: TeammateScope {
+        get { access == .viewer ? .read : .control }
+        set { access = newValue == .read ? .viewer : (access == .viewer ? .member : access) }
+    }
 
     public init(
         who: CeremonyTeammate, directory: String, scanner: String, grantedBy: String,
@@ -101,7 +112,7 @@ public struct TeammateChoice: Equatable, Sendable {
         self.held = held
         self.handle = handle
         self.name = name
-        self.scope = scope
+        self.access = scope == .read ? .viewer : .member
     }
 
     /// What the directory suggests a teammate is called, before the person
@@ -154,6 +165,9 @@ public enum TeammateAddOutcome: Equatable, Sendable {
     /// The phone never reached the runner, or the runner refused the call:
     /// nothing is known to have been written.
     case notReached
+    /// The runner refused it, or the person closed the prompt, and said why in
+    /// a sentence (ov-856). Nothing was written. Empty when they cancelled.
+    case declined(String)
 
     /// Decode `teammate.enroll`'s JSON. An answer that doesn't read is
     /// ``notReached``, never a guess at success.
@@ -217,6 +231,8 @@ public enum TeammateAddCopy {
         case .notUpdated:
             return "Far Cooler couldn’t update your teammate’s record on \(runner), but their device still has "
                 + "the access you chose. Add your teammate again to finish updating it."
+        case .declined(let why):
+            return why.isEmpty ? nil : why
         case .notReached:
             return "This \(device) couldn’t reach \(runner), so your teammate’s device wasn’t added there."
         }

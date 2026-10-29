@@ -83,6 +83,31 @@ class PeopleAccess private constructor(
         val key: String get() = handle.ifEmpty { "(owner)" }
     }
 
+    /**
+     * What the Access menu offers for [person], as the runner will allow it: the Owner sets anyone but the Owner to
+     * Admin, Member or Viewer; an Admin sets Members and Viewers to Member or Viewer, and lowers only themselves; a
+     * Member or a Viewer sets no one's.
+     */
+    fun accessChoices(person: Person): List<PersonAccess> {
+        if (person.access == PersonAccess.OWNER) return emptyList()
+        return when (yourAccess) {
+            PersonAccess.OWNER -> PersonAccess.choices(PersonAccess.OWNER)
+            PersonAccess.ADMIN ->
+                if (person.isYou || person.access != PersonAccess.ADMIN) PersonAccess.choices(PersonAccess.ADMIN) else emptyList()
+            PersonAccess.MEMBER, PersonAccess.VIEWER -> emptyList()
+        }
+    }
+
+    /** Whether Limit to Viewer is offered on [device]: the Owner limits any; an Admin their own and non-Admins'. */
+    fun mayLimit(device: Device): Boolean = when (yourAccess) {
+        PersonAccess.OWNER -> true
+        PersonAccess.ADMIN -> {
+            val holder = people.firstOrNull { it.handle == device.person }
+            holder?.isYou == true || (holder != null && holder.access != PersonAccess.ADMIN && holder.access != PersonAccess.OWNER)
+        }
+        PersonAccess.MEMBER, PersonAccess.VIEWER -> false
+    }
+
     /** The waiting keys to list: this phone's own person's only, since it can approve no one else's. */
     val shownWaiting: List<Device>
         get() = waiting.filter { thisDevice != null && it.person == thisDevice.person }

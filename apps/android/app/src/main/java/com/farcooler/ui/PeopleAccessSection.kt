@@ -39,6 +39,10 @@ import com.farcooler.model.StepUpKeyStanding
 /** What the People screen can do on this phone: a null draws no control, so it never offers what the runner would refuse. */
 class PeopleAccessActions(
     val removeDevice: ((PeopleAccess.Device, Boolean) -> Unit)? = null,
+    /** Hold a device at Viewer, signed by this phone's key. */
+    val limitToViewer: ((PeopleAccess.Device) -> Unit)? = null,
+    /** Give a person another Access, signed by this phone's key. */
+    val setAccess: ((PeopleAccess.Person, PersonAccess) -> Unit)? = null,
     val approve: ((PeopleAccess.Device) -> Unit)? = null,
     val allowAdminActions: (() -> Unit)? = null,
 )
@@ -68,15 +72,10 @@ fun PeopleAccessSection(
                 if (person.isYou && person.access != PersonAccess.OWNER) {
                     Text("You", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(
-                    person.access.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.testTag("people-access-${person.handle.ifEmpty { "owner" }}"),
-                )
+                AccessControl(person, access, actions)
             }
             for (device in person.devices) {
-                DeviceRow(device, runner, actions, Modifier.padding(start = 12.dp)) { removing = it }
+                DeviceRow(device, access, runner, actions, Modifier.padding(start = 12.dp)) { removing = it }
             }
         }
     }
@@ -88,7 +87,7 @@ fun PeopleAccessSection(
     if (access.toCheck.isNotEmpty()) {
         SectionTitle(PeopleAccess.CHECK_HEADER)
         Column(Modifier.testTag("people-check"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (device in access.toCheck) DeviceRow(device, runner, actions, Modifier) { removing = it }
+            for (device in access.toCheck) DeviceRow(device, access, runner, actions, Modifier) { removing = it }
         }
         Text(PeopleAccess.CHECK_FOOTER, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -141,6 +140,7 @@ fun removalMessage(device: PeopleAccess.Device, runner: String): String {
 @Composable
 private fun DeviceRow(
     device: PeopleAccess.Device,
+    access: PeopleAccess,
     runner: String,
     actions: PeopleAccessActions,
     modifier: Modifier,
@@ -178,19 +178,62 @@ private fun DeviceRow(
                 )
             }
         }
-        if (actions.removeDevice != null) {
+        if (actions.removeDevice != null || actions.limitToViewer != null) {
             Box {
                 IconButton(
                     onClick = { open = true },
                     modifier = Modifier.testTag("device-menu-${device.id}").semantics { contentDescription = "${device.name} options" },
                 ) { Icon(Icons.Filled.MoreVert, contentDescription = null) }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    DropdownMenuItem(
-                        text = { Text(PeopleAccess.REMOVE_DEVICE) },
-                        onClick = { open = false; remove(device) },
-                        modifier = Modifier.testTag("device-remove-${device.id}"),
-                    )
+                    val limit = actions.limitToViewer
+                    if (limit != null && !device.viewerOnThisDevice && access.mayLimit(device)) {
+                        DropdownMenuItem(
+                            text = { Text(PeopleAccess.LIMIT_TO_VIEWER) },
+                            onClick = { open = false; limit(device) },
+                            modifier = Modifier.testTag("device-limit-${device.id}"),
+                        )
+                    }
+                    if (actions.removeDevice != null) {
+                        DropdownMenuItem(
+                            text = { Text(PeopleAccess.REMOVE_DEVICE) },
+                            onClick = { open = false; remove(device) },
+                            modifier = Modifier.testTag("device-remove-${device.id}"),
+                        )
+                    }
                 }
+            }
+        }
+    }
+}
+
+/** The person's Access: a menu of what the runner would allow this phone to set, else just the word. */
+@Composable
+private fun AccessControl(person: PeopleAccess.Person, access: PeopleAccess, actions: PeopleAccessActions) {
+    val choices = access.accessChoices(person)
+    val set = actions.setAccess
+    val tag = "people-access-${person.handle.ifEmpty { "owner" }}"
+    if (set == null || choices.isEmpty()) {
+        Text(
+            person.access.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag(tag),
+        )
+        return
+    }
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { open = true },
+            modifier = Modifier.testTag(tag).semantics { contentDescription = "${person.name}’s access" },
+        ) { Text(person.access.title) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (choice in (choices + person.access).distinct().sortedBy { it.ordinal }) {
+                DropdownMenuItem(
+                    text = { Text(choice.title) },
+                    onClick = { open = false; if (choice != person.access) set(person, choice) },
+                    modifier = Modifier.testTag("$tag-${choice.wire}"),
+                )
             }
         }
     }

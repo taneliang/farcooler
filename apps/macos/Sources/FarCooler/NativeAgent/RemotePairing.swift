@@ -112,6 +112,11 @@ final class RemotePairing: ObservableObject {
         }
     }
 
+    /// The host key `target` was found to present this run, as pinned
+    /// against `known_hosts`, or nil before a connect has pinned one. What a
+    /// step-up signs for (ov-856): the Mac's own pin, never the runner's say.
+    func pin(for target: String) -> String? { pins[target] }
+
     /// The label the runner's device list shows for this Mac's line.
     static var label: String { "\(thisMacName) Conversation View" }
 

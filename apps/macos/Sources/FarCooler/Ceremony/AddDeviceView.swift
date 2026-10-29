@@ -298,7 +298,11 @@ struct AddDeviceView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                TeammateFields(teammate: teammate) { change in store.setTeammate(change) }
+                TeammateFields(
+                    teammate: teammate, candidates: candidates(confirmation),
+                    choices: TeammateAccessRules.choices(
+                        callers: addingTo(confirmation).map { confirmation.facts[$0.runner.id]?.caller })
+                ) { change in store.setTeammate(change) }
 
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(confirmation.rows) { row in
@@ -540,6 +544,20 @@ struct AddDeviceView: View {
         "This device will only reach it on your current network. Update Far Cooler on it and "
         + "add it again to connect from anywhere."
 
+    /// The runners being added to, or every runner while none is ticked yet.
+    private func addingTo(_ confirmation: CeremonyStore.Confirmation) -> [CeremonyStore.RunnerRow] {
+        let granted = confirmation.rows.filter(\.granted)
+        return granted.isEmpty ? confirmation.rows : granted
+    }
+
+    /// The people this device could be added to, from the runners being added to.
+    private func candidates(_ confirmation: CeremonyStore.Confirmation) -> [(person: ExistingPerson, runner: String)] {
+        var seen = Set<String>()
+        return addingTo(confirmation).flatMap { row in
+            (confirmation.facts[row.runner.id]?.candidates ?? []).map { ($0, row.runner.label) }
+        }.filter { seen.insert($0.0.handle).inserted }
+    }
+
     private func grant(_ row: CeremonyStore.RunnerRow) -> Binding<Bool> {
         Binding(
             get: { row.granted },
@@ -658,7 +676,8 @@ struct AddDeviceView: View {
         if let teammate = confirmation.teammate {
             let member = TeammateEnrollment.Member(
                 handle: teammate.handle, name: teammate.name.trimmingCharacters(in: .whitespaces),
-                account: teammate.who.account, email: teammate.who.email)
+                account: teammate.who.account, email: teammate.who.email, access: teammate.access,
+                person: teammate.person)
             let scope = teammate.scope
             Task {
                 await store.confirm(reason: "Confirm adding \(name) for \(teammate.who.email)") { granted in
@@ -746,44 +765,67 @@ struct TailcatPairingNote: View {
     }
 }
 
-/// What a teammate will be called on the runners, and what they may do there
-/// (ruling R-65): a name and a handle suggested from their email, both
-/// editable, and Control or Read, never a shell.
+/// Who the teammate is and what they may do there (ruling R-65, ov-856): the
+/// person (one the runner already has, or a New Person), a name and a handle
+/// suggested from their email, both editable, and the Access, never a shell.
 struct TeammateFields: View {
     let teammate: CeremonyStore.TeammateChoice
+    let candidates: [(person: ExistingPerson, runner: String)]
+    let choices: [PersonAccess]
     let change: ((inout CeremonyStore.TeammateChoice) -> Void) -> Void
+
+    private var chosen: (person: ExistingPerson, runner: String)? {
+        candidates.first { $0.person.handle == teammate.person }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            LabeledContent("Name") {
-                TextField("Name", text: bind(\.name))
+            if !candidates.isEmpty {
+                LabeledContent("Person") {
+                    Picker("Person", selection: bind(\.person)) {
+                        ForEach(candidates, id: \.person.handle) { Text($0.person.name).tag(String?.some($0.person.handle)) }
+                        Text("New Person…").tag(String?.none)
+                    }
                     .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
+                    .fixedSize()
+                }
             }
-            LabeledContent("Handle") {
-                TextField("Handle", text: bind(\.handle))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-            }
-            if !TeammateNames.isValidHandle(teammate.handle) {
-                Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+            if let chosen {
+                Text(TeammateAccessRules.keeps(chosen.person, runner: chosen.runner))
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                LabeledContent("Name") {
+                    TextField("Name", text: bind(\.name))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabeledContent("Handle") {
+                    TextField("Handle", text: bind(\.handle))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                if !TeammateNames.isValidHandle(teammate.handle) {
+                    Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                LabeledContent("Access") {
+                    Picker("Access", selection: bind(\.access)) {
+                        ForEach(choices) { access in Text(access.title).tag(access) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+                Text(teammate.access.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            LabeledContent("Access") {
-                Picker("Access", selection: bind(\.scope)) {
-                    ForEach(TeammateScope.allCases) { scope in Text(scope.title).tag(scope) }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .fixedSize()
-            }
-            Text(teammate.scope.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         // The fields reach the sheet's trailing edge, where the scroll view
         // clips: this keeps their borders whole.

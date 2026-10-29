@@ -63,14 +63,12 @@ final class TeammateAddUITests: XCTestCase {
         XCTAssertTrue(blocked.exists, app.debugDescription)
         XCTAssertFalse(blocked.isEnabled, "a runner this phone can't add a teammate on was tickable")
         XCTAssertTrue(
-            app.staticTexts[
-                "This iPhone can only control gpu-workstation, so it can’t add a teammate there. Add your teammate from your Mac."
-            ].exists,
+            app.staticTexts["Only an Owner or an Admin can add people to gpu-workstation."].exists,
             "the row didn't say why: \(app.debugDescription)")
         XCTAssertTrue(element(app, "teammate-runner-build-box").isEnabled)
     }
 
-    func testAddTeammateWritesAtControlToTheTickedRunnerOnly() {
+    func testAddTeammateWritesAsAMemberToTheTickedRunnerOnly() {
         let app = launch()
         _ = confirmation(app)
         element(app, "teammate-runner-build-box").tap()
@@ -82,20 +80,54 @@ final class TeammateAddUITests: XCTestCase {
             "no reply: \(app.debugDescription)")
         XCTAssertEqual(
             asked(app),
-            "scope=control handle=bob-smith name=Bob Smith account=user_bob runners=build-box")
+            "access=member handle=bob-smith name=Bob Smith account=user_bob runners=build-box")
     }
 
-    func testReadAccessIsWhatIsSent() {
+    func testViewerIsWhatIsSentWhenViewerIsChosen() {
         let app = launch()
         _ = confirmation(app)
-        element(app, "teammate-scope").buttons["Read"].tap()
+        element(app, "teammate-access").buttons["Viewer"].tap()
         XCTAssertTrue(
-            app.staticTexts["They can follow the work on the runners you select, but can’t change it."].exists,
-            app.debugDescription)
+            app.staticTexts["Can see the board and progress, but not terminals."].exists, app.debugDescription)
         element(app, "teammate-runner-build-box").tap()
         element(app, "teammate-add").tap()
         XCTAssertTrue(app.staticTexts["Scan this code with Bob’s iPhone"].waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(asked(app).hasPrefix("scope=read "), asked(app))
+        XCTAssertTrue(asked(app).hasPrefix("access=viewer "), asked(app))
+    }
+
+    /// Admin is the Owner's to give: offered on a runner where this phone is the
+    /// Owner, never where it is an Admin.
+    func testAdminIsOfferedToTheOwnerAndToNoOneElse() {
+        let owner = launch()
+        _ = confirmation(owner)
+        XCTAssertTrue(element(owner, "teammate-access").buttons["Admin"].exists, owner.debugDescription)
+        element(owner, "teammate-access").buttons["Admin"].tap()
+        element(owner, "teammate-runner-build-box").tap()
+        element(owner, "teammate-add").tap()
+        XCTAssertTrue(owner.staticTexts["Scan this code with Bob’s iPhone"].waitForExistence(timeout: 30), owner.debugDescription)
+        XCTAssertTrue(asked(owner).hasPrefix("access=admin "), asked(owner))
+        owner.terminate()
+
+        let admin = launch(["-teammate-add-admin"])
+        _ = confirmation(admin)
+        XCTAssertTrue(element(admin, "teammate-access").buttons["Member"].exists, admin.debugDescription)
+        XCTAssertFalse(element(admin, "teammate-access").buttons["Admin"].exists, "an Admin was offered Admin")
+    }
+
+    /// A person the runner already has under this account is picked to start,
+    /// keeps the access they have, and New Person is the other choice.
+    func testAPersonAlreadyHereIsPickedAndKeepsTheirAccess() {
+        let app = launch(["-teammate-add-existing"])
+        _ = confirmation(app)
+        XCTAssertTrue(element(app, "teammate-person").exists, app.debugDescription)
+        XCTAssertTrue(
+            app.staticTexts["Bob is already on build-box as a Member, and keeps that access."].exists,
+            app.debugDescription)
+        XCTAssertFalse(element(app, "teammate-handle").exists, "a person who is here has no handle to type")
+        element(app, "teammate-runner-build-box").tap()
+        element(app, "teammate-add").tap()
+        XCTAssertTrue(app.staticTexts["Scan this code with Bob’s iPhone"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertEqual(asked(app), "access=member handle=bob name=Bob account=user_bob runners=build-box")
     }
 
     func testAHandleARunnerWouldRefuseKeepsAddTeammateOff() {

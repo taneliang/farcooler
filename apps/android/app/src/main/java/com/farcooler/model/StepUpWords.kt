@@ -27,6 +27,11 @@ object StepUpReason {
 
     fun add(device: String, runner: String, access: PersonAccess) = "Add $device to $runner as ${article(access.title)} ${access.title}."
 
+    fun limit(device: String, runner: String) = "Limit $device on $runner to Viewer." // casing ok: Owner, Admin and Viewer are access names
+
+    fun setAccess(person: String, access: PersonAccess, runner: String) =
+        "Make $person ${article(access.title)} ${access.title} on $runner."
+
     fun approve(device: String) = "Allow $device to approve changes to who has access."
 
     private fun article(word: String) = if (word.first() in "AEIOU") "an" else "a"
@@ -50,6 +55,11 @@ object StepUpWords {
         "challenge_expired" -> "That took too long. Try again."
         "step_up_failed", "host_pin_mismatch", "step_up_replayed" -> "Couldn’t confirm it was you. Try again."
         "defensive_only", "not_admin", "not_yours", "socket_only", "person_only" -> "You can’t change that from this $device."
+        "add_limit" -> "You can add five devices a day from this $device. Try again tomorrow."
+        "admin_is_owners" -> "Only the Owner can make someone an Admin." // casing ok: Owner, Admin and Viewer are access names
+        "access_exists" -> "They already have a different access on $runner. Change it from People." // casing ok: Owner, Admin and Viewer are access names
+        "handle_taken", "device_taken" -> "That person or device is already on $runner, under another name."
+        "scope_access" -> "That access doesn’t fit the device’s line. Try again."
         "wrong_code" -> "That code doesn’t match. Check the other device and try again."
         "proposal_expired" -> "That request timed out. Ask again on the other device."
         else -> "Couldn’t do that. Try again."

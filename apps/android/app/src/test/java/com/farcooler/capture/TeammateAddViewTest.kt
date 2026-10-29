@@ -55,7 +55,7 @@ class TeammateAddViewTest {
     private fun rows(vararg runners: Runner) = runners.map {
         RunnerRow(
             it, picked = false,
-            blocked = if (it.id == gpu.id) "This phone can only control ${it.label}, so it can’t add a teammate there. Add your teammate from your Mac." else null,
+            blocked = if (it.id == gpu.id) "Only an Owner or an Admin can add people to ${it.label}." else null,
         )
     }
 
@@ -124,7 +124,7 @@ class TeammateAddViewTest {
             assertFalse("Add teammate on with no runner ticked", enabled(tagged(root(), "teammate-add")!!))
 
             // A runner this phone only controls says why and can't be ticked.
-            assertTrue(said.toString(), said.any { it.startsWith("This phone can only control gpu-workstation") })
+            assertTrue(said.toString(), said.any { it.startsWith("Only an Owner or an Admin can add people to gpu-workstation") })
             tagged(root(), "teammate-runner-gpu-workstation")!!.config.getOrNull(SemanticsActions.OnClick)
                 ?.action?.invoke()
             ShadowLooper.idleMainLooper()
@@ -135,12 +135,13 @@ class TeammateAddViewTest {
             assertTrue(enabled(tagged(root(), "teammate-add")!!))
             assertEquals("nothing is written before a press", 0, confirmed)
 
-            // Read is what is sent when Read is chosen.
-            tagged(root(), "teammate-scope-read")!!.config[SemanticsActions.OnClick].action!!.invoke()
+            // A read line is what is sent when Viewer is chosen.
+            tagged(root(), "teammate-access-viewer")!!.config[SemanticsActions.OnClick].action!!.invoke()
             ShadowLooper.idleMainLooper()
+            assertEquals(com.farcooler.model.PersonAccess.VIEWER, current!!.access)
             assertEquals(com.farcooler.ceremony.TeammateScope.READ, current!!.scope)
             val after = mutableListOf<String>().also { texts(root(), it) }
-            assertTrue(after.toString(), "They can follow the work on the runners you select, but can’t change it." in after)
+            assertTrue(after.toString(), "Can see the board and progress, but not terminals." in after)
 
             tagged(root(), "teammate-add")!!.config[SemanticsActions.OnClick].action!!.invoke()
         }

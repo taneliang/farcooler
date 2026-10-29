@@ -140,6 +140,28 @@ struct AddDeviceView: View {
 
     // MARK: - A teammate's device (ov-854)
 
+    /// The runners being added to, or every runner this phone may add to
+    /// while none is ticked yet.
+    private var addingTo: [RunnerRow] {
+        let picked = store.rows.filter(\.picked)
+        return picked.isEmpty ? store.rows.filter { $0.blocked == nil } : picked
+    }
+
+    /// The people this device could be added to, from the runners being added
+    /// to: the one under this account and any added by hand with none yet.
+    private var candidates: [(person: ExistingPerson, runner: String)] {
+        var seen = Set<String>()
+        return addingTo.flatMap { row in
+            (store.facts[row.runner.id.uuidString]?.candidates ?? []).map { ($0, row.label) }
+        }.filter { seen.insert($0.0.handle).inserted }
+    }
+
+    /// What the Access menu offers: Admin only when this phone is the Owner
+    /// on every runner being added to.
+    private var accessChoices: [PersonAccess] {
+        TeammateAccessRules.choices(callers: addingTo.map { store.facts[$0.runner.id.uuidString]?.caller })
+    }
+
     /// The confirmation for a teammate's device, in the Mac's words: who the
     /// directory says they are, the key to compare in person, what they'll be
     /// called and may do, and the runners.
@@ -168,7 +190,9 @@ struct AddDeviceView: View {
                     FingerprintRow(fingerprint: fingerprint, key: store.offer?.key_a ?? "", opened: true)
                 }
 
-                TeammateFields(teammate: teammate) { change in store.setTeammate(change) }
+                TeammateFields(
+                    teammate: teammate, candidates: candidates, choices: accessChoices
+                ) { change in store.setTeammate(change) }
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach($store.rows) { $row in
@@ -443,45 +467,72 @@ struct RefusalScreen: View {
     }
 }
 
-/// What a teammate will be called on the runners, and what they may do there
-/// (ov-854), as the Mac's `TeammateFields` has it.
+/// Who the teammate is and what they may do (ov-854, ov-856): the person (one
+/// a runner already has, or a New Person), then the Access, as the Mac's
+/// `TeammateFields` has it.
 struct TeammateFields: View {
     let teammate: TeammateChoice
+    let candidates: [(person: ExistingPerson, runner: String)]
+    let choices: [PersonAccess]
     let change: ((inout TeammateChoice) -> Void) -> Void
+
+    private var chosen: (person: ExistingPerson, runner: String)? {
+        candidates.first { $0.person.handle == teammate.person }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            LabeledContent("Name") {
-                TextField("Name", text: bind(\.name))
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityIdentifier("teammate-name")
+            if !candidates.isEmpty {
+                Picker("Person", selection: bind(\.person)) {
+                    ForEach(candidates, id: \.person.handle) { Text($0.person.name).tag(String?.some($0.person.handle)) }
+                    Text("New Person…").tag(String?.none)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("teammate-person")
             }
-            LabeledContent("Handle") {
-                TextField("Handle", text: bind(\.handle))
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityIdentifier("teammate-handle")
-            }
-            if !TeammateNames.isValidHandle(teammate.handle) {
-                Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+            if chosen == nil {
+                LabeledContent("Name") {
+                    TextField("Name", text: bind(\.name))
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("teammate-name")
+                }
+                LabeledContent("Handle") {
+                    TextField("Handle", text: bind(\.handle))
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                        .accessibilityIdentifier("teammate-handle")
+                }
+                if !TeammateNames.isValidHandle(teammate.handle) {
+                    Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("teammate-handle-note")
+                }
+                accessPicker
+            } else if let chosen {
+                Text(TeammateAccessRules.keeps(chosen.person, runner: chosen.runner))
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("teammate-handle-note")
+                    .accessibilityIdentifier("teammate-access-detail")
             }
-            Picker("Access", selection: bind(\.scope)) {
-                ForEach(TeammateScope.allCases) { scope in Text(scope.title).tag(scope) }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("teammate-scope")
-            Text(teammate.scope.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("teammate-scope-detail")
         }
+    }
+
+    @ViewBuilder private var accessPicker: some View {
+        Picker("Access", selection: bind(\.access)) {
+            ForEach(choices) { access in Text(access.title).tag(access) }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("teammate-access")
+        Text(teammate.access.summary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("teammate-access-detail")
     }
 
     private func bind<Value>(_ path: WritableKeyPath<TeammateChoice, Value>) -> Binding<Value> {

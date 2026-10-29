@@ -119,6 +119,10 @@ public enum StepUpReason {
         "Allow \(device) to approve changes to who has access."
     }
 
+    public static func limit(_ device: String, runner: String) -> String {
+        "Limit \(device) on \(runner) to Viewer."
+    }
+
     public static func setAccess(_ person: String, to access: PersonAccess, runner: String) -> String {
         "Make \(person) \(article(access.title)) \(access.title) on \(runner)."
     }
@@ -151,6 +155,16 @@ public enum StepUpWords {
             "Couldn’t confirm it was you. Try again."
         case "defensive_only", "not_admin", "not_yours", "socket_only", "person_only":
             "You can’t change that from this \(device)."
+        case "add_limit":
+            "You can add five devices a day from this \(device). Try again tomorrow."
+        case "admin_is_owners":
+            "Only the Owner can make someone an Admin."
+        case "access_exists":
+            "They already have a different access on \(runner). Change it from People."
+        case "handle_taken", "device_taken":
+            "That person or device is already on \(runner), under another name."
+        case "scope_access":
+            "That access doesn’t fit the device’s line. Try again."
         case "wrong_code":
             "That code doesn’t match. Check the other device and try again."
         case "proposal_expired":

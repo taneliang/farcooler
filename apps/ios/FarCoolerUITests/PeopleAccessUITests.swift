@@ -74,6 +74,41 @@ final class PeopleAccessUITests: XCTestCase {
         XCTAssertFalse(element(app, "device-pad-c").waitForExistence(timeout: 3), "the device it added was left")
     }
 
+    /// The Access menu is the Owner's, signed: one prompt for exactly that person
+    /// and access, and the list reads again with the change.
+    func testTheOwnerChangesAnAccessWithOnePrompt() {
+        let app = people(["-phone-access-trusted"])
+        let menu = element(app, "people-access-cosmo")
+        XCTAssertTrue(app.reveal(menu), "no Access menu: \(app.debugDescription)")
+        menu.tap()
+        app.buttons["Viewer"].firstMatch.tap()
+        waitForSent(app, "prompt Make Cosmo a Viewer on studio.")
+        waitForSent(app, "access cosmo=viewer")
+        // The list is read again with the change: Cosmo's line now says what a Viewer may do.
+        XCTAssertTrue(
+            app.staticTexts["Can see the board and progress, but not terminals."].waitForExistence(timeout: 10),
+            app.debugDescription)
+    }
+
+    /// Admin is offered by the Owner's menu and a plain read-only phone gets no menu.
+    func testThePhoneOffersNoMenuUntilItsKeyIsTrusted() {
+        let app = people()
+        XCTAssertTrue(app.reveal(element(app, "people-access-cosmo")))
+        XCTAssertFalse(app.buttons["Viewer"].exists)
+        XCTAssertEqual(element(app, "people-access-cosmo").label, "Member")
+    }
+
+    func testLimitToViewerIsSignedForThatDevice() {
+        let app = people(["-phone-access-trusted"])
+        let menu = element(app, "device-menu-phone-c")
+        XCTAssertTrue(app.reveal(menu), "no device menu: \(app.debugDescription)")
+        menu.tap()
+        app.buttons["Limit to Viewer"].firstMatch.tap()
+        waitForSent(app, "prompt Limit Cosmos-iPhone on studio to Viewer.")
+        waitForSent(app, "cap phone-c=viewer")
+        XCTAssertTrue(element(app, "device-viewer-phone-c").waitForExistence(timeout: 10), app.debugDescription)
+    }
+
     func testClosingThePromptRemovesNothing() {
         let app = people(["-phone-access-trusted", "-phone-access-cancel"])
         let menu = element(app, "device-menu-pad-c")

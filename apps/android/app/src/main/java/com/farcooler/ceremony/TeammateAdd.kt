@@ -2,6 +2,7 @@ package com.farcooler.ceremony
 
 import com.farcooler.account.RelayAnswer
 import com.farcooler.account.body
+import com.farcooler.model.PersonAccess
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -50,8 +51,14 @@ data class TeammateChoice(
     val grantedBy: String,
     val handle: String = TeammateNames.handle(who.email),
     val name: String = TeammateNames.name(who.email),
-    val scope: TeammateScope = TeammateScope.CONTROL,
+    /** What they may do (ov-856): Admin (only the Owner offers it), Member or Viewer. */
+    val access: PersonAccess = PersonAccess.MEMBER,
+    /** The handle of the person already on the runners this device is added to, or null for a New person. */
+    val person: String? = null,
 ) {
+    /** The line this access is written at: Viewer reads, everyone else controls. */
+    val scope: TeammateScope get() = if (access == PersonAccess.VIEWER) TeammateScope.READ else TeammateScope.CONTROL
+
     /** Whether what was typed is something a runner will take. */
     val isComplete: Boolean get() = TeammateNames.isValidHandle(handle) && name.isNotBlank()
 }
@@ -145,6 +152,12 @@ sealed interface TeammateAddOutcome {
     /** The phone never reached the runner, or the runner refused the call. */
     data object NotReached : TeammateAddOutcome
 
+    /**
+     * The runner refused it, or the person closed the prompt, and [why] says so in a sentence (ov-856). Nothing was
+     * written. Empty when they cancelled.
+     */
+    data class Declined(val why: String) : TeammateAddOutcome
+
     val isWritten: Boolean get() = this is Written
 
     /**
@@ -223,6 +236,7 @@ object TeammateAddCopy {
                 "the access you chose. Add your teammate again to finish updating it."
         TeammateAddOutcome.NotReached ->
             "This $device couldn’t reach $runner, so your teammate’s device wasn’t added there."
+        is TeammateAddOutcome.Declined -> outcome.why.ifEmpty { null }
     }
 
     const val TAKEN_OFF = "It took the device’s key off again, so it has no access there."

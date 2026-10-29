@@ -70,6 +70,24 @@ class PeopleAccessController(
         if (perform("client.revoke", args, reason)) load()
     }
 
+    /** Hold one device at Viewer, with a prompt for exactly that device. */
+    suspend fun limit(target: PeopleAccess.Device) {
+        val args = buildJsonObject {
+            put("clientId", target.id)
+            put("cap", "viewer")
+        }
+        if (perform("client.set_cap", args, StepUpReason.limit(target.name, runner))) load()
+    }
+
+    /** Give a person another Access, with a prompt for exactly that person and access. */
+    suspend fun setAccess(person: PeopleAccess.Person, new: com.farcooler.model.PersonAccess) {
+        val args = buildJsonObject {
+            put("handle", person.handle)
+            put("access", new.wire)
+        }
+        if (perform("member.set_access", args, StepUpReason.setAccess(person.name, new, runner))) load()
+    }
+
     suspend fun approve(target: PeopleAccess.Device) {
         val args = buildJsonObject {
             put("clientId", target.id)

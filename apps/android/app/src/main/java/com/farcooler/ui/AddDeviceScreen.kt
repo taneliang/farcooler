@@ -54,9 +54,10 @@ import com.farcooler.ceremony.ScanScreen
 import com.farcooler.ceremony.SealedReply
 import com.farcooler.ceremony.SealedReplyPost
 import com.farcooler.ceremony.TeamDirectory
+import com.farcooler.ceremony.TeammateAccessRules
 import com.farcooler.ceremony.TeammateEnroller
 import com.farcooler.net.enrollTeammate
-import com.farcooler.net.mayAddTeammate
+import com.farcooler.net.teammateFacts
 import kotlinx.coroutines.launch
 
 /**
@@ -93,7 +94,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
             // directory says so, and only runners this phone administers can
             // have one added (ov-854).
             it.teamDirectory = { TeamDirectory.fetch(model.account::directoryPost) }
-            it.mayAddTeammate = { runner -> model.fleet.connection(runner.id)?.mayAddTeammate() == true }
+            it.teammateFacts = { runner, account -> model.fleet.connection(runner.id)?.teammateFacts(account) }
             // A browser's offer: its sealed reply goes to this account's relay (ov-770).
             it.sealedReply.post = { ceremony, account, sealed ->
                 SealedReplyPost.send(model.account::directoryPost, ceremony, account, sealed)
@@ -112,6 +113,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
     val addressOnlyNote by store.addressOnlyNote.collectAsStateWithLifecycle()
     val teammate by store.teammate.collectAsStateWithLifecycle()
     val teammateNote by store.teammateNote.collectAsStateWithLifecycle()
+    val facts by store.facts.collectAsStateWithLifecycle()
     val scanned by scanner.scanned.collectAsStateWithLifecycle()
 
     /**
@@ -138,10 +140,10 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
      * was never asked.
      */
     val teammateEnroller = remember(model) {
-        TeammateEnroller { publicKey, label, clientId, nodeKey, teammate, granted ->
+        TeammateEnroller { publicKey, label, clientId, nodeKey, teammate, granted, facts ->
             granted.mapNotNull { entry ->
                 model.fleet.connection(entry.id)
-                    ?.enrollTeammate(publicKey, label, clientId, nodeKey, teammate)
+                    ?.enrollTeammate(context, publicKey, label, clientId, nodeKey, teammate, facts[entry.id])
                     ?.let { outcome -> entry.id to outcome }
             }.toMap()
         }
@@ -200,6 +202,12 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                         fingerprint = fingerprint,
                         publicKey = offer?.keyA.orEmpty(),
                         rows = rows,
+                        candidates = (rows.filter { it.picked }.ifEmpty { rows.filter { it.blocked == null } })
+                            .flatMap { row -> facts[row.runner.id]?.candidates.orEmpty().map { it to row.label } }
+                            .distinctBy { it.first.handle },
+                        choices = TeammateAccessRules.choices(
+                            rows.filter { it.picked }.ifEmpty { rows.filter { it.blocked == null } }.map { facts[it.runner.id]?.caller },
+                        ),
                         onToggle = { store.toggle(it) },
                         onChange = { store.setTeammate(it) },
                         onConfirm = {

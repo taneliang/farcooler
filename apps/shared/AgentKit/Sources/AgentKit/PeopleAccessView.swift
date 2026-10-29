@@ -54,7 +54,7 @@ public struct PeopleAccessSections: View {
         Group {
             Section {
                 ForEach(access.people) { person in
-                    PersonRows(person: person, runner: runner, actions: actions, remove: { removing = $0 })
+                    PersonRows(person: person, access: access, runner: runner, actions: actions, remove: { removing = $0 })
                 }
             } header: {
                 Text("Access")
@@ -64,7 +64,7 @@ public struct PeopleAccessSections: View {
             }
             if !access.toCheck.isEmpty {
                 Section {
-                    ForEach(access.toCheck) { DeviceRow(device: $0, runner: runner, actions: actions, remove: { removing = $0 }) }
+                    ForEach(access.toCheck) { DeviceRow(device: $0, access: access, runner: runner, actions: actions, remove: { removing = $0 }) }
                 } header: {
                     Text(PeopleAccess.checkHeader).accessibilityIdentifier("people-check")
                 } footer: {
@@ -115,6 +115,7 @@ public struct PeopleAccessSections: View {
 
 private struct PersonRows: View {
     let person: PeopleAccess.Person
+    let access: PeopleAccess
     let runner: String
     let actions: PeopleAccessActions
     let remove: (PeopleAccess.Device) -> Void
@@ -134,7 +135,7 @@ private struct PersonRows: View {
                 accessControl
             }
             ForEach(person.devices) { device in
-                DeviceRow(device: device, runner: runner, actions: actions, remove: remove)
+                DeviceRow(device: device, access: access, runner: runner, actions: actions, remove: remove)
                     .padding(.leading, 14)
             }
         }
@@ -142,12 +143,14 @@ private struct PersonRows: View {
     }
 
     @ViewBuilder private var accessControl: some View {
-        if let setAccess = actions.setAccess, person.access != .owner, !PersonAccess.choices(for: .owner).isEmpty {
+        let choices = access.accessChoices(for: person)
+        if let setAccess = actions.setAccess, !choices.isEmpty {
             Picker("Access", selection: Binding(get: { choosing ?? person.access }, set: { new in
+                guard new != person.access else { return }
                 choosing = new
                 Task { await setAccess(person, new); choosing = nil }
             })) {
-                ForEach(PersonAccess.choices(for: .owner)) { Text($0.title).tag($0) }
+                ForEach(Array(Set(choices + [person.access])).sorted { $0.rawValue < $1.rawValue }) { Text($0.title).tag($0) }
             }
             .labelsHidden().pickerStyle(.menu).fixedSize().disabled(choosing != nil)
             .accessibilityLabel("\(person.name)’s access")
@@ -161,6 +164,7 @@ private struct PersonRows: View {
 
 private struct DeviceRow: View {
     let device: PeopleAccess.Device
+    let access: PeopleAccess
     let runner: String
     let actions: PeopleAccessActions
     let remove: (PeopleAccess.Device) -> Void
@@ -193,7 +197,7 @@ private struct DeviceRow: View {
             Spacer(minLength: 4)
             if actions.removeDevice != nil || actions.limitToViewer != nil {
                 Menu {
-                    if let limit = actions.limitToViewer, !device.viewerOnThisDevice {
+                    if let limit = actions.limitToViewer, !device.viewerOnThisDevice, access.mayLimit(device) {
                         Button(PeopleAccess.limitToViewer) { Task { await limit(device) } }
                     }
                     if actions.removeDevice != nil {

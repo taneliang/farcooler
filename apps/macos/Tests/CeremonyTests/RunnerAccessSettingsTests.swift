@@ -16,7 +16,7 @@ struct RunnerAccessSettingsTests {
     /// Cosmo (Member) with an iPhone that added an iPad held at Viewer; Dan
     /// (Admin) whose phone waits for an approval and whose Mac has a shell; a
     /// legacy line to check.
-    static let members =
+    nonisolated static let members =
         #"{"members":[{"handle":"cosmo","name":"Cosmo","devices":["phone-c","pad-c"],"reps":0,"rep_panes":[],"access":"member"},"#
         + #"{"handle":"dan","name":"Dan","devices":["phone-d","mac-d"],"reps":0,"rep_panes":[],"access":"admin"}],"#
         + #""claude_account":"team@example.com","you":"","device_access":["#
@@ -27,7 +27,7 @@ struct RunnerAccessSettingsTests {
         + #"{"client_id":"phone-d","person":"dan","access":"admin","cap":"","check":false,"step_up":"proposed","step_up_code":"418207","step_up_at":9},"#
         + #"{"client_id":"mac-d","person":"dan","access":"admin","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5}]}"#
 
-    static let clients =
+    nonisolated static let clients =
         #"{"clients":[{"clientId":"phone-c","label":"farcooler-Cosmos-iPhone-dddd4444","shellAccess":false,"foreign":false,"addedBy":""},"#
         + #"{"clientId":"pad-c","label":"farcooler-Cosmos-iPad-eeee5555","shellAccess":false,"foreign":false,"addedBy":"phone-c"},"#
         + #"{"clientId":"phone-d","label":"farcooler-Dans-iPhone-ffff6666","shellAccess":false,"foreign":false,"addedBy":""},"#
@@ -108,6 +108,93 @@ struct RunnerAccessSettingsTests {
         let access = try #require(store.access)
         await store.accessActions().approve?(access.waiting[0])
         #expect(store.failure == "You can’t change that from this Mac.")
+    }
+
+    // MARK: - A Mac that isn't the runner (ov-856)
+
+    /// The client core, as a paired Mac's step-up calls it: it answers the lists,
+    /// the statement to sign and the signed action, and remembers every call.
+    final class PairedCalls: StepUpCalling, @unchecked Sendable {
+        var made: [(method: String, args: [String: Any])] = []
+        var refuse: String?
+        struct Refusal: Error { let word: String }
+        func call(_ method: String, _ args: [String: Any]) async throws -> Data {
+            made.append((method, args))
+            if let refuse, method == "step_up.finish" { throw Refusal(word: refuse) }
+            switch method {
+            case "member.list":
+                return Data(RunnerAccessSettingsTests.members.replacingOccurrences(of: "\"you\":\"\"", with: "\"you\":\"dan\"").utf8)
+            case "client.list": return Data(RunnerAccessSettingsTests.clients.utf8)
+            case "step_up.begin": return Data(#"{"token":"t-1","statement":"c3RhdGVtZW50"}"#.utf8)
+            default: return Data("{}".utf8)
+            }
+        }
+        func refusalWord(_ error: Error) -> String? { (error as? Refusal)?.word }
+    }
+
+    final class FakeSigner: StepUpSigning, @unchecked Sendable {
+        var prompts: [String] = []
+        var publicKey: Data? { Data(repeating: 4, count: 65) }
+        func makeKey() throws -> Data { publicKey! }
+        func sign(_ statement: Data, reason: String) async throws -> Data {
+            prompts.append(reason)
+            return Data([1])
+        }
+    }
+
+    /// A store for a runner the owner's ssh can't reach, but this Mac is paired with.
+    static func pairedStore(_ paired: PairedCalls, _ signer: FakeSigner) -> RunnerSettingsStore {
+        let store = RunnerSettingsStore(target: "box")
+        store.cliForTesting = { _ in CLI.Result(ok: false, output: "", errors: "Permission denied (publickey).") }
+        store.stepUpOpener = { _ in
+            RemoteStepUp(
+                stepUp: StepUp(core: paired, signer: signer, clientId: "mac-d", hostPin: "SHA256:host"), core: paired,
+                clientID: "mac-d")
+        }
+        return store
+    }
+
+    @Test("A Mac with no shell on the runner reads the people as its paired device")
+    func pairedRead() async throws {
+        let store = Self.pairedStore(PairedCalls(), FakeSigner())
+        await store.loadPeople()
+        let access = try #require(store.access)
+        #expect(access.yourAccess == .admin && access.thisDevice?.stepUp == .trusted)
+    }
+
+    @Test("Each admin action is one signed request, with Touch ID for exactly that action")
+    func pairedActionsAreSigned() async throws {
+        let paired = PairedCalls()
+        let signer = FakeSigner()
+        let store = Self.pairedStore(paired, signer)
+        await store.loadPeople()
+        let access = try #require(store.access)
+        let actions = store.accessActions()
+        let cosmo = try #require(access.people.first { $0.handle == "cosmo" })
+        await actions.limitToViewer?(cosmo.devices[0])
+        await actions.setAccess?(cosmo, .viewer)
+        await actions.removeDevice?(cosmo.devices[0], false)
+        let begun = paired.made.filter { $0.method == "step_up.begin" }
+        #expect(begun.compactMap { $0.args["method"] as? String } == ["client.set_cap", "member.set_access", "client.revoke"])
+        #expect((begun[0].args["args"] as? [String: Any])?["clientId"] as? String == "phone-c")
+        #expect((begun[0].args["args"] as? [String: Any])?["cap"] as? String == "viewer")
+        #expect(begun[0].args["hostPin"] as? String == "SHA256:host" && begun[0].args["clientId"] as? String == "mac-d")
+        #expect(
+            signer.prompts == [
+                "Limit Cosmos-iPhone on box to Viewer.", "Make Cosmo a Viewer on box.", "Remove Cosmos-iPhone from box.",
+            ], "\(signer.prompts)")
+        #expect(paired.made.filter { $0.method == "step_up.finish" }.count == 3, "each prompt sent its own action")
+    }
+
+    @Test("A refused signed action is a sentence on the Mac")
+    func pairedRefusal() async throws {
+        let paired = PairedCalls()
+        let store = Self.pairedStore(paired, FakeSigner())
+        await store.loadPeople()
+        paired.refuse = "admin_is_owners"
+        let cosmo = try #require(store.access?.people.first { $0.handle == "cosmo" })
+        await store.accessActions().setAccess?(cosmo, .member)
+        #expect(store.failure == "Only the Owner can make someone an Admin.", "\(store.failure ?? "")")
     }
 
     // MARK: - Drawn

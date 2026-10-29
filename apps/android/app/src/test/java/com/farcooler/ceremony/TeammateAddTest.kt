@@ -27,7 +27,7 @@ class TeammateAddTest {
             who = CeremonyTeammate("user_bob", "bob.smith@example.com", "Platform"),
             directory = "{}",
             grantedBy = "alice@example.com",
-            scope = scope,
+            access = if (scope == TeammateScope.READ) com.farcooler.model.PersonAccess.VIEWER else com.farcooler.model.PersonAccess.MEMBER,
             handle = handle ?: "bob-smith",
             name = name ?: "Bob Smith",
         )

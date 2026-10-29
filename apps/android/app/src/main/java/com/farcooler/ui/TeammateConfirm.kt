@@ -27,7 +27,9 @@ import androidx.compose.ui.unit.dp
 import com.farcooler.ceremony.RunnerRow
 import com.farcooler.ceremony.TeammateChoice
 import com.farcooler.ceremony.TeammateNames
-import com.farcooler.ceremony.TeammateScope
+import com.farcooler.ceremony.ExistingPerson
+import com.farcooler.ceremony.TeammateAccessRules
+import com.farcooler.model.PersonAccess
 
 /**
  * The confirmation for a teammate's device (ov-854), in the Mac's words: who
@@ -46,6 +48,10 @@ fun TeammateConfirmScreen(
     fingerprint: String?,
     publicKey: String,
     rows: List<RunnerRow>,
+    /** The people this device could be added to, with the runner each is on. */
+    candidates: List<Pair<ExistingPerson, String>> = emptyList(),
+    /** What the Access menu offers: Admin only when this phone is the Owner on every runner being added to. */
+    choices: List<PersonAccess> = PersonAccess.choices(PersonAccess.ADMIN),
     onToggle: (String) -> Unit,
     onChange: ((TeammateChoice) -> TeammateChoice) -> Unit,
     onConfirm: () -> Unit,
@@ -75,46 +81,72 @@ fun TeammateConfirmScreen(
         // Open: comparing it is what the sentence above asks for.
         fingerprint?.let { FingerprintRow(it, publicKey, opened = true) }
 
-        OutlinedTextField(
-            value = teammate.name,
-            onValueChange = { value -> onChange { it.copy(name = value) } },
-            label = { Text("Name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("teammate-name"),
-        )
-        OutlinedTextField(
-            value = teammate.handle,
-            onValueChange = { value -> onChange { it.copy(handle = value) } },
-            label = { Text("Handle") },
-            singleLine = true,
-            isError = !TeammateNames.isValidHandle(teammate.handle),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-            supportingText = {
-                if (!TeammateNames.isValidHandle(teammate.handle)) {
-                    Text(
-                        "Use lowercase letters, numbers, and hyphens, starting with a letter.",
-                        modifier = Modifier.testTag("teammate-handle-note"),
-                    )
+        val existing = candidates.firstOrNull { it.first.handle == teammate.person }
+        val keeping = existing != null
+        if (candidates.isNotEmpty()) {
+            val options = candidates.map { it.first.handle to it.first.name } + (null to "New person…")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("teammate-person")) {
+                options.forEachIndexed { index, (handle, title) ->
+                    SegmentedButton(
+                        selected = handle == teammate.person,
+                        onClick = { onChange { it.copy(person = handle) } },
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                        modifier = Modifier.testTag("teammate-person-${handle ?: "new"}"),
+                    ) { Text(title, maxLines = 1) }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().testTag("teammate-handle"),
-        )
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("teammate-scope")) {
-            TeammateScope.entries.forEachIndexed { index, scope ->
-                SegmentedButton(
-                    selected = scope == teammate.scope,
-                    onClick = { onChange { it.copy(scope = scope) } },
-                    shape = SegmentedButtonDefaults.itemShape(index, TeammateScope.entries.size),
-                    modifier = Modifier.testTag("teammate-scope-${scope.word}"),
-                ) { Text(scope.title) }
             }
         }
-        Text(
-            teammate.scope.detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.testTag("teammate-scope-detail"),
-        )
+        if (!keeping) {
+            OutlinedTextField(
+                value = teammate.name,
+                onValueChange = { value -> onChange { it.copy(name = value) } },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("teammate-name"),
+            )
+            OutlinedTextField(
+                value = teammate.handle,
+                onValueChange = { value -> onChange { it.copy(handle = value) } },
+                label = { Text("Handle") },
+                singleLine = true,
+                isError = !TeammateNames.isValidHandle(teammate.handle),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                supportingText = {
+                    if (!TeammateNames.isValidHandle(teammate.handle)) {
+                        Text(
+                            "Use lowercase letters, numbers, and hyphens, starting with a letter.",
+                            modifier = Modifier.testTag("teammate-handle-note"),
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("teammate-handle"),
+            )
+        }
+        if (existing != null) {
+            Text(
+                TeammateAccessRules.keeps(existing.first, existing.second),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("teammate-access-detail"),
+            )
+        } else {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("teammate-access")) {
+                choices.forEachIndexed { index, access ->
+                    SegmentedButton(
+                        selected = access == teammate.access,
+                        onClick = { onChange { it.copy(access = access) } },
+                        shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+                        modifier = Modifier.testTag("teammate-access-${access.wire}"),
+                    ) { Text(access.title) }
+                }
+            }
+            Text(
+                teammate.access.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("teammate-access-detail"),
+            )
+        }
 
         Column {
             for (row in rows) {

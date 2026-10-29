@@ -1,6 +1,7 @@
 package com.farcooler.ceremony
 
 import com.farcooler.data.Reach
+import com.farcooler.model.PersonAccess
 import com.farcooler.data.Runner
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -60,24 +61,34 @@ class TeammateAddFlowTest {
 
     private class Recorder(var outcome: TeammateAddOutcome = TeammateAddOutcome.Written("")) {
         val asked = mutableListOf<Asked>()
-        val enroller = TeammateEnroller { publicKey, _, clientId, _, teammate, runners ->
+        val enroller = TeammateEnroller { publicKey, _, clientId, _, teammate, runners, _ ->
             asked += Asked(publicKey, clientId, teammate, runners.map { it.label })
             runners.associate { it.id to outcome }
         }
     }
 
-    private fun store(core: Core, directory: String? = "{}"): CeremonyStore {
+    private fun store(
+        core: Core,
+        directory: String? = "{}",
+        facts: TeammateRunnerFacts = TeammateRunnerFacts(caller = PersonAccess.OWNER, taken = setOf("dan")),
+    ): CeremonyStore {
         val store = CeremonyStore(account = "user_alice", accountEmail = "alice@example.com", deviceName = "Alice’s Pixel")
         store.core = core
         store.clock = { 1_000L }
         store.teamDirectory = { directory }
-        store.mayAddTeammate = { it.id != gpu.id }
+        store.teammateFacts = { runner, _ ->
+            if (runner.id == gpu.id) TeammateRunnerFacts(caller = PersonAccess.MEMBER) else facts
+        }
         store.certify = { _, _ -> error("a teammate's device is never this phone's to vouch for") }
         return store
     }
 
-    private suspend fun scanned(core: Core = Core(), directory: String? = "{}"): CeremonyStore {
-        val store = store(core, directory)
+    private suspend fun scanned(
+        core: Core = Core(),
+        directory: String? = "{}",
+        facts: TeammateRunnerFacts = TeammateRunnerFacts(caller = PersonAccess.OWNER, taken = setOf("dan")),
+    ): CeremonyStore {
+        val store = store(core, directory, facts)
         store.read(offer("user_bob"), listOf(buildBox, gpu), null)
         assertEquals("nothing about another account's code is shown before the check", CeremonyStore.Phase.CheckingTeam, store.phase.value)
         assertNull(store.offer.value)
@@ -103,7 +114,7 @@ class TeammateAddFlowTest {
         val store = scanned()
         val blocked = store.rows.value.single { it.runner.id == gpu.id }
         assertEquals(
-            "This phone can only control gpu-workstation, so it can’t add a teammate there. Add your teammate from your Mac.",
+            "Only an Owner or an Admin can add people to gpu-workstation.",
             blocked.blocked,
         )
         store.toggle(gpu.id)
@@ -162,7 +173,7 @@ class TeammateAddFlowTest {
         val recorder = Recorder()
         val store = scanned(core)
         store.toggle(buildBox.id)
-        store.setTeammate { it.copy(scope = TeammateScope.READ, handle = "bobby") }
+        store.setTeammate { it.copy(access = PersonAccess.VIEWER, handle = "bobby") }
 
         store.confirmTeammate(gate, recorder.enroller)
 
@@ -176,6 +187,47 @@ class TeammateAddFlowTest {
         assertEquals("the reply says whose runners these are", listOf("alice@example.com", "alice@example.com"), core.repliesGrantedBy)
         assertNull(store.teammateNote.value)
         assertFalse(store.someRunnersPending.value)
+    }
+
+    @Test
+    fun theAccessMenuOffersAdminOnlyWhereThePhoneIsTheOwner() = runTest {
+        val owner = scanned(facts = TeammateRunnerFacts(caller = PersonAccess.OWNER))
+        owner.toggle(buildBox.id)
+        assertEquals(
+            listOf(PersonAccess.ADMIN, PersonAccess.MEMBER, PersonAccess.VIEWER),
+            TeammateAccessRules.choices(owner.rows.value.filter { it.picked }.map { owner.facts.value[it.runner.id]?.caller }),
+        )
+        val admin = scanned(facts = TeammateRunnerFacts(caller = PersonAccess.ADMIN))
+        admin.toggle(buildBox.id)
+        assertEquals(
+            listOf(PersonAccess.MEMBER, PersonAccess.VIEWER),
+            TeammateAccessRules.choices(admin.rows.value.filter { it.picked }.map { admin.facts.value[it.runner.id]?.caller }),
+        )
+    }
+
+    @Test
+    fun thePersonAlreadyUnderTheAccountIsPickedToStartAndNewPersonIsTheOtherChoice() = runTest {
+        val bob = ExistingPerson("bob", "Bob", PersonAccess.MEMBER)
+        val store = scanned(facts = TeammateRunnerFacts(caller = PersonAccess.OWNER, candidates = listOf(bob), matching = "bob"))
+        assertEquals("bob", store.teammate.value!!.person)
+        store.setTeammate { it.copy(person = null) }
+        assertNull("New person", store.teammate.value!!.person)
+    }
+
+    @Test
+    fun aPhoneThatSignsAsksOnceForTheRequestAndNotForTheOldTap() = runTest {
+        val recorder = Recorder()
+        val signing = scanned(facts = TeammateRunnerFacts(caller = PersonAccess.OWNER, signs = true))
+        signing.toggle(buildBox.id)
+        var asked = 0
+        signing.confirmTeammate({ _, _ -> asked += 1; ConfirmingTap.Outcome.CONFIRMED }, recorder.enroller)
+        assertEquals("the prompt is the signature's", 0, asked)
+        assertEquals(1, recorder.asked.size)
+
+        val plain = scanned(facts = TeammateRunnerFacts(caller = PersonAccess.OWNER, signs = false))
+        plain.toggle(buildBox.id)
+        plain.confirmTeammate({ _, _ -> asked += 1; ConfirmingTap.Outcome.CONFIRMED }, recorder.enroller)
+        assertEquals("a phone that can't sign still confirms", 1, asked)
     }
 
     @Test
