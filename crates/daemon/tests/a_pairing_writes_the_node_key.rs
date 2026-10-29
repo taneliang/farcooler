@@ -63,6 +63,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str, shell_access: bool
         shell_access,
         node_key: node_key.into(),
         for_teammate: false,
+        step_up_key: None,
     }
 }
 

@@ -128,6 +128,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 // device asked for no tunnel" — not as an unusable key.
                 node_key: node_key.clone().unwrap_or_default(),
                 for_teammate: *for_teammate,
+                step_up_key: None,
             }),
         ),
         ClientCmd::Revoke { client_id, with_added } => with(

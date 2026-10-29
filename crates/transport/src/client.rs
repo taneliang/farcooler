@@ -751,6 +751,7 @@ pub fn request(method: &str) -> Request {
         // envelope rather than checked at each call site.
         required_capabilities: Vec::new(),
         accepts: Vec::new(),
+        step_up: None,
         payload: Some(farcooler_protocol::v1::request::Payload::Empty(
             farcooler_protocol::v1::Empty {},
         )),

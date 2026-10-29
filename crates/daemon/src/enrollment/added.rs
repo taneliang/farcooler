@@ -39,17 +39,33 @@ pub struct Caller {
     /// Who the caller was, and their access generation, when the request was
     /// decided (ov-856, S2): checked again under the fence lock.
     pub authority: Option<crate::person_access::Authority>,
+    /// The step-up this request carried (ov-856): an admin's Face ID over
+    /// exactly this request. A fact beside `scope`, never in it: `scope` stays
+    /// what the line grants, so every `== HostAdmin` test below still means
+    /// "this line is `host_admin`" (B2).
+    pub stepped_up: Option<crate::step_up::Stepped>,
 }
 
 impl Caller {
     pub fn new(session: Arc<Session>, scope: Scope) -> Self {
-        Caller { session, scope, authority: None }
+        Caller { session, scope, authority: None, stepped_up: None }
     }
 
     /// This caller, with the authority its request was decided under.
     pub fn with_authority(mut self, authority: crate::person_access::Authority) -> Self {
         self.authority = Some(authority);
         self
+    }
+
+    /// This caller, having stepped up for its request.
+    pub fn with_stepped_up(mut self, stepped: Option<crate::step_up::Stepped>) -> Self {
+        self.stepped_up = stepped;
+        self
+    }
+
+    /// Whether this caller has stepped up for exactly `method`.
+    pub fn stepped_up_for(&self, method: &str) -> bool {
+        self.stepped_up.as_ref().is_some_and(|s| s.method == method)
     }
 
     /// Refuse `access_changed` when who the caller is, or their generation,

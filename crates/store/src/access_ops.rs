@@ -69,6 +69,13 @@ fn holder_in(tx: &rusqlite::Transaction, device: &str) -> Result<Option<String>>
     Ok(owner.then(String::new))
 }
 
+/// Bump the generation of the person `device` is bound to, nobody's devices
+/// counting as the owner's.
+pub(crate) fn bump_holder_in(tx: &rusqlite::Transaction, device: &str) -> Result<()> {
+    let holder = holder_in(tx, device)?.unwrap_or_default();
+    bump_in(tx, &holder)
+}
+
 /// Called by `set_member_releasing` once `devices` are newly bound to a
 /// member: the owner's positive binding for each goes (it is theirs now), and
 /// so does the cap it was given against the owner's ceiling, since the caller

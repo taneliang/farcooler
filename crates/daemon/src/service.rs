@@ -1936,6 +1936,10 @@ pub struct Service {
     /// service at a scratch file; an environment variable would be
     /// process-global and would move every other test's target with it.
     authorized_keys: PathBuf,
+    /// Where this runner's sshd host keys are (`/etc/ssh`): a step-up names
+    /// one by fingerprint (ov-856), and a field for `authorized_keys`' reason,
+    /// so a test points ONE service at a scratch folder.
+    ssh_host_dir: PathBuf,
     /// The `.claude.json` the runner's Claude account is read from (ov-508):
     /// a field for `authorized_keys`' reason, so a test's service never reads
     /// the Claude config of whoever runs the suite.
@@ -2140,6 +2144,7 @@ impl Service {
             host_id,
             install_id,
             authorized_keys: scratch_authorized_keys(&root),
+            ssh_host_dir: PathBuf::from("/etc/ssh"),
             claude_config: root.join("claude").join(".claude.json"),
             agent_home: Some(root.join("home")),
             rep_resumes: Default::default(),
@@ -2262,6 +2267,29 @@ impl Service {
     pub fn enrolling_into(mut self, path: PathBuf) -> Self {
         self.authorized_keys = path;
         self
+    }
+
+    /// Read this runner's sshd host keys from `dir`. For the tests, as
+    /// [`enrolling_into`](Self::enrolling_into) is.
+    pub fn with_ssh_host_dir(mut self, dir: PathBuf) -> Self {
+        self.ssh_host_dir = dir;
+        self
+    }
+
+    /// The fingerprints (`SHA256:...`) of this runner's sshd host keys, which
+    /// a step-up's statement must name one of (ov-856, S1). Empty when none
+    /// can be read; a step-up is then refused rather than guessed.
+    pub fn host_pins(&self) -> Vec<String> {
+        let Ok(dir) = std::fs::read_dir(&self.ssh_host_dir) else { return Vec::new() };
+        let mut pins: Vec<String> = dir
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("ssh_host_") && e.file_name().to_string_lossy().ends_with("_key.pub"))
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .filter_map(|text| ssh_key::PublicKey::from_openssh(text.trim()).ok())
+            .map(|key| key.fingerprint(ssh_key::HashAlg::Sha256).to_string())
+            .collect();
+        pins.sort();
+        pins
     }
 
     /// The file this runner's device keys live in.

@@ -231,6 +231,14 @@ async fn enroll_held(
     // owner's device is one that no member's device and no Add Teammate made
     // (ov-856): the enroller is the owner's own device or this runner's socket.
     let member_enrolls = by_member.is_some();
+    // The new device's step-up key (ov-856, B3): trusted from this write only
+    // when the runner's own socket asked, or a device that stepped up for this
+    // enroll did and the device is its own person's. Every other key is a
+    // proposal, and waits for an approval.
+    let step_key = request.step_up_key.clone().map(|key| {
+        let trusted = caller.as_ref().is_none_or(|c| c.session.client_id().is_none() || (c.stepped_up.is_some() && !request.for_teammate));
+        (key, trusted)
+    });
     let owner_binds = by_member.is_none() && !request.for_teammate;
     let (mut result, admitted) = blocking(move || {
         held();
@@ -365,7 +373,15 @@ async fn enroll_held(
             // line would keep the id taken.
             match (bind.get(), done.already_enrolled) {
                 (Some(scope), false) if store.access_migrated()? => {
-                    store.bind_owner_device(&mine.client_id, crate::person_access::owner_cap(scope)).map_err(Refusal)
+                    store.bind_owner_device(&mine.client_id, crate::person_access::owner_cap(scope)).map_err(Refusal)?
+                }
+                _ => {}
+            }
+            // And its step-up key, after the bind (the bind refuses an id
+            // with any row left, a key's included).
+            match (&step_key, done.already_enrolled) {
+                (Some((key, trusted)), false) => {
+                    store.put_step_up_key(&mine.client_id, &key.alg, &key.public_key, *trusted, now).map_err(Refusal)
                 }
                 _ => Ok(()),
             }
