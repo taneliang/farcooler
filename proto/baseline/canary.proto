@@ -1,4 +1,4 @@
-// Shipped by Canary at 053c6c74c564b65ed6eff15f547806a8375f29b4. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 59cc46b37bd448e68980362c997cec1ff5a510c0. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -320,6 +320,12 @@ message Request {
     // owner's own phone recorded, as its signature only. 561-569 are its
     // block, held by `reserved` below.
     CrashReport crash_report = 560;
+    // `member.set_access` and `client.set_cap` (ov-856), behind
+    // `person_access`: a person's access and a device's cap, from the
+    // runner's own socket only. 572-579 are their block, held by `reserved`
+    // below.
+    MemberSetAccess member_set_access = 570;
+    ClientSetCap client_set_cap = 571;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -363,6 +369,8 @@ message Request {
   reserved 552 to 559;
   // The rest of crash reports' block (ov-797).
   reserved 561 to 569;
+  // The rest of person access' block (ov-856).
+  reserved 572 to 579;
 }
 
 message Response {
@@ -5251,10 +5259,32 @@ message Member {
   // (`member.set_role`). Empty from a runner before `member_roles`.
   string role = 9;
   // What they may do on this runner (ov-856): `admin`, `member` or `viewer`.
-  // Read only for now: no call changes it, and enforcement is still per
-  // device. Empty from a runner before it, or before it has moved the
-  // devices' scopes over.
+  // Each request is served at the lowest of its line, this and its device's
+  // cap. Only the runner's own socket changes it (`member.set_access`).
+  // Empty from a runner before it, or before it has moved the devices'
+  // scopes over.
   string access = 10;
+}
+
+// `member.set_access` (ov-856), at `host_admin` and from the runner's own
+// socket only, by a person and never from a pane: give a member `admin`,
+// `member` or `viewer`. A demotion lowers the lines of every device of
+// theirs before it is recorded; a promotion raises a line only for this
+// person, and only as far as `control`. Answers the member list. Behind
+// `person_access`.
+message MemberSetAccess {
+  string handle = 1;
+  string access = 2;
+}
+
+// `client.set_cap` (ov-856), on the same terms: hold one device below its
+// person's access at `viewer` or `member`, or clear the cap with an empty
+// `cap`. Lowering rewrites the line first; raising or clearing records
+// first, then raises the line to `control` at most. Answers the member list.
+// Behind `person_access`.
+message ClientSetCap {
+  string client_id = 1;
+  string cap = 2;
 }
 
 // One device's place in the people's access (ov-856, read only): whose it is,
