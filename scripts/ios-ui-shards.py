@@ -119,6 +119,7 @@ SHARDS = {
         "EnrolledDevicesUITests",  # 131 s + opt-in captures; -phone-harness -phone-devices (ov-855)
         "NeedsYouTeamUITests",  # 172 s; -phone-harness -phone-team (ov-633)
         "DynamicTypeTests",  # 104 s; -phone-harness. Moved from agent (ov-722, Oct 30)
+        "PeopleRouteUITests",  # about 60 s, 2 tests; -phone-access -phone-alone (ov-865)
     ],
     "phone2": [
         "PlanUITests",  # 711 s, a failed test's 84 s in it (139 to 433 before); -phone-harness -phone-plan (ov-274)
