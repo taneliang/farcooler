@@ -230,6 +230,13 @@ struct TileView: View {
                 // replaced: every pane scaled from the wrong `group.columns`,
                 // then snapping once tmux was finally told. That is the
                 // wrong-size flash on every switch.
+                // The terminal view is the one being used: say its size even
+                // where tmux's window already has it. A browser viewing the same
+                // pane may have reshaped it since, and the last to use the
+                // terminal is the one who should see it right (ov-853).
+                .onChange(of: hasKeyboard) { _, now in
+                    if now { Task { await send(viewport: size, for: group, force: true) } }
+                }
                 .task(id: Viewport(size: size, group: group, font: preferences.revision, header: headerHeight(group))) {
                     if size != lastViewportSize {
                         try? await Task.sleep(for: .milliseconds(250))
@@ -332,7 +339,7 @@ struct TileView: View {
     /// This is the ONLY grid this app computes. Everything below it — how many
     /// columns any one pane has — is tmux's answer, read back off the layout and
     /// handed to that pane's renderer. See `TilePane`'s `grid`.
-    private func send(viewport size: CGSize, for group: PaneGroup) async {
+    private func send(viewport size: CGSize, for group: PaneGroup, force: Bool = false) async {
         let viewport = Viewport(size: size, group: group, font: preferences.revision, header: headerHeight(group))
         guard
             let window = TileGeometry.viewport(
@@ -342,7 +349,7 @@ struct TileView: View {
 
         // Compared against what tmux HAS rather than against what we last asked
         // for. The two are not the same thing, and only the first one is a fact.
-        guard window.columns != group.columns || window.rows != group.rows else { return }
+        guard force || window.columns != group.columns || window.rows != group.rows else { return }
         await onViewport(group.id, window.columns, window.rows)
     }
 }

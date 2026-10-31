@@ -35,3 +35,25 @@ export class SizeLease {
     return back
   }
 }
+
+/// How long after claiming the pane's size a typed key does not claim it
+/// again. The runner answers a size it already has at once, but a key a
+/// character would otherwise be a round trip a character.
+export const CLAIM_EVERY_MS = 2000
+
+/// Whose size the pane has, when the person is using it here. A browser tab
+/// left open keeps the size it fitted, so the Mac was garbled until the tab
+/// closed; the Mac claims its size when its terminal becomes active, and this
+/// page does the same when its pane gains focus or is typed into, so whoever
+/// last used the terminal sees it right.
+export class Claim {
+  private last = Number.NEGATIVE_INFINITY
+
+  /// Whether to send this page's size now. Focus claims always; typing
+  /// claims once per `CLAIM_EVERY_MS`.
+  due(now: number, focus: boolean): boolean {
+    if (!focus && now - this.last < CLAIM_EVERY_MS) return false
+    this.last = now
+    return true
+  }
+}

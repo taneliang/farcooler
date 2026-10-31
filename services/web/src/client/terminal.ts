@@ -11,7 +11,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
 
-import { SizeLease } from './lease'
+import { Claim, SizeLease } from './lease'
 import type { Pane } from './panes'
 import { paneOutput, Replacement } from './reconnect'
 
@@ -39,6 +39,7 @@ export class PaneView implements Pane<WebRunner> {
   private resizing = 0
   /// The size the terminal had before this page fitted it (`SizeLease`).
   private readonly lease = new SizeLease()
+  private readonly claim = new Claim()
   private readonly encoder = new TextEncoder()
   private readonly watching = new ResizeObserver(() => this.refit())
 
@@ -57,6 +58,7 @@ export class PaneView implements Pane<WebRunner> {
     // Bytes that aren't text (some mouse reports): one byte per character.
     this.term.onBinary(text => this.send(Uint8Array.from(text, c => c.charCodeAt(0) & 0xff)))
     this.watching.observe(host)
+    this.term.textarea?.addEventListener('focus', () => this.claimSize(true))
     // Closing the tab is not a detach; hand the pane back as it goes.
     window.addEventListener('pagehide', () => this.giveBack())
   }
@@ -172,6 +174,12 @@ export class PaneView implements Pane<WebRunner> {
     }
   }
 
+  /// This page is being used: send its size, so a Mac that reshaped the pane
+  /// meanwhile gives way (`Claim`).
+  private claimSize(focus: boolean): void {
+    if (this.pane && this.claim.due(Date.now(), focus)) this.refit(true)
+  }
+
   /// Put the pane back to the size it had before this page fitted it. Queued
   /// on the control channel ahead of the pane's closing.
   private giveBack(): void {
@@ -199,6 +207,7 @@ export class PaneView implements Pane<WebRunner> {
       this.typedEarlyBytes += bytes.length
       return
     }
+    this.claimSize(false)
     // Not awaited between keystrokes: each write is queued in call order
     // before this returns (crates/web, Control::call).
     this.pane?.write(bytes).catch((e: Error) => this.onProblem(e.message))
