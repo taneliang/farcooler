@@ -708,7 +708,7 @@ impl Runtime {
     /// Resize the window backing a terminal to the viewer's geometry.
     pub async fn resize_terminal(&self, id: Uuid, columns: u32, rows: u32) -> Result<()> {
         let (columns, rows) = validate::clamp_size(columns, rows);
-        let snapshot = self.inventory.snapshot();
+        let snapshot = self.inventory.refresh().await; // tmux, not a view that lags
         let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
 
         if pane.columns == columns && pane.rows == rows {

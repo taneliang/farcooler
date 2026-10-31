@@ -1460,6 +1460,7 @@ mod compose_empty_box_tests;
 
 #[path = "compose_scrolled_tests.rs"]
 mod compose_scrolled_tests;
+#[path = "viewer_resize_tests.rs"] mod viewer_resize_tests;
 
 #[path = "hidden_turn_tests.rs"]
 mod hidden_turn_tests;

@@ -11,6 +11,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
 
+import { SizeLease } from './lease'
 import type { Pane } from './panes'
 import { paneOutput, Replacement } from './reconnect'
 
@@ -36,6 +37,8 @@ export class PaneView implements Pane<WebRunner> {
   /// arrives, and is cleared only then (`resume`).
   private replacement = new Replacement(false)
   private resizing = 0
+  /// The size the terminal had before this page fitted it (`SizeLease`).
+  private readonly lease = new SizeLease()
   private readonly encoder = new TextEncoder()
   private readonly watching = new ResizeObserver(() => this.refit())
 
@@ -54,6 +57,8 @@ export class PaneView implements Pane<WebRunner> {
     // Bytes that aren't text (some mouse reports): one byte per character.
     this.term.onBinary(text => this.send(Uint8Array.from(text, c => c.charCodeAt(0) & 0xff)))
     this.watching.observe(host)
+    // Closing the tab is not a detach; hand the pane back as it goes.
+    window.addEventListener('pagehide', () => this.giveBack())
   }
 
   get active(): boolean {
@@ -108,6 +113,8 @@ export class PaneView implements Pane<WebRunner> {
     this.term.focus()
     let pane: WebPane
     try {
+      const before = await this.sizeOf(runner, terminal)
+      if (current()) this.lease.begin(before)
       pane = await runner.attach(
         terminal,
         paneOutput(replacement, current, () => this.term.reset(), bytes => this.write(bytes)),
@@ -146,11 +153,31 @@ export class PaneView implements Pane<WebRunner> {
     this.holding = false
     this.typedEarly = null
     delete this.host.dataset.attached
+    this.giveBack()
     // close() hands the channel's closing to a task of its own, so the wasm
     // object can go at once.
     this.pane?.close()
     this.pane?.free()
     this.pane = null
+  }
+
+  /// The terminal's size on the runner right now, null when it can't be read.
+  private async sizeOf(runner: WebRunner, terminal: string): Promise<{ columns: number; rows: number } | null> {
+    try {
+      const all: { id: string; columns: number; rows: number }[] = JSON.parse(await runner.terminals())
+      const found = all.find(t => t.id === terminal)
+      return found ? { columns: found.columns, rows: found.rows } : null
+    } catch {
+      return null
+    }
+  }
+
+  /// Put the pane back to the size it had before this page fitted it. Queued
+  /// on the control channel ahead of the pane's closing.
+  private giveBack(): void {
+    clearTimeout(this.resizing)
+    const back = this.lease.release()
+    if (back) this.pane?.resize(back.columns, back.rows).catch(() => {})
   }
 
   /// Output onto the screen. The page's measuring harness
@@ -185,7 +212,11 @@ export class PaneView implements Pane<WebRunner> {
       return
     }
     clearTimeout(this.resizing)
-    const tell = () => this.pane?.resize(this.term.cols, this.term.rows).catch(() => {})
+    const tell = () => {
+      if (!this.pane) return
+      this.lease.reshape()
+      this.pane.resize(this.term.cols, this.term.rows).catch(() => {})
+    }
     if (now) tell()
     else this.resizing = window.setTimeout(tell, 150)
   }
