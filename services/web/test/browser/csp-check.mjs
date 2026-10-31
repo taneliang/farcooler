@@ -820,6 +820,8 @@ async function imageWalk(page) {
   await page.press('.chat-host:not([hidden]) .chat-input', 'Enter')
   await waitForFile(join(runner.dir, 'composed'), 'What is in these?')
   await waitForFile(join(runner.dir, 'images'), `image/png ${png.length}`)
+  // The runner has the message once its file says so; the page clears the thumbnails when the answer arrives.
+  await page.waitForFunction(() => !document.querySelector('.chat-host:not([hidden]) .chat-thumb'), null, { timeout: 30_000 })
   const images = readFileSync(join(runner.dir, 'images'), 'utf8').trim().split('\n')
   if (images.length !== 3 || images.some(i => i !== `image/png ${png.length}`)) failures.push(`the runner got images ${JSON.stringify(images)}`)
   else console.log('csp-check: an attached, a pasted and a dropped image reached the agent with the words as one compose')

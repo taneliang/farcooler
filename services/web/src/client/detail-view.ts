@@ -98,7 +98,8 @@ export class DetailSheet {
     this.last = null
     // Back to where the person was: the button that opened it, or the same
     // card's button once the list was drawn anew, or the tab they are on.
-    const again = this.openerTask ? document.querySelector<HTMLElement>(`[data-task="${CSS.escape(this.openerTask)}"] button`) : null
+    const shown = (el: HTMLElement) => el.getClientRects().length > 0
+    const again = this.openerTask ? [...document.querySelectorAll<HTMLElement>(`[data-task="${CSS.escape(this.openerTask)}"] button`)].find(shown) : undefined
     const back = this.opener instanceof HTMLElement && this.opener.isConnected ? this.opener : again ?? document.querySelector<HTMLElement>('.seg [aria-pressed="true"]')
     back?.focus()
     this.opener = null
