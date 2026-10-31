@@ -371,6 +371,7 @@ struct PlanAgentCard: View {
                 .foregroundStyle(agent.doingIsTrouble ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                 .frame(width: 16)
                 .accessibilityHidden(true)
+                .probed("plan-agent-glyph-\(agent.id)")
             (Text(agent.name).fontWeight(.semibold) + Text("  ") + Text(agent.doing).foregroundStyle(trouble))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -424,6 +425,7 @@ struct PlanTicketRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 PlanStageRing(progress: ticket.stage.progress)
                     .frame(width: 10, height: 10)
+                    .probed("plan-ticket-ring-\(ticket.key)")
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                 Text(ticket.title)
                     .frame(maxWidth: .infinity, alignment: .leading)

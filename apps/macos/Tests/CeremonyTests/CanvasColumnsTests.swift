@@ -39,7 +39,8 @@ struct CanvasColumnsTests {
         for width in [CGFloat(1300), 1800, 2200, 2600] {
             let f = Self.frames(width)
             #expect(f.chat >= f.main, "the plan is wider than the orchestrator at \(width): \(f.main) > \(f.chat)")
-            #expect(f.chat - f.main <= 2 * Self.cell, "the two are equal, to a column, at \(width): \(f.main) and \(f.chat)")
+            let kept = WorkspaceColumns.width(columns: 88, cell: Self.cell)
+            #expect(f.chat == kept || f.chat - f.main <= 2 * Self.cell, "past its columns, the two are equal, to a column, at \(width): \(f.main) and \(f.chat)")
         }
         #expect(Self.frames(2200).chat > Self.frames(1800).chat, "widening grows the chat with the canvas")
     }
@@ -72,11 +73,13 @@ struct CanvasColumnsTests {
         }
     }
 
-    @Test("Opening something, or Focus, leaves the chat's width alone, and keeps it on screen but in Focus")
+    @Test("Opening something leaves the chat's width alone, and keeps it on screen but in Focus")
     func openingKeepsTheChat() {
         let home = Self.frames(1600), opened = Self.frames(1600, opened: true)
         let focus = Self.frames(1600, opened: true, focused: true)
-        #expect(home.chat == opened.chat && opened.chat == focus.chat)
+        // In Focus the chat is hidden, and its pane keeps the width it has
+        // beside the canvas (`WorkspaceView`'s kept frame), so only these two are drawn.
+        #expect(home.chat == opened.chat && focus.chat >= home.chat)
         #expect(focus.mainX == 0 && focus.main == 1600, "Focus gives the canvas the whole width")
         #expect(Self.arrangement(1600, opened: true).showsConversation)
         #expect(Self.arrangement(1300, opened: true).showsConversation)
