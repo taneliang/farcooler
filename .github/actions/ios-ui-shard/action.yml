@@ -113,3 +113,17 @@ runs:
         # shellcheck disable=SC2046
         SKIP_TESTING="$(./scripts/ios-ui-shards.py --skip)" \
           ./scripts/ios-ui-tests.sh $(./scripts/ios-ui-shards.py "$SHARD")
+
+    # The result bundle, kept for a week when the run is red: its failure
+    # screenshots, element trees and the app's crash and hang reports are
+    # what a nightly failure is diagnosed from. Without it, nightly
+    # 41095427660's four red tests had only their one-line messages, and a
+    # cancelled shard (`cancelled()`, at the timeout) left nothing at all.
+    - name: Keep the result bundle of a red run
+      if: ${{ failure() || cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-ui-xcresult-${{ inputs.shard }}
+        path: ~/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult
+        retention-days: 7
+        if-no-files-found: warn
