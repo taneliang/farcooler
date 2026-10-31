@@ -15,17 +15,22 @@
 //!
 //! The files are claude's: `<project>/<session>.jsonl`, and beside it
 //! `<session>/subagents/agent-<id>.jsonl` with `agent-<id>.meta.json`. Main
-//! file first, then each subagent file, each in its own line order. Or a codex
+//! file first, then each subagent file, each in its own line order, except that
+//! a subagent whose meta has been read is read as soon as the main file's
+//! `Agent` call makes its row (ov-870): its own `Agent` calls are rows in its
+//! parent's turn, and folded after the whole main file they were all pushed
+//! below the newest turn. Or a codex
 //! rollout, `rollout-<time>-<thread>.jsonl` (ov-378), one file with no
 //! subagent files followed (`codex.rs`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::fold::Projection;
 use super::record::SubagentMeta;
+use super::rows::RowKind;
 
 /// A line over this is skipped unread. Six times the largest line ever seen.
 pub const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
@@ -215,6 +220,9 @@ pub struct SessionProjector {
     subagents_dir: PathBuf,
     /// By agent id, so the fold order is the same on every run.
     subagents: BTreeMap<String, SubagentFile>,
+    /// Each subagent's agent id by the `Agent` call its meta names, for
+    /// reading its file when that call's row is made.
+    launches: HashMap<String, String>,
     /// Lines held back as half-written, summed over every read. For the
     /// benchmark and logs.
     pub held_back: u64,
@@ -230,6 +238,7 @@ impl SessionProjector {
             main: LineReader::new(transcript),
             subagents_dir,
             subagents: BTreeMap::new(),
+            launches: HashMap::new(),
             held_back: 0,
         }
     }
@@ -276,13 +285,16 @@ impl SessionProjector {
         self.subagents_dir = session_of(&transcript).1;
         self.codex = is_codex_rollout(&transcript);
         self.subagents.clear();
+        self.launches.clear();
         self.main = LineReader::new(transcript);
     }
 
     /// Read whatever every file gained and fold it. Returns the lines folded.
     pub fn poll(&mut self) -> u64 {
-        let mut folded = self.poll_main();
+        // Before the main file, so a launch it folds can read its agent's
+        // file at once (ov-870).
         self.discover_subagents();
+        let mut folded = self.poll_main();
         let agents: Vec<String> = self.subagents.keys().cloned().collect();
         folded += self.poll_subagents(&agents);
         folded
@@ -321,11 +333,83 @@ impl SessionProjector {
     }
 
     fn poll_main(&mut self) -> u64 {
+        let Self { projection, codex, main, subagents, launches, held_back, .. } = self;
+        for file in subagents.values_mut().filter(|f| f.meta.is_none()) {
+            Self::load_meta(file, launches);
+        }
+        let mut folded = 0;
+        let mut nested = 0;
+        loop {
+            let mut launched = |projection: &mut Projection, from: usize| {
+                nested += Self::read_launched(projection, subagents, launches, from, held_back);
+            };
+            let report = Self::drain(main, projection, None, *codex, &mut launched);
+            folded += report.lines;
+            *held_back += u64::from(report.holding);
+            if !report.more || report.bytes == 0 {
+                break;
+            }
+        }
+        folded + nested
+    }
+
+    fn load_meta(file: &mut SubagentFile, launches: &mut HashMap<String, String>) {
+        file.meta = std::fs::read(&file.meta_path).ok().and_then(|b| serde_json::from_slice::<SubagentMeta>(&b).ok());
+        let agent = file.reader.path().file_stem().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix("agent-"));
+        if let (Some(tool), Some(agent)) = (file.meta.as_ref().and_then(|m| m.tool_use_id.clone()), agent) {
+            launches.insert(tool, agent.to_string());
+        }
+    }
+
+    /// Read the file of every agent whose `Agent` call made a row from `from`
+    /// on, then of the agents those files launch, so each agent's own
+    /// launches are rows beside its own, in its turn, rather than below the
+    /// newest turn when every subagent file is read after the main one.
+    fn read_launched(
+        projection: &mut Projection,
+        subagents: &mut BTreeMap<String, SubagentFile>,
+        launches: &mut HashMap<String, String>,
+        mut from: usize,
+        held_back: &mut u64,
+    ) -> u64 {
+        let mut folded = 0;
+        while from < projection.rows().len() {
+            let end = projection.rows().len();
+            let agents: Vec<String> = projection.rows()[from..end]
+                .iter()
+                .filter(|row| matches!(row.kind, RowKind::Subagent(_)))
+                .filter_map(|row| launches.get(row.id.strip_prefix("sub:")?).cloned())
+                .collect();
+            from = end;
+            for agent in agents {
+                folded += Self::read_agent(projection, subagents, launches, &agent, held_back);
+            }
+        }
+        folded
+    }
+
+    /// Everything subagent `agent`'s file gained, folded.
+    fn read_agent(
+        projection: &mut Projection,
+        subagents: &mut BTreeMap<String, SubagentFile>,
+        launches: &mut HashMap<String, String>,
+        agent: &str,
+        held_back: &mut u64,
+    ) -> u64 {
+        let Some(file) = subagents.get_mut(agent) else { return 0 };
+        if file.meta.is_none() {
+            Self::load_meta(file, launches);
+        }
+        // Every poll until it takes: the meta file can be written before
+        // the parent's `Agent` call is, and then there is no row to join.
+        if let Some(meta) = file.meta.as_ref().filter(|_| !projection.is_joined(agent)) {
+            projection.join_by_meta(agent, meta);
+        }
         let mut folded = 0;
         loop {
-            let report = Self::drain(&mut self.main, &mut self.projection, None, self.codex);
+            let report = Self::drain(&mut file.reader, projection, Some((agent, file.meta.as_ref())), false, &mut |_, _| {});
             folded += report.lines;
-            self.held_back += u64::from(report.holding);
+            *held_back += u64::from(report.holding);
             if !report.more || report.bytes == 0 {
                 break;
             }
@@ -335,23 +419,8 @@ impl SessionProjector {
 
     fn poll_subagents(&mut self, agents: &[String]) -> u64 {
         let mut folded = 0;
-        for (agent, file) in self.subagents.iter_mut().filter(|(agent, _)| agents.contains(agent)) {
-            if file.meta.is_none() {
-                file.meta = std::fs::read(&file.meta_path).ok().and_then(|b| serde_json::from_slice(&b).ok());
-            }
-            // Every poll until it takes: the meta file can be written before
-            // the parent's `Agent` call is, and then there is no row to join.
-            if let Some(meta) = file.meta.as_ref().filter(|_| !self.projection.is_joined(agent)) {
-                self.projection.join_by_meta(agent, meta);
-            }
-            loop {
-                let report = Self::drain(&mut file.reader, &mut self.projection, Some((agent, file.meta.as_ref())), false);
-                folded += report.lines;
-                self.held_back += u64::from(report.holding);
-                if !report.more || report.bytes == 0 {
-                    break;
-                }
-            }
+        for agent in agents {
+            folded += Self::read_agent(&mut self.projection, &mut self.subagents, &mut self.launches, agent, &mut self.held_back);
         }
         // A nested agent's meta names an `Agent` call in its parent's file,
         // which may sort after it and so be read after it: join it now,
@@ -375,15 +444,29 @@ impl SessionProjector {
         folded
     }
 
-    fn drain(reader: &mut LineReader, projection: &mut Projection, agent: Option<(&str, Option<&SubagentMeta>)>, codex: bool) -> ReadReport {
+    /// Fold what `reader` gained. `after` is handed the row count each line
+    /// began at, once the line is folded.
+    fn drain(
+        reader: &mut LineReader,
+        projection: &mut Projection,
+        agent: Option<(&str, Option<&SubagentMeta>)>,
+        codex: bool,
+        after: &mut dyn FnMut(&mut Projection, usize),
+    ) -> ReadReport {
         let path: std::sync::Arc<Path> = reader.path().into();
-        let report = reader.read_at(|at, line| match (line, agent) {
-            (Line::Complete(bytes), None) if codex => projection.fold_codex_line(bytes),
-            (Line::Complete(bytes), None) => projection.fold_line_at(bytes, super::RecordAt { path: path.clone(), at }),
-            (Line::Complete(bytes), Some((agent, meta))) => projection.fold_subagent_line(agent, meta, bytes),
-            (Line::TooLarge(n), None) => projection.fold_too_large(n),
-            (Line::TooLarge(_), Some(_)) => {}
-            (Line::Restart, agent) => projection.reread(Some(agent.map_or("", |(a, _)| a))),
+        let report = reader.read_at(|at, line| {
+            let from = projection.rows().len();
+            match (line, agent) {
+                (Line::Complete(bytes), None) if codex => projection.fold_codex_line(bytes),
+                (Line::Complete(bytes), None) => projection.fold_line_at(bytes, super::RecordAt { path: path.clone(), at }),
+                (Line::Complete(bytes), Some((agent, meta))) => projection.fold_subagent_line(agent, meta, bytes),
+                (Line::TooLarge(n), None) => projection.fold_too_large(n),
+                (Line::TooLarge(_), Some(_)) => {}
+                (Line::Restart, agent) => projection.reread(Some(agent.map_or("", |(a, _)| a))),
+            }
+            if projection.rows().len() > from {
+                after(projection, from);
+            }
         });
         if report.rewritten && agent.is_none() {
             projection.fold_rewritten();

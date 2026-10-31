@@ -196,3 +196,28 @@ fn an_event_on_the_subagents_directory_reads_a_new_subagent() {
     assert_eq!(late.agent_id.as_deref(), Some("alate"), "{late:?}");
     assert_eq!(late.tool_count, 1);
 }
+
+/// A rebuild of a long session (ov-870): a subagent's own launches are rows
+/// in its turn, beside its row, not below the newest turn. Read after the
+/// whole main file, every nested agent of a coordinator's day (135 of them
+/// in the owner's) was pushed at the end, under the latest prompt.
+#[test]
+fn a_nested_agent_stays_in_its_turn_on_a_rebuild() {
+    let scratch = Scratch::new("nested-place");
+    let main = write_nested(scratch.path());
+    let later = [
+        json!({"type":"user","promptId":"p2","promptSource":"typed","uuid":"u2","timestamp":"2026-10-06T11:00:00Z","message":{"content":"Next thing."}}),
+        json!({"type":"assistant","uuid":"m3","timestamp":"2026-10-06T11:00:01Z","message":{"content":[{"type":"text","text":"On it."}]}}),
+    ];
+    let mut file = std::fs::OpenOptions::new().append(true).open(&main).unwrap();
+    std::io::Write::write_all(&mut file, jsonl(&later).as_bytes()).unwrap();
+    let mut s = SessionProjector::open(main);
+    s.poll();
+    let p = s.projection();
+    let ord = |id: &str| p.row(id).unwrap_or_else(|| panic!("no {id}")).ord;
+    assert_eq!(ord("sub:toolu_nested"), ord("sub:toolu_parent") + 1, "beside the agent that launched it");
+    assert!(ord("sub:toolu_nested") < ord("turn:p2"), "above the next turn");
+    let newest: Vec<&str> = p.page(None, 2).iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(newest[0], "turn:p2", "the newest turn's rows end the page: {newest:?}");
+    assert_eq!(sub(p, "sub:toolu_nested").agent_id.as_deref(), Some("a1nested"));
+}
