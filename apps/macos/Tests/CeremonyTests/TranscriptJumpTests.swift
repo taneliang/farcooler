@@ -78,12 +78,18 @@ struct TranscriptJumpTests {
         private var before: [String: CGRect]
         /// Whether the last tick shared a row with the one before.
         private(set) var shared = true
+        /// The last tick's rows shared with the one before, and their median
+        /// move: what it counted as the rows' move, for a failure's message.
+        private(set) var sharing = 0
+        private(set) var rows: CGFloat?
 
         init(_ shown: [String: CGRect]) { before = shown }
 
         mutating func add(asked asking: CGFloat, clip: CGFloat, resized: Bool = false, shown now: [String: CGRect]) {
             let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
             shared = !moves.isEmpty
+            sharing = moves.count
+            rows = moves.isEmpty ? nil : moves[moves.count / 2]
             // Scrolled up, the clip's origin falls and the rows move down.
             moved += !moves.isEmpty ? moves[moves.count / 2] : resized ? -owed : -clip
             // Never from the rows' move, so a jump isn't owed back later.
@@ -177,11 +183,18 @@ struct TranscriptJumpTests {
                         ours?.onScreen == false ? " off screen" : "", driver?.aimed.map { String(format: "%.4f", $0) } ?? "none",
                         docWas, doc, originWas, scroll.contentView.bounds.minY, LiveScroll.scrolls(scroll) ? "yes" : "no"))
                 }
-                if !tally.shared || doc != docWas {
+                // And every tick whose rows moved other than the clip did, or
+                // whose clip moved other than the scroll it owed: nightly
+                // 41095427660 lost 2,605 pt on ticks that all shared rows and
+                // never resized, and the two conditions alone traced none of
+                // them (ov-862).
+                let clipMoved = scroll.contentView.bounds.minY - originWas
+                let apart = tally.rows.map { abs($0 + clipMoved) > 2 } ?? false || abs(clipMoved - owed) > 2
+                if !tally.shared || doc != docWas || apart {
                     trace.append(String(
-                        format: "tick %d asked %.0f owed %.0f clip %.0f doc %.0f>%.0f shared %@ lost %.0f",
-                        fling.stamps.count, asking, owed, scroll.contentView.bounds.minY - originWas, docWas, doc,
-                        tally.shared ? "yes" : "no", tally.lost))
+                        format: "tick %d asked %.0f owed %.0f clip %.0f rows %@ (%d shared) doc %.0f>%.0f lost %.0f",
+                        fling.stamps.count, asking, owed, clipMoved, tally.rows.map { String(format: "%.0f", $0) } ?? "none",
+                        tally.sharing, docWas, doc, tally.lost))
                 }
                 resized = max(resized, abs(doc - docWas))
                 docWas = doc
