@@ -9,11 +9,13 @@ import type { WebRunner } from 'fc-web'
 export interface PlanTab {
   /// The tab came to the front (true) or went behind (false).
   show(front: boolean): void
+  /// Another workspace's plan.
+  choose(workspace: string): void
   stop(): void
 }
 
 /// `current` is the connection as it is now, or null when there is none.
-export function startPlanTab(root: HTMLElement, runner: string, current: () => WebRunner | null): PlanTab {
+export function startPlanTab(root: HTMLElement, runner: string, current: () => WebRunner | null, workspace: string | null = null): PlanTab {
   const live = (): WebRunner => {
     const r = current()
     if (!r) throw new Error('closed')
@@ -22,6 +24,7 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
   let drawn = ''
   const board: PlanBoard = new PlanBoard({
     runner,
+    workspace,
     workspaces: () => live().workspaces(),
     plan: workspace => live().plan(workspace),
     setNext: (theme, next) => live().setThemeNext(theme, next),
@@ -33,7 +36,6 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
         view,
         Date.now(),
         {
-          choose: id => board.choose(id),
           edit: id => board.edit(id),
           type: draft => board.type(draft),
           save: () => void board.save(),
@@ -54,6 +56,9 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
       timer = window.setInterval(() => {
         if (document.visibilityState === 'visible') void board.refresh()
       }, PLAN_POLL_MS)
+    },
+    choose(id) {
+      board.choose(id)
     },
     stop() {
       clearInterval(timer)

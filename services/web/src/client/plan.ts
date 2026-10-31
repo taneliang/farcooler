@@ -470,6 +470,8 @@ export type Failure = Error & { code?: string; what?: string }
 
 export interface PlanDeps {
   runner: string
+  /// The workspace to read first (the page's picker), else the main one.
+  workspace?: string | null
   workspaces(): Promise<string>
   plan(workspace: string): Promise<string>
   setNext(theme: string, next: string): Promise<void>
@@ -481,7 +483,7 @@ export interface PlanDeps {
 export class PlanBoard {
   private plan: Plan | null = null
   private workspaces: Workspace[] = []
-  private workspace: string | null = null
+  private workspace: string | null
   private state: PlanBoardView['state'] = 'loading'
   private banner = ''
   private editing: { theme: string; draft: string } | null = null
@@ -490,7 +492,9 @@ export class PlanBoard {
   private reading: Promise<void> | null = null
   private dead = false
 
-  constructor(private readonly deps: PlanDeps) {}
+  constructor(private readonly deps: PlanDeps) {
+    this.workspace = deps.workspace ?? null
+  }
 
   /// Read the plan now. The runner's answer replaces what is shown. While a
   /// Next line is being typed the newest plan is kept but not drawn, so a

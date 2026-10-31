@@ -92,6 +92,13 @@ export class PaneSet<R> {
     await this.attach(terminal, pane, runner, ended)
   }
 
+  /// Nothing in front: the pane that was goes out of sight, attached still.
+  /// For a workspace with no terminals.
+  clear(): void {
+    if (this.front) this.panes.get(this.front)?.show(false)
+    this.front = null
+  }
+
   /// A new connection: attach again every pane that was attached, the one in
   /// front first. A pane that can't be (its terminal ended) is left as it is;
   /// the one in front reports why.

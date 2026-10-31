@@ -29,6 +29,9 @@ import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, countLabel, countOf, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
+import { parseWorkspaces } from './plan'
+import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scopeBoard, type Space, terminalsIn, waitingIn } from './scope'
+import { drawPicker, saveSpace, savedSpace } from './space-picker'
 import { ChatView } from './chat'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
@@ -464,18 +467,32 @@ function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
   if (needs) void fleet?.refresh()
 }
 
-/// Put the board's view on the page: the list, the count on the button, the
-/// bar and the tab's title.
+/// The workspaces of the runner in front, the one showing, and the last view
+/// the board gave (so a pick redraws without waiting for a poll).
+let spaces: Space[] = []
+let chosenSpace: string | null = null
+let frontRunner = ''
+let lastView: BoardView | null = null
+let pickerDrawn = ''
+
+/// Put the board's view on the page: the list for the workspace showing, the
+/// count on the button, the bar and the tab's title. The bar and the title
+/// count everything waiting, in every workspace and on every runner; the
+/// button counts what the list shows, and the picker says how many wait in
+/// each workspace.
 function drawNeeds(view: BoardView): void {
-  const count = countOf(view.items)
-  $('show-needs').textContent = countLabel(count)
+  lastView = view
+  const scoped = scopeBoard(view, spaces, chosenSpace, frontRunner)
+  const total = countOf(view.items)
+  $('show-needs').textContent = countLabel(countOf(scoped.items))
   const bar = $<HTMLButtonElement>('bar-count')
-  bar.hidden = count === 0
-  bar.textContent = `${count} Waiting`
-  document.title = pageTitle(count)
+  bar.hidden = total === 0
+  bar.textContent = `${total} Waiting`
+  document.title = pageTitle(total)
+  pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, waitingIn(view, spaces, frontRunner), pickerDrawn)
   drawn = renderNeeds(
     $('needs'),
-    view,
+    scoped,
     Date.now(),
     {
       canOpen: (terminal, item) => fleet?.canOpenItem(terminal, item) ?? false,
@@ -499,6 +516,10 @@ function stopNeeds(): void {
   others = []
   retries.clear()
   drawn = ''
+  pickerDrawn = ''
+  lastView = null
+  spaces = []
+  chosenSpace = null
   document.title = pageTitle(0)
   $('bar-count').hidden = true
 }
@@ -625,9 +646,13 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
-  let terminals: { id: string; title: string; state: string; agent: boolean }[]
+  let terminals: Listed[]
+  let boards: Space[] = []
   try {
-    terminals = JSON.parse(await runner.terminals())
+    terminals = parseTerminals(await runner.terminals())
+    // A runner without workspaces answers with a refusal: it is listed as it
+    // always was, every terminal together.
+    boards = parseWorkspaces(await runner.workspaces().catch(() => '[]'))
   } catch (e) {
     status(`Can’t list ${target.label}’s terminals`, connectFailure((e as Error).message, target.label), {
       label: 'Connect',
@@ -642,6 +667,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   show('work')
 
   stopNeeds()
+  frontRunner = target.id
+  spaces = boards
+  chosenSpace = pickSpace(spaces, savedSpace(target.id))
   const opening = (id: string) => void buttonFor.get(id)?.click()
   buttonFor.clear()
   const mine = new Fleet(
@@ -663,16 +691,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     else joinRunner(session, r, mine)
   }
   mine.up(target.id)
-  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null))
+  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace)
   showTab('terminals')
   boardTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void mine.refresh()
   }, NEEDS_POLL_MS)
-  if (terminals.length === 0) {
-    paneNote(`${target.label} has no terminals yet. Open one in Far Cooler on your Mac or phone, then reload.`)
-    return
-  }
-
   panes?.dispose()
   // One xterm per terminal, each in a host of its own inside the stage. Only
   // the one in front is displayed; the rest keep their screens and, up to the
@@ -702,20 +725,43 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       paneNote(connectFailure((e as Error).message, target.label))
     }
   }
-  const buttons = terminals.map(t => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'terminal-choice'
-    button.textContent = t.title || 'Terminal'
-    button.title = t.state
-    if (t.agent) button.dataset.agent = 'true'
-    button.onclick = () => void open(t.id, button)
-    buttonFor.set(t.id, button)
-    list.append(button)
-    return button
-  })
-  const first = Math.max(0, terminals.findIndex(t => t.state === 'running'))
-  void open(terminals[first].id, buttons[first])
+  /// The terminals of the workspace showing, as buttons; the first running
+  /// one opens. A workspace with none says so.
+  const relist = () => {
+    list.replaceChildren()
+    buttonFor.clear()
+    const shown = terminalsIn(terminals, spaces, chosenSpace)
+    const buttons = shown.map(t => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'terminal-choice'
+      button.textContent = t.title || 'Terminal'
+      button.title = t.state
+      if (t.agent) button.dataset.agent = 'true'
+      button.onclick = () => void open(t.id, button)
+      buttonFor.set(t.id, button)
+      list.append(button)
+      return button
+    })
+    const first = firstToOpen(shown)
+    if (!first) {
+      set.clear()
+      paneNote(noTerminals(spaces.find(sp => sp.id === chosenSpace), target.label, spaces.length > 1))
+      return
+    }
+    paneNote('')
+    void open(first.id, buttons[shown.indexOf(first)])
+  }
+  $<HTMLSelectElement>('space-picker').onchange = event => {
+    chosenSpace = (event.target as HTMLSelectElement).value
+    saveSpace(target.id, chosenSpace)
+    planTab?.choose(chosenSpace)
+    relist()
+    if (lastView) drawNeeds(lastView)
+  }
+  relist()
+  if (lastView) drawNeeds(lastView)
+  else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, waitingIn({ state: 'loading', items: [], busy: new Set(), notices: new Map(), banner: '' }, spaces, target.id))
 }
 
 /// What reads and answers for the runner `rec` is connected to.

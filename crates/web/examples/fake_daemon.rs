@@ -27,6 +27,15 @@
 //! id and the option to `answers` beside the typed log, and the ask is gone
 //! from the next `needs_you.list`.
 //!
+//! **Two workspaces** (ov-871): terminals 1 to 12 work for Main, 13 (a shell)
+//! and 14 (an agent) for Billing, which has a plan of its own with a lane on
+//! one card (`bil-7`, a task with notes). Each item Needs You lists names its
+//! workspace. A file called `billing` beside the typed log adds Billing's two
+//! items, an ask and a decision on that task; the decision's answer is a
+//! `task.note` and is appended to `notes` beside the typed log. `terminal.compose`
+//! appends its text to `composed` and each image's type and size to `images`.
+//! An agent's conversation is one turn and a reply.
+//!
 //!   fake_daemon <typed-log> [runner]
 
 #[path = "../tests/support/mod.rs"]
@@ -39,14 +48,41 @@ use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, ServerHello, Terminal, TerminalAttachResult, TerminalList, TerminalRef,
-    TerminalState, request, result, wire_envelope,
+    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, ServerHello, TaskRef, Terminal, TerminalAttachResult, TerminalList, TerminalRef,
+    TerminalRole, TerminalState, request, result, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
 use uuid::Uuid;
 
-/// How many terminals this runner has.
-const TERMINALS: u8 = 12;
+/// How many terminals this runner has: twelve for Main, then Billing's two.
+const TERMINALS: u8 = 14;
+/// The first of Billing's terminals.
+const BILLING_FROM: u8 = 13;
+/// Billing's id, and its decision's task.
+const BILLING: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a2);
+const TASK: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_0d01);
+
+fn id_bytes(id: Uuid) -> Bytes {
+    Bytes::copy_from_slice(id.as_bytes())
+}
+
+/// The workspace terminal `n` works for.
+fn workspace(n: u8) -> Uuid {
+    if n >= BILLING_FROM { BILLING } else { support::WORKSPACE }
+}
+
+fn title(n: u8) -> String {
+    match n {
+        13 => "billing shell".into(),
+        14 => "billing agent".into(),
+        n => format!("shell {n}"),
+    }
+}
+
+/// An agent's conversation, as the projector's rows: a turn and a reply.
+const TURN: &str = r#"{"ord":0,"rev":1,"id":"turn:a","turn":null,"provisional":false,"kind":{"Turn":{"prompt":"Add the invoice PDF export","origin":"Typed","outcome":null,"background_running":0,"activity":"Idle"}}}"#;
+const PROSE: &str = r#"{"ord":1,"rev":2,"id":"prose:1","turn":"turn:a","provisional":false,"kind":{"Prose":{"text":"The export is written. Tell me what to change.","conclusion":false,"at_ms":null}}}"#;
+const EPOCH: u64 = 1_700_000_000_000_001;
 /// The line whose Return starts the load.
 const LOAD: &[u8] = b"seq 1 2000000";
 
@@ -60,26 +96,87 @@ fn socket(typed_log: &Path, n: u8) -> PathBuf {
     typed_log.with_file_name(format!("p{n}"))
 }
 
-/// The ask waiting on this runner, unless it has been answered.
+/// What waits on this runner, unless it has been answered: its ask for Main,
+/// and, once `billing` exists, Billing's ask and its decision.
 fn waiting(typed_log: &Path, runner: &str) -> NeedsYouList {
     let answered = std::fs::read_to_string(typed_log.with_file_name("answers")).unwrap_or_default();
-    let ask = format!("ask-{runner}");
-    if answered.lines().any(|l| l.split(' ').next() == Some(ask.as_str())) {
-        return NeedsYouList::default();
-    }
+    let noted = std::fs::read_to_string(typed_log.with_file_name("notes")).unwrap_or_default();
     let action = |id: &str, title: &str, primary: bool| NeedsYouAction { id: id.into(), title: title.into(), primary, ..Default::default() };
-    NeedsYouList {
-        items: vec![NeedsYouItem {
+    let mut items = Vec::new();
+    let ask = format!("ask-{runner}");
+    if !answered.lines().any(|l| l.split(' ').next() == Some(ask.as_str())) {
+        items.push(NeedsYouItem {
             id: format!("ask:{runner}"),
             kind: NeedsYouKind::Ask as i32,
             rank: 1,
+            workspace_id: id_bytes(support::WORKSPACE),
             workspace_name: "Main".into(),
             question: format!("Run the tests on {runner}?"),
             ask_id: Some(ask),
-            terminal: Some(TerminalRef { id: Bytes::copy_from_slice(terminal(1).as_bytes()), label: "shell 1".into(), ..Default::default() }),
+            terminal: Some(TerminalRef { id: id_bytes(terminal(1)), label: "shell 1".into(), ..Default::default() }),
             actions: vec![action("allow", "Allow", true), action("deny", "Deny", false)],
             ..Default::default()
+        });
+    }
+    if typed_log.with_file_name("billing").exists() {
+        if !answered.lines().any(|l| l.split(' ').next() == Some("ask-billing")) {
+            items.push(NeedsYouItem {
+                id: "ask:billing".into(),
+                kind: NeedsYouKind::Ask as i32,
+                rank: 2,
+                workspace_id: id_bytes(BILLING),
+                workspace_name: "Billing".into(),
+                question: "Run the invoice tests?".into(),
+                ask_id: Some("ask-billing".into()),
+                terminal: Some(TerminalRef { id: id_bytes(terminal(BILLING_FROM)), label: "billing shell".into(), ..Default::default() }),
+                actions: vec![action("allow", "Allow", true), action("deny", "Deny", false)],
+                ..Default::default()
+            });
+        }
+        if noted.is_empty() {
+            items.push(NeedsYouItem {
+                id: "decision:billing".into(),
+                kind: NeedsYouKind::Decision as i32,
+                rank: 3,
+                workspace_id: id_bytes(BILLING),
+                workspace_name: "Billing".into(),
+                question: "Which invoice format first?".into(),
+                task: Some(TaskRef { id: id_bytes(TASK), key: "bil-7".into(), title: "Invoice export".into(), ..Default::default() }),
+                actions: vec![action("PDF", "PDF", true), action("CSV", "CSV", false)],
+                ..Default::default()
+            });
+        }
+    }
+    NeedsYouList { items }
+}
+
+/// Billing's task, with a note.
+fn task_detail() -> farcooler_protocol::v1::TaskDetail {
+    use farcooler_protocol::v1 as pb;
+    pb::TaskDetail {
+        task: Some(pb::Task {
+            id: id_bytes(TASK),
+            key: "bil-7".into(),
+            title: "Invoice export".into(),
+            intent: "Customers download an invoice as a file.".into(),
+            status: pb::TaskStatus::InProgress as i32,
+            workspace_id: id_bytes(BILLING),
+            acceptance: vec![
+                pb::TaskAcceptanceItem { id: Bytes::from_static(&[3; 16]), text: "A PDF opens in Preview".into(), met: true },
+                pb::TaskAcceptanceItem { id: Bytes::from_static(&[4; 16]), text: "A CSV opens in Numbers".into(), met: false },
+            ],
+            ..Default::default()
+        }),
+        notes: vec![pb::TaskNote {
+            id: Bytes::from_static(&[5; 16]),
+            task_id: id_bytes(TASK),
+            kind: pb::TaskNoteKind::Question as i32,
+            actor: "orchestrator".into(),
+            at: 1_800_000_000_000,
+            body: "PDF or CSV first?".into(),
+            ..Default::default()
         }],
+        ..Default::default()
     }
 }
 
@@ -132,6 +229,16 @@ fn pane(typed_log: &Path, n: u8, out: Arc<Mutex<std::io::Stdout>>) {
     });
 }
 
+fn chat_page() -> farcooler_protocol::v1::AgentRowPage {
+    use farcooler_protocol::v1::{AgentRow, AgentRowPage};
+    let row = |id: &str, ord: u64, rev: u64, json: &str| AgentRow { id: id.into(), ord, rev, row_json: json.into() };
+    AgentRowPage { epoch: EPOCH, rev: 2, rows: vec![row("turn:a", 0, 1, TURN), row("prose:1", 1, 2, PROSE)], ..Default::default() }
+}
+
+fn chat_nothing_new() -> farcooler_protocol::v1::AgentRowChanges {
+    farcooler_protocol::v1::AgentRowChanges { epoch: EPOCH, rev: 2, ..Default::default() }
+}
+
 fn main() {
     let typed_log = PathBuf::from(std::env::args().nth(1).expect("fake_daemon <typed-log>"));
     let runner = std::env::args().nth(2).unwrap_or_else(|| "studio".into());
@@ -160,6 +267,10 @@ fn main() {
                         capability::WORKSTREAMS.to_string(),
                         capability::BOARD_PLAN.to_string(),
                         capability::NEEDS_YOU.to_string(),
+                        capability::TASKS.to_string(),
+                        capability::AGENT_ROWS.to_string(),
+                        capability::AGENT_COMPOSE.to_string(),
+                        capability::COMPOSE.to_string(),
                     ],
                     ..Default::default()
                 }))]
@@ -171,10 +282,12 @@ fn main() {
                         items: (1..=TERMINALS)
                             .map(|n| Terminal {
                                 id: Bytes::copy_from_slice(terminal(n).as_bytes()),
-                                title: format!("shell {n}"),
+                                title: title(n),
                                 state: TerminalState::Running as i32,
                                 columns: 80,
                                 rows: 24,
+                                workspace_id: Some(id_bytes(workspace(n))),
+                                role: if n == 14 { TerminalRole::Agent as i32 } else { TerminalRole::Shell as i32 },
                                 ..Default::default()
                             })
                             .collect(),
@@ -201,34 +314,84 @@ fn main() {
                     }
                     vec![support::answer(&req, result::Value::Empty(Empty {}))]
                 }
-                // The plan tab's reads (ov-775): one board with one theme.
+                // The plan tab's reads (ov-775): Main's board has one theme, and
+                // Billing's a theme and a lane on one card.
                 ("workspace.list", _) => vec![support::answer(
                     &req,
                     result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList {
-                        items: vec![farcooler_protocol::v1::Workspace {
-                            id: Bytes::copy_from_slice(support::WORKSPACE.as_bytes()),
-                            name: "Main".into(),
-                            is_main: true,
-                            ..Default::default()
-                        }],
+                        items: vec![
+                            farcooler_protocol::v1::Workspace { id: id_bytes(support::WORKSPACE), name: "Main".into(), is_main: true, ..Default::default() },
+                            farcooler_protocol::v1::Workspace { id: id_bytes(BILLING), name: "Billing".into(), ordinal: 1, ..Default::default() },
+                        ],
                     }),
                 )],
-                ("plan.get", _) => vec![support::answer(
-                    &req,
-                    result::Value::Plan(farcooler_protocol::v1::Plan {
-                        themes: vec![farcooler_protocol::v1::BoardThemeView {
-                            theme: Some(farcooler_protocol::v1::BoardTheme {
-                                id: Bytes::copy_from_slice(Uuid::from_u128(0xb01).as_bytes()),
-                                name: "Visual language".into(),
-                                next: "Frosted window plane".into(),
-                                state: farcooler_protocol::v1::BoardThemeState::Active as i32,
-                                ..Default::default()
-                            }),
+                ("plan.get", Some(request::Payload::PlanGet(get))) => {
+                    use farcooler_protocol::v1 as pb;
+                    let billing = get.workspace_id == id_bytes(BILLING);
+                    let theme = |id: u128, name: &str, next: &str| pb::BoardThemeView {
+                        theme: Some(pb::BoardTheme {
+                            id: id_bytes(Uuid::from_u128(id)),
+                            name: name.into(),
+                            next: next.into(),
+                            state: pb::BoardThemeState::Active as i32,
                             ..Default::default()
-                        }],
+                        }),
                         ..Default::default()
-                    }),
-                )],
+                    };
+                    let plan = if billing {
+                        pb::Plan {
+                            themes: vec![theme(0xb02, "Invoices", "PDF export")],
+                            lanes: vec![pb::Lane {
+                                id: id_bytes(Uuid::from_u128(0xc01)),
+                                workspace_id: id_bytes(BILLING),
+                                name: "invoice-export".into(),
+                                title: "Invoice export".into(),
+                                state: pb::LaneState::Building as i32,
+                                reason: "Writing the PDF".into(),
+                                cards: vec![pb::LaneCard { task_id: id_bytes(TASK), ..Default::default() }],
+                                ..Default::default()
+                            }],
+                            cards: vec![pb::PlanCard { task_id: id_bytes(TASK), key: "bil-7".into(), title: "Invoice export".into(), ..Default::default() }],
+                            ..Default::default()
+                        }
+                    } else {
+                        pb::Plan { themes: vec![theme(0xb01, "Visual language", "Frosted window plane")], ..Default::default() }
+                    };
+                    vec![support::answer(&req, result::Value::Plan(plan))]
+                }
+                ("task.get", _) => vec![support::answer(&req, result::Value::TaskDetail(task_detail()))],
+                ("task.note", Some(request::Payload::TaskNoteAppend(n))) => {
+                    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("notes")).unwrap();
+                    writeln!(log, "{} {}", n.kind, n.body).unwrap();
+                    vec![support::answer(&req, result::Value::TaskNote(Default::default()))]
+                }
+                ("agent.rows", _) => vec![support::answer(&req, result::Value::AgentRowPage(chat_page()))],
+                ("agent.rows_follow", _) => {
+                    // Held a moment, off this loop: the control session must
+                    // go on answering keystrokes while a conversation waits.
+                    let (out, done) = (stdout.clone(), support::answer(&req, result::Value::AgentRowChanges(chat_nothing_new())));
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(800));
+                        let mut out = out.lock().unwrap();
+                        let _ = out.write_all(&done).and_then(|_| out.flush());
+                    });
+                    continue;
+                }
+                ("terminal.compose", Some(request::Payload::AgentPrompt(p))) => {
+                    use farcooler_protocol::v1::agent_prompt_block::Content;
+                    let mut text = String::new();
+                    let mut images = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("images")).unwrap();
+                    for block in p.blocks {
+                        match block.content {
+                            Some(Content::Text(t)) => text = t,
+                            Some(Content::Image(i)) => writeln!(images, "{} {}", i.mime_type, i.data.len()).unwrap(),
+                            _ => {}
+                        }
+                    }
+                    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("composed")).unwrap();
+                    writeln!(log, "{text}").unwrap();
+                    vec![support::answer(&req, result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued: false }))]
+                }
                 ("needs_you.list", _) => vec![support::answer(&req, result::Value::NeedsYouList(waiting(&typed_log, &runner)))],
                 ("terminal.agent_answer", Some(request::Payload::AgentAnswer(a))) => {
                     let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("answers")).unwrap();

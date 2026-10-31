@@ -33,6 +33,9 @@ export interface Item {
   /// Unix milliseconds by the runner's clock, or null: shows no age.
   since: number | null
   workspace: string
+  /// The workspace's id on its runner, or null for an item that belongs to
+  /// none (a runner without workspaces).
+  workspaceId: string | null
   task: { id: string; key: string; title: string } | null
   terminal: { id: string; label: string } | null
   worktree: { branch: string; insertions: number; deletions: number } | null
@@ -47,6 +50,9 @@ export interface Item {
   /// from a single runner.
   runner?: string
   runnerName?: string
+  /// Set by `scopeBoard` on an item from a runner other than the one in
+  /// front: its workspaces aren't the picker's, so it is listed apart.
+  elsewhere?: boolean
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -71,6 +77,7 @@ export function parseList(json: string): Item[] {
       kind: KINDS.has(r.kind) ? r.kind : 'unknown',
       since: typeof r.since === 'number' ? r.since : null,
       workspace: text(r.workspace_name),
+      workspaceId: typeof r.workspace_id === 'string' && r.workspace_id ? r.workspace_id : null,
       task: r.task && typeof r.task.id === 'string' ? { id: r.task.id, key: text(r.task.key), title: text(r.task.title) } : null,
       terminal: r.terminal && typeof r.terminal.id === 'string' ? { id: r.terminal.id, label: text(r.terminal.label) } : null,
       worktree: r.worktree

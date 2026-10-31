@@ -80,6 +80,20 @@ function rig(max?: { max: number }, sessions = 10, lag = false) {
   return { sshd, screens, set, ids, open, ended }
 }
 
+describe('a workspace with no terminals', () => {
+  it('puts the pane that was in front out of sight, still attached, and nothing in front', async () => {
+    const { screens, set, open } = rig()
+    await open('t1')
+    set.clear()
+    expect(set.shown).toBeNull()
+    expect(screens.get('t1')?.visible).toBe(false)
+    expect(screens.get('t1')?.active).toBe(true)
+    await open('t1')
+    expect(set.shown).toBe('t1')
+    expect(screens.get('t1')?.visible).toBe(true)
+  })
+})
+
 describe('the channel budget', () => {
   it('opening twelve panes one after another never holds more than ten channels', async () => {
     const { sshd, set, ids, open } = rig()

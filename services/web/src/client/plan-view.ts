@@ -26,7 +26,6 @@ import {
 } from './plan'
 
 export interface PlanHandlers {
-  choose(workspace: string): void
   edit(theme: string): void
   type(draft: string): void
   save(): void
@@ -245,18 +244,6 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
   const open = root.querySelector('details.plan-fold')?.hasAttribute('open') ?? false
   const typing = view.editing !== null
   const children: HTMLElement[] = []
-  if (view.workspaces.length > 1) {
-    const select = make('select', 'plan-board')
-    select.setAttribute('aria-label', 'Board')
-    for (const w of view.workspaces) {
-      const o = make('option', '', w.name)
-      o.value = w.id
-      o.selected = w.id === view.workspace
-      select.append(o)
-    }
-    select.onchange = () => on.choose(select.value)
-    children.push(select)
-  }
   if (view.banner) {
     const banner = make('p', 'note plan-banner', view.banner)
     banner.setAttribute('role', 'status')

@@ -118,13 +118,18 @@ export function renderNeeds(root: HTMLElement, view: BoardView, now: number, on:
   } else if (view.state === 'ready' && view.items.length === 0) {
     children.push(make('h2', 'need-clear', 'Nothing needs you'))
   } else if (view.state === 'ready') {
-    const g = groups(view.items)
+    // Items on the runners behind the one in front are listed after the
+    // workspace's own, apart (scope.ts).
+    const here = view.items.filter(i => !i.elsewhere)
+    const elsewhere = view.items.filter(i => i.elsewhere)
+    const g = groups(here)
     if (g.split) {
       if (g.yours.length) children.push(section('Yours', g.yours, view, now, on))
       children.push(section('Everyone Else', g.others, view, now, on))
-    } else {
-      children.push(section('', view.items, view, now, on))
+    } else if (here.length) {
+      children.push(section('', here, view, now, on))
     }
+    if (elsewhere.length) children.push(section('On Other Runners', elsewhere, view, now, on))
   }
   root.replaceChildren(...children)
   return signature

@@ -163,6 +163,34 @@ function runner() {
   return { state, board: new PlanBoard(deps), last: () => state.views[state.views.length - 1] }
 }
 
+describe('the page’s workspace', () => {
+  const OTHER = '01990000-0000-7000-8000-0000000000b2'
+
+  it('reads the workspace the page asked for first, not the main one', async () => {
+    const asked: string[] = []
+    const views: PlanBoardView[] = []
+    const board = new PlanBoard({
+      runner: 'studio',
+      workspace: OTHER,
+      workspaces: async () => JSON.stringify([{ id: WS, name: 'Main', is_main: true }, { id: OTHER, name: 'Billing', is_main: false }]),
+      plan: async ws => {
+        asked.push(ws)
+        return JSON.stringify(plan)
+      },
+      setNext: async () => {},
+      keep: async () => {},
+      keepAll: async () => 0,
+      show: v => void views.push(v),
+    })
+    await board.refresh()
+    expect(asked).toEqual([OTHER])
+    expect(views[views.length - 1].workspace).toBe(OTHER)
+    board.choose(WS)
+    await board.refresh()
+    expect(asked).toEqual([OTHER, WS])
+  })
+})
+
 describe('reading and editing', () => {
   it('reads the first board’s plan', async () => {
     const { board, last } = runner()

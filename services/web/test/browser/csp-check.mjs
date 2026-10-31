@@ -32,6 +32,12 @@
 //   is swapped, by this harness only, for a WebSocket spliced to that sshd;
 //   everything above the dial is the page's own: SSH in wasm, the passkey's
 //   assertion, the pinned host key, terminal.list, xterm;
+// - one runner with two workspaces (ov-871): a picker scopes the terminals,
+//   Needs You and the plan to one workspace at a time and remembers the pick;
+//   a card opens its detail from a Needs You item and from a plan card, where a
+//   decision is answered and a note is added; an agent's pane switches between
+//   its conversation and its terminal; images attached, pasted and dropped
+//   reach the agent as one compose, and one past the limit is refused;
 // - the passkey can't be used from the parent domain's other child
 //   (canary.farcooler.com for canary): Chromium refuses it (ov-767
 //   acceptance 2);
@@ -686,6 +692,74 @@ async function everyRunner(page) {
   console.log(`csp-check: with build-box unreachable, studio's ask stayed listed and the page said "${note.trim()}"`)
 }
 
+/// One runner, two workspaces (ov-871). The fake daemon's Main workspace has
+/// twelve shells, one ask and the plan's Frosted window plane; its Billing has
+/// a shell, an agent, an ask, a decision on a card, and a plan with a lane on
+/// that card. Everything here is the page's own, through the real sshd.
+async function workspaceWalk(page) {
+  writeFileSync(join(runner.dir, 'billing'), '')
+  await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }] })
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  const titles = () => page.$$eval('.terminal-choice', b => b.map(x => x.textContent))
+  const picker = () => page.$$eval('#space-picker option', o => o.map(x => x.textContent))
+  const rows = () => page.$$eval('#needs .need-question', r => r.map(x => x.textContent))
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+  // Main is showing: its twelve shells, and nothing of Billing's.
+  await page.waitForFunction(() => document.querySelector('#space-picker')?.textContent?.includes('Billing (2)'), null, { timeout: 60_000 })
+  if (!same(await picker(), ['Main (1)', 'Billing (2)'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
+  const main = await titles()
+  if (main.length !== 12 || main.some(t => /billing/.test(t))) failures.push(`Main lists ${JSON.stringify(main)}`)
+  await page.click('#show-needs')
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
+  if (!same(await rows(), ['Run the tests on studio?'])) failures.push(`Main's Needs You lists ${JSON.stringify(await rows())}`)
+  if ((await page.textContent('#show-needs')) !== 'Needs You (1)') failures.push(`Main's Needs You button says ${await page.textContent('#show-needs')}`)
+  if ((await page.textContent('#bar-count')) !== '3 Waiting') failures.push(`the bar says ${await page.textContent('#bar-count')}, not everything waiting`)
+  await page.click('#show-plan')
+  await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Frosted window plane'), null, { timeout: 30_000 })
+  if ((await page.textContent('#plan')).includes('Invoices')) failures.push("Main's plan shows Billing's theme")
+  console.log('csp-check: with two workspaces, Main showed its twelve terminals, its one ask and its plan, and nothing of Billing’s')
+  await shoot(page, 'workspace-main')
+
+  // Billing: its own terminals, Needs You and plan.
+  await page.selectOption('#space-picker', { label: 'Billing (2)' })
+  await page.waitForFunction(() => document.querySelector('#plan')?.textContent?.includes('PDF export'), null, { timeout: 30_000 })
+  const plan = await page.textContent('#plan')
+  if (plan.includes('Frosted window plane') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)
+  await page.click('#show-needs')
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 30_000 })
+  if (!same(await rows(), ['Run the invoice tests?', 'Which invoice format first?'])) failures.push(`Billing's Needs You lists ${JSON.stringify(await rows())}`)
+  if ((await page.textContent('#show-needs')) !== 'Needs You (2)') failures.push(`Billing's Needs You button says ${await page.textContent('#show-needs')}`)
+  await shoot(page, 'workspace-needs')
+  await page.click('#show-terminals')
+  await page.waitForSelector(LIVE, { timeout: 60_000 })
+  if (!same(await titles(), ['billing shell', 'billing agent'])) failures.push(`Billing lists ${JSON.stringify(await titles())}`)
+  console.log('csp-check: picking Billing swapped the terminals, Needs You (2) and the plan, and opened its first terminal')
+  await shoot(page, 'workspace-billing')
+
+  // The pick is remembered across a reload.
+  await page.reload()
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  if ((await page.inputValue('#space-picker')) === '' || !same(await titles(), ['billing shell', 'billing agent'])) failures.push('the pick was not remembered')
+  else console.log('csp-check: the pick survived a reload')
+}
+
+/// Wait for a file the fake daemon writes to hold `text` on a line.
+async function waitForFile(path, text) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    if (existsSync(path) && readFileSync(path, 'utf8').split('\n').includes(text)) return
+    await new Promise(r => setTimeout(r, 100))
+  }
+  failures.push(`${path.split('/').pop()} never held ${JSON.stringify(text)}`)
+}
+
 let session = await launch()
 try {
   // A step that times out stops the walk, and the violations it caused are
@@ -918,6 +992,7 @@ try {
       await shoot(page, 'refused')
 
       await everyRunner(page)
+      await workspaceWalk(page)
     }
 
     // ov-767 acceptance 2: the passkey, made for the app host, can't be used
