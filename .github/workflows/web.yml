@@ -2,30 +2,38 @@
 # app.canary.farcooler.com for canary and, from slice 17 of the plan,
 # app.farcooler.com for stable.
 #
+#   push to main      → canary, continuously, when the client or what it is
+#                       built from changed (the paths below)
 #   workflow_dispatch → canary, from the commit it is run on
 #
-# BY HAND ONLY FOR NOW. The first deploy creates the Worker, its custom
-# domain's DNS record and its certificate, and app.canary.farcooler.com is two
-# levels deep, so Universal SSL doesn't cover it: someone has to watch that
-# first deploy and check the certificate
+# Canary only. Nothing here can reach app.farcooler.com: the dispatch choice
+# has one option, the push trigger is hard-wired to canary, and the build and
+# `wrangler deploy` below both say `canary`. Stable joins through promote.yml
+# in slice 17, with the build composed from the stable tag as site.yml composes
+# www.
+#
+# The first deploy created the Worker, its custom domain's DNS record and its
+# certificate (app.canary.farcooler.com is two levels deep, so Universal SSL
+# does not cover it). If that Worker is ever recreated, watch the first deploy
+# and check the certificate
 # (`curl -v https://app.canary.farcooler.com/ 2>&1 | grep 'subject:'`).
-# Once that holds, a push to main deploys canary: add
 #
-#   push:
-#     branches: [main]
-#     paths: ['services/web/**', 'services/common/**', '.github/workflows/web.yml',
-#             'crates/web/**', 'crates/ceremony/**', 'crates/protocol/**',
-#             'proto/**', 'crates/tailcat/go/**']
-#
-# (the client carries wasm built from those crates). Stable joins through
-# promote.yml in slice 17, with the build composed from the stable tag as
-# site.yml composes www.
+# A push deploys only after this workflow's own gates pass (typecheck, npm
+# test, cargo test, size gate) on the pushed commit, so a red client never
+# ships. Runs queue per channel, and GitHub keeps only the newest waiting one,
+# so a burst of landings deploys the latest commit.
 #
 # Authenticates wrangler as site.yml does: the CLOUDFLARE_API_TOKEN and
 # CLOUDFLARE_ACCOUNT_ID secrets, passed to the deploy step and no other.
 name: Web
 
 on:
+  push:
+    branches: [main]
+    # The client carries wasm built from the crates below.
+    paths: ['services/web/**', 'services/common/**', '.github/workflows/web.yml',
+            'crates/web/**', 'crates/ceremony/**', 'crates/protocol/**',
+            'proto/**', 'crates/tailcat/go/**']
   workflow_dispatch:
     inputs:
       environment:
@@ -37,12 +45,12 @@ on:
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.environment }}
+    name: Deploy ${{ inputs.environment || 'canary' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # One deploy at a time, never cancelled halfway.
     concurrency:
-      group: web-${{ inputs.environment }}
+      group: web-${{ inputs.environment || 'canary' }}
       cancel-in-progress: false
     defaults:
       run:
