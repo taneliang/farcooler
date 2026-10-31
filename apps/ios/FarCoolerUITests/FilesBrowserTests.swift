@@ -31,8 +31,12 @@ final class FilesBrowserTests: XCTestCase {
     }
 
     private func openFilesFromAWorktree(_ app: XCUIApplication) throws {
+        // 90 s: nightly 41218510431's recording shows the app on its spinner
+        // for most of the first minute on a loaded runner, and the Task screen
+        // under the pane just arriving when 30 s ran out. The link goes on to
+        // the pane once the cover's turn comes (`PhoneNavigator.settle`).
         XCTAssertTrue(
-            app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 30),
+            app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 90),
             "the link did not land on the pane: \(app.debugDescription)")
         let overflow = try XCTUnwrap(visibleOverflow(app), "no pane menu on screen")
         overflow.tap()
