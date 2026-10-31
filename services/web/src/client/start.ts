@@ -46,10 +46,10 @@ export function startScreen(step: StartStep, elapsedMs: number): StartScreen {
   if (elapsedMs >= SLOW_MS)
     return {
       title,
-      detail: `This is taking longer than usual (${seconds} s). Your connection may be slow. Reload to try again, or sign out and start again.`,
+      detail: `${seconds} s so far, which is longer than a start usually takes. Your connection may be slow. Reload to try again, or sign out and start again.`,
       slow: true,
     }
-  if (elapsedMs >= SHOW_SECONDS_MS) return { title, detail: `${STEP_DETAIL[step]} ${seconds} s`, slow: false }
+  if (elapsedMs >= SHOW_SECONDS_MS) return { title, detail: `${STEP_DETAIL[step]} ${seconds} s so far.`, slow: false }
   return { title, detail: STEP_DETAIL[step], slow: false }
 }
 

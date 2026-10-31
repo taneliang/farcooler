@@ -767,7 +767,7 @@ try {
     await statusSays(page, 'Checking your account…', 3_000).catch(() => failures.push('a slow start never said it was checking the account'))
     const slow = await page
       .waitForFunction(
-        () => document.getElementById('status-action')?.textContent === 'Reload' && !document.getElementById('status-action')?.hidden && document.getElementById('status-cancel')?.textContent === 'Sign Out and Start Again' && !document.getElementById('status-cancel')?.hidden && /taking longer than usual \(1\d s\)/.test(document.getElementById('status-detail')?.textContent ?? ''),
+        () => document.getElementById('status-action')?.textContent === 'Reload' && !document.getElementById('status-action')?.hidden && document.getElementById('status-cancel')?.textContent === 'Sign Out and Start Again' && !document.getElementById('status-cancel')?.hidden && /1\d s so far/.test(document.getElementById('status-detail')?.textContent ?? ''),
         null,
         { timeout: 12_000 },
       )
