@@ -109,6 +109,44 @@ struct PlanSectionsColumnTests {
         #expect(column.agentCount == 1)
     }
 
+    @Test("a ticket is on one agent even when several claim its lane: the lander first, then the first builder")
+    func eachTicketOnce() throws {
+        var train = PlanTrainsTests.train("integ-9", "gating", lanes: ["l1"])
+        train["phase"] = "gating_locally"
+        let plan = try Self.plan(
+            lanes: [
+                PlanModelTests.lane("l1", "landing", cards: ["t1"], train: "integ-9"),
+                PlanModelTests.lane("b", "building", cards: ["t2"]),
+            ],
+            trains: [train],
+            agents: [
+                Self.agent("agent:b1", "build", lane: "l1", started: 9), Self.agent("agent:i", "integrator", train: "integ-9", started: 20),
+                Self.agent("agent:b2", "build", lane: "b", started: 8), Self.agent("agent:b3", "build", lane: "b", started: 7),
+            ])
+        let column = PlanColumn(plan: plan)
+        let all = column.pipeline.flatMap { $0.agents.flatMap { $0.tickets.map(\.task) } + $0.unattended.map(\.task) }
+        #expect(all.sorted() == ["t1", "t2"], "each once: \(all)")
+        #expect(column.pipeline.flatMap(\.agents).first { $0.id == "agent:i" }?.tickets.map(\.task) == ["t1"], "the lander has its train's")
+        #expect(column.pipeline.flatMap(\.agents).first { $0.id == "agent:b2" }?.tickets.map(\.task) == ["t2"])
+        #expect(column.pipeline.flatMap(\.agents).first { $0.id == "agent:b3" }?.tickets.isEmpty == true)
+        #expect(column.pipeline.map(\.count).reduce(0, +) == 2)
+    }
+
+    @Test("an empty plan has an empty pipeline, no initiatives, no footer and no facts")
+    func emptyPlan() throws {
+        let column = PlanColumn(plan: try Self.plan(lanes: []))
+        #expect(column.pipeline.isEmpty && column.initiatives.isEmpty && column.quietInitiatives.isEmpty)
+        #expect(column.footer.isEmpty && column.facts.isEmpty)
+    }
+
+    @Test("the footer leaves out a cancelled ticket on a queued lane, and Needs You is amber above zero")
+    func footerAndAttention() throws {
+        let plan = try Self.plan(lanes: [PlanModelTests.lane("q", "queued", cards: ["t1", "t2"])])
+        let column = PlanColumn(plan: plan, needsYou: 1, statuses: ["t2": .cancelled])
+        #expect(column.footer.first { $0.kind == .waiting }?.count == 1)
+        #expect(column.facts.first { $0.kind == .needsYou }?.attention == true)
+    }
+
     @Test("a live train's integrator is the lander over its landing tickets; the next landing is on the facts line")
     func lander() throws {
         var train = PlanTrainsTests.train("integ-9", "gating", lanes: ["l1", "l2", "l3"])

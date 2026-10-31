@@ -36,7 +36,7 @@ public struct PlanColumn: Equatable, Sendable {
         public enum Kind: String, Sendable { case needsYou, stuck, nextLanding, done }
         public var kind: Kind
         public var runs: [Run]
-        /// Drawn in amber: it waits on the owner or is stuck.
+        /// Drawn in amber: it needs the owner (above 0) or is stuck.
         public var attention: Bool
         public var id: String { kind.rawValue }
         /// The fact as one string, for a label or a test.
@@ -76,15 +76,6 @@ public struct PlanColumn: Equatable, Sendable {
             case .building: "Building"
             case .reviewing: "Reviewing"
             case .landing: "Landing"
-            }
-        }
-
-        /// How far along a ticket in this stage is, for its ring.
-        public var progress: Double {
-            switch self {
-            case .stuck, .building: 0.25
-            case .reviewing: 0.5
-            case .landing: 0.75
             }
         }
     }
@@ -153,6 +144,8 @@ public struct PlanColumn: Equatable, Sendable {
         /// The lane it works, for its page when there's no pane to open.
         public var lane: String?
         public var tickets: [Ticket]
+        /// It is working now: its glyph shows it, and its tickets never do.
+        public var working: Bool = false
         /// Tickets in this stage nobody is on, said under the last card.
         public var more: Int = 0
 
@@ -273,7 +266,8 @@ public struct PlanColumn: Equatable, Sendable {
     static func footer(_ plan: PlanModel, statuses: [String: TaskStatus]) -> [Count] {
         // Tickets on a queued lane, waiting for a builder, each once.
         var seen = Set<String>()
-        let waiting = plan.lanes.filter { $0.state == .queued }.flatMap(\.cards).filter { seen.insert($0.task).inserted }
+        let waiting = plan.lanes.filter { $0.state == .queued }.flatMap(\.cards)
+            .filter { statuses[$0.task] != .cancelled && seen.insert($0.task).inserted }
         var counts: [Count] = []
         if !waiting.isEmpty { counts.append(Count(kind: .waiting, count: waiting.count, status: .todo)) }
         if let c = plan.boardCounts {
@@ -289,7 +283,7 @@ public struct PlanColumn: Equatable, Sendable {
     static func facts(_ plan: PlanModel, needsYou: Int, pipeline: [Group]) -> [Fact] {
         var facts: [Fact] = []
         if needsYou > 0 {
-            facts.append(Fact(kind: .needsYou, runs: [.init("\(needsYou)", strong: true), .init(" need you")], attention: false))
+            facts.append(Fact(kind: .needsYou, runs: [.init("\(needsYou)", strong: true), .init(" need you")], attention: true))
         }
         if let stuck = pipeline.first(where: { $0.stage == .stuck }) {
             let longest = stuck.agents.compactMap(\.elapsed).max()
@@ -365,7 +359,7 @@ extension PlanColumn {
             return lane.cards.filter { statuses[$0.task] != .cancelled }.map { ticket($0, lane: lane, stage: s) }
         }
 
-        var cards: [(stage: Stage, agent: Agent, started: Int64)] = []
+        var cards: [(stage: Stage, agent: Agent, started: Int64, card: String?)] = []
         var attended = Set<String>()
         var trainsDrawn = Set<String>()
         let agents = plan.agents.filter { $0.role != .orchestrator }
@@ -409,8 +403,8 @@ extension PlanColumn {
                     Agent(
                         id: agent.id, role: role, name: role.word, doing: doing, doingIsTrouble: trouble,
                         elapsed: agent.startedAt > 0 ? max(0, plan.nowMs - agent.startedAt) : nil, terminal: agent.terminal,
-                        lane: laneID, tickets: mine),
-                    agent.startedAt
+                        lane: laneID, tickets: mine, working: agent.working),
+                    agent.startedAt, agent.card?.task
                 ))
         }
         // A live train whose integrating agent isn't listed: its own record
@@ -430,9 +424,23 @@ extension PlanColumn {
                     Agent(
                         id: "train:\(train.id)", role: .lander, name: Role.lander.word, doing: doing, doingIsTrouble: trouble,
                         elapsed: record.startedAt > 0 ? max(0, plan.nowMs - record.startedAt) : nil, terminal: nil, lane: nil,
-                        tickets: mine),
-                    record.startedAt
+                        tickets: mine, working: true),
+                    record.startedAt, nil
                 ))
+        }
+
+        // Each ticket is on one agent: the lander of its train first, then the
+        // agent whose own card it is, then the first to claim it.
+        var owner: [String: (rank: Int, index: Int)] = [:]
+        for (index, card) in cards.enumerated() {
+            for t in card.agent.tickets {
+                let rank = card.agent.role == .lander ? 0 : card.card == t.task ? 1 : 2
+                if let have = owner[t.task], (have.rank, have.index) <= (rank, index) { continue }
+                owner[t.task] = (rank, index)
+            }
+        }
+        for index in cards.indices {
+            cards[index].agent.tickets.removeAll { owner[$0.task]?.index != index }
         }
 
         // Number each role in the order its agents started: "Builder 1".
@@ -454,7 +462,8 @@ extension PlanColumn {
             var agents = cards.filter { $0.stage == stage }.sorted { (Self.order($0.agent), $0.started) < (Self.order($1.agent), $1.started) }
                 .map(\.agent)
             let loose = unattended[stage] ?? []
-            if !agents.isEmpty { agents[agents.count - 1].more = loose.count }
+            // Said under the last card that has tickets, never under an empty one.
+            if let last = agents.lastIndex(where: { !$0.tickets.isEmpty }) { agents[last].more = loose.count }
             guard !agents.isEmpty || !loose.isEmpty else { return nil }
             return Group(stage: stage, agents: agents, unattended: loose)
         }

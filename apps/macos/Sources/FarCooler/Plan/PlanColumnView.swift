@@ -231,7 +231,7 @@ struct PlanInitiativesSection: View {
     var body: some View {
         if column.initiativeCount > 0 {
             PlanColumnHeading(title: "Initiatives", count: "\(column.initiativeCount)", prominent: true)
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: PlanColumnMetrics.cards) {
                 ForEach(column.initiatives) { initiative in
                     PlanInitiativeRow(initiative: initiative) { onOpen(.theme(initiative.id)) }
                 }
@@ -241,6 +241,7 @@ struct PlanInitiativesSection: View {
                         .foregroundStyle(.quietInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, Spacing.tight)
+                        .padding(.horizontal, Spacing.group)
                         .identified("plan-initiatives-quiet")
                 }
             }
@@ -255,14 +256,16 @@ struct PlanInitiativeRow: View {
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
 
+    /// Name and progress on one baseline, then what's next: the line that
+    /// matters most. The goal is on the initiative's page and in the help.
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
-                    (Text(initiative.name).fontWeight(.semibold)
-                        + Text(initiative.goal.isEmpty ? "" : "   \(initiative.goal)").font(.callout).foregroundStyle(.quietInk))
+                    Text(initiative.name)
+                        .font(.headline)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
                     ProgressView(value: initiative.fraction)
                         .progressViewStyle(.linear)
                         .controlSize(.small)
@@ -277,20 +280,24 @@ struct PlanInitiativeRow: View {
                 }
                 if let next = initiative.next {
                     Text(next)
+                        .font(.body)
                         .foregroundStyle(initiative.asksOwner ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .font(.body)
-            .padding(.vertical, Spacing.tight)
-            .padding(.horizontal, Spacing.group)
+            .padding(.vertical, Spacing.inset)
+            .padding(.horizontal, Spacing.section)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background { if hovering { RoundedRectangle.control.fill(Fill.hover) } }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, -Spacing.group)
+        .surface(.content, in: .card, fill: PlanColumnMetrics.cardFill)
         .onHover { hovering = $0 }
+        .help(initiative.goal.isEmpty ? "Open \(initiative.name)" : initiative.goal)
         .accessibilityLabel("\(initiative.name), \(initiative.progress) done. \(initiative.next ?? "")")
+        .accessibilityHint(initiative.goal)
         .identified("plan-initiative-\(initiative.name)")
     }
 }
@@ -314,6 +321,15 @@ struct PlanPipelineSection: View {
                         }
                         if group.agents.isEmpty, let words = group.unattendedWords {
                             PlanUnattendedCard(words: words, tickets: group.unattended, actions: actions)
+                        } else if !group.agents.isEmpty, !group.agents.contains(where: { $0.more > 0 }),
+                            let words = group.unattendedWords
+                        {
+                            // No card has tickets to hang it on: its own line.
+                            Text(words)
+                                .font(.callout)
+                                .foregroundStyle(.quietInk)
+                                .padding(.horizontal, Spacing.group)
+                                .identified("plan-more-\(group.stage.rawValue)")
                         }
                     }
                     .identified("plan-stage-\(group.stage.rawValue)")
@@ -366,9 +382,12 @@ struct PlanAgentCard: View {
     private var header: some View {
         let trouble = agent.doingIsTrouble ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary)
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // Activity is the agent's: a quiet pulse while it works, amber and
+            // still when stuck, still when idle.
             Image(systemName: agent.role.symbol)
                 .font(.callout)
                 .foregroundStyle(agent.doingIsTrouble ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                .symbolEffect(.pulse, options: .repeating.speed(0.4), isActive: agent.working && !agent.doingIsTrouble)
                 .frame(width: 16)
                 .accessibilityHidden(true)
                 .probed("plan-agent-glyph-\(agent.id)")
@@ -414,7 +433,7 @@ struct PlanUnattendedCard: View {
     }
 }
 
-/// A ticket under its agent: its stage's ring, its title, its initiative.
+/// A ticket under its agent: a quiet dot, its title, its initiative.
 struct PlanTicketRow: View {
     let ticket: PlanColumn.Ticket
     let open: () -> Void
@@ -423,9 +442,12 @@ struct PlanTicketRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                PlanStageRing(progress: ticket.stage.progress)
+                // A quiet static mark: a ticket never reads as progress.
+                Circle().fill(.quaternary)
+                    .frame(width: 4, height: 4)
                     .frame(width: 10, height: 10)
-                    .probed("plan-ticket-ring-\(ticket.key)")
+                    .accessibilityHidden(true)
+                    .probed("plan-ticket-mark-\(ticket.key)")
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                 Text(ticket.title)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -451,24 +473,6 @@ struct PlanTicketRow: View {
         .accessibilityLabel("\(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)")
         .accessibilityHint("Opens the ticket")
         .identified("plan-ticket-\(ticket.key)")
-    }
-}
-
-/// How far along a ticket is: a ring, filled to its stage.
-struct PlanStageRing: View {
-    let progress: Double
-
-    var body: some View {
-        // style-exempt: a progress ring is a glyph drawn in strokes, not an edge
-        ZStack {
-            // style-exempt: the ring's track
-            Circle().inset(by: 0.75).stroke(.quaternary, lineWidth: 1.5)
-            Circle().inset(by: 0.75).trim(from: 0, to: progress)
-                // style-exempt: the ring's fill, to the ticket's stage
-                .stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .accessibilityHidden(true)
     }
 }
 

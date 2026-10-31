@@ -50,7 +50,7 @@ struct PlanColumnViewTests {
         let task = try #require(drawn["plan-ticket-ov-882"])
         #expect(chat.minY >= builder.maxY - 0.5 && task.minY >= chat.maxY - 0.5, "the tickets follow the header")
         let glyph = try #require(drawn["plan-agent-glyph-agent:b3"])
-        let ring = try #require(drawn["plan-ticket-ring-ov-881"])
+        let ring = try #require(drawn["plan-ticket-mark-ov-881"])
         #expect(ring.minX >= glyph.maxX, "the tickets are indented past the role glyph: \(glyph) \(ring)")
         let lander = try #require(drawn["plan-agent-agent:i1"])
         let landing = try #require(drawn["plan-stage-landing"])

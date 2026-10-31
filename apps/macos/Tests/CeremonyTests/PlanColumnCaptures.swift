@@ -22,7 +22,7 @@ struct PlanColumnCaptures {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let board = try await PlanColumnViewTests.store()
-        let height: CGFloat = 1000
+        let height: CGFloat = 1900
         let expecting = "the C10f plan read"
         for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
             let model = T.model(try T.terminal())
