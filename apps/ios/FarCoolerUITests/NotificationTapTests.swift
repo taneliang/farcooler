@@ -36,6 +36,19 @@ final class NotificationTapTests: XCTestCase {
     }
 
     private func tapBanner(leaving leave: (XCUIApplication) -> Void) throws {
+        // The permission alert is answered by this monitor, not left to
+        // XCTest: a query that finds an alert in the way dismisses it with
+        // its own default, which for a permission is the refusal, and that
+        // is how the CI simulator read "Denied" (UNErrorDomain 2003) with
+        // no alert ever found by the loop below (ov-722). A monitor is asked
+        // first, and runs whenever a query below is blocked by an alert.
+        let monitor = addUIInterruptionMonitor(withDescription: "Notification permission") { alert in
+            let allow = alert.buttons["Allow"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        addTeardownBlock { [self] in removeUIInterruptionMonitor(monitor) }
         let app = XCUIApplication()
         app.launchArguments = ["-notification-tap-harness"]
         // Left running, this app was the one the next class's launch failed
