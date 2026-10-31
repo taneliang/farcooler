@@ -780,8 +780,12 @@ async function detailWalk(page) {
   await page.waitForFunction(() => !document.querySelector('#detail .detail-answers'), null, { timeout: 30_000 })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.getElementById('detail').open)
-  const landed = await page.evaluate(() => document.activeElement?.id)
-  if (landed !== 'show-needs') failures.push(`with its card gone, closing the sheet left focus on ${JSON.stringify(landed)}, not the Needs You tab`)
+  // The dialog's close event is a task of its own, so focus is looked for, not read once.
+  const landed = await page.waitForFunction(() => document.activeElement?.id === 'show-needs', null, { timeout: 5000 }).then(
+    () => true,
+    () => false,
+  )
+  if (!landed) failures.push(`with its card gone, closing the sheet left focus on ${JSON.stringify(await page.evaluate(() => document.activeElement?.id))}, not the Needs You tab`)
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   console.log('csp-check: Details opened the card, a note and the PDF answer reached the runner, and closing it put focus back')
 
