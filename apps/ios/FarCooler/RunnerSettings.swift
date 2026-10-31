@@ -337,8 +337,12 @@ struct RunnerSettingsView: View {
     /// sign-in sheet up once, as soon as the member's login section is drawn.
     let signInOnOpen: Bool
 
-    init(name: String, connection: Connection, signInOnOpen: Bool = false) {
+    /// The runners this phone knows, for Add Teammate's scan (ov-865).
+    let runners: RunnerStore?
+
+    init(name: String, connection: Connection, signInOnOpen: Bool = false, runners: RunnerStore? = nil) {
         self.name = name
+        self.runners = runners
         self.signInOnOpen = signInOnOpen
         _model = StateObject(wrappedValue: RunnerSettingsModel(connection: connection, runner: name))
     }
@@ -369,6 +373,10 @@ struct RunnerSettingsView: View {
                         logins: logins, owner: people.you.isEmpty,
                         set: logins.mayChange ? { agent, on in await model.setOwnLogin(agent, on) } : nil)
                 }
+            }
+            // People is where Add Teammate starts, shared yet or not (ov-865).
+            if let people = model.people, let runners, model.mayAdminister {
+                AddTeammateSection(runners: runners, alone: !people.isShared)
             }
             if let enrolled = model.enrolled, !enrolled.devices.isEmpty {
                 EnrolledDevicesSection(
@@ -801,6 +809,30 @@ private struct RemoveRootConfirmSheet: View {
                     .disabled(!matches || working)
                 }
             }
+        }
+    }
+}
+
+/// Add Teammate, from People (ov-865): the scan that opens the teammate's
+/// confirmation. On a runner nobody shares yet it is People's only row.
+struct AddTeammateSection: View {
+    @ObservedObject var runners: RunnerStore
+    let alone: Bool
+
+    var body: some View {
+        Section {
+            if alone {
+                Text("It’s just you here so far.")
+                    .accessibilityIdentifier("runner-people-alone")
+            }
+            NavigationLink("Add Teammate") {
+                AddDeviceView(runners: runners)
+            }
+            .accessibilityIdentifier("people-add-teammate")
+        } header: {
+            if alone { Text("People") }
+        } footer: {
+            Text("Scan the code on your teammate’s device to give them access to this runner.")
         }
     }
 }

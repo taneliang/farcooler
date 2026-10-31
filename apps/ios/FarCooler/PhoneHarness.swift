@@ -74,6 +74,8 @@ import SwiftUI
 //   -phone-terminal-alt      with -phone-terminal-key, that screen is a full-screen program's (the
 //                            alternate screen, mouse reporting on), and each terminal.write is in
 //                            `sent` as `write <hex>` (ov-609)
+//   -phone-alone             the runner serves `member.list` with no one on it but the owner (ov-865): People
+//                            says so and offers Add Teammate
 //   -phone-shared            the runner is shared (ov-508): it serves `member.list`, two
 //                            members besides the owner, one with a long name and reps in
 //                            Main and Billing, and this phone is Bob's
@@ -589,14 +591,14 @@ final class HarnessRunner {
                         + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
                         + (PhonePrHarness.advertised ? ["pr_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
-                        + (Self.shared ? ["representatives"] : [])
+                        + (Self.shared || Self.alone ? ["representatives"] : [])
                         + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])
                         + (Self.nativeOrchestrator && CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
                         + (Self.claudeSignIn ? ["claude_sign_in"] : [])
                         + (Self.ownLogins ? ["member_own_logins"] : [])
                         + (Self.roles ? ["member_roles"] : [])
                         + (AccessStandIn.isOn ? AccessStandIn.capabilities : [])),
-                grantedScope: Self.readOnly ? "read" : "control",
+                grantedScope: Self.readOnly ? "read" : (AccessStandIn.isOn || Self.alone ? "admin" : "control"),
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
         // What a poll does with a fleet: the runner's projection for the
@@ -638,6 +640,9 @@ final class HarnessRunner {
             ["clientId": $0.id, "label": $0.label, "scope": $0.scope, "foreign": false, "shellAccess": false, "addedBy": $0.addedBy]
         }
     }
+
+    /// `-phone-alone`: the runner serves `member.list` with nobody on it but the owner (ov-865).
+    static var alone: Bool { CommandLine.arguments.contains("-phone-alone") }
 
     /// `-phone-shared`: see the launch arguments above.
     static var shared: Bool {
@@ -1011,6 +1016,10 @@ final class HarnessRunner {
             }
             revokedDevices.formUnion(gone)
             return try json(["clients": deviceLines()])
+        case "member.list" where Self.alone:
+            // The owner on a runner nobody shares yet (ov-865).
+            sent.append(method)
+            return try json(["members": [], "claude_account": "", "you": ""])
         case "member.list" where Self.shared:
             sent.append(method)
             if CommandLine.arguments.contains("-phone-rep-list-fails") {

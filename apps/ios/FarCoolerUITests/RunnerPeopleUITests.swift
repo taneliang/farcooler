@@ -171,3 +171,51 @@ final class RunnerPeopleUITests: XCTestCase {
         XCTAssertFalse(element(app, "runner-people-account").exists, "a private runner names an account")
     }
 }
+
+/// People is reached from Settings, and Add Teammate from People (ov-865):
+/// through Settings, then Runner Settings, as a reader gets there.
+final class PeopleRouteUITests: XCTestCase {
+    override func setUp() {
+        continueAfterFailure = false
+    }
+
+    private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any)[id]
+    }
+
+    private func runnerSettings(_ arguments: [String]) -> XCUIApplication {
+        let app = XCUIApplication.phoneHarness(arguments)
+        let gear = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), "no Settings button: \(app.debugDescription)")
+        gear.tap()
+        let link = app.buttons["Runner Settings"].firstMatch
+        XCTAssertTrue(app.reveal(link), "no Runner Settings row: \(app.debugDescription)")
+        link.tap()
+        return app
+    }
+
+    private func addTeammate(_ app: XCUIApplication) {
+        let add = element(app, "people-add-teammate")
+        XCTAssertTrue(app.reveal(add), "no Add Teammate in People: \(app.debugDescription)")
+        add.tap()
+        XCTAssertTrue(
+            app.navigationBars["Add a Device"].waitForExistence(timeout: 15),
+            "Add Teammate opened nothing: \(app.debugDescription)")
+    }
+
+    func testAnOwnerAloneOnARunnerFindsPeopleAndAddTeammate() {
+        let app = runnerSettings(["-phone-alone"])
+        XCTAssertTrue(
+            element(app, "runner-people-alone").waitForExistence(timeout: 30),
+            "no People: \(app.debugDescription)")
+        addTeammate(app)
+    }
+
+    func testASharedRunnersPeopleOffersAddTeammateToo() {
+        let app = runnerSettings(["-phone-access"])
+        XCTAssertTrue(
+            element(app, "runner-people-account").waitForExistence(timeout: 30),
+            "no People: \(app.debugDescription)")
+        addTeammate(app)
+    }
+}

@@ -308,7 +308,7 @@ struct SettingsView: View {
                 if let connection {
                     NavigationLink("Runner Settings") {
                         RunnerSettingsView(
-                            name: connection.hostLabel, connection: connection)
+                            name: connection.hostLabel, connection: connection, runners: runners)
                     }
                 }
             } header: {
