@@ -193,4 +193,17 @@ struct RunnerPeopleSettingsTests {
         window.close()
         #expect(!drawn.contains("runner-people-account"), "\(drawn)")
     }
+
+    /// People is reached from the runner's settings, and Add Teammate from
+    /// People (ov-865): over the real sheet, on a runner nobody shares and on
+    /// one somebody does.
+    @Test("People offers Add Teammate, shared or not")
+    func addTeammateIsInPeople() async {
+        let (alone, aloneWindow) = await Self.drawn(members: Self.alone)
+        aloneWindow.close()
+        #expect(alone.contains("runner-people-alone") && alone.contains("people-add-teammate"), "\(alone)")
+        let (shared, sharedWindow) = await Self.drawn(members: Self.shared)
+        sharedWindow.close()
+        #expect(shared.contains("runner-people-account") && shared.contains("people-add-teammate"), "\(shared)")
+    }
 }

@@ -18,6 +18,8 @@ struct RunnerSettingsSheet: View {
     /// One value rather than a flag plus a draft: a sheet that can be presented
     /// with nothing to edit is a sheet that eventually will be.
     @State private var editingTheme: Theme?
+    /// Add Teammate's sheet, opened from People (ov-865).
+    @State private var addingTeammate = false
     /// The deletion waiting on a yes. Nothing here is undone by anything but
     /// retyping it, so none goes through on the first click.
     @State private var pendingRemoval: PendingRemoval?
@@ -104,6 +106,21 @@ struct RunnerSettingsSheet: View {
                             set: logins.mayChange ? { agent, on in await store.setOwnLogin(agent, on) } : nil)
                     }
                 }
+                // People is where Add Teammate starts, shared yet or not (ov-865).
+                if let people = store.people {
+                    Section {
+                        if !people.isShared {
+                            Text("It’s just you here so far.")
+                                .identified("runner-people-alone")
+                        }
+                        Button("Add Teammate…") { addingTeammate = true }
+                            .identified("people-add-teammate")
+                    } header: {
+                        if !people.isShared { Text("People") }
+                    } footer: {
+                        Text("Show your teammate’s device the code that Add Another Device makes, to give them access to this runner.")
+                    }
+                }
                 if let enrolled = store.enrolled, !enrolled.devices.isEmpty {
                     EnrolledDevicesSection(
                         devices: enrolled, failure: store.revokeFailure,
@@ -144,6 +161,7 @@ struct RunnerSettingsSheet: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(isPresented: $addingTeammate) { AddView(initial: .addAnotherDevice) }
         .sheet(item: $editingTheme) { theme in
             ThemeEditor(theme: theme) { edited in
                 Task { await store.save(theme: edited) }
