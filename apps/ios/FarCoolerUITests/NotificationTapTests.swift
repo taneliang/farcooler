@@ -48,13 +48,22 @@ final class NotificationTapTests: XCTestCase {
         // filed, and the banner comes fifteen seconds after that: answer the
         // alert while waiting for the mark, then leave.
         let scheduled = app.descendants(matching: .any)["notification-tap-scheduled"]
+        let refused = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "notification-tap-refused")).firstMatch
         let allow = springboard.alerts.buttons["Allow"]
         let deadline = Date().addingTimeInterval(90)
-        while !scheduled.exists, Date() < deadline {
+        while !scheduled.exists, !refused.exists, Date() < deadline {
             if allow.exists { allow.tap() }
             _ = scheduled.waitForExistence(timeout: 1)
         }
-        guard scheduled.exists else { throw HarnessFailure("the app never filed a notification") }
+        if refused.exists { throw HarnessFailure(refused.identifier) }
+        // Nightly 41095427660 waited the whole 90 s on CI with no alert found
+        // and no answer, and said only that: what SpringBoard and the app
+        // showed at the end goes in the message.
+        guard scheduled.exists else {
+            throw HarnessFailure(
+                "the app never filed a notification; SpringBoard showed \(springboard.debugDescription)\nthe app showed \(app.debugDescription)")
+        }
         leave(app)
 
         // Filed fifteen seconds after launch: found by what it says, wherever
