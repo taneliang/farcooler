@@ -17,6 +17,8 @@ enum PlanStack {
         var task: String
         /// "Builder 1".
         var agent: String
+        /// What it is doing now, as its card says it ("Reviewing the diff").
+        var doing = ""
         /// Its chat, else its lane's page; nil when it has neither.
         var target: Selection?
     }

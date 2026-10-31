@@ -105,7 +105,7 @@ extension ContentView {
                 } else if let lane = agent.lane {
                     target = .workspace(host: host, workspace: workspace.id, focus: .plan(.lane(lane)))
                 }
-                jumpBar.planOrigin = PlanStack.Origin(task: id, agent: agent.name, target: target)
+                jumpBar.planOrigin = PlanStack.Origin(task: id, agent: agent.name, doing: agent.doing, target: target)
             },
             openList: { status in
                 trail = nil

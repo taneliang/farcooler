@@ -272,6 +272,9 @@ struct TaskViewHeader: View {
     var ask: AskOrchestrator.Action = .unavailable
     /// The agent working it, if any (`TaskColumnModel.agentLine`).
     var agent: BoardPane?
+    /// The title wraps whole, as on a ticket's own page beside the plan
+    /// (ov-873), rather than truncating to one line.
+    var wrapsTitle = false
 
     /// How much of itself the header draws (ov-601), by the width its column
     /// gives it. The title keeps `titleLeast` in every form: the words that
@@ -292,10 +295,17 @@ struct TaskViewHeader: View {
     static let titleLeast: CGFloat = 160
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            header(.full)
-            header(.markOnly)
-            header(.essentials)
+        Group {
+            if wrapsTitle {
+                // The title gives way by wrapping, so nothing else is shed.
+                header(.full)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    header(.full)
+                    header(.markOnly)
+                    header(.essentials)
+                }
+            }
         }
         // The overview's own margin, so the key sits over its text.
         .padding(.horizontal, TaskTypography.inset.leading)
@@ -313,8 +323,9 @@ struct TaskViewHeader: View {
                 .taskKeyCard(row.key, speaksTitle: false)
             Text(row.title)
                 .font(TaskTypography.title)
-                .lineLimit(1)
+                .lineLimit(wrapsTitle ? nil : 1)
                 .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: wrapsTitle)
                 .textSelection(.enabled)
                 .help(row.title)
                 .frame(minWidth: Self.titleLeast, alignment: .leading)

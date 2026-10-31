@@ -624,12 +624,26 @@ extension ContentView {
         let newTerminalHere = TaskColumnModel.newTerminalAction(
             in: lane, refused: store.refusal(for: host) != nil,
             openWorktree: openWorktree, newTerminal: { newTerminal(in: $0) })
+        let overview = TaskColumnCard(
+            row: row, store: board, orchestrator: onRunner.orchestrator(for: row),
+            speaksOfAgents: onRunner.runnerRecordsTasks, onGoTo: { go(to: $0) },
+            decision: store.needsYou.first { $0.task?.id == row.id && $0.runner == host && $0.kind.isDecision },
+            teamRunners: NeedsYou.teamRunners(in: store.needsYou))
+        // Beside the plan, the Agent and Changes tabs are links in the page (ov-873).
+        let who = PlanTicketWork.who(origin: jumpBar.planOrigin, task: row.id, pane: chosen)
+        let planWork = PlanTicketWork(
+            agent: who?.name, doing: who?.doing, branch: lane?.branch,
+            openChat: chosen.map { pane in { go(to: pane) } },
+            openTerminal: chosen.flatMap { pane in
+                lane.map { lane in { openWorktree(); open(lane, terminal: pane.terminal.id) } }
+            },
+            openChanges: lane.flatMap { showChangesAction(for: $0, usable: store.refusal(for: host) == nil) })
         let start = TaskStartPanel(
             sentence: TaskColumnModel.sentence(agent) ?? "", row: row, ask: ask)
         return VStack(spacing: 0) {
-            TaskViewHeader(row: row, ask: ask, agent: chosen)
-            PlanTaskLineView(plan: board.plan, task: row.id) { openPlan($0, host: host, workspace: board.workspace.id) }
             if tabs {
+                TaskViewHeader(row: row, ask: ask, agent: chosen)
+                PlanTaskLineView(plan: board.plan, task: row.id) { openPlan($0, host: host, workspace: board.workspace.id) }
                 TaskTabBar(
                     tab: tab, onChoose: { choose($0, for: row.id) },
                     worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
@@ -654,20 +668,21 @@ extension ContentView {
                     onClose: { terminal in Task { await run(.close, on: terminal, in: lane) } })
             }
             TaskTabs(tab: tab) {
-                ScrollView {
-                    TaskColumnCard(
-                        row: row, store: board, orchestrator: onRunner.orchestrator(for: row),
-                        speaksOfAgents: onRunner.runnerRecordsTasks, onGoTo: { go(to: $0) },
-                        decision: store.needsYou.first { $0.task?.id == row.id && $0.runner == host && $0.kind.isDecision },
-                        teamRunners: NeedsYou.teamRunners(in: store.needsYou)
-                    )
-                    .padding(TaskTypography.inset)
+                if tabs {
+                    ScrollView {
+                        overview.padding(TaskTypography.inset)
+                    }
+                    // The record runs past the window on a long task: bars that
+                    // stay, and a soft edge that says there is more below.
+                    .scrollIndicators(.visible)
+                    .scrollEdgeEffectStyle(.soft, for: .bottom)
+                    .background(WorkspaceStyle.paper)
+                } else {
+                    PlanTicketPage(
+                        row: row, ask: ask, agent: chosen, work: planWork,
+                        line: { PlanTaskLineView(plan: board.plan, task: row.id) { openPlan($0, host: host, workspace: board.workspace.id) } },
+                        card: { overview })
                 }
-                // The record runs past the window on a long task: bars that
-                // stay, and a soft edge that says there is more below.
-                .scrollIndicators(.visible)
-                .scrollEdgeEffectStyle(.soft, for: .bottom)
-                .background(WorkspaceStyle.paper)
             } agent: {
                 // A task passed on the way, glancing: no terminal mounted
                 // until it settles. Mounted once, then kept behind the other

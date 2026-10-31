@@ -63,7 +63,15 @@ struct PlanColumnCaptures {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let board = try await PlanColumnViewTests.store()
-        let height: CGFloat = 1900
+        let height: CGFloat = 1000
+        let ticket = TaskRow(
+            id: "ov-880", key: "ov-880", title: "The Android app no longer crashes on a cold start after the Play update",
+            status: .inProgress, statusSince: Date(),
+            intent: "A cold start after the Play update crashes before the first frame. Find why, and make the app reach its home screen.",
+            acceptance: [
+                TaskAcceptanceLine(id: "a1", text: "A cold start after an update reaches the home screen", met: true),
+                TaskAcceptanceLine(id: "a2", text: "A test starts the app from a cleared cache", met: false),
+            ])
         let expecting = "the C10f plan read"
         for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
             let model = T.model(try T.terminal())
@@ -87,14 +95,16 @@ struct PlanColumnCaptures {
                         ).crumbs, onGo: { _ in }, onClose: nil)
                 },
                 detail: { _, _ in
-                    VStack(spacing: 0) {
-                        TaskViewHeader(
-                            row: TaskRow(
-                                id: "ov-880", key: "ov-880",
-                                title: "The Android app no longer crashes on a cold start after the Play update",
-                                status: .inProgress, statusSince: Date()))
-                        Spacer()
-                    }.contentCard()
+                    PlanTicketPage(
+                        row: ticket,
+                        work: PlanTicketWork(
+                            agent: "Builder 1", doing: "Running the Android tests", branch: "builder-1/android-cold-start",
+                            openChat: {}, openTerminal: {}, openChanges: {}),
+                        line: { EmptyView() },
+                        card: {
+                            TaskCard(row: ticket, detail: .empty, question: nil, canAnswer: true, onAnswer: { _ in true })
+                        }
+                    ).contentCard()
                 }, split: true,
                 home: { AnyView(PlanHome(board: board, needsYou: PlanNeedsYou(), onOpen: { _ in })) },
                 boardExists: false,

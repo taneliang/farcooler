@@ -1428,6 +1428,7 @@ struct TaskCard: View {
                 MarkdownText(text: row.intent, spacing: .document)
                     .accessibilityIdentifier("task-intent")
             }
+            .probed("task-intent-section")
         }
         if !row.acceptance.isEmpty {
             section("Acceptance", detail: row.acceptanceProgress?.sentence) {
@@ -1454,6 +1455,7 @@ struct TaskCard: View {
                     }
                 }
             }
+            .probed("task-acceptance-section")
         }
         if !row.constraints.isEmpty {
             section("Constraints") {
