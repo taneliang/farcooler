@@ -83,7 +83,12 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boolean = false) {
+fun RunnerSettingsScreen(
+    connection: Connection,
+    onBack: () -> Unit,
+    signIn: Boolean = false,
+    onAddTeammate: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
 
     var prefix by remember { mutableStateOf("") }
@@ -319,6 +324,12 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                         }
                     }
                 })
+            }
+
+            // Add Teammate starts in People, shared yet or not, for the owner's phone (ov-865).
+            team?.takeIf { it.offersAddTeammate }?.let { people ->
+                Separator()
+                AddTeammateRow(alone = !people.isShared, onAddTeammate = onAddTeammate)
             }
 
             // Who may log in to this runner and who added each, with Revoke's two choices (ov-855), as on the Mac

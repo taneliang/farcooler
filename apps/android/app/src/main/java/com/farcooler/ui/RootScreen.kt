@@ -298,7 +298,12 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             if (live == null) {
                 model.back()
             } else {
-                RunnerSettingsScreen(live, onBack = { model.back() }, signIn = route.signIn)
+                RunnerSettingsScreen(
+                    live,
+                    onBack = { model.back() },
+                    signIn = route.signIn,
+                    onAddTeammate = { model.navigate(Route.AddDevice) },
+                )
             }
         }
 

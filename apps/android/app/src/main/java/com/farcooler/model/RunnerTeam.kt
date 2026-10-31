@@ -15,6 +15,9 @@ import kotlinx.serialization.json.contentOrNull
  * - A removed member's device reads nothing, and is told so ([isReleased]).
  */
 data class RunnerTeam(val members: List<Member>, val you: String) {
+    /** Add Teammate starts in People on the owner's own phone, shared yet or not (ov-865); a member's never offers it. */
+    val offersAddTeammate: Boolean get() = isOwner
+
     /** A person on the runner who isn't its owner. [role] is null from a runner before roles. */
     data class Member(val handle: String, val name: String, val role: Role?, val reps: Int = 0)
 
