@@ -632,7 +632,7 @@ struct TitleStatusRoom: Equatable {
 
     init(
         switcherTitle: String, switcherRepository: String, editor: Bool, changes: Bool, files: Bool = false,
-        trouble: String?, needsYou: Int = 0, backForward: Bool = false
+        trouble: String?, needsYou: Int = 0, backForward: Bool = false, terminals: Int = 0
     ) {
         self.switcherTitle = switcherTitle
         self.switcherRepository = switcherRepository
@@ -645,6 +645,7 @@ struct TitleStatusRoom: Equatable {
         leadingWidth = TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository)
         trailingWidth = TitleStatus.trailing(
             editor: editor, changes: changes, files: files, trouble: trouble, needsYou: needsYou)
+            + TerminalsToolbar.width(terminals)
     }
 
     /// What Back and Forward take beside the switcher: their own capsule,

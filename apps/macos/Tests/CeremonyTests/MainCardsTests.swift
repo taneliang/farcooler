@@ -59,10 +59,8 @@ struct MainCardsTests {
                     BoardHistoryView(
                         store: TaskBoardStore(client: client, workspace: workspace), status: .done, onOpen: { _ in }))
             ),
-            (
-                "plan-home",
-                AnyView(PlanHome(board: TaskBoardStore(client: client, workspace: workspace), needsYou: PlanNeedsYou(), onOpen: { _ in }))
-            ),
+            // Not the plan's home: since ov-867 (C10f) it sits on the window's
+            // plane beside the orchestrator, and its agents' cards are the fills.
             ("plan-theme", AnyView(PlanPageView(plan: plan, page: .theme("t"), context: context))),
             ("plan-lane", AnyView(PlanPageView(plan: plan, page: .lane("l"), context: context))),
             ("plan-page", AnyView(PlanPageView(plan: plan, page: .page("p"), context: context))),

@@ -38,8 +38,11 @@ extension ContentView {
         let needs = planNeedsYou(host: host, workspace: summary)
         let open = { (page: PlanPage) in openPlan(page, host: host, workspace: summary.id) }
         let rulings = planRulingActions(host: host, workspace: summary, plan: board.plan)
+        let actions = planColumnActions(host: host, workspace: summary)
         return (
-            AnyView(PlanHome(board: board, needsYou: needs, onOpen: open).environment(\.planRulingActions, rulings)),
+            AnyView(
+                PlanHome(board: board, needsYou: needs, onOpen: open, actions: actions)
+                    .environment(\.planRulingActions, rulings)),
             AnyView(
                 PlanStripRow(
                     plan: board.plan,
@@ -47,9 +50,56 @@ extension ContentView {
                     statuses: board.board.statuses
                 ) { planPeeking = true }),
             AnyView(
-                PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false }
+                PlanPeek(board: board, needsYou: needs, onOpen: open, actions: actions) { planPeeking = false }
                     .environment(\.planRulingActions, rulings))
         )
+    }
+
+    /// What the plan column's rows do (ov-867): a Needs You row is quoted into
+    /// the orchestrator's input, unsent, as Ask the Orchestrator does; an
+    /// agent opens its chat, else its lane's page; a ticket opens as a row
+    /// clicked in the navigator does; a footer count opens the board's list.
+    func planColumnActions(host: String, workspace: WorkspaceSummary) -> PlanColumnActions {
+        let live = WorkspaceScreen.workspace(
+            workspace.id, host: host, in: store.fleet,
+            repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
+        let seat = surfaces(host: host, workspace: live).asksOrchestrator
+            ? WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet) : nil
+        let worktrees = store.fleet.worktrees.filter { ($0.host ?? "") == host }
+        return PlanColumnActions(
+            quote: { text in
+                guard let seat else {
+                    errorBanner = "Start the orchestrator to talk to it about this."
+                    return
+                }
+                let client = store.client(for: seat.worktree)
+                Task { @MainActor in
+                    let pasted = await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? .declined
+                    // The person finishes it in the pane, so the pane takes the keyboard.
+                    focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
+                    if pasted == .declined {
+                        (client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)(
+                            text.trimmingCharacters(in: .whitespaces))
+                        errorBanner = "Copied it. Paste it into the orchestrator."
+                    }
+                }
+            },
+            openAgent: { agent in
+                if let id = agent.terminal, let ws = worktrees.first(where: { $0.terminals.contains { $0.id == id } }),
+                    let terminal = ws.terminals.first(where: { $0.id == id })
+                {
+                    go(to: BoardPane(terminal: terminal, worktree: ws))
+                } else if let lane = agent.lane {
+                    openPlan(.lane(lane), host: host, workspace: workspace.id)
+                } else {
+                    errorBanner = "\(agent.name) has no chat to open."
+                }
+            },
+            openTicket: { id in openTask(id, host: host, workspace: workspace.id) },
+            openList: { status in
+                trail = nil
+                selection = .workspace(host: host, workspace: workspace.id, focus: .history(status))
+            })
     }
 
     /// `workspace`'s own Needs You, answered in place as the Needs You page

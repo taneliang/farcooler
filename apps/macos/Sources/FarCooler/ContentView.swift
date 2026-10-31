@@ -298,6 +298,8 @@ struct ContentView: View {
                 needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
                 perform: { perform($0) })
         }
+        // The workspace's terminals, a menu that opens each (ov-867).
+        .toolbar { TerminalsToolbar(panes: workspaceTerminals, open: { go(to: $0) }) }
         // Open in Editor and Changes, one capsule (ov-214).
         .toolbar {
             WorktreeToolbar(

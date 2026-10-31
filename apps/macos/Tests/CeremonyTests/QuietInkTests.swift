@@ -276,7 +276,7 @@ struct QuietInkTests {
         let sources = root.appendingPathComponent("Sources/FarCooler")
         let files = [
             "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanRulings", "Plan/PlanTrainCard", "Plan/PlanThemeGridView",
-            "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanOutsideRow",
+            "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
             "ChangesPane", "ChangesLfsNotice", "RepColumn", "WelcomeView", "CharterSetupView", "TileView", "Files/FilesPane", "Files/CodeLineRow", "Files/OpenInFiles", "DiffView", "DiffReadFailureRow",

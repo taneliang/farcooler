@@ -216,6 +216,20 @@ enum WorkspaceColumns {
             floats: floats)
     }
 
+    /// The chat column's width in a detail `width` pt wide whose canvas
+    /// starts at `mainX`: its kept `columns`, or, where that would leave the
+    /// canvas wider than the chat, the whole columns that make the two equal
+    /// (ov-867). Widening the window then grows both; a drag of the chat's
+    /// edge widens it past half, never under.
+    static func chatWidth(width: CGFloat, mainX: CGFloat, columns: Int, cell: CGFloat = defaultCell) -> CGFloat {
+        let kept = self.width(columns: columns, cell: cell)
+        // The canvas runs under the chat's gutter, so equal is half of the
+        // room past the navigator, and that gutter.
+        let half = (width - mainX + Pane.inset) / 2
+        let share = Int(((half - chrome) / max(cell, 1)).rounded(.up))
+        return max(kept, self.width(columns: share, cell: cell))
+    }
+
     /// Where each part sits, in points from the detail's leading edge.
     struct Frames: Equatable {
         /// The navigator's width, kept while it's put away.
@@ -242,9 +256,11 @@ enum WorkspaceColumns {
         let mainX = arrangement.navigator && !arrangement.floats ? navigator + divider : 0
         guard arrangement.canvas else { return Frames(navigator: navigator, mainX: mainX, main: max(0, width - mainX)) }
         // The chat's width is its columns, whole, with the navigator
-        // floating, put away or beside it, and in Focus, where it's hidden:
-        // only a drag of its edge changes it. The tiers leave it room.
-        let chat = self.width(columns: chatColumns, cell: cell)
+        // floating, put away or beside it, and in Focus, where it's hidden;
+        // and never narrower than the canvas beside it (ov-867, the owner's
+        // decision 6: the orchestrator is a column as wide as the plan or
+        // wider). The tiers leave it room.
+        let chat = chatWidth(width: width, mainX: mainX, columns: chatColumns, cell: cell)
         guard arrangement.conversation == .column else {
             return Frames(navigator: navigator, mainX: mainX, main: max(0, width - mainX), chatX: width, chat: chat)
         }

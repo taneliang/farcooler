@@ -175,12 +175,12 @@ struct PlanSectionViewTests {
         #expect(try #require(narrow["plan-theme-tile-Phones"]).width > 240, "one column on a narrow canvas")
     }
 
-    @Test("The Plan's home draws no pinned Now and Next band: the sections carry the same, and Needs You is not said twice")
+    @Test("The Plan's home draws no pinned Now and Next band: the column carries the same, and Needs You is not said twice")
     func noBand() async throws {
         let store = try await Self.store(.busy)
         let drawn = await PlanThemePageTests.frames(
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: 700, height: 3200)
-        #expect(drawn["plan-home"] != nil && drawn["plan-landing"] != nil, "\(drawn.keys.sorted())")
+        #expect(drawn["plan-home"] != nil && drawn["plan-pipeline"] != nil, "\(drawn.keys.sorted())")
         for id in ["plan-band-now", "plan-band-next", "plan-band-needs-you"] { #expect(drawn[id] == nil, "\(id) is gone") }
         // The sentence is still the whole summary where there is no room for sections.
         let sections = store.plan.sections(needsYou: 2, statuses: store.board.statuses, activity: [:])

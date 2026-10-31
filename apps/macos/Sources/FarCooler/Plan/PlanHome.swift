@@ -5,9 +5,9 @@ import SwiftUI
 // The plan as the canvas's home (ov-298, Concept A of
 // .claude/agent/reports/ov-298/research-layout.md, the owner's pick): beside
 // the orchestrator's chat column, the plan fills the canvas until something
-// is opened in its place. Needs You first, this workspace's only and answered
-// in place (the toolbar's tray stays every workspace's), then the overview:
-// Now, Next Up, Themes, Pages and Landed Today, then Decided For You.
+// is opened in its place. Since ov-867 it's the plan column (C10f,
+// `PlanColumnView`): the facts, Needs You (this workspace's only, each quoted
+// into the orchestrator's input), Initiatives, the pipeline and the footer.
 //
 // A window too narrow for the canvas folds it away: the chat carries the
 // plan's one-line strip (Concept C, 3.3), and a click on it or ⌥⌘P peeks the
@@ -22,110 +22,38 @@ struct PlanNeedsYou {
     var onDecide: (NeedsYouItem, String) async -> Bool = { _, _ in false }
 }
 
-/// The canvas's home: the plan, on its card.
+/// The canvas's home: the plan column (ov-867, C10f), on the window's
+/// plane beside the orchestrator. No card: the agents' cards are the only
+/// fills, and type and space group the rest.
 struct PlanHome: View {
-    /// The board, watched for its statuses (whether a lane waits on the
-    /// owner); its plan is `board.plan`.
+    /// The board, watched for its statuses and titles; its plan is
+    /// `board.plan`.
     @ObservedObject var board: TaskBoardStore
     let needsYou: PlanNeedsYou
     let onOpen: (PlanPage) -> Void
+    var actions = PlanColumnActions()
 
     var body: some View {
-        // No pinned Now / Next band (ov-522): the sections and the title bar's
-        // counts say the same, and its "N need you" repeated Needs You just
-        // below. The sentence stays in the folded strip, on the phones and on
-        // the watch.
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                PlanHomeContent(
-                    plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou,
-                    onOpen: onOpen
-                )
-                // No reading width since the sections are columns and tiles
-                // (ov-503): the 680-pt cap went; only a very wide display stops.
-                .frame(maxWidth: PlanMetrics.widest, alignment: .leading)
-                .padding(.horizontal, PlanMetrics.gutter)
-                .padding(.vertical, 2 * ColumnGrid.rhythm)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            .scrollBounceBehavior(.basedOnSize)
+        ScrollView {
+            PlanColumnView(
+                plan: board.plan, statuses: board.board.statuses, titles: Self.titles(board.board), needsYou: needsYou,
+                actions: actions, onOpen: onOpen
+            )
+            .frame(maxWidth: PlanMetrics.widest, alignment: .leading)
+            .padding(.horizontal, PlanColumnMetrics.gutter)
+            .padding(.top, Spacing.section)
+            .padding(.bottom, 2 * Spacing.section)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        // The one card every destination sits on (ov-297), so a change to
-        // its gutter or radius moves the canvas's home with the rest.
-        .contentCard()
+        .scrollBounceBehavior(.basedOnSize)
         // The chat column is the canvas's neighbor: it holds Start Orchestrator.
         .environment(\.besideOrchestratorColumn, true)
         .identified("plan-home")
     }
-}
 
-/// The plan's sections, for the home and the peek alike.
-struct PlanHomeContent: View {
-    @ObservedObject var plan: PlanStore
-    let statuses: [String: TaskStatus]
-    /// Each card's last move on the board, by task id.
-    var activity: [String: Int64] = [:]
-    let needsYou: PlanNeedsYou
-    let onOpen: (PlanPage) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
-            if !needsYou.items.isEmpty || !asks.isEmpty { needs }
-            if plan.available {
-                PlanOverviewView(
-                    plan: plan, statuses: statuses, selected: nil, activity: activity,
-                    needsYou: needsYou.items.count + asks.count, onOpen: onOpen)
-                // The calls made for the owner (ov-304), last: they ask
-                // nothing, and stand until the owner says otherwise.
-                PlanRulingsSection(plan: plan)
-            } else if needsYou.items.isEmpty {
-                // A runner too old to keep a plan: said, once.
-                PlanNotice(title: PlanWords.needsUpdate, detail: nil)
-                    .identified("plan-needs-update")
-            }
-        }
-    }
-
-    /// The themes asking for the owner.
-    private var asks: [PlanTheme] { plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty } }
-
-    /// Needs You: this workspace's questions, decisions and reviews, each
-    /// answered here, most urgent first.
-    private var needs: some View {
-        CollapsibleSection(
-            "Needs You", id: "plan.needs", style: .navigator, tone: .attention,
-            key: "board.plan.section.needs.\(plan.host).\(plan.workspace.id)", count: needsYou.items.count + asks.count
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.group) {
-                // A theme's ask, counted here as in the title bar and the
-                // tree's Needs You (ov-321 review M3).
-                ForEach(asks) { theme in
-                    Button { onOpen(.theme(theme.id)) } label: {
-                        VStack(alignment: .leading, spacing: Spacing.tight) {
-                            Text(theme.name)
-                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.quietInk)
-                            PlanAsk(text: theme.ownerAsk)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .identified("plan-home-theme-ask-\(theme.name)")
-                }
-                ForEach(needsYou.items) { item in
-                    NeedsYouItemRow(
-                        item: item, canAct: needsYou.canAct(item), onOpen: { needsYou.onOpen(item) },
-                        onAnswerAsk: { await needsYou.onAnswerAsk(item, $0) },
-                        onDecide: { await needsYou.onDecide(item, $0) },
-                        teamRunners: NeedsYou.teamRunners(in: needsYou.items))
-                    .changeWashed(item.key)
-                }
-            }
-            .padding(.top, NavigatorRhythm.air)
-            .listChanges(needsYou.items.map { ListChangeRow(id: $0.key, signature: "\($0.kind)\u{1}\($0.question)") })
-        }
-        .identified("plan-needs-you")
+    /// Each card's title, by task id, for a ticket the plan doesn't carry.
+    static func titles(_ board: TaskBoardModel) -> [String: String] {
+        Dictionary(board.rows.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
     }
 }
 
@@ -257,6 +185,7 @@ struct PlanPeek: View {
     @ObservedObject var board: TaskBoardStore
     let needsYou: PlanNeedsYou
     let onOpen: (PlanPage) -> Void
+    var actions = PlanColumnActions()
     let onClose: () -> Void
 
     var body: some View {
@@ -264,7 +193,10 @@ struct PlanPeek: View {
             // A click beside the card puts it away; it draws nothing.
             Color.clear.contentShape(Rectangle()).onTapGesture(perform: onClose)
             ScrollView {
-                PlanHomeContent(plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou) { page in
+                PlanColumnView(
+                    plan: board.plan, statuses: board.board.statuses, titles: PlanHome.titles(board.board), needsYou: needsYou,
+                    actions: actions.closing(onClose)
+                ) { page in
                     onClose()
                     onOpen(page)
                 }

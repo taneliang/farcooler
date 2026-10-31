@@ -118,6 +118,14 @@ extension ContentView {
         files.toolbar(toolbarWorktree, client: toolbarWorktree.flatMap { store.client(for: $0) })
     }
 
+    /// The workspace on screen's terminals, for the toolbar's `>_ N`
+    /// (ov-867): every pane the status area counts but the orchestrator's,
+    /// which is the column beside the plan.
+    var workspaceTerminals: [BoardPane] {
+        guard let source = titleStatusSource else { return [] }
+        return source.panes.filter { $0.terminal.id != source.seat?.id }
+    }
+
     /// What the status area sizes itself around (`TitleStatusRoom`).
     var titleStatusRoom: TitleStatusRoom {
         let switcher = workspaceSwitcher
@@ -125,7 +133,7 @@ extension ContentView {
             switcherTitle: switcher.title, switcherRepository: switcher.repository,
             editor: detailWorktree != nil, changes: changesToolbarState != nil, files: filesToolbarState != nil,
             trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts),
-            needsYou: store.needsYou.countedTotal, backForward: selection != nil)
+            needsYou: store.needsYou.countedTotal, backForward: selection != nil, terminals: workspaceTerminals.count)
     }
 
     /// What the status area's parts do, by the routes the window already

@@ -27,9 +27,9 @@ import SwiftUI
 /// With `split` (ov-298, Concept A), a window wide enough has a canvas and a
 /// chat column: the plan is the canvas's home, what's opened replaces it
 /// there, and the orchestrator sits beside it at the trailing edge, a fixed
-/// whole number of terminal columns wide, on screen whatever is opened.
-/// Widening the window grows the canvas only, so the orchestrator never
-/// re-wraps but for a drag of its edge. Narrower, the navigator floats when
+/// whole number of terminal columns wide, on screen whatever is opened, and
+/// never narrower than the canvas (ov-867): widening the window grows the
+/// two alike, and a drag of its edge widens it further. Narrower, the navigator floats when
 /// shown; narrower still, the canvas folds away and the chat carries the
 /// plan's strip, with the plan peeked over it (`WorkspaceColumns`).
 struct WorkspaceView<

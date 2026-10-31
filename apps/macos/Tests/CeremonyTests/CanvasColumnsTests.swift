@@ -5,7 +5,8 @@ import Testing
 @testable import Far_Cooler
 
 /// The canvas beside the orchestrator's chat column (ov-298, Concept A): the
-/// chat a fixed whole number of terminal columns, the canvas flexing, the
+/// chat a whole number of terminal columns and never narrower than the canvas
+/// (ov-867), the
 /// navigator floating where it doesn't fit beside them, and the canvas
 /// folding away where it doesn't fit either.
 struct CanvasColumnsTests {
@@ -29,18 +30,23 @@ struct CanvasColumnsTests {
             navigator: sizing.navigator, cell: cell, chatColumns: sizing.chatColumns)
     }
 
-    @Test("Widening the window grows the canvas, never the chat")
-    func wideningGrowsTheCanvas() {
-        let a = Self.frames(1800), b = Self.frames(2200)
-        #expect(a.chat == WorkspaceColumns.width(columns: 88, cell: Self.cell))
-        #expect(a.chat == b.chat, "the chat re-wraps on a resize")
-        #expect(b.main - a.main == 400)
-        #expect(a.mainX == 321 && a.chatX == 1800 - a.chat)
+    @Test("The chat is its columns until the canvas would be wider; then the two are equal and widen together (ov-867)")
+    func chatIsNeverNarrowerThanTheCanvas() {
+        // With the navigator beside them, 1,600 pt leaves the canvas narrower than 88 columns.
+        let a = Self.frames(1600)
+        #expect(a.chat == WorkspaceColumns.width(columns: 88, cell: Self.cell) && a.main <= a.chat)
+        #expect(a.mainX == 321 && a.chatX == 1600 - a.chat)
+        for width in [CGFloat(1300), 1800, 2200, 2600] {
+            let f = Self.frames(width)
+            #expect(f.chat >= f.main, "the plan is wider than the orchestrator at \(width): \(f.main) > \(f.chat)")
+            #expect(f.chat - f.main <= 2 * Self.cell, "the two are equal, to a column, at \(width): \(f.main) and \(f.chat)")
+        }
+        #expect(Self.frames(2200).chat > Self.frames(1800).chat, "widening grows the chat with the canvas")
     }
 
     /// Train 1004r, P2: a navigator wider than about 338 pt, or a chat wider
     /// than 88 columns, shrank the chat as the window crossed 1,500 pt.
-    @Test("The chat is its columns in every tier with a canvas, at any navigator and chat width")
+    @Test("The chat is its columns, or the canvas's width where that is more, in every tier with a canvas")
     func chatHoldsThroughTheTiers() {
         for navigator in [CGFloat(240), 320, 400, 600] {
             for columns in [58, 88, 120] {
@@ -49,7 +55,9 @@ struct CanvasColumnsTests {
                 for width in stride(from: CGFloat(900), through: 2600, by: 1) where sizing.hasCanvas(width) {
                     for floating in [false, true] {
                         let frames = Self.frames(width, sizing: sizing, floating: floating)
-                        #expect(frames.chat == want, "navigator \(navigator), \(columns) columns, at \(width): \(frames.chat)")
+                        let equal = WorkspaceColumns.chatWidth(width: width, mainX: frames.mainX, columns: columns, cell: Self.cell)
+                        #expect(frames.chat == max(want, equal), "navigator \(navigator), \(columns) columns, at \(width): \(frames.chat)")
+                        #expect(frames.chat >= want, "the chat is never under its columns")
                         #expect(frames.main >= WorkspaceColumns.canvasMinimum, "the canvas squeezed at \(width)")
                         // ov-601: the navigator beside it never leaves a task
                         // view less than its own minimum.

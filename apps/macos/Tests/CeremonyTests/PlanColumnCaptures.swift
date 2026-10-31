@@ -1,0 +1,60 @@
+import AgentKit
+import AppKit
+import SwiftUI
+import TestWindows
+import Testing
+
+@testable import Far_Cooler
+
+/// Opt-in (FARCOOLER_CAPTURE_OUT): the plan column beside the orchestrator
+/// (ov-867, C10f) at 1,100, 1,440 and 1,920 points, light and dark: the
+/// production `WorkspaceView` with `PlanHome` over `PlanColumnScenario` and a
+/// conversation in the chat column, in a real titled window off every screen,
+/// taken with `screencapture -l`. Below 1,180 the canvas folds, so 1,100 shows
+/// the chat with the plan's strip. Sends no input.
+@MainActor
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
+struct PlanColumnCaptures {
+    typealias T = NativeAgentTests
+
+    @Test(arguments: [1100.0, 1440.0, 1920.0])
+    func column(_ width: CGFloat) async throws {
+        let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
+        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+        let board = try await PlanColumnViewTests.store()
+        let height: CGFloat = 1000
+        let expecting = "the C10f plan read"
+        for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
+            let model = T.model(try T.terminal())
+            model.store.apply(try await model.store.ledger.page(T.page(NativeAgentSubagentTests.rows())))
+            let reached = { @MainActor in PlanColumnScenario.shown(board.plan.plan) }
+            let view = WorkspaceView(
+                opened: nil as String?, hasConversation: true, hasBoard: false, cell: WorkspaceColumns.defaultCell,
+                focused: false, navigatorWidth: .constant(320),
+                conversation: { NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas() },
+                navigator: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear }, split: true,
+                home: { AnyView(PlanHome(board: board, needsYou: PlanNeedsYou(), onOpen: { _ in })) },
+                boardExists: false,
+                cards: { canvas in
+                    canvas ? AnyView(EmptyView()) : AnyView(
+                        WorkspaceStripRow {
+                            PlanStripRow(plan: board.plan, needsYou: 2, statuses: board.board.statuses) {}
+                        })
+                })
+            let window = NSWindow(
+                contentRect: NSRect(x: -9000, y: -9000, width: width, height: height), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background { WindowPlane() })
+            window.appearance = NSAppearance(named: appearance)
+            TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
+            await T.settle(window, 900)
+            try await Capture.keep(
+                to: URL(fileURLWithPath: out).appendingPathComponent("c10f-plan-\(Int(width))-\(variant).png"), expecting: expecting,
+                until: reached
+            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
+            window.close()
+        }
+    }
+}
