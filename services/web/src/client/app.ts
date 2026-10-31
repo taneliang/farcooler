@@ -35,6 +35,7 @@ import { drawCode, scan } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
+import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
 
@@ -75,9 +76,9 @@ function show(screen: string): void {
   for (const id of SCREENS) $(id).toggleAttribute('hidden', id !== screen)
 }
 
-/// A full-page message, with at most one button, and Cancel when `cancel`
-/// is given.
-function status(title: string, detail = '', action?: { label: string; run: () => void }, cancel?: () => void): void {
+/// A full-page message, with at most one button, and a quiet second one
+/// (Cancel unless `cancelLabel` says otherwise) when `cancel` is given.
+function status(title: string, detail = '', action?: { label: string; run: () => void }, cancel?: () => void, cancelLabel = 'Cancel'): void {
   $('status-title').textContent = title
   $('status-detail').textContent = detail
   const button = $<HTMLButtonElement>('status-action')
@@ -87,6 +88,7 @@ function status(title: string, detail = '', action?: { label: string; run: () =>
   const quit = $<HTMLButtonElement>('status-cancel')
   quit.hidden = !cancel
   quit.onclick = cancel ? () => cancel() : null
+  quit.textContent = cancelLabel
   show('status')
 }
 
@@ -817,20 +819,30 @@ async function addAgain(session: Session): Promise<void> {
 
 // MARK: Boot
 
+/// How long Sign Out waits for this site's storage to forget the device
+/// before it signs out anyway: the Worker's `Clear-Site-Data` clears it too.
+const FORGET_WAIT_MS = 2_000
+
 /// Sign Out takes this browser's key and runners with it, before the form
 /// posts. The Worker's answer also clears the origin's storage
-/// (`Clear-Site-Data`), which covers a sign-out this page didn't run.
+/// (`Clear-Site-Data`), which covers a sign-out this page didn't run, and one
+/// whose storage never answered.
 function signOutForgets(): void {
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
   form.addEventListener('submit', event => {
     event.preventDefault()
     dropSecret()
-    void forgetDevice()
-      .catch(() => {})
-      .finally(() => form.submit())
+    void Promise.race([forgetDevice().catch(() => {}), new Promise(resolve => setTimeout(resolve, FORGET_WAIT_MS))]).finally(() => form.submit())
   })
 }
+
+/// Sign Out and Start Again, from the start screen: the header's Sign Out.
+function signOut(): void {
+  document.querySelector<HTMLFormElement>('form[action="/sign-out"]')?.requestSubmit()
+}
+
+const reload = { label: 'Reload', run: () => location.reload() }
 
 async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
@@ -845,38 +857,57 @@ async function boot(): Promise<void> {
   window.addEventListener('online', recheckLink)
   signOutForgets()
 
+  // Nothing below has a deadline of its own, so the screen says which step
+  // the start is on, counts the seconds, and offers a way forward when it is
+  // slow (start.ts, ov-869).
+  const watch = new StartWatch(screen => status(screen.title, screen.detail, screen.slow ? reload : undefined, screen.slow ? signOut : undefined, 'Sign Out and Start Again'))
+  try {
+    await start(watch)
+  } catch {
+    watch.done()
+    status('Far Cooler couldn’t start in this browser', 'Reload the page to try again.', reload, signOut, 'Sign Out and Start Again')
+  }
+}
+
+async function start(watch: StartWatch): Promise<void> {
+  /// A screen of its own, which ends the start screen.
+  const fail = (title: string, detail: string, action?: { label: string; run: () => void }) => {
+    watch.done()
+    status(title, detail, action)
+  }
+  // Both modules download while the account is checked: after a deploy they
+  // are the longest wait, and neither depends on who is signed in.
+  const loading = Promise.all([init({ module_or_path: __WASM__.web }), loadTailcat(__WASM__.tailcat)])
+  loading.catch(() => {})
+
   // Which account is signed in decides which device this browser may use, so
   // nothing starts without it.
+  watch.at('account')
   const me = await relay('directory/me').catch(() => null)
   const account = typeof me?.user?.id === 'string' && me.user.id ? (me.user.id as string) : null
   if (typeof me?.user?.email === 'string') $('who').textContent = me.user.email
-  if (!account) {
-    status("Far Cooler couldn’t check your account", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
-    return
-  }
+  if (!account) return fail('Far Cooler couldn’t check your account', 'Reload the page to try again.', reload)
 
+  watch.at('load')
   let tailcat: Tailcat
   try {
-    ;[, tailcat] = await Promise.all([init({ module_or_path: __WASM__.web }), loadTailcat(__WASM__.tailcat)])
+    ;[, tailcat] = await loading
   } catch {
-    status("Far Cooler couldn’t start in this browser", 'Reload the page to try again.', { label: 'Reload', run: () => location.reload() })
-    return
+    return fail('Far Cooler couldn’t start in this browser', 'Reload the page to try again.', reload)
   }
 
-  if (!canUsePasskeys()) {
-    status('This browser can’t use passkeys', 'Far Cooler signs in to your runners with a passkey. Use a current version of Chrome, Safari, Edge or Firefox.')
-    return
-  }
+  if (!canUsePasskeys()) return fail('This browser can’t use passkeys', 'Far Cooler signs in to your runners with a passkey. Use a current version of Chrome, Safari, Edge or Firefox.')
+  watch.at('settings')
   let kept: { device: Device; migrated: boolean }
   try {
     kept = await loadDevice(account, () => tailcat.mintNodeKey())
   } catch {
-    status('This browser can’t keep Far Cooler’s settings', 'Far Cooler keeps this browser’s runners in this site’s storage. Allow site data for this site, then reload.')
-    return
+    return fail('This browser can’t keep Far Cooler’s settings', 'Far Cooler keeps this browser’s runners in this site’s storage. Allow site data for this site, then reload.')
   }
   const { device, migrated } = kept
   const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
   const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, user: await userHandle(account), tailcat }
+  watch.done()
   if (!device.passkey) passkeyScreen(session, migrated)
   else if (device.runners?.length) void work(session)
   else void enroll(session)

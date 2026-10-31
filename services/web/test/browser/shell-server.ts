@@ -17,7 +17,13 @@ export interface Reports {
   registered?: number
 }
 
-export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pick<WebEnv, 'DERP_HOSTS' | 'DERP_MAP_ORIGIN'>, reports: Reports) {
+export interface ShellOptions {
+  /// How long `directory/me` takes to answer, in ms, asked on each request: a
+  /// slow relay or link, for the start screen's count (ov-869).
+  meDelay?: () => number
+}
+
+export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pick<WebEnv, 'DERP_HOSTS' | 'DERP_MAP_ORIGIN'>, reports: Reports, options: ShellOptions = {}) {
   const assets = {
     async fetch(input: URL | string): Promise<Response> {
       const bytes = dist(new URL(input).pathname)
@@ -41,6 +47,8 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
     if (path === '/sign-out' && request.method === 'POST') return new Response(null, { status: 303, headers: { location: '/signed-out' } })
     if (path === '/signed-out') return withHeaders('signed out', 200, { 'content-type': 'text/plain' })
     if (path === '/api/relay/directory/me') {
+      const delay = options.meDelay?.() ?? 0
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
       return withHeaders(JSON.stringify({ user: { id: 'acct-test', email: 'owner@example.com' } }), 200, { 'content-type': 'application/json' })
     }
     // The relay's device directory and sealed-reply routes the enroll flow calls

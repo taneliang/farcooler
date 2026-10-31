@@ -115,7 +115,9 @@ const read = path => {
     return null
   }
 }
-const handle = shellHandler(read, env, reports)
+/// How long the stub relay holds `directory/me`, for the slow-start step.
+let meDelay = 0
+const handle = shellHandler(read, env, reports, { meDelay: () => meDelay })
 
 /// Answer a routed request with the Worker's own handler.
 async function serve(route) {
@@ -751,6 +753,38 @@ try {
     // authenticator replaces it rather than keeping one per enrollment.
     else if (credential.userHandle !== made[0].userHandle) failures.push('a second passkey for the same account has a new user handle')
     else console.log('csp-check: the same account made its passkey under the same user handle')
+
+    // A browser paired by an earlier build (deb71c680, Oct 27) starts on this
+    // one (ov-869): its record has a passkey and runners but no `registered`,
+    // and runners without `cause`. On a slow start the screen says which step
+    // it is on and counts, and at ten seconds offers a way forward, rather
+    // than "Starting Far Cooler…" alone; the start then finishes behind it.
+    const registered = (await device(page)).registered
+    await edit(page, { registered: null, offer: null, offerShownAt: null, runners: [{ id: 'cosmo', label: 'Cosmo', user: 'u', host_key: 'SHA256:x', token: 't', why: '' }] })
+    meDelay = 13_000
+    const reloaded = Date.now()
+    await page.reload()
+    await statusSays(page, 'Checking your account…', 3_000).catch(() => failures.push('a slow start never said it was checking the account'))
+    const slow = await page
+      .waitForFunction(
+        () => document.getElementById('status-action')?.textContent === 'Reload' && !document.getElementById('status-action')?.hidden && document.getElementById('status-cancel')?.textContent === 'Sign Out and Start Again' && !document.getElementById('status-cancel')?.hidden && /taking longer than usual \(1\d s\)/.test(document.getElementById('status-detail')?.textContent ?? ''),
+        null,
+        { timeout: 12_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      )
+    if (!slow) failures.push(`a slow start showed no way forward by ten seconds: ${JSON.stringify(await page.textContent('#status'))}`)
+    else console.log(`csp-check: a slow start offered Reload and Sign Out and Start Again after ${Math.round((Date.now() - reloaded) / 1000)} s`)
+    await shoot(page, 'slow-start')
+    meDelay = 0
+    await statusSays(page, 'Connect to Cosmo', 30_000).catch(() => failures.push("an earlier build's paired browser never reached Connect"))
+    if (!(await page.isHidden('#status-cancel'))) failures.push('the start screen’s Sign Out and Start Again stayed up after the start finished')
+    else console.log("csp-check: an earlier build's paired browser started on this one, at Connect to Cosmo")
+    await edit(page, { registered: registered ?? null, runners: null })
+    await page.reload()
+    await enrolling(page)
 
     if (runner) {
       runner.enroll(JSON.parse((await device(page)).offer).key_a)
