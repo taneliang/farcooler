@@ -57,4 +57,67 @@ struct PlanColumnCaptures {
             window.close()
         }
     }
+
+    @Test(arguments: [1440.0])
+    func ticket(_ width: CGFloat) async throws {
+        let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
+        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+        let board = try await PlanColumnViewTests.store()
+        let height: CGFloat = 1900
+        let expecting = "the C10f plan read"
+        for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
+            let model = T.model(try T.terminal())
+            model.store.apply(try await model.store.ledger.page(T.page(NativeAgentSubagentTests.rows())))
+            let reached = { @MainActor in PlanColumnScenario.shown(board.plan.plan) }
+            let view = WorkspaceView(
+                opened: "ov-881", hasConversation: true, hasBoard: false, cell: WorkspaceColumns.defaultCell,
+                focused: false, navigatorWidth: .constant(320),
+                conversation: { NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas() },
+                navigator: { Color.clear }, breadcrumb: { _ in
+                    DrillBreadcrumb(
+                        crumbs: PlanStack.page(
+                            base: [
+                                .init(title: "Far Cooler", target: PlanStackTests.plan),
+                                .init(title: "Android", target: PlanStackTests.lane),
+                                .init(title: "The Android app no longer crashes on a cold start after the Play update", target: nil),
+                            ],
+                            place: PlanStackTests.task("ov-880"),
+                            origin: PlanStack.Origin(task: "ov-880", agent: "Builder 1", target: PlanStackTests.lane),
+                            besidePlan: true
+                        ).crumbs, onGo: { _ in }, onClose: nil)
+                },
+                detail: { _, _ in
+                    VStack(spacing: 0) {
+                        TaskViewHeader(
+                            row: TaskRow(
+                                id: "ov-880", key: "ov-880",
+                                title: "The Android app no longer crashes on a cold start after the Play update",
+                                status: .inProgress, statusSince: Date()))
+                        Spacer()
+                    }.contentCard()
+                }, split: true,
+                home: { AnyView(PlanHome(board: board, needsYou: PlanNeedsYou(), onOpen: { _ in })) },
+                boardExists: false,
+                cards: { canvas in
+                    canvas ? AnyView(EmptyView()) : AnyView(
+                        WorkspaceStripRow {
+                            PlanStripRow(plan: board.plan, needsYou: 2, statuses: board.board.statuses) {}
+                        })
+                })
+            let window = NSWindow(
+                contentRect: NSRect(x: -9000, y: -9000, width: width, height: height), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background { WindowPlane() })
+            window.appearance = NSAppearance(named: appearance)
+            TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
+            await T.settle(window, 900)
+            try await Capture.keep(
+                to: URL(fileURLWithPath: out).appendingPathComponent("ticket-plan-\(Int(width))-\(variant).png"), expecting: expecting,
+                until: reached
+            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
+            window.close()
+        }
+    }
 }
