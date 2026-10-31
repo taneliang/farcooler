@@ -60,7 +60,10 @@ extension ContentView {
                         if target == trail { trail = nil }
                         selection = target
                     },
-                    onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() },
+                    // Beside the plan there's no close button (ov-867): Back, or the
+                    // first crumb, goes back to it, as a navigation stack does.
+                    onClose: plan != nil || WorkspaceNavigation.closing(place, board: scene.board) == nil
+                        ? nil : { closeOpened() },
                     // A task's own worktree keeps the task as the way back, as its Open Worktree does.
                     onOpen: { item in land(NavigationHistory.Stop(item.target, trail: item.trail)) },
                     menus: tree.map { treeMenus($0, place: place, host: host, summary: summary) }
