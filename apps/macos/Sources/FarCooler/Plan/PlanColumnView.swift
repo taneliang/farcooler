@@ -448,17 +448,22 @@ struct PlanTicketRow: View {
     let ticket: PlanColumn.Ticket
     let open: () -> Void
     @State private var hovering = false
+    /// Room for "ov-0000" at the callout size, which follows the system's text size.
+    @ScaledMetric(relativeTo: .callout) private var keyWidth: CGFloat = 46
 
     var body: some View {
         Button(action: open) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                // A quiet static mark: a ticket never reads as progress.
-                Circle().fill(.quaternary)
-                    .frame(width: 4, height: 4)
-                    .frame(width: 10, height: 10)
+                // Its key, in secondary ink at one width so every title starts
+                // on one edge; the ticket never reads as progress (ov-873).
+                Text(ticket.key)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.quietInk)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: keyWidth, alignment: .leading)
                     .accessibilityHidden(true)
-                    .probed("plan-ticket-mark-\(ticket.key)")
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    .probed("plan-ticket-key-\(ticket.key)")
                 Text(ticket.title)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -480,7 +485,7 @@ struct PlanTicketRow: View {
         // The wash sits a step in from the card's edges.
         .padding(.horizontal, Spacing.group)
         .onHover { hovering = $0 }
-        .accessibilityLabel("\(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)")
+        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)")
         .accessibilityHint("Opens the ticket")
         .identified("plan-ticket-\(ticket.key)")
     }
