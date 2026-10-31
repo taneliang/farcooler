@@ -20,6 +20,14 @@ struct PlanColumnActions {
     var openAgent: (PlanColumn.Agent) -> Void = { _ in }
     /// Open a ticket.
     var openTicket: (String) -> Void = { _ in }
+    /// The same, from under an agent's card, which the page's breadcrumb names
+    /// (ov-873). Falls back to `openTicket`.
+    var openTicketUnder: ((PlanColumn.Agent, String) -> Void)?
+
+    /// A ticket on an agent's card opened.
+    func open(ticket: String, under agent: PlanColumn.Agent) {
+        if let openTicketUnder { openTicketUnder(agent, ticket) } else { openTicket(ticket) }
+    }
     /// Open the board's list for a status.
     var openList: (TaskStatus) -> Void = { _ in }
 
@@ -28,7 +36,9 @@ struct PlanColumnActions {
     func closing(_ close: @escaping () -> Void) -> PlanColumnActions {
         PlanColumnActions(
             quote: { close(); quote($0) }, openAgent: { close(); openAgent($0) },
-            openTicket: { close(); openTicket($0) }, openList: { close(); openList($0) })
+            openTicket: { close(); openTicket($0) },
+            openTicketUnder: openTicketUnder.map { under in { agent, ticket in close(); under(agent, ticket) } },
+            openList: { close(); openList($0) })
     }
 }
 
@@ -361,7 +371,7 @@ struct PlanAgentCard: View {
                 .accessibilityHint(agent.terminal == nil ? "Opens its lane" : "Opens its chat")
                 .identified("plan-agent-\(agent.id)")
             ForEach(agent.tickets) { ticket in
-                PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) }
+                PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }
             }
             if let moreWords {
                 Text(moreWords)

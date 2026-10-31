@@ -14,6 +14,9 @@ struct JumpBarWindow: Equatable {
     var request = 0
     /// The jump bar has the keyboard: its Esc is its own, not Back.
     var active = false
+    /// The agent a ticket was opened under, from the plan column, for its
+    /// breadcrumb (ov-873). Cleared by any other way of opening a task.
+    var planOrigin: PlanStack.Origin?
 }
 
 extension ContentView {

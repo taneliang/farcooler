@@ -51,8 +51,12 @@ extension ContentView {
                 // Card or Group › Lane › Agent, where it has one; else as before.
                 let tree = treePath(for: place, host: host, workspace: summary, name: workspaceName(host, summary))
                 let worktrees = tree == nil ? worktreeCrumb(for: place, scene: scene) : nil
-                let crumbs = tree?.crumbs ?? WorkspaceWorktrees.crumbs(
+                let outline = tree?.crumbs ?? WorkspaceWorktrees.crumbs(
                     crumbs(for: place, host: host, workspace: summary), isHere: worktrees?.isHere == true)
+                // Opened from the plan, the path reads as a stack's (ov-873).
+                let stack = PlanStack.page(
+                    base: outline, place: place, origin: jumpBar.planOrigin, besidePlan: plan != nil)
+                let crumbs = stack.crumbs
                 DrillBreadcrumb(
                     crumbs: crumbs,
                     worktrees: worktrees,
@@ -66,8 +70,10 @@ extension ContentView {
                         ? nil : { closeOpened() },
                     // A task's own worktree keeps the task as the way back, as its Open Worktree does.
                     onOpen: { item in land(NavigationHistory.Stop(item.target, trail: item.trail)) },
-                    menus: tree.map { treeMenus($0, place: place, host: host, summary: summary) }
-                        ?? jumpMenus(crumbs, place: place, host: host, summary: summary),
+                    menus: stack.keepsMenus
+                        ? (tree.map { treeMenus($0, place: place, host: host, summary: summary) }
+                            ?? jumpMenus(crumbs, place: place, host: host, summary: summary))
+                        : .none,
                     onJump: { jump($0) }, focusRequest: jumpBar.request, onLeave: { keyOpened() },
                     onActive: { jumpBar.active = $0 })
             },
@@ -601,7 +607,10 @@ extension ContentView {
             hasAgent: chosen != nil, worktree: lane?.id,
             stopped: TaskColumnModel.hadAgent(row.id, host: host, in: store.fleet))
         let showsChanges = lane != nil && client.changesSupported != false
-        let tab = taskTabs.tab(for: row.id, agentWorking: chosen != nil)
+        // Opened from the plan, a ticket is a page in a stack: no tab strip,
+        // and its Overview (ov-873).
+        let tabs = PlanStack.showsTabs(besidePlan: selection.flatMap(workspaceScene).map(splits) ?? false)
+        let tab = tabs ? taskTabs.tab(for: row.id, agentWorking: chosen != nil) : .overview
         let openWorktree = {
             guard let lane, let current = selection else { return }
             let opened = WorkspaceNavigation.openWorktree(lane.id, from: current)
@@ -620,13 +629,15 @@ extension ContentView {
         return VStack(spacing: 0) {
             TaskViewHeader(row: row, ask: ask, agent: chosen)
             PlanTaskLineView(plan: board.plan, task: row.id) { openPlan($0, host: host, workspace: board.workspace.id) }
-            TaskTabBar(
-                tab: tab, onChoose: { choose($0, for: row.id) },
-                worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
-                agents: agents, chosen: chosen,
-                onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
-                onOpenWorktree: openWorktree,
-                onNewTerminal: newTerminalHere)
+            if tabs {
+                TaskTabBar(
+                    tab: tab, onChoose: { choose($0, for: row.id) },
+                    worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
+                    agents: agents, chosen: chosen,
+                    onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
+                    onOpenWorktree: openWorktree,
+                    onNewTerminal: newTerminalHere)
+            }
             // The task's own terminals, a dev server among them: in view over
             // every tab, each with Close. Nothing here closes on its own.
             let terminals = TaskTerminals.terminals(of: row, host: host, in: store.fleet)

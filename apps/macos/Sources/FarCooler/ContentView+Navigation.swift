@@ -12,6 +12,7 @@ extension ContentView {
     /// holding the keyboard, as a row clicked in it does (`chooseTask`).
     func openTask(_ id: String, host: String, workspace: String) {
         let opened = WorkspaceNavigation.openingTask(id, host: host, workspace: workspace, from: boardState)
+        jumpBar.planOrigin = nil
         trail = nil
         if opened.step.keyboard == .board { boardKeyboardPending = true }
         focusColumn = opened.step.focus
@@ -44,6 +45,7 @@ extension ContentView {
     func chooseTask(_ id: String, host: String, workspace: String, glance: Bool) {
         let next = WorkspaceNavigation.choosing(task: id, host: host, workspace: workspace, from: selection, toggles: !glance)
         guard next != selection else { return }
+        jumpBar.planOrigin = nil
         trail = nil
         let step = WorkspaceNavigation.boardStep(.choose(glance: glance), from: boardState)
         if step.keyboard == .board { boardKeyboardPending = true }

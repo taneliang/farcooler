@@ -96,6 +96,17 @@ extension ContentView {
                 }
             },
             openTicket: { id in openTask(id, host: host, workspace: workspace.id) },
+            // Under an agent's card, the breadcrumb names the agent (ov-873).
+            openTicketUnder: { agent, id in
+                openTask(id, host: host, workspace: workspace.id)
+                var target: Selection?
+                if let terminal = agent.terminal, let ws = worktrees.first(where: { $0.terminals.contains { $0.id == terminal } }) {
+                    target = Self.opening(ws, terminal: terminal, in: store.fleet)
+                } else if let lane = agent.lane {
+                    target = .workspace(host: host, workspace: workspace.id, focus: .plan(.lane(lane)))
+                }
+                jumpBar.planOrigin = PlanStack.Origin(task: id, agent: agent.name, target: target)
+            },
             openList: { status in
                 trail = nil
                 selection = .workspace(host: host, workspace: workspace.id, focus: .history(status))
