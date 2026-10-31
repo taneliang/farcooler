@@ -370,3 +370,20 @@ fn ready_lanes_fold_into_the_waiting_train() {
         assert!(section(&body, "Defaults").contains(rebased), "{h:?} lacks {rebased:?}");
     }
 }
+
+/// The plan links an agent to a ticket only when its description (or pane
+/// title) starts with the key, so the skill states that as a rule of its
+/// own where it tells the orchestrator to dispatch, with the reason (ov-872).
+#[test]
+fn every_agent_description_and_pane_title_starts_with_its_ticket_key() {
+    for h in ALL {
+        let body = prose(h);
+        let rule = "Every subagent's description and every pane's title starts with its ticket key";
+        let at = body.find(rule).unwrap_or_else(|| panic!("{h:?}: the key rule is gone"));
+        let dispatch = body.find("To put an agent to work, dispatch a lane").expect("dispatch paragraph");
+        assert!(at < dispatch, "{h:?}: the rule must come before the dispatch text");
+        let tail = &body[at..dispatch];
+        assert!(tail.contains("(`ov-123: polish the sidebar`)"), "{h:?}: {tail}");
+        assert!(tail.contains("how the plan shows which agent works on which ticket"), "{h:?}: {tail}");
+    }
+}

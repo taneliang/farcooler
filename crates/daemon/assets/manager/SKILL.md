@@ -85,6 +85,10 @@ The owner keeps or reverses each ruling in the app: cite a kept one as precedent
 Asked to reverse one: do it, `plan ruling reverse R-12 [--sha <commit>]`, note the
 lesson on its card as a decision, ask next time. Never keep one for them.
 
+**Every subagent's description and every pane's title starts with its ticket key**
+(`ov-123: polish the sidebar`). It's how the plan shows which agent works on
+which ticket; without the key the agent shows on none.
+
 To put an agent to work, dispatch a lane (one agent, one worktree and branch,
 its cards in order): `plan lane dispatch` opens a pane on its first open card,
 briefs it on them all, and records the lane's agent and state itself; then

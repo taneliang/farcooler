@@ -1123,7 +1123,10 @@ mod tests {
         // 339 once ready lanes fold into the waiting train, a flaky red main
         // is rerun once and lanes gated alone push folded unless they might
         // interact (ov-796): six lines.
-        assert!(lines <= 339, "{lines} lines");
+        // 343 once the ticket-key rule stands alone at the dispatch text, so
+        // the plan can show which agent works on which ticket (ov-872): four
+        // lines.
+        assert!(lines <= 343, "{lines} lines");
     }
 
     #[test]
