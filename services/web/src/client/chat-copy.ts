@@ -2,6 +2,7 @@
 /// `AgentConversation` and `ConversationItems`, so the browser reads a tool
 /// run, a turn's ending or an ask the way the Mac does. Pure strings, no DOM.
 
+import { IMAGE_WORDS } from './attachments'
 import { bodyOf, type Row } from './chat-rows'
 
 /// Minutes and seconds, "1:05", or with hours, "1:02:03" (`AgentConversation.short`).
@@ -221,13 +222,22 @@ export function chatTrouble(word: string, runner: string): string {
 
 /// Why a message or Stop didn't go through. A message that failed stays in the
 /// box, so it is never lost.
-export function sendFailure(word: string, runner: string, what: 'send' | 'stop'): string {
+export function sendFailure(word: string, runner: string, what: 'send' | 'stop', refusal = ''): string {
   if (word === 'runner_too_old')
     return `${runner} needs a newer Far Cooler to ${what === 'send' ? 'take messages' : 'stop a turn'} from here. Update it, then try again.`
-  if (word === 'refused')
+  if (word === 'refused') {
+    // The runner's own word for what it refused, in the apps' sentences
+    // (AgentConversation.swift).
+    if (what === 'send') {
+      if (refusal === 'images_too_large') return IMAGE_WORDS.imagesTooLarge
+      if (refusal === 'image_too_large') return IMAGE_WORDS.imageTooLarge
+      if (refusal === 'images') return IMAGE_WORDS.tooMany
+      if (refusal === 'image') return IMAGE_WORDS.unreadable
+    }
     return what === 'send'
       ? 'The agent didn’t take that message. It may be showing a dialog only the terminal can answer.'
       : 'The agent didn’t stop. It may be showing a dialog only the terminal can answer.'
+  }
   return what === 'send'
     ? `Your message didn’t reach ${runner}. It’s still in the box. Try sending it again.`
     : `Stop didn’t reach ${runner}. Try again.`

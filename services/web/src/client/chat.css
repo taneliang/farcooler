@@ -106,3 +106,15 @@
   .bubble { max-width: 88%; }
   .chat-latest { right: 12px; bottom: 100px; }
 }
+
+/* Images beside the box (ov-871): a row of thumbnails, an attach button, and a
+   drop target over the whole conversation. */
+.chat-attachments { list-style: none; display: flex; gap: 8px; margin: 0 0 8px; padding: 0 4px; overflow-x: auto; }
+.chat-thumb { position: relative; flex: none; width: 56px; height: 56px; border-radius: 10px; background: var(--card); }
+.chat-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+.chat-thumb-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; display: grid; place-items: center; font-size: 14px; line-height: 1; background: var(--text); color: var(--bg); box-shadow: 0 0 0 2px var(--bg); }
+.chat-attach { flex: none; width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; background: none; color: var(--text-2); }
+.chat-attach:hover:not(:disabled) { color: var(--text); background: var(--chip); filter: none; }
+.chat-attach svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.chat-field { padding-left: 6px; }
+.chat-host[data-dropping="true"]::after { content: "Drop Images to Attach"; position: absolute; inset: 8px; display: grid; place-items: center; border: 2px dashed var(--run); border-radius: 18px; background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--text); font-weight: 600; pointer-events: none; }

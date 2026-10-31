@@ -341,6 +341,11 @@ describe('sending and stopping', () => {
         if (release) await new Promise<void>(done => (release = done))
         return text.startsWith('queue')
       },
+      composeImages: async (terminal, text, images) => {
+        log.push(`compose ${terminal} ${JSON.stringify(text)} with ${images.map(i => `${i.mime}:${i.data.length}`).join(',')}`)
+        if (fail) throw fail
+        return false
+      },
       interrupt: async terminal => {
         log.push(`interrupt ${terminal}`)
         if (fail) throw fail
@@ -387,6 +392,33 @@ describe('sending and stopping', () => {
     expect((out as { message: string }).message).toContain('studio')
     expect((out as { message: string }).message).not.toContain('closed')
     expect(box.busy).toBe(false)
+  })
+
+  it('images go with the words in one compose, and a message may be only images', async () => {
+    const s = speaker()
+    const box = new Outbox(() => s.runner, 't-1', 'studio')
+    const png = { id: 1, name: 'a.png', mime: 'image/png', data: new Uint8Array([1, 2, 3]) }
+    const jpg = { id: 2, name: 'b.jpg', mime: 'image/jpeg', data: new Uint8Array([9]) }
+    expect(await box.send(' what is this? ', [png, jpg])).toEqual({ ok: true, queued: false })
+    expect(await box.send('   ', [png])).toEqual({ ok: true, queued: false })
+    expect(s.log).toEqual(['compose t-1 "what is this?" with image/png:3,image/jpeg:1', 'compose t-1 "" with image/png:3'])
+    expect(await box.send('', [])).toMatchObject({ ok: false, ignored: true })
+  })
+
+  it('an image the runner refuses for size says so in the apps’ sentence, not the generic one', async () => {
+    const s = speaker()
+    const box = new Outbox(() => s.runner, 't-1', 'studio')
+    const png = { id: 1, name: 'a.png', mime: 'image/png', data: new Uint8Array([1]) }
+    for (const [what, said] of [
+      ['image_too_large', 'That image is too large to send. Use a smaller one.'],
+      ['images_too_large', 'These images are too large to send together. Send fewer or smaller ones.'],
+      ['images', 'A message takes at most 10 images.'],
+    ]) {
+      s.failWith(Object.assign(new Error('refused'), { code: 'resource-conflict', what }))
+      expect(await box.send('look', [png])).toEqual({ ok: false, message: said })
+    }
+    s.failWith(Object.assign(new Error('refused'), { what: 'busy' }))
+    expect(((await box.send('look', [png])) as { message: string }).message).toContain('showing a dialog')
   })
 
   it('Stop is one interrupt on this terminal and never a keystroke', async () => {

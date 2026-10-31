@@ -16,8 +16,12 @@ export class FakeRunner {
   rows: Row[] = []
   rev = 0
   composed: string[] = []
+  /// Each message's images as `type:bytes`, by message.
+  composedImages: string[][] = []
+  limits = { images: true, each: 1_000_000, total: 3_000_000 }
   interrupts = 0
   failing: string | null = null
+  failingWhat = ''
   private parked: (() => void)[] = []
   private log: { rev: number; kind: 'insert' | 'update'; row: Row }[] = []
 
@@ -47,6 +51,18 @@ export class FakeRunner {
     this.composed.push(text)
     // The Mac would show it as the person's turn, at once.
     this.put(turn(`turn:${this.rev + 1}`, 0, 0, text, { activity: 'Busy' }) as any)
+    return false
+  }
+
+  composeLimits(): string {
+    return JSON.stringify(this.limits)
+  }
+
+  async composeImages(_t: string, text: string, images: { mime: string; data: Uint8Array }[]): Promise<boolean> {
+    if (this.failing) throw Object.assign(new Error(this.failing), this.failingWhat ? { what: this.failingWhat } : {})
+    this.composed.push(text)
+    this.composedImages.push(images.map(i => `${i.mime}:${i.data.length}`))
+    this.put(turn(`turn:${this.rev + 1}`, 0, 0, text || 'Image', { activity: 'Busy' }) as any)
     return false
   }
 

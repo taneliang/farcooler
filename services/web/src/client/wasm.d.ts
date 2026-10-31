@@ -79,6 +79,12 @@ declare module 'fc-web' {
     agentRowsFollow(terminal: string, epoch: number, afterRev: number, waitMs: number): Promise<string>
     /// Send a message as the person's; true when the agent was busy and it waits.
     compose(terminal: string, text: string): Promise<boolean>
+    /// `compose`, with images (`{mime, data}`) typed into the agent's box
+    /// too. A refusal for size rejects with message `refused` and `what` of
+    /// `image_too_large` or `images_too_large`.
+    composeImages(terminal: string, text: string, images: { mime: string; data: Uint8Array }[]): Promise<boolean>
+    /// What the composer may send, as `{images, each, total}` JSON.
+    composeLimits(): string
     /// Stop the turn the agent is working on.
     interrupt(terminal: string): Promise<void>
     /// Whether the runner answers right now. False means the connection is

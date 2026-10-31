@@ -10,6 +10,9 @@
 // - a row the runner changes is on screen within a second (acceptance 1);
 // - a typed message goes out as one compose, leaves the box, and is drawn as
 //   the person's turn (acceptance 2); a message that fails stays in the box;
+// - images (ov-871): an attached, pasted or dropped image waits beside the box
+//   as a thumbnail, can be taken out, and goes with the words as one compose;
+//   one past the runner's limit is refused with the apps' sentence;
 // - Stop is one interrupt and the working line goes (acceptance 3);
 // - no CSP violation; no horizontal scroll at phone width.
 //
@@ -39,7 +42,9 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 <button class="terminal-choice" aria-current="true" type="button">Fix the web build</button><button class="terminal-choice" type="button">Plan the release</button><button class="terminal-choice" type="button">shell</button></div></nav>
 <div class="pane"><div class="terminal" id="terminal"></div></div></section></main></body></html>`
 const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'] }
-const csp = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
+// img-src as the shell's own policy has it (src/headers.ts): thumbnails of
+// attached images are blob: URLs.
+const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
 const server = createServer((req, res) => {
   const hit = files[req.url]
   if (!hit) return void res.writeHead(404).end()
@@ -125,6 +130,82 @@ const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isM
   check((await page.inputValue('.chat-input')) === 'This one will not go', 'a message that failed is still in the box')
   check(!/closed/.test(await page.textContent('.chat-problem')) && /studio/.test(await page.textContent('.chat-problem')), 'and the page says why in its own words')
   await page.evaluate(() => (window.__chat.runner.failing = null))
+  await page.fill('.chat-input', '')
+
+  // Images: attach, paste and drop wait beside the box; Send sends them with the words.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const chooser = page.waitForEvent('filechooser')
+  await page.click('.chat-attach')
+  await (await chooser).setFiles([{ name: 'pixel.png', mimeType: 'image/png', buffer: png }])
+  await page.waitForSelector('.chat-thumb')
+  check((await count('.chat-thumb')) === 1 && !(await page.locator('.chat-send').isDisabled()), 'an attached image waits beside the box, and Send is on with no words')
+  check((await page.locator('.chat-thumb img').getAttribute('alt')) === 'pixel.png', 'the thumbnail is named for the screen reader')
+  await page.evaluate(
+    async b64 => {
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+      const box = document.querySelector('.chat-input')
+      const paste = new DataTransfer()
+      paste.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }))
+      box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: paste, bubbles: true, cancelable: true }))
+      const drop = new DataTransfer()
+      drop.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }))
+      const host = document.querySelector('.chat-host')
+      host.dispatchEvent(new DragEvent('dragover', { dataTransfer: drop, bubbles: true, cancelable: true }))
+      window.__dropping = host.dataset.dropping
+      host.dispatchEvent(new DragEvent('drop', { dataTransfer: drop, bubbles: true, cancelable: true }))
+    },
+    png.toString('base64'),
+  )
+  await page.waitForFunction(() => document.querySelectorAll('.chat-thumb').length === 3)
+  check((await page.evaluate(() => window.__dropping)) === 'true', 'a file dragged over the conversation shows the drop target')
+  check((await page.evaluate(() => document.querySelector('.chat-host').dataset.dropping)) === undefined, 'and the target goes when it is dropped')
+  await page.click('.chat-thumb-remove >> nth=1')
+  check((await count('.chat-thumb')) === 2, 'an image can be taken out before it is sent')
+  await page.fill('.chat-input', 'What is in these?')
+  await page.press('.chat-input', 'Enter')
+  await page.waitForFunction(() => window.__chat.runner.composedImages.length === 1)
+  const sentImages = await page.evaluate(() => window.__chat.runner.composedImages[0])
+  check(JSON.stringify(sentImages) === JSON.stringify([`image/png:${png.length}`, `image/png:${png.length}`]), 'both images went with the words as one compose')
+  check((await count('.chat-thumb')) === 0 && (await page.inputValue('.chat-input')) === '', 'the thumbnails and the box empty once it is taken')
+  check((await page.evaluate(() => window.__chat.runner.composed.at(-1))) === 'What is in these?', 'the words went with them')
+
+  // Pasted text is left to the box.
+  await page.evaluate(() => {
+    const t = new DataTransfer()
+    t.setData('text/plain', 'just words')
+    const e = new ClipboardEvent('paste', { clipboardData: t, bubbles: true, cancelable: true })
+    window.__textPasteHeld = !document.querySelector('.chat-input').dispatchEvent(e)
+  })
+  check((await page.evaluate(() => window.__textPasteHeld)) === false, 'pasting text is left to the box')
+
+  // Past the runner's limit: refused with the apps' sentence, nothing waits.
+  await page.evaluate(() => (window.__chat.runner.limits = { images: true, each: 50, total: 80 }))
+  const recount = await page.evaluate(() => window.__chat.runner.composedImages.length)
+  const big = page.waitForEvent('filechooser')
+  await page.click('.chat-attach')
+  await (await big).setFiles([{ name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(200, 1) }])
+  await page.waitForSelector('.chat-problem:not([hidden])')
+  check((await page.textContent('.chat-problem')) === 'That image is too large to send. Use a smaller one.', 'an image past the runner’s limit is refused with the apps’ sentence')
+  check((await count('.chat-thumb')) === 0 && (await page.evaluate(() => window.__chat.runner.composedImages.length)) === recount, 'and nothing waits or goes')
+  const nonImage = page.waitForEvent('filechooser')
+  await page.click('.chat-attach')
+  await (await nonImage).setFiles([{ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') }])
+  await page.waitForFunction(() => document.querySelector('.chat-problem').textContent.includes('Only PNG'))
+  check((await count('.chat-thumb')) === 0, 'a file that is not an image is left out, with a sentence')
+  await page.evaluate(() => (window.__chat.runner.limits = { images: true, each: 1_000_000, total: 3_000_000 }))
+
+  // A runner that refuses an image for size says so in the apps' words and keeps the box.
+  const refused = page.waitForEvent('filechooser')
+  await page.click('.chat-attach')
+  await (await refused).setFiles([{ name: 'pixel.png', mimeType: 'image/png', buffer: png }])
+  await page.waitForSelector('.chat-thumb')
+  await page.evaluate(() => Object.assign(window.__chat.runner, { failing: 'refused', failingWhat: 'images_too_large' }))
+  await page.fill('.chat-input', 'Will not go')
+  await page.click('.chat-send')
+  await page.waitForFunction(() => document.querySelector('.chat-problem').textContent.includes('too large to send together'))
+  check((await count('.chat-thumb')) === 1 && (await page.inputValue('.chat-input')) === 'Will not go', 'an image the runner refused stays beside the box, with the words')
+  await page.evaluate(() => Object.assign(window.__chat.runner, { failing: null, failingWhat: '' }))
+  await page.click('.chat-thumb-remove')
   await page.fill('.chat-input', '')
 
   // Acceptance 3: Stop is one interrupt, and the turn ends.

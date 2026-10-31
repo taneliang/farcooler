@@ -11,6 +11,7 @@
 
 import type { WebRunner } from 'fc-web'
 
+import { admit, filesOf, IMAGE_TYPES, IMAGE_WORDS, parseLimits, type Picked, readImages } from './attachments'
 import { chatTrouble, isWorking } from './chat-copy'
 import { Outbox } from './chat-send'
 import { closesWithLine, drawEnd, drawRow, type Memory, toolsGroup } from './chat-draw'
@@ -60,6 +61,14 @@ export class ChatView implements Pane<WebRunner> {
   private readonly send = el('button', 'chat-send')
   private readonly composer = el('form', 'chat-composer')
   private readonly problem = el('p', 'chat-problem')
+  /// Images waiting to go with the next message (attachments.ts), and their
+  /// thumbnails' object URLs.
+  private images: Picked[] = []
+  private nextImage = 1
+  private readonly thumbs = new Map<number, string>()
+  private readonly strip = el('ul', 'chat-attachments')
+  private readonly attachButton = el('button', 'chat-attach')
+  private readonly chooser = el('input')
 
   constructor(
     private readonly host: HTMLElement,
@@ -96,8 +105,26 @@ export class ChatView implements Pane<WebRunner> {
     arrow.append(path)
     this.send.append(arrow)
     const field = el('div', 'chat-field')
-    field.append(this.box, this.send)
-    this.composer.append(field)
+    this.strip.hidden = true
+    this.strip.setAttribute('aria-label', 'Images to send')
+    this.attachButton.type = 'button'
+    this.attachButton.title = 'Attach Images'
+    this.attachButton.setAttribute('aria-label', 'Attach Images')
+    const clip = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    clip.setAttribute('viewBox', '0 0 16 16')
+    clip.setAttribute('aria-hidden', 'true')
+    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    clipPath.setAttribute('d', 'M13 7.5 8.2 12.3a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.8 2.8l-5 5a1 1 0 0 1-1.4-1.4L10 5')
+    clip.append(clipPath)
+    this.attachButton.append(clip)
+    this.chooser.type = 'file'
+    this.chooser.accept = IMAGE_TYPES.join(',')
+    this.chooser.multiple = true
+    this.chooser.hidden = true
+    this.chooser.setAttribute('aria-hidden', 'true')
+    this.chooser.tabIndex = -1
+    field.append(this.attachButton, this.box, this.send)
+    this.composer.append(this.strip, field, this.chooser)
     this.scroller.append(this.older, this.list, this.empty)
     const foot = el('div', 'chat-foot')
     foot.append(this.working, this.problem, this.composer)
@@ -118,6 +145,35 @@ export class ChatView implements Pane<WebRunner> {
       void this.submit()
     })
     this.box.addEventListener('input', () => this.sizeBox())
+    this.attachButton.onclick = () => this.chooser.click()
+    this.chooser.addEventListener('change', () => {
+      const files = [...(this.chooser.files ?? [])]
+      this.chooser.value = ''
+      void this.take(files)
+    })
+    // A pasted screenshot is an image; pasted text is left to the box.
+    this.box.addEventListener('paste', event => {
+      const files = filesOf(event.clipboardData).filter(f => f.type.startsWith('image/'))
+      if (files.length === 0) return
+      event.preventDefault()
+      void this.take(files)
+    })
+    const carrying = (event: DragEvent) => !!event.dataTransfer && [...event.dataTransfer.types].includes('Files')
+    host.addEventListener('dragover', event => {
+      if (!carrying(event)) return
+      event.preventDefault()
+      host.dataset.dropping = 'true'
+    })
+    host.addEventListener('dragleave', event => {
+      if (event.relatedTarget instanceof Node && host.contains(event.relatedTarget)) return
+      delete host.dataset.dropping
+    })
+    host.addEventListener('drop', event => {
+      if (!carrying(event)) return
+      event.preventDefault()
+      delete host.dataset.dropping
+      void this.take(filesOf(event.dataTransfer))
+    })
     this.box.addEventListener('keydown', event => {
       // Return sends where there is a keyboard; on a touch screen it is a new
       // line and the arrow sends. Never while an input method is composing.
@@ -260,7 +316,7 @@ export class ChatView implements Pane<WebRunner> {
     this.note.textContent = trouble
     this.note.hidden = trouble === ''
     this.host.dataset.stale = trouble ? 'true' : 'false'
-    this.send.disabled = !!this.outbox?.busy || this.box.value.trim() === ''
+    this.send.disabled = !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
   }
 
   private toBottom(): void {
@@ -271,7 +327,7 @@ export class ChatView implements Pane<WebRunner> {
   private sizeBox(): void {
     this.box.style.height = 'auto'
     this.box.style.height = `${Math.min(this.box.scrollHeight, 200)}px`
-    this.send.disabled = !!this.outbox?.busy || this.box.value.trim() === ''
+    this.send.disabled = !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
   }
 
   private say(text: string): void {
@@ -293,13 +349,66 @@ export class ChatView implements Pane<WebRunner> {
     }
   }
 
-  /// Send the box's words. They leave the box only once the runner has taken
-  /// them, so a message that didn't go is never lost.
+  /// Images chosen, pasted or dropped: the ones that fit wait beside the box,
+  /// and the first reason one didn't is said.
+  private async take(files: File[]): Promise<void> {
+    if (files.length === 0) return
+    const { picked, others, unreadable } = await readImages(files, () => this.nextImage++)
+    // Asked each time: the runner on the connection may be a new one.
+    let limits = null
+    try {
+      limits = this.runner ? parseLimits(this.runner.composeLimits()) : null
+    } catch {}
+    const { next, said } = admit(this.images, picked, limits, this.runnerLabel)
+    this.images = next
+    this.drawImages()
+    this.say(said || (unreadable ? IMAGE_WORDS.unreadable : picked.length === 0 && others ? IMAGE_WORDS.notAnImage : ''))
+    this.paint()
+  }
+
+  /// The thumbnails of what waits, each with a button to take it out.
+  private drawImages(): void {
+    for (const [id, url] of this.thumbs) {
+      if (this.images.some(i => i.id === id)) continue
+      URL.revokeObjectURL(url)
+      this.thumbs.delete(id)
+    }
+    this.strip.hidden = this.images.length === 0
+    this.strip.replaceChildren(
+      ...this.images.map(image => {
+        let url = this.thumbs.get(image.id)
+        if (!url) {
+          url = URL.createObjectURL(new Blob([image.data as BlobPart], { type: image.mime }))
+          this.thumbs.set(image.id, url)
+        }
+        const item = el('li', 'chat-thumb')
+        const picture = el('img')
+        picture.src = url
+        picture.alt = image.name
+        const remove = el('button', 'chat-thumb-remove')
+        remove.type = 'button'
+        remove.textContent = '×'
+        remove.setAttribute('aria-label', `Remove ${image.name}`)
+        remove.onclick = () => {
+          this.images = this.images.filter(i => i.id !== image.id)
+          this.drawImages()
+          this.say('')
+          this.paint()
+        }
+        item.append(picture, remove)
+        return item
+      }),
+    )
+  }
+
+  /// Send the box's words, and the images beside it. They leave the box only
+  /// once the runner has taken them, so a message that didn't go is never lost.
   private async submit(): Promise<void> {
     const text = this.box.value
+    const sent = this.images
     if (!this.outbox) return
     this.say('')
-    const sending = this.outbox.send(text)
+    const sending = this.outbox.send(text, sent)
     this.paint()
     const done = await sending
     if (done.ok) {
@@ -308,6 +417,9 @@ export class ChatView implements Pane<WebRunner> {
         this.box.value = ''
         this.sizeBox()
       }
+      // Images added while it was going wait for the next message.
+      this.images = this.images.filter(i => !sent.includes(i))
+      this.drawImages()
       this.stick = true
     } else if (!done.ignored) this.say(done.message)
     this.paint()

@@ -750,6 +750,41 @@ async function workspaceWalk(page) {
   else console.log('csp-check: the pick survived a reload')
 }
 
+/// An agent's conversation and its images (ov-871), after `workspaceWalk`.
+async function imageWalk(page) {
+  await page.locator('.terminal-choice', { hasText: 'billing agent' }).click()
+  await page.waitForSelector('.chat-host:not([hidden]) .bubble', { timeout: 30_000 })
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const chooser = page.waitForEvent('filechooser')
+  await page.click('.chat-host:not([hidden]) .chat-attach')
+  await (await chooser).setFiles([{ name: 'pixel.png', mimeType: 'image/png', buffer: png }])
+  await page.evaluate(async b64 => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+    const pasted = new DataTransfer()
+    pasted.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }))
+    document.querySelector('.chat-host:not([hidden]) .chat-input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: pasted, bubbles: true, cancelable: true }))
+    const dropped = new DataTransfer()
+    dropped.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }))
+    document.querySelector('.chat-host:not([hidden])').dispatchEvent(new DragEvent('drop', { dataTransfer: dropped, bubbles: true, cancelable: true }))
+  }, png.toString('base64'))
+  await page.waitForFunction(() => document.querySelectorAll('.chat-host:not([hidden]) .chat-thumb').length === 3)
+  await shoot(page, 'workspace-images')
+  await page.fill('.chat-host:not([hidden]) .chat-input', 'What is in these?')
+  await page.press('.chat-host:not([hidden]) .chat-input', 'Enter')
+  await waitForFile(join(runner.dir, 'composed'), 'What is in these?')
+  await waitForFile(join(runner.dir, 'images'), `image/png ${png.length}`)
+  const images = readFileSync(join(runner.dir, 'images'), 'utf8').trim().split('\n')
+  if (images.length !== 3 || images.some(i => i !== `image/png ${png.length}`)) failures.push(`the runner got images ${JSON.stringify(images)}`)
+  else console.log('csp-check: an attached, a pasted and a dropped image reached the agent with the words as one compose')
+  // Past the runner's limit (no compose_upload here: 900 KiB together): refused, nothing sent.
+  const big = page.waitForEvent('filechooser')
+  await page.click('.chat-host:not([hidden]) .chat-attach')
+  await (await big).setFiles([{ name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(1024 * 1024, 1) }])
+  await page.waitForFunction(() => document.querySelector('.chat-host:not([hidden]) .chat-problem')?.textContent?.includes('too large'), null, { timeout: 10_000 })
+  if (await page.locator('.chat-host:not([hidden]) .chat-thumb').count()) failures.push('an image past the limit waited to be sent')
+  else console.log('csp-check: an image past the runner’s limit was refused with a sentence')
+}
+
 /// Wait for a file the fake daemon writes to hold `text` on a line.
 async function waitForFile(path, text) {
   const deadline = Date.now() + 30_000
@@ -993,6 +1028,7 @@ try {
 
       await everyRunner(page)
       await workspaceWalk(page)
+      await imageWalk(page)
     }
 
     // ov-767 acceptance 2: the passkey, made for the app host, can't be used
