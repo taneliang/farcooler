@@ -147,6 +147,10 @@ pub struct Seen {
     pub chat: Mutex<Chat>,
     /// What `terminal.compose` carried, as the text of its first block.
     pub composed: Mutex<Vec<String>>,
+    /// The images of each `terminal.compose` as `(MIME type, byte count)`.
+    pub composed_images: Mutex<Vec<(String, usize)>>,
+    /// The task `task.get` answers with, when a test sets it.
+    pub task: Mutex<Option<farcooler_protocol::v1::TaskDetail>>,
     /// Set, the agent is mid-turn: a composed message waits in its queue.
     pub busy: AtomicBool,
     /// How many times `terminal.interrupt` was asked.
@@ -323,6 +327,7 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     capability::BOARD_RULING_ACTIONS.to_string(),
                     capability::AGENT_ROWS.to_string(),
                     capability::AGENT_COMPOSE.to_string(),
+                    capability::COMPOSE.to_string(),
                     capability::TERMINAL_INTERRUPT.to_string(),
                 ],
                 ..Default::default()
@@ -338,6 +343,7 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                                 id: Bytes::copy_from_slice(TERMINAL.as_bytes()),
                                 title: "shell".into(),
                                 role: farcooler_protocol::v1::TerminalRole::Agent as i32,
+                                workspace_id: Some(Bytes::copy_from_slice(WORKSPACE.as_bytes())),
                                 state: TerminalState::Running as i32,
                                 columns: 80,
                                 rows: 24,
@@ -370,10 +376,15 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                         answer(&req, result::Value::AgentRowChanges(seen.chat.lock().await.follow(f.epoch, f.after_rev)))
                     }
                     ("terminal.compose", Some(request::Payload::AgentPrompt(p))) => {
-                        let text = p.blocks.into_iter().find_map(|b| match b.content {
-                            Some(farcooler_protocol::v1::agent_prompt_block::Content::Text(t)) => Some(t),
-                            _ => None,
-                        });
+                        use farcooler_protocol::v1::agent_prompt_block::Content;
+                        let mut text = None;
+                        for block in p.blocks {
+                            match block.content {
+                                Some(Content::Text(t)) => text = Some(t),
+                                Some(Content::Image(i)) => seen.composed_images.lock().await.push((i.mime_type, i.data.len())),
+                                _ => {}
+                            }
+                        }
                         seen.composed.lock().await.push(text.unwrap_or_default());
                         let queued = seen.busy.load(Ordering::SeqCst);
                         answer(&req, result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
@@ -422,6 +433,10 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                             answer(&req, result::Value::TaskNote(Default::default()))
                         }
                     }
+                    ("task.get", _) => match seen.task.lock().await.clone() {
+                        Some(detail) => answer(&req, result::Value::TaskDetail(detail)),
+                        None => refusal(&req, ErrorCode::NotFound, "task"),
+                    },
                     ("workspace.list", _) => answer(
                         &req,
                         result::Value::WorkspaceList(WorkspaceList {

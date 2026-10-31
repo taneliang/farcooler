@@ -404,6 +404,42 @@ impl WebRunner {
         self.0.compose(id, &text).await.map_err(web_failure)
     }
 
+    /// Send `text` and `images` to an agent as the person's message. `images`
+    /// is an array of `{mime, data}`, `data` a `Uint8Array`. True when the
+    /// agent was busy and it waits in its queue. A refusal for size rejects
+    /// with `refused` and `what` of `image_too_large` or `images_too_large`.
+    #[wasm_bindgen(js_name = composeImages)]
+    pub async fn compose_images(&self, terminal: String, text: String, images: js_sys::Array) -> Result<bool, JsValue> {
+        let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
+        let mut parsed = Vec::with_capacity(images.length() as usize);
+        for image in images.iter() {
+            let mime = Reflect::get(&image, &"mime".into()).ok().and_then(|m| m.as_string());
+            let data = Reflect::get(&image, &"data".into()).ok().filter(|d| d.is_instance_of::<Uint8Array>());
+            let (Some(mime), Some(data)) = (mime, data) else { return Err(failure("protocol", "an image is {mime, data}")) };
+            parsed.push((mime, Uint8Array::from(data).to_vec()));
+        }
+        self.0.compose_images(id, &text, &parsed).await.map_err(web_failure)
+    }
+
+    /// What the composer may send, as JSON: `{images, each, total}`.
+    #[wasm_bindgen(js_name = composeLimits)]
+    pub fn compose_limits(&self) -> String {
+        serde_json::to_string(&self.0.compose_limits()).unwrap_or_default()
+    }
+
+    /// One task with its record, as JSON in `task show --json`'s shape.
+    pub async fn task(&self, task: String) -> Result<String, JsValue> {
+        let id = Uuid::parse_str(&task).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.task(id).await.map_err(web_failure)?.to_string())
+    }
+
+    /// Add a note to a task as the person's.
+    #[wasm_bindgen(js_name = addNote)]
+    pub async fn add_note(&self, task: String, body: String) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&task).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.comment_on_task(id, &body).await.map_err(web_failure)
+    }
+
     /// Stop the turn an agent is working on.
     pub async fn interrupt(&self, terminal: String) -> Result<(), JsValue> {
         let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;

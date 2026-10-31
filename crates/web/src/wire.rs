@@ -89,6 +89,10 @@ pub struct TerminalSummary {
     /// an agent's activity (the apps' `RunningAgents.isAgent`). The page opens
     /// an agent as a conversation.
     pub agent: bool,
+    /// The workspace whose work this terminal is doing (`Terminal.workspace_id`),
+    /// as a uuid; none for a terminal in an unclaimed worktree and from a
+    /// runner without `workstreams`. The page lists a workspace's own.
+    pub workspace: Option<String>,
 }
 
 /// A connected runner: the client core's session over one SSH connection.
@@ -189,6 +193,7 @@ impl Runner {
                     .unwrap_or_else(|_| "unknown".into()),
                 columns: t.columns,
                 rows: t.rows,
+                workspace: farcooler_client::workspaces_json::workspace_of(t.workspace_id.as_deref()),
             })
             .collect())
     }
@@ -225,6 +230,19 @@ impl Runner {
     /// (`workspace_json`): the page picks the board whose plan it shows.
     pub async fn workspaces(&self) -> Result<serde_json::Value, WebError> {
         Ok(self.session.workspaces().await?.iter().map(farcooler_client::workspaces_json::workspace_json).collect())
+    }
+
+    /// One task with its record, in the shape `farcooler task show --json`
+    /// prints (`detail_json`): what a Needs You item or a plan card opens.
+    pub async fn task(&self, task: Uuid) -> Result<serde_json::Value, WebError> {
+        Ok(self.session.task(task).await?)
+    }
+
+    /// Add a note to a task as the person at this browser (`task.note`, a
+    /// comment, the call a phone's Add Note makes).
+    pub async fn comment_on_task(&self, task: Uuid, body: &str) -> Result<(), WebError> {
+        self.session.task_note(farcooler_client::session::task_note_append(task, farcooler_protocol::v1::TaskNoteKind::Comment, body)).await?;
+        Ok(())
     }
 
     /// Write a theme's Next line (`board_theme.update`).

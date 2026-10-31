@@ -11,6 +11,8 @@
 
 use uuid::Uuid;
 
+use serde::Serialize;
+
 use crate::error::WebError;
 use crate::wire::Runner;
 
@@ -47,9 +49,41 @@ impl Runner {
         Ok(self.session.compose_with_files(terminal, text, &[], &[]).await?)
     }
 
+    /// `compose`, with `images` (MIME type and bytes) typed into the agent's
+    /// box too, as the apps' composers send them. The session refuses images
+    /// past the limits (`compose_limits`) before anything is sent.
+    pub async fn compose_images(&self, terminal: Uuid, text: &str, images: &[(String, Vec<u8>)]) -> Result<bool, WebError> {
+        Ok(self.session.compose(terminal, text, images).await?)
+    }
+
+    /// What the runner takes from the composer: whether it takes images at
+    /// all, and the most bytes of one image and of all of them together. A
+    /// runner with `compose_upload` stages each image in chunks (so the
+    /// limits are the paste's and the upload's); an older one carries them
+    /// inside the request.
+    pub fn compose_limits(&self) -> ComposeLimits {
+        use farcooler_protocol::capability::{COMPOSE, COMPOSE_UPLOAD};
+        let upload = self.session.can(COMPOSE_UPLOAD);
+        ComposeLimits {
+            images: self.session.can(COMPOSE),
+            each: if upload { farcooler_protocol::MAX_PASTE_FILE_BYTES } else { farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES as u64 },
+            total: if upload { farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES as u64 } else { farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES as u64 },
+        }
+    }
+
     /// Stop the turn the agent is working on.
     pub async fn interrupt(&self, terminal: Uuid) -> Result<(), WebError> {
         self.session.interrupt(terminal).await?;
         Ok(())
     }
+}
+
+/// What the composer may send (`Runner::compose_limits`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ComposeLimits {
+    pub images: bool,
+    /// The most bytes in one image.
+    pub each: u64,
+    /// The most bytes in all of a message's images together.
+    pub total: u64,
 }
