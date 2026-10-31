@@ -177,6 +177,42 @@ final class GlassUITests: XCTestCase {
         }
     }
 
+    /// **A hold near or on the remove badge previews, never nothing, and a
+    /// tap on the badge removes** (ov-868). The badge's target was 44 pt over
+    /// a 64 pt chip, a third of the photo on each side, so a hold near the
+    /// corner landed on it and showed nothing. The target is 28 pt now,
+    /// centered on the chip's corner region, and a hold on it previews.
+    func testHoldingNearTheRemoveBadgePreviewsAndTappingItRemoves() {
+        let app = composer()
+        postPhoto()
+        let chip = element(app, "native-image-chip")
+        XCTAssertTrue(chip.waitForExistence(timeout: 60), "no chip for the photo")
+        let badge = element(app, "native-image-remove")
+        XCTAssertTrue(badge.waitForExistence(timeout: 10), "no remove badge")
+        // The badge's target must reach only 20 pt into the photo, from the
+        // top right corner, which is the badge frame's bottom left.
+        XCTAssertLessThanOrEqual(badge.frame.width, 30, "the badge's target is \(badge.frame.width) pt wide")
+        // The badge's own square gives the photo's corner (its maxX is 8 pt
+        // past the chip's right edge, its minY 8 pt above its top); points in
+        // the photo's frame, right edge to left, top edge down.
+        let right = badge.frame.maxX - 8, top = badge.frame.minY + 8
+        let points: [(String, CGFloat, CGFloat)] = [
+            ("middle", right - 32, top + 32), ("under the badge", right - 8, top + 28),
+            ("left of the badge", right - 28, top + 8), ("the badge's inner corner", right - 22, top + 22),
+            ("on the badge", badge.frame.midX, badge.frame.midY),
+        ]
+        for (name, x, y) in points {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).press(forDuration: 1.2)
+            let preview = element(app, "native-image-preview")
+            XCTAssertTrue(preview.waitForExistence(timeout: 10), "holding \(name) showed no preview")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+            XCTAssertTrue(preview.waitForNonExistence(timeout: 10), "the preview stayed after \(name)")
+            XCTAssertTrue(chip.exists, "holding \(name) removed the photo")
+        }
+        badge.tap()
+        XCTAssertTrue(wait(30) { !chip.exists }, "a tap on the remove badge left the photo")
+    }
+
     /// **The field's glass comes back however the menu goes** (ov-792 review):
     /// it stands down while a held photo's menu is up, and answers a touch
     /// again once the menu is dismissed, and once the app has left the

@@ -344,6 +344,9 @@ struct NativeComposer: View {
     private static let chipShape = RoundedRectangle(
         cornerRadius: Radius.concentric(outer: radius, padding: Spacing.group), style: .continuous)
 
+    /// The remove badge's square target; see `chip`.
+    private static let removeSide: CGFloat = 28
+
     private func chip(_ image: OutgoingImage) -> some View {
         Group {
             if let thumbnail = model.thumbnails[image.id] {
@@ -362,9 +365,33 @@ struct NativeComposer: View {
         // whole of the chip to its left, so holding the left photo previewed
         // the right one, drawn on top of it.
         .contentShape(Self.chipShape)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                model.detach(image.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .symbolRenderingMode(.palette)
+                    // style-exempt: a badge over a photo, white on dark to read on any picture
+                    .foregroundStyle(.white, .black.opacity(0.6))
+                    .frame(width: Self.removeSide, height: Self.removeSide)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove Photo")
+            .accessibilityIdentifier("native-image-remove")
+            // On the photo's corner, mostly past it (ov-868): its target was
+            // 44 pt square over a 64 pt chip, a third of the photo's width
+            // and height, so a press-and-hold near the corner landed on the X
+            // and previewed nothing. Now 28 pt, centered 6 pt in from the
+            // corner: 20 pt square of it over the photo, the rest in the
+            // field's padding.
+            .offset(x: Spacing.group, y: -Spacing.group)
+        }
         // Held, the photo as it will go, large, with Remove under it, as
-        // Messages does with a photo waiting in its field (ov-792). Before
-        // the remove badge, so the badge isn't lifted with it.
+        // Messages does with a photo waiting in its field (ov-792).
+        // After the remove badge, so a hold over the badge previews too
+        // (ov-868); the lift is the photo's shape only.
         .contentShape(.contextMenuPreview, Self.chipShape)
         .contextMenu {
             Button("Remove Photo", systemImage: "trash", role: .destructive) { model.detach(image.id) }
@@ -376,26 +403,6 @@ struct NativeComposer: View {
         }
         // Decoded for that preview ahead of a hold, off the main thread.
         .task(id: image.id) { await PreviewImages.prepare(image, longest: PreviewImages.longest(for: OutgoingImagePreview.most)) }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                model.detach(image.id)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .symbolRenderingMode(.palette)
-                    // style-exempt: a badge over a photo, white on dark to read on any picture
-                    .foregroundStyle(.white, .black.opacity(0.6))
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove Photo")
-            .accessibilityIdentifier("native-image-remove")
-            // Inside the photo's corner, as in Messages: the badge's middle
-            // 14 pt in from each edge, its 44 pt target centered on it and
-            // inside the field's padding.
-            .offset(x: Spacing.group, y: -Spacing.group)
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Photo")
         // Which photo, for a held preview to be matched to its chip (ov-805).
