@@ -32,6 +32,7 @@ import { type PlanTab, startPlanTab } from './plan-tab'
 import { parseWorkspaces } from './plan'
 import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scopeBoard, type Space, terminalsIn, waitingIn } from './scope'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
+import { AgentPane, type View } from './agent-pane'
 import { ChatView } from './chat'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
@@ -705,12 +706,21 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const agents = new Set(terminals.filter(t => t.agent).map(t => t.id))
   const budget = paneBudgets.get(target.label) ?? { max: MAX_LIVE_PANES }
   paneBudgets.set(target.label, budget)
-  const set = new PaneSet<WebRunner>(id => {
+  const agentPanes = new Map<string, AgentPane<WebRunner>>()
+  const hostIn = () => {
     const host = document.createElement('div')
     host.className = 'terminal-host'
     $('terminal').append(host)
-    if (agents.has(id)) return new ChatView(host, target.label)
-    return new PaneView(host, word => paneNote(connectFailure(word, target.label)))
+    return host
+  }
+  const shell = () => new PaneView(hostIn(), word => paneNote(connectFailure(word, target.label)))
+  const set = new PaneSet<WebRunner>(id => {
+    if (!agents.has(id)) return shell()
+    // An agent opens as its conversation; the Mac's view switch (the bar over
+    // the pane) shows the terminal it runs in.
+    const agent = new AgentPane<WebRunner>(new ChatView(hostIn(), target.label), shell)
+    agentPanes.set(id, agent)
+    return agent
   }, budget)
   panes = set
   const open = async (id: string, button: HTMLButtonElement) => {
@@ -724,7 +734,34 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     } catch (e) {
       paneNote(connectFailure((e as Error).message, target.label))
     }
+    drawView()
   }
+  /// The bar over an agent's pane: its name and which view is in front.
+  const drawView = () => {
+    const id = set.shown
+    const agent = id ? agentPanes.get(id) : undefined
+    $('pane-bar').hidden = !agent
+    if (!id || !agent) return
+    $('pane-title').textContent = terminals.find(t => t.id === id)?.title || 'Agent'
+    $('view-conversation').setAttribute('aria-pressed', String(agent.mode === 'conversation'))
+    $('view-terminal').setAttribute('aria-pressed', String(agent.mode === 'terminal'))
+  }
+  const viewAs = async (mode: View) => {
+    const id = set.shown
+    const agent = id ? agentPanes.get(id) : undefined
+    const current = reconnector.current
+    if (!id || !agent || !current || agent.mode === mode) return
+    agent.setMode(mode)
+    paneNote('')
+    try {
+      await set.open(id, current, () => ended(current))
+    } catch (e) {
+      paneNote(connectFailure((e as Error).message, target.label))
+    }
+    drawView()
+  }
+  $('view-conversation').onclick = () => void viewAs('conversation')
+  $('view-terminal').onclick = () => void viewAs('terminal')
   /// The terminals of the workspace showing, as buttons; the first running
   /// one opens. A workspace with none says so.
   const relist = () => {
@@ -746,6 +783,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     const first = firstToOpen(shown)
     if (!first) {
       set.clear()
+      drawView()
       paneNote(noTerminals(spaces.find(sp => sp.id === chosenSpace), target.label, spaces.length > 1))
       return
     }

@@ -50,6 +50,12 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .terminal-choice[aria-current="true"] { background: var(--selected); font-weight: 600; }
 .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--term-bg); }
 .pane .note { margin: 8px; }
+.pane-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--rule); background: var(--bg-alt); }
+.pane-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.view-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 980px; background: var(--selected); }
+.view-switch button { border-radius: 980px; padding: 3px 12px; background: none; color: var(--text-2); font-size: 13px; }
+.view-switch button[aria-pressed="true"] { background: var(--seg-on); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 0 0 .5px var(--rule); }
+.view-switch button:hover:not([aria-pressed="true"]) { color: var(--text); filter: none; }
 .link-note p { margin: 0 0 4px; }
 .link-note .link-title { font-weight: 600; }
 .link-note .link-detail { color: var(--text-2); margin-bottom: 8px; }

@@ -785,6 +785,26 @@ async function imageWalk(page) {
   else console.log('csp-check: an image past the runner’s limit was refused with a sentence')
 }
 
+/// An agent's view switch (ov-871), after `imageWalk`, on the same agent.
+async function switchWalk(page) {
+  if ((await page.getAttribute('#view-conversation', 'aria-pressed')) !== 'true' || (await page.isHidden('#pane-bar'))) failures.push('an agent did not open as its conversation with the view switch')
+  await page.click('#view-terminal')
+  await page.waitForSelector(LIVE, { timeout: 60_000 })
+  if (await page.locator('.chat-host:not([hidden])').count()) failures.push('the conversation stayed in front of the terminal')
+  if ((await page.getAttribute('#view-terminal', 'aria-pressed')) !== 'true') failures.push('the switch does not say Terminal')
+  const before = runner.typed()
+  await page.keyboard.type('whoami')
+  const deadline = Date.now() + 30_000
+  while (runner.typed() === before && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
+  if (!runner.typed().endsWith('whoami')) failures.push(`the agent's terminal got ${JSON.stringify(runner.typed().slice(before.length))}`)
+  await shoot(page, 'workspace-agent-terminal')
+  await page.click('#view-conversation')
+  await page.waitForSelector('.chat-host:not([hidden]) .bubble', { timeout: 30_000 })
+  if (await page.locator('#terminal .terminal-host:not(.chat-host):not([hidden])[data-attached="true"]').count()) failures.push('the terminal kept its channel after switching back to the conversation')
+  console.log('csp-check: an agent switched from its conversation to its terminal, took keystrokes there, and came back')
+  await shoot(page, 'workspace-agent')
+}
+
 /// Wait for a file the fake daemon writes to hold `text` on a line.
 async function waitForFile(path, text) {
   const deadline = Date.now() + 30_000
@@ -1029,6 +1049,7 @@ try {
       await everyRunner(page)
       await workspaceWalk(page)
       await imageWalk(page)
+      await switchWalk(page)
     }
 
     // ov-767 acceptance 2: the passkey, made for the app host, can't be used
