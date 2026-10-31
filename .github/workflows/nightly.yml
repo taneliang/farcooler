@@ -3,7 +3,7 @@
 # THREE TIERS (owner, Oct 14). A push or pull request runs unit and
 # integration tests, plus a small smoke set of UI tests (ci.yml's `ios-ui`, the
 # SMOKE list in scripts/ios-ui-shards.py). The train gate adds the UI classes a
-# diff touches. This workflow runs everything else: all six shards (five on an iPhone,
+# diff touches. This workflow runs everything else: all eight shards (seven on an iPhone,
 # `pad` on an iPad), 271
 # app-launching test methods in 40 classes, which took 25 to 34 minutes a shard
 # when they ran on every push, and the capture classes. It runs on a fixed
@@ -22,7 +22,8 @@
 # tool on the owner's Mac and a runner cannot reach it.
 #
 # Everything runs with all five macOS runners free (nothing else is on a Mac at
-# that hour but a Canary build), so the six shards start together. Their job
+# that hour but a Canary build): five shards start together and the rest
+# take a runner as one finishes. Their job
 # names are the ones the shard budget reads (scripts/ios-ui-shard-budget.py),
 # which now reads this workflow's runs and not ci.yml's.
 name: Nightly
@@ -59,9 +60,9 @@ jobs:
   # With `captures` below, these are SHARDS in scripts/ios-ui-shards.py, whose
   # `--check` fails when the matrix and the file disagree. The job name and
   # the timeout are the ones the budget job reads. `pad` runs on an iPad
-  # simulator (ov-355). Five phone shards of about 1,160 s
-  # of tests each, so 25 minutes a job against a 45-minute timeout; the budget
-  # job goes red at 75% of it.
+  # simulator (ov-355). Seven phone shards of about 1,500 s
+  # of tests each (ov-722, Oct 30), so 31 minutes a job against a 45-minute
+  # timeout; the budget job goes red at 75% of it.
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that still
   # uploaded its products leaves the shards to run, and a build that produced
@@ -75,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [shell, agent, phone, phone2, phone3, phone4, pad]
+        shard: [shell, agent, phone, phone2, phone3, phone4, phone5, pad]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
@@ -123,7 +124,7 @@ jobs:
   budget:
     name: iOS UI shard budget
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read

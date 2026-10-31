@@ -43,7 +43,7 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # Rebalance by class durations from a CI log ("Test Suite '<Class>' passed ...
 # in N (N) seconds"), not by test count: NativeAgentViewTests alone is eleven minutes.
 #
-# Six phone shards, shell to phone4 (ruling R-40; rebalanced again by ov-594). Each number below is a
+# Six phone shards, shell to phone4 (seven since Oct 30, with phone5; ruling R-40; rebalanced again by ov-594). Each number below is a
 # class's mean suite time over the last three nightly runs, 38634315732 (Oct 14),
 # 38762191089 (Oct 15) and 38923726443 (Oct 16). The five shards total 1,067 to
 # 1,201 s of tests each (5,736 s in all). A shard's job adds 229 to 539 s on top
@@ -79,70 +79,83 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # shell to agent gives shell 1,451, agent 1,332, phone 1,292, phone2 1,393, phone3 1,471 and
 # phone4 1,478. With the 380 s of overhead the worst is about 1,860 s: 69% of the timeout.
 #
+# Oct 30 (ov-722; nightly 41095427660): `phone` was cancelled at the timeout (46.0 min),
+# `phone2` ran 38.0 min and `shell` 33.3; the budget job had them at 98%, 75% and 78%. The
+# team-mode classes that landed in `phone` (PeopleAccessUITests alone 653 s) took it to about
+# 2,470 s of tests. The seconds per class below are that run's, from its shard logs, and
+# all seven shards' tests come to about 10,430 s: with a job's 310 to 350 s on top, six shards
+# can't each stay under 75%, so a seventh, `phone5`, takes the team classes. Tests per shard:
+# shell 1,468, agent 1,491, phone 1,518, phone2 1,518, phone3 1,480, phone4 1,453, phone5
+# 1,505 (were 1,673, 1,595, 2,473, 1,964, 1,364, 1,364): about 1,870 s a job, 69%.
+#
 # The classes are not grouped by the harness they launch with; each class
 # launches its own app, so only the seconds matter.
 SHARDS = {
     "shell": [
-        "NativeComposerTests",  # 575 s
-        "NativeComposerRoleTests",  # ~51 s with the audit (ov-680)
-        "PhoneTreeUITests",  # 327 s; -phone-harness -phone-plan (ov-300)
-        "NativeAnswersUITests",  # 96 s; -native-agent-harness -native-held-ask (ov-370)
-        "BoardUnreadUITests",  # 103 s; -phone-harness (ov-113)
-        "ReadScopeTests",  # 38 s; -phone-harness (TaskScreenTests.swift)
+        "NativeComposerTests",  # 837 s
+        "NativeComposerRoleTests",  # 47 s with the audit (ov-680)
+        "PhoneTreeUITests",  # 559 s; -phone-harness -phone-plan (ov-300)
+        "ReadScopeTests",  # 25 s; -phone-harness (TaskScreenTests.swift)
     ],
     "agent": [
-        "DynamicTypeTests",  # 132 s; -phone-harness
-        "PlanSheetAppearanceUITests",  # 176 s; -phone-harness -phone-plan (ov-444)
-        "PlanRulingsUITests",  # 97 s; -phone-harness -phone-plan -phone-rulings (ov-304)
-        "FirstRunUITests",  # 243 s; -phone-harness (ov-205 lane P, placed by integ-9)
-        "ChangesPullRequestTests",  # 66 s; -changes-layout-harness
-        "TaskScreenTests",  # 225 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
-        "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
-        "HarnessResetTests",  # ~120 s: two harnesses, four launches each (ov-672). Moved from shell (ov-722)
-        "ChangesLfsNoticeTests",  # 61 s; -changes-layout-harness -lfs-pointers (ov-199). Moved from phone3 (ov-722)
-        "TunnelRouteOfferTests",  # 34 s; seeded -hosts and -runnerAlternatives (ov-485). Moved from phone3 (ov-722)
+        "PlanSheetAppearanceUITests",  # 131 s; -phone-harness -phone-plan (ov-444)
+        "PlanRulingsUITests",  # 351 s; -phone-harness -phone-plan -phone-rulings (ov-304)
+        "FirstRunUITests",  # 392 s; -phone-harness (ov-205 lane P, placed by integ-9)
+        "ChangesPullRequestTests",  # 40 s; -changes-layout-harness
+        "TaskScreenTests",  # 193 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
+        "FilesBrowserTests",  # 147 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
+        "HarnessResetTests",  # 132 s: two harnesses, four launches each (ov-672). Moved from shell (ov-722)
+        "ChangesLfsNoticeTests",  # 80 s; -changes-layout-harness -lfs-pointers (ov-199). Moved from phone3 (ov-722)
+        "TunnelRouteOfferTests",  # 25 s; seeded -hosts and -runnerAlternatives (ov-485). Moved from phone3 (ov-722)
     ],
     "phone": [
-        "PagesUITests",  # 479 s; -phone-harness -phone-plan -phone-pages (ov-285)
-        "WorkspaceScreenTests",  # 218 s; -phone-harness
-        "ChangesPatchNoticeTests",  # 85 s; -changes-layout-harness
-        "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
-        "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
-        "GrantBrowserUITests",  # 3 tests; -grant-browser (ov-828)
-        "TeammateAddUITests",  # 9 tests; -teammate-add (ov-854)
-        "PeopleAccessUITests",  # 5 tests + opt-in captures; -phone-harness -phone-access (ov-856)
-        "MemberLoginsUITests",  # ~95 s locally, 3 tests; -phone-harness -phone-shared -phone-own-logins (ov-652)
-        "EnrolledDevicesUITests",  # 3 tests + opt-in captures; -phone-harness -phone-devices (ov-855)
-        "NeedsYouTeamUITests",  # ~40 s locally, 1 test; -phone-harness -phone-team (ov-633)
-        "MemberBylinesUITests",  # 3 tests + opt-in captures; -phone-harness -phone-shared -phone-member-notes (ov-707, ov-637)
+        "PagesUITests",  # 440 s; -phone-harness -phone-plan -phone-pages (ov-285)
+        "WorkspaceScreenTests",  # about 225 s (188 s of it before the cancel); -phone-harness
+        "ChangesPatchNoticeTests",  # 70 s; -changes-layout-harness
+        "TaskUsageUITests",  # 77 s; -phone-harness (ov-195)
+        "TeammateJoinUITests",  # 48 s; -teammate-join (ov-525)
+        "GrantBrowserUITests",  # 40 s; -grant-browser (ov-828)
+        "TeammateAddUITests",  # 211 s; -teammate-add (ov-854)
+        "EnrolledDevicesUITests",  # 131 s + opt-in captures; -phone-harness -phone-devices (ov-855)
+        "NeedsYouTeamUITests",  # 172 s; -phone-harness -phone-team (ov-633)
+        "DynamicTypeTests",  # 104 s; -phone-harness. Moved from agent (ov-722, Oct 30)
     ],
     "phone2": [
-        "PlanUITests",  # 249 s (139 to 433); -phone-harness -phone-plan (ov-274)
+        "PlanUITests",  # 711 s, a failed test's 84 s in it (139 to 433 before); -phone-harness -phone-plan (ov-274)
         "WorkspaceChromeTests",  # 60 s; -phone-harness -phone-plan (ov-342)
-        "OrchestratorImageDoorTests",  # 37 s; -phone-harness (ov-444)
-        "TerminalTaskKeyTests",  # 37 s; -phone-harness -phone-terminal-key (ov-215)
-        "TalkToRepUITests",  # 243 s; -phone-harness -phone-rep (ov-526)
-        "TerminalLigatureTests",  # 9 s; -terminal-ligature
-        "ActionFailureTests",  # 93 s; -phone-harness
-        "RunnerPeopleUITests",  # 348 s, mean of nights 40368881613 to 40733569282; -phone-harness -phone-shared (ov-508). Moved from phone (ov-722)
-        "NotificationTapTests",  # about 60 s, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
+        "OrchestratorImageDoorTests",  # 42 s; -phone-harness (ov-444)
+        "TerminalTaskKeyTests",  # 40 s; -phone-harness -phone-terminal-key (ov-215)
+        "TalkToRepUITests",  # 309 s; -phone-harness -phone-rep (ov-526)
+        "TerminalLigatureTests",  # 12 s; -terminal-ligature
+        "ActionFailureTests",  # 126 s; -phone-harness
+        "NotificationTapTests",  # 218 s failing, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
     ],
     "phone3": [
-        "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)
-        "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
-        "SealedReplyUITests",  # 4 tests; -sealed-reply (ov-770)
+        "PlanSectionsUITests",  # 143 s; -phone-harness -phone-plan (ov-503)
+        "RunnerReachTests",  # 8 s; seeded -hosts at an address that never answers
+        "SealedReplyUITests",  # 50 s; -sealed-reply (ov-770)
         "FailedLaunchTests",  # under 1 s; launches no app of ours (ov-703)
-        "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
-        "ConversationScreenUITests",  # 371 to 763 s, mean 590; -native-agent-harness, -phone-harness -phone-native (ov-609)
+        "NativeAgentViewTests",  # 515 s; -native-agent-harness. Moved from shell (ov-594: 80%)
+        "ConversationScreenUITests",  # 648 s (371 to 763); -native-agent-harness, -phone-harness -phone-native (ov-609)
+        "NativeAnswersUITests",  # 116 s; -native-agent-harness -native-held-ask (ov-370). Moved from shell (ov-722, Oct 30)
     ],
     # Moved out of phone, phone2 and phone3 when the budget job went red at phone
-    # (39.2 min, 87% of the timeout). Seconds are from nightly 39450769439 (Oct 20).
+    # (39.2 min, 87% of the timeout) on Oct 20.
     "phone4": [
-        "ClaudeSignInUITests",  # 496 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
-        "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
-        "AgentsUITests",  # ~250 s; -phone-harness -phone-native -native-agents (ov-619). Moved from phone3 (ov-722)
-        "ConversationScrollUITests",  # 284 s, about 420 s with ov-675's two flings; -native-agent-harness -native-live (ov-626). Moved from phone3
-        "GlassUITests",  # untimed, 5 tests; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789)
+        "ClaudeSignInUITests",  # 399 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
+        "PhoneReopenTests",  # 168 s; -phone-harness. Moved from phone
+        "AgentsUITests",  # 252 s; -phone-harness -phone-native -native-agents (ov-619). Moved from phone3 (ov-722)
+        "ConversationScrollUITests",  # 351 s; -native-agent-harness -native-live (ov-626). Moved from phone3
+        "GlassUITests",  # 194 s; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789)
+        "BoardUnreadUITests",  # 89 s; -phone-harness (ov-113). Moved from shell (ov-722, Oct 30)
+    ],
+    # The team classes, added on Oct 30 when `phone` was cancelled at the
+    # timeout (ov-722): moved from phone, and RunnerPeopleUITests from phone2.
+    "phone5": [
+        "PeopleAccessUITests",  # 653 s + opt-in captures; -phone-harness -phone-access (ov-856)
+        "MemberLoginsUITests",  # 229 s; -phone-harness -phone-shared -phone-own-logins (ov-652)
+        "MemberBylinesUITests",  # 177 s + opt-in captures; -phone-harness -phone-shared -phone-member-notes (ov-707, ov-637)
+        "RunnerPeopleUITests",  # 446 s; -phone-harness -phone-shared (ov-508)
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
     # device by this name. On an iPhone every method of the class skips, which
