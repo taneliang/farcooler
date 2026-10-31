@@ -14,6 +14,7 @@
 //! (`DomainError::NewerData`) unless the build that wrote it stamped a
 //! `compatible_down_to` at or below this build's schema. See `compat`.
 
+pub mod agents;
 mod backup;
 pub mod claude_logins;
 pub mod member_connectors;
@@ -25,6 +26,8 @@ mod compat;
 mod crash_signatures;
 mod error;
 pub mod landing;
+pub mod landings;
+mod line_migration;
 pub mod lfs_pointers;
 mod migrate;
 pub mod read_counts;
@@ -35,6 +38,8 @@ pub mod plan_agents;
 pub mod plan_panes;
 pub mod review;
 pub mod rulings;
+pub mod ticket_lines;
+pub mod ticket_work;
 pub mod trains;
 pub mod train_phase;
 pub mod open_train;
