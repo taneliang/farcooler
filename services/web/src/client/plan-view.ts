@@ -13,6 +13,7 @@ import {
   openRulings,
   pastRulings,
   phaseTitle,
+  type CardRef,
   type Lane,
   type Plan,
   type PlanBoardView,
@@ -26,6 +27,8 @@ import {
 } from './plan'
 
 export interface PlanHandlers {
+  /// A card's detail (a task, by its id on this runner).
+  detail(card: CardRef): void
   edit(theme: string): void
   type(draft: string): void
   save(): void
@@ -55,7 +58,20 @@ function heading(title: string, count?: number): HTMLElement {
   return h
 }
 
-function trainCard(train: Train, lanes: Lane[], now: number): HTMLElement {
+/// The cards a plan card names, each a button that opens its detail, and the
+/// whole card opens the first (a click on the card's own buttons does not).
+function cardsOf(li: HTMLElement, refs: CardRef[], on: PlanHandlers): void {
+  if (refs.length === 0) return
+  const chips = make('p', 'plan-sub plan-chips')
+  for (const ref of refs) chips.append(button(ref.key, 'quiet plan-chip', () => on.detail(ref)))
+  li.append(chips)
+  li.dataset.task = refs[0].task
+  li.onclick = event => {
+    if (!(event.target as Element).closest('button, a')) on.detail(refs[0])
+  }
+}
+
+function trainCard(train: Train, lanes: Lane[], now: number, on: PlanHandlers): HTMLElement {
   const li = make('li', needsAttention(train.phase) ? 'plan-card plan-attention' : 'plan-card')
   const head = make('div', 'plan-head')
   head.append(make('span', 'plan-name', train.heading), make('span', needsAttention(train.phase) ? 'plan-phase plan-phase-amber' : 'plan-phase', phaseTitle(train.phase)))
@@ -65,17 +81,21 @@ function trainCard(train: Train, lanes: Lane[], now: number): HTMLElement {
   if (rows.length) li.append(make('p', 'plan-sub', rows.join(' · ')))
   const when = since(train.phaseSince, now)
   if (when) li.append(make('p', 'plan-sub', `${when} in this step`))
+  if (train.cardRef) cardsOf(li, [train.cardRef], on)
   return li
 }
 
-function laneRow(lane: Lane, now: number): HTMLElement {
+function laneRow(lane: Lane, now: number, on: PlanHandlers): HTMLElement {
   const li = make('li', 'plan-card')
   const head = make('div', 'plan-head')
   head.append(make('span', 'plan-name', lane.heading), make('span', 'plan-phase', laneStateTitle(lane.state)))
   li.append(head)
   if (lane.reason) li.append(make('p', 'plan-line', lane.reason))
-  const meta = [lane.cards.join(', '), lane.agent ?? '', since(lane.stateSince, now)].filter(Boolean)
+  // A card with no task id on the wire stays text, as it was.
+  const named = new Set(lane.cardRefs.map(r => r.key))
+  const meta = [lane.cards.filter(c => !named.has(c)).join(', '), lane.agent ?? '', since(lane.stateSince, now)].filter(Boolean)
   if (meta.length) li.append(make('p', 'plan-sub', meta.join(' · ')))
+  cardsOf(li, lane.cardRefs, on)
   return li
 }
 
@@ -191,12 +211,12 @@ function draw(plan: Plan, view: PlanBoardView, now: number, on: PlanHandlers): H
 
   const nowBlock = make('div', 'plan-now')
   nowBlock.append(
-    section(WORDS.landing, s.landing.length, s.landing.map(l => trainCard(l.train, l.lanes, now)), WORDS.nothingLanding),
+    section(WORDS.landing, s.landing.length, s.landing.map(l => trainCard(l.train, l.lanes, now, on)), WORDS.nothingLanding),
   )
-  if (s.inReview.length) nowBlock.append(section(WORDS.inReview, s.inReview.length, s.inReview.map(l => laneRow(l, now))))
-  nowBlock.append(section(WORDS.building, s.building.length, s.building.map(l => laneRow(l, now)), WORDS.nothingBuilding))
-  nowBlock.append(section(WORDS.nextUp, s.nextUp.length, s.nextUp.map(l => laneRow(l, now)), s.notRanked.length ? undefined : WORDS.nothingQueued))
-  if (s.notRanked.length) nowBlock.append(section(WORDS.notRanked, s.notRanked.length, s.notRanked.map(l => laneRow(l, now))))
+  if (s.inReview.length) nowBlock.append(section(WORDS.inReview, s.inReview.length, s.inReview.map(l => laneRow(l, now, on))))
+  nowBlock.append(section(WORDS.building, s.building.length, s.building.map(l => laneRow(l, now, on)), WORDS.nothingBuilding))
+  nowBlock.append(section(WORDS.nextUp, s.nextUp.length, s.nextUp.map(l => laneRow(l, now, on)), s.notRanked.length ? undefined : WORDS.nothingQueued))
+  if (s.notRanked.length) nowBlock.append(section(WORDS.notRanked, s.notRanked.length, s.notRanked.map(l => laneRow(l, now, on))))
   out.push(nowBlock)
 
   const themes = liveThemes(plan)

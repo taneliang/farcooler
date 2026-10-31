@@ -107,5 +107,21 @@
     </div>
   </section>
 </main>
+<dialog class="detail" id="detail" aria-labelledby="detail-title">
+  <header class="detail-bar">
+    <div class="detail-heading">
+      <p class="detail-meta"><span id="detail-key"></span> <span class="detail-status" id="detail-status" hidden></span></p>
+      <h2 id="detail-title"></h2>
+    </div>
+    <button class="quiet" id="detail-close" type="button">Close</button>
+  </header>
+  <div class="detail-scroll" id="detail-body"></div>
+  <form class="detail-form" id="detail-form">
+    <label class="sr-only" for="detail-note">Note</label>
+    <textarea id="detail-note" rows="2" placeholder="Add a note"></textarea>
+    <button type="submit" id="detail-add">Add Note</button>
+    <p class="need-notice" id="detail-notice" role="alert" hidden></p>
+  </form>
+</dialog>
 </body>
 </html>

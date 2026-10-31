@@ -750,6 +750,44 @@ async function workspaceWalk(page) {
   else console.log('csp-check: the pick survived a reload')
 }
 
+/// A card's detail (ov-871), after `workspaceWalk`, on Billing.
+async function detailWalk(page) {
+  // From a Needs You item: its words, its answer, a note.
+  await page.click('#show-needs')
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 30_000 })
+  const decision = page.locator('#needs .need', { hasText: 'Which invoice format first?' })
+  await decision.getByRole('button', { name: 'Details' }).click()
+  await page.waitForSelector('#detail[open] .detail-note', { timeout: 30_000 })
+  const sheet = await page.textContent('#detail')
+  for (const word of ['bil-7', 'Invoice export', 'In Progress', 'Customers download an invoice as a file.', 'A PDF opens in Preview', 'PDF or CSV first?', 'Waiting on You'])
+    if (!sheet.includes(word)) failures.push(`the card's sheet lacks ${JSON.stringify(word)}`)
+  if (!(await page.locator('#detail .detail-answers').getByRole('button', { name: 'PDF' }).count())) failures.push("the card's sheet has no PDF button")
+  await shoot(page, 'workspace-detail')
+  await page.fill('#detail-note', 'Looks right')
+  await page.click('#detail-add')
+  await waitForFile(join(runner.dir, 'notes'), '6 Looks right')
+  await page.locator('#detail .detail-answers').getByRole('button', { name: 'PDF' }).click()
+  await waitForFile(join(runner.dir, 'notes'), '4 PDF')
+  await page.waitForFunction(() => !document.querySelector('#detail .detail-answers'), null, { timeout: 30_000 })
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.getElementById('detail').open)
+  const focused = await page.evaluate(() => document.activeElement?.textContent)
+  if (focused !== 'Details') failures.push(`closing the sheet left focus on ${JSON.stringify(focused)}, not the button that opened it`)
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
+  console.log('csp-check: Details opened the card, a note and the PDF answer reached the runner, and the sheet closed back onto its button')
+
+  // And from a plan card.
+  await page.click('#show-plan')
+  await page.waitForSelector('#plan .plan-chip', { timeout: 30_000 })
+  await page.locator('#plan .plan-card', { hasText: 'Writing the PDF' }).click({ position: { x: 20, y: 10 } })
+  await page.waitForSelector('#detail[open] .detail-note', { timeout: 30_000 })
+  if (!(await page.textContent('#detail-title')).includes('Invoice export')) failures.push('a plan card did not open its card')
+  else console.log('csp-check: a plan card opened its card’s detail')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.getElementById('detail').open)
+  await page.click('#show-terminals')
+}
+
 /// An agent's conversation and its images (ov-871), after `workspaceWalk`.
 async function imageWalk(page) {
   await page.locator('.terminal-choice', { hasText: 'billing agent' }).click()
@@ -1048,6 +1086,7 @@ try {
 
       await everyRunner(page)
       await workspaceWalk(page)
+      await detailWalk(page)
       await imageWalk(page)
       await switchWalk(page)
     }

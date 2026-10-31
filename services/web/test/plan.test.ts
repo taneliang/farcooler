@@ -163,6 +163,20 @@ function runner() {
   return { state, board: new PlanBoard(deps), last: () => state.views[state.views.length - 1] }
 }
 
+describe('a plan card’s cards', () => {
+  it('keeps each card’s task beside its key, to open its detail', () => {
+    const wire: any = JSON.parse(JSON.stringify(plan))
+    wire.lanes[0].cards = [{ task: 'task-1', key: 'ov-1' }, { key: 'no-task' }]
+    wire.trains[0].card = { task: 'task-9', key: 'ov-9' }
+    const shown = parsePlan(JSON.stringify(wire))!
+    expect(shown.lanes[0].cards).toEqual(['ov-1', 'no-task'])
+    expect(shown.lanes[0].cardRefs).toEqual([{ task: 'task-1', key: 'ov-1' }])
+    expect(shown.trains[0].cardRef).toEqual({ task: 'task-9', key: 'ov-9' })
+    wire.trains[0].card = null
+    expect(parsePlan(JSON.stringify(wire))!.trains[0].cardRef).toBeNull()
+  })
+})
+
 describe('the page’s workspace', () => {
   const OTHER = '01990000-0000-7000-8000-0000000000b2'
 

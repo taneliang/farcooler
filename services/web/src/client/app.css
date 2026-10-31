@@ -158,3 +158,47 @@ button.danger { color: var(--danger); }
   .seg { flex-direction: column; border-radius: 12px; }
   .seg button { border-radius: 10px; text-align: left; padding: 5px 10px; }
 }
+
+/* A card's detail, over the work screen (ov-871). */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.detail { width: min(560px, 100vw); max-width: 100vw; height: 100%; max-height: 100%; margin: 0 0 0 auto; padding: 0; border: 0; border-left: 1px solid var(--rule); background: var(--bg); color: var(--text); flex-direction: column; }
+.detail[open] { display: flex; }
+.detail::backdrop { background: rgb(0 0 0 / .45); }
+.detail-bar { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--rule); background: var(--bg-alt); }
+.detail-heading { min-width: 0; }
+.detail-heading h2 { margin: 2px 0 0; font-size: 17px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+.detail-meta { margin: 0; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.detail-meta #detail-key { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.detail-status { margin-left: 6px; padding: 1px 8px; border-radius: 980px; background: var(--chip); color: var(--text); font-size: 12px; font-weight: 600; }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 24px; }
+.detail-scroll > * { max-width: 520px; }
+.detail-intent { margin: 0 0 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.detail-banner { margin: 0 0 16px; }
+.detail-empty { margin: 0 0 12px; color: var(--text-2); }
+.detail-title { margin: 20px 0 8px; padding: 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.detail-answers { margin: 0 0 8px; padding: 10px 14px 12px; border-radius: 14px; background: var(--card); box-shadow: inset 0 0 0 1.5px var(--amber); }
+.detail-answers .need-actions { justify-content: flex-start; margin-top: 8px; }
+.detail-criteria, .detail-constraints { list-style: none; margin: 0; padding: 0; }
+.detail-constraints li { padding: 2px 4px; overflow-wrap: anywhere; }
+.detail-criterion { display: flex; gap: 10px; align-items: baseline; padding: 3px 4px; overflow-wrap: anywhere; }
+.detail-box { flex: none; width: 13px; height: 13px; border: 1.5px solid var(--text-2); border-radius: 4px; position: relative; top: 2px; }
+.detail-criterion.met { color: var(--text-2); }
+.detail-criterion.met .detail-box { background: var(--ok); border-color: var(--ok); }
+.detail-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.detail-note { padding: 10px 14px 12px; border-radius: 12px; background: var(--card); min-width: 0; }
+.detail-note.quiet { background: none; padding: 2px 4px; color: var(--text-2); font-size: 13px; }
+.detail-note-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 11.5px; color: var(--text-2); }
+.detail-note-kind { font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.detail-note-by { font-size: 13px; text-align: right; overflow-wrap: anywhere; }
+.detail-note-body { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-form { flex: none; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--rule); background: var(--bg-alt); }
+.detail-form textarea { flex: 1 1 200px; min-width: 0; resize: none; padding: 8px 12px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--rule); border-radius: 12px; }
+.detail-form textarea:focus-visible { outline: 2px solid var(--button-bg); outline-offset: 1px; }
+.detail-form button:disabled { opacity: .5; cursor: default; }
+.detail-form .need-notice { flex: 1 0 100%; margin: 0 !important; }
+.need[data-task], .plan-card[data-task] { cursor: pointer; }
+.plan-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-chip { padding: 1px 10px; border-radius: 980px; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
+@media (max-width: 640px) {
+  .detail { width: 100vw; border-left: 0; }
+}

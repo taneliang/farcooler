@@ -85,6 +85,10 @@ declare module 'fc-web' {
     composeImages(terminal: string, text: string, images: { mime: string; data: Uint8Array }[]): Promise<boolean>
     /// What the composer may send, as `{images, each, total}` JSON.
     composeLimits(): string
+    /// One task with its record (`farcooler task show --json`), as JSON.
+    task(task: string): Promise<string>
+    /// Add a note to a task as the person's.
+    addNote(task: string, body: string): Promise<void>
     /// Stop the turn the agent is working on.
     interrupt(terminal: string): Promise<void>
     /// Whether the runner answers right now. False means the connection is

@@ -35,6 +35,21 @@ function fleet() {
 }
 const settle = () => new Promise(r => setTimeout(r, 0))
 
+describe('a runner’s cards', () => {
+  it('hands a card’s reads and writes to the runner it is on, and none for a runner without them', async () => {
+    const f = fleet()
+    const mine = { ...runner(list('studio')).deps, task: async (id: string) => `task ${id}`, note: async () => {} }
+    f.set.add('r1', 'studio', mine)
+    f.set.add('r2', 'build-box', runner(list('build-box')).deps)
+    f.set.addUnreachable('r3', 'old-box', 'asleep')
+    expect(f.set.cardsOf('r1')?.label).toBe('studio')
+    expect(await f.set.cardsOf('r1')?.deps.task?.('t')).toBe('task t')
+    expect(f.set.cardsOf('r2')?.deps.task).toBeUndefined()
+    expect(f.set.cardsOf('r3')).toBeNull()
+    expect(f.set.cardsOf('nobody')).toBeNull()
+  })
+})
+
 describe('two runners', () => {
   it('lists both runners’ items, each row naming its runner, in the order they were enrolled', async () => {
     const f = fleet()

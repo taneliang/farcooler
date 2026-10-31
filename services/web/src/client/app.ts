@@ -26,7 +26,7 @@ import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newRep
 import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
-import { type BoardView, countLabel, countOf, pageTitle } from './needs'
+import { type BoardView, buttonsFor, countLabel, countOf, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { parseWorkspaces } from './plan'
@@ -34,6 +34,8 @@ import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scope
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
 import { AgentPane, type View } from './agent-pane'
 import { ChatView } from './chat'
+import { DetailBoard, type Subject } from './detail'
+import { type Answer, DetailSheet } from './detail-view'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
@@ -502,12 +504,47 @@ function drawNeeds(view: BoardView): void {
         void fleet?.press(item, press)
       },
       retry: runner => retries.get(runner)?.(),
+      detail: item => {
+        if (item.task) openCard(item.runner ?? frontRunner, item.task)
+      },
     },
     drawn,
   )
+  if (sheet?.isOpen) sheet.redraw()
+}
+
+/// The card sheet, made the first time a card is opened.
+let sheet: DetailSheet | null = null
+
+/// Open a task's detail, read from the runner it is on. The buttons that
+/// answer it are the Needs You item's own, while one waits on the person.
+function openCard(runner: string, task: { id: string; key: string; title: string }): void {
+  const member = fleet?.cardsOf(runner)
+  const deps = member?.deps
+  if (!member || !deps?.task || !deps.note) return
+  const read = deps.task
+  const write = deps.note
+  sheet ??= new DetailSheet($('detail') as HTMLDialogElement, $)
+  const subject: Subject = { runner, id: task.id, key: task.key, title: task.title }
+  const board = new DetailBoard({ runner: member.label, task: id => read(id), addNote: (id, body) => write(id, body), show: view => sheet?.draw(view) }, subject)
+  sheet.open(board, () => answersFor(runner, task.id))
+}
+
+/// The buttons a waiting item on this task offers (not Open: the sheet covers
+/// the terminal), each pressed on the runner the item is on.
+function answersFor(runner: string, task: string): Answer[] {
+  const item = lastView?.items.find(i => i.runner === runner && i.task?.id === task && i.kind !== 'fyi')
+  if (!item) return []
+  return buttonsFor(item, () => false).map(({ action, press }) => ({
+    label: action.title,
+    primary: action.primary,
+    destructive: action.destructive,
+    run: () => void fleet?.press(item, press),
+  }))
 }
 
 function stopNeeds(): void {
+  sheet?.close()
   planTab?.stop()
   planTab = null
   clearInterval(boardTimer)
@@ -692,7 +729,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     else joinRunner(session, r, mine)
   }
   mine.up(target.id)
-  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace)
+  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace,
+    card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
+  )
   showTab('terminals')
   boardTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void mine.refresh()
@@ -813,6 +852,8 @@ function depsOf(rec: Reconnector<WebRunner, TunnelConn>): RunnerDeps {
     list: async () => await live().needsYou(),
     ask: async (terminal, ask, option) => await live().answer(terminal, ask, option),
     decide: async (task, body) => await live().answerDecision(task, body),
+    task: async id => await live().task(id),
+    note: async (id, body) => await live().addNote(id, body),
   }
 }
 

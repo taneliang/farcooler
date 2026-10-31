@@ -22,6 +22,12 @@ export interface Spend {
   tokens: number
 }
 
+/// A card on the plan: its key and the task it is.
+export interface CardRef {
+  task: string
+  key: string
+}
+
 export interface TrainLane {
   id: string
   name: string
@@ -38,6 +44,7 @@ export interface Train {
   state: string
   lanes: TrainLane[]
   card: string | null
+  cardRef: CardRef | null
 }
 
 export type LaneState = 'queued' | 'building' | 'review' | 'fixing' | 'landing' | 'landed' | 'dropped' | 'unknown'
@@ -52,6 +59,8 @@ export interface Lane {
   rank: number | null
   train: string | null
   cards: string[]
+  /// The same cards with their task ids, to open their detail.
+  cardRefs: CardRef[]
   stale: boolean
   agent: string | null
 }
@@ -188,6 +197,9 @@ export function parsePlan(json: string): Plan | null {
       rank: num(l.plan_rank),
       train: typeof l.train === 'string' && l.train ? l.train : null,
       cards: list(l.cards).map(c => text(c?.key)).filter(Boolean),
+      cardRefs: list(l.cards)
+        .filter(c => c && typeof c.task === 'string' && c.task && typeof c.key === 'string' && c.key)
+        .map(c => ({ task: c.task, key: c.key })),
       stale: l.stale === true,
       agent: live.length ? [text(live[0].role), text(live[0].model)].filter(Boolean).join(' · ') || null : null,
     })
@@ -208,6 +220,7 @@ export function parsePlan(json: string): Plan | null {
         .filter(x => x && typeof x.lane === 'string')
         .map(x => ({ id: x.lane, name: text(x.name) })),
       card: t.card && typeof t.card.key === 'string' ? t.card.key : null,
+      cardRef: t.card && typeof t.card.key === 'string' && typeof t.card.task === 'string' && t.card.task ? { task: t.card.task, key: t.card.key } : null,
     })
   }
 

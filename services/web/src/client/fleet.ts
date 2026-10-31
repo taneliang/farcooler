@@ -19,11 +19,16 @@ import { Board, type BoardDeps, type BoardView, type Item, type Press, type Runn
 
 /// What reads and answers for one runner. `list` and the answers reject with
 /// `closed` while the runner has no connection.
-export type RunnerDeps = Pick<BoardDeps, 'list' | 'ask' | 'decide'>
+export type RunnerDeps = Pick<BoardDeps, 'list' | 'ask' | 'decide'> & {
+  /// A task on this runner, and a note added to it (a card's detail).
+  task?(id: string): Promise<string>
+  note?(id: string, body: string): Promise<void>
+}
 
 interface Member {
   id: string
   label: string
+  deps?: RunnerDeps
   board: Board | null
   view: BoardView | null
   /// Why the runner can't be read right now, and what to offer.
@@ -45,7 +50,7 @@ export class Fleet {
 
   /// A runner the page will read. Its board reads nothing until `refresh`.
   add(id: string, label: string, deps: RunnerDeps): void {
-    const member: Member = { id, label, board: null, view: null, down: null, connecting: false }
+    const member: Member = { id, label, deps, board: null, view: null, down: null, connecting: false }
     member.board = new Board({
       runner: label,
       ...deps,
@@ -56,6 +61,13 @@ export class Fleet {
       },
     })
     this.members.set(id, member)
+  }
+
+  /// What reads and writes a card on a runner, and its name; none for a
+  /// runner that isn't listed or can't be read from.
+  cardsOf(id: string): { label: string; deps: RunnerDeps } | null {
+    const m = this.members.get(id)
+    return m?.deps ? { label: m.label, deps: m.deps } : null
   }
 
   /// A runner this browser can't reach at all (an address-only one), listed

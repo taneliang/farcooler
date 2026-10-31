@@ -2,7 +2,7 @@
 /// the page and read again while the tab is in front. app.ts calls this and
 /// nothing else of the plan.
 
-import { PLAN_POLL_MS, PlanBoard } from './plan'
+import { type CardRef, PLAN_POLL_MS, PlanBoard } from './plan'
 import { renderPlan } from './plan-view'
 import type { WebRunner } from 'fc-web'
 
@@ -15,7 +15,7 @@ export interface PlanTab {
 }
 
 /// `current` is the connection as it is now, or null when there is none.
-export function startPlanTab(root: HTMLElement, runner: string, current: () => WebRunner | null, workspace: string | null = null): PlanTab {
+export function startPlanTab(root: HTMLElement, runner: string, current: () => WebRunner | null, workspace: string | null = null, openCard: (card: CardRef) => void = () => {}): PlanTab {
   const live = (): WebRunner => {
     const r = current()
     if (!r) throw new Error('closed')
@@ -36,6 +36,7 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
         view,
         Date.now(),
         {
+          detail: openCard,
           edit: id => board.edit(id),
           type: draft => board.type(draft),
           save: () => void board.save(),

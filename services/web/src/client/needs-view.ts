@@ -10,6 +10,8 @@ export interface Handlers {
   /// Whether a terminal is one the page lists, so an Open can go to it.
   canOpen(terminal: string, item: Item): boolean
   press(item: Item, press: Press): void
+  /// An item's card, when it is about one (a task).
+  detail?(item: Item): void
   /// A runner's note button was pressed (a Connect or Reconnect).
   retry?(runner: string): void
 }
@@ -54,6 +56,18 @@ function card(item: Item, view: BoardView, now: number, on: Handlers): HTMLEleme
 
   const busy = view.busy.has(item.id)
   const row = make('div', 'need-actions')
+  const task = item.task
+  if (task && on.detail) {
+    const open = make('button', 'quiet need-details', 'Details')
+    open.type = 'button'
+    open.setAttribute('aria-label', `Details of ${task.key || task.title || 'this card'}`)
+    open.onclick = () => on.detail?.(item)
+    row.append(open)
+    li.dataset.task = task.id
+    li.onclick = event => {
+      if (!(event.target as Element).closest('button, a, pre')) on.detail?.(item)
+    }
+  }
   for (const { action, press } of buttonsFor(item, on.canOpen)) {
     const button = make('button', action.destructive ? 'quiet danger' : action.primary ? '' : 'quiet', action.title)
     button.type = 'button'
