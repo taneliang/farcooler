@@ -37,7 +37,8 @@ class KeystoreStepUpSigner(private val context: Context, private val alias: Stri
     override fun makeKey(): ByteArray {
         publicKey?.let { return it }
         val manager = context.getSystemService(BiometricManager::class.java)
-        if (manager == null || manager.canAuthenticate(ALLOWED) != BiometricManager.BIOMETRIC_SUCCESS) {
+        val answer = runCatching { manager?.canAuthenticate(ALLOWED) }.getOrNull()
+        if (answer != BiometricManager.BIOMETRIC_SUCCESS) {
             throw StepUpFailure.NoScreenLock
         }
         fun spec(strongBox: Boolean) = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)

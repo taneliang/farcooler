@@ -47,7 +47,8 @@ object AppLockAuth {
      * open would only lock the person out of their own runners.
      */
     fun canAsk(context: Context): Boolean =
-        context.getSystemService(BiometricManager::class.java)?.canAuthenticate(ALLOWED) == BiometricManager.BIOMETRIC_SUCCESS
+        runCatching { context.getSystemService(BiometricManager::class.java)?.canAuthenticate(ALLOWED) }
+            .getOrNull() == BiometricManager.BIOMETRIC_SUCCESS
 
     suspend fun ask(context: Context, reason: String = AppLock.PROMPT): Boolean = suspendCancellableCoroutine { continuation ->
         val cancel = CancellationSignal()

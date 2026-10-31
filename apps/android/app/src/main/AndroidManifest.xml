@@ -11,6 +11,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+        The platform's BiometricManager and BiometricPrompt throw a
+        SecurityException without it: the app lock asks at launch, so a build
+        without this line crashed before its first screen (ov-864).
+    -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!--
         For reading the code on a device being added, and asked for when the
         scan screen opens rather than at launch: the reason only makes sense
         while someone is holding two devices, and a camera prompt at first run
