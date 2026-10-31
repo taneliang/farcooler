@@ -389,6 +389,16 @@ final class NativeAgentViewTests: XCTestCase {
         capture("images-full", expecting: .when("the image opened at full size") { preview.exists || app.navigationBars.firstMatch.exists })
     }
 
+    /// Whether the middle of `image` is something other than the viewer's
+    /// white page: any channel clearly under full.
+    private static func centerIsDrawn(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return false }
+        let bpp = cg.bitsPerPixel / 8
+        guard bpp >= 3 else { return false }
+        let offset = (cg.height / 2) * cg.bytesPerRow + (cg.width / 2) * bpp
+        return (0..<3).contains { bytes[offset + $0] < 235 }
+    }
+
     /// **A swipe down puts an open image away** (ov-806), as in Photos, with
     /// no tap for the bar and its X first; a short drag springs back and
     /// leaves it open, and zoomed in, a drag pans.
@@ -404,6 +414,13 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(viewer.waitForExistence(timeout: 15), "the image didn't open: \(app.debugDescription)")
         // Settled: a drag during the zoom in is the presentation's, not the swipe's.
         Thread.sleep(forTimeInterval: 1)
+        // Drawn: nightly 41218510431's recording shows the viewer open on an
+        // all-white page for the whole test, the picture not yet decoded,
+        // and a pinch on nothing zooms nothing, so the drag after it closed
+        // the viewer. The picture is orange, and the page around it white.
+        XCTAssertTrue(
+            wait(30) { Self.centerIsDrawn(XCUIScreen.main.screenshot().image) },
+            "the viewer opened on a blank page: the picture was never drawn")
         let middle = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         // A short, slow drag isn't a dismissal: the image springs back.
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0)
