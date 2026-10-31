@@ -35,6 +35,8 @@ export class DetailSheet {
   private timer = 0
   private drawn = ''
   private opener: Element | null = null
+  /// The task the opener's card was about, to find its button again if the list was drawn anew.
+  private openerTask: string | null = null
   private last: DetailView | null = null
 
   constructor(
@@ -70,6 +72,7 @@ export class DetailSheet {
     note.value = ''
     this.$('detail-notice').hidden = true
     this.opener = document.activeElement
+    this.openerTask = this.opener?.closest('[data-task]')?.getAttribute('data-task') ?? null
     if (!this.dialog.open) this.dialog.showModal()
     board.publish()
     void board.refresh()
@@ -93,8 +96,13 @@ export class DetailSheet {
     this.board?.stop()
     this.board = null
     this.last = null
-    if (this.opener instanceof HTMLElement && this.opener.isConnected) this.opener.focus()
+    // Back to where the person was: the button that opened it, or the same
+    // card's button once the list was drawn anew, or the tab they are on.
+    const again = this.openerTask ? document.querySelector<HTMLElement>(`[data-task="${CSS.escape(this.openerTask)}"] button`) : null
+    const back = this.opener instanceof HTMLElement && this.opener.isConnected ? this.opener : again ?? document.querySelector<HTMLElement>('.seg [aria-pressed="true"]')
+    back?.focus()
     this.opener = null
+    this.openerTask = null
   }
 
   private async add(): Promise<void> {

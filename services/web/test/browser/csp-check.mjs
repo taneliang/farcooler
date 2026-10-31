@@ -684,6 +684,8 @@ async function everyRunner(page) {
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelector('.need-runner-note')?.textContent?.includes('build-box'), null, { timeout: 60_000 })
+  // Studio's own list is read over its own connection, and may land after the note.
+  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 60_000 })
   const note = await page.textContent('.need-runner-note')
   const kept = await rows()
   if (kept.length !== 1 || kept[0].runner !== 'studio') failures.push(`with build-box unreachable the list holds ${JSON.stringify(kept)}`)
@@ -766,15 +768,22 @@ async function detailWalk(page) {
   await page.fill('#detail-note', 'Looks right')
   await page.click('#detail-add')
   await waitForFile(join(runner.dir, 'notes'), '6 Looks right')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.getElementById('detail').open)
+  const focused = await page.evaluate(() => document.activeElement?.textContent)
+  if (focused !== 'Details') failures.push(`closing the sheet left focus on ${JSON.stringify(focused)}, not the button that opened it`)
+  // Answered from the sheet: the card leaves Needs You, and focus goes to the tab.
+  await decision.getByRole('button', { name: 'Details' }).click()
+  await page.waitForSelector('#detail[open] .detail-answers', { timeout: 30_000 })
   await page.locator('#detail .detail-answers').getByRole('button', { name: 'PDF' }).click()
   await waitForFile(join(runner.dir, 'notes'), '4 PDF')
   await page.waitForFunction(() => !document.querySelector('#detail .detail-answers'), null, { timeout: 30_000 })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.getElementById('detail').open)
-  const focused = await page.evaluate(() => document.activeElement?.textContent)
-  if (focused !== 'Details') failures.push(`closing the sheet left focus on ${JSON.stringify(focused)}, not the button that opened it`)
+  const landed = await page.evaluate(() => document.activeElement?.id)
+  if (landed !== 'show-needs') failures.push(`with its card gone, closing the sheet left focus on ${JSON.stringify(landed)}, not the Needs You tab`)
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
-  console.log('csp-check: Details opened the card, a note and the PDF answer reached the runner, and the sheet closed back onto its button')
+  console.log('csp-check: Details opened the card, a note and the PDF answer reached the runner, and closing it put focus back')
 
   // And from a plan card.
   await page.click('#show-plan')
@@ -833,7 +842,7 @@ async function switchWalk(page) {
   const before = runner.typed()
   await page.keyboard.type('whoami')
   const deadline = Date.now() + 30_000
-  while (runner.typed() === before && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
+  while (!runner.typed().endsWith('whoami') && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
   if (!runner.typed().endsWith('whoami')) failures.push(`the agent's terminal got ${JSON.stringify(runner.typed().slice(before.length))}`)
   await shoot(page, 'workspace-agent-terminal')
   await page.click('#view-conversation')
