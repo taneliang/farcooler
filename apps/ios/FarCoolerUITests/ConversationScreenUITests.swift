@@ -516,6 +516,8 @@ final class ConversationScreenUITests: XCTestCase {
         // scrolling up under the composer, as one that starts above the
         // bar's lower edge scrolls under the bar.
         let composerTop = element(app, "native-composer-stack").exists ? element(app, "native-composer-stack").frame.minY : CGFloat.infinity
+        let subagentRows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'native-subagent-open'"))
+            .allElementsBoundByIndex.map(\.frame)
         func inRow(_ frame: CGRect) -> Bool { rows.contains { $0.insetBy(dx: -1, dy: -1).contains(frame) } }
         func underGlassOrComposer(_ frame: CGRect) -> Bool {
             rows.contains { row in
@@ -568,6 +570,15 @@ final class ConversationScreenUITests: XCTestCase {
                 if !large, ["plan-band-now", "plan-band-next"].contains(id), ["NOW", "NEXT"].contains(found?.label) { return true }
             case .textClipped:
                 if let found, found.elementType == .staticText, underGlassOrComposer(frame) { return true }
+                // A subagent row's current action is one monospaced line the
+                // row draws in full (nightlies 41095427660 and 41218510431
+                // read "Read ComposerTextView paste and drag handling" in the
+                // frame, whole, with room to spare, and still called it
+                // clipped; it passes on the same phone locally). Let go only
+                // for a single line inside a subagent row: a row's title or a
+                // wrapped line is still judged.
+                if let found, found.elementType == .staticText, found.label.isEmpty == false, frame.height < 20,
+                    subagentRows.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) { return true }
                 // The strip's Now and Next are one line each at the default
                 // size, by design (ov-616): the card opens the plan, and its
                 // spoken label is the whole sentence. At the largest size they
