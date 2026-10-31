@@ -31,8 +31,13 @@ extension ContentView {
                 // count as seen or watched (`shown`).
                 let drawn = KeptOrchestrator.conversation(visible: layouts, drawable: drawableLayouts(for: selection))
                 conversationColumn(host: host, workspace: summary, shown: drawn.layout, onScreen: drawn.onScreen)
-                    // The agents at work, in the orchestrator pane's corner (ov-829).
-                    .environment(\.paneCornerAccessory, agentsCorner(host: host, workspace: summary))
+                    // The agents at work, in the orchestrator pane's corner (ov-829),
+                    // while the chat is alone; beside the plan, its pipeline lists
+                    // them, and nothing is drawn into the orchestrator (ov-867).
+                    .environment(
+                        \.paneCornerAccessory,
+                        plan != nil && canvasSizing.hasCanvas(detailWidth ?? 0)
+                            ? nil : agentsCorner(host: host, workspace: summary))
             },
             navigator: {
                 if let board = scene.board {

@@ -432,9 +432,7 @@ struct PlanTicketRow: View {
                     Text(initiative)
                         .font(.callout)
                         .foregroundStyle(.quietInk)
-                        .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 200, alignment: .trailing)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .fixedSize()
                 }
             }
             .font(.body)

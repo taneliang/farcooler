@@ -13,8 +13,8 @@ struct TerminalsToolbar: ToolbarContent {
             ToolbarItem(placement: .automatic) {
                 Menu {
                     let titles = BoardPane.titles(panes)
-                    ForEach(Array(zip(panes, titles)), id: \.0.id) { pane, title in
-                        Button(title) { open(pane) }
+                    ForEach(panes.indices, id: \.self) { index in
+                        Button(titles[index]) { open(panes[index]) }
                     }
                 } label: {
                     Label(Self.label(panes.count), systemImage: "apple.terminal")
