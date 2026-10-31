@@ -863,7 +863,8 @@ async function boot(): Promise<void> {
   const watch = new StartWatch(screen => status(screen.title, screen.detail, screen.slow ? reload : undefined, screen.slow ? signOut : undefined, 'Sign Out and Start Again'))
   try {
     await start(watch)
-  } catch {
+  } catch (error) {
+    console.error('Far Cooler couldn’t start', error)
     watch.done()
     status('Far Cooler couldn’t start in this browser', 'Reload the page to try again.', reload, signOut, 'Sign Out and Start Again')
   }

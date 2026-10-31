@@ -65,7 +65,7 @@ describe('StartWatch', () => {
     clock.advance(2_000)
     watch.at('load')
     expect(drawn.at(-1)?.title).toBe('Loading Far Cooler…')
-    clock.advance(SLOW_MS - 2_000)
+    clock.advance(8_000)
     // The time counts from the start, not from the step.
     expect(drawn.at(-1)?.slow).toBe(true)
     expect(drawn.at(-1)?.detail).toContain('10 s')

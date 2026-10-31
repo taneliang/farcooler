@@ -762,6 +762,12 @@ try {
     const registered = (await device(page)).registered
     await edit(page, { registered: null, offer: null, offerShownAt: null, runners: [{ id: 'cosmo', label: 'Cosmo', user: 'u', host_key: 'SHA256:x', token: 't', why: '' }] })
     meDelay = 13_000
+    // Both wasm modules download while the account is checked, not after it
+    // (ov-869). The stub relay holds the account for 13 s and serves the wasm
+    // at once, so a start that loads them after the account asks for them
+    // only at 13 s or later.
+    const wasmAsked = []
+    page.on('request', request => /\.wasm$/.test(new URL(request.url()).pathname) && wasmAsked.push(Date.now()))
     const reloaded = Date.now()
     await page.reload()
     await statusSays(page, 'Checking your account…', 3_000).catch(() => failures.push('a slow start never said it was checking the account'))
@@ -776,11 +782,15 @@ try {
         () => false,
       )
     if (!slow) failures.push(`a slow start showed no way forward by ten seconds: ${JSON.stringify(await page.textContent('#status'))}`)
+    else if (wasmAsked.length < 2 || Math.max(...wasmAsked) - reloaded > 6_000) failures.push(`the wasm modules were not both asked for while the account was checked: ${wasmAsked.map(at => at - reloaded)} ms after the reload`)
     else console.log(`csp-check: a slow start offered Reload and Sign Out and Start Again after ${Math.round((Date.now() - reloaded) / 1000)} s`)
     await shoot(page, 'slow-start')
     meDelay = 0
+    page.removeAllListeners('request')
     await statusSays(page, 'Connect to Cosmo', 30_000).catch(() => failures.push("an earlier build's paired browser never reached Connect"))
-    if (!(await page.isHidden('#status-cancel'))) failures.push('the start screen’s Sign Out and Start Again stayed up after the start finished')
+    // Only meaningful while #status itself is shown, as it is on this screen.
+    if (await page.isHidden('#status')) failures.push('the Connect screen is not on #status, so its buttons were not checked')
+    else if (!(await page.isHidden('#status-cancel'))) failures.push('the start screen’s Sign Out and Start Again stayed up after the start finished')
     else console.log("csp-check: an earlier build's paired browser started on this one, at Connect to Cosmo")
     await edit(page, { registered: registered ?? null, runners: null })
     await page.reload()
