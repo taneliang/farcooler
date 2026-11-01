@@ -578,6 +578,7 @@ struct OneTreeRowView: View {
         if !node.detail.isEmpty { parts.append(node.detail) }
         if !node.also.isEmpty { parts.append(node.also) }
         if !node.caption.isEmpty { parts.append(node.caption) }
+        if !node.modelID.isEmpty { parts.append("Model ID \(node.modelID)") }
         if row.dot { parts.append(OneTreeWords.needsYou) }
         return parts.joined(separator: ", ")
     }

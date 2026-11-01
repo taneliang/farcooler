@@ -347,6 +347,8 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
     /// The worktree a ticket, a worktree or a terminal row is in: what its
     /// menu acts on.
     public var worktreeID: String?
+    /// The exact recorded model, for accessible detail.
+    public var modelID: String = ""
 
     public var hasChildren: Bool { !children.isEmpty }
 
@@ -728,7 +730,7 @@ struct OneTreeBuilder {
                 return open.enumerated().map { index, agent in
                     subagentNode(
                         id: "\(parent)/agent:\(agent.id.isEmpty ? "\(index)" : agent.id)",
-                        title: OneTreeWords.subagent(role: agent.role.word, model: agent.model))
+                        title: OneTreeWords.subagent(role: agent.role.word, model: agent.model), model: agent.model)
                 }
             }
         }
@@ -736,14 +738,14 @@ struct OneTreeBuilder {
         return task.workers.filter(\.state.isOpen).enumerated().map { index, worker in
             subagentNode(
                 id: "\(parent)/worker:\(index)",
-                title: OneTreeWords.subagent(role: "Subagent", model: worker.model.isEmpty ? worker.harness : worker.model))
+                title: OneTreeWords.subagent(role: "Subagent", model: worker.model.isEmpty ? worker.harness : worker.model), model: worker.model)
         }
     }
 
-    func subagentNode(id: String, title: String) -> OneTreeNode {
+    func subagentNode(id: String, title: String, model: String) -> OneTreeNode {
         OneTreeNode(
             id: id, kind: .subagent, title: title, caption: OneTreeWords.subagentCaption, glyph: OneTreeGlyph.subagent,
-            target: .orchestrator)
+            target: .orchestrator, modelID: model)
     }
 
     // MARK: Below the divider

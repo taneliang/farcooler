@@ -73,7 +73,8 @@ class OneTreeTest {
         assertEquals(listOf("c1", "c2"), ticket.children.filter { it.kind == OneTree.Kind.TERMINAL }.map { (it.target as OneTree.Target.Terminal).terminal })
         assertEquals("Agent", ticket.children.first().detail)
         val builder = ticket.children.single { it.kind == OneTree.Kind.SUBAGENT }
-        assertEquals("Builder · Opus", builder.title)
+        assertEquals("Builder · opus", builder.title)
+        assertEquals("opus", builder.modelId)
         assertEquals(OneTree.Words.SUBAGENT_CAPTION, builder.caption)
     }
 

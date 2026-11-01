@@ -820,7 +820,7 @@ struct AgentModelPickers: View {
 
         Picker("", selection: $model) {
             Text("Default Model").tag("")
-            ForEach(Agents.agent(agent).models, id: \.self) { Text($0).tag($0) }
+            ForEach(Agents.agent(agent).models, id: \.self) { Text(PlanWords.model($0)).accessibilityValue($0).tag($0) }
         }
         .labelsHidden().fixedSize().controlSize(.small)
     }

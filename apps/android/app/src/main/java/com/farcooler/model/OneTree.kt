@@ -67,6 +67,7 @@ object OneTree {
         val asks: Boolean = false,
         val quiet: Boolean = false,
         val worktreeId: String? = null,
+        val modelId: String = "",
     ) {
         /** It or anything under it asks: what a closed row's dot rolls up. */
         val holdsAsk: Boolean get() = asks || children.any { it.holdsAsk }
@@ -337,16 +338,16 @@ object OneTree {
             if (!ticket.stage.isLive) return emptyList()
             val open = plan.agentsOn(ticket)
             if (open.isNotEmpty()) return open.mapIndexed { i, a ->
-                subagent("$parent/agent:${a.id.ifEmpty { "$i" }}", Words.subagent(a.role.word, a.model))
+                subagent("$parent/agent:${a.id.ifEmpty { "$i" }}", Words.subagent(a.role.word, a.model), a.model)
             }
             return workerNodes(cards[ticket.task]?.workers.orEmpty(), parent)
         }
 
         fun workerNodes(workers: List<TaskWorker>, parent: String) = workers.filter { it.state.isOpen }.mapIndexed { i, w ->
-            subagent("$parent/worker:$i", Words.subagent("Subagent", w.model.ifEmpty { w.harness }))
+            subagent("$parent/worker:$i", Words.subagent("Subagent", w.model.ifEmpty { w.harness }), w.model)
         }
 
-        fun subagent(id: String, title: String) = Node(id, Kind.SUBAGENT, title, caption = Words.SUBAGENT_CAPTION, target = Target.Orchestrator)
+        fun subagent(id: String, title: String, model: String) = Node(id, Kind.SUBAGENT, title, caption = Words.SUBAGENT_CAPTION, target = Target.Orchestrator, modelId = model)
 
         fun mainCheckoutNode(): Node? {
             val wt = checkout ?: return null

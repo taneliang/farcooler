@@ -166,9 +166,14 @@ class PlanTest {
     @Test
     fun `a work record says its role, the agent's model and how long it ran`() {
         val work = PlanWork("a", WorkRole.BUILD, 0, 3 * hour)
-        assertEquals("Builder Opus, 3 h", PlanWords.work(work, now, "claude-opus-5-5"))
+        assertEquals("GPT-6.1 Sol", PlanWords.model("gpt-6.1-sol"))
+        assertEquals("GPT-6.1 Terra", PlanWords.model("gpt-6.1-terra"))
+        assertEquals("GPT-6 Luna", PlanWords.model("gpt-6-luna"))
+        assertEquals("Gemini 2.5 Pro", PlanWords.model("gemini-2.5-pro"))
+        assertEquals("claude-opus-5-5-20261101", PlanWords.model("claude-opus-5-5-20261101"))
+        assertEquals("Builder Claude Opus 5.5, 3 h", PlanWords.work(work, now, "claude-opus-5-5"))
         assertEquals("Reviewer, 3 h", PlanWords.work(work.copy(role = WorkRole.REVIEW), now))
-        assertEquals("Fixer Sonnet, 3 h", PlanWords.work(work.copy(role = WorkRole.FIX), now, "sonnet"))
+        assertEquals("Fixer sonnet, 3 h", PlanWords.work(work.copy(role = WorkRole.FIX), now, "sonnet"))
     }
 
     @Test

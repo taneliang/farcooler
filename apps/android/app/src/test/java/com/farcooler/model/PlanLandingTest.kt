@@ -154,7 +154,7 @@ class PlanLandingTest {
     fun `the sidebar lists only the agents that exist on a ticket`() {
         val plan = plan("landing-ticket-notes")
         fun agents(p: Plan) = TicketTree.of(p, PlanSections.of(p), java.util.Locale.US).groups.flatMap { it.tickets }.first { it.key == "ov-11" }.agents.map { it.who }
-        assertEquals(listOf("Builder \u00b7 Sonnet"), agents(plan))
+        assertEquals(listOf("Builder \u00b7 sonnet"), agents(plan))
         assertEquals("a runner that lists no agents lists none on a ticket", emptyList<String>(), agents(plan.copy(agents = emptyList())))
     }
 
@@ -168,7 +168,7 @@ class PlanLandingTest {
 
     @Test
     fun `a facts line keeps each span whole, so it breaks between spans only`() {
-        val line = "3f78754f \u00b7 Running \u00b7 2 of 5 jobs done \u00b7 1 h \u00b7 Lander \u00b7 Opus \u00b7 1.4M"
+        val line = "3f78754f \u00b7 Running \u00b7 2 of 5 jobs done \u00b7 1 h \u00b7 Lander \u00b7 opus \u00b7 1.4M"
         val kept = LandingWords.unbroken(line)
         assertTrue(kept.contains("1\u00a0h") && kept.contains("2\u00a0of\u00a05\u00a0jobs\u00a0done"))
         assertEquals(line, kept.replace('\u00a0', ' '))

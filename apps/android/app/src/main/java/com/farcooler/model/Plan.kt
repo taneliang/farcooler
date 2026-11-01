@@ -612,13 +612,16 @@ object PlanWords {
 
     fun cards(n: Int): String = if (n == 1) "1 card" else "$n cards"
 
-    /** A model as people say it: "opus" and "claude-opus-5-5" are "Opus". */
-    fun model(raw: String): String {
-        val lower = raw.lowercase()
-        for (family in listOf("opus", "sonnet", "haiku", "fable")) {
-            if (family in lower) return family.replaceFirstChar { it.uppercase() }
-        }
-        return raw
+    /** Exact presentation names only; unknown IDs and variants stay literal. */
+    fun model(raw: String): String = when (raw) {
+        "gpt-6.1-sol" -> "GPT-6.1 Sol"
+        "gpt-6.1-terra" -> "GPT-6.1 Terra"
+        "gpt-6-luna" -> "GPT-6 Luna"
+        "gemini-2.5-pro" -> "Gemini 2.5 Pro"
+        "claude-opus-5-5" -> "Claude Opus 5.5"
+        "claude-opus-5" -> "Claude Opus 5"
+        "claude-sonnet-5" -> "Claude Sonnet 5"
+        else -> raw
     }
 
     /** The cards a theme's progress counts: all but the canceled. */

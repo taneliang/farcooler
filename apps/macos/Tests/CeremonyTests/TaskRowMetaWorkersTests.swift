@@ -115,8 +115,14 @@ struct TaskRowMetaWorkersTests {
     @Test("The task view names a subagent's model, and only there")
     func modelInTheTaskView() {
         let row = Self.row(workers: [Self.worker(doing: "", model: "opus")])
-        #expect(TaskWorkers.lines(of: row, at: Self.now) == ["Claude subagent working, 12 min · Opus"])
+        #expect(TaskWorkers.lines(of: row, at: Self.now) == ["Claude subagent working, 12 min · opus"])
         #expect(Self.text(row) == "Claude subagent working, 12 min")
+        for (raw, shown) in [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6.1-terra", "GPT-6.1 Terra"),
+                             ("gpt-6-luna", "GPT-6 Luna"), ("gpt-6.1-sol-20261101", "gpt-6.1-sol-20261101")] {
+            let worker = Self.worker(doing: "", model: raw)
+            #expect(TaskWorkers.lines(of: Self.row(workers: [worker]), at: Self.now) == ["Claude subagent working, 12 min · \(shown)"])
+            #expect(worker.model == raw)
+        }
     }
 
     @Test("The task view lists each subagent in AgentKit's words, open ones first")

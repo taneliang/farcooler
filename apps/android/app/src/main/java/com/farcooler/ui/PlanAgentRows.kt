@@ -40,7 +40,7 @@ fun PlanAgentRow(agent: PlanAgent, now: Long, onOpenTicket: (String) -> Unit) {
     val tokens = agent.tokens()
     val cost = agent.cost()
     val second = agentSecondLine(agent, now)
-    val spoken = listOfNotNull(agent.who, second, tokens?.let { "$it tokens" }, cost).joinToString(", ")
+    val spoken = listOfNotNull(agent.who, agent.model.takeIf { it.isNotEmpty() }?.let { "Model ID $it" }, second, tokens?.let { "$it tokens" }, cost).joinToString(", ")
     val ink = MaterialTheme.colorScheme.onSurface
     Row(
         verticalAlignment = Alignment.Top,

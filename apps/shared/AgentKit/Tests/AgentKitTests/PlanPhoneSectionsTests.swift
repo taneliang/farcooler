@@ -59,7 +59,7 @@ struct PlanPhoneSectionsTests {
         #expect(ready.hasPrefix("Landing 86, Teams on a shared runner"), "\(ready)")
         #expect(ready.contains("Checking on CI \u{00B7} step 2 of 3"), "\(ready)")
         #expect(ready.contains("3f78754f"), "the commit isn't said: \(ready)")
-        #expect(ready.contains("Lander \u{00B7} Opus"), "\(ready)")
+        #expect(ready.contains("Lander \u{00B7} opus"), "\(ready)")
         #expect(ready.contains("The team directory; the iPhone composer"), "\(ready)")
         #expect(!ready.contains("a-integ86"), "the lander's id is not in the text: \(ready)")
 
@@ -124,7 +124,7 @@ struct PlanPhoneSectionsTests {
         #expect(fleet.header(locale: F.en).contains("working"))
         let builder = try #require(fleet.agents.first { $0.id == "pane:b1" })
         let said = builder.spoken(now: sections.now)
-        #expect(said.contains("Builder \u{00B7} Sonnet"), "\(said)")
+        #expect(said.contains("Builder \u{00B7} sonnet"), "\(said)")
         #expect(said.contains("ov-310"), "the ticket it works for isn't said: \(said)")
         #expect(said.contains("380K tokens"), "\(said)")
         let loose = try #require(fleet.agents.first { $0.id == "agent:s1" }).spoken(now: sections.now)

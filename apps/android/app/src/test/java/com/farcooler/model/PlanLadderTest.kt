@@ -48,11 +48,11 @@ class PlanLadderTest {
         val read = PlanCiRead("sha:abc", status = CiStatus.RUNNING, jobs = listOf(PlanCiJob("a", "passed"), PlanCiJob("b", "running")), fetchedAt = 1_000)
         val agent = lander(PlanSpend(inputTokens = 1_400_000))
         assertEquals(
-            "3f78754f · Running · 1 of 2 jobs done · 12 min · Lander · Haiku · 1.4M",
+            "3f78754f · Running · 1 of 2 jobs done · 12 min · Lander · claude-haiku-4 · 1.4M",
             LandingWords.facts(card("3f78754f0c2e", agent, since = 1_000), read, now = 1_000 + 12 * 60_000L),
         )
         assertEquals("3f78754f · CI not read yet", LandingWords.facts(card("3f78754f0c2e"), null, now = 0))
         assertEquals("", LandingWords.facts(card(null), null, now = 0))
-        assertEquals("Lander · Haiku · done", LandingWords.landerFacts(lander(PlanSpend(), working = false)))
+        assertEquals("Lander · claude-haiku-4 · done", LandingWords.landerFacts(lander(PlanSpend(), working = false)))
     }
 }

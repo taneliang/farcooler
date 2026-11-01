@@ -266,14 +266,14 @@ extension PlanWords {
     /// One row of the week's split: "Claude Code · opus", then "28M tokens ·
     /// about $41.20 API-equivalent".
     public static func weekRow(_ w: PlanWeekSpend, locale: Locale = .current) -> PlanCompareRow {
-        let model = w.model.isEmpty ? "no model named" : w.model
+        let model = w.model.isEmpty ? "no model named" : PlanWords.model(w.model)
         let dollars = w.costMicros.map { "about \(TaskUsageFormat.dollars($0, locale: locale)) API-equivalent" }
         let missing = noDollars(model: w.model)
         let detail = ["\(TaskUsageFormat.tokens(w.tokens, locale: locale)) tokens", dollars ?? missing]
         let spoken = ["\(spokenTokens(w.tokens, locale: locale)) tokens", dollars ?? missing]
         return PlanCompareRow(
             id: "week/\(w.id)", title: "\(harnessName(w.harness)) · \(model)", detail: detail.joined(separator: " · "),
-            spoken: "\(harnessName(w.harness)), \(model). \(spoken.joined(separator: ", "))")
+            spoken: "\(harnessName(w.harness)), \(model)\(model == w.model || w.model.isEmpty ? "" : ", model ID \(w.model)"). \(spoken.joined(separator: ", "))")
     }
 
     /// Said once under the week: why there is no percentage, and which days.
@@ -312,7 +312,7 @@ extension PlanWords {
     /// One comparison row: cost per landed card is the pair's spend on landed
     /// cards over its share of them. Dollars are API-equivalent, or Not reported.
     public static func compareRow(_ p: PlanHarnessCost, locale: Locale = .current) -> PlanCompareRow {
-        let model = p.model.isEmpty ? "no model named" : p.model
+        let model = p.model.isEmpty ? "no model named" : PlanWords.model(p.model)
         let share = max(p.cardShareMilli, 1)
         let cards = cardShare(p.cardShareMilli, locale: locale)
         let each = p.tokens * 1000 / UInt64(share)
@@ -329,7 +329,7 @@ extension PlanWords {
         let title = "\(harnessName(p.harness)) · \(model)"
         return PlanCompareRow(
             id: p.id, title: title, detail: detail.joined(separator: " · "),
-            spoken: "\(harnessName(p.harness)), \(model). \(spoken.joined(separator: ", "))")
+            spoken: "\(harnessName(p.harness)), \(model)\(model == p.model || p.model.isEmpty ? "" : ", model ID \(p.model)"). \(spoken.joined(separator: ", "))")
     }
 
     /// "1.2M tokens on cards that haven't landed · about $9 API-equivalent", or

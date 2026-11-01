@@ -357,13 +357,17 @@ struct PlanModelTests {
         let review = try #require(plan.line(key: "ov-1"))
         let words = review.work.map { PlanWords.work($0, agent: plan.agent($0.agent), now: plan.nowMs) }
         // The builder is the codex agent (model gpt-5.6, not a family this build names); the open review ran 25 min.
-        #expect(words == ["Builder gpt-5.6, 2 h", "Reviewer Sonnet, 25 min"])
+        #expect(words == ["Builder gpt-5.6, 2 h", "Reviewer sonnet, 25 min"])
         var fix = review.work[0]
         fix.role = .fix
         #expect(PlanWords.work(fix, agent: nil, now: plan.nowMs) == "Fixer, 2 h", "no agent left: no model said")
         fix.role = .land
         #expect(PlanWords.work(fix, agent: plan.agent(fix.agent), now: plan.nowMs).hasPrefix("Lander "))
-        #expect(PlanWords.model("claude-opus-5-5") == "Opus")
+        #expect(PlanWords.model("gpt-6.1-sol") == "GPT-6.1 Sol")
+        #expect(PlanWords.model("gpt-6.1-terra") == "GPT-6.1 Terra")
+        #expect(PlanWords.model("gemini-2.5-pro") == "Gemini 2.5 Pro")
+        #expect(PlanWords.model("gpt-6-luna") == "GPT-6 Luna")
+        #expect(PlanWords.model("claude-opus-5-5-20261101") == "claude-opus-5-5-20261101")
         #expect(PlanWords.model("gpt-5.5") == "gpt-5.5")
     }
 

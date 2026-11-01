@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.TaskSpend
 import com.farcooler.model.TaskUsageFormat
@@ -113,8 +115,9 @@ private fun Breakdown(rows: List<com.farcooler.model.TaskSpendRow>) {
         if (open) {
             for (row in rows) {
                 ListItem(
-                    headlineContent = { Text(row.title, style = MaterialTheme.typography.bodyMedium) },
+                    headlineContent = { Text(if (row.model.isEmpty()) row.harness else "${row.harness} · ${com.farcooler.model.PlanWords.model(row.model)}", style = MaterialTheme.typography.bodyMedium) },
                     supportingContent = { Text(TaskUsageFormat.detail(row)) },
+                    modifier = Modifier.semantics { if (row.model.isNotEmpty()) contentDescription = "Model ID ${row.model}" },
                 )
             }
         }

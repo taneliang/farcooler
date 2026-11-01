@@ -140,10 +140,10 @@ struct PlanSectionsTests {
 
     @Test("a facts line keeps each span whole, so a line breaks between spans only (ov-515)")
     func factsKeepSpansTogether() {
-        let line = "3f78754f \u{00B7} Running \u{00B7} 2 of 5 jobs done \u{00B7} 12 min \u{00B7} Lander \u{00B7} Opus \u{00B7} 1.4M"
+        let line = "3f78754f \u{00B7} Running \u{00B7} 2 of 5 jobs done \u{00B7} 12 min \u{00B7} Lander \u{00B7} opus \u{00B7} 1.4M"
         let kept = PlanSections.LandingCard.unbroken(line)
         // The separators still break; nothing else does.
-        #expect(kept.components(separatedBy: " \u{00B7} ") == ["3f78754f", "Running", "2\u{00A0}of\u{00A0}5\u{00A0}jobs\u{00A0}done", "12\u{00A0}min", "Lander", "Opus", "1.4M"])
+        #expect(kept.components(separatedBy: " \u{00B7} ") == ["3f78754f", "Running", "2\u{00A0}of\u{00A0}5\u{00A0}jobs\u{00A0}done", "12\u{00A0}min", "Lander", "opus", "1.4M"])
         #expect(kept.replacingOccurrences(of: "\u{00A0}", with: " ") == line)
         #expect(!kept.contains("12 min"))
         // The band's Now line the same: "2 building" stays whole.
@@ -167,7 +167,7 @@ struct PlanSectionsTests {
         #expect(plan.agents.map(\.role) == [.orchestrator, .reviewer, .builder])
         let sections = PlanSections(plan: plan)
         let fleet = sections.fleet
-        #expect(fleet.agents.map(\.who) == ["Orchestrator \u{00B7} Opus", "Reviewer \u{00B7} Sonnet", "Builder \u{00B7} gpt-5.6"])
+        #expect(fleet.agents.map(\.who) == ["Orchestrator \u{00B7} opus", "Reviewer \u{00B7} sonnet", "Builder \u{00B7} gpt-5.6"])
         #expect(fleet.agents.map(\.worksFor) == ["Plan", "ov-1", "ov-4"])
         #expect(fleet.agents[1].title == "Review ov-1" && fleet.agents.map(\.working) == [true, true, false])
         #expect(sections.count(.agents) == 3)

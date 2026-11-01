@@ -166,7 +166,7 @@ struct PlanBrowseRow: View {
                     if !node.key.isEmpty {
                         Text(node.key).font(.subheadline.monospaced()).foregroundStyle(.secondary)
                     }
-                    Text(node.title)
+                    Text(node.title).accessibilityValue(node.modelID.isEmpty ? "" : "Model ID \(node.modelID)")
                         .font(isAgent ? .subheadline : .body)
                         .foregroundStyle(node.quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                         .lineLimit(2)

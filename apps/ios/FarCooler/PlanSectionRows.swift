@@ -230,7 +230,7 @@ struct PlanAgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([agent.who, agent.second(now: now), agent.tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([agent.who, agent.model.isEmpty ? nil : "Model ID \(agent.model)", agent.second(now: now), agent.tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier("plan-agent-\(agent.id)")
     }
 

@@ -251,12 +251,12 @@ object PlanCostWords {
 
     /** One row of the week's split: "Claude Code · opus", then "28M tokens · about $41.20 API-equivalent". */
     fun weekRow(w: PlanWeekSpend, locale: Locale = Locale.getDefault()): PlanCompareRow {
-        val model = w.model.ifEmpty { "no model named" }
+        val model = if (w.model.isEmpty()) "no model named" else PlanWords.model(w.model)
         val dollars = w.costMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" } ?: noDollars(w.model)
         val name = harnessName(w.harness)
         return PlanCompareRow(
             "week/${w.id}", "$name · $model", "${TaskUsageFormat.tokens(w.tokens, locale)} tokens · $dollars",
-            "$name, $model. ${spokenTokens(w.tokens, locale)} tokens, $dollars",
+            "$name, $model${if (model != w.model && w.model.isNotEmpty()) ", model ID ${w.model}" else ""}. ${spokenTokens(w.tokens, locale)} tokens, $dollars",
         )
     }
 
@@ -266,7 +266,7 @@ object PlanCostWords {
 
     /** One comparison row: cost per landed card is the pair's spend on landed cards over its share of them. */
     fun compareRow(p: PlanHarnessCost, locale: Locale = Locale.getDefault()): PlanCompareRow {
-        val model = p.model.ifEmpty { "no model named" }
+        val model = if (p.model.isEmpty()) "no model named" else PlanWords.model(p.model)
         val share = maxOf(p.cardShareMilli, 1)
         val cards = cardShare(p.cardShareMilli)
         val each = p.tokens * 1000 / share
@@ -282,7 +282,7 @@ object PlanCostWords {
             spoken += noDollars(p.model)
         }
         val name = harnessName(p.harness)
-        return PlanCompareRow(p.id, "$name · $model", detail.joinToString(" · "), "$name, $model. ${spoken.joinToString(", ")}")
+        return PlanCompareRow(p.id, "$name · $model", detail.joinToString(" · "), "$name, $model${if (model != p.model && p.model.isNotEmpty()) ", model ID ${p.model}" else ""}. ${spoken.joinToString(", ")}")
     }
 
     /** "1.2M tokens on cards that haven't landed · about $9 API-equivalent", Not reported for the dollars; null with nothing in flight. */

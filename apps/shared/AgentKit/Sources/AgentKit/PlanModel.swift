@@ -554,13 +554,19 @@ public enum PlanWords {
     /// "1 card", "5 cards".
     public static func cards(_ n: Int) -> String { n == 1 ? "1 card" : "\(n) cards" }
 
-    /// A model as people say it: "opus" and "claude-opus-5-5" are "Opus".
+    /// Display names are exact matches; unknown IDs and variants remain literal.
+    /// This is presentation only, never a launch or pricing key.
     public static func model(_ raw: String) -> String {
-        let lower = raw.lowercased()
-        for family in ["opus", "sonnet", "haiku", "fable"] where lower.contains(family) {
-            return family.prefix(1).uppercased() + family.dropFirst()
+        switch raw {
+        case "gpt-6.1-sol": "GPT-6.1 Sol"
+        case "gpt-6.1-terra": "GPT-6.1 Terra"
+        case "gpt-6-luna": "GPT-6 Luna"
+        case "gemini-2.5-pro": "Gemini 2.5 Pro"
+        case "claude-opus-5-5": "Claude Opus 5.5"
+        case "claude-opus-5": "Claude Opus 5"
+        case "claude-sonnet-5": "Claude Sonnet 5"
+        default: raw
         }
-        return raw
     }
 
     /// "4 of 18 done". Canceled cards count on neither side: they were

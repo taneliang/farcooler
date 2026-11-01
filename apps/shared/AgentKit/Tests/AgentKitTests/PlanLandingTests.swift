@@ -142,7 +142,7 @@ struct PlanLandingTests {
         // The ticket's work records a finished reviewer and an open builder; the runner lists only the builder, which exists.
         #expect(plan.agentsSpend != nil)
         #expect(plan.line(key: "ov-11")?.work.map(\.role) == [.review, .build])
-        #expect(agents(plan) == ["Builder \u{00B7} Sonnet"], "only the agent that exists: \(agents(plan))")
+        #expect(agents(plan) == ["Builder \u{00B7} sonnet"], "only the agent that exists: \(agents(plan))")
         // Once it is gone from the list, the work's record alone lists nothing.
         plan.agents.removeAll { $0.id == "agent:a-open" }
         #expect(agents(plan) == [], "a finished agent stayed in the sidebar: \(agents(plan))")

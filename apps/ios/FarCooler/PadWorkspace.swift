@@ -188,6 +188,7 @@ private struct PadTreeRow: View {
         HStack(spacing: 4) {
             disclosure
             Button(action: onPick) { label }
+                .accessibilityValue(node.modelID.isEmpty ? "" : "Model ID \(node.modelID)")
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(chosen ? .isSelected : [])
                 .accessibilityIdentifier("pad-tree-row-\(node.rowName)")

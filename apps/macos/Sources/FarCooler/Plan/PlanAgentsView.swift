@@ -103,7 +103,7 @@ struct PlanAgentRow: View {
     static func second(_ agent: PlanAgent, now: Int64) -> String { agent.second(now: now) }
 
     private var accessibility: String {
-        [agent.who, Self.second(agent, now: now), agent.tokens().map { "\($0) tokens" }, agent.cost()]
+        [agent.who, agent.model.isEmpty ? nil : "Model ID \(agent.model)", Self.second(agent, now: now), agent.tokens().map { "\($0) tokens" }, agent.cost()]
             .compactMap { $0 }.joined(separator: ", ")
     }
 }

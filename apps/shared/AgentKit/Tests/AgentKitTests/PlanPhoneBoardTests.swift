@@ -54,7 +54,7 @@ struct PlanPhoneBoardTests {
         #expect(said.contains("Landing 9"), "\(said)")
         #expect(said.contains("A read-only Files browser"), "the landing doesn't say what it carries: \(said)")
         #expect(said.contains("Checking Here \u{00B7} step 1 of 3"), "no place on the ladder: \(said)")
-        #expect(said.contains("Lander \u{00B7} Opus"), "the landing doesn't say who lands it: \(said)")
+        #expect(said.contains("Lander \u{00B7} opus"), "the landing doesn't say who lands it: \(said)")
         #expect(!said.contains("a-integ9"), "the lander's id is in the text: \(said)")
         let aboard = try #require(card.tickets.first { $0.key == "ov-259" })
         #expect(aboard.line.heading.contains("read-only Files browser"))

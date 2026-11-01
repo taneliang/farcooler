@@ -322,7 +322,7 @@ struct TreeRow: View {
                             .font(.subheadline.monospaced())
                             .foregroundStyle(.secondary)
                     }
-                    Text(node.title)
+                    Text(node.title).accessibilityValue(node.modelID.isEmpty ? "" : "Model ID \(node.modelID)")
                         .foregroundStyle(node.quiet ? .secondary : .primary)
                         .lineLimit(2)
                         .frameProbe("tree-row-title")

@@ -91,7 +91,7 @@ class PlanSectionsTest {
         assertEquals(listOf(AgentRole.ORCHESTRATOR, AgentRole.REVIEWER, AgentRole.BUILDER), plan.agents.map { it.role })
         val fleet = PlanSections.of(plan).fleet
         // Working agents come first, then by spend.
-        assertEquals(listOf("Orchestrator · Opus", "Reviewer · Sonnet", "Builder · gpt-5.6"), fleet.agents.map { it.who })
+        assertEquals(listOf("Orchestrator · opus", "Reviewer · sonnet", "Builder · gpt-5.6"), fleet.agents.map { it.who })
         assertEquals(listOf("Plan", "ov-1", "ov-4"), fleet.agents.map { it.worksFor })
         assertEquals("Review ov-1", fleet.agents[1].title)
         assertEquals(listOf(true, true, false), fleet.agents.map { it.working })

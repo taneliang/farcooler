@@ -100,7 +100,7 @@ struct TaskUsageView: View {
                 verticalSpacing: ColumnGrid.rhythm / 2) {
                 ForEach(rows) { row in
                     GridRow {
-                        Text(TaskUsageFormat.title(row))
+                        Text(TaskUsageFormat.title(row)).accessibilityValue(row.model)
                         Text(TaskUsageFormat.detail(row))
                             .foregroundStyle(.quietInk)
                     }

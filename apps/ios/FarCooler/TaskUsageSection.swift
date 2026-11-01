@@ -41,7 +41,7 @@ struct TaskUsageSection: View {
                         DisclosureGroup("By Harness and Model") {
                             ForEach(usage.rows) { row in
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(TaskUsageFormat.title(row))
+                                    Text(TaskUsageFormat.title(row)).accessibilityValue(row.model)
                                         .font(.subheadline)
                                     Text(TaskUsageFormat.detail(row))
                                         .font(.footnote)

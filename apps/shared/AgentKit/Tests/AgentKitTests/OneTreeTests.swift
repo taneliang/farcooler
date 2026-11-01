@@ -184,7 +184,8 @@ struct OneTreeTests {
         let tree = OneTree.build(try Self.board())
         let fix = try #require(Self.node(tree, "theme:theme-Plan/task:t1/ticket:t1"))
         #expect(fix.children.map(\.kind) == [.subagent])
-        #expect(fix.children[0].title == "Builder · Opus")
+        #expect(fix.children[0].title == "Builder · Claude Opus 5.5")
+        #expect(fix.children[0].modelID == "claude-opus-5-5")
         #expect(fix.children[0].caption == "No terminal; runs inside the orchestrator")
         #expect(fix.children[0].target == .orchestrator)
         #expect(fix.children[0].id == "theme:theme-Plan/task:t1/ticket:t1/agent:a1")
@@ -200,7 +201,7 @@ struct OneTreeTests {
         input.plan.agents[0].role = .reviewer
         input.plan.agents[0].tickets[0] = PlanAgentTicket(task: "t2", key: "ov-2", role: .review, startedAt: 0)
         #expect(Self.node(OneTree.build(input), "theme:theme-Plan/task:t1/ticket:t1")?.children.isEmpty == true)
-        #expect(Self.node(OneTree.build(input), "theme:theme-Plan/task:t2/ticket:t2")?.children.map(\.title) == ["claude", "zsh", "Reviewer · Opus"])
+        #expect(Self.node(OneTree.build(input), "theme:theme-Plan/task:t2/ticket:t2")?.children.map(\.title) == ["claude", "zsh", "Reviewer · Claude Opus 5.5"])
         input.plan.lines[1].stage = .landed
         #expect(Self.node(OneTree.build(input), "theme:theme-Plan/task:t2/ticket:t2")?.children.map(\.title) == ["claude", "zsh"])
     }
@@ -213,13 +214,13 @@ struct OneTreeTests {
         input.tasks[5].workers = [worker]
         let tree = OneTree.build(input)
         let copy = try #require(Self.node(tree, "theme:theme-Plan/task:t2/ticket:t2"))
-        #expect(copy.children.map(\.title) == ["claude", "zsh", "Subagent · Sonnet"])
+        #expect(copy.children.map(\.title) == ["claude", "zsh", "Subagent · sonnet"])
         let t5 = try #require(Self.node(tree, "group:no-theme/task:t5"))
         #expect(t5.children.map(\.kind) == [.subagent])
         // The plan's record wins: the fix round's agent isn't said twice.
         input.tasks[0].workers = [worker]
         let fix = try #require(Self.node(OneTree.build(input), "theme:theme-Plan/task:t1/ticket:t1"))
-        #expect(fix.children.map(\.title) == ["Builder · Opus"])
+        #expect(fix.children.map(\.title) == ["Builder · Claude Opus 5.5"])
     }
 
     @Test("A card's own worktree with no ticket recorded is a ticket row all the same, opening the worktree")

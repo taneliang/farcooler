@@ -97,7 +97,7 @@ public struct TaskUsage: Decodable, Equatable, Sendable {
     public var rows: [TaskSpendRow] {
         byHarnessModel.sorted {
             let (a, b) = ($0.totals.totalTokens, $1.totals.totalTokens)
-            return a != b ? a > b : TaskUsageFormat.title($0) < TaskUsageFormat.title($1)
+            return a != b ? a > b : ($0.harness, $0.model) < ($1.harness, $1.model)
         }
     }
 }
@@ -225,7 +225,7 @@ public enum TaskUsageFormat {
 
     /// "claude · claude-opus-5", or the harness alone for an unnamed model.
     public static func title(_ row: TaskSpendRow) -> String {
-        row.model.isEmpty ? row.harness : "\(row.harness) · \(row.model)"
+        row.model.isEmpty ? row.harness : "\(row.harness) · \(PlanWords.model(row.model))"
     }
 
     /// "1.2M tokens · $3.20", with "estimated", "partly estimated" and

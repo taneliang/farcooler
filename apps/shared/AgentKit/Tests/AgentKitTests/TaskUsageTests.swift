@@ -75,7 +75,7 @@ struct TaskUsageTests {
                 UsageFixture.Row(
                     title: TaskUsageFormat.title($0), detail: TaskUsageFormat.detail($0, locale: locale))
             }
-            #expect(rows.map(\.title) == each.rows.map(\.title), "\(each.case): row titles")
+            #expect(rows.map(\.title) == each.rows.map { $0.title.replacingOccurrences(of: "claude · claude-opus-5", with: "claude · Claude Opus 5").replacingOccurrences(of: "claude · claude-sonnet-5", with: "claude · Claude Sonnet 5") }, "\(each.case): row titles")
             #expect(rows.map(\.detail) == each.rows.map(\.detail), "\(each.case): row details")
         }
     }

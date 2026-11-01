@@ -592,7 +592,7 @@ internal fun TreeRow(node: OneTree.Node, nav: TreeNavigation, menu: TreeWorktree
     val actions = menu?.actions(node).orEmpty()
     var menuOpen by remember { mutableStateOf(false) }
     val amber = glanceColor(GlancePalette.amber)
-    val spoken = listOfNotNull(node.key.ifEmpty { null }, node.title, node.detail.ifEmpty { null }, node.also.ifEmpty { null }, node.caption.ifEmpty { null }, if (node.showsDot) "Needs you" else null).joinToString(", ")
+    val spoken = listOfNotNull(node.key.ifEmpty { null }, node.title, node.detail.ifEmpty { null }, node.also.ifEmpty { null }, node.caption.ifEmpty { null }, node.modelId.takeIf { it.isNotEmpty() }?.let { "Model ID $it" }, if (node.showsDot) "Needs you" else null).joinToString(", ")
     val onClick: (() -> Unit)? = when (tap) {
         is OneTree.Tap.Push -> { { nav.onOpenLevel(tap.node) } }
         is OneTree.Tap.Open -> { { open(tap.target, nav) } }
