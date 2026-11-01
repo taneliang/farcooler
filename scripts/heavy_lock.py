@@ -443,6 +443,16 @@ def light_slot(job, path=None, slots=None, limit=LOAD_LIMIT, load=load5, poll=LO
 
 
 def self_test():
+    from unittest.mock import patch
+
+    # scripts/heavy sets this for real nested commands. Our private test queues
+    # need fresh takers even when the suite itself runs inside that wrapper.
+    with patch.dict(os.environ):
+        os.environ.pop(HELD_ENV, None)
+        return _self_test()
+
+
+def _self_test():
     import re
     import threading
 

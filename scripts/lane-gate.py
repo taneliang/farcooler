@@ -793,6 +793,16 @@ def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
 
 
 def self_test():
+    from unittest.mock import patch
+
+    # An outer scripts/heavy owns the machine queue, not these scratch queues.
+    # Restore its marker afterward; production nested gates must still bypass it.
+    with patch.dict(os.environ):
+        os.environ.pop(hl.HELD_ENV, None)
+        return _self_test()
+
+
+def _self_test():
     global run_jobs, clean_target_after_pass
     import contextlib
     import io
