@@ -5,12 +5,17 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
+import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.view.PreviewView
@@ -52,10 +57,12 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.LuminanceSource
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.ReaderException
 import com.google.zxing.common.HybridBinarizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -250,13 +257,6 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
     val view = remember {
         PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
     }
-    // One thread, named, for the same reason the client core has one: a native
-    // decode on an anonymous pool thread tells you nothing in a trace.
-    val executor = remember {
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "farcooler-scan").apply { isDaemon = true }
-        }
-    }
     val reader = remember { QrReader() }
     var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
@@ -271,34 +271,109 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
     }
 
     DisposableEffect(provider) {
-        val camera = provider
-        if (camera != null) {
-            val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
-            val analysis = ImageAnalysis.Builder()
-                // The newest frame, and no queue. A backlog of frames is a
-                // backlog of decodes of a code that has already been read.
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-            analysis.setAnalyzer(executor) { image ->
-                image.use { frame -> reader.read(frame)?.let(scanner::report) }
-            }
-            scanner.bindCamera {
-                camera.unbindAll()
-                camera.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis,
-                )
-            }
-        }
-        onDispose {
-            camera?.unbindAll()
-            executor.shutdown()
-        }
+        val release = AnalysisThread.attach(
+            camera = provider,
+            bind = { camera, executor ->
+                val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
+                val analysis = ImageAnalysis.Builder()
+                    // The newest frame, and no queue. A backlog of frames is a
+                    // backlog of decodes of a code that has already been read.
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setResolutionSelector(ANALYSIS_RESOLUTION)
+                    .build()
+                var frames = 0
+                analysis.setAnalyzer(executor) { image ->
+                    image.use { frame ->
+                        // One line per binding, so `adb logcat -s FarCoolerScan`
+                        // says whether frames arrive at all and at what size —
+                        // the question ov-876 could not answer from a phone.
+                        if (frames++ == 0) {
+                            Log.i(SCAN_LOG, "first frame ${frame.width}x${frame.height}")
+                        }
+                        reader.read(frame)?.let(scanner::report)
+                    }
+                }
+                scanner.bindCamera {
+                    camera.unbindAll()
+                    camera.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        analysis,
+                    )
+                }
+            },
+            unbind = { camera -> camera.unbindAll() },
+        )
+        onDispose(release)
     }
 
     AndroidView(factory = { view }, modifier = modifier)
+}
+
+/** The logcat tag for the scanner's own lines. */
+private const val SCAN_LOG = "FarCoolerScan"
+
+/**
+ * The analysis frame CameraX is asked for: 1280×960, 4:3 like the sensor.
+ *
+ * CameraX's own default is 640×480, and that is too coarse for the code the
+ * other device shows. A reply carrying one tunneled runner is about 660 bytes,
+ * which the Mac draws as a version-19 code — 89 modules plus its one-module
+ * border. Held so the code is 40% of the frame's height, 480 rows give it
+ * about two camera pixels per module, under what ZXing can threshold; 960
+ * rows give it four. `QrDensityTest` measures both, with the Mac's own render.
+ *
+ * "Closest higher then lower": a camera that has no 1280×960 stream picks the
+ * nearest one above it before settling for one below.
+ */
+private val ANALYSIS_RESOLUTION: ResolutionSelector = ResolutionSelector.Builder()
+    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+    .setResolutionStrategy(
+        ResolutionStrategy(
+            Size(1280, 960),
+            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+        )
+    )
+    .build()
+
+/**
+ * The thread the analyzer runs on, made for ONE camera binding and shut down
+ * with it.
+ *
+ * This is ov-876. The thread used to be `remember`ed once for the screen while
+ * its shutdown sat in the `onDispose` of the effect keyed on the camera
+ * provider. That effect runs first with no provider, and is disposed the
+ * moment the provider arrives — so the thread was shut down a few milliseconds
+ * after the screen opened, before any camera was bound. CameraX then handed
+ * every frame to an executor that refused it, dropped the frame quietly, and
+ * the preview kept running over a scanner that never saw a single frame, at
+ * any distance. Owning the thread here, per binding, leaves no second lifetime
+ * to get out of step.
+ */
+internal object AnalysisThread {
+    /**
+     * Bind [camera], if there is one yet, on a fresh thread; the returned
+     * function unbinds it and stops that thread. Exactly what one run of a
+     * keyed effect does, and its `onDispose`.
+     */
+    fun <C : Any> attach(
+        camera: C?,
+        bind: (C, ExecutorService) -> Unit,
+        unbind: (C) -> Unit,
+    ): () -> Unit {
+        if (camera == null) return {}
+        // One thread, named, for the same reason the client core has one: a
+        // native decode on an anonymous pool thread tells you nothing in a trace.
+        val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "farcooler-scan").apply { isDaemon = true }
+        }
+        bind(camera, executor)
+        return {
+            unbind(camera)
+            executor.shutdown()
+        }
+    }
 }
 
 /**
@@ -310,7 +385,7 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
  * second and a fresh two-megabyte array each time is thirty a second for the
  * collector.
  */
-private class QrReader {
+internal class QrReader {
     private val reader = MultiFormatReader().apply {
         setHints(
             mapOf(
@@ -326,6 +401,8 @@ private class QrReader {
 
     private var luminance = ByteArray(0)
 
+    private val unexpected = mutableSetOf<String>()
+
     fun read(image: ImageProxy): String? {
         val plane = image.planes.firstOrNull() ?: return null
         val stride = plane.rowStride
@@ -337,15 +414,19 @@ private class QrReader {
         val buffer = plane.buffer
         buffer.rewind()
         buffer.get(luminance, 0, minOf(buffer.remaining(), needed))
+        return read(luminance, stride, image.width, image.height)
+    }
 
+    /** The decode itself, on a luminance plane rows of [stride] bytes apart. */
+    fun read(luminance: ByteArray, stride: Int, width: Int, height: Int): String? {
         val source = PlanarYUVLuminanceSource(
             luminance,
             stride,
-            image.height,
+            height,
             0,
             0,
-            image.width,
-            image.height,
+            width,
+            height,
             false,
         )
         // The inverted pass is for a code shown light-on-dark by something else.
@@ -356,9 +437,18 @@ private class QrReader {
     }
 
     private fun decode(source: LuminanceSource): String? {
-        val result = runCatching {
+        val result = try {
             reader.decodeWithState(BinaryBitmap(HybridBinarizer(source)))
-        }.getOrNull()
+        } catch (e: ReaderException) {
+            null
+        } catch (e: RuntimeException) {
+            // Not "no code here": ZXing failing, or a frame shaped unlike what
+            // it was told. Said once per kind rather than thirty times a second.
+            if (unexpected.add(e.javaClass.name)) {
+                Log.w(SCAN_LOG, "decode failed", e)
+            }
+            null
+        }
         // Not finding a code in a frame is the ordinary answer, thirty times a
         // second, and ZXing reports it by throwing. Reset either way, or the
         // reader carries state from a frame into the next one.
