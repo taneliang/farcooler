@@ -199,6 +199,9 @@ struct MainCardsTests {
             "ChangesPane.swift", "Files/CodeView.swift", "Files/FilesPane.swift",
             // A pane's native view, in the pane's card (ov-372).
             "NativeAgent/NativeAgentView.swift",
+            // A ticket opened from the plan, in the plan's card; it stands in
+            // for the task's overview tab above (ov-873).
+            "Plan/PlanTicketPage.swift",
         ]
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/FarCooler")
