@@ -48,7 +48,9 @@ struct Running(Uuid);
 
 impl Running {
     fn take(workspace: Uuid) -> Option<Running> {
-        running().lock().unwrap_or_else(|e| e.into_inner()).insert(workspace).then_some(Running(workspace))
+        // A rejected take must not construct a guard: dropping it here would
+        // re-lock this mutex while its temporary lock is still held.
+        running().lock().unwrap_or_else(|e| e.into_inner()).insert(workspace).then(|| Running(workspace))
     }
 }
 
@@ -162,13 +164,49 @@ mod tests {
         assert_eq!(run_id("https://github.com/o/r/pull/1"), None);
     }
 
-    /// One job per board: a second start waits for the first to give it back.
-    #[test]
-    fn one_job_runs_per_board() {
-        let board = Uuid::now_v7();
-        let first = Running::take(board).expect("free");
-        assert!(Running::take(board).is_none());
-        drop(first);
-        assert!(Running::take(board).is_some());
+    /// A second start is refused, not blocked. Run the real guard in a child
+    /// so a reentrant mutex deadlock fails promptly without wedging the suite.
+    #[tokio::test]
+    async fn one_job_runs_per_board() {
+        const CHILD: &str = "FARCOOLER_TEST_LANDING_RUNNING_CHILD";
+        if let Some(phase) = std::env::var_os(CHILD) {
+            let mark = |text| std::fs::write(&phase, text).unwrap();
+            let board = Uuid::now_v7();
+            mark("take first job");
+            let first = Running::take(board).expect("free");
+            mark("reject overlapping job");
+            assert!(Running::take(board).is_none());
+            mark("take job on another board");
+            let other = Running::take(Uuid::now_v7()).expect("another board is free");
+            // A rejected take must leave the original job's place intact.
+            assert!(Running::take(board).is_none());
+            mark("release first job");
+            drop(first);
+            mark("take job after release");
+            let next = Running::take(board).expect("released board is free");
+            assert!(Running::take(board).is_none());
+            drop((next, other));
+            mark("done");
+            return;
+        }
+
+        let fixture = farcooler_core::scratch::dir("landing-running");
+        let phase = fixture.join("phase");
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "landing_run::tests::one_job_runs_per_board", "--nocapture"])
+            .env(CHILD, &phase)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("run isolated guard fixture");
+        if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
+            child.kill().await.expect("kill and reap only our stalled fixture");
+            panic!("production Running guard stalled at {:?}", std::fs::read_to_string(&phase));
+        }
+        let output = child.wait_with_output().await.expect("read guard fixture result");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read_to_string(phase).unwrap(), "done");
     }
 }
