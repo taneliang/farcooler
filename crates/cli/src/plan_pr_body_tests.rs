@@ -74,20 +74,24 @@ fn bare_detail() -> pb::TaskDetail {
     }
 }
 
-fn lane() -> pb::Lane {
-    pb::Lane {
-        id: id_bytes(uuid::Uuid::from_u128(0x50)),
-        name: "mac-frost".into(),
-        branch: "el/frost".into(),
-        cards: vec![pb::LaneCard { task_id: id_bytes(CARD), ..Default::default() }],
-        agents: vec![
-            pb::LaneAgent { harness: "claude".into(), model: "sonnet".into(), role: pb::LaneAgentRole::Build as i32, ..Default::default() },
-            pb::LaneAgent { harness: "claude".into(), model: "sonnet".into(), role: pb::LaneAgentRole::Fix as i32, ..Default::default() },
-            pb::LaneAgent { harness: "claude".into(), model: "opus".into(), role: pb::LaneAgentRole::Review as i32, ..Default::default() },
-        ],
-        spend: Some(pb::LaneSpend { input_tokens: 300_000, output_tokens: 60_000, cache_read_tokens: 40_000, cache_write_tokens: 10_000, ..Default::default() }),
-        ..Default::default()
-    }
+/// What the ticket spent and who worked it: 410K tokens, Sonnet building and
+/// fixing, Opus reviewing.
+#[derive(Default)]
+struct Work {
+    spend: pb::Spend,
+    workers: Vec<section::Worker>,
+}
+
+fn worker(model: &str, role: &'static str) -> section::Worker {
+    section::Worker { model: model.into(), role }
+}
+
+fn spend() -> pb::Spend {
+    pb::Spend { input_tokens: 300_000, output_tokens: 60_000, cache_read_tokens: 40_000, cache_write_tokens: 10_000, ..Default::default() }
+}
+
+fn work() -> Work {
+    Work { spend: spend(), workers: vec![worker("sonnet", "build"), worker("sonnet", "fix"), worker("opus", "review")] }
 }
 
 fn ruling(number: u32, decision: &str, reversal: &str, state: pb::BoardRulingState, on: uuid::Uuid) -> pb::BoardRuling {
@@ -111,12 +115,12 @@ fn rulings() -> Vec<pb::BoardRuling> {
     ]
 }
 
-fn render(detail: &pb::TaskDetail, lane: &pb::Lane, theme: Option<&str>, rulings: &[pb::BoardRuling], cost_line: bool) -> String {
-    section::render(&Input { detail, lane, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line, changes: None, carried: None, reviewers: &[] })
+fn render(detail: &pb::TaskDetail, work: &Work, theme: Option<&str>, rulings: &[pb::BoardRuling], cost_line: bool) -> String {
+    section::render(&Input { detail, spend: work.spend, workers: &work.workers, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line, changes: None, carried: None, reviewers: &[] })
 }
 
 fn full(cost_line: bool) -> String {
-    render(&detail(), &lane(), Some("Visual language"), &rulings(), cost_line)
+    render(&detail(), &work(), Some("Visual language"), &rulings(), cost_line)
 }
 
 // ---- the section ----------------------------------------------------------
@@ -134,23 +138,23 @@ fn the_same_card_with_the_cost_toggle_off_has_no_cost_section() {
 
 #[test]
 fn a_bare_card_says_so_and_leaves_the_empty_sections_out() {
-    assert_eq!(render(&bare_detail(), &pb::Lane::default(), None, &[], false), golden("bare.md"));
+    assert_eq!(render(&bare_detail(), &Work::default(), None, &[], false), golden("bare.md"));
 }
 
 #[test]
 fn a_tick_on_the_card_is_a_tick_in_the_section() {
     let mut d = detail();
     d.task.as_mut().unwrap().acceptance[1].met = true;
-    let out = render(&d, &lane(), Some("Visual language"), &rulings(), true);
+    let out = render(&d, &work(), Some("Visual language"), &rulings(), true);
     assert!(out.contains("- [x] The window plane uses"), "{out}");
     assert!(out.contains("- [x] Phones match (stack PR 2 of 3)"), "{out}");
     assert!(!out.contains("- [ ]"), "{out}");
     d.task.as_mut().unwrap().acceptance[0].met = false;
-    assert!(render(&d, &lane(), None, &[], false).contains("- [ ] The window plane uses"));
+    assert!(render(&d, &work(), None, &[], false).contains("- [ ] The window plane uses"));
 }
 
 #[test]
-fn rulings_on_the_lane_s_cards_appear_and_reversed_or_other_ones_do_not() {
+fn rulings_on_the_ticket_s_card_appear_and_reversed_or_other_ones_do_not() {
     let out = full(false);
     assert!(out.contains("- R-12 Inbox stays amber, not blue (reversible: one token). Reply \"reverse R-12\"."), "{out}");
     assert!(out.contains("- R-13 The window plane keeps its 12 pt corner. The owner confirmed it."), "{out}");
@@ -166,7 +170,7 @@ fn a_finding_a_later_one_replaced_is_history_and_the_rounds_count_the_rest() {
     let mut d = detail();
     d.notes.retain(|n| n.at != 3);
     d.notes.retain(|n| n.at != 1);
-    let one = render(&d, &lane(), None, &[], false);
+    let one = render(&d, &work(), None, &[], false);
     assert!(one.contains("Opus review: fix first. One blocker. (1 round)\nNot checked: Android at 1x\n"), "{one}");
 }
 
@@ -188,14 +192,16 @@ fn captures_are_links_found_in_the_notes_each_once() {
 fn the_cost_line_says_what_was_spent_and_by_whom() {
     let one = full(true);
     assert!(one.ends_with("## Cost\n410K tokens, Sonnet build + Sonnet fix + Opus review\n<!-- farcooler:end -->"), "{one}");
-    let mut two = lane();
-    two.cards.push(pb::LaneCard { task_id: id_bytes(OTHER), ..Default::default() });
-    let out = render(&detail(), &two, None, &[], true);
-    assert!(out.contains("About 205K tokens, the lane's spend split evenly across 2 cards, Sonnet build + Sonnet fix + Opus review"), "{out}");
-    let mut none = lane();
-    none.spend = None;
+    let mut shared = work();
+    shared.spend.shared_agents = 1;
+    let out = render(&detail(), &shared, None, &[], true);
+    assert!(out.contains("About 410K tokens, its share of agents that also worked other tickets, Sonnet build + Sonnet fix + Opus review"), "{out}");
+    let none = Work { spend: Default::default(), ..work() };
     let out = render(&detail(), &none, None, &[], true);
     assert!(out.contains("## Cost\nNot reported\n"), "no tokens is not zero tokens: {out}");
+    let mut twice = work();
+    twice.workers.push(worker("sonnet", "build"));
+    assert!(render(&detail(), &twice, None, &[], true).contains("410K tokens, Sonnet build + Sonnet fix + Opus review\n"), "each once");
 }
 
 // ---- merging into a description -------------------------------------------
@@ -209,7 +215,7 @@ fn described_by_a_reviewer(section: &str) -> String {
 
 #[test]
 fn a_reviewer_s_edits_outside_the_markers_survive_a_re_render() {
-    let stale = render(&bare_detail(), &lane(), None, &[], false);
+    let stale = render(&bare_detail(), &work(), None, &[], false);
     let existing = described_by_a_reviewer(&stale);
     let merged = section::merge(&existing, &full(true)).unwrap();
     assert_eq!(merged, described_by_a_reviewer(&full(true)), "above, below and the line endings are byte for byte");
@@ -265,27 +271,56 @@ impl DispatchLink for Runner {
     }
 }
 
-fn the_plan(two_cards: bool) -> (pb::Plan, Keys) {
-    let mut lane = lane();
+const BUILDER: uuid::Uuid = uuid::Uuid::from_u128(0xa1);
+const FIXER: uuid::Uuid = uuid::Uuid::from_u128(0xa2);
+const REVIEWER: uuid::Uuid = uuid::Uuid::from_u128(0xa3);
+
+/// ov-12 on the line on its own branch, worked by three agents the plan
+/// lists; with `two_cards`, ov-13 beside it.
+fn the_plan(two_cards: bool) -> pb::Plan {
+    let did = |agent: uuid::Uuid, role: pb::WorkRole| pb::TicketWork {
+        agent_id: id_bytes(agent),
+        task_id: id_bytes(CARD),
+        role: role as i32,
+        ..Default::default()
+    };
+    let agent = |id: uuid::Uuid, role: pb::AgentRole, model: &str| pb::Agent {
+        id: id_bytes(id),
+        role: role as i32,
+        harness: "claude".into(),
+        model: model.into(),
+        ..Default::default()
+    };
+    let mut lines = vec![pb::TicketLine {
+        task_id: id_bytes(CARD),
+        stage: pb::TicketStage::Reviewing as i32,
+        branch: "el/frost".into(),
+        work: vec![did(BUILDER, pb::WorkRole::Build), did(FIXER, pb::WorkRole::Fix), did(REVIEWER, pb::WorkRole::Review)],
+        spend: Some(spend()),
+        ..Default::default()
+    }];
     if two_cards {
-        lane.cards.push(pb::LaneCard { task_id: id_bytes(OTHER), ..Default::default() });
+        lines.push(pb::TicketLine { task_id: id_bytes(OTHER), branch: "el/phones".into(), ..Default::default() });
     }
-    let plan = pb::Plan {
+    pb::Plan {
         themes: vec![pb::BoardThemeView {
             theme: Some(pb::BoardTheme { name: "Visual language".into(), ..Default::default() }),
             task_ids: vec![id_bytes(CARD)],
             ..Default::default()
         }],
-        lanes: vec![lane],
+        lines,
+        agents: vec![
+            agent(BUILDER, pb::AgentRole::Builder, "sonnet"),
+            agent(FIXER, pb::AgentRole::Builder, "sonnet"),
+            agent(REVIEWER, pb::AgentRole::Reviewer, "opus"),
+        ],
         cards: vec![
             pb::PlanCard { task_id: id_bytes(CARD), key: "ov-12".into(), title: "Frosted window plane".into(), ..Default::default() },
             pb::PlanCard { task_id: id_bytes(OTHER), key: "ov-13".into(), title: "Phones".into(), ..Default::default() },
         ],
         rulings: rulings(),
         ..Default::default()
-    };
-    let keys = Keys::of_plan(&plan);
-    (plan, keys)
+    }
 }
 
 fn board(cost: Option<bool>) -> Board {
@@ -299,7 +334,7 @@ fn board(cost: Option<bool>) -> Board {
 fn args(line: &str) -> PrBodyArgs {
     match crate::Cli::try_parse_from(line.split_whitespace()).expect(line).command {
         crate::Command::Plan(plan) => match plan.cmd {
-            Some(super::super::PlanCmd::Lane(super::super::LaneCmd::PrBody(a))) => a,
+            Some(super::super::PlanCmd::Ticket(super::super::ticket::TicketCmd::PrBody(a))) => a,
             _ => panic!("{line}"),
         },
         _ => panic!("{line}"),
@@ -356,9 +391,9 @@ impl Description for Described {
 }
 
 async fn run(line: &str, two_cards: bool, cost: Option<bool>, gh: &mut Described) -> Result<String, String> {
-    let (plan, keys) = the_plan(two_cards);
+    let plan = the_plan(two_cards);
     let mut link = Runner { details: vec![detail()], sent: vec![] };
-    pr_body_with(&mut link, &board(cost), &plan, &keys, args(line), false, gh).await.map_err(|e| e.to_string())
+    pr_body_with(&mut link, &board(cost), &plan, args(line), false, gh).await.map_err(|e| e.to_string())
 }
 
 fn gh(body: &str) -> Described {
@@ -366,36 +401,32 @@ fn gh(body: &str) -> Described {
 }
 
 #[tokio::test]
-async fn it_prints_the_section_for_the_lane_s_card_and_the_workspace_s_cost_choice() {
-    let out = run("farcooler plan lane pr-body mac-frost", false, Some(true), &mut gh("")).await.unwrap();
+async fn it_prints_the_section_for_the_ticket_and_the_workspace_s_cost_choice() {
+    let out = run("farcooler plan ticket pr-body ov-12", false, Some(true), &mut gh("")).await.unwrap();
     assert_eq!(out, golden("full.md"), "theme from the plan, rulings from the plan, cost on because the workspace said so");
-    let off = run("farcooler plan lane pr-body mac-frost", false, None, &mut gh("")).await.unwrap();
+    let off = run("farcooler plan ticket pr-body ov-12", false, None, &mut gh("")).await.unwrap();
     assert_eq!(off, golden("cost-off.md"), "a workspace that never opted in has no cost line");
-    let off = run("farcooler plan lane pr-body mac-frost", false, Some(false), &mut gh("")).await.unwrap();
+    let off = run("farcooler plan ticket pr-body ov-12", false, Some(false), &mut gh("")).await.unwrap();
     assert_eq!(off, golden("cost-off.md"));
 }
 
 #[tokio::test]
-async fn a_lane_of_several_cards_is_asked_which_because_a_pull_request_is_one_cards() {
-    let said = run("farcooler plan lane pr-body mac-frost", true, None, &mut gh("")).await.unwrap_err();
-    assert_eq!(said, "mac-frost works 2 cards, and a pull request is one card's. Name one with --card: ov-12, ov-13.");
-    let named = run("farcooler plan lane pr-body mac-frost --card OV-12", true, None, &mut gh("")).await.unwrap();
+async fn a_ticket_is_named_by_its_key_and_one_off_the_line_is_refused() {
+    let named = run("farcooler plan ticket pr-body OV-12", true, None, &mut gh("")).await.unwrap();
     assert!(named.contains("## What and why\nThe window plane"), "{named}");
-    let wrong = run("farcooler plan lane pr-body mac-frost --card ov-99", true, None, &mut gh("")).await.unwrap_err();
-    assert_eq!(wrong, "mac-frost doesn't work ov-99. Its cards: ov-12, ov-13.");
-    let nobody = run("farcooler plan lane pr-body nobody", false, None, &mut gh("")).await.unwrap_err();
-    assert!(nobody.contains("No lane here is called"), "{nobody}");
+    let off = run("farcooler plan ticket pr-body ov-99", false, None, &mut gh("")).await.unwrap_err();
+    assert_eq!(off, "ov-99 isn't on the line. Put it there with `farcooler plan ticket set ov-99`.");
 }
 
 #[tokio::test]
 async fn apply_replaces_only_the_section_and_a_second_apply_writes_nothing() {
-    let stale = render(&bare_detail(), &lane(), None, &[], false);
+    let stale = render(&bare_detail(), &work(), None, &[], false);
     let mut d = gh(&described_by_a_reviewer(&stale));
-    let said = run("farcooler plan lane pr-body mac-frost --apply 31", false, Some(true), &mut d).await.unwrap();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 31", false, Some(true), &mut d).await.unwrap();
     assert_eq!(said, "Updated the Far Cooler section of 31. Everything outside it was left alone.");
     assert_eq!(d.writes, [described_by_a_reviewer(&golden("full.md"))]);
 
-    let again = run("farcooler plan lane pr-body mac-frost --apply 31", false, Some(true), &mut d).await.unwrap();
+    let again = run("farcooler plan ticket pr-body ov-12 --apply 31", false, Some(true), &mut d).await.unwrap();
     assert_eq!(again, "The description of 31 already says this.");
     assert_eq!(d.writes.len(), 1, "nothing to change is nothing written");
 }
@@ -403,7 +434,7 @@ async fn apply_replaces_only_the_section_and_a_second_apply_writes_nothing() {
 #[tokio::test]
 async fn apply_appends_when_the_markers_are_missing_and_says_so() {
     let mut d = gh("What a reviewer typed.");
-    let said = run("farcooler plan lane pr-body mac-frost --apply 31", false, None, &mut d).await.unwrap();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 31", false, None, &mut d).await.unwrap();
     assert_eq!(said, "Added the Far Cooler section to the end of 31. Everything else was left alone.");
     assert_eq!(d.writes, [format!("What a reviewer typed.\n\n{}", golden("cost-off.md"))]);
 }
@@ -411,12 +442,12 @@ async fn apply_appends_when_the_markers_are_missing_and_says_so() {
 #[tokio::test]
 async fn apply_refuses_damaged_markers_and_a_gh_that_cannot_answer_without_writing() {
     let mut d = gh(&format!("mine\n{BEGIN}\nhalf a section"));
-    let said = run("farcooler plan lane pr-body mac-frost --apply 31", false, None, &mut d).await.unwrap_err();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 31", false, None, &mut d).await.unwrap_err();
     assert!(said.starts_with("This description has 1 begin and 0 end markers"), "{said}");
     assert!(d.writes.is_empty());
 
     let mut refused = Described { refuse: true, ..gh("") };
-    let said = run("farcooler plan lane pr-body mac-frost --apply 31", false, None, &mut refused).await.unwrap_err();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 31", false, None, &mut refused).await.unwrap_err();
     assert_eq!(said, "GitHub wouldn't do that.");
     assert!(refused.writes.is_empty());
 }
@@ -475,68 +506,60 @@ fn a_gh_that_is_missing_or_refuses_is_said_in_words_and_a_flag_is_never_a_pull_r
     }
 }
 
-// ---- --apply only writes to the lane's own pull request -------------------
+// ---- --apply only writes to the ticket's own pull request -----------------
 
 #[tokio::test]
 async fn apply_refuses_a_pull_request_from_another_branch_and_force_overrides() {
     let mut other = Described { head: "someone/else".into(), ..gh("Someone else's description.") };
-    let said = run("farcooler plan lane pr-body mac-frost --apply 42", false, None, &mut other).await.unwrap_err();
-    assert_eq!(said, "42 is from the branch someone/else, and mac-frost works el/frost. Check the number, or add --force if it is the right pull request.");
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 42", false, None, &mut other).await.unwrap_err();
+    assert_eq!(said, "42 is from the branch someone/else, and ov-12 is on el/frost. Check the number, or add --force if it is the right pull request.");
     assert!(other.writes.is_empty(), "nothing is appended to somebody else's pull request");
 
-    let forced = run("farcooler plan lane pr-body mac-frost --apply 42 --force", false, None, &mut other).await.unwrap();
+    let forced = run("farcooler plan ticket pr-body ov-12 --apply 42 --force", false, None, &mut other).await.unwrap();
     assert!(forced.starts_with("Added the Far Cooler section"), "{forced}");
     assert_eq!(other.writes.len(), 1);
 }
 
 #[tokio::test]
-async fn apply_refuses_when_the_lane_has_no_branch_to_check_against() {
-    let (mut plan, keys) = the_plan(false);
-    plan.lanes[0].branch.clear();
+async fn apply_refuses_when_the_ticket_has_no_branch_to_check_against() {
+    let mut plan = the_plan(false);
+    plan.lines[0].branch.clear();
     let mut link = Runner { details: vec![detail()], sent: vec![] };
     let mut d = gh("");
-    let said = pr_body_with(&mut link, &board(None), &plan, &keys, args("farcooler plan lane pr-body mac-frost --apply 31"), false, &mut d)
+    let said = pr_body_with(&mut link, &board(None), &plan, args("farcooler plan ticket pr-body ov-12 --apply 31"), false, &mut d)
         .await
         .map_err(|e| e.to_string())
         .unwrap_err();
-    assert_eq!(said, "mac-frost has no branch recorded, so Far Cooler can't tell that 31 is its pull request. Check the number, then add --force.");
+    assert_eq!(said, "ov-12 has no branch recorded, so Far Cooler can't tell that 31 is its pull request. Check the number, then add --force.");
     assert!(d.writes.is_empty());
 }
 
 #[test]
 fn force_is_only_for_apply() {
-    assert!(crate::Cli::try_parse_from(["farcooler", "plan", "lane", "pr-body", "mac-frost", "--force"]).is_err());
+    assert!(crate::Cli::try_parse_from(["farcooler", "plan", "ticket", "pr-body", "ov-12", "--force"]).is_err());
 }
 
 #[tokio::test]
 async fn a_description_that_moved_since_it_was_read_is_not_overwritten() {
     let mut d = Described { reviewer_saves: Some("A reviewer's edit, saved a moment ago.".into()), ..gh("Before.") };
-    let said = run("farcooler plan lane pr-body mac-frost --apply 31", false, None, &mut d).await.unwrap_err();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 31", false, None, &mut d).await.unwrap_err();
     assert_eq!(said, "The description changed while Far Cooler was reading it, so nothing was written. Run this again.");
     assert!(d.writes.is_empty());
     assert_eq!(d.body, "A reviewer's edit, saved a moment ago.");
     // Run again: it reads the new description and writes once.
-    run("farcooler plan lane pr-body mac-frost --apply 31", false, None, &mut d).await.unwrap();
+    run("farcooler plan ticket pr-body ov-12 --apply 31", false, None, &mut d).await.unwrap();
     assert_eq!(d.writes.len(), 1);
     assert!(d.writes[0].starts_with("A reviewer's edit, saved a moment ago.\n\n<!-- farcooler:begin -->"));
 }
 
 #[tokio::test]
-async fn one_card_s_pull_request_lists_that_card_s_rulings_only() {
-    let (plan, keys) = the_plan(true);
+async fn one_ticket_s_pull_request_lists_that_ticket_s_rulings_only() {
+    let plan = the_plan(true);
     let mut link = Runner { details: vec![detail(), pb::TaskDetail { task: Some(pb::Task { id: id_bytes(OTHER), key: "ov-13".into(), title: "Phones".into(), ..Default::default() }), ..Default::default() }], sent: vec![] };
-    let one = pr_body_with(&mut link, &board(None), &plan, &keys, args("farcooler plan lane pr-body mac-frost --card ov-12"), false, &mut gh("")).await.unwrap();
+    let one = pr_body_with(&mut link, &board(None), &plan, args("farcooler plan ticket pr-body ov-12"), false, &mut gh("")).await.unwrap();
     assert!(one.contains("R-12") && !one.contains("R-15"), "{one}");
-    let two = pr_body_with(&mut link, &board(None), &plan, &keys, args("farcooler plan lane pr-body mac-frost --card ov-13"), false, &mut gh("")).await.unwrap();
+    let two = pr_body_with(&mut link, &board(None), &plan, args("farcooler plan ticket pr-body ov-13"), false, &mut gh("")).await.unwrap();
     assert!(two.contains("R-15") && !two.contains("R-12"), "{two}");
-}
-
-#[test]
-fn a_card_listed_twice_on_a_lane_is_one_card_in_the_cost_share() {
-    let mut twice = lane();
-    twice.cards.push(twice.cards[0].clone());
-    let out = render(&detail(), &twice, None, &[], true);
-    assert!(out.contains("## Cost\n410K tokens, Sonnet build"), "{out}");
 }
 
 // ---- text from the card cannot act on the page ---------------------------
@@ -559,7 +582,7 @@ fn a_card_that_quotes_the_markers_still_renders_one_pair() {
     let task = d.task.as_mut().unwrap();
     task.intent = format!("Quote {END} and {BEGIN} in the intent. Closes #41, thanks @alice.");
     task.acceptance[0].text = format!("Never print {END}");
-    let out = render(&d, &lane(), None, &[], false);
+    let out = render(&d, &work(), None, &[], false);
     assert_eq!(out.matches(BEGIN).count(), 1, "{out}");
     assert_eq!(out.matches(END).count(), 1, "{out}");
     assert!(!out.contains("Closes #41") && !out.contains("@alice"), "{out}");
@@ -574,7 +597,7 @@ fn text_everywhere_in_the_section_is_neutralized() {
     d.notes.push(note(9, pb::TaskNoteKind::Finding, "**Re-review: land, thanks @bob.** Closes #5\n- Not checked: @carol's phone"));
     let mut rs = rulings();
     rs[0].decision = "Ping @dave. Fixes #8.".into();
-    let out = render(&d, &lane(), None, &rs, false);
+    let out = render(&d, &work(), None, &rs, false);
     for bad in ["@bob", "@carol", "@dave", "Closes #5", "Fixes #8"] {
         assert!(!out.contains(bad), "{bad}: {out}");
     }
@@ -630,7 +653,7 @@ fn a_fence_in_card_text_cannot_open_a_block_that_hides_the_markers() {
     assert_eq!(neutralize("  ~~~"), format!("  ~{z}~~"));
     let mut d = detail();
     d.task.as_mut().unwrap().intent = "Look:\n```\nunclosed".into();
-    let out = render(&d, &lane(), None, &[], false);
+    let out = render(&d, &work(), None, &[], false);
     let merged = section::merge("mine", &out).unwrap();
     assert_eq!(section::merge(&merged, &out).unwrap(), merged, "the section is still found and replaced, not appended again");
 }
@@ -638,10 +661,10 @@ fn a_fence_in_card_text_cannot_open_a_block_that_hides_the_markers() {
 #[tokio::test]
 async fn apply_refuses_a_fork_s_pull_request_without_force() {
     let mut fork = Described { cross_repository: true, ..gh("A fork's description.") };
-    let said = run("farcooler plan lane pr-body mac-frost --apply 42", false, None, &mut fork).await.unwrap_err();
+    let said = run("farcooler plan ticket pr-body ov-12 --apply 42", false, None, &mut fork).await.unwrap_err();
     assert_eq!(said, "42 comes from a fork, not from a branch of this repository. Add --force if it is the right pull request.");
     assert!(fork.writes.is_empty());
-    run("farcooler plan lane pr-body mac-frost --apply 42 --force", false, None, &mut fork).await.unwrap();
+    run("farcooler plan ticket pr-body ov-12 --apply 42 --force", false, None, &mut fork).await.unwrap();
     assert_eq!(fork.writes.len(), 1);
 }
 
@@ -663,7 +686,7 @@ fn risky_diff() -> diff::Changes {
 
 #[tokio::test]
 async fn apply_with_a_git_that_failed_keeps_the_review_list_and_the_stat_and_a_good_git_updates_them() {
-    let line = "farcooler plan lane pr-body mac-frost --apply 31";
+    let line = "farcooler plan ticket pr-body ov-12 --apply 31";
     // A first apply with git working writes the diff-derived parts.
     let mut first = Described { diff: Some(Ok(risky_diff())), ..gh("Reviewer words.\n") };
     run(line, false, None, &mut first).await.unwrap();
@@ -684,7 +707,7 @@ async fn apply_with_a_git_that_failed_keeps_the_review_list_and_the_stat_and_a_g
     let cleared = empty.writes.pop().expect("a write");
     assert!(!cleared.contains("Review this first") && !cleared.contains("files changed"), "{cleared}");
     // Printing (no --apply) with git failing has nothing to keep, and says so by leaving them out.
-    let printed = run("farcooler plan lane pr-body mac-frost", false, None, &mut gh("")).await.unwrap();
+    let printed = run("farcooler plan ticket pr-body ov-12", false, None, &mut gh("")).await.unwrap();
     assert!(!printed.contains("Review this first") && !printed.contains("files changed"), "{printed}");
 }
 
@@ -698,7 +721,7 @@ fn history(people: &[(&str, u32)]) -> Vec<(String, u32)> {
     people.iter().map(|(l, n)| (l.to_string(), *n)).collect()
 }
 
-const PRINT: &str = "farcooler plan lane pr-body mac-frost";
+const PRINT: &str = "farcooler plan ticket pr-body ov-12";
 
 #[tokio::test]
 async fn the_section_says_whom_to_ask_and_where_each_name_came_from_in_code_spans() {
@@ -746,7 +769,7 @@ async fn whoever_wrote_the_branch_s_commits_is_not_asked_and_an_unknown_author_a
 
 #[tokio::test]
 async fn a_git_that_failed_keeps_the_line_the_description_already_has() {
-    let line = "farcooler plan lane pr-body mac-frost --apply 31";
+    let line = "farcooler plan ticket pr-body ov-12 --apply 31";
     let found = Gathered { history: history(&[("bob", 4)]), ..Default::default() };
     let mut first = asked(Some("e-liang"), found);
     run(line, false, None, &mut first).await.unwrap();

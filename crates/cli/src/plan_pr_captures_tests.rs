@@ -37,7 +37,7 @@ fn card(labels: &[&str], notes: Vec<pb::TaskNote>) -> pb::TaskDetail {
 }
 
 fn render(detail: &pb::TaskDetail, changes: Option<&Changes>) -> String {
-    super::render(&Input { detail, lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes, carried: None, reviewers: &[] })
+    super::render(&Input { detail, spend: Default::default(), workers: &[], theme: None, rulings: vec![], cost_line: false, changes, carried: None, reviewers: &[] })
 }
 
 fn links(names: &[&str]) -> String {

@@ -54,21 +54,34 @@ fn task(n: u128, key: &str, status: pb::TaskStatus) -> pb::Task {
     }
 }
 
-fn lane(name: &str, state: pb::LaneState) -> pb::Lane {
-    pb::Lane { name: name.into(), state: state as i32, spend: Some(Default::default()), ..Default::default() }
+/// A ticket on the line, its card keyed `key`: what a page's `lane`
+/// reference names now (ov-872).
+fn ticket(n: u128, key: &str, stage: pb::TicketStage) -> (pb::PlanCard, pb::TicketLine) {
+    let id = id_bytes(Uuid::from_u128(0x7000 + n));
+    (
+        pb::PlanCard { task_id: id.clone(), key: key.into(), ..Default::default() },
+        pb::TicketLine { task_id: id, stage: stage as i32, spend: Some(Default::default()), ..Default::default() },
+    )
 }
 
-/// The plan the train page's references read: three lanes in review and one fixing.
+/// `tickets` as a plan's cards and lines.
+fn on_the_line(tickets: Vec<(pb::PlanCard, pb::TicketLine)>) -> (Vec<pb::PlanCard>, Vec<pb::TicketLine>) {
+    tickets.into_iter().unzip()
+}
+
+/// The plan the landing page's references read: three tickets in review and one fixing.
 fn the_plan() -> pb::Plan {
-    let mut fixing = lane("ov-181-review", pb::LaneState::Fixing);
-    fixing.fix_rounds = 1;
+    let mut fixing = ticket(4, "ov-181-review", pb::TicketStage::Building);
+    fixing.1.fix_rounds = 1;
+    let (cards, lines) = on_the_line(vec![
+        ticket(1, "ov-274-phones", pb::TicketStage::Reviewing),
+        ticket(2, "ov-199-lfs", pb::TicketStage::Reviewing),
+        ticket(3, "ov-275-cost", pb::TicketStage::Reviewing),
+        fixing,
+    ]);
     pb::Plan {
-        lanes: vec![
-            lane("ov-274-phones", pb::LaneState::Review),
-            lane("ov-199-lfs", pb::LaneState::Review),
-            lane("ov-275-cost", pb::LaneState::Review),
-            fixing,
-        ],
+        cards,
+        lines,
         themes: vec![pb::BoardThemeView {
             theme: Some(pb::BoardTheme { id: id_bytes(Uuid::from_u128(0x1001)), name: "Visual language".into(), ..Default::default() }),
             counts: Some(pb::PlanStatusCounts { done: 3, backlog: 7, ..Default::default() }),
@@ -382,7 +395,7 @@ async fn show_draws_the_page_with_its_references_live() {
     let table: Vec<&&str> = lines.iter().filter(|l| l.contains("ov-27") && l.contains("iOS UI class")).collect();
     assert_eq!(table.len(), 1, "{text}");
     assert!(table[0].starts_with("ov-274-phones  ov-274 Title of ov-274 (Needs Decision)"), "{}", table[0]);
-    assert!(table[0].ends_with("In review"), "a lane's state is live: {}", table[0]);
+    assert!(table[0].ends_with("In review"), "a ticket's stage is live: {}", table[0]);
     assert!(text.contains("Fixing · round 1 (attention)"), "{text}");
     assert!(text.contains("- [Waiting] Owner: should Plan hide Unread on phones? -> Needs you (attention) (ask ov-274)"), "{text}");
     assert!(text.contains("- [Active] CI on the pushed branch · run 812 -> github.com (https://github.com/example/overnight/actions/runs/812)"), "{text}");
@@ -392,7 +405,7 @@ async fn show_draws_the_page_with_its_references_live() {
 }
 
 /// A reference the board can't resolve is plain text and never an error, and a
-/// runner with no plan draws its lanes by name.
+/// runner with no plan draws its tickets by name.
 #[tokio::test]
 async fn an_unresolved_reference_is_plain_text() {
     let mut link = runner();
@@ -402,7 +415,7 @@ async fn an_unresolved_reference_is_plain_text() {
     assert!(text.contains("spend [page spend]"), "a page that isn't there is its slot: {text}");
     let row = text.lines().find(|l| l.contains("iOS UI class")).unwrap();
     assert!(row.starts_with("ov-274-phones"), "{row}");
-    assert!(row.ends_with("ov-274-phones"), "a lane's state is its name without a plan: {row}");
+    assert!(row.ends_with("ov-274-phones"), "a ticket's stage is its name without a plan: {row}");
     assert!(text.contains("Visual language [theme Visual language]"), "{text}");
     assert!(!text.contains("in theme"), "the anchor's name can't be read without a plan: {text}");
 }
@@ -488,20 +501,22 @@ fn the_verbs_parse() {
 
 /// The live page drawn against a plan: CI from the runner's reads (a failed
 /// one in amber, a short SHA matching the read of its full one), the board's
-/// counts, and a lane's and a theme's spend. With no plan, each is its name.
+/// counts, and a ticket's and a theme's spend. With no plan, each is its name.
 #[test]
 fn live_data_draws_what_the_runner_last_read() {
     let doc = page_file("normalized/live.json");
     let page = farcooler_core::page_doc::parse(&doc, &farcooler_core::page_doc::Caps::default()).unwrap();
     let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
-    let mut mac_ux = lane("mac-ux", pb::LaneState::Review);
-    mac_ux.spend = Some(pb::LaneSpend { input_tokens: 400_000, output_tokens: 70_000, runs: 2, ..Default::default() });
+    let mut mac_ux = ticket(1, "mac-ux", pb::TicketStage::Reviewing);
+    mac_ux.1.spend = Some(pb::Spend { input_tokens: 400_000, output_tokens: 70_000, runs: 2, ..Default::default() });
+    let (cards, lines) = on_the_line(vec![mac_ux]);
     let plan = pb::Plan {
-        lanes: vec![mac_ux],
+        cards,
+        lines,
         themes: vec![pb::BoardThemeView {
             theme: Some(pb::BoardTheme { name: "Visual language".into(), ..Default::default() }),
             counts: Some(pb::PlanStatusCounts { done: 3, backlog: 7, ..Default::default() }),
-            spend: Some(pb::LaneSpend { input_tokens: 1_200_000, runs: 5, ..Default::default() }),
+            spend: Some(pb::Spend { input_tokens: 1_200_000, runs: 5, ..Default::default() }),
             ..Default::default()
         }],
         ci: vec![

@@ -1,42 +1,46 @@
-//! `farcooler plan lane dispatch` (ov-457): put an agent on a lane, not a card.
+//! `farcooler agent dispatch` (ov-457, ov-872): open a pane as an agent on
+//! one or more tickets.
 //!
-//! A lane is the unit of execution: one agent, or a chain of them, in one
-//! worktree on one branch, working one or more cards. This takes an existing
-//! lane by name, or makes one from `--card`, and opens a pane on its first
-//! card that isn't done, exactly as `task dispatch` would (same refusals,
-//! warnings and board moves: it IS `task dispatch`), with the lane named on
-//! the pane. The runner does the rest (`farcooler_daemon::lane_panes`): it
-//! briefs the agent on every card on the lane, records the pane as the lane's
-//! build agent, moves the lane to building, and exports `FARCOOLER_LANE`.
-//! Nothing is recorded by hand.
+//! The pane opens on the first ticket exactly as `task dispatch` would (same
+//! refusals, warnings and board moves: it IS `task dispatch`), with
+//! `TerminalCreate.agent` naming its role and the tickets after the first. The
+//! runner does the rest (`farcooler_daemon::agent_panes`): it refuses a
+//! ticket that isn't on the first one's board, briefs the agent on its role
+//! and every ticket, records the pane as the agent with its tickets on the
+//! line, starts a builder building the first on the pane's branch, and
+//! exports `FARCOOLER_ROLE`. Nothing is recorded by hand.
+//!
+//! A reviewer or a lander works a ticket a builder already built, so its pane
+//! leaves the card where it is: only a builder's dispatch puts the card on
+//! the pane's worktree and into progress.
 //!
 //! **Seen to start** (ov-493). Then it watches the pane for up to
 //! `FIRST_TURN_LOOKS` seconds and says whether the agent began its first
 //! turn, or what stopped it: claude's folder-trust prompt, which is the
 //! owner's to answer, another prompt, or nothing yet. The runner watches on
-//! past that (`farcooler_daemon::watch::lane_start`) and messages the
+//! past that (`farcooler_daemon::watch::agent_start`) and messages the
 //! orchestrator if it never starts.
 
 use clap::Args;
 use farcooler_protocol::capability;
-use farcooler_protocol::v1::{self as pb, request, result};
+use farcooler_protocol::v1::{self as pb, result};
 
-use super::{Failed, cards_of, find_lane, is_live, send, unreadable};
-use crate::tasks::{Board, DispatchLink, Lane, actor_for, board_in};
+use super::{Failed, RoleArg, board_in, card, unreadable};
+use crate::tasks::{Board, DispatchLink, Lane, actor_for};
 
-/// `plan lane dispatch`'s arguments.
+/// `agent dispatch`'s arguments.
 #[derive(Debug, Clone, Args)]
-pub(super) struct LaneDispatchArgs {
-    /// The lane: an existing one, or one to make from `--card`.
-    name: String,
-    /// A card the lane works, `KEY` or `KEY:SLICE`, in order. Repeat for more.
-    /// Added to an existing lane that doesn't have it yet.
-    #[arg(long = "card", value_name = "KEY[:SLICE]")]
-    cards: Vec<String>,
+pub(crate) struct AgentDispatchArgs {
+    /// Builder, reviewer, lander or orchestrator.
+    #[arg(long, value_enum)]
+    role: RoleArg,
+    /// A ticket it works, by key, in order: the pane opens on the first. Repeat for more.
+    #[arg(long = "ticket", value_name = "KEY", required = true)]
+    tickets: Vec<String>,
     /// The worktree to work in, by name or id.
     #[arg(long, required_unless_present = "new", conflicts_with = "new")]
     worktree: Option<String>,
-    /// Make a new worktree with this name for the lane.
+    /// Make a new worktree with this name for it.
     #[arg(long, requires = "branch")]
     new: Option<String>,
     /// The new worktree's branch.
@@ -47,80 +51,61 @@ pub(super) struct LaneDispatchArgs {
     base: String,
     /// The agent to start: claude, codex or cursor, with an optional `:model`.
     #[arg(long, default_value = "claude")]
-    preset: String,
-    /// One line: why a new lane is in the plan.
+    harness: String,
+    /// What it's for, for people: "Phones show the plan".
     #[arg(long)]
-    reason: Option<String>,
-    /// Dispatch even though the lane's first card already has an agent.
+    title: Option<String>,
+    /// Dispatch even though the first ticket already has an agent.
     #[arg(long)]
     again: bool,
 }
 
-/// `plan lane dispatch`, answering what to print.
+/// `agent dispatch`, answering what to print.
 pub(super) async fn dispatch<L: DispatchLink>(
     link: &mut L,
     board: &Board,
-    ws: bytes::Bytes,
-    plan: &pb::Plan,
-    args: LaneDispatchArgs,
+    args: AgentDispatchArgs,
     actor: &str,
     json: bool,
 ) -> Result<String, Failed> {
-    if !link.capabilities().iter().any(|c| c == capability::TERMINAL_LANE) {
-        return Err("This runner's Far Cooler can't open a pane for a lane yet. Update it and try again.".into());
+    if !link.capabilities().iter().any(|c| c == capability::BOARD_LINE) {
+        return Err("This runner's Far Cooler can't open a pane as an agent yet. Update it and try again.".into());
     }
     let items = board_in(link, board, None, None).await?.items;
-    let wanted = cards_of(link, board, &items, &args.cards).await?;
-    let existing = find_lane(plan, &args.name).ok().filter(|l| is_live(l.state)).cloned();
-    let lane = match existing {
-        Some(lane) => {
-            let add: Vec<pb::LaneCard> =
-                wanted.into_iter().filter(|w| !lane.cards.iter().any(|c| c.task_id == w.task_id && c.slice == w.slice)).collect();
-            if add.is_empty() {
-                lane
-            } else {
-                let p = request::Payload::LaneCards(pb::LaneCards { lane_id: lane.id.clone(), add, remove: Vec::new(), actor: actor.into() });
-                let result::Value::Lane(changed) = send(link, board, "lane.cards", p).await? else { return Err(unreadable()) };
-                changed
-            }
+    let mut tickets: Vec<pb::Task> = Vec::new();
+    for key in &args.tickets {
+        let task = card(link, board, &items, key).await?;
+        if !tickets.iter().any(|t| t.id == task.id) {
+            tickets.push(task);
         }
-        None if wanted.is_empty() => {
-            return Err(format!("No lane here is called {:?}. Name its cards with --card to make it.", args.name).into());
-        }
-        None => {
-            let p = request::Payload::LaneCreate(pb::LaneCreate {
-                workspace_id: ws,
-                name: args.name.clone(),
-                reason: args.reason.clone().unwrap_or_default(),
-                cards: wanted,
-                actor: actor.into(),
-                ..Default::default()
-            });
-            let result::Value::Lane(made) = send(link, board, "lane.create", p).await? else { return Err(unreadable()) };
-            made
-        }
-    };
-    let first = first_open(&lane, &items)
-        .ok_or_else(|| -> Failed { format!("Every card on {} is done. Add one with --card.", lane.name).into() })?;
+    }
+    let Some((first, rest)) = tickets.split_first() else { return Err("Name a ticket with --ticket.".into()) };
     let worktree = match (args.worktree, args.new, args.branch) {
         (Some(named), _, _) => Lane::Existing(named),
         (None, Some(name), Some(branch)) => Lane::New { name, branch, base: args.base },
         _ => return Err("Name a worktree with --worktree, or a new one with --new and --branch.".into()),
     };
+    let agent = pb::AgentDispatch {
+        role: args.role.wire() as i32,
+        more_tickets: rest.iter().map(|t| t.key.clone()).collect(),
+        title: args.title.clone().unwrap_or_default(),
+    };
     let asked = crate::tasks::Dispatch {
         task: first,
         lane: worktree,
-        preset: &args.preset,
+        preset: &args.harness,
         actor: actor_for(Some(actor))?,
         again: args.again,
-        plan_lane: Some(&lane.name),
+        agent: Some(agent),
     };
     let done = crate::tasks::dispatch(link, asked, &mut |w| eprintln!("{w}")).await?;
     let said = crate::tasks::dispatched_output(&first.key, &done, json);
     let turn = if done.confirmed() { first_turn(link, done.worktree, done.terminal).await } else { FirstTurn::Unseen };
+    let role = super::role_word(args.role.wire() as i32);
     if json {
         let mut out: serde_json::Value = serde_json::from_str(&said).map_err(|_| unreadable())?;
-        out["lane"] = serde_json::Value::String(lane.name.clone());
+        out["role"] = serde_json::Value::String(role.to_lowercase());
+        out["tickets"] = tickets.iter().map(|t| serde_json::Value::String(t.key.clone())).collect();
         out["first_turn"] = serde_json::Value::String(turn.word().into());
         if let FirstTurn::Stopped(q) = &turn {
             out["stopped_on"] = q.clone().map_or(serde_json::Value::Null, serde_json::Value::String);
@@ -128,7 +113,12 @@ pub(super) async fn dispatch<L: DispatchLink>(
         return Ok(out.to_string());
     }
     let started = turn.said(&done.terminal_short).map(|s| format!("\n{s}")).unwrap_or_default();
-    Ok(format!("Lane {} is building, starting on {}.\n{said}{started}", lane.name, first.key))
+    let then = if rest.is_empty() {
+        String::new()
+    } else {
+        format!(", then {}", rest.iter().map(|t| t.key.as_str()).collect::<Vec<_>>().join(", "))
+    };
+    Ok(format!("{role} is starting on {}{then}.\n{said}{started}", first.key))
 }
 
 /// How many times dispatch looks for the agent's first turn, a second
@@ -198,14 +188,6 @@ async fn first_turn<L: DispatchLink>(link: &mut L, worktree: uuid::Uuid, termina
     FirstTurn::NotYet
 }
 
-/// The lane's first card, in its order, that isn't done or cancelled.
-fn first_open<'a>(lane: &pb::Lane, items: &'a [pb::Task]) -> Option<&'a pb::Task> {
-    let open = |t: &&pb::Task| {
-        !matches!(pb::TaskStatus::try_from(t.status), Ok(pb::TaskStatus::Done | pb::TaskStatus::Cancelled))
-    };
-    lane.cards.iter().find_map(|c| items.iter().filter(open).find(|t| t.id == c.task_id))
-}
-
 #[cfg(test)]
-#[path = "plan_dispatch_tests.rs"]
+#[path = "plan_agent_dispatch_tests.rs"]
 mod tests;

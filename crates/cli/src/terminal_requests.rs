@@ -30,7 +30,7 @@ pub(crate) fn terminal_create_request(
             join_active_group: tile,
             prompt: prompt.clone(),
             task_key: task.clone(),
-            lane: None,
+            agent: None,
         }),
     );
     if prompt.is_some() {
@@ -42,14 +42,17 @@ pub(crate) fn terminal_create_request(
     req
 }
 
-/// `req`, a `terminal.create`, opened for the plan lane `lane` when there is
-/// one (ov-457), naming `capability::TERMINAL_LANE`: an older runner refuses
-/// it rather than open a pane that knows only its first card.
-pub(crate) fn with_lane(mut req: farcooler_protocol::v1::Request, lane: Option<&str>) -> farcooler_protocol::v1::Request {
-    let Some(lane) = lane.map(str::trim).filter(|l| !l.is_empty()) else { return req };
+/// `req`, a `terminal.create`, opened as the agent `agent` when there is one
+/// (ov-457, ov-872), naming `capability::BOARD_LINE`: an older runner refuses
+/// it rather than open a pane that knows only its first ticket.
+pub(crate) fn with_agent(
+    mut req: farcooler_protocol::v1::Request,
+    agent: Option<farcooler_protocol::v1::AgentDispatch>,
+) -> farcooler_protocol::v1::Request {
+    let Some(agent) = agent else { return req };
     if let Some(request::Payload::TerminalCreate(create)) = &mut req.payload {
-        create.lane = Some(lane.to_string());
-        req.required_capabilities.push(farcooler_protocol::capability::TERMINAL_LANE.to_string());
+        create.agent = Some(agent);
+        req.required_capabilities.push(farcooler_protocol::capability::BOARD_LINE.to_string());
     }
     req
 }

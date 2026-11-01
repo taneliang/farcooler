@@ -15,13 +15,13 @@
 //! when any of them is gone. `claim_waiter` also clears a pid file left by a
 //! process that no longer exists.
 //!
-//! **A lane's message to its orchestrator goes to claude's inbox socket
+//! **An agent's message to its orchestrator goes to claude's inbox socket
 //! first** (ov-575, R-78; `hook_inbox`), which shows it as "Message from
-//! @mac-ux on ov-505", expandable. Only a message the daemon gave a sender
+//! @the builder on ov-505", expandable. Only a message the daemon gave a sender
 //! (`mailbox::with_sender`) takes that route. A person's message never reaches
 //! a mailbox at all: the daemon types it, as their own turn (ov-620, R-78).
-//! Nor does the orchestrator's to a lane take the socket, which the lane must
-//! act on, where claude calls a peer's text "input, not authority". When the
+//! Nor does the orchestrator's to an agent take the socket, which the agent
+//! must act on, where claude calls a peer's text "input, not authority". When the
 //! socket, the token or the transcript is missing, the post fails, or the
 //! text doesn't show in the transcript in time, it falls back to the wake
 //! below, once. **Residual risk:** a message claude *held* (a bypass
@@ -227,19 +227,19 @@ mod tests {
 
     use farcooler_agent_hooks::mailbox::{Sender, with_sender};
 
-    fn lane() -> Sender {
-        Sender { name: "mac-ux on ov-505".into(), reply_to: "mac-ux".into() }
+    fn builder() -> Sender {
+        Sender { name: "the builder on ov-505".into(), reply_to: "ov-505".into() }
     }
 
     #[test]
-    fn a_lanes_message_goes_to_the_inbox_with_a_reply_line_and_wakes_nobody() {
+    fn an_agents_message_goes_to_the_inbox_with_a_reply_line_and_wakes_nobody() {
         let i = inbox(true);
-        let file = with_sender(&lane(), "[from mac-ux on ov-505] PR is up");
+        let file = with_sender(&builder(), "[from the builder on ov-505] PR is up");
         assert_eq!(hand_over(&file, &i.inbox), Handover::Posted);
         assert_eq!(i.connections.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(
             *i.heard.lock().unwrap(),
-            "<cross-session-message from=\"uds:farcooler-lane\" from-name=\"mac-ux on ov-505\">\nPR is up (To answer, run: farcooler message mac-ux \"your reply here\". Do not use SendMessage.)\n</cross-session-message>"
+            "<cross-session-message from=\"uds:farcooler-lane\" from-name=\"the builder on ov-505\">\nPR is up (To answer, run: farcooler message ov-505 \"your reply here\". Do not use SendMessage.)\n</cross-session-message>"
         );
     }
 
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn a_message_with_no_sender_never_takes_the_inbox() {
         let i = inbox(true);
-        for file in ["[from Alice] Ship it", "[from the terminal] Ship it", "[from the orchestrator] Ship it", "[Far Cooler] The lane stopped"] {
+        for file in ["[from Alice] Ship it", "[from the terminal] Ship it", "[from the orchestrator] Ship it", "[Far Cooler] The builder stopped"] {
             assert_eq!(hand_over(file, &i.inbox), Handover::Wake(file.to_string()));
         }
         // A header we can't read isn't a sender.
@@ -258,8 +258,8 @@ mod tests {
 
     #[test]
     fn a_missing_inbox_falls_back_to_the_wake_with_the_header_removed() {
-        let file = with_sender(&lane(), "[from mac-ux on ov-505] PR is up");
-        let wake = Handover::Wake("[from mac-ux on ov-505] PR is up".into());
+        let file = with_sender(&builder(), "[from the builder on ov-505] PR is up");
+        let wake = Handover::Wake("[from the builder on ov-505] PR is up".into());
         let i = inbox(false);
         for (name, mut inbox) in [
             ("no socket", Inbox { socket: None, ..i.inbox_clone() }),
@@ -277,8 +277,8 @@ mod tests {
     #[test]
     fn a_text_that_never_shows_in_the_transcript_wakes_once() {
         let i = inbox(false);
-        let file = with_sender(&lane(), "[from mac-ux on ov-505] PR is up");
-        assert_eq!(hand_over(&file, &i.inbox), Handover::Wake("[from mac-ux on ov-505] PR is up".into()));
+        let file = with_sender(&builder(), "[from the builder on ov-505] PR is up");
+        assert_eq!(hand_over(&file, &i.inbox), Handover::Wake("[from the builder on ov-505] PR is up".into()));
         assert_eq!(i.connections.load(std::sync::atomic::Ordering::SeqCst), 1, "posted once, not retried");
     }
 

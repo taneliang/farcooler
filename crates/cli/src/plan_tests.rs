@@ -1,5 +1,6 @@
 use clap::Parser;
 use farcooler_transport::ClientError;
+use serde_json::json;
 use uuid::Uuid;
 
 use super::*;
@@ -10,6 +11,11 @@ const WORKSPACE: Uuid = Uuid::from_u128(0x0202);
 const OTHER_BOARD: Uuid = Uuid::from_u128(0x0203);
 const NOW: i64 = 1_800_000_000_000;
 const HOUR: i64 = 3_600_000;
+
+/// The orchestrator's pane, and the lander on Landing 9.
+const ORCHESTRATOR: u128 = 0xa001;
+const LANDER: u128 = 0xa002;
+const BUILDER: u128 = 0xa003;
 
 fn task(n: u128, key: &str, status: pb::TaskStatus, board: Uuid) -> pb::Task {
     pb::Task {
@@ -31,14 +37,16 @@ fn items() -> Vec<pb::Task> {
     ]
 }
 
-fn lane(n: u128, name: &str, state: pb::LaneState, cards: &[u128]) -> pb::Lane {
-    pb::Lane {
-        id: id_bytes(Uuid::from_u128(0x2000 + n)),
-        workspace_id: id_bytes(WORKSPACE),
-        name: name.into(),
-        state: state as i32,
-        state_since: NOW - 10 * 60_000,
-        cards: cards.iter().map(|c| pb::LaneCard { task_id: id_bytes(Uuid::from_u128(0x1000 + c)), slice: String::new(), stage: None }).collect(),
+fn tid(n: u128) -> bytes::Bytes {
+    id_bytes(Uuid::from_u128(n))
+}
+
+/// The ticket for card `n` on the line, in `stage`.
+fn line(n: u128, stage: pb::TicketStage) -> pb::TicketLine {
+    pb::TicketLine {
+        task_id: tid(0x1000 + n),
+        stage: stage as i32,
+        stage_since: NOW - 10 * 60_000,
         spend: Some(Default::default()),
         ..Default::default()
     }
@@ -63,7 +71,6 @@ fn theme(n: u128, name: &str, cards: &[u128], done: u32) -> pb::BoardThemeView {
 }
 
 /// Two rulings (ov-304): R-2 standing on ov-1 and the theme, R-1 confirmed.
-/// The client's `plan_json` test builds the same two, so one fixture holds both.
 fn rulings() -> Vec<pb::BoardRuling> {
     vec![
         pb::BoardRuling {
@@ -101,39 +108,31 @@ fn rulings() -> Vec<pb::BoardRuling> {
     ]
 }
 
-/// A train (ov-309): integ-9, red, carrying mac-ux, and the runner's CI read
-/// of its SHA. The client's `plan_json` test builds the same, so one fixture
-/// holds both.
-fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
+/// Landing 9 (ov-309, ov-872): red, carrying ov-1, its lander working, and
+/// the runner's CI read of its SHA.
+fn landings() -> (Vec<pb::Landing>, Vec<pb::BoardCiRead>) {
     let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
-    let train = pb::BoardTrain {
+    let landing = pb::Landing {
         id: tid(0x6001),
         workspace_id: tid(0x0202),
-        name: "integ-9".into(),
+        number: 9,
+        route: pb::LandingRoute::Push as i32,
         base: "origin/main".into(),
         pushed_sha: Some("c85bf83d".into()),
-        state: pb::BoardTrainState::Red as i32,
+        state: pb::LandingState::Red as i32,
         state_since: NOW - 20 * 60_000,
+        lander_id: Some(tid(LANDER)),
         actor: "manager".into(),
         created_at: NOW - 2 * HOUR,
-        landed_at: None,
-        lane_ids: vec![tid(0x2002)],
+        task_ids: vec![tid(0x1001)],
         ci_subject: "sha:c85bf83d".into(),
         resource_version: 3,
-        title: "Train 9".into(),
-        summary: "Mac interface polish".into(),
-        agent: Some(pb::TrainAgent {
-            harness: "claude".into(),
-            agent_id: "i1".into(),
-            model: "sonnet".into(),
-            started_at: NOW - HOUR,
-            ended_at: None,
-            spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
-        }),
-        card_id: Some(tid(0x1002)),
-        phase: pb::BoardTrainPhase::CiFailed as i32,
-        held_by: Vec::new(),
+        title: "Mac interface polish".into(),
+        summary: "Title of ov-1".into(),
+        phase: pb::LandingPhase::CiFailed as i32,
         phase_since: NOW - 20 * 60_000,
+        spend: Some(pb::Spend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
+        ..Default::default()
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),
@@ -145,26 +144,76 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         changed_at: NOW - 20 * 60_000,
         asked_at: NOW - 60_000,
     };
-    (vec![train], vec![read])
+    (vec![landing], vec![read])
 }
 
-fn tid(n: u128) -> bytes::Bytes {
-    id_bytes(Uuid::from_u128(n))
+/// The orchestrator, and Landing 9's lander working ov-1.
+fn agents() -> Vec<pb::Agent> {
+    vec![
+        pb::Agent {
+            id: tid(LANDER),
+            role: pb::AgentRole::Lander as i32,
+            harness: "claude".into(),
+            model: "sonnet".into(),
+            title: "Land the Mac polish".into(),
+            started_at: NOW - HOUR,
+            tickets: vec![pb::AgentTicket { task_id: tid(0x1001), role: pb::WorkRole::Land as i32, started_at: NOW - HOUR }],
+            working: true,
+            doing_now: "Running the gate".into(),
+            last_at: NOW,
+            spend: Some(pb::Spend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
+            ..Default::default()
+        },
+        pb::Agent {
+            id: tid(ORCHESTRATOR),
+            role: pb::AgentRole::Orchestrator as i32,
+            harness: "claude".into(),
+            model: "opus".into(),
+            terminal_id: Some(tid(0xd00d)),
+            started_at: NOW - 4 * HOUR,
+            working: false,
+            last_at: NOW - 5 * 60_000,
+            spend: Some(pb::Spend { input_tokens: 2_000_000, output_tokens: 100_000, cost_micros: Some(14_200_000), runs: 4, ..Default::default() }),
+            ..Default::default()
+        },
+    ]
 }
 
-/// What the runner holds: a plan, and the board's cards.
+/// What the runner holds: a plan, and the board's cards. ov-2 waits next up,
+/// ov-1 is landing on Landing 9, built and now landed by agents, and ov-3
+/// landed an hour ago.
 fn the_plan() -> pb::Plan {
-    let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
-    queued.plan_rank = Some(1);
-    queued.reason = "Frees the Mac slot".into();
-    queued.title = "Mac follow-ups".into();
-    let mut review = lane(2, "mac-ux", pb::LaneState::Review, &[1]);
-    review.title = "Mac interface polish".into();
-    review.train = Some("integ-9".into());
-    review.spend = Some(pb::LaneSpend { input_tokens: 300_000, output_tokens: 170_000, runs: 2, ..Default::default() });
-    review.budget_tokens = Some(500_000);
-    let mut landed = lane(3, "fix-ac84", pb::LaneState::Landed, &[3]);
-    landed.state_since = NOW - HOUR;
+    let mut waiting = line(2, pb::TicketStage::Waiting);
+    waiting.plan_rank = Some(1);
+    waiting.reason = "Frees the Mac slot".into();
+    let mut landing = line(1, pb::TicketStage::Landing);
+    landing.branch = "mac-ux".into();
+    landing.pr_number = Some(31);
+    landing.landing = Some(9);
+    landing.spend = Some(pb::Spend { input_tokens: 300_000, output_tokens: 170_000, runs: 2, ..Default::default() });
+    landing.budget_tokens = Some(500_000);
+    landing.work = vec![
+        pb::TicketWork {
+            agent_id: tid(BUILDER),
+            task_id: tid(0x1001),
+            role: pb::WorkRole::Build as i32,
+            started_at: NOW - 3 * HOUR,
+            ended_at: Some(NOW - 2 * HOUR),
+            verdict: "finished".into(),
+            ..Default::default()
+        },
+        pb::TicketWork {
+            agent_id: tid(LANDER),
+            task_id: tid(0x1001),
+            role: pb::WorkRole::Land as i32,
+            started_at: NOW - HOUR,
+            ..Default::default()
+        },
+    ];
+    let mut landed = line(3, pb::TicketStage::Landed);
+    landed.stage_since = NOW - HOUR;
+    landed.landed_sha = Some("4d3c8cb1e2".into());
+    let (landings, ci) = landings();
     pb::Plan {
         now_ms: NOW,
         themes: vec![pb::BoardThemeView {
@@ -174,37 +223,31 @@ fn the_plan() -> pb::Plan {
             last_moved_at: Some(NOW - HOUR),
             ..theme(1, "Visual language", &[1, 2, 3], 1)
         }],
-        order: vec![queued.id.clone()],
-        lanes: vec![queued, review, landed],
         cards: items()
             .iter()
             .map(|t| pb::PlanCard { task_id: t.id.clone(), key: t.key.clone(), title: t.title.clone(), status: t.status })
             .collect(),
-        coverage: vec![
-            pb::PlanCoverage { task_id: items()[0].id.clone(), live: 1, landed: 0 },
-            pb::PlanCoverage { task_id: items()[1].id.clone(), live: 1, landed: 0 },
-            pb::PlanCoverage { task_id: items()[2].id.clone(), live: 0, landed: 1 },
-        ],
         rulings: rulings(),
-        trains: trains().0,
-        ci: trains().1,
+        ci,
         board_counts: Some(board_counts()),
         cost: Some(plan_cost()),
-        agents: vec![],
-        agents_spend: None,
         review_waits: vec![],
+        lines: vec![waiting, landing, landed],
+        landings,
+        agents: agents(),
+        agents_spend: Some(pb::Spend {
+            input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
+        }),
         suggested_reviewers: vec![],
     }
 }
 
-/// The theme's share of its lanes' spend, and the board's counts (ov-306).
-/// The client's `plan_json` test builds the same.
-fn theme_spend() -> pb::LaneSpend {
-    pb::LaneSpend { input_tokens: 235_000, output_tokens: 85_000, cost_micros: Some(15_500_000), runs: 2, ..Default::default() }
+/// The theme's share of its tickets' spend (ov-306).
+fn theme_spend() -> pb::Spend {
+    pb::Spend { input_tokens: 235_000, output_tokens: 85_000, cost_micros: Some(15_500_000), runs: 2, ..Default::default() }
 }
 
-/// The week's tokens and the harness and model comparison (ov-307). The
-/// client's `plan_json` test builds the same, so one fixture holds both.
+/// The week's tokens and the harness and model comparison (ov-307).
 fn plan_cost() -> pb::PlanCost {
     pb::PlanCost {
         week_tokens: 34_200_000,
@@ -240,7 +283,7 @@ struct Runner {
     capabilities: Vec<String>,
     sent: Vec<pb::Request>,
     refuse: Option<&'static str>,
-    /// What `plan.events` answers, for a theme or a lane alike.
+    /// What `plan.events` answers, for a theme, a ticket or a landing alike.
     events: Vec<pb::PlanEvent>,
     /// A plan to answer in place of `the_plan()`.
     plan: Option<pb::Plan>,
@@ -248,10 +291,18 @@ struct Runner {
 
 fn runner() -> Runner {
     Runner {
-        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS, capability::BOARD_COST,
-         capability::BOARD_RULING_ACTIONS, capability::BOARD_THEME_MOVE]
-            .map(String::from)
-            .to_vec(),
+        capabilities: [
+            "workstreams",
+            "tasks",
+            capability::BOARD_PLAN,
+            capability::BOARD_LINE,
+            capability::BOARD_RULINGS,
+            capability::BOARD_COST,
+            capability::BOARD_RULING_ACTIONS,
+            capability::BOARD_THEME_MOVE,
+        ]
+        .map(String::from)
+        .to_vec(),
         sent: vec![],
         refuse: None,
         events: vec![],
@@ -284,49 +335,76 @@ impl DispatchLink for Runner {
                 ("plan.get", _) => result::Value::Plan(plan),
                 ("task.list", _) => result::Value::TaskList(pb::TaskList { items: items(), reads: None }),
                 ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList { events: self.events.clone() }),
-                ("plan.set", Some(request::Payload::PlanSet(p))) => result::Value::Plan(pb::Plan {
-                    order: p.lane_ids,
-                    ..plan
-                }),
+                ("line.order", Some(request::Payload::LineOrder(p))) => {
+                    let mut plan = plan;
+                    for l in &mut plan.lines {
+                        l.plan_rank = p.task_ids.iter().position(|id| *id == l.task_id).map(|i| i as u32 + 1);
+                    }
+                    result::Value::Plan(plan)
+                }
+                ("line.set", Some(request::Payload::LineSet(p))) => {
+                    let mut set = plan.lines.into_iter().find(|l| l.task_id == p.task_id).unwrap_or_else(|| pb::TicketLine {
+                        task_id: p.task_id.clone(),
+                        stage: pb::TicketStage::Waiting as i32,
+                        ..Default::default()
+                    });
+                    if let Some(stage) = p.stage {
+                        set.stage = stage;
+                        set.landing = (stage == pb::TicketStage::Landing as i32).then_some(10);
+                    }
+                    result::Value::TicketLine(set)
+                }
                 ("board_theme.create" | "board_theme.update" | "board_theme.cards" | "board_theme.move", _) => {
                     result::Value::BoardThemeView(plan.themes[0].clone())
                 }
-                ("lane.create", Some(request::Payload::LaneCreate(p))) => {
-                    let mut made = lane(9, &p.name, pb::LaneState::Queued, &[]);
-                    if p.agent.is_some() {
-                        made.state = pb::LaneState::Building as i32;
-                    }
-                    made.cards = p.cards;
-                    result::Value::Lane(made)
+                ("agent.record", Some(request::Payload::AgentRecord(p))) => result::Value::Agent(pb::Agent {
+                    id: tid(0xa100),
+                    role: p.role,
+                    harness: p.harness,
+                    model: p.model.unwrap_or_default(),
+                    title: p.title.unwrap_or_default(),
+                    subagent_id: p.subagent_id,
+                    parent_terminal_id: p.parent_terminal_id,
+                    tickets: p.task_ids.into_iter().map(|t| pb::AgentTicket { task_id: t, ..Default::default() }).collect(),
+                    working: true,
+                    ..Default::default()
+                }),
+                ("agent.work", Some(request::Payload::AgentWork(p))) => {
+                    result::Value::Agent(plan.agents.into_iter().find(|a| a.id == p.agent_id).unwrap_or_default())
                 }
-                ("lane.update", Some(request::Payload::LaneUpdate(p))) => {
-                    let mut moved = plan.lanes.into_iter().find(|l| l.id == p.lane_id).unwrap();
-                    if let Some(state) = p.state {
-                        moved.state = state;
-                    }
-                    result::Value::Lane(moved)
+                ("agent.end", Some(request::Payload::AgentEnd(p))) => {
+                    result::Value::Agent(plan.agents.into_iter().find(|a| a.id == p.agent_id).unwrap_or_default())
                 }
-                ("lane.cards", _) => result::Value::Lane(plan.lanes[1].clone()),
-                ("train.start", Some(request::Payload::TrainStart(p))) => result::Value::BoardTrain(pb::BoardTrain {
-                    name: p.name,
+                ("landing.start", Some(request::Payload::LandingStart(p))) => result::Value::Landing(pb::Landing {
+                    id: tid(0x6002),
+                    number: 10,
+                    route: p.route,
                     base: p.base,
-                    lane_ids: p.lane_ids,
-                    state: pb::BoardTrainState::Integrating as i32,
+                    title: p.title,
+                    lander_id: p.lander_id,
+                    task_ids: p.task_ids,
+                    state: pb::LandingState::Open as i32,
                     state_since: NOW,
                     ..Default::default()
                 }),
-                ("train.set", Some(request::Payload::TrainSet(p))) => {
-                    let mut moved = plan.trains.into_iter().find(|t| t.id == p.train_id).unwrap();
+                ("landing.set", Some(request::Payload::LandingSet(p))) => {
+                    let mut set = plan.landings.into_iter().find(|l| l.id == p.landing_id).unwrap();
                     if let Some(sha) = p.sha {
-                        moved.ci_subject = format!("sha:{sha}");
-                        moved.pushed_sha = Some(sha);
-                        moved.state = pb::BoardTrainState::Pushed as i32;
+                        set.ci_subject = format!("sha:{sha}");
+                        set.pushed_sha = Some(sha);
+                        set.state = pb::LandingState::Pushed as i32;
                     }
                     if p.state != 0 {
-                        moved.state = p.state;
+                        set.state = p.state;
                     }
-                    result::Value::BoardTrain(moved)
+                    set.task_ids.retain(|t| !p.remove_task_ids.contains(t));
+                    set.task_ids.extend(p.add_task_ids);
+                    result::Value::Landing(set)
                 }
+                ("terminal.list", _) => result::Value::TerminalList(pb::TerminalList {
+                    items: vec![pb::Terminal { id: tid(0xd00d), ..Default::default() }],
+                    ..Default::default()
+                }),
                 ("ruling.add", Some(request::Payload::RulingAdd(p))) => result::Value::BoardRuling(pb::BoardRuling {
                     number: 3,
                     decision: p.decision,
@@ -388,50 +466,61 @@ async fn say(link: &mut Runner, args: &str) -> Result<String, Failed> {
     run_on(link, &the_board(), parsed(args), "manager", false, NOW).await
 }
 
+async fn say_json(link: &mut Runner, args: &str) -> Value {
+    let out = run_on(link, &the_board(), parsed(args), "manager", true, NOW).await.unwrap_or_else(|e| panic!("{args}: {e}"));
+    serde_json::from_str(&out).unwrap()
+}
+
 fn last(link: &Runner) -> &pb::Request {
     link.sent.last().expect("something was sent")
 }
 
 /// A runner without the layer is told so before anything is sent, with the
-/// sentence the design gives.
+/// sentence the design gives; one with themes and no line hears that it
+/// needs the line, and still keeps its themes.
 #[tokio::test]
 async fn an_old_runner_is_told_before_anything_is_sent() {
     let mut link = runner();
     link.capabilities.retain(|c| c != capability::BOARD_PLAN);
-    for args in ["", "set a", "theme list", "lane list", "lane start x"] {
+    for args in ["", "set ov-2", "theme list", "ticket show ov-1", "ticket set ov-2"] {
         let err = say(&mut link, args).await.unwrap_err();
         assert_eq!(err.to_string(), "This runner needs an update to keep a plan.", "{args:?}");
     }
     assert!(link.sent.is_empty(), "sent {:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
     assert_eq!(needs_the_layer(&link.capabilities()).unwrap_err().to_string(), NEEDS_UPDATE);
+
+    let mut link = runner();
+    link.capabilities.retain(|c| c != capability::BOARD_LINE);
+    for args in ["", "set ov-2", "ticket show ov-1", "ticket set ov-2 --stage building"] {
+        let err = say(&mut link, args).await.unwrap_err();
+        assert_eq!(err.to_string(), NEEDS_LINE, "{args:?}");
+    }
+    assert!(link.sent.is_empty(), "sent {:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
+    say(&mut link, "theme list").await.expect("themes were kept before the line");
 }
 
-/// Every layer request names the capability, so an older runner refuses
-/// rather than dropping what it can't read.
+/// Every layer request names the capability it needs, so an older runner
+/// refuses rather than dropping what it can't read, and who it's from.
 #[tokio::test]
 async fn every_write_names_the_capability_and_the_actor() {
     let cases = [
-        "set mac-fu3",
-        "theme create Reliability --outcome Done. --card ov-2",
-        "theme set Visual --next Ship",
-        "theme cards Visual --add ov-2",
-        "lane start mac-new --card ov-2:Mac --agent a1",
-        "lane set mac-ux --state landing",
-        "lane cards mac-ux --add ov-2",
+        ("set ov-2", capability::BOARD_LINE),
+        ("theme create Reliability --outcome Done. --card ov-2", capability::BOARD_PLAN),
+        ("theme set Visual --next Ship", capability::BOARD_PLAN),
+        ("theme cards Visual --add ov-2", capability::BOARD_PLAN),
+        ("ticket set ov-2 --stage building", capability::BOARD_LINE),
     ];
-    for args in cases {
+    for (args, needs) in cases {
         let mut link = runner();
         say(&mut link, args).await.unwrap_or_else(|e| panic!("{args}: {e}"));
         let r = last(&link);
-        assert_eq!(r.required_capabilities, [capability::BOARD_PLAN.to_string()], "{args}");
+        assert_eq!(r.required_capabilities, [needs.to_string()], "{args}");
         let actor = match r.payload.as_ref().unwrap() {
-            request::Payload::PlanSet(p) => &p.actor,
+            request::Payload::LineOrder(p) => &p.actor,
             request::Payload::BoardThemeCreate(p) => &p.actor,
             request::Payload::BoardThemeUpdate(p) => &p.actor,
             request::Payload::BoardThemeCards(p) => &p.actor,
-            request::Payload::LaneCreate(p) => &p.actor,
-            request::Payload::LaneUpdate(p) => &p.actor,
-            request::Payload::LaneCards(p) => &p.actor,
+            request::Payload::LineSet(p) => &p.actor,
             other => panic!("{other:?}"),
         };
         assert_eq!(actor, "manager", "{args}: a write names who it's from, even `user`");
@@ -439,18 +528,23 @@ async fn every_write_names_the_capability_and_the_actor() {
 }
 
 /// The overview is what the Mac draws: next up first with each reason, then
-/// what's running, then the themes, then what landed today.
+/// the tickets being worked and who works them, the landings, the agents,
+/// then the themes, rulings, cost and what landed today.
 #[tokio::test]
-async fn the_overview_reads_next_up_now_themes_and_landed() {
+async fn the_overview_reads_next_up_now_landings_agents_themes_and_landed() {
     let mut link = runner();
     let text = say(&mut link, "").await.unwrap();
     let expected = [
         "Next up",
-        "  1  Mac follow-ups (mac-fu3) · ov-2",
+        "  1  ov-2  Title of ov-2",
         "     Frees the Mac slot",
         "Now",
-        "  Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · agent working · 120K tokens · $4.00 API-equivalent",
-        "    Mac interface polish (mac-ux) · In review · in integ-9 · 1 card · 470K tokens · 470K of 500K tokens budgeted",
+        "  ov-1  Title of ov-1 · Landing · on Landing 9 · PR 31 · Lander sonnet (0000a002) · 470K tokens · 470K of 500K tokens budgeted",
+        "Landings",
+        "  Mac interface polish (Landing 9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · ov-1 · lander Lander sonnet (0000a002) · 120K tokens · $4.00 API-equivalent",
+        "Agents",
+        "  \u{25cf} Lander sonnet (0000a002) \u{201c}Land the Mac polish\u{201d}  ov-1  working · Running the gate  120K tokens · about $4.00 API-equivalent",
+        "  \u{25cb} Orchestrator opus (0000a001)  The plan  idle · active 5m ago  2.1M tokens · about $14.20 API-equivalent",
         "Themes",
         "  Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens",
         "Decided for you",
@@ -464,133 +558,184 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "  2 other harness and model pairs held back until three cards have landed",
         "  In flight  1.2M tokens on cards that haven't landed · API-equivalent dollars: Not reported",
         "Landed today",
-        "  fix-ac84",
+        "  ov-3  Title of ov-3",
     ];
     assert_eq!(text.lines().collect::<Vec<_>>(), expected, "{text}");
     assert_eq!(link.sent.len(), 1, "one read draws it");
     assert_eq!(link.sent[0].method, "plan.get");
 }
 
-/// A card with all its lanes landed shows up as such only while it isn't done.
+/// A card whose ticket landed while it isn't done, and one in progress that
+/// isn't on the line, are flagged in words and in `--json`.
 #[test]
-fn landed_not_closed_and_no_lane_are_derived() {
+fn landed_not_closed_and_off_the_line_are_derived() {
     let mut plan = the_plan();
     plan.cards[2].status = pb::TaskStatus::InProgress as i32;
-    plan.cards[0].status = pb::TaskStatus::InProgress as i32;
-    plan.coverage[0].live = 0;
-    let flagged = checks(&plan, &Keys::of_plan(&plan));
-    assert_eq!(flagged.len(), 2, "{flagged:?}");
-    assert!(flagged[0].starts_with("ov-1  In Progress, and no lane"), "{flagged:?}");
-    assert!(flagged[1].starts_with("ov-3  All its lanes have landed"), "{flagged:?}");
-    let json = plan_json(&plan, &Keys::of_plan(&plan));
+    plan.lines.retain(|l| l.task_id != tid(0x1001));
+    let flagged = checks(&plan);
+    assert_eq!(flagged, ["ov-1  In Progress, and it isn't on the line.", "ov-3  Landed, and it's still In Progress."]);
+    assert!(overview(&plan, NOW).ends_with("Worth a look\n  ov-1  In Progress, and it isn't on the line.\n  ov-3  Landed, and it's still In Progress."));
+    let json = plan_json(&plan);
     assert_eq!(json["landed_not_closed"][0]["key"], "ov-3");
-    assert_eq!(json["no_lane"][0]["key"], "ov-1");
+    assert_eq!(json["off_the_line"][0]["key"], "ov-1");
     plan.cards[2].status = pb::TaskStatus::Done as i32;
-    assert!(plan_json(&plan, &Keys::of_plan(&plan))["landed_not_closed"].as_array().unwrap().is_empty());
+    assert!(plan_json(&plan)["landed_not_closed"].as_array().unwrap().is_empty());
 }
 
-/// `plan --json` is the whole plan: the read an orchestrator makes instead of
-/// `task list` plus a `task show` per card.
+/// `plan --json` is the client's `plan_json`, byte for byte: the shape the
+/// apps decode and `test/fixtures/plan.json` holds (the client's test keeps
+/// the fixture).
 #[tokio::test]
-async fn plan_json_is_the_whole_plan() {
+async fn plan_json_is_the_apps_shape() {
     let mut link = runner();
     let out = run_on(&mut link, &the_board(), None, "manager", true, NOW).await.unwrap();
+    assert_eq!(out, farcooler_client::plan_json::plan_json(&the_plan()).to_string());
     let v: Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["lanes"].as_array().unwrap().len(), 3);
-    assert_eq!(v["themes"][0]["name"], "Visual language");
-    assert_eq!(v["themes"][0]["cards"][0]["key"], "ov-1");
-    assert_eq!(v["order"][0], Uuid::from_u128(0x2001).to_string());
-    assert_eq!(v["lanes"][1]["spend"]["input_tokens"], 300_000);
-    assert_eq!(v["lanes"][1]["train"], "integ-9");
-    assert_eq!(v["cards"][0]["status"], "In Progress");
+    assert_eq!(v["lines"].as_array().unwrap().len(), 3);
+    assert_eq!(v["lines"][1]["key"], "ov-1");
+    assert_eq!(v["lines"][1]["stage"], "landing");
+    assert_eq!(v["landings"][0]["number"], 9);
+    assert_eq!(v["agents"][0]["short"], "0000a002");
+    assert!(v.get("lanes").is_none() && v.get("trains").is_none(), "no lanes or trains in the shape");
 }
 
-/// `lane start` makes the lane, links its cards with their slices, and records
-/// the agent in one command.
+/// `plan set` takes waiting tickets by key and sends their ids in order; a
+/// ticket that isn't waiting, isn't on the line, or is named twice is refused
+/// before anything is sent.
 #[tokio::test]
-async fn lane_start_is_one_command_for_a_dispatch() {
-    let mut link = runner();
-    let out = say(
-        &mut link,
-        "lane start mac-new --card ov-1:Mac --card ov-2 --reason Because --path .claude/worktrees/x --branch x --model sonnet --agent a1",
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "Started lane mac-new (building, 2 cards).");
-    let Some(request::Payload::LaneCreate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(last(&link).method, "lane.create");
-    assert_eq!(p.name, "mac-new");
-    assert_eq!(p.cards[0].slice, "Mac");
-    assert_eq!(p.cards[1].slice, "");
-    assert_eq!(p.harness, "claude", "an agent without a harness is a Claude one");
-    let agent = p.agent.as_ref().unwrap();
-    assert_eq!((agent.agent_id.as_str(), agent.role), ("a1", pb::LaneAgentRole::Build as i32));
-    assert_eq!(agent.model.as_deref(), Some("sonnet"));
-    assert_eq!(p.model, "sonnet");
+async fn the_plan_takes_waiting_tickets_by_key() {
+    let mut plan = the_plan();
+    let mut also = line(4, pb::TicketStage::Waiting);
+    also.task_id = tid(0x1004);
+    plan.lines.push(also);
+    plan.cards.push(pb::PlanCard { task_id: tid(0x1004), key: "ov-4".into(), title: "Four".into(), ..Default::default() });
+    let mut link = Runner { plan: Some(plan), ..runner() };
+    let out = say(&mut link, "set OV-4 ov-2").await.unwrap();
+    assert!(out.starts_with("Next up\n  1  ov-4  Four\n  2  ov-2  Title of ov-2"), "{out}");
+    let Some(request::Payload::LineOrder(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.task_ids, [tid(0x1004), tid(0x1002)]);
+    assert_eq!(p.workspace_id, id_bytes(WORKSPACE));
 
-    // Without an agent it's a plan item, written before anything is dispatched.
     let mut link = runner();
-    let out = say(&mut link, "lane start later --card ov-2 --reason Next").await.unwrap();
-    assert_eq!(out, "Started lane later (queued, 1 card).");
-    let Some(request::Payload::LaneCreate(p)) = &last(&link).payload else { panic!() };
-    assert!(p.agent.is_none());
+    let err = say(&mut link, "set ov-1").await.unwrap_err();
+    assert_eq!(err.to_string(), "Only a waiting ticket can be in the plan: ov-1 is landing.");
+    let err = say(&mut link, "set ov-2 ov-2").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-2 is named twice. A ticket can only be in the plan once.");
+    let err = say(&mut link, "set ov-9").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-9 isn't on the line. Put it there with `farcooler plan ticket set ov-9`.");
+    assert!(link.sent.iter().all(|r| r.method != "line.order"), "refused before the wire");
+    say(&mut link, "set").await.expect("no tickets empties the plan");
+    let Some(request::Payload::LineOrder(p)) = &last(&link).payload else { panic!() };
+    assert!(p.task_ids.is_empty());
 }
 
-/// A reviewer moves the lane to review in the same write, and a fix agent to
-/// fixing; naming no state and no agent is refused.
+/// `ticket set` puts a card on the line, waiting, and says so; every flag
+/// reaches the wire, a stack parent by its id and `--no-stack` as empty.
 #[tokio::test]
-async fn a_reviewer_moves_the_lane_in_the_same_write() {
-    let mut link = runner();
-    say(&mut link, "lane set mac-ux --agent r1 --role review --model opus").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.state, None, "mac-ux is in review already: no move to ask for");
-    assert_eq!(p.agent.as_ref().unwrap().role, pb::LaneAgentRole::Review as i32);
+async fn ticket_set_puts_a_card_on_the_line_and_changes_it() {
+    let mut plan = the_plan();
+    plan.lines.retain(|l| l.task_id != tid(0x1002));
+    let mut link = Runner { plan: Some(plan), ..runner() };
+    let out = say(&mut link, "ticket set ov-2 --reason Next --branch el/two --stack-on ov-1 --pr 40 --budget 1M").await.unwrap();
+    assert_eq!(out, "ov-2 is on the line, waiting.");
+    let Some(request::Payload::LineSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.task_id, tid(0x1002));
+    assert_eq!(p.stage, None, "a card goes on the line waiting");
+    assert_eq!((p.reason.as_deref(), p.branch.as_deref(), p.pr_number), (Some("Next"), Some("el/two"), Some(40)));
+    assert_eq!((p.stack_parent.clone(), p.budget_tokens), (Some(tid(0x1001)), Some(1_000_000)));
 
     let mut link = runner();
-    let err = say(&mut link, "lane set mac-fu3 --agent r1 --role review").await.unwrap_err();
-    assert_eq!(err.to_string(), "mac-fu3 is queued. It can go to building or dropped.", "the move rides with the reviewer, and a queued lane can't make it");
-    assert!(link.sent.iter().all(|r| r.method != "lane.update"));
+    assert_eq!(say(&mut link, "ticket set ov-2 --stage building --no-stack").await.unwrap(), "ov-2 is building.");
+    let Some(request::Payload::LineSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.stage, p.stack_parent.clone()), (Some(pb::TicketStage::Building as i32), Some(bytes::Bytes::new())));
+    assert_eq!(say(&mut link, "ticket set ov-1 --stage landed --sha abc1234").await.unwrap(), "ov-1 is landed.");
+    let Some(request::Payload::LineSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.landed_sha.as_deref(), Some("abc1234"));
+    assert_eq!(say(&mut link, "ticket set ov-2 --stage needs_you").await.unwrap(), "ov-2 is waiting on you.");
 
-    let mut link = runner();
-    say(&mut link, "lane set mac-ux --agent f1 --role fix").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.state, Some(pb::LaneState::Fixing as i32));
-
-    let err = say(&mut link, "lane set mac-ux").await.unwrap_err();
-    assert!(err.to_string().starts_with("Say what to change"), "{err}");
+    let err = say(&mut link, "ticket set ov-2").await.unwrap_err();
+    assert!(err.to_string().starts_with("ov-2 is already on the line. Say what to change"), "{err}");
+    let err = say(&mut link, "ticket set ov-40 --stage building").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-40 is on another board.");
 }
 
-/// Landing records the commit and the train; `--no-train` clears the train.
+/// A ticket that reaches landing says which landing it joined.
 #[tokio::test]
-async fn landing_records_the_sha_and_the_train() {
-    let mut link = runner();
-    say(&mut link, "lane set mac-ux --state landed --sha 1a1b3275 --train integ-9").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.state, Some(pb::LaneState::Landed as i32));
-    assert_eq!(p.landed_sha.as_deref(), Some("1a1b3275"));
-    assert_eq!(p.train.as_deref(), Some("integ-9"));
-    say(&mut link, "lane set mac-ux --no-train").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.train.as_deref(), Some(""), "an empty train takes the lane out of it");
+async fn a_ticket_that_reaches_landing_names_its_landing() {
+    let mut plan = the_plan();
+    plan.lines[0].stage = pb::TicketStage::Reviewing as i32;
+    plan.lines[0].plan_rank = None;
+    let mut link = Runner { plan: Some(plan), ..runner() };
+    assert_eq!(say(&mut link, "ticket set ov-2 --stage landing").await.unwrap(), "ov-2 is landing. It's on Landing 10.");
 }
 
-/// The plan is named by lane names, in order, and only queued lanes are
-/// accepted, before anything is sent.
+/// A refused move says where the ticket is and where it can go, before
+/// anything is sent, in the line's own arrows.
 #[tokio::test]
-async fn the_plan_takes_queued_lanes_by_name() {
+async fn a_refused_move_says_where_the_ticket_can_go() {
     let mut link = runner();
-    say(&mut link, "set mac-fu3").await.unwrap();
-    let Some(request::Payload::PlanSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.lane_ids, [id_bytes(Uuid::from_u128(0x2001))]);
+    let err = say(&mut link, "ticket set ov-1 --stage waiting").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-1 is landing. It can move to building, needs_you, landed or dropped.");
+    let err = say(&mut link, "ticket set ov-2 --stage landing").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-2 is waiting. It can move to building, needs_you or dropped.");
+    let err = say(&mut link, "ticket set ov-3 --stage building").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-3 is landed, so it takes no more moves.");
+    assert!(link.sent.iter().all(|r| r.method != "line.set"), "refused before the wire");
+}
 
+/// `ticket show` reads the ticket's own timeline and says who worked it.
+#[tokio::test]
+async fn ticket_show_reads_the_timeline_and_who_worked_it() {
     let mut link = runner();
-    let err = say(&mut link, "set mac-ux").await.unwrap_err();
-    assert_eq!(err.to_string(), "Only a queued lane can be in the plan: mac-ux is in review.");
-    let err = say(&mut link, "set mac-fu3 MAC-FU3").await.unwrap_err();
-    assert!(err.to_string().contains("named twice"), "{err}");
-    let err = say(&mut link, "set nope").await.unwrap_err();
-    assert_eq!(err.to_string(), "No lane here is called \"nope\".");
-    assert!(link.sent.iter().all(|r| r.method != "plan.set"), "a refusal here sends nothing");
+    link.events = vec![plan_event(NOW - HOUR, "stage", "Landing.", json!({ "from": "reviewing", "to": "landing" }))];
+    let text = say(&mut link, "ticket show ov-1").await.unwrap();
+    let expected = [
+        "ov-1  Title of ov-1 · Landing · on Landing 9 · PR 31 · Lander sonnet (0000a002) · 470K tokens · 470K of 500K tokens budgeted",
+        "Branch mac-ux",
+        "",
+        "Worked by",
+        "  agent 0000a003 · building, 1h · finished",
+        "  Lander sonnet (0000a002) · landing, 1h · working",
+        "",
+        "Spend  470K tokens",
+        "Budget  470K of 500K tokens budgeted",
+        "",
+        "Timeline",
+        "  1h ago  Landing.",
+    ];
+    assert_eq!(text.lines().collect::<Vec<_>>(), expected, "{text}");
+    let Some(request::Payload::PlanEvents(p)) = &link.sent.iter().find(|r| r.method == "plan.events").unwrap().payload else { panic!() };
+    assert_eq!(p.subject, Some(pb::plan_events_request::Subject::TaskId(tid(0x1001))));
+
+    let json = say_json(&mut link, "ticket show ov-1").await;
+    assert_eq!(json, {
+        let mut want = farcooler_client::plan_json::plan_json(&the_plan())["lines"][1].clone();
+        want["events"] = json!([{ "at": NOW - HOUR, "actor": "manager", "kind": "stage", "body": "Landing.", "extra": { "from": "reviewing", "to": "landing" } }]);
+        want
+    });
+    let err = say(&mut link, "ticket show ov-9").await.unwrap_err();
+    assert_eq!(err.to_string(), "ov-9 isn't on the line. Put it there with `farcooler plan ticket set ov-9`.");
+}
+
+/// A ticket's pull request stage (ov-312) reaches the overview and `ticket
+/// show`; a building one isn't said twice.
+#[test]
+fn a_ticket_s_pr_stage_is_printed() {
+    let mut plan = the_plan();
+    plan.lines[1].pr_stage = Some(pb::PrStage {
+        kind: pb::PrStageKind::WaitingOnReviewer as i32,
+        label: "Waiting on alice".into(),
+        pr_number: 31,
+        unresolved_threads: Some(2),
+        ..Default::default()
+    });
+    assert!(overview(&plan, NOW).contains("Landing · on Landing 9 · PR 31 · Waiting on alice · Lander"), "{}", overview(&plan, NOW));
+    let shown = ticket::ticket_text(&plan, &plan.lines[1], &[], NOW);
+    assert!(shown.contains("Pull request  Waiting on alice · PR 31 · 2 threads open"), "{shown}");
+    assert_eq!(plan_json(&plan)["lines"][1]["pr_stage"]["kind"], "waiting_on_reviewer");
+    plan.lines[1].stage = pb::TicketStage::Building as i32;
+    plan.lines[1].pr_stage = Some(pb::PrStage { kind: pb::PrStageKind::Building as i32, label: "Building".into(), ..Default::default() });
+    assert!(!overview(&plan, NOW).contains("Building · Building"));
 }
 
 /// A card on another board, or nowhere, is named as such before the write.
@@ -599,28 +744,31 @@ async fn a_card_must_be_on_this_board() {
     let mut link = runner();
     let err = say(&mut link, "theme cards Visual --add ov-40").await.unwrap_err();
     assert_eq!(err.to_string(), "ov-40 is on another board.");
-    let mut link = runner();
-    link.refuse = None;
-    let err = say(&mut link, "lane cards mac-ux --add ov-1 --remove ov-40").await.unwrap_err();
-    assert_eq!(err.to_string(), "ov-40 is on another board.");
-    assert!(link.sent.iter().all(|r| r.method != "lane.cards"));
+    assert!(link.sent.iter().all(|r| r.method != "board_theme.cards"));
 }
 
 /// A refusal from the runner is said in this module's words, and still carries
-/// the runner's word for a script.
+/// the runner's word for a script. Every word the line refuses with has one.
 #[tokio::test]
 async fn a_refusal_is_said_in_words_a_person_reads() {
     let mut link = runner();
-    link.refuse = Some("lane_state");
-    let err = say(&mut link, "lane set mac-ux --state landing").await.unwrap_err();
-    assert!(err.to_string().starts_with("A lane can't make that move"), "{err}");
+    link.refuse = Some("parent_not_landed");
+    let err = say(&mut link, "ticket set ov-1 --stage landed").await.unwrap_err();
+    assert_eq!(err.to_string(), "Its parent ticket hasn't landed yet, so it lands after that one does.");
     let refusal = err.downcast_ref::<Refused>().expect("keeps its code");
-    assert_eq!(refusal.what(), Some("lane_state"));
+    assert_eq!(refusal.what(), Some("parent_not_landed"));
     for word in [
-        "name", "name_taken", "other_board", "lane_state", "lane_closed", "lane_twice", "plan_state", "harness",
-        "agent_id", "role", "state", "actor", "outcome", "story", "train", "subject",
+        "stage", "ticket_closed", "on_the_line", "not_on_the_line", "not_waiting", "duplicate", "stack_parent", "stack_cycle",
+        "parent_not_landed", "same_branch", "not_landed", "role", "agent_ended", "place", "verdict", "ticket_pr", "name",
+        "name_taken", "other_board", "harness", "agent_id", "state", "actor", "outcome", "story", "subject", "title", "sha",
     ] {
         assert!(said_here(word).is_some(), "no sentence for {word}");
+    }
+    for word in [
+        "lander", "not_ready", "ticket_in_review", "landing_moving", "landing_settled", "landing_changed", "no_sha", "sha",
+        "route", "base",
+    ] {
+        assert!(landing::said_here(word).is_some(), "no landing sentence for {word}");
     }
 }
 
@@ -648,56 +796,41 @@ async fn a_theme_is_made_rewritten_and_asked_about() {
     assert!(err.to_string().starts_with("Say what to change"), "{err}");
 }
 
-/// `lane show` and `theme show` read the timeline too.
+/// `theme show` reads the timeline, and lists the theme's tickets on the line.
 #[tokio::test]
-async fn show_reads_the_timeline() {
+async fn theme_show_reads_the_timeline_and_its_tickets() {
     let mut link = runner();
-    let text = say(&mut link, "lane show mac-ux").await.unwrap();
-    assert!(text.starts_with("Mac interface polish (mac-ux) · In review · in integ-9 · 1 card · 470K tokens"), "{text}");
-    assert!(link.sent.iter().any(|r| r.method == "plan.events"));
     let text = say(&mut link, "theme show Visual").await.unwrap();
     assert!(text.starts_with("Visual language · active"), "{text}");
-    assert!(text.contains("Lanes\n  Mac follow-ups (mac-fu3)") && text.contains("  Mac interface polish (mac-ux) · "), "{text}");
+    assert!(link.sent.iter().any(|r| r.method == "plan.events"));
+    assert!(text.contains("On the line\n  ov-2  Title of ov-2 · Waiting · next up\n  ov-1  Title of ov-1 · Landing"), "{text}");
 }
 
-/// Spend says "Not reported" rather than zero for a lane nothing measured.
+/// Spend says "Not reported" rather than zero for a ticket nothing measured,
+/// tokens first, and a share of an agent's spend says so.
 #[test]
-fn an_unmeasured_lane_says_not_reported() {
-    assert_eq!(spend_words(&pb::LaneSpend::default()), "Not reported");
-    let some = pb::LaneSpend { input_tokens: 1_500, runs: 1, unmeasured_agents: 1, ..Default::default() };
+fn spend_puts_tokens_first_and_says_what_isn_t_reported() {
+    assert_eq!(spend_words(&pb::Spend::default()), "Not reported");
+    let some = pb::Spend { input_tokens: 1_500, runs: 1, unmeasured_agents: 1, ..Default::default() };
     assert_eq!(spend_words(&some), "1.5K tokens · 1 agent not reported");
-}
-
-/// Dollars follow tokens, and a card's part of a lane is labeled a share.
-#[test]
-fn spend_puts_tokens_first_and_a_card_s_part_is_a_share() {
-    let s = pb::LaneSpend { input_tokens: 3_000, output_tokens: 1_000, cost_micros: Some(40_000), runs: 1, ..Default::default() };
+    let s = pb::Spend { input_tokens: 3_000, output_tokens: 1_000, cost_micros: Some(40_000), runs: 1, ..Default::default() };
     assert_eq!(spend_words(&s), "4K tokens · $0.04 API-equivalent");
-    assert_eq!(
-        share_words(&s, 2).as_deref(),
-        Some("About 2K tokens · $0.02 API-equivalent a card, the lane\u{2019}s spend split evenly across 2 cards")
-    );
-    assert_eq!(share_words(&s, 1), None, "one card has the lane\u{2019}s whole spend, not a share of it");
-    assert_eq!(share_words(&pb::LaneSpend::default(), 3), None, "nothing measured is never a share of zero");
+    let one = pb::Spend { input_tokens: 2_000, runs: 1, shared_agents: 1, ..Default::default() };
+    assert_eq!(spend_words(&one), "2K tokens · 1 agent\u{2019}s spend split with other tickets");
+    let two = pb::Spend { input_tokens: 2_000, runs: 1, unmeasured_agents: 1, shared_agents: 2, ..Default::default() };
+    assert_eq!(spend_words(&two), "2K tokens · 1 agent not reported · 2 agents\u{2019} spend split with other tickets");
 }
 
-/// A lane holding part of an agent shared with other lanes says so, after
-/// what wasn't reported (review 1004j P1).
+/// A ticket stuck for over an hour says how long, and a fix round its number.
 #[test]
-fn a_lane_with_a_shared_agent_says_its_figure_is_a_split() {
-    let one = pb::LaneSpend { input_tokens: 2_000, runs: 1, shared_agents: 1, ..Default::default() };
-    assert_eq!(spend_words(&one), "2K tokens · 1 agent\u{2019}s spend split with other lanes");
-    let two = pb::LaneSpend { input_tokens: 2_000, runs: 1, unmeasured_agents: 1, shared_agents: 2, ..Default::default() };
-    assert_eq!(spend_words(&two), "2K tokens · 1 agent not reported · 2 agents\u{2019} spend split with other lanes");
-}
-
-/// A lane stuck for over an hour says how long.
-#[test]
-fn a_stale_lane_says_how_long() {
-    let mut l = lane(1, "a", pb::LaneState::Building, &[1]);
-    l.state_since = NOW - 3 * HOUR;
+fn a_stale_ticket_says_how_long_and_a_fix_its_round() {
+    let plan = the_plan();
+    let mut l = line(1, pb::TicketStage::Building);
+    l.stage_since = NOW - 3 * HOUR;
     l.stale = true;
-    assert!(lane_status(&l, NOW).ends_with("stuck for 3h"), "{}", lane_status(&l, NOW));
+    l.fix_rounds = 2;
+    let said = overview_text::ticket_status(&plan, &l, NOW);
+    assert!(said.starts_with("Fixing · round 2") && said.ends_with("stuck for 3h"), "{said}");
 }
 
 /// An empty board says how to start rather than printing nothing.
@@ -706,22 +839,28 @@ fn an_empty_board_says_how_to_start() {
     assert_eq!(overview(&pb::Plan::default(), NOW), NOTHING_PLANNED);
 }
 
-/// The Mac's and the orchestrator's argv parse, flags after the subcommand
-/// included.
+/// The argv the orchestrator writes parses, flags after the subcommand
+/// included, and the retired verbs don't.
 #[test]
 fn the_argv_parses() {
     let cli = crate::Cli::try_parse_from([
-        "farcooler", "plan", "lane", "start", "mac-ux", "--card", "ov-1:Mac", "--workspace", "main", "--actor",
-        "manager", "--json",
+        "farcooler", "plan", "ticket", "set", "ov-1", "--stage", "needs_you", "--workspace", "main", "--actor", "manager", "--json",
     ])
     .expect("parses");
     assert!(cli.json);
     let crate::Command::Plan(args) = cli.command else { panic!() };
     assert_eq!(args.common.workspace.as_deref(), Some("main"));
     assert_eq!(args.common.actor.as_deref(), Some("manager"));
-    assert!(matches!(args.cmd, Some(PlanCmd::Lane(LaneCmd::Start { .. }))));
+    assert!(matches!(args.cmd, Some(PlanCmd::Ticket(ticket::TicketCmd::Set { stage: Some(ticket::StageArg::NeedsYou), .. }))));
     assert!(crate::Cli::try_parse_from(["farcooler", "plan"]).is_ok(), "bare `plan` is the overview");
-    assert!(crate::Cli::try_parse_from(["farcooler", "lane", "list"]).is_err(), "`lane` lives under `plan`");
+    for retired in [&["plan", "lane", "list"][..], &["plan", "train", "list"], &["plan", "agents"], &["lane", "list"]] {
+        let argv = std::iter::once("farcooler").chain(retired.iter().copied());
+        assert!(crate::Cli::try_parse_from(argv).is_err(), "{retired:?} is gone");
+    }
+    for stage in ["waiting", "building", "reviewing", "needs_you", "needs-you", "landing", "landed", "dropped"] {
+        assert!(crate::Cli::try_parse_from(["farcooler", "plan", "ticket", "set", "ov-1", "--stage", stage]).is_ok(), "{stage}");
+    }
+    assert!(crate::Cli::try_parse_from(["farcooler", "plan", "ticket", "set", "ov-1", "--stack-on", "ov-2", "--no-stack"]).is_err());
 }
 
 /// `farcooler theme` is still the terminal color schemes: the plan's themes
@@ -732,13 +871,6 @@ fn farcooler_theme_is_still_the_color_schemes() {
     assert!(matches!(cli.command, crate::Command::Theme(_)));
 }
 
-#[test]
-fn a_card_names_its_slice_after_a_colon() {
-    assert_eq!(split_card("ov-113:s3-4 phones"), ("ov-113", "s3-4 phones".to_string()));
-    assert_eq!(split_card("ov-113"), ("ov-113", String::new()));
-    assert_eq!(split_card(" ov-1 : Mac "), ("ov-1", "Mac".to_string()));
-}
-
 /// Ages say "just now" and "5m ago", never "just now ago".
 #[test]
 fn ages_read_naturally() {
@@ -746,88 +878,6 @@ fn ages_read_naturally() {
     assert_eq!(ago(5 * 60_000), "5m ago");
     assert_eq!(ago(3 * HOUR), "3h ago");
     assert_eq!(age(49 * HOUR), "2d");
-}
-
-/// A refused move says where the lane is and where it can go, before anything
-/// is sent, and review lands in one command.
-#[tokio::test]
-async fn a_refused_move_says_where_the_lane_can_go() {
-    let mut link = runner();
-    let err = say(&mut link, "lane set mac-ux --state building").await.unwrap_err();
-    assert_eq!(err.to_string(), "mac-ux is in review. It can go to fixing, landing, landed or dropped.");
-    let err = say(&mut link, "lane set fix-ac84 --state review").await.unwrap_err();
-    assert_eq!(err.to_string(), "fix-ac84 is landed, so it takes no more changes.");
-    assert!(link.sent.iter().all(|r| r.method != "lane.update"), "refused before the wire");
-    say(&mut link, "lane set mac-ux --state landed --sha abc").await.expect("review lands in one command");
-}
-
-/// **`plan --json` is the shape the Mac decodes** (ov-273):
-/// `test/fixtures/plan.json` is this output byte for byte, and AgentKit's
-/// `PlanModelTests` decode the same file. A key renamed here fails this test
-/// until the fixture is rewritten (`FARCOOLER_WRITE_FIXTURES=1`), which then
-/// fails the Mac's.
-#[test]
-fn plan_json_is_the_shape_the_mac_reads() {
-    let mut plan = the_plan();
-    let review = &mut plan.lanes[1];
-    review.reason = "Five small Mac fixes, batched".into();
-    review.worktree_path = ".claude/worktrees/mac-ux".into();
-    review.branch = "mac-ux".into();
-    review.harness = "claude".into();
-    review.model = "opus".into();
-    review.fix_rounds = 1;
-    review.cards[0].slice = "Mac".into();
-    review.spend = Some(pb::LaneSpend {
-        input_tokens: 300_000, output_tokens: 170_000, cost_micros: Some(31_000_000), runs: 2, unmeasured_agents: 1,
-        shared_agents: 1, ..Default::default()
-    });
-    review.agents = vec![
-        pb::LaneAgent { harness: "claude".into(), agent_id: "a1".into(), role: pb::LaneAgentRole::Build as i32,
-            model: "opus".into(), started_at: NOW - 3 * HOUR, ended_at: Some(NOW - HOUR) },
-        pb::LaneAgent { harness: "claude".into(), agent_id: "a2".into(), role: pb::LaneAgentRole::Review as i32,
-            model: "sonnet".into(), started_at: NOW - 25 * 60_000, ended_at: None },
-    ];
-    plan.lanes[2].landed_sha = Some("4d3c8cb1e2".into());
-    plan.agents = vec![
-        pb::PlanAgent {
-            id: "pane:orchestrator".into(), role: pb::PlanAgentRole::Orchestrator as i32, harness: "claude".into(),
-            model: "opus".into(), working: true, started_at: NOW - 4 * HOUR, last_at: NOW,
-            spend: Some(pb::LaneSpend {
-                input_tokens: 2_000_000, output_tokens: 100_000, cost_micros: Some(14_200_000), runs: 4, ..Default::default()
-            }),
-            ..Default::default()
-        },
-        pb::PlanAgent {
-            id: "agent:a2".into(), role: pb::PlanAgentRole::Review as i32, harness: "claude".into(), model: "sonnet".into(),
-            lane_id: Some(tid(0x2002)), lane_name: "mac-ux".into(), working: true, started_at: NOW - 25 * 60_000,
-            last_at: NOW - 5 * 60_000,
-            spend: Some(pb::LaneSpend { input_tokens: 200_000, runs: 1, ..Default::default() }),
-            ..Default::default()
-        },
-        pb::PlanAgent {
-            id: "agent:s1".into(), role: pb::PlanAgentRole::Subagent as i32, harness: "claude".into(), model: "sonnet".into(),
-            label: "Design ov-503".into(), working: true, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * 60_000,
-            spend: Some(pb::LaneSpend { input_tokens: 90_000, cost_micros: Some(600_000), runs: 1, ..Default::default() }),
-            ..Default::default()
-        },
-    ];
-    // What the day cost, three agents that are gone included.
-    plan.agents_spend = Some(pb::LaneSpend {
-        input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
-    });
-    let theme = plan.themes[0].theme.as_mut().unwrap();
-    theme.outcome = "Every Mac surface reads as one app.".into();
-    theme.story = "Tokens are on main.".into();
-    theme.story_at = NOW - HOUR;
-    theme.next = "Frosted window plane".into();
-    theme.owner_ask = "Should the sidebar tint follow the terminal theme?".into();
-    let out = serde_json::to_string_pretty(&plan_json(&plan, &Keys::of_plan(&plan))).unwrap() + "\n";
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/plan.json");
-    if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
-        std::fs::write(&path, &out).unwrap();
-    }
-    let fixture = std::fs::read_to_string(&path).expect("test/fixtures/plan.json is missing");
-    assert_eq!(out, fixture, "plan --json no longer matches test/fixtures/plan.json, which the Mac decodes");
 }
 
 /// One event of a record, its extra as the store writes it.
@@ -842,16 +892,15 @@ fn plan_event(at: i64, kind: &str, body: &str, extra: Value) -> pb::PlanEvent {
     }
 }
 
-/// **`plan theme show --json` and `plan lane show --json` are the records the
-/// Mac decodes** (ov-273, review 1004i P4): `test/fixtures/plan-theme-show.json`
-/// and `plan-lane-show.json` are this command's output, pretty-printed, and
-/// AgentKit's `PlanRecordFixtureTests` decode the same files. Each event's
-/// extra is the one `crates/store/src/plan.rs` writes for its kind. A key
-/// renamed here fails this test until the fixtures are rewritten
+/// **`plan theme show --json` is the record the Mac decodes** (ov-273):
+/// `test/fixtures/plan-theme-show.json` is this command's output,
+/// pretty-printed, and AgentKit's `PlanRecordFixtureTests` decode the same
+/// file. A key renamed here fails this test until the fixture is rewritten
 /// (`FARCOOLER_WRITE_FIXTURES=1`), which then fails the Mac's.
 #[tokio::test]
-async fn plan_show_json_is_the_record_the_mac_reads() {
-    let theme_events = vec![
+async fn theme_show_json_is_the_record_the_mac_reads() {
+    let mut link = runner();
+    link.events = vec![
         plan_event(NOW - 5 * HOUR, "state", "Created.", json!({})),
         plan_event(NOW - 4 * HOUR, "story", "", json!({ "to": "Tokens are in review." })),
         plan_event(NOW - 3 * HOUR, "cards", "Added ov-1.", json!({})),
@@ -859,29 +908,15 @@ async fn plan_show_json_is_the_record_the_mac_reads() {
         plan_event(NOW - HOUR, "story", "Tokens are in review.", json!({ "to": "Tokens are on main." })),
         plan_event(NOW - HOUR + 1, "state", "Paused.", json!({ "from": "active" })),
     ];
-    let lane_events = vec![
-        plan_event(NOW - 3 * HOUR, "state", "Queued.", json!({})),
-        plan_event(NOW - 3 * HOUR + 1, "plan", "Ranked 1.", json!({ "rank": 1 })),
-        plan_event(NOW - 2 * HOUR, "state", "Started building.", json!({ "from": "queued", "to": "building" })),
-        plan_event(NOW - HOUR, "state", "Moved to review.", json!({ "from": "building", "to": "review" })),
-    ];
-    for (args, events, file) in [
-        ("theme show Visual", theme_events, "plan-theme-show.json"),
-        ("lane show mac-ux", lane_events, "plan-lane-show.json"),
-    ] {
-        let mut link = runner();
-        link.events = events;
-        let out = run_on(&mut link, &the_board(), parsed(args), "manager", true, NOW).await.unwrap();
-        let value: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(value["events"].as_array().map(Vec::len), Some(link.events.len()), "{args}");
-        let out = serde_json::to_string_pretty(&value).unwrap() + "\n";
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures").join(file);
-        if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
-            std::fs::write(&path, &out).unwrap();
-        }
-        let fixture = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("test/fixtures/{file} is missing"));
-        assert_eq!(out, fixture, "plan {args} --json no longer matches test/fixtures/{file}, which the Mac decodes");
+    let value = say_json(&mut link, "theme show Visual").await;
+    assert_eq!(value["events"].as_array().map(Vec::len), Some(link.events.len()));
+    let out = serde_json::to_string_pretty(&value).unwrap() + "\n";
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/plan-theme-show.json");
+    if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
+        std::fs::write(&path, &out).unwrap();
     }
+    let fixture = std::fs::read_to_string(&path).expect("test/fixtures/plan-theme-show.json is missing");
+    assert_eq!(out, fixture, "plan theme show --json no longer matches test/fixtures/plan-theme-show.json, which the Mac decodes");
 }
 
 /// A theme's progress leaves its cancelled cards out, as the Mac's does
@@ -985,21 +1020,20 @@ async fn ruling_set_takes_the_short_id_as_said() {
     assert!(link.sent.iter().all(|r| r.method == "plan.get"), "nothing written");
 }
 
-/// A card a ruling names, in progress with no lane, isn't flagged: a ruling
-/// isn't a lane, and the runner leaves its cards out of the plan's cards
-/// (review 1005a F2). Its key still reads, from the ruling.
+/// A card a ruling names, in progress and off the line, isn't flagged: a
+/// ruling isn't a ticket, and the runner leaves its cards out of the plan's
+/// cards (review 1005a F2). Its key still reads, from the ruling.
 #[tokio::test]
-async fn a_ruling_s_card_is_not_flagged_as_having_no_lane() {
+async fn a_ruling_s_card_is_not_flagged_as_off_the_line() {
     let mut plan = the_plan();
     plan.themes.clear();
-    plan.lanes.clear();
-    plan.order.clear();
-    plan.coverage.clear();
+    plan.lines.clear();
+    plan.landings.clear();
     plan.cards.clear();
     plan.rulings[0].task_keys = vec!["ov-1".into()];
-    assert!(checks(&plan, &Keys::of_plan(&plan)).is_empty());
-    let json = plan_json(&plan, &Keys::of_plan(&plan));
-    assert!(json["no_lane"].as_array().unwrap().is_empty());
+    assert!(checks(&plan).is_empty());
+    let json = plan_json(&plan);
+    assert!(json["off_the_line"].as_array().unwrap().is_empty());
     assert_eq!(json["rulings"][0]["cards"][0]["key"], "ov-1", "the key is the ruling's own");
 }
 
@@ -1144,107 +1178,6 @@ async fn ruling_list_reads_standing_first() {
     assert_eq!(json["rulings"][1]["state"], "confirmed");
 }
 
-// ---- trains (ov-309) ----
-
-/// `plan train start` names its lanes by name and sends them as ids, behind
-/// `board_trains` as well as the plan.
-#[tokio::test]
-async fn a_train_starts_with_its_lanes_by_name() {
-    let mut link = runner();
-    let said = say(&mut link, "train start integ-10 --lane mac-ux --force --base origin/main").await.unwrap();
-    let r = last(&link);
-    assert_eq!(r.method, "train.start");
-    assert_eq!(r.required_capabilities, [capability::BOARD_TRAINS.to_string()]);
-    let Some(request::Payload::TrainStart(p)) = &r.payload else { panic!("{r:?}") };
-    assert_eq!((p.name.as_str(), p.base.as_str(), p.actor.as_str()), ("integ-10", "origin/main", "manager"));
-    assert_eq!(p.lane_ids, vec![tid(0x2002)]);
-    assert!(said.starts_with("integ-10 · Checking here"), "{said}");
-    assert!(said.contains("Lanes: mac-ux"), "{said}");
-    assert!(say(&mut link, "train start integ-11 --lane nope").await.unwrap_err().to_string().contains("No lane here is called"));
-}
-
-/// `plan train set` with a SHA sends it; a state goes as the wire's word.
-#[tokio::test]
-async fn a_train_is_set_by_name() {
-    let mut link = runner();
-    let said = say(&mut link, "train set INTEG-9 --sha 1a1b3275").await.unwrap();
-    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.train_id.clone(), p.sha.as_deref(), p.state), (tid(0x6001), Some("1a1b3275"), 0));
-    assert!(said.starts_with("Train 9 (integ-9) · Checking on CI · 1a1b3275 · CI not read yet · agent working"), "{said}");
-    say(&mut link, "train set integ-9 --state landed --remove-lane mac-ux").await.unwrap();
-    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.state, p.remove_lane_ids.clone()), (pb::BoardTrainState::Landed as i32, vec![tid(0x2002)]));
-    let err = say(&mut link, "train set integ-99 --state gating").await.unwrap_err();
-    assert!(err.to_string().contains("No train here is called"), "{err}");
-}
-
-/// A runner with the plan and no trains is told so before anything is sent.
-#[tokio::test]
-async fn a_runner_without_trains_is_told_before_anything_is_sent() {
-    let mut link = runner();
-    link.capabilities.retain(|c| c != capability::BOARD_TRAINS);
-    let err = say(&mut link, "train list").await.unwrap_err();
-    assert_eq!(err.to_string(), "This runner needs an update to keep trains.");
-    assert!(link.sent.is_empty());
-}
-
-/// `plan train list` says what the owner's Now says, and which jobs failed.
-#[tokio::test]
-async fn the_train_list_names_failed_jobs() {
-    let mut link = runner();
-    let text = say(&mut link, "train list").await.unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[0], "Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · agent working · 120K tokens · $4.00 API-equivalent");
-    assert_eq!(lines[1], "  cut from origin/main · red for 20m");
-    assert_eq!(lines[2], "  Carries: Mac interface polish");
-    assert_eq!(lines[3], "  Agent: claude sonnet i1 · working · 120K tokens · $4.00 API-equivalent");
-    assert_eq!(lines[4], "  Card: ov-2");
-    assert_eq!(lines[5], "  Lanes: mac-ux");
-    assert_eq!(lines[6], "  Failed: CI / Swift (shared + macOS)");
-    assert!(lines[7].ends_with("runs/37275435256 · read 1m ago"), "{}", lines[7]);
-}
-
-/// The runner's refusals read as sentences, a train's own before a lane's: a
-/// bad SHA isn't "too long", and a bad name names a train.
-#[tokio::test]
-async fn a_train_refusal_reads_as_a_train_sentence() {
-    let mut link = runner();
-    for (what, said) in [
-        ("train_settled", "That train has landed or been dropped, so it takes no more moves, SHAs or lanes."),
-        ("sha", "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one."),
-        ("name", "A train's name is one word with no spaces, like integ-14."),
-    ] {
-        link.refuse = Some(what);
-        let err = say(&mut link, "train set integ-9 --state gating").await.unwrap_err();
-        assert_eq!(err.to_string(), said, "{what}");
-    }
-    link.refuse = Some("sha");
-    let lane = say(&mut link, "lane set mac-ux --sha abc").await.unwrap_err();
-    assert_eq!(lane.to_string(), "That's too long.", "a lane's words are the lane's");
-}
-
-/// A first read that failed says "CI unknown" once, not "CI CI unknown"
-/// (review train-1005c L2).
-#[test]
-fn an_unknown_read_says_ci_once() {
-    let mut plan = the_plan();
-    plan.ci[0].status = pb::BoardCiStatus::Unknown as i32;
-    plan.ci[0].jobs.clear();
-    assert_eq!(train::train_line(&plan, &plan.trains[0]), "Train 9 (integ-9) · Red · c85bf83d · CI unknown · agent working · 120K tokens · $4.00 API-equivalent");
-}
-
-/// A read that stopped working says how old it is (review train-1005c M1).
-#[test]
-fn a_stale_ci_read_says_how_old_it_is() {
-    let mut plan = the_plan();
-    plan.ci[0].fetched_at = NOW - 3 * HOUR;
-    plan.ci[0].asked_at = NOW;
-    let line = train::train_line(&plan, &plan.trains[0]);
-    assert_eq!(line, "Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · as of 3h ago · agent working · 120K tokens · $4.00 API-equivalent");
-    plan.ci[0].fetched_at = NOW - 60_000;
-    assert!(!train::train_line(&plan, &plan.trains[0]).contains("as of"));
-}
-
 // ---- cost (ov-307) ----
 
 /// `--budget` takes tokens as a number or with K, M or B, and refuses what
@@ -1281,16 +1214,16 @@ fn a_budget_reads_as_tokens() {
     }
 }
 
-/// A budget goes to the theme and the lane as tokens, `--no-budget` as zero,
-/// and a runner without `board_cost` is told before anything is changed.
+/// A budget goes to the theme and the ticket as tokens, `--no-budget` as
+/// zero, and a runner without `board_cost` is told before anything is changed.
 #[tokio::test]
 async fn a_budget_is_sent_and_a_runner_without_budgets_is_told() {
     let mut link = runner();
     say(&mut link, "theme set Visual --budget 5M").await.unwrap();
     let Some(request::Payload::BoardThemeUpdate(p)) = &last(&link).payload else { panic!() };
     assert_eq!(p.budget_tokens, Some(5_000_000));
-    say(&mut link, "lane set mac-ux --no-budget").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
+    say(&mut link, "ticket set ov-1 --no-budget").await.unwrap();
+    let Some(request::Payload::LineSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!(p.budget_tokens, Some(0));
     say(&mut link, "theme set Visual --next Ship").await.unwrap();
     let Some(request::Payload::BoardThemeUpdate(p)) = &last(&link).payload else { panic!() };
@@ -1298,25 +1231,20 @@ async fn a_budget_is_sent_and_a_runner_without_budgets_is_told() {
 
     let mut old = runner();
     old.capabilities.retain(|c| c != capability::BOARD_COST);
-    let err = say(&mut old, "lane set mac-ux --budget 1M").await.unwrap_err();
+    let err = say(&mut old, "ticket set ov-1 --budget 1M").await.unwrap_err();
     assert_eq!(err.to_string(), "This runner needs an update to keep budgets.");
-    assert!(old.sent.iter().all(|r| r.method != "lane.update"), "nothing was changed");
+    assert!(old.sent.iter().all(|r| r.method != "line.set"), "nothing was changed");
 }
 
-/// The overview flags a theme over its budget, shows a lane inside its own,
-/// and says the week's tokens with no limit, and what is held back.
+/// The overview flags a theme over its budget, shows a ticket inside its
+/// own, and says the week's tokens with no limit, and what is held back.
 #[tokio::test]
 async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
     let mut link = runner();
     let text = say(&mut link, "").await.unwrap();
     assert!(text.contains("Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens"), "{text}");
     assert!(text.contains("470K of 500K tokens budgeted"), "{text}");
-    assert!(text.contains("Last 7 days  34M tokens · about $45.00 API-equivalent in this project (its weekly limit isn't known)"), "{text}");
     assert!(!text.contains('%'), "no share of a limit nobody can read: {text}");
-    assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent"), "{text}");
-    assert!(text.contains("Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · No price listed for gpt-5.6"), "{text}");
-    assert!(text.contains("2 other harness and model pairs held back until three cards have landed"), "{text}");
-    assert!(text.contains("In flight  1.2M tokens on cards that haven't landed"), "{text}");
     let theme = say(&mut link, "theme show Visual").await.unwrap();
     assert!(theme.contains("Last 7 days  0, 0, 0, 40K, 120K, 0, 160K tokens a day (UTC days), oldest first, today last"), "{theme}");
 }
@@ -1336,122 +1264,24 @@ fn the_overview_notes_old_cache_writes_only_when_the_week_has_them() {
 }
 
 /// Without cost from the runner, nothing about cost is drawn.
-#[tokio::test]
-async fn a_runner_that_sends_no_cost_draws_none() {
-    let mut link = runner();
-    let plan = the_plan();
-    let mut bare = pb::Plan { cost: None, ..plan };
+#[test]
+fn a_runner_that_sends_no_cost_draws_none() {
+    let mut bare = pb::Plan { cost: None, ..the_plan() };
     bare.themes[0].budget_tokens = None;
     bare.themes[0].trend_tokens.clear();
-    bare.lanes[1].budget_tokens = None;
+    bare.lines[1].budget_tokens = None;
     let text = super::overview(&bare, NOW);
     assert!(!text.contains("Cost") && !text.contains("budget"), "{text}");
-    let _ = &mut link;
 }
-
-/// A lane's pull request stage (ov-312) reaches `farcooler plan`, `plan lane
-/// show` and `--json`; a lane the runner said nothing of prints as it always
-/// did, with no `stage` key to break a reader of the old shape.
-#[test]
-fn a_lane_s_pr_stage_is_printed_and_left_out_when_unsaid() {
-    let stage = |kind: pb::PrStageKind, label: &str, n: u32| pb::PrStage {
-        kind: kind as i32,
-        label: label.into(),
-        pr_number: n,
-        unresolved_threads: Some(2),
-        ..Default::default()
-    };
-    let mut plan = the_plan();
-    let at = plan.lanes.iter().position(|l| l.name == "mac-ux").unwrap();
-    plan.lanes[at].stage = Some(stage(pb::PrStageKind::WaitingOnReviewer, "Waiting on alice", 31));
-    plan.lanes[at].cards[0].stage = Some(stage(pb::PrStageKind::WaitingOnReviewer, "Waiting on alice", 31));
-    let keys = Keys::of_plan(&plan);
-
-    let text = overview(&plan, NOW);
-    assert!(text.contains("In review \u{b7} in integ-9 \u{b7} Waiting on alice \u{b7} 1 card"), "{text}");
-
-    let lane = lane_text(&plan.lanes[at], &keys, &[], NOW);
-    assert!(lane.contains("ov-1  whole card \u{b7} Waiting on alice \u{b7} PR 31 \u{b7} 2 threads open"), "{lane}");
-
-    let json = plan_json(&plan, &keys);
-    assert_eq!(json["lanes"][at]["stage"]["label"], "Waiting on alice");
-    assert_eq!(json["lanes"][at]["stage"]["kind"], "waiting_on_reviewer");
-    assert_eq!(json["lanes"][at]["cards"][0]["stage"]["unresolved_threads"], 2);
-    let other = (at + 1) % plan.lanes.len();
-    assert!(json["lanes"][other].get("stage").is_none(), "no stage said, no key");
-
-    // Building says itself once.
-    plan.lanes[at].stage = Some(stage(pb::PrStageKind::Building, "Building", 0));
-    plan.lanes[at].state = pb::LaneState::Building as i32;
-    assert!(!overview(&plan, NOW).contains("Building \u{b7} Building"));
-}
-
-// ---- titles, and a train's own agent (ov-462, ov-461) ----
-
-/// `--title` goes to the wire on a lane and a train, and an empty one on `set`
-/// takes the title away.
-#[tokio::test]
-async fn titles_go_to_the_wire() {
-    let mut link = runner();
-    say(&mut link, "lane start mac-new --title=Mac-catches-up --card ov-2").await.unwrap();
-    let Some(request::Payload::LaneCreate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.title, "Mac-catches-up");
-    say(&mut link, "lane set mac-ux --title=").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.title.as_deref(), Some(""));
-    say(&mut link, "train start integ-10 --title=Phones").await.unwrap();
-    let Some(request::Payload::TrainStart(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.title, "Phones");
-    say(&mut link, "train set integ-9 --title=").await.unwrap();
-    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.title.as_deref(), Some(""));
-    link.refuse = Some("title");
-    let err = say(&mut link, "lane set mac-ux --title long").await.unwrap_err();
-    assert_eq!(err.to_string(), "A title is one short line, up to 80 characters.");
-}
-
-/// A train records its integrating agent and card (ov-461), and `--ended`
-/// marks it finished.
-#[tokio::test]
-async fn a_train_records_its_agent_and_card() {
-    let mut link = runner();
-    say(&mut link, "train start integ-10 --agent i9 --model opus --card ov-2").await.unwrap();
-    let Some(request::Payload::TrainStart(p)) = &last(&link).payload else { panic!() };
-    let agent = p.agent.clone().unwrap();
-    assert_eq!((agent.harness.as_str(), agent.agent_id.as_str(), agent.model.as_deref(), agent.ended), ("claude", "i9", Some("opus"), false));
-    assert_eq!(p.card_id, Some(id_bytes(Uuid::from_u128(0x1002))));
-    say(&mut link, "train set integ-9 --agent i9 --harness codex --ended").await.unwrap();
-    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
-    let agent = p.agent.clone().unwrap();
-    assert_eq!((agent.harness.as_str(), agent.ended, p.card_id.clone()), ("codex", true, None));
-    assert!(say(&mut link, "train set integ-9 --card ov-40").await.unwrap_err().to_string().contains("ov-40"));
-}
-
-/// A lane named like a live train is the integrating agent modeled as a lane
-/// (ov-461): Now lists the train once, and Worth a look says what to do.
-#[test]
-fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
-    let mut plan = the_plan();
-    plan.lanes.push(lane(9, "INTEG-9", pb::LaneState::Building, &[1]));
-    let text = overview_text::overview(&plan, NOW);
-    let now: Vec<&str> = text.lines().skip_while(|l| *l != "Now").take_while(|l| !l.starts_with("Themes")).collect();
-    assert_eq!(now.len(), 3, "the train and its lane, not the shadow: {text}");
-    assert!(!text.lines().any(|l| l.contains("INTEG-9 ·")), "no row of its own: {text}");
-    assert!(text.contains("Worth a look\n  INTEG-9  is a lane and a landing. Record its agent on the train (`plan train set INTEG-9 --agent <id>`), then drop the lane."), "{text}");
-    let json = plan_json(&plan, &Keys::of_plan(&plan));
-    assert_eq!(json["lane_is_train"][0]["name"], "INTEG-9");
-    plan.lanes[3].state = pb::LaneState::Landed as i32;
-    assert!(plan_json(&plan, &Keys::of_plan(&plan))["lane_is_train"].as_array().unwrap().is_empty(), "a finished lane is history");
-    plan.lanes[3].state = pb::LaneState::Building as i32;
-    plan.trains[0].state = pb::BoardTrainState::Landed as i32;
-    assert!(plan_json(&plan, &Keys::of_plan(&plan))["lane_is_train"].as_array().unwrap().is_empty(), "a landed train is history");
-}
-
-#[path = "plan_train_tests.rs"]
-mod train_tests;
 
 #[path = "plan_move_tests.rs"]
 mod move_tests;
+
+#[path = "plan_agent_tests.rs"]
+mod agent_tests;
+
+#[path = "plan_landing_tests.rs"]
+mod landing_tests;
 
 /// Every call `farcooler plan` makes, as text and as `--json`, is one a
 /// rep's pane may make (`people::rep_may`, ov-527): the overview is a read.

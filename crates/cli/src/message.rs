@@ -1,8 +1,9 @@
-//! `farcooler message <to> <text>` (ov-455): an agent tells its orchestrator,
-//! and the orchestrator tells a lane.
+//! `farcooler message <to> <text>` (ov-455, ov-872): an agent tells its
+//! orchestrator, and the orchestrator tells the agent working a ticket.
 //!
 //! The runner queues the message and types it into the recipient's box when
-//! it's safe, tagged with who it's from (`[from mac-ux on ov-505] PR is up`): a claude
+//! it's safe, tagged with who it's from (`[from the builder on ov-505] PR is
+//! up`): a claude
 //! working takes it into its own queue, a codex between turns. It is told
 //! once, in order, and waits through a restart. See
 //! `farcooler_daemon::watch::answer_wake::messages`.
@@ -22,9 +23,9 @@ use crate::{Fallible, connect_to, expect_value, req, with};
 /// `farcooler message`'s arguments.
 #[derive(Debug, Clone, Args)]
 pub(crate) struct MessageArgs {
-    /// Who it's for: `orchestrator`, a lane by name, a card by key (the
-    /// agent working it, or its lane's), or a person's rep as
-    /// `rep:<handle>`. An agent may only message its orchestrator.
+    /// Who it's for: `orchestrator`, a ticket by its card's key (the agent
+    /// working it), or a person's rep as `rep:<handle>`. An agent may only
+    /// message its orchestrator.
     to: String,
     /// The message, one line of at most 400 characters. Put `--` before one
     /// that starts with a dash.
@@ -134,10 +135,10 @@ pub(crate) fn sent_line(sent: &pb::MessageSent, json: bool) -> String {
 /// This CLI's line for a refusal the runner named, in clap's style.
 pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
-        "hub" => "an agent messages its orchestrator, not another lane: send it to `orchestrator`",
-        "self" => "that's you. message a lane by name, or a card by key",
-        "nobody" => "no agent is working that lane or card. dispatch one with `farcooler plan lane dispatch`",
-        "to" => "there's no lane or card by that name on this board",
+        "hub" => "an agent messages its orchestrator, not another agent: send it to `orchestrator`",
+        "self" => "that's you. message the agent on a ticket by its key",
+        "nobody" => "no agent is working that ticket. dispatch one with `farcooler agent dispatch`",
+        "to" => "there's no ticket with that key on this board",
         "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was sent. run it from outside Far Cooler's panes, or from the app",
         "no_task" => "this pane works no card, so there's nowhere to file the message. name one with --task",
         "too_long" => "that message is over 400 characters. put the detail in a note or a report, and send its path",
@@ -168,9 +169,9 @@ mod tests {
 
     #[test]
     fn a_queued_message_says_where_it_went() {
-        let sent = pb::MessageSent { note_id: Default::default(), task_key: "ov-4".into(), recipient: "the lane mac-ux".into() };
-        assert_eq!(sent_line(&sent, false), "queued for the lane mac-ux, on ov-4. it's typed in when it's ready");
-        assert_eq!(sent_line(&sent, true), r#"{"task":"ov-4","to":"the lane mac-ux"}"#);
+        let sent = pb::MessageSent { note_id: Default::default(), task_key: "ov-4".into(), recipient: "the builder on ov-4".into() };
+        assert_eq!(sent_line(&sent, false), "queued for the builder on ov-4, on ov-4. it's typed in when it's ready");
+        assert_eq!(sent_line(&sent, true), r#"{"task":"ov-4","to":"the builder on ov-4"}"#);
     }
 
     /// Every word the runner's `message_send` refuses with has a line here.

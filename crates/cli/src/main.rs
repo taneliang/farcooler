@@ -206,15 +206,19 @@ enum Command {
     /// What is read on a board, shared by every device on this runner.
     #[command(subcommand)]
     Board(board_reads::BoardCmd),
-    /// The plan (experimental): themes, lanes, and what's next. Run bare for the overview.
+    /// The plan (experimental): themes, the tickets on the line, and what's next. Run bare for the overview.
     Plan(plan::PlanArgs),
-    /// Tell your orchestrator something, or, as the orchestrator, tell a lane.
+    /// Agents at work (experimental): list them, dispatch one, record a subagent, and its work on tickets.
+    Agent(plan::AgentArgs),
+    /// Landings (experimental): finished tickets on their way into the product, and their CI.
+    Landing(plan::LandingArgs),
+    /// Tell your orchestrator something, or, as the orchestrator, tell the agent on a ticket.
     ///
     /// Queued and typed into the recipient's box when it's safe, tagged with
-    /// who it's from ("[from mac-ux on ov-505] PR is up"), in order, and kept across a
+    /// who it's from ("[from the builder on ov-505] PR is up"), in order, and kept across a
     /// restart. An agent Far Cooler started sends with no flags: `farcooler
     /// message orchestrator "PR is up: #123"`. The orchestrator answers with
-    /// a lane's name or a card's key: `farcooler message ov-12 "Rebase first"`.
+    /// a ticket's key: `farcooler message ov-12 "Rebase first"`.
     Message(message::MessageArgs),
     /// Find where something is in your checkout (a rep's search).
     ///
@@ -236,7 +240,7 @@ enum Command {
     Rep(people::RepArgs),
     /// Pages (experimental): what the orchestrator draws for the apps, in blocks.
     ///
-    /// A page is a small JSON document of typed blocks: a table of lanes, a
+    /// A page is a small JSON document of typed blocks: a table of tickets, a
     /// list of risks, a spend tally. Publish one with `page set`, learn the
     /// blocks with `page schema`, and fix a document before publishing with
     /// `page check`.
@@ -1249,6 +1253,8 @@ async fn run() -> Fallible {
         Command::Report(args) => report::report(runner, args, cli.json).await,
         Command::Board(c) => board_reads::board(runner, c, cli.json).await,
         Command::Plan(a) => plan::plan(runner, a, cli.json).await,
+        Command::Agent(a) => plan::agents(runner, a, cli.json).await,
+        Command::Landing(a) => plan::landings(runner, a, cli.json).await,
         Command::Message(a) => message::message(runner, a, cli.json).await,
         Command::Search(a) => rep_search::search(runner, a, cli.json).await,
         Command::Member(c) => people::member(runner, c, cli.json).await,

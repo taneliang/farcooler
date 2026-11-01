@@ -75,7 +75,7 @@ pub(crate) fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_
     })
 }
 
-/// The plan layer on a board moved (ov-268): a theme, a lane or the plan was
+/// The plan layer on a board moved (ov-268): a theme, a ticket, a landing or the plan was
 /// written. The Mac's Plan view re-reads `plan --json` on it. Not `task`: no
 /// task moved, and that line makes every board re-read.
 pub(crate) fn plan_event_json(p: &pb::PlanChanged) -> serde_json::Value {

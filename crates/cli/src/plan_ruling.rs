@@ -194,7 +194,7 @@ pub(super) async fn ruling<L: DispatchLink>(
         needs_actions(link)?;
     }
     // Keep is a person's mark, the owner's or a member's (ov-736), so a
-    // person's actor: the orchestrator, a lane or a rep is asked in chat,
+    // person's actor: the orchestrator, an agent or a rep is asked in chat,
     // and keeps nothing for them.
     let keeps = matches!(cmd, RulingCmd::Keep { .. })
         || matches!(cmd, RulingCmd::Set { state: RulingStateArg::Confirmed, .. });

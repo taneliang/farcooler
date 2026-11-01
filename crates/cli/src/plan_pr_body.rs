@@ -1,22 +1,22 @@
-//! `farcooler plan lane pr-body` (ov-314, ov-305 section 4.3): a pull
-//! request's description, drawn from the card.
+//! `farcooler plan ticket pr-body` (ov-314, ov-305 section 4.3, ov-872): a
+//! pull request's description, drawn from the card.
 //!
 //! ```text
-//! farcooler plan lane pr-body LANE [--card KEY] [--base REF]  print the section
-//! farcooler plan lane pr-body LANE [--card KEY] --apply PR  write it into PR
+//! farcooler plan ticket pr-body KEY [--base REF]  print the section
+//! farcooler plan ticket pr-body KEY --apply PR    write it into PR
 //! ```
 //!
-//! One pull request is one card's (owner, 2026-10-05), so a lane that works
-//! several cards is asked which: `--card`. The section is rendered by
-//! `plan_pr_section` (what is in it, and why those words); this file reads the
-//! board, and with `--apply` reads the description, merges, and writes it back
-//! with the owner's own `gh`, run in the directory the command is run in, so
-//! the pull request is looked up in that directory's repository (a URL names
-//! any other). Everything outside the markers stays as the reviewers left it;
-//! `--apply` with nothing to change writes nothing.
+//! One pull request is one ticket's (owner, 2026-10-05), and a ticket is on
+//! its own branch. The section is rendered by `plan_pr_section` (what is in
+//! it, and why those words); this file reads the board, and with `--apply`
+//! reads the description, merges, and writes it back with the owner's own
+//! `gh`, run in the directory the command is run in, so the pull request is
+//! looked up in that directory's repository (a URL names any other).
+//! Everything outside the markers stays as the reviewers left it; `--apply`
+//! with nothing to change writes nothing.
 //!
-//! **`--apply` only writes to the lane's own pull request.** Its head branch
-//! must be the lane's branch, because a typo or the wrong checkout would
+//! **`--apply` only writes to the ticket's own pull request.** Its head branch
+//! must be the ticket's branch, because a typo or the wrong checkout would
 //! otherwise append this card's section to somebody else's pull request, under
 //! the owner's login, in public. `--force` is the explicit override. The
 //! description is read again just before the write and nothing is written if
@@ -35,26 +35,23 @@ pub(super) mod section;
 #[path = "plan_pr_diff.rs"]
 pub(super) mod diff;
 
-use super::{Failed, Keys, expect_value, refused_here, unreadable};
+use super::{Failed, expect_value, find_line, refused_here, unreadable};
 use crate::tasks::{Board, DispatchLink};
-use crate::{req_for, short_bytes, with};
+use crate::{req_for, with};
 
 #[derive(Debug, Clone, Args)]
 pub(super) struct PrBodyArgs {
-    /// The lane's name.
-    name: String,
-    /// The card, when the lane works several: a pull request is one card's.
-    #[arg(long, value_name = "KEY")]
-    card: Option<String>,
+    /// The ticket: its card's key.
+    key: String,
     /// Write it into this pull request's description: a number, a branch or a
     /// URL. Only the text between the Far Cooler markers changes.
     #[arg(long, value_name = "PR")]
     apply: Option<String>,
     /// With --apply: write even when the pull request's branch isn't the
-    /// lane's, or the lane has no branch recorded.
+    /// ticket's, or the ticket has no branch recorded.
     #[arg(long, requires = "apply")]
     force: bool,
-    /// What the lane's branch is compared against for the diff stat and the
+    /// What the ticket's branch is compared against for the diff stat and the
     /// files to review first.
     #[arg(long, value_name = "REF", default_value = "origin/main")]
     base: String,
@@ -199,34 +196,23 @@ fn suggested(gh: &mut impl Description, base: &str, branch: &str, changes: &diff
     })
 }
 
-/// The card this pull request is for: `--card`, or the lane's only one.
-fn card_of<'a>(lane: &'a pb::Lane, keys: &Keys, wanted: Option<&str>) -> Result<&'a pb::LaneCard, Failed> {
-    let mut cards: Vec<&pb::LaneCard> = Vec::new();
-    for c in &lane.cards {
-        if !cards.iter().any(|seen| seen.task_id == c.task_id) {
-            cards.push(c);
-        }
+/// Who worked the ticket and in what role, for the cost line: each agent the
+/// plan still lists, by its model (or harness), in the order it started. An
+/// agent the plan no longer lists is left out, since its model isn't known.
+fn workers(plan: &pb::Plan, line: &pb::TicketLine) -> Vec<section::Worker> {
+    let mut out = Vec::new();
+    for w in &line.work {
+        let role = match pb::WorkRole::try_from(w.role) {
+            Ok(pb::WorkRole::Build) => "build",
+            Ok(pb::WorkRole::Fix) => "fix",
+            Ok(pb::WorkRole::Review) => "review",
+            _ => continue,
+        };
+        let Some(agent) = plan.agents.iter().find(|a| a.id == w.agent_id) else { continue };
+        let model = if agent.model.is_empty() { agent.harness.clone() } else { agent.model.clone() };
+        out.push(section::Worker { model, role });
     }
-    let names = || cards.iter().map(|c| keys.of(&c.task_id)).collect::<Vec<_>>().join(", ");
-    match (wanted, cards.as_slice()) {
-        (_, []) => Err(format!("{} has no cards yet.", lane.name).into()),
-        (Some(key), _) => {
-            let key = key.trim().to_lowercase();
-            cards
-                .iter()
-                .find(|c| keys.of(&c.task_id).to_lowercase() == key || short_bytes(&c.task_id) == key)
-                .copied()
-                .ok_or_else(|| format!("{} doesn't work {key}. Its cards: {}.", lane.name, names()).into())
-        }
-        (None, [only]) => Ok(only),
-        (None, many) => Err(format!(
-            "{} works {} cards, and a pull request is one card's. Name one with --card: {}.",
-            lane.name,
-            many.len(),
-            names()
-        )
-        .into()),
-    }
+    out
 }
 
 async fn detail<L: DispatchLink>(link: &mut L, task: &bytes::Bytes) -> Result<pb::TaskDetail, Failed> {
@@ -242,52 +228,52 @@ async fn detail<L: DispatchLink>(link: &mut L, task: &bytes::Bytes) -> Result<pb
     }
 }
 
-/// `plan lane pr-body`, with the real `gh`.
+/// `plan ticket pr-body`, with the real `gh`.
 pub(super) async fn pr_body<L: DispatchLink>(
     link: &mut L,
     board: &Board,
     plan: &pb::Plan,
-    keys: &Keys,
     args: PrBodyArgs,
     json: bool,
 ) -> Result<String, Failed> {
-    pr_body_with(link, board, plan, keys, args, json, &mut Gh::new()).await
+    pr_body_with(link, board, plan, args, json, &mut Gh::new()).await
 }
 
-/// `plan lane pr-body`, reading and writing descriptions through `gh`.
+/// `plan ticket pr-body`, reading and writing descriptions through `gh`.
 pub(super) async fn pr_body_with<L: DispatchLink>(
     link: &mut L,
     board: &Board,
     plan: &pb::Plan,
-    keys: &Keys,
     args: PrBodyArgs,
     json: bool,
     gh: &mut impl Description,
 ) -> Result<String, Failed> {
-    let lane = super::find_lane(plan, &args.name)?;
-    let card = card_of(lane, keys, args.card.as_deref())?;
-    let detail = detail(link, &card.task_id).await?;
+    let (card, line) = find_line(plan, &args.key)?;
+    let key = card.key.clone();
+    let detail = detail(link, &line.task_id).await?;
     let theme = plan
         .themes
         .iter()
-        .find(|v| v.task_ids.contains(&card.task_id))
+        .find(|v| v.task_ids.contains(&line.task_id))
         .and_then(|v| v.theme.as_ref())
         .map(|t| t.name.as_str());
-    // The calls that touch this card: one pull request is one card's.
-    let rulings: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| r.task_ids.contains(&card.task_id)).collect();
+    // The calls that touch this ticket: one pull request is one ticket's.
+    let rulings: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| r.task_ids.contains(&line.task_id)).collect();
     let cost_line = board.workspace.as_ref().is_some_and(|w| w.pr_cost_line == Some(true));
-    let changes = gh.changes(&args.base, &lane.branch);
+    let changes = gh.changes(&args.base, &line.branch);
     if let Err(why) = &changes {
         eprintln!("{}", diff_notice(&args.base, why, args.apply.is_some()));
     }
     let asked = match &changes {
-        Ok(c) => suggested(gh, &args.base, &lane.branch, c),
+        Ok(c) => suggested(gh, &args.base, &line.branch, c),
         Err(_) => Vec::new(),
     };
+    let workers = workers(plan, line);
     let render = |carried: Option<&section::Carried>| {
         section::render(&section::Input {
             detail: &detail,
-            lane,
+            spend: line.spend.unwrap_or_default(),
+            workers: &workers,
             theme,
             rulings: rulings.clone(),
             cost_line,
@@ -297,7 +283,6 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
         })
     };
     let text = render(None);
-    let key = keys.of(&card.task_id);
 
     let Some(pr) = args.apply else {
         return Ok(if json { json!({ "card": key, "section": text }).to_string() } else { text });
@@ -307,19 +292,18 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
         if existing.cross_repository {
             return Err(format!("{pr} comes from a fork, not from a branch of this repository. Add --force if it is the right pull request.").into());
         }
-        match lane.branch.as_str() {
+        match line.branch.as_str() {
             "" => {
                 return Err(format!(
-                    "{} has no branch recorded, so Far Cooler can't tell that {pr} is its pull request. \
-                     Check the number, then add --force.",
-                    lane.name
+                    "{key} has no branch recorded, so Far Cooler can't tell that {pr} is its pull request. \
+                     Check the number, then add --force."
                 )
                 .into());
             }
             branch if branch != existing.head => {
                 return Err(format!(
-                    "{pr} is from the branch {}, and {} works {branch}. Check the number, or add --force if it is the right pull request.",
-                    existing.head, lane.name
+                    "{pr} is from the branch {}, and {key} is on {branch}. Check the number, or add --force if it is the right pull request.",
+                    existing.head
                 )
                 .into());
             }

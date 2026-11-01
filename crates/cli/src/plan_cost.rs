@@ -1,4 +1,4 @@
-//! Cost on the plan (ov-307): a token budget on a theme or a lane, the
+//! Cost on the plan (ov-307): a token budget on a theme or a ticket, the
 //! seven-day trend, and cost per finished card by harness and model, in words
 //! an orchestrator reads as the owner sees them.
 //!
@@ -6,7 +6,7 @@
 //! anything is sent by a runner that doesn't keep budgets, and the reads simply
 //! draw nothing from one that doesn't carry them.
 //!
-//! **Tokens first.** A budget is a number of tokens, counted as a lane's spend
+//! **Tokens first.** A budget is a number of tokens, counted as a ticket's spend
 //! counts them (input, output and both cache counts). Dollars follow, and
 //! every one is API-equivalent. There is no weekly-limit percentage because
 //! the runner can't know the limit: see `farcooler_store::plan_cost`.
@@ -82,18 +82,18 @@ pub(super) fn asked(budget: Option<u64>, no_budget: bool) -> Option<u64> {
     if no_budget { Some(0) } else { budget }
 }
 
-fn total(s: &pb::LaneSpend) -> u64 {
+fn total(s: &pb::Spend) -> u64 {
     s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens
 }
 
 /// Whether `spend` is past its `budget`. Equal is within it.
-pub(super) fn over(spend: &pb::LaneSpend, budget: Option<u64>) -> bool {
+pub(super) fn over(spend: &pb::Spend, budget: Option<u64>) -> bool {
     budget.is_some_and(|b| total(spend) > b)
 }
 
 /// "1.2M of 5M tokens", or "Over budget: 6.1M of 5M tokens". Nothing without
 /// a budget.
-pub(super) fn budget_words(spend: &pb::LaneSpend, budget: Option<u64>) -> Option<String> {
+pub(super) fn budget_words(spend: &pb::Spend, budget: Option<u64>) -> Option<String> {
     let b = budget?;
     let used = tokens(total(spend));
     Some(if over(spend, Some(b)) {

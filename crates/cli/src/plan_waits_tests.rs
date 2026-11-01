@@ -18,7 +18,7 @@ fn wait(who: &str, prs: u32, median_minutes: Option<i64>) -> pb::ReviewerWait {
 fn plan_with(waits: Vec<pb::ReviewerWait>) -> pb::Plan {
     pb::Plan {
         now_ms: NOW,
-        lanes: vec![pb::Lane { id: vec![1].into(), name: "review".into(), state: pb::LaneState::Review as i32, ..Default::default() }],
+        lines: vec![pb::TicketLine { task_id: vec![1].into(), stage: pb::TicketStage::Reviewing as i32, ..Default::default() }],
         review_waits: waits,
         ..Default::default()
     }
@@ -49,8 +49,8 @@ fn a_usual_time_is_said_in_the_unit_a_person_plans_by() {
 
 #[test]
 fn the_json_carries_the_waits_with_an_absent_median_as_null() {
-    let json = plan_json(&plan_with(vec![wait("alice", 2, Some(48)), wait("bob", 1, None)]), &Keys::of_plan(&plan_with(vec![])));
+    let json = plan_json(&plan_with(vec![wait("alice", 2, Some(48)), wait("bob", 1, None)]));
     assert_eq!(json["review_waits"][0]["median_wait_ms"], 48 * MINUTE);
-    assert!(plan_json(&plan_with(vec![]), &Keys::of_plan(&plan_with(vec![]))).get("review_waits").is_none());
+    assert!(plan_json(&plan_with(vec![])).get("review_waits").is_none());
     assert!(json["review_waits"][1]["median_wait_ms"].is_null());
 }

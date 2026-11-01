@@ -364,7 +364,7 @@ async fn get_page<L: DispatchLink>(
     }
 }
 
-/// The plan, when this runner has one: a page's lanes and themes are drawn
+/// The plan, when this runner has one: a page's tickets and themes are drawn
 /// from it, and without it they're plain text.
 async fn plan_of<L: DispatchLink>(link: &mut L, ws: &bytes::Bytes) -> Option<pb::Plan> {
     if !link.capabilities().iter().any(|c| c == capability::BOARD_PLAN) {

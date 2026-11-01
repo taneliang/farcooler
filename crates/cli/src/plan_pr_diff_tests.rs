@@ -85,7 +85,7 @@ fn note(n: u128, kind: pb::TaskNoteKind, body: &str) -> pb::TaskNote {
 }
 
 fn render(detail: &pb::TaskDetail, changes: Option<&Changes>) -> String {
-    section::render(&Input { detail, lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes, carried: None, reviewers: &[] })
+    section::render(&Input { detail, spend: Default::default(), workers: &[], theme: None, rulings: vec![], cost_line: false, changes, carried: None, reviewers: &[] })
 }
 
 fn golden(name: &str) -> String {
@@ -482,7 +482,8 @@ fn a_git_failure_keeps_the_review_list_and_the_stat_the_description_already_has(
     assert!(kept.review.first().is_some_and(|l| l == "## Review this first") && kept.stat.as_deref() == Some(c.stat().as_str()));
     let after = section::render(&Input {
         detail: &card(vec![note(1, pb::TaskNoteKind::Comment, "Walkthrough:\nNew words.")]),
-        lane: &pb::Lane::default(),
+        spend: Default::default(),
+        workers: &[],
         theme: None,
         rulings: vec![],
         cost_line: false,
@@ -494,7 +495,7 @@ fn a_git_failure_keeps_the_review_list_and_the_stat_the_description_already_has(
     assert_eq!(after.replace("## Walkthrough\nNew words.\n\n", ""), before, "everything diff-derived is as it was");
     // A diff that read fine and was empty is not a failure: it clears them.
     let empty = Changes::default();
-    let cleared = section::render(&Input { detail: &card(vec![]), lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes: Some(&empty), carried: Some(&kept), reviewers: &[] });
+    let cleared = section::render(&Input { detail: &card(vec![]), spend: Default::default(), workers: &[], theme: None, rulings: vec![], cost_line: false, changes: Some(&empty), carried: Some(&kept), reviewers: &[] });
     assert!(!cleared.contains("Review this first") && !cleared.contains("files changed"), "{cleared}");
     // And nothing to keep, nothing invented.
     assert_eq!(section::Carried::of("no markers at all"), section::Carried::default());
@@ -555,6 +556,6 @@ fn git_failing_is_an_error_with_git_s_first_line_and_not_an_empty_diff() {
     assert!(changes_in(Some(repo.path()), "main", "no-such-branch").is_err());
     let elsewhere = tempfile::tempdir().unwrap();
     assert!(changes_in(Some(elsewhere.path()), "main", "lane").is_err(), "not a repository");
-    assert_eq!(changes_in(Some(repo.path()), "main", "").unwrap_err(), "the lane has no branch recorded");
+    assert_eq!(changes_in(Some(repo.path()), "main", "").unwrap_err(), "the ticket has no branch recorded");
     assert!(changes_in(Some(repo.path()), "--output=/tmp/x", "lane").is_err() && changes_in(Some(repo.path()), "main", "-p").is_err());
 }

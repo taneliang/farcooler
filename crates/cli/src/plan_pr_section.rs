@@ -2,7 +2,7 @@
 //! (ov-314, ov-305 section 4.3): rendered from a card, and merged into a
 //! description without touching a word a reviewer wrote.
 //!
-//! The pure half of `plan lane pr-body`, a child of `plan_pr_body.rs`: no I/O,
+//! The pure half of `plan ticket pr-body`, a child of `plan_pr_body.rs`: no I/O,
 //! so a golden file can pin every line of it.
 //!
 //! ```text
@@ -12,7 +12,7 @@
 //! ## Walkthrough           the card's latest Walkthrough: note (ov-577)
 //! ## Acceptance            the card's lines, ticked as they are
 //! ## Agent review          the latest finding's headline, and what was not checked
-//! ## Decided for you      rulings on the lane's cards, each reversible by a reply
+//! ## Decided for you      rulings on the ticket's card, each reversible by a reply
 //! ## Captures              links the card's notes carry, a before and an after side by side (ov-578)
 //! ## Cost                 only when the workspace opted in
 //! <!-- farcooler:end -->
@@ -78,14 +78,17 @@ pub const END: &str = "<!-- farcooler:end -->";
 /// Everything the section is drawn from.
 pub struct Input<'a> {
     pub detail: &'a pb::TaskDetail,
-    pub lane: &'a pb::Lane,
+    /// What the ticket spent.
+    pub spend: pb::Spend,
+    /// Who worked it, and in what role, oldest first.
+    pub workers: &'a [Worker],
     /// The theme the card is in, by name.
     pub theme: Option<&'a str>,
-    /// Rulings on any of the lane's cards, in the order the board lists them.
+    /// Rulings on the ticket's card, in the order the board lists them.
     pub rulings: Vec<&'a pb::BoardRuling>,
     /// Whether the workspace opted in to a cost line (`pr_cost_line`).
     pub cost_line: bool,
-    /// What the lane's branch changed; `None` when git couldn't say.
+    /// What the ticket's branch changed; `None` when git couldn't say.
     pub changes: Option<&'a Changes>,
     /// With no `changes`, the diff-derived parts the description already has,
     /// kept rather than deleted because git failed.
@@ -93,6 +96,14 @@ pub struct Input<'a> {
     /// Whom to ask to review (`farcooler_core::reviewers`), best first; empty
     /// when nobody is known or git couldn't say.
     pub reviewers: &'a [Suggestion],
+}
+
+/// An agent that worked the ticket, for the cost line: its model (or its
+/// harness when it named none) and what it did, `build`, `fix` or `review`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Worker {
+    pub model: String,
+    pub role: &'static str,
 }
 
 /// The parts of a section that come from the diff: the "Review this first"
@@ -292,7 +303,7 @@ pub fn render(input: &Input) -> String {
     if input.cost_line {
         out.push(String::new());
         out.push("## Cost".into());
-        out.push(cost_line(input.lane));
+        out.push(cost_line(&input.spend, input.workers));
     }
     out.push(END.to_string());
     out.join("\n")
@@ -564,36 +575,21 @@ fn capture_lines(links: &[(String, String)]) -> Vec<String> {
     out
 }
 
-/// "About 120K tokens, Sonnet build + Opus review": what the lane spent, and
-/// by whom. A lane's spend is the lane's, and a card on a lane of several
-/// gets an even share, which the line says.
-fn cost_line(lane: &pb::Lane) -> String {
-    let spend = lane.spend.unwrap_or_default();
+/// "120K tokens, Sonnet build + Opus review": what the ticket spent, and by
+/// whom. An agent that also worked other tickets counts once across them,
+/// evenly, so a ticket with one says its figure is a share.
+fn cost_line(spend: &pb::Spend, workers: &[Worker]) -> String {
     let total = spend.input_tokens + spend.output_tokens + spend.cache_read_tokens + spend.cache_write_tokens;
-    let mut distinct: Vec<&[u8]> = Vec::new();
-    for c in &lane.cards {
-        if !distinct.contains(&c.task_id.as_ref()) {
-            distinct.push(c.task_id.as_ref());
-        }
-    }
-    let cards = distinct.len().max(1) as u64;
-    let mut line = match (total, cards) {
+    let mut line = match (total, spend.shared_agents) {
         (0, _) => NOT_REPORTED.to_string(),
-        (t, 1) => format!("{} tokens", tokens(t)),
-        (t, n) => format!("About {} tokens, the lane's spend split evenly across {n} cards", tokens(t / n)),
+        (t, 0) => format!("{} tokens", tokens(t)),
+        (t, _) => format!("About {} tokens, its share of agents that also worked other tickets", tokens(t)),
     };
     let mut who: Vec<String> = Vec::new();
-    for agent in &lane.agents {
-        let role = match pb::LaneAgentRole::try_from(agent.role) {
-            Ok(pb::LaneAgentRole::Build) => "build",
-            Ok(pb::LaneAgentRole::Review) => "review",
-            Ok(pb::LaneAgentRole::Fix) => "fix",
-            _ => continue,
-        };
-        let model = if agent.model.is_empty() { agent.harness.as_str() } else { agent.model.as_str() };
-        let mut chars = model.chars();
+    for w in workers {
+        let mut chars = w.model.chars();
         let named = chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
-        let entry = neutralize(&format!("{named} {role}"));
+        let entry = neutralize(&format!("{named} {}", w.role));
         if !named.is_empty() && !who.contains(&entry) {
             who.push(entry);
         }

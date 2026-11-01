@@ -1,10 +1,10 @@
-//! `plan lane dispatch` (ov-457), against a fake runner.
+//! `agent dispatch` (ov-457, ov-872), against a fake runner.
 
 use clap::Parser;
 use farcooler_transport::ClientError;
 use uuid::Uuid;
 
-use super::super::{PlanCmd, run_on};
+use super::super::{AgentCmd, Session, run_in};
 use super::*;
 use crate::id_bytes;
 
@@ -25,20 +25,8 @@ fn task(n: u128, key: &str, status: pb::TaskStatus) -> pb::Task {
     }
 }
 
-fn lane(name: &str, cards: &[u128]) -> pb::Lane {
-    pb::Lane {
-        id: id_bytes(Uuid::from_u128(0x2001)),
-        workspace_id: id_bytes(WORKSPACE),
-        name: name.into(),
-        state: pb::LaneState::Queued as i32,
-        cards: cards.iter().map(|c| pb::LaneCard { task_id: id_bytes(Uuid::from_u128(0x1000 + c)), slice: String::new(), stage: None }).collect(),
-        ..Default::default()
-    }
-}
-
-/// A runner with three cards (the first done) and one queued lane,
-/// `mac-ux`, holding all three; it answers a dispatch's reads and writes and
-/// records what it was sent.
+/// A runner with three cards, the first done; it answers a dispatch's reads
+/// and writes and records what it was sent.
 struct Runner {
     capabilities: Vec<String>,
     sent: Vec<pb::Request>,
@@ -48,16 +36,12 @@ struct Runner {
 }
 
 fn runner() -> Runner {
-    let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::TERMINAL_TASK, capability::TERMINAL_LANE];
+    let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_LINE, capability::TERMINAL_TASK];
     Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None }
 }
 
 fn items() -> Vec<pb::Task> {
     vec![task(1, "ov-1", pb::TaskStatus::Done), task(2, "ov-2", pb::TaskStatus::Todo), task(3, "ov-3", pb::TaskStatus::Backlog)]
-}
-
-fn the_plan() -> pb::Plan {
-    pb::Plan { lanes: vec![lane("mac-ux", &[1, 2, 3])], ..Default::default() }
 }
 
 impl DispatchLink for Runner {
@@ -76,7 +60,6 @@ impl DispatchLink for Runner {
             ..Default::default()
         };
         let value = match (method.as_str(), payload) {
-            ("plan.get", _) => result::Value::Plan(the_plan()),
             ("task.list", _) => result::Value::TaskList(pb::TaskList { items: items(), reads: None }),
             ("worktree.list", _) => result::Value::WorktreeList(pb::WorktreeList {
                 items: vec![pb::Worktree { id: id_bytes(WORKTREE), repository_id: id_bytes(REPO), task_name: "lane".into(), ..Default::default() }],
@@ -88,17 +71,11 @@ impl DispatchLink for Runner {
             ("terminal.create", _) => result::Value::Terminal(pane()),
             ("task.get", _) => result::Value::TaskDetail(pb::TaskDetail { task: Some(items()[1].clone()), ..Default::default() }),
             ("task.update" | "task.set_status", _) => result::Value::Task(items()[1].clone()),
-            ("lane.create", Some(request::Payload::LaneCreate(p))) => {
-                let mut made = lane(&p.name, &[]);
-                made.cards = p.cards;
-                result::Value::Lane(made)
-            }
-            ("lane.cards", Some(request::Payload::LaneCards(p))) => {
-                let mut changed = the_plan().lanes.remove(0);
-                changed.cards.extend(p.add);
-                result::Value::Lane(changed)
-            }
-            (other, _) => panic!("lane dispatch sent {other}, which this fake doesn't expect"),
+            ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList { items: vec![], reads: None }),
+            ("repository.list", _) => result::Value::RepositoryList(pb::RepositoryList {
+                items: vec![pb::Repository { id: id_bytes(REPO), display_name: "overnight".into(), ..Default::default() }],
+            }),
+            (other, _) => panic!("agent dispatch sent {other}, which this fake doesn't expect"),
         };
         Ok(pb::Result { value: Some(value) })
     }
@@ -111,7 +88,7 @@ impl Runner {
     }
     fn create(&self) -> (&pb::Request, &pb::TerminalCreate) {
         let req = self.sent.iter().find(|r| r.method == "terminal.create").expect("a pane was opened");
-        let Some(request::Payload::TerminalCreate(create)) = &req.payload else { panic!("no payload") };
+        let Some(farcooler_protocol::v1::request::Payload::TerminalCreate(create)) = &req.payload else { panic!("no payload") };
         (req, create)
     }
 }
@@ -124,104 +101,115 @@ fn the_board() -> Board {
     }
 }
 
-async fn say(link: &mut Runner, args: &str) -> Result<String, Failed> {
-    let argv = format!("farcooler plan lane dispatch {args} --workspace main");
+fn parsed(args: &str) -> AgentCmd {
+    let argv = format!("farcooler agent dispatch {args} --workspace main");
     let cmd = crate::Cli::try_parse_from(argv.split_whitespace().map(String::from).collect::<Vec<_>>())
         .map(|cli| match cli.command {
-            crate::Command::Plan(a) => a.cmd,
-            _ => panic!("not plan"),
+            crate::Command::Agent(a) => a.cmd,
+            _ => panic!("not agent"),
         })
         .unwrap_or_else(|e| panic!("{argv}: {e}"));
-    assert!(matches!(cmd, Some(PlanCmd::Lane(_))));
-    run_on(link, &the_board(), cmd, "manager", false, 0).await
+    assert!(matches!(cmd, AgentCmd::Dispatch(_)));
+    cmd
 }
 
-/// An existing lane opens its pane on its first card that isn't done, names
-/// the lane on the pane with the capability that carries it, and says so.
+async fn say(link: &mut Runner, args: &str) -> Result<String, Failed> {
+    run_in(link, &the_board(), parsed(args), "manager", false, &Session::default()).await
+}
+
+/// A builder opens its pane on its first ticket, names its role, title and
+/// the tickets after the first on the pane with the capability that carries
+/// them, puts the card into progress, and says so.
 #[tokio::test]
-async fn a_lane_opens_on_its_first_open_card() {
+async fn a_builder_opens_on_its_first_ticket() {
     let mut link = runner();
-    let said = say(&mut link, "mac-ux --worktree lane --preset codex").await.unwrap();
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --ticket ov-2 --worktree lane --harness codex --title Phones")
+        .await
+        .unwrap();
     let (req, create) = link.create();
-    assert_eq!(create.task_key.as_deref(), Some("ov-2"), "ov-1 is done");
-    assert_eq!(create.lane.as_deref(), Some("mac-ux"));
+    assert_eq!(create.task_key.as_deref(), Some("ov-2"));
+    let agent = create.agent.clone().expect("opened as an agent");
+    assert_eq!(agent.role, pb::AgentRole::Builder as i32);
+    assert_eq!((agent.more_tickets, agent.title.as_str()), (vec!["ov-3".to_string()], "Phones"), "each ticket once");
     assert_eq!(create.command_preset, "codex");
-    assert!(req.required_capabilities.contains(&capability::TERMINAL_LANE.to_string()), "{:?}", req.required_capabilities);
-    assert!(said.starts_with("Lane mac-ux is building, starting on ov-2.\nov-2 is in progress in lane"), "{said}");
-    assert!(!link.methods().contains(&"lane.create") && !link.methods().contains(&"lane.cards"), "{:?}", link.methods());
+    assert!(req.required_capabilities.contains(&capability::BOARD_LINE.to_string()), "{:?}", req.required_capabilities);
+    assert!(said.starts_with("Builder is starting on ov-2, then ov-3.\nov-2 is in progress in lane"), "{said}");
+    assert!(link.methods().contains(&"task.update") && link.methods().contains(&"task.set_status"), "{:?}", link.methods());
 }
 
-/// A lane that doesn't exist is made from `--card`, in the order given, and
-/// its pane opens on the first.
+/// A reviewer works a ticket a builder built, so the card stays where it is:
+/// no move onto the worktree, none into progress, and no warning that it
+/// would.
 #[tokio::test]
-async fn a_new_lane_is_made_from_its_cards() {
+async fn a_reviewer_leaves_the_card_where_it_is() {
     let mut link = runner();
-    say(&mut link, "phones --card ov-3 --card ov-2 --worktree lane").await.unwrap();
-    let made = link.sent.iter().find(|r| r.method == "lane.create").expect("the lane was made");
-    let Some(request::Payload::LaneCreate(p)) = &made.payload else { panic!("no payload") };
-    let keys: Vec<_> = p.cards.iter().map(|c| c.task_id.clone()).collect();
-    assert_eq!(keys, [items()[2].id.clone(), items()[1].id.clone()]);
+    let said = say(&mut link, "--role reviewer --ticket ov-2 --worktree lane").await.unwrap();
     let (_, create) = link.create();
-    assert_eq!((create.task_key.as_deref(), create.lane.as_deref()), (Some("ov-3"), Some("phones")));
+    assert_eq!(create.agent.as_ref().map(|a| a.role), Some(pb::AgentRole::Reviewer as i32));
+    assert!(!link.methods().contains(&"task.update") && !link.methods().contains(&"task.set_status"), "{:?}", link.methods());
+    assert!(said.starts_with("Reviewer is starting on ov-2.\nterminal 00000404 is working ov-2 in lane"), "{said}");
 }
 
-/// A lane with no such name and no cards to make it from is refused before
-/// anything is written.
+/// A ticket on another board, or none at all, is refused before anything is
+/// opened, and a ticket is required.
 #[tokio::test]
-async fn no_lane_and_no_cards_is_refused() {
+async fn a_ticket_must_be_on_this_board() {
     let mut link = runner();
-    let refused = say(&mut link, "nowhere --worktree lane").await.unwrap_err().to_string();
-    assert_eq!(refused, "No lane here is called \"nowhere\". Name its cards with --card to make it.");
-    assert!(link.methods().iter().all(|m| *m == "plan.get" || *m == "task.list"), "{:?}", link.methods());
+    let refused = say(&mut link, "--role builder --ticket ov-9 --worktree lane").await.unwrap_err().to_string();
+    assert_eq!(refused, "No card here is called \"ov-9\".");
+    assert!(!link.methods().contains(&"terminal.create") && !link.methods().contains(&"worktree.list"), "{:?}", link.methods());
+    assert!(crate::Cli::try_parse_from(["farcooler", "agent", "dispatch", "--role", "builder", "--worktree", "lane"]).is_err());
+    assert!(crate::Cli::try_parse_from(["farcooler", "agent", "dispatch", "--ticket", "ov-1", "--worktree", "lane"]).is_err(), "a role is named");
 }
 
-/// A runner from before lanes could be named on a pane is told so before
-/// anything is sent past the plan's read.
+/// A runner from before agents could be named on a pane is told so before
+/// anything is sent.
 #[tokio::test]
 async fn an_old_runner_is_refused_first() {
     let mut link = runner();
-    link.capabilities.retain(|c| c != capability::TERMINAL_LANE);
-    let refused = say(&mut link, "mac-ux --worktree lane").await.unwrap_err().to_string();
-    assert!(refused.contains("can't open a pane for a lane yet"), "{refused}");
-    assert_eq!(link.methods(), ["plan.get"]);
+    link.capabilities.retain(|c| c != capability::BOARD_LINE);
+    let refused = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert_eq!(refused, super::super::super::NEEDS_LINE);
+    assert!(link.methods().is_empty(), "{:?}", link.methods());
 }
 
 /// Dispatch looks for the agent's first turn and says it began (ov-493).
 #[tokio::test]
-async fn a_lane_says_its_agent_began() {
+async fn an_agent_says_it_began() {
     let mut link = runner();
-    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap();
     assert!(said.ends_with("\n  its agent began its first turn"), "{said}");
 }
 
 /// An agent on claude's folder-trust prompt hasn't started, and dispatch
 /// says it's the owner's to answer, in words and in `--json`.
 #[tokio::test]
-async fn a_lane_on_the_trust_prompt_says_so() {
+async fn an_agent_on_the_trust_prompt_says_so() {
     let mut link = runner();
     link.activity = pb::AgentActivity::Blocked;
     link.question = Some("Trust this folder?".into());
-    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap();
     assert!(said.contains("its agent hasn't started: Claude Code is asking whether to trust its folder"), "{said}");
     assert!(said.contains("tell them it's waiting in Needs You"), "{said}");
     let mut link = runner();
     link.activity = pb::AgentActivity::Blocked;
     link.question = Some("Trust this folder?".into());
-    let json = say_json(&mut link, "mac-ux --worktree lane").await;
+    let json = say_json(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --worktree lane").await;
     assert_eq!((json["first_turn"].as_str(), json["stopped_on"].as_str()), (Some("stopped"), Some("Trust this folder?")), "{json}");
+    assert_eq!((json["role"].as_str(), json["tickets"].clone()), (Some("builder"), serde_json::json!(["ov-2", "ov-3"])));
 }
 
 /// An agent that hasn't begun by the last look says so, and where to see
 /// it; dispatch looks a bounded number of times.
 #[tokio::test]
-async fn a_lane_that_hasnt_begun_says_where_to_look() {
+async fn an_agent_that_hasnt_begun_says_where_to_look() {
     let mut link = runner();
     link.activity = pb::AgentActivity::Idle;
-    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap();
     assert!(said.contains("its agent hasn't begun its first turn yet: see `farcooler terminal screen 00000404`"), "{said}");
     let looks = link.sent.iter().skip_while(|r| r.method != "terminal.create").filter(|r| r.method == "terminal.list").count();
     assert!(looks <= FIRST_TURN_LOOKS + 4, "{looks} looks");
-    let json = say_json(&mut runner_idle(), "mac-ux --worktree lane").await;
+    let json = say_json(&mut runner_idle(), "--role builder --ticket ov-2 --worktree lane").await;
     assert_eq!(json["first_turn"], "not_yet", "{json}");
 }
 
@@ -232,13 +220,6 @@ fn runner_idle() -> Runner {
 }
 
 async fn say_json(link: &mut Runner, args: &str) -> serde_json::Value {
-    let argv = format!("farcooler plan lane dispatch {args} --workspace main");
-    let cmd = crate::Cli::try_parse_from(argv.split_whitespace().map(String::from).collect::<Vec<_>>())
-        .map(|cli| match cli.command {
-            crate::Command::Plan(a) => a.cmd,
-            _ => panic!("not plan"),
-        })
-        .unwrap();
-    let said = run_on(link, &the_board(), cmd, "manager", true, 0).await.unwrap();
+    let said = run_in(link, &the_board(), parsed(args), "manager", true, &Session::default()).await.unwrap();
     serde_json::from_str(&said).unwrap()
 }

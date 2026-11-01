@@ -1,4 +1,4 @@
-//! What a lane's branch changed, and where a reviewer should look first
+//! What a ticket's branch changed, and where a reviewer should look first
 //! (ov-576, ov-577): the pure half reads a `git diff` and sorts its files by
 //! risk; the thin half runs git.
 //!
@@ -21,7 +21,7 @@
 //! stays risky however generated it looks, because a fixture under the
 //! protocol crate is still wire.
 //!
-//! The diff is the three-dot diff, the lane's branch against where it left
+//! The diff is the three-dot diff, the ticket's branch against where it left
 //! its base, so work that landed on the base since never counts against it.
 
 use std::process::{Command, Stdio};
@@ -470,7 +470,7 @@ pub fn changes(base: &str, branch: &str) -> Result<Changes, String> {
 /// `changes`, run in `dir` rather than the current directory.
 pub fn changes_in(dir: Option<&std::path::Path>, base: &str, branch: &str) -> Result<Changes, String> {
     if branch.is_empty() {
-        return Err("the lane has no branch recorded".into());
+        return Err("the ticket has no branch recorded".into());
     }
     if !plain_ref(base) || !plain_ref(branch) {
         return Err("the base or branch isn't a name git can be asked about".into());

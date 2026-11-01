@@ -3,7 +3,7 @@
 //! `farcooler page show` prints this so the orchestrator reads what the owner
 //! sees: tables as aligned columns, lists with their state words, and each live
 //! reference resolved against the board it was read from. A reference the board
-//! can't resolve (a lane that's gone, a runner with no plan) is plain text, as
+//! can't resolve (a ticket that's gone, a runner with no plan) is plain text, as
 //! it is in the apps.
 
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use crate::ci_words;
 pub(crate) struct Live {
     /// Cards by lowercase key: title and status.
     pub(crate) cards: HashMap<String, (String, i32)>,
-    /// The plan, when the runner has one and the page names a lane, a theme,
+    /// The plan, when the runner has one and the page names a ticket, a theme,
     /// CI or a card count: CI reads and the board's counts come with it
     /// (ov-306).
     pub(crate) plan: Option<pb::Plan>,
@@ -34,23 +34,20 @@ fn tone(t: Tone) -> &'static str {
     if t == Tone::Attention { ATTENTION } else { "" }
 }
 
-/// A lane's state, as a person reads it.
-fn lane_state(l: &pb::Lane) -> String {
-    let word = match pb::LaneState::try_from(l.state) {
-        Ok(pb::LaneState::Queued) => "Queued",
-        Ok(pb::LaneState::Building) => "Building",
-        Ok(pb::LaneState::Review) => "In review",
-        Ok(pb::LaneState::Fixing) => "Fixing",
-        Ok(pb::LaneState::Landing) => "Landing",
-        Ok(pb::LaneState::Landed) => "Landed",
-        Ok(pb::LaneState::Dropped) => "Dropped",
+/// A ticket's stage, as a person reads it, with a fix round's number.
+fn ticket_state(l: &pb::TicketLine) -> String {
+    let word = match pb::TicketStage::try_from(l.stage) {
+        Ok(pb::TicketStage::Waiting) => "Waiting",
+        Ok(pb::TicketStage::Building) if l.fix_rounds > 0 => return format!("Fixing · round {}", l.fix_rounds),
+        Ok(pb::TicketStage::Building) => "Building",
+        Ok(pb::TicketStage::Reviewing) => "In review",
+        Ok(pb::TicketStage::NeedsYou) => "Needs you",
+        Ok(pb::TicketStage::Landing) => "Landing",
+        Ok(pb::TicketStage::Landed) => "Landed",
+        Ok(pb::TicketStage::Dropped) => "Dropped",
         _ => "Unknown",
     };
-    if l.state == pb::LaneState::Fixing as i32 && l.fix_rounds > 0 {
-        format!("{word} · round {}", l.fix_rounds)
-    } else {
-        word.to_string()
-    }
+    word.to_string()
 }
 
 fn task_status(status: i32) -> &'static str {
@@ -66,7 +63,7 @@ fn task_status(status: i32) -> &'static str {
     }
 }
 
-fn spend(s: &pb::LaneSpend) -> String {
+fn spend(s: &pb::Spend) -> String {
     let total = s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens;
     if total == 0 {
         return NOT_REPORTED.to_string();
@@ -104,15 +101,17 @@ fn live_value(reference: &Reference, show: Option<Show>, live: &Live) -> (String
             Some(_) => ("Answered".to_string(), false),
             None => (label.unwrap_or(key).to_string(), false),
         },
+        // A page's `lane` reference names a ticket on the line, by its
+        // card's key (ov-872).
         Target::Lane(name) => {
-            let lane = live
-                .plan
-                .as_ref()
-                .and_then(|p| p.lanes.iter().find(|l| l.name.eq_ignore_ascii_case(name)));
-            match (lane, show) {
-                (Some(l), Some(Show::State)) => (lane_state(l), false),
-                (Some(l), Some(Show::Spend)) => (spend(&l.spend.unwrap_or_default()), false),
-                (Some(l), None) => (label.unwrap_or(&l.name).to_string(), false),
+            let ticket = live.plan.as_ref().and_then(|p| {
+                let card = p.cards.iter().find(|c| c.key.eq_ignore_ascii_case(name))?;
+                p.lines.iter().find(|l| l.task_id == card.task_id).map(|l| (card, l))
+            });
+            match (ticket, show) {
+                (Some((_, l)), Some(Show::State)) => (ticket_state(l), false),
+                (Some((_, l)), Some(Show::Spend)) => (spend(&l.spend.unwrap_or_default()), false),
+                (Some((c, _)), None) => (label.unwrap_or(&c.key).to_string(), false),
                 (None, _) => (label.unwrap_or(name).to_string(), false),
             }
         }

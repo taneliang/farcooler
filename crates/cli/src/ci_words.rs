@@ -1,6 +1,6 @@
-//! CI as a person reads it (ov-309, ov-306): one set of words for a train's
-//! CI in `plan`, and for a page's CI reference in `page show`, the same words
-//! the apps draw.
+//! CI as a person reads it (ov-309, ov-306, ov-872): one set of words for a
+//! landing's CI in `plan` and `landing`, and for a page's CI reference in
+//! `page show`, the same words the apps draw.
 
 use farcooler_protocol::v1 as pb;
 
@@ -35,7 +35,7 @@ pub(crate) fn summary(read: &pb::BoardCiRead) -> String {
     let jobs = |k: usize| if k == 1 { "job" } else { "jobs" };
     match pb::BoardCiStatus::try_from(read.status) {
         Ok(pb::BoardCiStatus::Failed) => {
-            // A canceled job is superseded, not failed (review train-1005c H1).
+            // A canceled job is superseded, not failed.
             format!("{word} · {} of {total} {} failed", n("failed"), jobs(total))
         }
         Ok(pb::BoardCiStatus::Running | pb::BoardCiStatus::Queued) => {
@@ -61,7 +61,7 @@ pub(crate) fn read_for<'a>(ci: &'a [pb::BoardCiRead], subject: &str) -> Option<&
 
 /// A read older than this is stale: the watch reads a finished subject every
 /// ten minutes, so two and a half of those missed is GitHub not answering
-/// (review train-1005c M1). The apps hold the same number.
+/// The apps hold the same number.
 pub(crate) const STALE_AFTER_MS: i64 = 25 * 60_000;
 
 /// "as of 2h ago" for a read that worked once and not since; nil while it's
@@ -74,80 +74,37 @@ pub(crate) fn stale(read: &pb::BoardCiRead, now: i64) -> Option<String> {
     })
 }
 
-/// A train's state, as a person reads it: the apps' plain words (ov-522), so
-/// combining, gating and the full test run are one "Checking here", and a
-/// pushed train is "Checking on CI". `--state` and `--json` keep the stored words.
-pub(crate) fn train_state_word(state: i32) -> &'static str {
-    match pb::BoardTrainState::try_from(state) {
-        Ok(pb::BoardTrainState::Integrating) | Ok(pb::BoardTrainState::Gating) => "Checking here",
-        Ok(pb::BoardTrainState::Pushed) => "Checking on CI",
-        Ok(pb::BoardTrainState::Green) => "Green",
-        Ok(pb::BoardTrainState::Red) => "Red",
-        Ok(pb::BoardTrainState::Landed) => "Landed",
-        Ok(pb::BoardTrainState::Dropped) => "Dropped",
+/// A landing's state, as a person reads it: the apps' plain words (ov-522),
+/// so gating is "Checking here" and a pushed landing is "Checking on CI".
+/// `--state` and `--json` keep the stored words.
+pub(crate) fn landing_state_word(state: i32) -> &'static str {
+    match pb::LandingState::try_from(state) {
+        Ok(pb::LandingState::Open) => "Open",
+        Ok(pb::LandingState::Gating) => "Checking here",
+        Ok(pb::LandingState::Pushed) => "Checking on CI",
+        Ok(pb::LandingState::Green) => "Green",
+        Ok(pb::LandingState::Red) => "Red",
+        Ok(pb::LandingState::Landed) => "Landed",
+        Ok(pb::LandingState::Dropped) => "Dropped",
         _ => "Unknown",
     }
 }
 
-/// A train's phase, as a person reads it (ov-503); `None` from a runner that
-/// derives none, where the state's word is all there is.
-pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
-    Some(match pb::BoardTrainPhase::try_from(phase) {
-        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "Waiting for the earlier landing",
-        Ok(pb::BoardTrainPhase::WaitingForMain) => "Waiting for main's checks to pass",
-        Ok(pb::BoardTrainPhase::WaitingForLanes) => "Waiting for lanes",
-        Ok(pb::BoardTrainPhase::Integrating) | Ok(pb::BoardTrainPhase::GatingLocally) => "Checking here",
-        Ok(pb::BoardTrainPhase::WaitingForCi) => "Checking on CI",
-        Ok(pb::BoardTrainPhase::CiFailed) => "CI failed",
-        Ok(pb::BoardTrainPhase::ReadyToLand) => "Ready to land",
-        Ok(pb::BoardTrainPhase::Landed) => "Landed",
-        Ok(pb::BoardTrainPhase::Stalled) => "Stalled",
-        Ok(pb::BoardTrainPhase::Dropped) => "Dropped",
+/// A landing's phase, as a person reads it (ov-503); `None` from a runner
+/// that derives none, where the state's word is all there is.
+pub(crate) fn landing_phase_word(phase: i32) -> Option<&'static str> {
+    use pb::LandingPhase as P;
+    Some(match P::try_from(phase) {
+        Ok(P::WaitingForPreviousLanding) => "Waiting for the earlier landing",
+        Ok(P::WaitingForMain) => "Waiting for main's checks to pass",
+        Ok(P::WaitingForTickets) => "Waiting for its tickets",
+        Ok(P::Integrating) | Ok(P::GatingLocally) => "Checking here",
+        Ok(P::WaitingForCi) => "Checking on CI",
+        Ok(P::CiFailed) => "CI failed",
+        Ok(P::ReadyToLand) => "Ready to land",
+        Ok(P::Landed) => "Landed",
+        Ok(P::Stalled) => "Stalled",
+        Ok(P::Dropped) => "Dropped",
         _ => return None,
     })
-}
-
-/// A train's phase word as `--json` and the apps' fixture carry it.
-pub(crate) fn train_phase_key(phase: i32) -> Option<&'static str> {
-    train_phase_word(phase)?;
-    Some(match pb::BoardTrainPhase::try_from(phase) {
-        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "waiting_for_previous_train",
-        Ok(pb::BoardTrainPhase::WaitingForMain) => "waiting_for_main",
-        Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
-        Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
-        Ok(pb::BoardTrainPhase::WaitingForCi) => "waiting_for_ci",
-        Ok(pb::BoardTrainPhase::CiFailed) => "ci_failed",
-        Ok(pb::BoardTrainPhase::ReadyToLand) => "ready_to_land",
-        Ok(pb::BoardTrainPhase::Integrating) => "integrating",
-        Ok(pb::BoardTrainPhase::Landed) => "landed",
-        Ok(pb::BoardTrainPhase::Stalled) => "stalled",
-        _ => "dropped",
-    })
-}
-
-/// A train's stored word, as `--json` and the apps' fixture carry it.
-pub(crate) fn train_state_key(state: i32) -> &'static str {
-    match pb::BoardTrainState::try_from(state) {
-        Ok(pb::BoardTrainState::Integrating) => "integrating",
-        Ok(pb::BoardTrainState::Gating) => "gating",
-        Ok(pb::BoardTrainState::Pushed) => "pushed",
-        Ok(pb::BoardTrainState::Green) => "green",
-        Ok(pb::BoardTrainState::Red) => "red",
-        Ok(pb::BoardTrainState::Landed) => "landed",
-        Ok(pb::BoardTrainState::Dropped) => "dropped",
-        _ => "unknown",
-    }
-}
-
-/// A CI read's stored word.
-pub(crate) fn status_key(status: i32) -> &'static str {
-    match pb::BoardCiStatus::try_from(status) {
-        Ok(pb::BoardCiStatus::Passed) => "passed",
-        Ok(pb::BoardCiStatus::Failed) => "failed",
-        Ok(pb::BoardCiStatus::Running) => "running",
-        Ok(pb::BoardCiStatus::Queued) => "queued",
-        Ok(pb::BoardCiStatus::Superseded) => "superseded",
-        Ok(pb::BoardCiStatus::None) => "none",
-        _ => "unknown",
-    }
 }
