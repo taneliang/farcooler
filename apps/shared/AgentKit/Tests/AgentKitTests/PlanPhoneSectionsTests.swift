@@ -70,6 +70,21 @@ struct PlanPhoneSectionsTests {
         #expect(try card(84).spoken(ci: nil, now: now).contains("Stalled \u{00B7} step 1 of 3"))
     }
 
+    @Test("landing speech preserves the recorded model identity without repeating literal IDs")
+    func landingModelIdentity() throws {
+        var card = try #require(F.sections().landings.first { $0.landing.number == 86 })
+        card.lander?.model = "gpt-6.1-sol"
+        #expect(card.facts(ci: nil, now: 0).contains("GPT-6.1 Sol"))
+        #expect(card.spoken(ci: nil, now: 0).contains("Model ID: gpt-6.1-sol"))
+        card.lander?.model = "gpt-6.1-sol-20260101"
+        let literal = card.spoken(ci: nil, now: 0)
+        #expect(literal.components(separatedBy: "gpt-6.1-sol-20260101").count == 2)
+        card.lander?.model = ""
+        #expect(!card.spoken(ci: nil, now: 0).contains("Model ID:"))
+        card.lander = nil
+        #expect(!card.spoken(ci: nil, now: 0).contains("Model ID:"))
+    }
+
     @Test("a ticket aboard a landing says nothing of its own state, and none says it holds the landing")
     func aTicketAboardSaysNothing() throws {
         let sections = try F.sections()

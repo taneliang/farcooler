@@ -214,6 +214,13 @@ extension PlanSections.LandingCard {
         return parts.joined(separator: " \u{00B7} ")
     }
 
+    /// Facts for assistive technology, retaining the exact recorded model ID.
+    public func accessibleFacts(ci: PlanCIRead?, now: Int64) -> String {
+        let words = facts(ci: ci, now: now)
+        guard let model = lander?.model, !model.isEmpty, PlanWords.model(model) != model else { return words }
+        return "\(words), Model ID: \(model)"
+    }
+
     /// `facts` with each "·"-separated span held together, so a line breaks
     /// between spans and never inside one ("12 min" is not cut after "12").
     /// For a view that wraps; the words are `facts`'s (ov-515).

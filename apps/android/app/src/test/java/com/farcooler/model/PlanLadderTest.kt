@@ -55,4 +55,14 @@ class PlanLadderTest {
         assertEquals("", LandingWords.facts(card(null), null, now = 0))
         assertEquals("Lander · claude-haiku-4 · done", LandingWords.landerFacts(lander(PlanSpend(), working = false)))
     }
+    @Test
+    fun `accessible facts retain branded model IDs without repeating literal IDs`() {
+        val agent = lander(PlanSpend()).copy(model = "gpt-6.1-sol")
+        assertEquals("Lander · GPT-6.1 Sol, Model ID: gpt-6.1-sol", LandingWords.accessibleFacts(card(null, agent), null, 0))
+        val unknown = agent.copy(model = "gpt-6.1-sol-20260101")
+        assertEquals("Lander · gpt-6.1-sol-20260101", LandingWords.accessibleFacts(card(null, unknown), null, 0))
+        assertEquals("Lander", LandingWords.accessibleFacts(card(null, agent.copy(model = "")), null, 0))
+        assertEquals("", LandingWords.accessibleFacts(card(null), null, 0))
+    }
+
 }

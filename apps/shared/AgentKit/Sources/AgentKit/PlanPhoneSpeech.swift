@@ -44,7 +44,7 @@ extension PlanSections.LandingCard {
     /// label: "Landing 86, Teams on a shared runner, …, Checking on CI · step 2
     /// of 3, 3f78754f · … · Lander · Opus".
     public func spoken(ci: PlanCIRead?, now: Int64) -> String {
-        [landing.label, landing.subtitle, landing.carries, PlanLadder.compact(phase), facts(ci: ci, now: now)]
+        [landing.label, landing.subtitle, landing.carries, PlanLadder.compact(phase), accessibleFacts(ci: ci, now: now)]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 

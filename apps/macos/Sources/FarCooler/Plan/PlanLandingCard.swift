@@ -96,6 +96,7 @@ struct PlanLandingCard: View {
                 line(words)
             }
         }
+        .accessibilityLabel(card.accessibleFacts(ci: ci, now: now))
         .identified("plan-landing-\(landing.number)-words")
     }
 

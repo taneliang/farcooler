@@ -53,6 +53,13 @@ fun LandingWords.facts(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Lon
     return parts.joinToString(" · ")
 }
 
+/** Facts spoken with the recorded ID when its visible name is branded. */
+fun LandingWords.accessibleFacts(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long): String {
+    val words = facts(card, ci, now)
+    val model = card.lander?.model.orEmpty()
+    return if (model.isNotEmpty() && PlanWords.model(model) != model) "$words, Model ID: $model" else words
+}
+
 /** [line] with the spaces inside each " · " span made non-breaking, so a line breaks between spans and never inside "1 h" (ov-515). */
 fun LandingWords.unbroken(line: String): String = line.split(" · ").joinToString(" · ") { it.replace(' ', '\u00A0') }
 

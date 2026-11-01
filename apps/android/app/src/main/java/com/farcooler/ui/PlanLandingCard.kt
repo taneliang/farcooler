@@ -41,6 +41,7 @@ import com.farcooler.model.PlanSections
 import com.farcooler.model.PlanWords
 import com.farcooler.model.LANDING_EXPLANATION
 import com.farcooler.model.LandingWords
+import com.farcooler.model.accessibleFacts
 import com.farcooler.model.facts
 import com.farcooler.model.unbroken
 
@@ -109,7 +110,8 @@ fun PlanLandingCard(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long, 
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (phaseAmber) FontWeight.Medium else FontWeight.Normal),
                             color = if (phaseAmber) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).testTag("plan-landing-${landing.number}-words"),
+                            modifier = Modifier.weight(1f, fill = false).testTag("plan-landing-${landing.number}-words")
+                                .semantics { contentDescription = LandingWords.accessibleFacts(card, ci, now) },
                         )
                         if (run != null) {
                             Spacer(Modifier.width(6.dp))
