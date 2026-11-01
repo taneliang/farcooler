@@ -29,9 +29,10 @@ disown "$daemon"
 (exec -a "tmux -L farcooler-0abc -f x new-session -c $home/worktrees/demo/wt" sleep 300) &
 server=$!
 disown "$server"
-for _ in $(seq 50); do lsof -t "$home/farcoolerd.lock" >/dev/null 2>&1 && break; sleep 0.1; done
+for _ in $(seq 50); do /usr/sbin/lsof -t "$home/farcoolerd.lock" >/dev/null 2>&1 && break; sleep 0.1; done
 
-PATH="$bin:$PATH" FARCOOLER_HOME="$home" FARCOOLER_BIN="$home/no-cli" ./scripts/mac-capture.sh stop
+# The gate may supply only bin directories; stop must still find macOS's lsof.
+PATH="$bin:/usr/bin:/bin" FARCOOLER_HOME="$home" FARCOOLER_BIN="$home/no-cli" ./scripts/mac-capture.sh stop
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 sleep 0.2

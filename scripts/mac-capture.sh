@@ -53,6 +53,8 @@ bin="${FARCOOLER_BIN:-$root/target/debug/farcooler}"
 fc() { FARCOOLER_HOME="$home" FARCOOLER_CONFIG="$home/config.toml" "$bin" "$@"; }
 
 if [ "${1:-}" = "stop" ]; then
+    # Gate environments may omit sbin, where macOS installs lsof.
+    export PATH="$PATH:/usr/sbin"
     # The daemon, then its tmux server, which `daemon stop` leaves running.
     # With the CLI: `status` names the socket in its recovery line. Without
     # one (target/ already deleted): the daemon is whoever holds the home's
