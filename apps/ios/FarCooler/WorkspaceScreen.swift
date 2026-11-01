@@ -367,7 +367,7 @@ struct WorkspaceScreen: View {
     }
     #endif
 
-    /// The board's plan (ov-274) in an iPad's plan column: a theme or lane
+    /// The board's plan (ov-274) in an iPad's plan column: a theme or ticket
     /// shows there too, and a ruling's Reverse or Discuss stays, since the
     /// chat it went to is beside it (review 8).
     private func planHook(_ summary: WorkspaceSummary) -> PlanBoardHook {

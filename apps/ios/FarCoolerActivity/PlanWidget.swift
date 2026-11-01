@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 
 /// The plan, on a home screen and under a lock screen clock (ov-310, ov-268
-/// P8): the board with a plan, what needs you on it, the lanes in Now and the
+/// P8): the board with a plan, what needs you on it, the tickets in Now and the
 /// one next up.
 ///
 /// The relay decided which board and what it says (`leadPlan`, from the
@@ -92,7 +92,7 @@ struct PlanWidgetView: View {
 enum PlanWidgetSamples {
     static let main = PlanGlance(
         workspace: "Main", needsYou: 2,
-        now: [.init(name: "mac-ux", state: .review), .init(name: "ov-310", state: .building)],
+        now: [.init(ticket: "mac-ux", stage: .reviewing), .init(ticket: "ov-310", stage: .building)],
         next: "mac-fu3")
 
     static let quiet = PlanGlance(workspace: "Billing", needsYou: 0, now: [], next: "bil-export")

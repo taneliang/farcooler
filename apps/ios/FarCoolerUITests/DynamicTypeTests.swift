@@ -44,8 +44,8 @@ final class DynamicTypeTests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).allElementsBoundByIndex
     }
 
-    /// Billing over `plan` (a file in test/fixtures). The long one has one lane in
-    /// Now and none in Next Up, so the lane that draws a glyph, not a rank, is on screen.
+    /// Billing over `plan` (a file in test/fixtures). The long one has one ticket in
+    /// Now and none in Next Up, so the ticket that draws a glyph, not a rank, is on screen.
     private func openBilling(
         _ extra: [String], size: [String], plan: String = "plan-seeded.json"
     ) -> XCUIApplication {

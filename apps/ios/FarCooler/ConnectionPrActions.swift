@@ -1,6 +1,6 @@
 import Foundation
 
-// A lane's pull request marked ready, and a review thread replied to, from the
+// A ticket's pull request marked ready, and a review thread replied to, from the
 // iPhone (ov-317): `pr.ready` and `pr.thread_reply` through the client core, the
 // runner running `gh` as its own login. `PhonePrActions` (AgentKit) holds what is
 // sent and said; this sends it and says what the runner refused.
@@ -16,13 +16,13 @@ extension Connection {
         return PhonePrActions.mayAct(prActions: build.can(.prActions), grantedScope: build.grantedScope, viewer: talk.viewer)
     }
 
-    /// Mark the pull request `stage` names ready for review, on `lane`. Answers
+    /// Mark the pull request `stage` names ready for review, on `ticket`. Answers
     /// the sentence for a refusal, nil when it went through, and reads the plan
-    /// again either way so the lane shows where it stands now.
-    func markReady(lane: PlanLane, stage: PlanPrStage, in summary: WorkspaceSummary) async -> String? {
+    /// again either way so the ticket shows where it stands now.
+    func markReady(ticket: PlanTicketLine, stage: PlanPrStage, in summary: WorkspaceSummary) async -> String? {
         var refused: String?
         do {
-            _ = try await rpc(PhonePrActions.readyMethod, PhonePrActions.readyRequest(lane: lane.id, number: stage.prNumber))
+            _ = try await rpc(PhonePrActions.readyMethod, PhonePrActions.readyRequest(task: ticket.task, number: stage.prNumber))
         } catch let ClientCore.CoreError.rejected(_, word, what) {
             refused = PhonePrActions.refusal(word: word, what: what, action: "mark it ready")
         } catch {

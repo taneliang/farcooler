@@ -2,7 +2,7 @@ import SwiftUI
 
 // The agents at work (ov-619, ov-617): one view, drawn for a workspace from
 // its Agents card and across every runner as All Agents on the workspace
-// list. Far Cooler's own agents (a lane's or a task's pane) and the Claude
+// list. Far Cooler's own agents (a ticket's or a task's pane) and the Claude
 // subagents an agent started are listed alike: each with its status dot,
 // its name, what it's doing and how long its run has gone. A row opens its
 // agent: a pane opens its worktree on that pane, and a subagent of the

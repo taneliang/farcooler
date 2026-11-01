@@ -1,7 +1,7 @@
 import Foundation
 
 // The plan layer on a phone (ov-268 design 6.5, phase P5 is ov-274): one
-// board's plan, as this connection last read it, and each theme's and lane's
+// board's plan, as this connection last read it, and each theme's and ticket's
 // record.
 //
 // EXPERIMENTAL and opt-in. Nothing here is asked of a runner that doesn't
@@ -24,13 +24,13 @@ final class PlanReads: ObservableObject {
     /// `Versioned`.
     @Published private var read = Versioned<[String: PlanReadState]>([:])
     var version: Int { read.version }
-    /// Each theme's and lane's record, by page, once read.
+    /// Each theme's and ticket's record, by page, once read.
     @Published private(set) var records: [PhonePlanPage: PlanRecord] = [:]
     /// Boards with a read out, and boards whose news came while it was.
     private var reading: Set<String> = []
     private var movedAgain: Set<String> = []
 
-    /// The theme's or lane's page on screen, if one is: the only record a
+    /// The theme's or ticket's page on screen, if one is: the only record a
     /// plan notice reads again.
     var openPage: PhonePlanPage?
 
@@ -119,14 +119,14 @@ extension Connection {
         } while plans.again(key)
     }
 
-    /// A theme's or lane's record, for its page's timeline. A read that
+    /// A theme's or ticket's record, for its page's timeline. A read that
     /// doesn't come back leaves the page without one: the page doesn't wait
     /// on it.
     func readPlanRecord(_ page: PhonePlanPage) async {
         let subject: [String: Any]
         switch page {
         case .theme(let id): subject = ["theme": id]
-        case .lane(let id): subject = ["lane": id]
+        case .ticket(let id): subject = ["task": id]
         // An orchestrator's page has no record: it's read whole with the
         // board's pages (ConnectionPages.swift).
         case .page: return
@@ -135,7 +135,7 @@ extension Connection {
         do {
             plans.set(try PlanRecord.decode(try await rpc("plan.events", subject)), for: page)
         } catch {
-            // The page has its theme or lane without a timeline; the next
+            // The page has its theme or ticket without a timeline; the next
             // plan notice reads the record again.
         }
     }

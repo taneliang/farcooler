@@ -115,7 +115,7 @@ extension Connection {
         switch destination {
         case .task(let id): return .push(.task(place, task: id))
         case .ask: return .needsYou
-        case .lane(let id): return .push(.plan(place, page: .lane(id)))
+        case .ticket(let id): return .push(.plan(place, page: .ticket(id)))
         case .theme(let id): return .push(.plan(place, page: .theme(id)))
         case .page(let slot): return .push(.plan(place, page: .page(slot)))
         case .worktree(let id):

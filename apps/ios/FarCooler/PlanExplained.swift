@@ -1,6 +1,6 @@
 import SwiftUI
 
-// A long press explains (ov-522): what a train is, or what each step of the
+// A long press explains (ov-522): what a landing is, or what each step of the
 // ladder means, in lines a person can read in a breath. A popover on a phone,
 // since there is no hover; the Mac says the same words as a tooltip.
 

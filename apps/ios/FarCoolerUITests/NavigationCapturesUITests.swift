@@ -81,7 +81,7 @@ final class NavigationCapturesUITests: XCTestCase {
     }
 
     /// The Plan sheet at its medium detent, then at full height down
-    /// through its sections: the tree, the trains landing, the lanes, the
+    /// through its sections: the tree, the landings, the tickets, the
     /// agents and their spend, cost and rulings.
     // One method per appearance and size: the four in one took 269 s on an
     // idle Mac, near the six-minute allowance a test gets on the nightly's

@@ -2,8 +2,8 @@ import SwiftUI
 
 // The Plan view on a phone (ov-268 design 6.5): what the board's list shows
 // when Plan is chosen. Next Up first, because it's what the owner can't see
-// anywhere else; then the lanes working now, the themes, and what landed
-// today. A lane or a theme opens its page, pushed.
+// anywhere else; then the tickets working now, the themes, and what landed
+// today. A ticket or a theme opens its page, pushed.
 //
 // EXPERIMENTAL and opt-in, as the layer is: Tasks is the default, the control
 // only appears on a runner that advertises `board_plan`, and it switches only
@@ -12,7 +12,7 @@ import SwiftUI
 //
 // Every rule is AgentKit's (`PlanModel`, `PlanWords`, `PlanReadState`); this
 // draws, in iOS's own idiom: title case, system type, and color only for a
-// lane that's stale or waiting on you.
+// ticket that's stale or waiting on you.
 
 /// What `WorkspaceBoardList` needs to draw a board's plan.
 struct PlanBoardHook {
@@ -24,8 +24,8 @@ struct PlanBoardHook {
     /// Read the plan, once or again.
     let read: () async -> Void
     let onOpen: (PhonePlanPage) -> Void
-    /// The board's statuses by task id: a lane waits on you when one of its
-    /// cards needs a decision.
+    /// The board's statuses by task id: a ticket waits on you when its
+    /// card needs a decision.
     let statuses: [String: TaskStatus]
     /// The board's orchestrator pages (ov-285), read with the plan. Nil on a
     /// runner without `board_pages`, which shows no Pages section.
@@ -37,13 +37,13 @@ struct PlanBoardHook {
     var rulingActions = PhoneRulingActions()
     /// What the sections are decided from besides the plan (ov-503).
     var facts = PlanFacts()
-    /// The sidebar's two lists for a filter, for the pages Themes and Lanes
+    /// The sidebar's two lists for a filter, for the pages Themes and Tickets
     /// push; nil where there are none to push.
     var outline: ((OneTreeFilter) -> SidebarOutline)?
-    /// A card, lane or pane chosen in a list the Plan pushes: the phone's
+    /// A card, ticket or pane chosen in a list the Plan pushes: the phone's
     /// stack opens it.
     var onRoute: (PhoneRoute) -> Void = { _ in }
-    /// Themes and Lanes as two rows that push lists, which a phone has in
+    /// Themes and Tickets as two rows that push lists, which a phone has in
     /// place of a sidebar. The iPad's sidebar holds both.
     var pushesLists = true
     /// How many tiles wide the themes grid is: one on a phone, two on an
@@ -59,7 +59,7 @@ struct PlanBoardHook {
 
 /// What the Plan's sections are decided from besides the plan itself: the
 /// workspace's Needs You count, when each card last moved, and whether the
-/// runner lists agents (`board_agents`).
+/// runner lists agents (`board_line`).
 struct PlanFacts {
     var needsYou = 0
     var activity: [String: Int64] = [:]
@@ -67,9 +67,9 @@ struct PlanFacts {
 }
 
 extension Connection {
-    /// Whether the runner lists the agents working for a board (`board_agents`);
+    /// Whether the runner lists the agents working for a board (`board_line`);
     /// without it the Agents section isn't drawn.
-    var listsAgents: Bool { knownBuild?.can(.boardAgentsList) == true }
+    var listsAgents: Bool { knownBuild?.can(.boardLine) == true }
 
     func planFacts(_ summary: WorkspaceSummary) -> PlanFacts {
         PlanFacts(
@@ -188,11 +188,11 @@ struct PlanBoardSections: View {
             if !landed.isEmpty {
                 Section {
                     if landedOpen {
-                        ForEach(landed) { lane in
-                            PlanLaneRow(
-                                lane: lane, theme: plan.theme(of: lane), rank: nil, now: plan.nowMs,
+                        ForEach(landed) { line in
+                            PlanTicketRow(
+                                line: line, theme: plan.theme(of: line), rank: nil, now: plan.nowMs,
                                 waitsOnOwner: false
-                            ) { hook.onOpen(.lane(lane.id)) }
+                            ) { hook.onOpen(.ticket(line.task)) }
                         }
                     }
                 } header: {
@@ -302,14 +302,14 @@ struct PlanNotice: View {
     }
 }
 
-/// A lane state's glyph: neutral, a shape to scan by.
+/// A ticket stage's glyph: neutral, a shape to scan by.
 enum PlanGlyph {
-    static func name(_ state: LaneState) -> String {
-        switch state {
-        case .queued: "clock"
-        case .building: "hammer"
-        case .review: "eye"
-        case .fixing: "wrench.and.screwdriver"
+    static func name(_ stage: TicketStage, fixing: Bool = false) -> String {
+        switch stage {
+        case .waiting: "clock"
+        case .building: fixing ? "wrench.and.screwdriver" : "hammer"
+        case .reviewing: "eye"
+        case .needsYou: "person.crop.circle.badge.exclamationmark"
         case .landing: "arrow.down.to.line"
         case .landed: "checkmark.circle"
         case .dropped: "xmark.circle"
@@ -318,25 +318,25 @@ enum PlanGlyph {
     }
 }
 
-/// One lane's row: its name and the theme it serves, then its reason or
+/// One ticket's row: its title and the theme it serves, then its reason or
 /// state. In Next Up its rank sits in the glyph column; elsewhere its state's
 /// glyph does, amber only when it's stale, waiting on you or over its token
 /// budget (ov-307).
-struct PlanLaneRow: View {
-    let lane: PlanLane
+struct PlanTicketRow: View {
+    let line: PlanTicketLine
     let theme: PlanTheme?
     /// Its place in Next Up, or nil.
     let rank: Int?
     let now: Int64
     let waitsOnOwner: Bool
-    /// What it says of itself aboard a train, in place of its own state's
+    /// What it says of itself on a landing, in place of its own state's
     /// words (ov-503, ov-522): "Landed · 3f78754f", or nothing (empty) while
-    /// it is simply aboard.
+    /// it is simply on it.
     var standing: String?
     /// The agent that works it, for the line under its title.
-    var agent: PlanFleetAgent?
-    /// The landed train it still names, when its state doesn't already say.
-    var landedTrain: String?
+    var agent: PlanAgent?
+    /// The landed landing it still names, when its state doesn't already say.
+    var landedLanding: String?
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
@@ -345,18 +345,18 @@ struct PlanLaneRow: View {
     /// rather than cut off (ov-653).
     @Environment(\.dynamicTypeSize) private var type
 
-    /// Stale, or waiting on you: the only lanes drawn in color.
+    /// Stale, or waiting on you: the only tickets drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(line, now: now)
     }
 
     /// Over its token budget (ov-307), drawn beside whatever else it is.
-    private var overBudget: String? { PlanWords.overBudget(lane) }
+    private var overBudget: String? { PlanWords.overBudget(line) }
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
-                mark.frameProbe("plan-lane-mark").frame(width: markWidth, alignment: .leading)
+                mark.frameProbe("plan-ticket-mark").frame(width: markWidth, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     // Which theme it serves (the owner's ask, ov-273): beside
                     // the name, or under it when the name takes the line.
@@ -377,11 +377,11 @@ struct PlanLaneRow: View {
                         .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     stageLine
-                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
-                        Text(line)
+                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { words in
+                        Text(words)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(GlancePalette.amber(scheme))
-                            .accessibilityLabel(line == overBudget ? (PlanWords.overBudgetSpoken(lane) ?? line) : line)
+                            .accessibilityLabel(words == overBudget ? (PlanWords.overBudgetSpoken(line) ?? words) : words)
                     }
                 }
                 Image(systemName: "chevron.forward")
@@ -396,17 +396,17 @@ struct PlanLaneRow: View {
         // the reason or state, and a warning, in that order.
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("plan-lane-\(lane.name)")
+        .accessibilityIdentifier("plan-ticket-\(line.key)")
         .probesShown()
     }
 
     private var name: some View {
-        Text(lane.heading)
+        Text(line.heading)
             .font(.subheadline.weight(.medium))
             .lineLimit(type.isAccessibilitySize ? nil : 2)
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
-            .frameProbe("plan-lane-name")
+            .frameProbe("plan-ticket-name")
     }
 
     @ViewBuilder private var themeName: some View {
@@ -417,18 +417,18 @@ struct PlanLaneRow: View {
                 .lineLimit(type.isAccessibilitySize ? nil : 1)
                 .truncationMode(.tail)
                 .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
-                .accessibilityIdentifier("plan-lane-\(lane.name)-theme")
+                .accessibilityIdentifier("plan-ticket-\(line.key)-theme")
         }
     }
 
-    /// Next Up's reason; elsewhere, the state with its round, train or
-    /// commit, and the cards.
+    /// Next Up's reason; elsewhere, the stage with its round, landing or
+    /// commit.
     private var second: String {
-        if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
+        if rank != nil { return line.reason.isEmpty ? line.key : line.reason }
         // The stage has a line of its own, so the state keeps only what it leaves
         // to it ("Approved" beside "Checks Failing", ov-316).
-        let state = standing ?? (lane.shownStage == nil ? nil : PlanWords.status(lane, stage: false))
-        return PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil, state: state)
+        let state = standing ?? (line.shownStage == nil ? nil : PlanWords.status(line, stage: false))
+        return PlanWords.ticketSecond(line, agent: agent, landedLanding: landedLanding, now: now, aged: warning == nil, state: state)
     }
 
     /// Where its pull request stands (ov-317), on a line of its own: gray, or
@@ -436,14 +436,14 @@ struct PlanLaneRow: View {
     /// Requested, Checks Failing, Merge Conflicts). Building is the state's
     /// word already, and a login too long for the line is cut in the middle.
     @ViewBuilder private var stageLine: some View {
-        if rank == nil, let stage = lane.shownStage, let words = stage.rowWords {
+        if rank == nil, let stage = line.shownStage, let words = stage.rowWords {
             let attention = stage.needsAttention
             Text(words)
                 .font(.footnote.weight(attention ? .medium : .regular))
                 .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .accessibilityIdentifier("plan-lane-\(lane.name)-stage\(attention ? "-attention" : "")")
+                .accessibilityIdentifier("plan-ticket-\(line.key)-stage\(attention ? "-attention" : "")")
         }
     }
 
@@ -453,10 +453,10 @@ struct PlanLaneRow: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
         } else {
-            Image(systemName: PlanGlyph.name(lane.state))
+            Image(systemName: PlanGlyph.name(line.stage, fixing: line.isFixing))
                 .font(.subheadline)
                 .foregroundStyle(
-                    warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true
+                    warning == nil && overBudget == nil && line.shownStage?.needsAttention != true
                         ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }

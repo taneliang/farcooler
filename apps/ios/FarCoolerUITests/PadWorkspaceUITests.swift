@@ -132,32 +132,32 @@ final class PadWorkspaceUITests: XCTestCase {
         })
     }
 
-    /// `test/fixtures/plan-phones-ov503.json`: the Plan with trains, agents and long titles (ov-503).
+    /// `test/fixtures/plan-phones-ov503.json`: the Plan with landings, agents and long titles (ov-503).
     private static var sectionsFixture: String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
         return root.appendingPathComponent("test/fixtures/plan-phones-ov503.json").path
     }
 
-    /// **The sidebar is two lists** (ov-503): Themes, the why, with each theme's cards, and Lanes, the
-    /// how, by train, review and building, each lane with its agents, as the Mac's sidebar is.
+    /// **The sidebar is two lists** (ov-503): Themes, the why, with each theme's cards, and Tickets, the
+    /// how, by landing, review and building, each ticket with its agents, as the Mac's sidebar is.
     func testTheSidebarIsTwoLists() {
         let app = openBilling(["-phone-agents"], fixture: Self.sectionsFixture)
         XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "no tree")
         XCTAssertTrue(app.buttons["pad-tree-row-Teams and accounts"].waitForExistence(timeout: 10), "no theme row")
-        let lanes = element(app, "pad-tree-lanes-header")
+        let tickets = element(app, "pad-tree-tickets-header")
         let tree = element(app, "pad-tree")
-        for _ in 0..<6 where !lanes.exists { tree.swipeUp() }
-        XCTAssertTrue(lanes.exists, "no Lanes list: \(app.debugDescription)")
-        let train = app.buttons["pad-tree-row-Train 86"]
-        for _ in 0..<6 where !train.exists { tree.swipeUp() }
-        XCTAssertTrue(train.exists, "no train in Lanes")
-        // The lane is the row under the train, which a lazy list may not
-        // have drawn yet when the train first shows (the Oct 20 nightly).
-        let lane = app.buttons["pad-tree-row-team-dir"].firstMatch
-        for _ in 0..<3 where !lane.waitForExistence(timeout: 3) { tree.swipeUp() }
-        XCTAssertTrue(lane.exists, "no lane under its train")
-        keep(app, "sidebar-two-lists", expecting: .all(.shows(train), .shows(lane)))
+        for _ in 0..<6 where !tickets.exists { tree.swipeUp() }
+        XCTAssertTrue(tickets.exists, "no Tickets list: \(app.debugDescription)")
+        let landing = app.buttons["pad-tree-row-Landing 86"]
+        for _ in 0..<6 where !landing.exists { tree.swipeUp() }
+        XCTAssertTrue(landing.exists, "no landing in Tickets")
+        // The ticket is the row under the landing, which a lazy list may not
+        // have drawn yet when the landing first shows (the Oct 20 nightly).
+        let ticket = app.buttons["pad-tree-row-ov-487"].firstMatch
+        for _ in 0..<3 where !ticket.waitForExistence(timeout: 3) { tree.swipeUp() }
+        XCTAssertTrue(ticket.exists, "no ticket under its landing")
+        keep(app, "sidebar-two-lists", expecting: .all(.shows(landing), .shows(ticket)))
     }
 
     /// **The plan column is one column of sections and a two-column grid** (ov-503).
@@ -245,15 +245,17 @@ final class PadWorkspaceUITests: XCTestCase {
         // Disclosure closes a row in place: the theme's cards go, and No
         // Theme, under it, comes into view.
         XCTAssertTrue(app.buttons["pad-tree-row-ov-220"].exists, "the theme isn't open")
-        // A lane's row says its title; its slug is only the identifier.
+        // A ticket's row says its title; its key is the identifier.
         let disclose = app.buttons["pad-tree-disclose-ov-220"]
         if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
-        // The sidebar is two lists (ov-503): the lane is under Lanes, once, and the card says its lane.
-        let laneRow = app.buttons["pad-tree-row-mac-vis"].firstMatch
-        for _ in 0..<8 where !laneRow.exists { element(app, "pad-tree").swipeUp() }
-        XCTAssertTrue(laneRow.waitForExistence(timeout: 5), "no lane row in Lanes")
-        XCTAssertTrue(laneRow.label.contains("Mac looks like one app"), "the lane's row doesn't say its title: \(laneRow.label)")
-        XCTAssertFalse(laneRow.label.contains("mac-vis"), "the lane's row says its slug: \(laneRow.label)")
+        // The sidebar is two lists (ov-503): the ticket is under Tickets, and its row says its title.
+        // Its key is also its card's identifier, so the first match is whichever row draws first.
+        let ticketRow = app.buttons["pad-tree-row-ov-220"].firstMatch
+        for _ in 0..<8 where !ticketRow.exists { element(app, "pad-tree").swipeUp() }
+        XCTAssertTrue(ticketRow.waitForExistence(timeout: 5), "no ticket row in Tickets")
+        XCTAssertTrue(
+            ticketRow.label.contains("Mac: window plane and sidebar go frosted"),
+            "the ticket's row doesn't say its title: \(ticketRow.label)")
         for _ in 0..<8 where !app.buttons["pad-tree-disclose-Visual language"].exists { element(app, "pad-tree").swipeDown() }
         tap(app, "pad-tree-disclose-Visual language", "the tree")
         XCTAssertFalse(app.buttons["pad-tree-row-ov-220"].waitForExistence(timeout: 2), "the theme didn't close")
@@ -347,7 +349,7 @@ final class PadWorkspaceUITests: XCTestCase {
     }
 
     /// **The Board's own Plan view keeps its picks in the column** (review 8):
-    /// a lane there shows beside the tree, not over the columns.
+    /// a ticket there shows beside the tree, not over the columns.
     func testTheBoardsPlanViewKeepsItsPicksInTheColumn() {
         let app = openBilling()
         layout(app, is: "threeColumns", "landscape")
@@ -356,11 +358,11 @@ final class PadWorkspaceUITests: XCTestCase {
         let control = app.segmentedControls["plan-switch"]
         XCTAssertTrue(control.waitForExistence(timeout: 15), "no Tasks | Plan: \(app.debugDescription)")
         control.buttons["Plan"].tap()
-        let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(app.reveal(lane), "no Next Up lane in the board's plan")
-        lane.tap()
-        canvasTitle(app, is: "Plan view on iOS and Android", "a lane picked in the board's plan")
-        XCTAssertTrue(app.navigationBars["Billing"].exists, "the lane was pushed over the columns")
+        let ticket = element(app, "plan-ticket-ov-274")
+        XCTAssertTrue(app.reveal(ticket), "no Next Up ticket in the board's plan")
+        ticket.tap()
+        canvasTitle(app, is: "Phones: Plan view on iOS and Android", "a ticket picked in the board's plan")
+        XCTAssertTrue(app.navigationBars["Billing"].exists, "the ticket was pushed over the columns")
     }
 
     /// **The keys**: ⇧⌘B shows the board and again the plan, ⌥⌘P goes back to
@@ -552,8 +554,8 @@ final class PadWorkspaceUITests: XCTestCase {
         keep(app, "capture-landscape-theme\(tag)", expecting: titleState(app, "Visual language"))
         let disclose = app.buttons["pad-tree-disclose-ov-220"]
         if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
-        if app.buttons["pad-tree-row-mac-vis"].firstMatch.waitForExistence(timeout: 5) {
-            keep(app, "capture-landscape-lane\(tag)", expecting: .shows(app.buttons["pad-tree-row-mac-vis"].firstMatch, "the lane under its theme"))
+        if app.buttons["pad-tree-row-ov-220"].firstMatch.waitForExistence(timeout: 5) {
+            keep(app, "capture-landscape-ticket\(tag)", expecting: .shows(app.buttons["pad-tree-row-ov-220"].firstMatch, "the ticket under its theme"))
         }
         XCUIDevice.shared.orientation = .portrait
         layout(app, is: "twoColumns", "portrait")
@@ -642,9 +644,9 @@ final class PadWorkspaceUITests: XCTestCase {
             "a New Task button is on the board")
     }
 
-    /// **No lane's mark sits over its name at the largest size** (ov-424), in
+    /// **No ticket's mark sits over its name at the largest size** (ov-424), in
     /// the board's Plan view.
-    func testThePlanLaneMarkDoesNotOverlapItsNameAtTheLargestSize() {
+    func testThePlanTicketMarkDoesNotOverlapItsNameAtTheLargestSize() {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
         let long = root.appendingPathComponent("test/fixtures/plan-rulings-long.json").path
@@ -655,11 +657,11 @@ final class PadWorkspaceUITests: XCTestCase {
         let control = app.segmentedControls["plan-switch"]
         XCTAssertTrue(control.waitForExistence(timeout: 15), "no Tasks | Plan control")
         control.buttons["Plan"].tap()
-        let mark = element(app, "plan-lane-mark")
-        XCTAssertTrue(app.reveal(mark), "the plan drew no lane")
-        let marks = app.descendants(matching: .any).matching(identifier: "plan-lane-mark").allElementsBoundByIndex
-        let names = app.descendants(matching: .any).matching(identifier: "plan-lane-name").allElementsBoundByIndex
-        XCTAssertFalse(names.isEmpty, "no lane name")
+        let mark = element(app, "plan-ticket-mark")
+        XCTAssertTrue(app.reveal(mark), "the plan drew no ticket")
+        let marks = app.descendants(matching: .any).matching(identifier: "plan-ticket-mark").allElementsBoundByIndex
+        let names = app.descendants(matching: .any).matching(identifier: "plan-ticket-name").allElementsBoundByIndex
+        XCTAssertFalse(names.isEmpty, "no ticket name")
         for mark in marks {
             for name in names {
                 XCTAssertFalse(mark.frame.intersects(name.frame), "a mark \(mark.frame) overlaps a name \(name.frame)")

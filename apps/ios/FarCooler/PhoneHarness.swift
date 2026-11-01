@@ -588,7 +588,7 @@ final class HarnessRunner {
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
-                        + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
+                        + (HarnessPlan.agentsAdvertised ? ["board_line"] : [])
                         + (PhonePrHarness.advertised ? ["pr_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (Self.shared || Self.alone ? ["representatives"] : [])
@@ -1106,7 +1106,7 @@ final class HarnessRunner {
             else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
             sent.append(
                 method == "plan.events"
-                    ? "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")"
+                    ? "plan.events \((args["theme"] as? String) ?? (args["task"] as? String) ?? "")"
                     : (method.hasPrefix("ruling.") ? "\(method) \((args["ruling"] as? String) ?? "")" : method))
             return data
         case "pr.ready", "pr.thread_reply":

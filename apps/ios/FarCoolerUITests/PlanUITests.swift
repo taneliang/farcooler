@@ -6,8 +6,8 @@ import XCTest
 ///
 /// Only the wiring a unit test cannot reach (ov-538): a runner without
 /// `board_plan` shows nothing new (the smoke test), a plan notice reads the
-/// plan again, and a lane and a theme open their pages. What the Plan says
-/// (the words of a lane, a train, a tile and the cost, the default segment, a
+/// plan again, and a ticket and a theme open their pages. What the Plan says
+/// (the words of a ticket, a landing, a tile and the cost, the default segment, a
 /// read that fails, which boards a notice reads) is AgentKit's, pinned in
 /// `PlanPhoneBoardTests`.
 final class PlanUITests: XCTestCase {
@@ -98,20 +98,20 @@ final class PlanUITests: XCTestCase {
         app.tapBack()
     }
 
-    /// The first Next Up lane under the name a new plan gives it, waited for
+    /// The first Next Up ticket under the key a new plan gives it, waited for
     /// where it was before the list is scrolled: `reveal` only moves down it,
     /// and on a short phone (an iPhone Duo, 678 pt) scrolling before the read
     /// lands ran past the row and left it above the screen (ov-709).
     private func renamed(_ app: XCUIApplication) -> Bool {
-        let lane = element(app, "plan-lane-plan-phones-v2")
-        return lane.waitForExistence(timeout: 15) || app.reveal(lane)
+        let ticket = element(app, "plan-ticket-ov-274-v2")
+        return ticket.waitForExistence(timeout: 15) || app.reveal(ticket)
     }
 
     /// A `plan` notice reaches the connection and the plan on screen is read again.
     func testAPlanNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
+        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274")))
         Self.notify("plan-news")
         XCTAssertTrue(renamed(app), "the notice didn't re-read the plan")
     }
@@ -120,7 +120,7 @@ final class PlanUITests: XCTestCase {
     func testATaskNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
+        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274")))
         Self.notify("task-news")
         XCTAssertTrue(renamed(app), "the task notice didn't re-read the plan")
     }
@@ -129,11 +129,11 @@ final class PlanUITests: XCTestCase {
     func testANoticeReadsOnlyThePageOnScreen() {
         let app = openBoard()
         showPlan(app)
-        let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(app.reveal(lane))
-        lane.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30))
-        element(app, "plan-lane-theme").tap()
+        let ticket = element(app, "plan-ticket-ov-274")
+        XCTAssertTrue(app.reveal(ticket))
+        ticket.tap()
+        XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30))
+        element(app, "plan-ticket-theme").tap()
         XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
         let gets = sent(app).filter { $0 == "plan.get" }.count
         let records = sent(app).filter { $0.hasPrefix("plan.events") }.count
@@ -150,34 +150,34 @@ final class PlanUITests: XCTestCase {
         // Back twice returns to the plan.
         back(app)
         back(app)
-        // The notice renamed the first Next Up lane, as a new plan does.
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "Back didn't return to the plan")
+        // The notice rekeyed the first Next Up ticket, as a new plan does.
+        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274-v2")), "Back didn't return to the plan")
     }
 
     // MARK: Pull requests (ov-317)
 
-    /// `test/fixtures/plan-phones-ov317.json`: lanes in every stage a row says, two of them drafts.
+    /// `test/fixtures/plan-phones-ov317.json`: tickets in every stage a row says, two of them drafts.
     private static var stages: String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
         return root.appendingPathComponent("test/fixtures/plan-phones-ov317.json").path
     }
 
-    private static let draftLane = "00000000-0000-0000-0000-000000002002"
+    private static let draftTicket = "00000000-0000-0000-0000-000000001002"
 
     /// Billing's Plan, with the pull request actions on unless `extra` says otherwise.
     private func openStages(_ extra: [String] = ["-phone-plan", "-phone-pr-actions"]) -> XCUIApplication {
         let app = openBoard(extra, fixture: Self.stages)
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-lane-2")), "no lanes: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-2")), "no tickets: \(app.debugDescription)")
         return app
     }
 
-    private func openLanePage(_ app: XCUIApplication, _ name: String) {
-        let row = element(app, "plan-lane-\(name)")
+    private func openTicketPage(_ app: XCUIApplication, _ name: String) {
+        let row = element(app, "plan-ticket-\(name)")
         XCTAssertTrue(app.reveal(row), "no row for \(name)")
         row.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30), "\(name) didn't open its page")
+        XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30), "\(name) didn't open its page")
     }
 
     private func wait(_ timeout: TimeInterval, _ done: () -> Bool) -> Bool {
@@ -189,84 +189,84 @@ final class PlanUITests: XCTestCase {
         return done()
     }
 
-    /// **A lane row says where its pull request stands, by the Mac's rules** (ov-316): Building is
+    /// **A ticket row says where its pull request stands, by the Mac's rules** (ov-316): Building is
     /// the state's word already, so it's said once; a problem leads and the gray line keeps
     /// "Approved"; a pull request the runner couldn't read is added to the state and never
     /// replaces it. The words are AgentKit's (`PlanPrStage`, pinned in `PhonePrActionsTests`).
-    func testLaneRowsSayWhereTheirPullRequestStands() {
+    func testTicketRowsSayWhereTheirPullRequestStands() {
         let app = openStages()
         // In the order the section draws them: a lazy list is only ever revealed downward.
         var labels: [String: String] = [:]
-        for name in ["lane-1", "lane-2", "lane-5", "lane-6", "lane-8", "lane-14", "lane-silent"] {
-            let row = element(app, "plan-lane-\(name)")
+        for name in ["ov-1", "ov-2", "ov-5", "ov-6", "ov-8", "ov-14", "00001100"] {
+            let row = element(app, "plan-ticket-\(name)")
             XCTAssertTrue(app.reveal(row), "no row for \(name)")
             labels[name] = row.label
         }
         func label(_ name: String) -> String { labels[name] ?? "" }
-        XCTAssertTrue(label("lane-2").contains("Agent Review"), label("lane-2"))
-        XCTAssertTrue(label("lane-6").contains("Changes Requested"), label("lane-6"))
-        let failing = label("lane-8")
+        XCTAssertTrue(label("ov-2").contains("Agent Review"), label("ov-2"))
+        XCTAssertTrue(label("ov-6").contains("Changes Requested"), label("ov-6"))
+        let failing = label("ov-8")
         XCTAssertTrue(failing.contains("Checks Failing") && failing.contains("Approved"), failing)
         XCTAssertFalse(failing.contains("Approved, Checks Failing"), "the problem leads: \(failing)")
-        let unknown = label("lane-14")
+        let unknown = label("ov-14")
         XCTAssertTrue(unknown.contains("PR State Unknown") && unknown.contains("In Review"), unknown)
-        XCTAssertFalse(label("lane-1").contains("Building"), "Building is the state's word already, so the stage leaves it out: \(label("lane-1"))")
-        XCTAssertTrue(label("lane-silent").contains("In Review") && !label("lane-silent").contains("Waiting"), label("lane-silent"))
-        let long = label("lane-5")
+        XCTAssertFalse(label("ov-1").contains("Building"), "Building is the state's word already, so the stage leaves it out: \(label("ov-1"))")
+        XCTAssertTrue(label("00001100").contains("In Review") && !label("00001100").contains("Waiting"), label("00001100"))
+        let long = label("ov-5")
         XCTAssertTrue(long.contains("Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg"), long)
-        keep(app, "stages-plan", expecting: .reads(element(app, "plan-lane-lane-silent"), "In Review"))
+        keep(app, "stages-plan", expecting: .reads(element(app, "plan-ticket-00001100"), "In Review"))
     }
 
-    /// **A draft lane's page offers Mark Ready, asks first, and marks the number the page showed**
-    /// (ov-317). The harness refuses a lane or a number that isn't a draft in the file, and from
-    /// then on says the lane waits on alice, so the page showing it is the plan read again.
-    func testADraftLanePageMarksItsPullRequestReadyAfterAsking() {
+    /// **A draft ticket's page offers Mark Ready, asks first, and marks the number the page showed**
+    /// (ov-317). The harness refuses a ticket or a number that isn't a draft in the file, and from
+    /// then on says the ticket waits on alice, so the page showing it is the plan read again.
+    func testADraftTicketPageMarksItsPullRequestReadyAfterAsking() {
         let app = openStages()
-        openLanePage(app, "lane-2")
-        XCTAssertEqual(element(app, "plan-lane-stage").label, "Agent Review")
-        XCTAssertEqual(element(app, "plan-lane-stage-detail").label, "PR 41")
-        keep(app, "stages-draft-lane", expecting: .all(.reads(element(app, "plan-lane-stage"), "Agent Review"), .reads(element(app, "plan-lane-stage-detail"), "PR 41")))
-        element(app, "plan-lane-mark-ready").tap()
+        openTicketPage(app, "ov-2")
+        XCTAssertEqual(element(app, "plan-ticket-stage").label, "Agent Review")
+        XCTAssertEqual(element(app, "plan-ticket-stage-detail").label, "PR 41")
+        keep(app, "stages-draft-ticket", expecting: .all(.reads(element(app, "plan-ticket-stage"), "Agent Review"), .reads(element(app, "plan-ticket-stage-detail"), "PR 41")))
+        element(app, "plan-ticket-mark-ready").tap()
         XCTAssertTrue(app.staticTexts["Mark PR 41 Ready for Review?"].waitForExistence(timeout: 10), "it didn't ask first: \(app.debugDescription)")
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.ready") }, "sent before the confirmation: \(sent(app))")
         keep(app, "stages-mark-ready-asks", expecting: .shows(app.staticTexts["Mark PR 41 Ready for Review?"]))
-        app.buttons.matching(identifier: "plan-lane-mark-ready-confirm").firstMatch.tap()
+        app.buttons.matching(identifier: "plan-ticket-mark-ready-confirm").firstMatch.tap()
         XCTAssertTrue(
-            wait(30) { sent(app).contains("pr.ready \(Self.draftLane) 41") }, "the lane and the number weren't sent: \(sent(app))")
+            wait(30) { sent(app).contains("pr.ready \(Self.draftTicket) 41") }, "the ticket and the number weren't sent: \(sent(app))")
         XCTAssertTrue(
-            wait(30) { element(app, "plan-lane-stage").label == "Waiting on alice" }, "the page didn't read where it stands now")
-        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "Mark Ready stays on a pull request that's ready")
-        keep(app, "stages-marked-ready", expecting: .all(.reads(element(app, "plan-lane-stage"), "Waiting on alice"), .gone(element(app, "plan-lane-mark-ready"))))
+            wait(30) { element(app, "plan-ticket-stage").label == "Waiting on alice" }, "the page didn't read where it stands now")
+        XCTAssertFalse(element(app, "plan-ticket-mark-ready").exists, "Mark Ready stays on a pull request that's ready")
+        keep(app, "stages-marked-ready", expecting: .all(.reads(element(app, "plan-ticket-stage"), "Waiting on alice"), .gone(element(app, "plan-ticket-mark-ready"))))
     }
 
     /// Cancel sends nothing; a pull request that needs a person, a runner without the actions and
     /// a Read grant offer no Mark Ready, and the link to GitHub is still there where there is one.
     func testMarkReadyIsOfferedOnlyWhereItCanWork() {
         var app = openStages()
-        openLanePage(app, "lane-2")
-        element(app, "plan-lane-mark-ready").tap()
-        app.buttons.matching(identifier: "plan-lane-mark-ready-cancel").firstMatch.tap()
-        XCTAssertTrue(element(app, "plan-lane-mark-ready").waitForExistence(timeout: 5))
+        openTicketPage(app, "ov-2")
+        element(app, "plan-ticket-mark-ready").tap()
+        app.buttons.matching(identifier: "plan-ticket-mark-ready-cancel").firstMatch.tap()
+        XCTAssertTrue(element(app, "plan-ticket-mark-ready").waitForExistence(timeout: 5))
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.ready") }, "\(sent(app))")
         back(app)
-        openLanePage(app, "lane-6")
-        XCTAssertEqual(element(app, "plan-lane-stage-attention").label, "Changes Requested")
-        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "changes requested is not a draft")
-        XCTAssertTrue(element(app, "plan-lane-review-on-github").exists)
+        openTicketPage(app, "ov-6")
+        XCTAssertEqual(element(app, "plan-ticket-stage-attention").label, "Changes Requested")
+        XCTAssertFalse(element(app, "plan-ticket-mark-ready").exists, "changes requested is not a draft")
+        XCTAssertTrue(element(app, "plan-ticket-review-on-github").exists)
         app.terminate()
 
         // A runner from before the actions.
         app = openStages(["-phone-plan"])
-        openLanePage(app, "lane-2")
-        XCTAssertTrue(element(app, "plan-lane-stage").exists)
-        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "offered where the runner can't do it")
-        XCTAssertTrue(element(app, "plan-lane-review-on-github").exists, "the link needs no runner")
+        openTicketPage(app, "ov-2")
+        XCTAssertTrue(element(app, "plan-ticket-stage").exists)
+        XCTAssertFalse(element(app, "plan-ticket-mark-ready").exists, "offered where the runner can't do it")
+        XCTAssertTrue(element(app, "plan-ticket-review-on-github").exists, "the link needs no runner")
         app.terminate()
 
         // A Read grant.
         app = openStages(["-phone-plan", "-phone-pr-actions", "-phone-read-scope"])
-        openLanePage(app, "lane-2")
-        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "offered to a phone that can only look")
+        openTicketPage(app, "ov-2")
+        XCTAssertFalse(element(app, "plan-ticket-mark-ready").exists, "offered to a phone that can only look")
     }
 
     /// **A member's phone is offered no Mark Ready** (ov-712): it posts as the owner's `gh` login,
@@ -274,19 +274,19 @@ final class PlanUITests: XCTestCase {
     /// as the owner does; the link to GitHub is still his.
     func testAMembersPhoneIsOfferedNoMarkReady() {
         let app = openStages(["-phone-plan", "-phone-pr-actions", "-phone-shared", "-phone-rep-lead"])
-        openLanePage(app, "lane-2")
-        XCTAssertEqual(element(app, "plan-lane-stage").label, "Agent Review")
-        XCTAssertTrue(element(app, "plan-lane-review-on-github").exists, "the link needs no say")
-        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "Mark Ready offered to a member")
+        openTicketPage(app, "ov-2")
+        XCTAssertEqual(element(app, "plan-ticket-stage").label, "Agent Review")
+        XCTAssertTrue(element(app, "plan-ticket-review-on-github").exists, "the link needs no say")
+        XCTAssertFalse(element(app, "plan-ticket-mark-ready").exists, "Mark Ready offered to a member")
     }
 
     /// **Open on GitHub hands the pull request's github.com link to the system** (ov-317), which
     /// gives it to GitHub Mobile when it is installed. The harness records the URL it was handed.
     func testOpenOnGitHubHandsTheLinkToTheSystem() {
         let app = openStages()
-        openLanePage(app, "lane-2")
-        XCTAssertEqual(element(app, "plan-lane-review-on-github").label, "Open on GitHub")
-        element(app, "plan-lane-review-on-github").tap()
+        openTicketPage(app, "ov-2")
+        XCTAssertEqual(element(app, "plan-ticket-review-on-github").label, "Open on GitHub")
+        element(app, "plan-ticket-review-on-github").tap()
         XCTAssertTrue(
             wait(30) { sent(app).contains("opened https://github.com/acme/app/pull/41") }, "the link wasn't handed over: \(sent(app))")
     }
@@ -382,7 +382,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertFalse(element(app, "needs-you-github-\(Self.review)").exists, "a link the runner never sent")
     }
 
-    /// The sheets: the overview, its themes, a lane and a theme, light and dark.
+    /// The sheets: the overview, its themes, a ticket and a theme, light and dark.
     ///
     /// Opt-in, like the Android Roborazzi captures: it makes screenshots and
     /// asserts nothing a behavior test does not, and it flips the whole
@@ -407,11 +407,11 @@ final class PlanUITests: XCTestCase {
             keep(app, "capture-theme-page-\(name)", expecting: .shows(element(app, "plan-theme-page")))
             back(app)
             back(app)
-            let lane = element(app, "plan-lane-mac-vis")
-            for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }
-            lane.tap()
-            XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30))
-            keep(app, "capture-lane-page-\(name)", expecting: .shows(element(app, "plan-lane-page")))
+            let ticket = element(app, "plan-ticket-ov-220")
+            for _ in 0..<8 where !(ticket.exists && ticket.isHittable) { app.swipeDown() }
+            ticket.tap()
+            XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30))
+            keep(app, "capture-ticket-page-\(name)", expecting: .shows(element(app, "plan-ticket-page")))
             app.terminate()
         }
     }

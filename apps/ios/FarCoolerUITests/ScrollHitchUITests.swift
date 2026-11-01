@@ -49,7 +49,7 @@ final class ScrollHitchUITests: XCTestCase {
         XCTAssertTrue(said.hasPrefix("frames="), "no fling measured: \(said)")
     }
 
-    /// The conversation: four hundred uneven rows, lane reports of about
+    /// The conversation: four hundred uneven rows, agent reports of about
     /// 11 KB folded among them, older pages loading and lines streaming.
     func testFlingTheConversation() {
         let app = XCUIApplication()

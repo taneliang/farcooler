@@ -737,10 +737,10 @@ final class NativeHarnessRunner: ObservableObject {
     private static func polishRows(now: Int64) -> [[String: Any]] {
         let prompt = """
             1. **Re-evaluate the plan.** Step back from the queue. Is the current execution plan still balancing the owner's priorities: engineering quality, product quality, cost/token efficiency and velocity?
-            2. **Re-check the themes and lanes themselves** (`farcooler-canary plan --repo overnight`).
+            2. **Re-check the themes and tickets themselves** (`farcooler-canary plan --repo overnight`).
             3. **Take initiative within each theme.**
             4. **Learn.** What went well or badly since the last check-in?
-            5. **Run the loop:** board triage, verify and land finished lanes.
+            5. **Run the loop:** board triage, verify and land finished tickets.
             """
         let scheduled = turn(prompt, origin: "Scheduled")
         let tool = { (id: String, name: String, summary: String, input: String, result: String, at: Int64) -> [String: Any] in
@@ -757,10 +757,10 @@ final class NativeHarnessRunner: ObservableObject {
             row("tool:c2", ord: 22, rev: 22, kind: ["Tool": tool("c2", "CronCreate", "", "cron: 31 11 10 10 *\nrecurring: false\nprompt: Coordinator heartbeat for `overnight`.", "Scheduled 573b639b (31 11 10 10 *)", now - 6000)]),
             row("tasks:turn:s1", ord: 23, rev: 23, kind: ["Tasks": ["items": [
                 ["subject": "Re-evaluate the plan", "status": "Completed"],
-                ["subject": "Re-check the themes and lanes", "status": "InProgress"],
+                ["subject": "Re-check the themes and tickets", "status": "InProgress"],
                 ["subject": "Learn from the last check-in", "status": "Pending"],
             ]]]),
-            row("prose:s1:0", ord: 24, rev: 24, kind: ["Prose": ["text": "Check-in at 09:34: nothing has changed. Main is green and no lanes are running. The next check-in is at 11:31.", "conclusion": true]]),
+            row("prose:s1:0", ord: 24, rev: 24, kind: ["Prose": ["text": "Check-in at 09:34: nothing has changed. Main is green and no agents are running. The next check-in is at 11:31.", "conclusion": true]]),
         ]
     }
 
@@ -804,16 +804,16 @@ final class NativeHarnessRunner: ObservableObject {
         }
     }
 
-    /// `-native-agents`' rows (ov-453): four lanes running, as the owner's
+    /// `-native-agents`' rows (ov-453): four agents running, as the owner's
     /// own session of Oct 10 had them, and one already back.
     private static func agentRows(now: Int64) -> [[String: Any]] {
-        let lanes: [(String, String, String, String, Int64, Int)] = [
+        let agents: [(String, String, String, String, Int64, Int)] = [
             ("a1", "general-purpose", "ov-452 conversation view hierarchy", "Bash Read old normalize result and task list code", 190, 87_200),
             ("a2", "general-purpose", "ov-454 image paste and attachments", "Read ComposerTextView paste and drag handling", 185, 80_100),
             ("a3", "Explore", "ov-453 subagent tray", "Grep subagents folder beside the session", 120, 41_900),
             ("a4", "general-purpose", "ov-455 queue phrasing", "Bash Tally turnOrigin values in transcripts", 82, 12_400),
         ]
-        var rows = lanes.enumerated().map { n, lane -> [String: Any] in
+        var rows = agents.enumerated().map { n, lane -> [String: Any] in
             row("sub:\(lane.0)", ord: 30 + UInt64(n), rev: 30 + UInt64(n), kind: ["Subagent": [
                 "tool_use_id": lane.0, "agent_id": "agent-\(lane.0)", "agent_type": lane.1, "description": lane.2, "background": true,
                 "status": "Running", "started_ms": now - lane.4 * 1000, "tool_count": 12, "current_action": lane.3, "last_ms": now - 2000,
@@ -826,7 +826,7 @@ final class NativeHarnessRunner: ObservableObject {
             for (n, id) in ["a6", "a7", "a8", "a9"].enumerated() {
                 rows.append(row("sub:\(id)", ord: 40 + UInt64(n), rev: 40 + UInt64(n), kind: ["Subagent": [
                     "tool_use_id": id, "agent_id": "agent-\(id)", "agent_type": "general-purpose",
-                    "description": "ov-46\(n) lane \(id)", "background": true, "status": "Running",
+                    "description": "ov-46\(n) agent \(id)", "background": true, "status": "Running",
                     "started_ms": now - Int64(60 - n * 10) * 1000, "tool_count": 4, "current_action": "Read Package.swift",
                     "last_ms": now - 2000, "tokens": 3_000 + n * 500,
                 ]]))

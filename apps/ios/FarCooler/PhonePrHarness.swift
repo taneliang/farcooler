@@ -5,12 +5,12 @@ import Foundation
 // with `-phone-pr-actions`, ov-317).
 //
 //   -phone-pr-actions        the runner advertises `pr_actions` and answers `pr.ready`
-//                            and `pr.thread_reply`. `pr.ready` checks it is sent the lane
-//                            and the number of a draft in the plan file, and from then on
-//                            the plan says that lane waits on alice. `pr.thread_reply`
+//                            and `pr.thread_reply`. `pr.ready` checks it is sent the ticket's
+//                            task and the number of a draft in the plan file, and from then on
+//                            the plan says that ticket waits on alice. `pr.thread_reply`
 //                            checks the card and a reply of 1 to 2,000 characters, and
 //                            answers acme/billing #213 as e-liang. Each call is in the
-//                            harness's `sent`: `pr.ready <lane> <number>`, and
+//                            harness's `sent`: `pr.ready <task> <number>`, and
 //                            `pr.thread_reply preview|send <chars>`.
 //   -phone-pr-needs-you      Needs You also holds a pull request waiting for this runner's
 //                            review and a review thread an agent escalated, as the runner
@@ -25,7 +25,7 @@ enum PhonePrHarness {
     static var advertised: Bool { CommandLine.arguments.contains("-phone-pr-actions") }
     static var needsYou: Bool { CommandLine.arguments.contains("-phone-pr-needs-you") }
 
-    /// The lanes marked ready this run, by id.
+    /// The tickets marked ready this run, by task id.
     static var readied: Set<String> = []
 
     /// A thread replied to this run: its card is answered, so its row has left.
@@ -35,10 +35,10 @@ enum PhonePrHarness {
     static let noteID = "01000000-0000-7000-8000-000000000015"
     static let digest = "9f2c41d07b3a5e8812ac6d00"
 
-    /// A lane `pr.ready` marked ready reads as waiting on alice, as the runner's
+    /// A ticket `pr.ready` marked ready reads as waiting on alice, as the runner's
     /// next read of GitHub would say.
     static func marking(_ plan: Any) -> Any {
-        guard !readied.isEmpty, var plan = plan as? [String: Any], var lanes = plan["lanes"] as? [[String: Any]] else { return plan }
+        guard !readied.isEmpty, var plan = plan as? [String: Any], var lines = plan["lines"] as? [[String: Any]] else { return plan }
         func waiting(_ stage: [String: Any]) -> [String: Any] {
             var stage = stage
             stage["kind"] = "waiting_on_reviewer"
@@ -46,16 +46,10 @@ enum PhonePrHarness {
             stage["reviewers"] = ["alice"]
             return stage
         }
-        for index in lanes.indices where readied.contains(lanes[index]["id"] as? String ?? "") {
-            if let stage = lanes[index]["stage"] as? [String: Any] { lanes[index]["stage"] = waiting(stage) }
-            if var cards = lanes[index]["cards"] as? [[String: Any]] {
-                for card in cards.indices {
-                    if let stage = cards[card]["stage"] as? [String: Any] { cards[card]["stage"] = waiting(stage) }
-                }
-                lanes[index]["cards"] = cards
-            }
+        for index in lines.indices where readied.contains(lines[index]["task"] as? String ?? "") {
+            if let stage = lines[index]["pr_stage"] as? [String: Any] { lines[index]["pr_stage"] = waiting(stage) }
         }
-        plan["lanes"] = lanes
+        plan["lines"] = lines
         return plan
     }
 
@@ -91,13 +85,13 @@ enum PhonePrHarness {
         }
         switch method {
         case "pr.ready":
-            guard let lane = args["lane"] as? String, let number = (args["pr_number"] as? NSNumber)?.intValue,
-                let plan, plan.draft(lane: lane, number: number)
-            else { throw refuse("invalid-argument", "lane_pr") }
-            readied.insert(lane)
+            guard let task = args["task"] as? String, let number = (args["pr_number"] as? NSNumber)?.intValue,
+                let plan, plan.draft(task: task, number: number)
+            else { throw refuse("invalid-argument", "ticket_pr") }
+            readied.insert(task)
             let url = "https://github.com/acme/app/pull/\(number)"
             let data = try JSONSerialization.data(withJSONObject: ["number": number, "url": url, "already_ready": false])
-            return (data, "pr.ready \(lane) \(number)")
+            return (data, "pr.ready \(task) \(number)")
         default:
             guard args["task"] as? String == thread else { throw refuse("not-found") }
             let send = args["send"] as? Bool ?? false
@@ -120,11 +114,11 @@ enum PhonePrHarness {
 }
 
 extension HarnessPlan {
-    /// Whether `lane` has a draft pull request numbered `number` in the file.
-    func draft(lane: String, number: Int) -> Bool {
-        guard let plan = capture["plan"] as? [String: Any], let lanes = plan["lanes"] as? [[String: Any]],
-            let found = lanes.first(where: { $0["id"] as? String == lane }),
-            let stage = found["stage"] as? [String: Any]
+    /// Whether the ticket `task` has a draft pull request numbered `number` in the file.
+    func draft(task: String, number: Int) -> Bool {
+        guard let plan = capture["plan"] as? [String: Any], let lines = plan["lines"] as? [[String: Any]],
+            let found = lines.first(where: { $0["task"] as? String == task }),
+            let stage = found["pr_stage"] as? [String: Any]
         else { return false }
         let kind = stage["kind"] as? String
         return (kind == "agent_review" || kind == "fixing") && (stage["pr_number"] as? NSNumber)?.intValue == number

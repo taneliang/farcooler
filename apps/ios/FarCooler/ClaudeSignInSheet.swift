@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// What the Claude section needs from a runner (ov-584): its name, who the
-/// orchestrator's lanes run as, and the calls. Built by `RunnerSettingsModel`.
+/// orchestrator's agents run as, and the calls. Built by `RunnerSettingsModel`.
 struct ClaudeSignInSupport {
     let runner: String
     let calls: ClaudeSignInModel.Calls

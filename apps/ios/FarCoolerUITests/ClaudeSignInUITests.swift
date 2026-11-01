@@ -124,7 +124,7 @@ final class ClaudeSignInUITests: XCTestCase {
         let state = element(app, "claude-login-state")
         XCTAssertTrue(app.reveal(state), "no Claude section: \(app.debugDescription)")
         XCTAssertEqual(
-            state.label, "Sign in so your rep and the lanes you start use your own Claude account and its connectors.")
+            state.label, "Sign in so your rep and the agents you start use your own Claude account and its connectors.")
         openSheet(app)
         // Sign In waits for a code.
         XCTAssertTrue(finishButton(app).waitForExistence(timeout: 10), "no Sign In button: \(app.debugDescription)")
@@ -197,7 +197,7 @@ final class ClaudeSignInUITests: XCTestCase {
         XCTAssertTrue(app.reveal(out))
         out.tap()
         XCTAssertTrue(
-            app.staticTexts["Your rep and lanes there stop until you sign in again."].waitForExistence(timeout: 10),
+            app.staticTexts["Your rep and agents there stop until you sign in again."].waitForExistence(timeout: 10),
             "no confirmation: \(app.debugDescription)")
         // Asking is not signing out.
         XCTAssertFalse(sent(app).contains("claude.sign_out bob"))
@@ -347,8 +347,8 @@ final class ClaudeSignInUITests: XCTestCase {
             XCTAssertTrue(app.reveal(element(app, "claude-sign-out")))
             element(app, "claude-sign-out").tap()
             XCTAssertTrue(
-                app.staticTexts["Your rep and lanes there stop until you sign in again."].waitForExistence(timeout: 10))
-            shoot(dir, tag, "sign-out-confirm", scheme, expecting: .shows(app.staticTexts["Your rep and lanes there stop until you sign in again."]))
+                app.staticTexts["Your rep and agents there stop until you sign in again."].waitForExistence(timeout: 10))
+            shoot(dir, tag, "sign-out-confirm", scheme, expecting: .shows(app.staticTexts["Your rep and agents there stop until you sign in again."]))
             app.terminate()
 
             // The owner's People.

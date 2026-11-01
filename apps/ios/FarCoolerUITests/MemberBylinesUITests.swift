@@ -156,10 +156,10 @@ final class MemberBylinesUITests: XCTestCase {
             marketing.tap()
             // A member's sheet lists the themes as the tree's levels, whose
             // Theme Page holds the ask; the owner's Plan names Marketing on a
-            // lane, whose page links its theme.
+            // ticket, whose page links its theme.
             let own = app.buttons["tree-own"].firstMatch
-            let lanes = app.buttons["plan-lane-theme"].firstMatch
-            if own.waitForExistence(timeout: 5) { own.tap() } else if lanes.exists { lanes.tap() }
+            let tickets = app.buttons["plan-ticket-theme"].firstMatch
+            if own.waitForExistence(timeout: 5) { own.tap() } else if tickets.exists { tickets.tap() }
             let page = element(app, "plan-theme-page")
             XCTAssertTrue(page.waitForExistence(timeout: 10), "no Marketing page: \(app.debugDescription)")
             keep(app, "member-plan-ask-\(name)-light", expecting: .shows(page))

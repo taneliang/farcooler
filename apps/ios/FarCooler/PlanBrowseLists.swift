@@ -1,14 +1,14 @@
 import SwiftUI
 
-// Themes and Lanes as pushed lists (ov-503, design 7): a phone has no
+// Themes and Tickets as pushed lists (ov-503, design 7): a phone has no
 // sidebar, so the two lists of the iPad's (`SidebarOutline`) are two rows at
 // the foot of the Plan, each pushing its list. Themes is the why, its cards
-// under each theme; Lanes is the how, grouped as the Plan's sections are, each
-// lane's agents under it. The nodes are AgentKit's; this draws rows and sends
+// under each theme; Tickets is the how, grouped as the Plan's sections are, each
+// ticket's agents under it. The nodes are AgentKit's; this draws rows and sends
 // a tap to the phone's stack.
 
 struct PlanBrowseList: View {
-    enum Kind { case themes, lanes }
+    enum Kind { case themes, tickets }
 
     let hook: PlanBoardHook
     let kind: Kind
@@ -27,10 +27,10 @@ struct PlanBrowseList: View {
     private var outline: SidebarOutline? { reads.state(hook.summary.id) == nil ? nil : hook.outline?(filter) }
 
     var body: some View {
-        let nodes = outline.map { kind == .themes ? $0.themes : $0.lanes } ?? []
+        let nodes = outline.map { kind == .themes ? $0.themes : $0.tickets } ?? []
         List {
             if nodes.isEmpty {
-                Text(kind == .themes ? "No themes yet." : "No lanes yet.")
+                Text(kind == .themes ? "No themes yet." : "No tickets yet.")
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("plan-browse-empty")
             }
@@ -43,7 +43,7 @@ struct PlanBrowseList: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(kind == .themes ? "Themes" : "Lanes")
+        .navigationTitle(kind == .themes ? "Themes" : "Tickets")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // The filter narrows the cards under Themes only.
@@ -62,7 +62,7 @@ struct PlanBrowseList: View {
         }
         .onChange(of: filter) { _, chosen in PhoneTreeFilter.remember(chosen, for: hook.place) }
         .refreshable { await hook.read() }
-        .accessibilityIdentifier(kind == .themes ? "plan-browse-themes-list" : "plan-browse-lanes-list")
+        .accessibilityIdentifier(kind == .themes ? "plan-browse-themes-list" : "plan-browse-tickets-list")
     }
 
     /// A group that starts folded and hasn't been opened.
@@ -124,7 +124,7 @@ struct PlanBrowseList: View {
     private func open(_ target: OneTreeTarget) {
         switch target {
         case .theme(let id): hook.onOpen(.theme(id))
-        case .lane(let id): hook.onOpen(.lane(id))
+        case .ticket(let id): hook.onOpen(.ticket(id))
         case .page(let slot): hook.onOpen(.page(slot))
         default:
             if let route = PhoneTree.route(target, in: hook.place) { hook.onRoute(route) }
@@ -132,8 +132,8 @@ struct PlanBrowseList: View {
     }
 }
 
-/// One row of a pushed list: a card, a lane, an agent or a pane. The card's
-/// key and title, the lane working it (or a lane's state and cards), and the
+/// One row of a pushed list: a card, a ticket, an agent or a pane. The card's
+/// key and title, the ticket working it (or a ticket's stage), and the
 /// amber dot when it asks for you.
 struct PlanBrowseRow: View {
     let node: OneTreeNode
@@ -196,8 +196,7 @@ struct PlanBrowseRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// A card says the lane working it; a lane, its state and the cards it
-    /// works.
+    /// A card says the ticket working it; a ticket, its stage.
     private var second: String? {
         guard !isAgent else { return nil }
         let words = [node.detail, node.caption].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")

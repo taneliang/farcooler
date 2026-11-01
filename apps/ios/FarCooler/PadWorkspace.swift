@@ -8,7 +8,7 @@ import SwiftUI
 // - Tree: the One tree as an outline, the Mac's sidebar: the same
 //   `OneTree.rows`, each row with children opened and closed in place.
 // - Plan: the canvas's home, the same sections the phone's Plan sheet draws
-//   (`PlanHomeList`). A theme, lane, page or task picked in the tree shows
+//   (`PlanHomeList`). A theme, ticket, page or task picked in the tree shows
 //   here, and so does the Board, the toolbar's item.
 // - Chat: the orchestrator's pane, always shown.
 //
@@ -31,7 +31,7 @@ extension EnvironmentValues {
 // MARK: - The tree
 
 /// The tree as an outline: Needs You and Plan, the themes and their cards,
-/// lanes and terminals, then the main checkout and the loose worktrees.
+/// tickets and terminals, then the main checkout and the loose worktrees.
 struct PadTreeColumn: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
@@ -70,7 +70,7 @@ struct PadTreeColumn: View {
 
     var body: some View {
         let outline = connection.sidebarOutline(summary, filter: filter)
-        // A card chosen lights the lane working it, and a lane its cards.
+        // A card chosen lights the ticket working it, and a ticket its card.
         let lit = outline.related(to: PadPick.target(of: canvas))
         List {
             Section { rows(outline.places, lit: lit) }
@@ -81,13 +81,13 @@ struct PadTreeColumn: View {
             } header: {
                 header
             }
-            if !outline.lanes.isEmpty {
+            if !outline.tickets.isEmpty {
                 Section {
-                    rows(outline.lanes, lit: lit)
+                    rows(outline.tickets, lit: lit)
                 } header: {
-                    Text(PadTreeColumn.lanesTitle)
+                    Text(PadTreeColumn.ticketsTitle)
                         .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("pad-tree-lanes-header")
+                        .accessibilityIdentifier("pad-tree-tickets-header")
                 }
             }
             if !outline.below.isEmpty {
@@ -139,7 +139,7 @@ struct PadTreeColumn: View {
     }
 
     /// The sidebar's second list: the how, beside Themes' why.
-    static let lanesTitle = "Lanes"
+    static let ticketsTitle = "Tickets"
 
     @ViewBuilder
     private func rows(_ nodes: [OneTreeNode], lit: Set<String>) -> some View {
@@ -173,7 +173,7 @@ private struct PadTreeRow: View {
     @ObservedObject var connection: Connection
     let place: PhoneWorkspace
     let chosen: Bool
-    /// Beside the chosen row: the lane working a chosen card, a lane's cards.
+    /// Beside the chosen row: the ticket working a chosen card, a ticket's card.
     let lit: Bool
     @Binding var failure: ActionFailure?
     let onToggle: () -> Void
@@ -247,7 +247,7 @@ private struct PadTreeRow: View {
                 if !node.caption.isEmpty {
                     Text(node.caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
-                // A card's lane goes under its title, so the lane's name never takes the title's room.
+                // A card's ticket goes under its title, so the ticket's name never takes the title's room.
                 if node.kind == .task, !node.detail.isEmpty {
                     Text(node.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -528,7 +528,7 @@ struct PadTreeSidebar<Tree: View>: View {
 // MARK: - Shared with the phone's tree
 
 extension View {
-    /// Hide and Unhide on a lane's or a loose worktree's own checkout: the
+    /// Hide and Unhide on a ticket's or a loose worktree's own checkout: the
     /// Worktrees segment's swipe, kept. Not below a Control grant.
     func worktreeSwipe(
         node: OneTreeNode, connection: Connection, place: PhoneWorkspace, failure: Binding<ActionFailure?>
@@ -567,10 +567,10 @@ struct WorktreeSwipeActions: View {
     let place: PhoneWorkspace
     @Binding var failure: ActionFailure?
 
-    /// The row's worktree, when it's a lane's or a loose one's own checkout,
+    /// The row's worktree, when it's a ticket's or a loose one's own checkout,
     /// or the repository's main checkout.
     static func worktree(_ node: OneTreeNode, in connection: Connection) -> Worktree? {
-        guard node.kind == .lane || node.kind == .worktree || node.id == "group:main", let id = node.worktreeID
+        guard node.kind == .ticket || node.kind == .worktree || node.id == "group:main", let id = node.worktreeID
         else { return nil }
         return connection.fleet.worktrees.first { $0.id == id }
     }

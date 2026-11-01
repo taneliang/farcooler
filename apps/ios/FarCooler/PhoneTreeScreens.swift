@@ -5,11 +5,11 @@ import SwiftUI
 // Plan's list is the tree's root (`PhonePlanList`, ov-616), and each level is
 // pushed, inside the Plan sheet,
 //
-//   Plan › Theme › Task › Lane › Terminal
+//   Plan › Theme › Task › Ticket › Terminal
 //
-// where a lane is its worktree. A row with children pushes its level, a level
+// where a ticket is its worktree. A row with children pushes its level, a level
 // opens on its node's own page, and a leaf opens what it points at. Back is
-// up. The Worktrees segment's list folds in here: a lane's worktree under its
+// up. The Worktrees segment's list folds in here: a ticket's worktree under its
 // card, the rest under Main Checkout and Loose Worktrees, with Hide and Unhide
 // on a worktree's swipe and New Worktree… at the root's foot.
 //
@@ -31,7 +31,7 @@ extension Connection {
         OneTree.build(treeInput(summary, filter: filter, narrow: narrow))
     }
 
-    /// `summary`'s sidebar as two lists, Themes and Lanes: the iPad's outline
+    /// `summary`'s sidebar as two lists, Themes and Tickets: the iPad's outline
     /// (ov-503).
     func sidebarOutline(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> SidebarOutline {
         SidebarOutline.build(treeInput(summary, filter: filter))
@@ -286,13 +286,13 @@ struct TreeRow: View {
     /// worktree is found by its name wherever it hangs; every other row by
     /// its key, else its title.
     private var identifier: String {
-        if node.kind == .lane || node.kind == .worktree, case .worktree? = node.target {
+        if node.kind == .ticket || node.kind == .worktree, case .worktree? = node.target {
             return "worktree-row-\(node.rowName)"
         }
         return "tree-row-\(node.rowName)"
     }
 
-    /// The row's worktree, when it's a lane's or a loose one's own checkout,
+    /// The row's worktree, when it's a ticket's or a loose one's own checkout,
     /// or the repository's main checkout.
     private var worktree: Worktree? { WorktreeSwipeActions.worktree(node, in: connection) }
 

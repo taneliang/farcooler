@@ -5,7 +5,7 @@ import SwiftUI
     ///
     /// Nothing else can show the watch's team words (ov-739): they need a
     /// runner with members, a paired phone, and an ask waiting on someone
-    /// else, and the preview canvas is not a screenshot a lane can attach.
+    /// else, and the preview canvas is not a screenshot an agent can attach.
     /// `xcrun simctl launch` with `SIMCTL_CHILD_FARCOOLER_WATCH_SCENE=<scene>`
     /// lands on one of them with a fixed fleet and no phone.
     ///

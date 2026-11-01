@@ -2,7 +2,7 @@ import SwiftUI
 
 // The Plan's sections on a phone and in the iPad's plan column (ov-503,
 // design 2 and 7; ov-522): Landing, In Review, Building, Waiting, Waiting for the Next Landing
-// (folded), Agents, then Themes as a grid and, on a phone, Themes and Lanes
+// (folded), Agents, then Themes as a grid and, on a phone, Themes and Tickets
 // as two rows that push lists. `PlanSections` decides what is where and what
 // each says empty; this lays it out as an inset list's sections, one column.
 
@@ -11,7 +11,7 @@ struct PlanSectionsList: View {
     let plan: PlanModel
     let hook: PlanBoardHook
 
-    @State private var landedOpen = !PlanSections.Kind.onLandedTrain.startsFolded
+    @State private var landedOpen = !PlanSections.Kind.onLandedLanding.startsFolded
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -21,10 +21,10 @@ struct PlanSectionsList: View {
             switch kind {
             case .needsYou: EmptyView()
             case .landing: landing
-            case .inReview: laneSection(.inReview, id: "plan-in-review", rows: sections.inReview)
-            case .building: laneSection(.building, id: "plan-building", rows: sections.building)
+            case .inReview: ticketSection(.inReview, id: "plan-in-review", rows: sections.inReview)
+            case .building: ticketSection(.building, id: "plan-building", rows: sections.building)
             case .waiting: waiting
-            case .onLandedTrain: landedTrain
+            case .onLandedLanding: landedLanding
             case .agents: agents
             case .themes: themes
             }
@@ -34,11 +34,11 @@ struct PlanSectionsList: View {
 
     // MARK: Rows
 
-    private func laneRow(_ row: PlanSections.LaneRow, rank: Int? = nil) -> some View {
-        PlanLaneRow(
-            lane: row.lane, theme: plan.theme(of: row.lane), rank: rank, now: sections.now, waitsOnOwner: row.waitsOnOwner,
-            agent: row.agent, landedTrain: row.landedTrain
-        ) { hook.onOpen(.lane(row.id)) }
+    private func ticketRow(_ row: PlanSections.TicketRow, rank: Int? = nil) -> some View {
+        PlanTicketRow(
+            line: row.line, theme: plan.theme(of: row.line), rank: rank, now: sections.now, waitsOnOwner: row.waitsOnOwner,
+            agent: row.agent, landedLanding: row.landedLanding
+        ) { hook.onOpen(.ticket(row.line.task)) }
     }
 
     /// What a section says with nothing in it.
@@ -56,32 +56,32 @@ struct PlanSectionsList: View {
             if let words = sections.emptyWords(.landing) {
                 empty(words, id: "plan-landing")
             } else {
-                ForEach(sections.trains) { card in
-                    PlanTrainRow(card: card, ci: plan.ci(of: card.train), now: sections.now)
-                    ForEach(card.lanes) { lane in
-                        PlanLaneRow(
-                            lane: lane.lane, theme: plan.theme(of: lane.lane), rank: nil, now: sections.now,
-                            waitsOnOwner: lane.waitsOnOwner, standing: lane.waitsOnOwner ? "" : lane.note ?? ""
-                        ) { hook.onOpen(.lane(lane.id)) }
+                ForEach(sections.landings) { card in
+                    PlanLandingRow(card: card, ci: plan.ci(of: card.landing), now: sections.now)
+                    ForEach(card.tickets) { ticket in
+                        PlanTicketRow(
+                            line: ticket.line, theme: plan.theme(of: ticket.line), rank: nil, now: sections.now,
+                            waitsOnOwner: ticket.waitsOnOwner, standing: ticket.waitsOnOwner ? "" : ticket.note ?? ""
+                        ) { hook.onOpen(.ticket(ticket.line.task)) }
                         .padding(.leading, PaneMetrics.card)
                     }
                 }
             }
         } header: {
             PlanHeader(title: PlanSections.Kind.landing.title, count: sections.count(.landing) == 0 ? nil : sections.count(.landing))
-                .explainedOnLongPress([PlanWords.trainExplanation])
+                .explainedOnLongPress([PlanWords.landingExplanation])
                 .accessibilityIdentifier("plan-landing")
         }
     }
 
     // MARK: In Review and Building
 
-    private func laneSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.LaneRow]) -> some View {
+    private func ticketSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.TicketRow]) -> some View {
         Section {
             if let words = sections.emptyWords(kind) {
                 empty(words, id: id)
             } else {
-                ForEach(rows) { laneRow($0) }
+                ForEach(rows) { ticketRow($0) }
             }
         } header: {
             PlanHeader(title: kind.title, count: rows.isEmpty ? nil : rows.count).accessibilityIdentifier(id)
@@ -101,7 +101,7 @@ struct PlanSectionsList: View {
                     // Each group is named only when something else shares the section.
                     if waiting.namesGroups { groupTitle(group) }
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
-                        laneRow(row, rank: group.rank(at: index))
+                        ticketRow(row, rank: group.rank(at: index))
                     }
                 }
             }
@@ -131,18 +131,18 @@ struct PlanSectionsList: View {
 
     // MARK: Waiting for the Next Landing
 
-    private var landedTrain: some View {
+    private var landedLanding: some View {
         Section {
-            if landedOpen { ForEach(sections.onLandedTrain) { laneRow($0) } }
+            if landedOpen { ForEach(sections.onLandedLanding) { ticketRow($0) } }
         } header: {
-            PlanHeader(title: PlanSections.Kind.onLandedTrain.title, count: sections.onLandedTrain.count, open: landedOpen)
+            PlanHeader(title: PlanSections.Kind.onLandedLanding.title, count: sections.onLandedLanding.count, open: landedOpen)
                 .contentShape(.rect)
                 .onTapGesture { withAnimation { landedOpen.toggle() } }
                 .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(PlanSections.Kind.onLandedTrain.title), \(sections.onLandedTrain.count)")
+            .accessibilityLabel("\(PlanSections.Kind.onLandedLanding.title), \(sections.onLandedLanding.count)")
             .accessibilityValue(landedOpen ? "Expanded" : "Collapsed")
             .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("plan-on-landed-train")
+            .accessibilityIdentifier("plan-on-landed-landing")
         }
     }
 
@@ -160,7 +160,7 @@ struct PlanSectionsList: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("plan-agents-header")
                 ForEach(fleet.agents) { agent in
-                    PlanAgentRow(agent: agent, now: sections.now) { open($0) }
+                    PlanAgentRow(agent: agent, now: sections.now) { hook.onOpen(.ticket($0.task)) }
                 }
             }
         } header: {
@@ -168,9 +168,7 @@ struct PlanSectionsList: View {
         }
     }
 
-    private func open(_ lane: PlanFleetAgent.Lane) { hook.onOpen(.lane(lane.id)) }
-
-    // MARK: Themes
+        // MARK: Themes
 
     private var themes: some View {
         Section {
@@ -187,7 +185,7 @@ struct PlanSectionsList: View {
         }
     }
 
-    // MARK: Themes and Lanes, pushed
+    // MARK: Themes and Tickets, pushed
 
     private var browse: some View {
         Section {
@@ -201,30 +199,30 @@ struct PlanSectionsList: View {
                 .accessibilityIdentifier("plan-browse-themes")
             }
             NavigationLink {
-                PlanBrowseList(hook: hook, kind: .lanes)
+                PlanBrowseList(hook: hook, kind: .tickets)
             } label: {
-                Label("Lanes", systemImage: "point.topleft.down.to.point.bottomright.curvepath").foregroundStyle(.primary)
+                Label("Tickets", systemImage: "point.topleft.down.to.point.bottomright.curvepath").foregroundStyle(.primary)
             }
-            .accessibilityIdentifier("plan-browse-lanes")
+            .accessibilityIdentifier("plan-browse-tickets")
         }
     }
 }
 
 /// One agent that exists, working or idle: who (role and model), what for and
 /// its state, and its tokens. A working agent has a filled dot, an idle one a
-/// ring; a tap opens its lane.
+/// ring; a tap opens its first ticket.
 struct PlanAgentRow: View {
-    let agent: PlanFleetAgent
+    let agent: PlanAgent
     let now: Int64
-    let onOpen: (PlanFleetAgent.Lane) -> Void
+    let onOpen: (PlanAgentTicket) -> Void
     @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
     @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         let row = content
         Group {
-            if let lane = agent.lane {
-                Button { onOpen(lane) } label: { row }
+            if let first = agent.tickets.first {
+                Button { onOpen(first) } label: { row }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(.isButton)
             } else {
@@ -232,7 +230,7 @@ struct PlanAgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(agent.spoken(now: now))
+        .accessibilityLabel([agent.who, agent.second(now: now), agent.tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier("plan-agent-\(agent.id)")
     }
 
@@ -270,7 +268,7 @@ struct PlanAgentRow: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            if agent.lane != nil {
+            if !agent.tickets.isEmpty {
                 Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)

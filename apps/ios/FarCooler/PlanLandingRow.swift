@@ -1,18 +1,18 @@
 import SwiftUI
 
-// A train in Landing (ov-309, ov-503, ov-522), on the iPhone as on the Mac:
-// "Train 72" with its title under it and what it carries (ov-462), where it
+// A landing in Landing (ov-309, ov-503, ov-522), on the iPhone as on the Mac:
+// "Landing 72" with its title under it and what it carries (ov-462), where it
 // stands on the ladder as "Checking on CI · step 2 of 3" over three short
-// segments (a long press explains the train and each step), the
+// segments (a long press explains the landing and each step), the
 // commit, how CI stands and how long it has waited, and who integrates. Amber
-// only for CI that failed or a train that stalled, each with its words. The arrow at the trailing edge opens the CI run in the browser, the
+// only for CI that failed or a landing that stalled, each with its words. The arrow at the trailing edge opens the CI run in the browser, the
 // one place it goes; a long press never does.
 //
-// The words are AgentKit's (`PlanSections.TrainCard`, `PlanLadder`); this
+// The words are AgentKit's (`PlanSections.LandingCard`, `PlanLadder`); this
 // draws them.
 
-struct PlanTrainRow: View {
-    let card: PlanSections.TrainCard
+struct PlanLandingRow: View {
+    let card: PlanSections.LandingCard
     let ci: PlanCIRead?
     /// The runner's clock, for how old a stale read is.
     var now: Int64 = 0
@@ -20,11 +20,11 @@ struct PlanTrainRow: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var type
     /// The glyph's column, grown with the type: a fixed 22 points let a large
-    /// train glyph run into "Train 86".
+    /// landing glyph run into "Landing 86".
     @ScaledMetric(relativeTo: .body) private var glyphWidth: CGFloat = 22
 
-    private var train: PlanTrain { card.train }
-    private var attention: Bool { card.phase.needsAttention || PlanWords.trainNeedsAttention(train, ci: ci) }
+    private var landing: PlanLanding { card.landing }
+    private var attention: Bool { card.phase.needsAttention || PlanWords.landingNeedsAttention(landing, ci: ci) }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
     private var facts: String { card.facts(ci: ci, now: now) }
     /// The same words with each span held together: a line breaks between
@@ -37,7 +37,7 @@ struct PlanTrainRow: View {
         // explanation. The run opens from its own control, at the trailing edge.
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(TrainRowSpeech(spoken: card.spoken(ci: ci, now: now), id: train.name))
+            .modifier(LandingRowSpeech(spoken: card.spoken(ci: ci, now: now), id: String(landing.number)))
             .explainedOnLongPress(card.explanation)
             // On the title's line, outside the row's one spoken element.
             .overlay(alignment: .topTrailing) { runControl }
@@ -56,13 +56,13 @@ struct PlanTrainRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open CI Run")
-            .accessibilityIdentifier("plan-train-\(train.name)-run")
+            .accessibilityIdentifier("plan-landing-\(landing.number)-run")
         }
     }
 
     private var content: some View {
             HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
-                Image(systemName: "train.side.front.car")
+                Image(systemName: "arrow.down.to.line")
                     .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                     // Its own width at the least: at accessibility sizes the
                     // glyph is wider than the column, and kept whole it pushes
@@ -71,29 +71,29 @@ struct PlanTrainRow: View {
                     .frame(minWidth: glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(train.label).font(.body.weight(.semibold))
-                        .accessibilityIdentifier("plan-train-\(train.name)-label")
-                    if let subtitle = train.subtitle {
+                    Text(landing.label).font(.body.weight(.semibold))
+                        .accessibilityIdentifier("plan-landing-\(landing.number)-label")
+                    if let subtitle = landing.subtitle {
                         Text(subtitle)
                             .font(.subheadline)
                             .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-train-\(train.name)-subtitle")
+                            .accessibilityIdentifier("plan-landing-\(landing.number)-subtitle")
                     }
-                    if let carries = train.carries {
+                    if let carries = landing.carries {
                         Text(carries)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(type.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-train-\(train.name)-carries")
+                            .accessibilityIdentifier("plan-landing-\(landing.number)-carries")
                     }
                     Text(PlanLadder.compact(card.phase))
                         .font(.footnote.weight(attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                         .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("plan-train-\(train.name)-phase")
+                        .accessibilityIdentifier("plan-landing-\(landing.number)-phase")
                     PlanLadderBar(phase: card.phase, attention: attention)
                         .padding(.vertical, 2)
                     if !facts.isEmpty {
@@ -102,7 +102,7 @@ struct PlanTrainRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-train-\(train.name)-words")
+                            .accessibilityIdentifier("plan-landing-\(landing.number)-words")
                     }
                 }
                 Spacer(minLength: 0)
@@ -111,8 +111,8 @@ struct PlanTrainRow: View {
     }
 }
 
-/// What VoiceOver reads for a train, and its identifier.
-private struct TrainRowSpeech: ViewModifier {
+/// What VoiceOver reads for a landing, and its identifier.
+private struct LandingRowSpeech: ViewModifier {
     let spoken: String
     let id: String
 
@@ -120,14 +120,14 @@ private struct TrainRowSpeech: ViewModifier {
         content
             .accessibilityElement(children: .combine)
             .accessibilityLabel(spoken)
-            .accessibilityIdentifier("plan-train-\(id)")
+            .accessibilityIdentifier("plan-landing-\(id)")
     }
 }
 
-/// Where a train stands, as three short segments: the ones climbed are
+/// Where a landing stands, as three short segments: the ones climbed are
 /// filled, the one it is on is dark, or amber when it needs attention.
 struct PlanLadderBar: View {
-    let phase: TrainPhase
+    let phase: LandingPhase
     let attention: Bool
     @Environment(\.colorScheme) private var scheme
 

@@ -8,7 +8,7 @@ import XCTest
 /// The strip (the Now/Next card) says what needs you and what's moving; a tap
 /// peeks the Plan as a sheet at the medium detent (ov-616). The Plan's list is
 /// the tree's root, and each level is pushed inside the sheet: Theme › Task ›
-/// Lane, each level opening on its node's own page, and a terminal opening
+/// Ticket, each level opening on its node's own page, and a terminal opening
 /// its worktree on that pane, the sheet gone.
 final class PhoneTreeUITests: XCTestCase {
     override func setUp() {
@@ -65,14 +65,14 @@ final class PhoneTreeUITests: XCTestCase {
 
     /// **The strip says what needs you, what's moving and what's next**, over
     /// the orchestrator: the plan's two themes with an ask, its first two
-    /// lanes in Now and how many more, and its next lane.
+    /// tickets in Now and how many more, and its next ticket.
     func testTheStripSaysWhatNeedsYouAndWhatsMoving() {
         let app = openBilling()
         XCTAssertTrue(element(app, "orchestrator-pane").waitForExistence(timeout: 10), "not on the orchestrator")
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip: \(app.debugDescription)")
-        // The glance band's two lines (ov-503): Now by train and section, Next by rank.
-        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. Train "), strip.label)
+        // The glance band's two lines (ov-503): Now by landing and section, Next by rank.
+        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. Landing "), strip.label)
         XCTAssertTrue(strip.label.contains(" building") && strip.label.contains(" in review"), strip.label)
         XCTAssertTrue(strip.label.contains("Next: Plan view on iOS"), strip.label)
         XCTAssertTrue(strip.label.hasSuffix(" 2 need you."), strip.label)
@@ -104,18 +104,18 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(strip.isHittable, "the strip is gone after the peek")
     }
 
-    /// **A lane chosen in the sheet is pushed inside it** (ov-616), and Back
+    /// **A ticket chosen in the sheet is pushed inside it** (ov-616), and Back
     /// comes back to the Plan, still in the sheet.
-    func testALaneChosenInTheSheetIsPushedInIt() {
+    func testATicketChosenInTheSheetIsPushedInIt() {
         let app = openBilling()
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip")
         strip.tap()
-        let lane = element(app, "plan-lane-phones-b")
-        XCTAssertTrue(app.reveal(lane), "no landing lane: \(app.debugDescription)")
-        lane.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "the lane wasn't pushed")
-        XCTAssertTrue(element(app, "plan-sheet").exists, "the lane left the sheet")
+        let ticket = element(app, "plan-ticket-ov-259")
+        XCTAssertTrue(app.reveal(ticket), "no landing ticket: \(app.debugDescription)")
+        ticket.tap()
+        XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 10), "the ticket wasn't pushed")
+        XCTAssertTrue(element(app, "plan-sheet").exists, "the ticket left the sheet")
         app.tapBack()
         XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 10), "Back didn't come back to the Plan")
     }
@@ -195,36 +195,35 @@ final class PhoneTreeUITests: XCTestCase {
         keep(app, "tree-root", expecting: .all(.gone(element(app, "tree-row-Plan")), .gone(element(app, "tree-row-Needs You"))))
     }
 
-    /// **Theme › Task › Lane, each pushed, each opening on its own page**,
+    /// **Theme › Task › Ticket, each pushed, each opening on its own page**,
     /// and a subagent with no pane says so rather than leading nowhere.
-    func testTheTreePushesThemeTaskAndLane() {
+    func testTheTreePushesThemeTaskAndTicket() {
         let app = openBilling()
         openTree(app)
-        tap(app, "tree-row-Visual language", "the root")
-        XCTAssertTrue(app.navigationBars["Visual language"].waitForExistence(timeout: 10), "the theme wasn't pushed")
+        tap(app, "tree-row-Phone parity", "the root")
+        XCTAssertTrue(app.navigationBars["Phone parity"].waitForExistence(timeout: 10), "the theme wasn't pushed")
         XCTAssertEqual(app.buttons["tree-own"].label, "Theme Page")
-        tap(app, "tree-row-ov-220", "the theme's level")
+        tap(app, "tree-row-ov-259", "the theme's level")
         XCTAssertTrue(app.buttons["tree-own"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.buttons["tree-own"].label, "Task Details")
-        // The row says the lane's title, as the strip does; the slug is found
-        // only on its page, and the row is still found by the slug's identifier.
-        let laneRow = app.buttons["tree-row-mac-vis"]
-        XCTAssertTrue(laneRow.waitForExistence(timeout: 10), "no lane row")
-        XCTAssertTrue(laneRow.label.contains("Mac looks like one app"), "the lane's row doesn't say its title: \(laneRow.label)")
-        XCTAssertFalse(laneRow.label.contains("mac-vis"), "the lane's row says its slug: \(laneRow.label)")
-        tap(app, "tree-row-mac-vis", "the task's level")
-        XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10), "the lane wasn't pushed, or is named by its slug")
-        XCTAssertFalse(app.navigationBars["mac-vis"].exists, "the lane's level is headed by its slug")
-        XCTAssertEqual(app.buttons["tree-own"].label, "Lane Page")
-        // Its builder runs inside the orchestrator: a row, and no button.
+        // The ticket's row says its branch (ov-259 works on `phones-b`) and keeps
+        // the key for its identifier, which is how the row is found.
+        let ticketRow = app.buttons["tree-row-ov-259"]
+        XCTAssertTrue(ticketRow.waitForExistence(timeout: 10), "no ticket row")
+        XCTAssertTrue(ticketRow.label.contains("phones-b"), "the ticket's row doesn't say its branch: \(ticketRow.label)")
+        tap(app, "tree-row-ov-259", "the task's level")
+        XCTAssertTrue(app.navigationBars["phones-b"].waitForExistence(timeout: 10), "the ticket wasn't pushed, or is named by its key")
+        XCTAssertFalse(app.navigationBars["ov-259"].exists, "the ticket's level is headed by its key")
+        XCTAssertEqual(app.buttons["tree-own"].label, "Ticket Page")
+        // Its lander runs inside the orchestrator: a row, and no button.
         let subagent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No terminal; runs inside the orchestrator")).firstMatch
         XCTAssertTrue(subagent.waitForExistence(timeout: 5), "no subagent row: \(app.debugDescription)")
-        keep(app, "tree-lane", expecting: .all(.shows(subagent), .reads(app.buttons["tree-own"], "Lane Page")))
+        keep(app, "tree-ticket", expecting: .all(.shows(subagent), .reads(app.buttons["tree-own"], "Ticket Page")))
         app.buttons["tree-own"].tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "Lane Page didn't open the lane's page")
+        XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 10), "Ticket Page didn't open the ticket's page")
         // Back walks up the way it came down.
         app.tapBack()
-        XCTAssertEqual(app.buttons["tree-own"].label, "Lane Page")
+        XCTAssertEqual(app.buttons["tree-own"].label, "Ticket Page")
         app.tapBack()
         XCTAssertEqual(app.buttons["tree-own"].label, "Task Details")
     }
@@ -384,15 +383,15 @@ final class PhoneTreeUITests: XCTestCase {
             keep(app, "capture-sheet-\(name)\(tag)", expecting: .when("the Plan sheet at its large detent") {
                 app.navigationBars["Plan"].frame.minY < app.windows.firstMatch.frame.height * 0.3
             })
-            XCTAssertTrue(app.buttons["tree-row-Visual language"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-root-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-Visual language"]))
-            app.buttons["tree-row-Visual language"].tap()
-            XCTAssertTrue(app.buttons["tree-row-ov-220"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-theme-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-ov-220"]))
-            app.buttons["tree-row-ov-220"].tap()
-            app.buttons["tree-row-mac-vis"].tap()
-            XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-lane-\(name)\(tag)", expecting: .shows(app.navigationBars["Mac looks like one app"]))
+            XCTAssertTrue(app.buttons["tree-row-Phone parity"].waitForExistence(timeout: 10))
+            keep(app, "capture-tree-root-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-Phone parity"]))
+            app.buttons["tree-row-Phone parity"].tap()
+            XCTAssertTrue(app.buttons["tree-row-ov-259"].waitForExistence(timeout: 10))
+            keep(app, "capture-tree-theme-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-ov-259"]))
+            app.buttons["tree-row-ov-259"].tap()
+            app.buttons["tree-row-ov-259"].tap()
+            XCTAssertTrue(app.navigationBars["phones-b"].waitForExistence(timeout: 10))
+            keep(app, "capture-tree-ticket-\(name)\(tag)", expecting: .shows(app.navigationBars["phones-b"]))
             app.terminate()
         }
     }

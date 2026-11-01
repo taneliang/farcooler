@@ -5,7 +5,7 @@ import Foundation
 // `-phone-plan`, ov-274).
 //
 // What it answers with is a real board's plan: `test/fixtures/plan-seeded.json`
-// is `farcooler plan --json` and each theme's and lane's `show --json`, read
+// is `farcooler plan --json` and each theme's and ticket's `show --json`, read
 // from a scratch daemon seeded by `.claude/agent/reports/ov-273/seed.sh`, so the
 // bytes the phone decodes are the CLI's. The file's path comes in as
 // `-phone-plan-file`: a simulator reads the Mac's disk.
@@ -21,13 +21,13 @@ import Foundation
 //   a Darwin notification `com.farcooler.harness.plan-news` (or `.task-news`) delivers
 //                         a `plan` (or `task`) notice for Billing's board, as the client core
 //                         queues one, and the plan the runner answers with from then on is
-//                         a new one: its first Next Up lane is called "<name>-v2". Each
+//                         a new one: its first Next Up ticket is keyed "<key>-v2". Each
 //                         `plan.get` and `plan.events` is in the harness's `sent`.
 //   -phone-plan-timeout N the phone gives up on a read after N seconds, not 15
 //   -phone-plan-outcomes  the first three themes carry an outcome of one line, of two and of
 //                         far too many, and no Next or Needs You line, so a test measures
 //                         how many lines an outcome gets from the rows' heights
-//   -phone-agents         the runner also advertises `board_agents` (ov-503), so the Plan draws its
+//   -phone-agents         the runner also advertises `board_line` (ov-503), so the Plan draws its
 //                         Agents section from the plan's `agents`
 //   -phone-pages          the runner also advertises `board_pages` and answers `page.list`
 //                         from the file's `pages`, and Billing's board also holds the file's
@@ -47,7 +47,7 @@ import Foundation
 // `board_plan`, so the board has no control.
 
 struct HarnessPlan {
-    /// How many notices have moved the plan: the lane the answer renames.
+    /// How many notices have moved the plan: the ticket the answer rekeys.
     static var version = 0
 
     static var advertised: Bool {
@@ -111,14 +111,14 @@ struct HarnessPlan {
         capture = object
     }
 
-    /// After a notice, the first queued lane is "<name>-v2".
+    /// After a notice, the first ranked waiting ticket's key ends "-v2".
     private static func versioned(_ plan: Any) -> Any {
-        guard version > 0, var plan = plan as? [String: Any], var lanes = plan["lanes"] as? [[String: Any]],
-            let first = (plan["order"] as? [String])?.first,
-            let at = lanes.firstIndex(where: { $0["id"] as? String == first })
+        guard version > 0, var plan = plan as? [String: Any], var lines = plan["lines"] as? [[String: Any]],
+            let at = lines.indices.filter({ lines[$0]["stage"] as? String == "waiting" && lines[$0]["plan_rank"] is NSNumber })
+                .min(by: { (lines[$0]["plan_rank"] as? Int ?? 0) < (lines[$1]["plan_rank"] as? Int ?? 0) })
         else { return plan }
-        lanes[at]["name"] = "\((lanes[at]["name"] as? String) ?? "")-v\(version + 1)"
-        plan["lanes"] = lanes
+        lines[at]["key"] = "\((lines[at]["key"] as? String) ?? "")-v\(version + 1)"
+        plan["lines"] = lines
         return plan
     }
 
@@ -215,7 +215,7 @@ struct HarnessPlan {
             }
             return try JSONSerialization.data(withJSONObject: [:] as [String: Any])
         case "plan.events":
-            let subject = (args["theme"] as? String) ?? (args["lane"] as? String)
+            let subject = (args["theme"] as? String) ?? (args["task"] as? String)
             guard let subject, let records = capture["records"] as? [String: Any], let record = records[subject]
             else { throw ClientCore.CoreError.rejected("bad subject", word: "invalid-argument") }
             return try JSONSerialization.data(withJSONObject: record)

@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 
 /// The plan, in the Smart Stack and on a face (ov-310, ov-268 P8): the board
-/// with a plan, what needs you on it, the lanes in Now and the one next up.
+/// with a plan, what needs you on it, the tickets in Now and the one next up.
 ///
 /// The watch has no sockets, so this hears the plan from the relay and from
 /// nowhere else: `/v1/pulse` over HTTPS, with the credential the watch app
@@ -82,7 +82,7 @@ struct WatchPlanView: View {
 enum WatchPlanSamples {
     static let main = PlanGlance(
         workspace: "Main", needsYou: 2,
-        now: [.init(name: "mac-ux", state: .review), .init(name: "ov-310", state: .building)],
+        now: [.init(ticket: "mac-ux", stage: .reviewing), .init(ticket: "ov-310", stage: .building)],
         next: "mac-fu3")
 }
 

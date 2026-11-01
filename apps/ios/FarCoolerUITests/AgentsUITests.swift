@@ -3,7 +3,7 @@ import XCTest
 /// The agents at work (ov-619, ov-617), over the canned runner: Main's
 /// orchestrator is claude with its conversation served (`-phone-native`) and
 /// four subagents running (`-native-agents`), and Billing, led under
-/// `-phone-billing-led`, has a lane's agent blocked in fc-3-webhooks.
+/// `-phone-billing-led`, has a ticket's agent blocked in fc-3-webhooks.
 ///
 /// No tray under the conversation. A compact Agents card beside Now/Next
 /// counts them and opens the agents view, where a subagent opens its own
@@ -121,7 +121,7 @@ final class AgentsUITests: XCTestCase {
         XCTAssertEqual(card.value as? String, "1")
         card.tap()
         let agent = element(app, "agent-row-\(Self.billingAgent)")
-        XCTAssertTrue(agent.waitForExistence(timeout: 10), "the lane's agent isn't listed: \(app.debugDescription)")
+        XCTAssertTrue(agent.waitForExistence(timeout: 10), "the ticket's agent isn't listed: \(app.debugDescription)")
         agent.tap()
         let back = app.buttons["worktree-back"].firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 20), "the worktree didn't open")
@@ -149,7 +149,7 @@ final class AgentsUITests: XCTestCase {
 
     /// **All Agents lists everything, across workspaces** (ov-617): each
     /// workspace's orchestrator leading its own, Main's subagents, and
-    /// Billing's lane agent; a row opens its agent, and Back comes back.
+    /// Billing's ticket agent; a row opens its agent, and Back comes back.
     func testAllAgentsListsEveryAgentAndOpensOne() {
         let app = launch(["-native-agents", "-phone-billing-led"])
         let row = app.buttons["all-agents-row"]

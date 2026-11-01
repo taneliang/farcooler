@@ -94,7 +94,7 @@ struct PlanPageRow: View {
         .accessibilityIdentifier("plan-page-\(page.slot)")
     }
 
-    /// "Page, Train integ-10, In review · 3 of 4 lanes green, Updated 12 min
+    /// "Page, Landing 10, In review · 3 of 4 tickets green, Updated 12 min
     /// ago", as the Mac's row says it.
     static func spoken(_ page: BoardPage, now: Int64) -> String {
         (["Page", page.title] + (page.summary.isEmpty ? [] : [page.summary]) + [PageWords.updated(page, now: now)])

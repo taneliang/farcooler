@@ -81,14 +81,14 @@ enum LiveRunner {
                 let bar = app.navigationBars["Plan"]
                 if bar.waitForExistence(timeout: 10) { bar.swipeUp() }
             }
-            // Its worktrees are in its tree (ov-300): under a card, a lane,
+            // Its worktrees are in its tree (ov-300): under a card, a ticket,
             // or Loose Worktrees, so the whole tree is searched (review 8).
-            // A plan lane's worktree is drawn as its lane's row (review R2-4):
-            // into the lane, and its first pane opens the worktree.
-            let lane = app.buttons["tree-row-\(name)"]
-            if findInTree(app, [row, lane], depth: 4) {
-                if !row.exists, lane.exists {
-                    lane.tap()
+            // A plan ticket's worktree is drawn as its ticket's row (review R2-4):
+            // into the ticket, and its first pane opens the worktree.
+            let ticket = app.buttons["tree-row-\(name)"]
+            if findInTree(app, [row, ticket], depth: 4) {
+                if !row.exists, ticket.exists {
+                    ticket.tap()
                     let pane = app.descendants(matching: .any)["tree-level"].buttons.matching(identifierPrefix: "tree-row-").firstMatch
                     if pane.waitForExistence(timeout: 5) { pane.tap() }
                     return try waitForShell(app, name)

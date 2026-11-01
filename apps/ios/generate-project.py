@@ -92,12 +92,12 @@ SOURCES = [
     # A finished status's History page, pushed from the board (ov-103).
     "BoardHistoryScreen.swift",
     # The plan layer on a phone (ov-274), experimental and opt-in: the Plan
-    # view in the board's list, a theme's and a lane's page, and what the
+    # view in the board's list, a theme's and a ticket's page, and what the
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
     # The Plan as sections on a phone and in the iPad's plan column: the glance
     # band, the sections, the themes grid, and the two pushed lists, Themes
-    # and Lanes (ov-503).
+    # and Agents (ov-503).
     "PhoneGlanceBand.swift",
     "PlanSectionRows.swift",
     "PlanThemeTiles.swift",
@@ -120,8 +120,8 @@ SOURCES = [
     "LayoutProbe.swift",
     "PadWorkspace.swift",
     "ComposerField.swift",
-    "PlanTrainRow.swift",
-    # A long press explains a train and each step of its ladder (ov-522).
+    "PlanLandingRow.swift",
+    # A long press explains a landing and each step of its ladder (ov-522).
     "PlanExplained.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
@@ -135,7 +135,7 @@ SOURCES = [
     # and the step log for AgentKit's `LinkRevival`.
     "ConnectionReturn.swift",
     "ConnectionRulings.swift",
-    # Mark Ready and Reply on a lane's pull request and a review thread (ov-317).
+    # Mark Ready and Reply on a ticket's pull request and a review thread (ov-317).
     "ConnectionPrActions.swift",
     "PrActionViews.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
@@ -759,7 +759,7 @@ AGENTKIT_SOURCES = [
     # The plan layer as a client reads it, and how a phone reads it (ov-274).
     "PlanModel.swift",
     "PlanPrStage.swift",
-    # A phone marks a lane's pull request ready and replies to a review thread (ov-317).
+    # A phone marks a ticket's pull request ready and replies to a review thread (ov-317).
     "PhonePrActions.swift",
     # A crash's signature out of MetricKit's JSON, and the outbox that keeps it
     # for the owner's runner (ov-797). See `CrashSignatureTests`.
@@ -767,12 +767,12 @@ AGENTKIT_SOURCES = [
     "PlanReading.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",
-    # Trains and the CI the runner reads for them and for pages (ov-309).
-    "PlanTrains.swift",
+    # Landings and the CI the runner reads for them and for pages (ov-309).
+    "PlanLandings.swift",
     # The Plan as sections, its glance band, themes grid and two-list sidebar,
-    # a train's phase and the agents list (ov-503).
-    "PlanTrainPhase.swift",
-    "PlanFleetAgents.swift",
+    # a landing's phase and the agents list (ov-503).
+    "PlanLandingPhase.swift",
+    "PlanAgents.swift",
     "PlanSections.swift",
     "PlanThemeTile.swift",
     "PlanGlanceSentence.swift",

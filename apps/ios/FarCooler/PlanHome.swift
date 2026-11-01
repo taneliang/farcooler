@@ -174,10 +174,10 @@ struct PlanHomeHeader: View {
 
 extension Connection {
     /// What the Plan's home reads and where it goes: `onOpen` for a theme's,
-    /// a lane's or a page's page, `onRuling` for where a ruling's Reverse or
+    /// a ticket's or a page's page, `onRuling` for where a ruling's Reverse or
     /// Discuss sends the owner after it.
     ///
-    /// `wide` is the iPad's plan column: its sidebar holds the Themes and Lanes
+    /// `wide` is the iPad's plan column: its sidebar holds the Themes and Tickets
     /// lists that a phone pushes, and its themes grid is two tiles wide.
     func planHomeHook(
         _ summary: WorkspaceSummary, place: PhoneWorkspace, wide: Bool = false, onOpen: @escaping (PhonePlanPage) -> Void,

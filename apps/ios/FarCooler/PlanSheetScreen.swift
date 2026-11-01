@@ -6,7 +6,7 @@ import SwiftUI
 //
 // - Over a conversation it's a sheet, opened from the Now/Next card, at the
 //   medium and large detents. The sheet has its own navigation stack
-//   (`PhoneNavigator.plan`): a theme, a card, a lane, a page or a board's
+//   (`PhoneNavigator.plan`): a theme, a card, a ticket, a page or a board's
 //   history is pushed inside it, Back comes back to the Plan, and Done closes
 //   it. A worktree, or another workspace, closes it first.
 // - A workspace with no conversation has the Plan as its screen
@@ -14,7 +14,7 @@ import SwiftUI
 //
 // The list: the band, the orchestrator and what needs you (in the sheet);
 // the status filters; Unread with Mark All as Read; the One tree's work
-// (theme › card › lane › terminal); the board's history; the plan's lanes by
+// (theme › card › ticket › terminal); the board's history; the plan's tickets by
 // where they stand, its pages, cost and rulings; the main checkout and loose
 // worktrees; and New Worktree.
 
@@ -235,8 +235,8 @@ struct PhonePlanList<Top: View>: View {
         }
     }
 
-    /// What the Plan's own sections read and where they go: the lanes and
-    /// trains, the agents and their spend, pages, cost and rulings, which the
+    /// What the Plan's own sections read and where they go: the tickets and
+    /// landings, the agents and their spend, pages, cost and rulings, which the
     /// tree doesn't list, and not the themes, which it does, so no card or
     /// theme is listed twice.
     private var hook: PlanBoardHook {
@@ -254,7 +254,7 @@ struct PhonePlanList<Top: View>: View {
         // In the sheet the band leads the list, over the orchestrator's line.
         hook.showsBand = !inSheet
         // The tree lists every theme. The Agents section stays: its tokens,
-        // cost, role, lane and the day's spend are the plan's, not the card's.
+        // cost, role, ticket and the day's spend are the plan's, not the card's.
         hook.kinds = Set(PlanSections.Kind.allCases).subtracting([.themes])
         return hook
     }

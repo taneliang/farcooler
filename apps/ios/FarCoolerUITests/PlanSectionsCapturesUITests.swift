@@ -2,7 +2,7 @@ import XCTest
 
 /// Captures of the Plan as sections (ov-503, phase 7): an iPhone's strip, the
 /// sheet at both detents, the Plan down its whole length, and the pushed Themes
-/// and Lanes lists; an iPad's three columns in landscape and two in portrait with the sidebar
+/// and Tickets lists; an iPad's three columns in landscape and two in portrait with the sidebar
 /// shown, each in light and dark, with the long real titles of
 /// `test/fixtures/plan-phones-ov503.json`.
 ///
@@ -231,12 +231,12 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 walk(app, "sheet", scheme, pages: 8, first: .when("the Plan sheet at its large detent") {
                     bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
                 })
-                // The Plan is the sheet alone (ov-616); its Lanes list is in it.
-                let lanes = element(app, "plan-browse-lanes")
-                for _ in 0..<14 where !(lanes.exists && lanes.isHittable) { app.swipeUp() }
-                lanes.tap()
-                XCTAssertTrue(element(app, "plan-browse-lanes-list").waitForExistence(timeout: 10), "no Lanes list")
-                shoot("lanes-list", scheme, expecting: .shows(element(app, "plan-browse-lanes-list")))
+                // The Plan is the sheet alone (ov-616); its Tickets list is in it.
+                let tickets = element(app, "plan-browse-tickets")
+                for _ in 0..<14 where !(tickets.exists && tickets.isHittable) { app.swipeUp() }
+                tickets.tap()
+                XCTAssertTrue(element(app, "plan-browse-tickets-list").waitForExistence(timeout: 10), "no Tickets list")
+                shoot("tickets-list", scheme, expecting: .shows(element(app, "plan-browse-tickets-list")))
             }
             app.terminate()
         }

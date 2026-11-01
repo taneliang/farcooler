@@ -95,7 +95,7 @@ final class PagesUITests: XCTestCase {
         keep(app, "pages-overview", expecting: .reads(train, "In review"))
     }
 
-    /// The train mockup, live: the lane's state and the card's question come
+    /// The train mockup, live: the ticket's state and the card's question come
     /// from the board, the table stacks on a phone, the steps go down it, and
     /// a link shows its domain.
     func testATrainPageDrawsItsBlocksLive() {
@@ -114,12 +114,13 @@ final class PagesUITests: XCTestCase {
         // The web link says where it goes.
         let ci = element(app, "page-item-1")
         XCTAssertTrue(ci.label.hasSuffix("Link to github.com"), "the link hides its domain: \(ci.label)")
-        // A four-column table on a phone stacks: each lane a row, each value
-        // under its column's title, the lane's state live.
-        let lane = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274-phones.'")).firstMatch
-        reach(app, lane, down: false)
-        XCTAssertTrue(lane.label.contains("State, In Review · in integ-10."), "the state isn't live: \(lane.label)")
-        keep(app, "pages-train", expecting: .reads(lane, "In Review"))
+        // A four-column table on a phone stacks: each row a ticket, each value
+        // under its column's title, the ticket's state live. The page's `lane`
+        // reference names the ticket by its branch, and the row says its key.
+        let ticket = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274.'")).firstMatch
+        reach(app, ticket, down: false)
+        XCTAssertTrue(ticket.label.contains("State, In Review."), "the state isn't live: \(ticket.label)")
+        keep(app, "pages-train", expecting: .reads(ticket, "In Review"))
     }
 
     /// At the largest Dynamic Type size, a timeline entry's live status sits
@@ -183,7 +184,7 @@ final class PagesUITests: XCTestCase {
     }
 
     /// The risks page, anchored to Visual language, draws inside it, after
-    /// Needs You and before Lanes, and opens whole.
+    /// Needs You and before Tickets, and opens whole.
     func testAThemePageDrawsItsAnchoredPage() {
         let app = openPlan()
         let theme = app.buttons["tree-row-Visual language"]

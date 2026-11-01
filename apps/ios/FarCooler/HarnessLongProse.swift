@@ -1,15 +1,15 @@
 #if DEBUG
 import Foundation
 
-/// Long Markdown as agents really write it (ov-788, ov-791): a lane's
+/// Long Markdown as agents really write it (ov-788, ov-791): an agent's
 /// report and a card's notes run to many kilobytes of headings, lists,
 /// tables, code and `ov-N` keys. The harnesses' own text is a line or two,
 /// which a fling never notices, so `-native-long-reports` and
 /// `-phone-long-record` draw these instead, for measuring a fling over them.
 enum HarnessLongProse {
-    /// A lane's report, about 11 KB, different for each `n`.
-    static func laneReport(_ n: Int) -> String {
-        var out = "## Lane ios-\(700 + n % 90): the transcript keeps its place (ov-\(600 + n % 180))\n\n"
+    /// An agent's report, about 11 KB, different for each `n`.
+    static func ticketReport(_ n: Int) -> String {
+        var out = "## Ticket ios-\(700 + n % 90): the transcript keeps its place (ov-\(600 + n % 180))\n\n"
         out += "**Commits**\n\n"
         for c in 0..<5 {
             out += "- `\(String(format: "%07x", 0x1a2b3c4 &+ n &* 977 &+ c &* 131))` ios: a row above the screen is measured once, not twice (ov-\(610 + c))\n"
@@ -59,7 +59,7 @@ enum HarnessLongProse {
     static func note(_ n: Int) -> String {
         let size = noteSizes[n % noteSizes.count]
         if size < 60 { return "moved from in_progress to needs_decision" }
-        let report = laneReport(n).split(separator: "\n", omittingEmptySubsequences: false).dropFirst(2)
+        let report = ticketReport(n).split(separator: "\n", omittingEmptySubsequences: false).dropFirst(2)
         var out = "**Owner, 25 Oct, decision \(n % 7 + 1):** all as recommended, after spike ov-\(750 + n % 40).\n\n"
         for line in report {
             if out.utf8.count + line.utf8.count >= size { break }

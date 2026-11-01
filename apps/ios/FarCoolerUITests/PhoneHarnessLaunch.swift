@@ -86,7 +86,7 @@ extension XCUIApplication {
 
     /// Scroll the front-most list down, in drags shorter than the list, until
     /// `element` is drawn: a lazy list draws only what is near its window, and
-    /// the Plan's sections put a lane or a theme well below the first screen.
+    /// the Plan's sections put a ticket or a theme well below the first screen.
     @discardableResult
     func reveal(_ element: XCUIElement, drags: Int = 40) -> Bool {
         let target = element.firstMatch

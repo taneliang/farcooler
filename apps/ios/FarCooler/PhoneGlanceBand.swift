@@ -6,7 +6,7 @@ import SwiftUI
 // `PlanStrip.band`), so the Mac, the phones and the watch read one sentence.
 //
 //   ● 2 need you
-//   NOW   Train 86 waiting for CI · 2 building · 3 in review
+//   NOW   Landing 86 waiting for CI · 2 building · 3 in review
 //   NEXT  Reps: each person's asks reach the orchestrator, then Onboarding…
 //
 // Over the orchestrator it is the strip (`WorkspaceCards`): the same two
@@ -19,7 +19,7 @@ struct PhoneGlanceBand: View {
     /// orchestrator gives each one; the Plan's list, three.
     var lines: Int? = 3
     /// Say Now only: the Plan's sheet at its medium detent, where the Next
-    /// line would take the room the first train needs (ov-515).
+    /// line would take the room the first landing needs (ov-515).
     var nowOnly = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var type
