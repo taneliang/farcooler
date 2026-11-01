@@ -797,6 +797,11 @@ pub mod capability {
     /// `approval.deny`, and `StepUp.approval_id`. A Mac offers the iPhone
     /// route only on a runner with it.
     pub const PHONE_APPROVAL: &str = "phone_approval";
+    /// The orchestrator stops an agent a person asked it to (ov-872):
+    /// `agent.stop`. A pane stops; a Claude subagent's next tool call is
+    /// refused, telling it to stop. A CLI refuses `agent stop` before sending
+    /// to a runner without it. Needs `board_line`.
+    pub const AGENT_STOP: &str = "agent_stop";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -821,7 +826,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            STEP_UP, PHONE_APPROVAL,
+            STEP_UP, PHONE_APPROVAL, AGENT_STOP,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1075,6 +1080,7 @@ pub mod method {
         AgentRecord = "agent.record" => BOARD_LINE,
         AgentWork = "agent.work" => BOARD_LINE,
         AgentEnd = "agent.end" => BOARD_LINE,
+        AgentStop = "agent.stop" => AGENT_STOP,
         PageList = "page.list" => BOARD_PAGES,
         PageGet = "page.get" => BOARD_PAGES,
         PageSet = "page.set" => BOARD_PAGES,

@@ -85,6 +85,7 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("agent.record", P::AgentRecord(pb::AgentRecord { actor: a(), ..Default::default() })),
         call("agent.work", P::AgentWork(pb::AgentWork { actor: a(), ..Default::default() })),
         call("agent.end", P::AgentEnd(pb::AgentEnd { actor: a(), ..Default::default() })),
+        call("agent.stop", P::AgentStop(pb::AgentStop { actor: a(), ..Default::default() })),
         call("ruling.add", P::RulingAdd(pb::RulingAdd { actor: a(), ..Default::default() })),
         call("ruling.set", P::RulingSet(pb::RulingSet { actor: a(), ..Default::default() })),
         call("ruling.keep_all", P::RulingKeepAll(pb::RulingKeepAll { actor: a(), ..Default::default() })),

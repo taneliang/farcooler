@@ -520,7 +520,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::LineSet
         | Method::AgentRecord
         | Method::AgentWork
-        | Method::AgentEnd
+        | Method::AgentEnd | Method::AgentStop
         | Method::RulingAdd
         | Method::RulingSet
         | Method::RulingKeepAll
@@ -1993,6 +1993,7 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
+            "agent.stop" => crate::rpc_agent_stop::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-872: a pane by `terminal.stop`'s path and gate
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, self.stepped.get(), req).await, // ov-494, ov-584
             // Step-up (ov-856): `step_up_rpc`.

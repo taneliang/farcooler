@@ -300,6 +300,7 @@ fn runner() -> Runner {
             capability::BOARD_COST,
             capability::BOARD_RULING_ACTIONS,
             capability::BOARD_THEME_MOVE,
+            capability::AGENT_STOP,
         ]
         .map(String::from)
         .to_vec(),
@@ -374,6 +375,10 @@ impl DispatchLink for Runner {
                 }
                 ("agent.end", Some(request::Payload::AgentEnd(p))) => {
                     result::Value::Agent(plan.agents.into_iter().find(|a| a.id == p.agent_id).unwrap_or_default())
+                }
+                ("agent.stop", Some(request::Payload::AgentStop(p))) => {
+                    let agent = plan.agents.into_iter().find(|a| a.id == p.agent_id).unwrap_or_default();
+                    result::Value::Agent(pb::Agent { stop_asked_at: Some(NOW), ..agent })
                 }
                 ("landing.start", Some(request::Payload::LandingStart(p))) => result::Value::Landing(pb::Landing {
                     id: tid(0x6002),

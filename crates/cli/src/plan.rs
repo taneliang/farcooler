@@ -321,10 +321,12 @@ fn unreadable() -> Failed {
     crate::daemon_link::UNREADABLE.into()
 }
 
-/// The capability a layer method needs: the line's for tickets, agents and
-/// landings, the plan's for the rest.
+/// The capability a layer method needs: its own for `agent.stop`, the line's
+/// for tickets, agents and landings, the plan's for the rest.
 fn capability_for(method: &str) -> &'static str {
-    if ["line.", "agent.", "landing."].iter().any(|p| method.starts_with(p)) {
+    if method == "agent.stop" {
+        capability::AGENT_STOP
+    } else if ["line.", "agent.", "landing."].iter().any(|p| method.starts_with(p)) {
         capability::BOARD_LINE
     } else {
         capability::BOARD_PLAN

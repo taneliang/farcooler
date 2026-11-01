@@ -9,20 +9,26 @@
 
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::ask::is_gate;
-use farcooler_agent_hooks::wire::Reply;
+use farcooler_agent_hooks::wire::{Decision, Reply};
 use tokio::net::unix::OwnedWriteHalf;
 
 use super::write_reply;
 use crate::hook_asks::{FENCE_HOLD, HookAsks};
 
 /// Mark `session`'s call in flight, wait out any Enter holding its fence,
-/// and answer the hook.
+/// and answer the hook. A call `refused` (a subagent asked to stop,
+/// `stopping`) is answered with that at once: it never runs, so it is never
+/// in flight.
 pub(super) async fn answer(
     asks: &HookAsks,
     session: Option<&str>,
     payload: &serde_json::Value,
     write: &mut OwnedWriteHalf,
+    refused: Option<Decision>,
 ) -> std::io::Result<()> {
+    if let Some(refused) = refused {
+        return write_reply(write, &Reply::verdict(Some(refused))).await;
+    }
     let call = payload["tool_use_id"].as_str();
     let agent = payload["agent_id"].as_str();
     if let (Some(session), Some(turn)) = (session, payload["prompt_id"].as_str()) {

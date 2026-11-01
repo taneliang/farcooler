@@ -251,6 +251,7 @@ macro_rules! actor_field {
             P::AgentRecord(p) => &$($m)* p.actor,
             P::AgentWork(p) => &$($m)* p.actor,
             P::AgentEnd(p) => &$($m)* p.actor,
+            P::AgentStop(p) => &$($m)* p.actor,
             P::RulingAdd(p) => &$($m)* p.actor,
             P::RulingSet(p) => &$($m)* p.actor,
             P::RulingKeepAll(p) => &$($m)* p.actor,

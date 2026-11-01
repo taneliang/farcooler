@@ -187,6 +187,9 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TerminalBringDraft
         | M::TerminalAgentAnswer
         | M::MessageSend
+        // Stopping an agent, as a person asks the orchestrator to: anyone's
+        // who can dispatch one. A pane is gated as `terminal.stop` is.
+        | M::AgentStop
         // Shared records of review and tiling, which change no one's work.
         | M::ChangesSetBase
         | M::StackSetParent

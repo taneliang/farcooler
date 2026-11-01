@@ -81,4 +81,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case personAccess = "person_access"
     case stepUp = "step_up"
     case phoneApproval = "phone_approval"
+    case agentStop = "agent_stop"
 }

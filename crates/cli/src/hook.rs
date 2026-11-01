@@ -206,6 +206,7 @@ async fn with_input(
     if gating && is_followup(agent, &event) {
         takes.push(TAKES_FOLLOWUP.to_string());
     }
+    let pre_tool = event == "PreToolUse";
     let line = HookLine { agent, event, payload, takes };
     let Ok(encoded) = encode_line(&line) else {
         return String::new();
@@ -216,7 +217,7 @@ async fn with_input(
     // whichever route it took to get there. `converse` bounds its two parts
     // more tightly still; this is the backstop to its arithmetic.
     let hold = if gating { LONGEST_HOLD + HOLD_GRACE } else { Duration::ZERO };
-    tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by))
+    tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by, pre_tool))
         .await
         .unwrap_or_default()
 }
@@ -240,7 +241,7 @@ async fn with_input(
 /// unless the daemon's first word is a hold. A hold buys one more line, read
 /// under the hold's own bound, and that line is the verdict. EOF or an error in
 /// the hold is the daemon gone, and ends the wait at once.
-async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant) -> String {
+async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant, pre_tool: bool) -> String {
     let first = tokio::time::timeout_at(by, first_contact(socket, encoded, gating)).await;
     let Ok(Some((mut reader, verdict))) = first else {
         return String::new();
@@ -266,6 +267,9 @@ async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant) -> St
     let Some(decision) = verdict.decision else {
         return String::new();
     };
+    if pre_tool {
+        return pre_tool_output(&decision).unwrap_or_default();
+    }
     claude_shaped_output(&decision).unwrap_or_default()
 }
 
@@ -326,6 +330,25 @@ fn claude_shaped_output(decision: &Decision) -> Option<String> {
     .ok()
 }
 
+/// A decision on claude's `PreToolUse` (the fence), in that hook's own shape:
+/// `permissionDecision`, with a deny's message as `permissionDecisionReason`,
+/// which claude hands the model. How a subagent asked to stop is told to
+/// (`agent stop`, ov-872). The `PermissionRequest` shape names another event,
+/// and claude would not act on it here.
+fn pre_tool_output(decision: &Decision) -> Option<String> {
+    let mut inner = match decision {
+        Decision::Allow { updated_input: None } => serde_json::json!({ "permissionDecision": "allow" }),
+        Decision::Allow { updated_input: Some(input) } => {
+            serde_json::json!({ "permissionDecision": "allow", "updatedInput": input })
+        }
+        Decision::Deny { message } => {
+            serde_json::json!({ "permissionDecision": "deny", "permissionDecisionReason": message })
+        }
+    };
+    inner["hookEventName"] = "PreToolUse".into();
+    serde_json::to_string(&serde_json::json!({ "hookSpecificOutput": inner })).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +397,33 @@ mod tests {
         .await;
 
         assert_eq!(out, "", "a hook with nowhere to send must print nothing at all");
+    }
+
+    /// A refusal on the fence (`PreToolUse`), as a subagent asked to stop
+    /// gets one (ov-872), prints in that hook's shape: claude reads
+    /// `permissionDecision` there, and hands the reason to the model.
+    #[tokio::test]
+    async fn a_refused_tool_call_prints_in_pre_tool_uses_shape() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+            let verdict = Reply::verdict(Some(Decision::Deny { message: "Stop now".to_string() }));
+            let bytes = encode_line(&verdict).expect("encode");
+            tokio::io::AsyncWriteExt::write_all(&mut stream, bytes.as_bytes()).await.expect("write");
+        });
+        let payload = b"{\"session_id\":\"abc\",\"agent_id\":\"a1\",\"tool_name\":\"Bash\"}".to_vec();
+        let out = run_with_input(Agent::Claude, "PreToolUse".to_string(), socket, true, payload, SHAPE_NOT_SPEED).await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("hook printed json");
+        let inner = &parsed["hookSpecificOutput"];
+        assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
+        assert_eq!(inner["permissionDecision"], "deny", "{out}");
+        assert_eq!(inner["permissionDecisionReason"], "Stop now", "{out}");
+        assert!(inner.get("decision").is_none(), "not PermissionRequest's shape: {out}");
     }
 
     #[tokio::test]

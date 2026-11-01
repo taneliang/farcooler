@@ -218,6 +218,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::AgentRecord
         | Method::AgentWork
         | Method::AgentEnd
+        // Stopping is the orchestrator's (ov-872): no screen has a Stop button.
+        | Method::AgentStop
         // A phone neither writes a page nor reads how often one is published.
         | Method::PageSet
         | Method::PageRemove

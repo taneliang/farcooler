@@ -2779,6 +2779,10 @@ impl Watcher {
         // for it (`answer_wake::followup`).
         let weak = Arc::downgrade(&watcher);
         watcher.service.hooks().set_followups(Arc::new(move |terminal| weak.upgrade()?.followup_for(terminal)));
+        // A subagent asked to stop has ended (ov-872): the plan stops showing it.
+        let weak = Arc::downgrade(&watcher);
+        let ended = move |ws| weak.upgrade().into_iter().for_each(|w| w.announce_plan_changed(ws, farcooler_store::models::Actor::Runner));
+        watcher.service.hooks().on_stopped_ended(Arc::new(ended));
         // A held ask offered or ended while its pane stays blocked is a
         // silent card update (`kind:"ask"`), not a second alert.
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {

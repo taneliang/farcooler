@@ -159,3 +159,44 @@ async fn an_old_runner_is_told_first() {
     }
     assert!(link.sent.is_empty());
 }
+
+/// `agent stop` names the agent by a ticket it works, or its short id, sends
+/// the reason behind `agent_stop`, and says what happens next: a subagent is
+/// told to stop at its next tool call, after any command already running; a
+/// pane stops (ov-872).
+#[tokio::test]
+async fn stop_says_what_happens_to_a_subagent_and_a_pane() {
+    let mut link = runner();
+    let said = agent_say(&mut link, "stop ov-1 --reason owner").await.unwrap();
+    assert_eq!(
+        said,
+        "Asked Lander sonnet (0000a002) to stop. Its next tool call is refused with a message telling it to stop and hand back. \
+         A command it's already running finishes first, so it shows as stopping until it ends."
+    );
+    let r = last(&link);
+    assert_eq!((r.method.as_str(), r.required_capabilities.clone()), ("agent.stop", vec![capability::AGENT_STOP.to_string()]));
+    let Some(request::Payload::AgentStop(p)) = &r.payload else { panic!() };
+    assert_eq!((p.agent_id.clone(), p.reason.as_deref(), p.actor.as_str()), (tid(LANDER), Some("owner"), "manager"));
+
+    let said = agent_say(&mut link, "stop a001").await.unwrap();
+    assert_eq!(said, "Stopped Orchestrator opus (0000a001): its pane has stopped.");
+    let Some(request::Payload::AgentStop(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.agent_id.clone(), p.reason.clone()), (tid(ORCHESTRATOR), None));
+}
+
+/// A harness the runner can't reach is said honestly, with what to do
+/// instead; a runner from before `agent.stop` is told before anything is sent.
+#[tokio::test]
+async fn stop_says_when_it_cant() {
+    let mut link = runner();
+    link.refuse = Some("stop_unsupported");
+    let err = agent_say(&mut link, "stop a002").await.unwrap_err();
+    assert!(err.to_string().starts_with("Far Cooler can stop a pane, or a Claude subagent, but not this harness's subagents."), "{err}");
+    assert!(err.to_string().contains("stop the orchestrator's pane"), "{err}");
+
+    let mut link = runner();
+    link.capabilities.retain(|c| c != capability::AGENT_STOP);
+    let err = agent_say(&mut link, "stop a002").await.unwrap_err();
+    assert_eq!(err.to_string(), agent::NEEDS_STOP);
+    assert!(link.sent.is_empty());
+}

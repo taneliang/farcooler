@@ -138,6 +138,8 @@ pub struct HookIngress {
     registry: Arc<std::sync::RwLock<&'static crate::claude_registry::Registry>>,
     /// Where a cursor `stop` hook asks for a message (`followup`).
     followups: Arc<Mutex<Option<followup::Followups>>>,
+    /// Subagents asked to stop (`stopping`, ov-872).
+    stopping: Arc<stopping::Stopping>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -179,6 +181,7 @@ impl HookIngress {
             hold: LONGEST_HOLD,
             registry: Arc::new(std::sync::RwLock::new(crate::claude_registry::global())),
             followups: Arc::default(),
+            stopping: Arc::default(),
         }
     }
 
@@ -799,12 +802,14 @@ impl HookIngress {
                 self.asks.heard(session, fence::raises_dialog(hook.agent, &hook.event, &hook.payload));
             }
             if is_fence(hook.agent, &hook.event) {
-                fence::answer(&self.asks, session, &hook.payload, &mut write).await?;
+                let refused = self.stop_verdict(hook.agent, &hook.payload); // a subagent asked to stop
+                fence::answer(&self.asks, session, &hook.payload, &mut write, refused).await?;
             } else if let Some(session) = session {
                 // A queued message's `UserPromptSubmit` clears no call: it
                 // bounds no turn (`fence::ended`).
                 fence::ended(&self.asks, session, &hook.event, &hook.payload);
             }
+            self.stopped_ended(hook.agent, &hook.event, &hook.payload);
             let terminal = self.terminal_for(&f, hook.agent);
             // Cursor's `stop` waits for this line, on every path (`followup`).
             if is_followup(hook.agent, &hook.event) && hook.takes_followup() {
@@ -1760,6 +1765,7 @@ mod tests {
 mod fence;
 pub(crate) mod followup;
 mod refusals;
+pub(crate) mod stopping;
 use refusals::{Refusals, transient};
 #[cfg(test)]
 use refusals::REFUSAL_REPORT_EVERY;

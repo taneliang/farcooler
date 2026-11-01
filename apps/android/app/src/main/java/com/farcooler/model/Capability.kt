@@ -83,5 +83,6 @@ enum class Capability(val wire: String) {
     WORKSPACE_MAINTAINERS("workspace_maintainers"),
     PERSON_ACCESS("person_access"),
     STEP_UP("step_up"),
-    PHONE_APPROVAL("phone_approval");
+    PHONE_APPROVAL("phone_approval"),
+    AGENT_STOP("agent_stop");
 }

@@ -8,6 +8,7 @@
 //!     [--title T] [--ticket KEY]...
 //! farcooler agent work AGENT --ticket KEY --role build|fix|review|land [--verdict V]
 //! farcooler agent end AGENT --verdict finished|failed|stopped|handed_back
+//! farcooler agent stop AGENT|TICKET [--reason R]
 //! ```
 //!
 //! An agent is recorded when it starts: the orchestrator, a builder, a
@@ -19,6 +20,13 @@
 //! it isn't there. An agent is named by its short id, as `agent list` and
 //! `plan --json` print it, or its full id.
 //!
+//! `stop` is how the orchestrator stops an agent a person asked it to stop:
+//! no screen has a Stop button. A pane stops. A Claude subagent's next tool
+//! call is refused, telling it to stop and hand back; a command already running
+//! finishes first, so it reads "stopping" until it ends. Another harness's
+//! subagent can't be reached, and the refusal says so. It names the agent as
+//! the others do, or by a ticket it works when one agent works it.
+//!
 //! `list` shows every agent still at work, working ones first, each with its
 //! role, harness or model, title, tickets, what it's doing now and its spend.
 //! The header's spend is the last 24 hours of every agent, those that ended
@@ -29,6 +37,7 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use farcooler_core::usage_words::{dollars, tokens};
+use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, request, result};
 use serde_json::{Value, json};
 
@@ -39,6 +48,9 @@ use super::{
 };
 use crate::tasks::{Board, DispatchLink, refused};
 use crate::{Unresolved, expect_value, id_bytes};
+
+/// Said to a runner from before `agent.stop`, before anything is sent.
+pub(super) const NEEDS_STOP: &str = "This runner needs an update to stop an agent.";
 
 #[path = "plan_agent_dispatch.rs"]
 mod dispatch;
@@ -98,6 +110,17 @@ pub(crate) enum AgentCmd {
         /// How the work ended. Without one, the work starts.
         #[arg(long, value_enum)]
         verdict: Option<VerdictArg>,
+    },
+    /// Stop an agent a person asked you to stop: a pane stops, a Claude subagent is told to.
+    ///
+    /// A Claude subagent's next tool call is refused with a message telling it
+    /// to stop and hand back. A command it's already running finishes first.
+    Stop {
+        /// The agent, by its short id, or by a ticket key only it works.
+        agent: String,
+        /// Why, in a line: the subagent reads it.
+        #[arg(long)]
+        reason: Option<String>,
     },
     /// An agent has finished: every ticket it still works ends the same way.
     End {
@@ -239,6 +262,10 @@ fn said_here(what: &str) -> Option<&'static str> {
     Some(match what {
         "place" => "Name the subagent with --subagent, the id from its launch result.",
         "task_key" => "Those tickets aren't all on this board.",
+        "stop_unsupported" => {
+            "Far Cooler can stop a pane, or a Claude subagent, but not this harness's subagents. Stop it with your own harness's tool, or stop the orchestrator's pane it runs under."
+        }
+        "reason" => "A reason is one line, up to 200 characters.",
         _ => return None,
     })
 }
@@ -336,6 +363,27 @@ pub(super) async fn run_in<L: DispatchLink>(
                 }
             })
         }
+        AgentCmd::Stop { agent, reason } => {
+            if !link.capabilities().iter().any(|c| c == capability::AGENT_STOP) {
+                let code = Some(pb::ErrorCode::CapabilityUnsupported as i32);
+                return Err(Box::new(crate::tasks::Refused::new(NEEDS_STOP.to_string(), code)));
+            }
+            let plan = get_plan(link, &ws, false).await?;
+            let id = agent_or_ticket(&plan, &agent)?;
+            let name = agent_name(&plan, &id);
+            let p = request::Payload::AgentStop(pb::AgentStop { agent_id: id, reason, actor: actor.into() });
+            let stopped = send_agent(link, board, "agent.stop", p).await?;
+            Ok(if json {
+                farcooler_client::plan_json::agent_json(&plan, &stopped).to_string()
+            } else if stopped.terminal_id.is_some() {
+                format!("Stopped {name}: its pane has stopped.")
+            } else {
+                format!(
+                    "Asked {name} to stop. Its next tool call is refused with a message telling it to stop and hand back. \
+                     A command it's already running finishes first, so it shows as stopping until it ends."
+                )
+            })
+        }
         AgentCmd::End { agent, verdict } => {
             let plan = get_plan(link, &ws, false).await?;
             let id = find_agent(&plan, &agent)?;
@@ -368,6 +416,22 @@ pub(super) fn find_agent(plan: &pb::Plan, name: &str) -> Result<bytes::Bytes, Fa
         Ok(a) if !wanted.is_empty() => Ok(a.id.clone()),
         Err(Unresolved::Ambiguous(_)) => Err(format!("{wanted:?} matches more than one agent. Give more of its id.").into()),
         _ => Err(format!("No agent at work here is {wanted:?}. `farcooler agent list` shows them.").into()),
+    }
+}
+
+/// An agent by `find_agent`'s names, or by a ticket key when one agent works
+/// that ticket.
+fn agent_or_ticket(plan: &pb::Plan, name: &str) -> Result<bytes::Bytes, Failed> {
+    let key = name.trim();
+    let on: Vec<&pb::Agent> =
+        plan.agents.iter().filter(|a| a.tickets.iter().any(|t| key_of(plan, &t.task_id).eq_ignore_ascii_case(key))).collect();
+    match on.as_slice() {
+        [] => find_agent(plan, name),
+        [one] => Ok(one.id.clone()),
+        many => {
+            let names = many.iter().map(|a| agent_name(plan, &a.id)).collect::<Vec<_>>().join(", ");
+            Err(format!("More than one agent works {key}: {names}. Name one by its short id.").into())
+        }
     }
 }
 

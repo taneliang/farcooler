@@ -340,6 +340,9 @@ message Request {
     AgentEnd agent_end = 604;
     LandingStart landing_start = 605;
     LandingSet landing_set = 606;
+    // `agent.stop` (ov-872), behind `agent_stop`. 610-619 are its block, the
+    // rest held by `reserved` below.
+    AgentStop agent_stop = 610;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -392,6 +395,8 @@ message Request {
   // `lane.*` and `plan.set` (ov-268) and `train.*` (ov-309), retired by ov-872.
   reserved 164 to 168, 190, 191;
   reserved 607 to 609;
+  // The rest of `agent.stop`'s block (ov-872).
+  reserved 611 to 619;
 }
 
 message Response {
@@ -4606,7 +4611,7 @@ message TaskUsage {
 // `duplicate`, `stack_parent`, `stack_cycle`, `parent_not_landed`,
 // `same_branch`, `not_landed`, `role`, `agent_ended`, `harness`, `agent_id`,
 // `actor`, `outcome`, `story`, `next`, `owner_ask`, `reason`, `sha`, `path`,
-// `branch`, `model`, `title`.
+// `branch`, `model`, `title`, `stop_unsupported`.
 // ---------------------------------------------------------------------------
 
 enum BoardThemeState {
@@ -5154,6 +5159,21 @@ message AgentEnd {
   bytes agent_id = 1;
   // `finished`, `failed`, `stopped` or `handed_back`.
   string verdict = 2;
+  string actor = 3;
+}
+
+// `agent.stop`, at `control`: the orchestrator stops an agent because a
+// person asked it to. There is no Stop button: you ask the orchestrator. A
+// pane is stopped as `terminal.stop` stops it, and the agent ends. A Claude
+// subagent is asked: its next tool call is refused with a message telling it
+// to stop and hand back, and it ends when it does. A tool call already running
+// finishes first, so it reads "Stopping" until then. Any other harness's
+// subagent is refused `stop_unsupported`, since the runner can't reach it.
+// Answers with the agent.
+message AgentStop {
+  bytes agent_id = 1;
+  // Why, in a line, for the agent to read in its refusal.
+  optional string reason = 2;
   string actor = 3;
 }
 
