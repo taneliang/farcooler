@@ -50,7 +50,7 @@ fn a_subagent_recorded_twice_is_one_agent() {
     assert_eq!(second.place, AgentPlace::Subagent { id: "a1".into(), parent: Some(parent) });
     assert_eq!(second.session_id.as_deref(), Some("s"));
     assert_eq!((second.model.as_str(), second.title.as_str()), ("opus", "Build the store"), "kept");
-    assert_eq!(store.subagent("Claude", "a1").unwrap().map(|a| a.id), Some(first.id));
+    assert_eq!(store.subagent("Claude", "a1", None).unwrap().map(|a| a.id), Some(first.id));
     assert_eq!(store.agents(main, false).unwrap().len(), 1);
 }
 
@@ -97,6 +97,21 @@ fn asking_to_stop_keeps_the_first_ask() {
     assert_eq!((again.stop_asked_by.as_deref(), again.stop_asked_at), (Some("user"), Some(at)));
     store.end_agent(a.id, Verdict::Stopped).unwrap();
     assert_eq!(refused(store.ask_agent_stop(a.id, Actor::User)), "agent_ended");
+}
+
+/// A hook's `agent_id` finds the subagent of its own session: a row recorded
+/// under another session isn't its agent, and one with no session yet is.
+#[test]
+fn a_subagent_is_found_by_its_session() {
+    let (store, main, _) = board();
+    let new = |id: &str, session: Option<&str>| NewAgent { session_id: session.map(str::to_string), ..subagent(id, AgentRole::Builder) };
+    let a = store.record_agent(main, &new("a1", Some("s-1"))).unwrap();
+    let b = store.record_agent(main, &new("b1", None)).unwrap();
+    let found = |id: &str, session: Option<&str>| store.subagent("claude", id, session).unwrap().map(|r| r.id);
+    assert_eq!(found("a1", Some("s-1")), Some(a.id), "its own session");
+    assert_eq!(found("a1", Some("s-2")), None, "another session's");
+    assert_eq!(found("a1", None), Some(a.id), "a hook that names no session");
+    assert_eq!(found("b1", Some("s-2")), Some(b.id), "a row with no session yet");
 }
 
 /// Ending an agent ends the tickets it still works, with the same reason, and

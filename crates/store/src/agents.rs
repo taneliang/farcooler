@@ -313,12 +313,19 @@ impl Store {
     }
 
     /// The agent a harness's subagent id names, on any board: what a hook
-    /// carrying only `agent_id` is about.
-    pub fn subagent(&self, harness: &str, id: &str) -> Result<Option<Agent>> {
+    /// carrying only `agent_id` is about. A hook says which session it is
+    /// from (`session`), and a row recorded under another session isn't
+    /// its agent, whatever its id (ov-872); a row with no session recorded
+    /// yet is still matched.
+    pub fn subagent(&self, harness: &str, id: &str, session: Option<&str>) -> Result<Option<Agent>> {
         let conn = self.conn();
         conn.query_row(
-            &format!("SELECT {AGENT_COLS} FROM agents WHERE harness = ?1 AND subagent_id = ?2 ORDER BY started_at DESC LIMIT 1"),
-            params![harness.trim().to_ascii_lowercase(), id],
+            &format!(
+                "SELECT {AGENT_COLS} FROM agents WHERE harness = ?1 AND subagent_id = ?2
+                    AND (?3 IS NULL OR session_id IS NULL OR session_id = ?3)
+                  ORDER BY started_at DESC LIMIT 1"
+            ),
+            params![harness.trim().to_ascii_lowercase(), id, session],
             row_to_agent,
         )
         .optional()

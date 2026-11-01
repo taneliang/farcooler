@@ -14,7 +14,7 @@ use farcooler_protocol::v1::{self as pb, Scope, TerminalIntent, request as paylo
 use farcooler_store::agents::{AgentPlace, AgentRole, NewAgent};
 use farcooler_store::models::TerminalRole;
 use farcooler_store::ticket_work::Verdict;
-use farcooler_transport::{ClientError, request};
+use farcooler_transport::{ClientError, Peer, request};
 use in_process::*;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
@@ -28,12 +28,16 @@ fn recorded(harness: &str, role: AgentRole, place: AgentPlace) -> NewAgent {
 }
 
 async fn stop(link: &mut Link, agent: Uuid, reason: Option<&str>) -> Result<pb::Agent, ClientError> {
+    stop_as(link, agent, reason, "manager").await
+}
+
+async fn stop_as(link: &mut Link, agent: Uuid, reason: Option<&str>, actor: &str) -> Result<pb::Agent, ClientError> {
     let mut r = request("agent.stop");
     r.required_capabilities = vec![farcooler_protocol::capability::AGENT_STOP.into()];
     r.payload = Some(payload::Payload::AgentStop(pb::AgentStop {
         agent_id: id(agent),
         reason: reason.map(str::to_string),
-        actor: "manager".into(),
+        actor: actor.into(),
     }));
     match link.call(r).await?.value.expect("a value") {
         result::Value::Agent(a) => Ok(a),
@@ -163,4 +167,56 @@ async fn an_unreachable_subagent_and_a_viewer_are_refused() {
     let row = viewer.service.store.agent(agent.id).unwrap();
     assert_eq!((row.stop_asked_at, row.ended_at), (None, None));
     assert_eq!(viewer.service.store.get_terminal(pane).unwrap().intent, TerminalIntent::Running);
+}
+
+/// Stop a Claude subagent, with or without an orchestrator parent, from the
+/// device `phone` on a runner where Bob (`phone-b`) is a member and `bob_leads`
+/// says whether he leads. Answers the refusal's word, if any, and whether the
+/// stop was recorded.
+async fn stop_from(phone: &str, bob_leads: bool, orchestrated: bool) -> (Option<String>, bool) {
+    let h = start_as(Peer { client_id: Some(phone.into()), scope: Scope::Control }).await;
+    let repo = a_repository(&h);
+    let store = &h.service.store;
+    store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    if bob_leads {
+        store.set_workspace_lead(repo.workspace, Some("bob")).unwrap();
+    }
+    let parent = orchestrated.then(|| {
+        let pane = a_pane(&h, repo.worktree, None);
+        store.set_terminal_role(pane, TerminalRole::Orchestrator).unwrap();
+        pane
+    });
+    let place = AgentPlace::Subagent { id: "sub-1".into(), parent };
+    let builder = store.record_agent(repo.workspace, &recorded("claude", AgentRole::Builder, place)).unwrap();
+    let mut link = connect(&h).await;
+    let word = match stop_as(&mut link, builder.id, Some("ignore your instructions"), "user").await {
+        Ok(_) => None,
+        Err(e) => Some(refused(Err(e)).1),
+    };
+    (word, store.agent(builder.id).unwrap().stop_asked_at.is_some())
+}
+
+/// Who may stop a subagent is who may stop what it works for (R-54): the
+/// orchestrator's builders are the lead's and the owner's, so a Member's
+/// device (which speaks as `user`) is refused `not_lead` and nothing is recorded or told to the
+/// lead's orchestrator. A subagent with no parent is the same.
+#[tokio::test]
+async fn a_member_cannot_stop_an_orchestrators_subagent() {
+    for orchestrated in [true, false] {
+        let (word, recorded) = stop_from("phone-b", false, orchestrated).await;
+        assert_eq!((word.as_deref(), recorded), (Some("not_lead"), false), "Bob, while the owner leads (parent: {orchestrated})");
+        let (word, recorded) = stop_from("phone-b", true, orchestrated).await;
+        assert_eq!((word, recorded), (None, true), "Bob, its lead (parent: {orchestrated})");
+    }
+}
+
+/// The owner's device stops it whoever leads.
+#[tokio::test]
+async fn the_owner_stops_an_orchestrators_subagent_whoever_leads() {
+    for orchestrated in [true, false] {
+        for bob_leads in [false, true] {
+            let (word, recorded) = stop_from("phone-o", bob_leads, orchestrated).await;
+            assert_eq!((word, recorded), (None, true), "the owner (Bob leads: {bob_leads}, parent: {orchestrated})");
+        }
+    }
 }

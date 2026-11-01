@@ -5,7 +5,8 @@
 //! - **A pane**, of any harness, is stopped as `terminal.stop` stops it, under
 //!   `terminal.stop`'s own gate: only the lead stops the orchestrator, and a
 //!   rep only its own pane. Its agent ends as stopped.
-//! - **A Claude subagent** is asked: the ask is recorded on the agent, and its
+//! - **A Claude subagent** is asked, under its parent pane's gate (a
+//!   subagent with no parent: the owner and the lead only): the ask is recorded on the agent, and its
 //!   next tool call is refused with a message telling it to stop and hand back
 //!   (`hook_ingress::stopping`). A tool call already running finishes first,
 //!   so it reads "Stopping" until its `SubagentStop` ends it.
@@ -59,16 +60,43 @@ pub(crate) async fn dispatch(
                 ..Default::default()
             };
             crate::people::gate(svc, peer, caller_pid, &as_stop)?;
-            svc.store.ask_agent_stop(id, actor)?;
             let worktree = svc.store.get_terminal(terminal)?.worktree_id;
             svc.stop_terminal(terminal).await?;
+            // Recorded once the pane is stopped, so a stop that failed
+            // doesn't leave the agent reading "Stopping" for good. Its end
+            // may have been seen already, which is the ask's answer too.
+            match svc.store.ask_agent_stop(id, actor) {
+                Ok(_) | Err(DomainError::InvalidArgument { what: "agent_ended" }) => {}
+                Err(e) => return Err(e),
+            }
             // Stopping kills the pane, so its window's grid just changed.
             if let Ok(groups) = svc.layout(worktree).await {
                 watcher.publish_layout(worktree, &groups);
             }
             svc.store.end_agent(id, Verdict::Stopped)?;
         }
-        AgentPlace::Subagent { .. } if agent.harness == "claude" => {
+        AgentPlace::Subagent { parent, .. } if agent.harness == "claude" => {
+            // A subagent is stopped by whoever may stop what it works for:
+            // its parent pane's gate, as the pane path has it, so only the
+            // lead stops the orchestrator's builders (R-54). One with no
+            // parent is the orchestrator's by default: the owner's and the
+            // lead's alone.
+            match parent {
+                Some(parent) => {
+                    let as_stop = Request {
+                        method: "terminal.stop".into(),
+                        target_resource_id: Some(id_bytes(parent)),
+                        ..Default::default()
+                    };
+                    crate::people::gate(svc, peer, caller_pid, &as_stop)?;
+                }
+                None => {
+                    let person = crate::people::person_of(&svc.store, peer)?;
+                    if !crate::people::talks_to_orchestrator(&svc.store, &person, agent.workspace_id)? {
+                        return Err(DomainError::NotYours { what: "not_lead" });
+                    }
+                }
+            }
             svc.store.ask_agent_stop(id, actor)?;
             svc.hooks().stop_reason(id, reason);
         }
@@ -77,3 +105,7 @@ pub(crate) async fn dispatch(
     watcher.announce_plan_changed(agent.workspace_id, actor);
     Ok(result::Value::Agent(crate::rpc_plan::pb_agent_row(&svc.store.agent(id)?)))
 }
+
+#[cfg(test)]
+#[path = "rpc_agent_stop_rep_tests.rs"]
+mod rep_tests;

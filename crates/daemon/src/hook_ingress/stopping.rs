@@ -65,7 +65,7 @@ impl HookIngress {
     /// and hasn't ended.
     fn asked_to_stop(&self, agent: Agent, payload: &serde_json::Value) -> Option<Recorded> {
         let id = payload["agent_id"].as_str().filter(|_| agent == Agent::Claude)?;
-        let recorded = self.store.subagent("claude", id).ok().flatten()?;
+        let recorded = self.store.subagent("claude", id, payload["session_id"].as_str()).ok().flatten()?;
         (recorded.stop_asked_at.is_some() && recorded.ended_at.is_none()).then_some(recorded)
     }
 

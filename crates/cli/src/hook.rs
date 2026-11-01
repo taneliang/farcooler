@@ -335,17 +335,17 @@ fn claude_shaped_output(decision: &Decision) -> Option<String> {
 /// which claude hands the model. How a subagent asked to stop is told to
 /// (`agent stop`, ov-872). The `PermissionRequest` shape names another event,
 /// and claude would not act on it here.
+///
+/// An allow prints nothing: on `PreToolUse`, `permissionDecision: "allow"`
+/// skips claude's permission dialog, so printing one could auto-approve a
+/// call nobody approved. Saying nothing lets claude ask as it would have.
 fn pre_tool_output(decision: &Decision) -> Option<String> {
-    let mut inner = match decision {
-        Decision::Allow { updated_input: None } => serde_json::json!({ "permissionDecision": "allow" }),
-        Decision::Allow { updated_input: Some(input) } => {
-            serde_json::json!({ "permissionDecision": "allow", "updatedInput": input })
-        }
-        Decision::Deny { message } => {
-            serde_json::json!({ "permissionDecision": "deny", "permissionDecisionReason": message })
-        }
-    };
-    inner["hookEventName"] = "PreToolUse".into();
+    let Decision::Deny { message } = decision else { return None };
+    let inner = serde_json::json!({
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": message,
+    });
     serde_json::to_string(&serde_json::json!({ "hookSpecificOutput": inner })).ok()
 }
 
@@ -424,6 +424,16 @@ mod tests {
         assert_eq!(inner["permissionDecision"], "deny", "{out}");
         assert_eq!(inner["permissionDecisionReason"], "Stop now", "{out}");
         assert!(inner.get("decision").is_none(), "not PermissionRequest's shape: {out}");
+    }
+
+    /// An allow on the fence prints nothing: `permissionDecision: "allow"`
+    /// on `PreToolUse` skips claude's permission dialog, so a printed one
+    /// could approve what nobody did.
+    #[test]
+    fn an_allow_on_the_fence_prints_nothing() {
+        assert_eq!(pre_tool_output(&Decision::Allow { updated_input: None }), None);
+        let edited = Decision::Allow { updated_input: Some(serde_json::json!({ "command": "ls" })) };
+        assert_eq!(pre_tool_output(&edited), None);
     }
 
     #[tokio::test]
