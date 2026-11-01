@@ -14,7 +14,7 @@ public enum OneTreeGlyph {
     public static let needsYou = "flag"
     public static let plan = "map"
     public static let page = "doc.text"
-    /// A worktree, and a lane's own with no state: a branch.
+    /// A worktree, and a ticket's own with no stage: a branch.
     public static let worktree = "arrow.triangle.branch"
     public static let doneFold = "checkmark"
     public static let noTheme = "tray"
@@ -24,9 +24,9 @@ public enum OneTreeGlyph {
     public static let notOnThisVersion = "questionmark.square.dashed"
     public static let unreadableCard = "questionmark.circle"
     public static let subagent = "person.crop.circle.dashed"
-    /// A train in the Lanes list (ov-503).
-    public static let train = "shippingbox"
-    /// An agent in the Lanes list: filled while it works, open when done.
+    /// A landing in the Tickets list (ov-503).
+    public static let landing = "shippingbox"
+    /// An agent in the Tickets list: filled while it works, open when done.
     public static func agent(working: Bool) -> String { working ? "circle.fill" : "circle" }
 
     /// A theme's, by its state: a paused one and a finished one say so.
@@ -41,8 +41,8 @@ public enum OneTreeGlyph {
     /// A card's, by its status: the shape before the color.
     public static func task(_ status: TaskStatus) -> String { TaskStatusGlyph.name(status) }
 
-    /// A plan lane's, by its state.
-    public static func lane(_ state: LaneState) -> String { OneTreeWords.glyph(state) }
+    /// A ticket's, by its stage.
+    public static func ticket(_ stage: TicketStage) -> String { OneTreeWords.glyph(stage) }
 
     /// A terminal's: an agent's sparkles, a shell's prompt.
     public static func terminal(isAgent: Bool) -> String { isAgent ? "sparkles" : "terminal" }

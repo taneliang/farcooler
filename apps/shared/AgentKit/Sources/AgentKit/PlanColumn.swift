@@ -16,9 +16,8 @@ import Foundation
 // Needs You sits between the facts and Initiatives, but its rows are the
 // runner's own list, which the plan doesn't carry, so the views add them.
 //
-// Built on today's wire (lanes, trains and the agents the runner lists). The
-// new wire (ov-872) names each agent's role and what it does now; until then
-// the column says the best that today's fields support, and never more.
+// Built on the line (ov-872): each agent has a role (builder, reviewer or
+// lander) and says what it is doing now, and its tickets are the ones it works.
 
 public struct PlanColumn: Equatable, Sendable {
     // MARK: The facts line
@@ -103,14 +102,12 @@ public struct PlanColumn: Equatable, Sendable {
             }
         }
 
-        init(_ role: PlanFleetRole) {
-            // ov-872: the new wire names builder, reviewer and lander; a
-            // subagent or a bare pane says nothing of its job today.
+        init(_ role: PlanAgentRole) {
             switch role {
-            case .build, .fix: self = .builder
-            case .review: self = .reviewer
-            case .integrator: self = .lander
-            case .orchestrator, .subagent, .agent: self = .agent
+            case .builder: self = .builder
+            case .reviewer: self = .reviewer
+            case .lander: self = .lander
+            case .orchestrator, .unknown: self = .agent
             }
         }
     }
@@ -132,8 +129,8 @@ public struct PlanColumn: Equatable, Sendable {
         public var role: Role
         /// "Builder 2": its role, numbered when there are several.
         public var name: String
-        /// What it does now. ov-872: today's best is what the orchestrator
-        /// called it, else the lane's or train's title.
+        /// What it does now, in its own words (`doing_now`); the problem
+        /// when it is stuck.
         public var doing: String
         /// `doing` says why it's stuck: drawn in amber.
         public var doingIsTrouble: Bool
@@ -141,8 +138,9 @@ public struct PlanColumn: Equatable, Sendable {
         public var elapsed: Int64?
         /// Its pane, to open its chat; nil when the runner names none.
         public var terminal: String?
-        /// The lane it works, for its page when there's no pane to open.
-        public var lane: String?
+        /// The first ticket it works, for its page when there's no pane to
+        /// open.
+        public var ticket: String?
         public var tickets: [Ticket]
         /// It is working now: its glyph shows it, and its tickets never do.
         public var working: Bool = false
@@ -264,9 +262,9 @@ public struct PlanColumn: Equatable, Sendable {
     }
 
     static func footer(_ plan: PlanModel, statuses: [String: TaskStatus]) -> [Count] {
-        // Tickets on a queued lane, waiting for a builder, each once.
+        // Tickets waiting for a builder, each once.
         var seen = Set<String>()
-        let waiting = plan.lanes.filter { $0.state == .queued }.flatMap(\.cards)
+        let waiting = plan.lines.filter { $0.stage == .waiting }
             .filter { statuses[$0.task] != .cancelled && seen.insert($0.task).inserted }
         var counts: [Count] = []
         if !waiting.isEmpty { counts.append(Count(kind: .waiting, count: waiting.count, status: .todo)) }
@@ -307,95 +305,71 @@ public struct PlanColumn: Equatable, Sendable {
         return facts
     }
 
-    /// The live train furthest along: how many tickets it carries, and since
-    /// when it has been in its phase.
+    /// The live landing furthest along: how many tickets it carries, and
+    /// since when it has been in its phase.
     static func nextLanding(_ plan: PlanModel) -> (tickets: Int, since: Int64?)? {
-        let live = plan.liveTrains.filter { $0.phase(in: plan) != .ciFailed && $0.phase(in: plan) != .stalled }
-        guard let train = live.max(by: { $0.phase(in: plan).progress < $1.phase(in: plan).progress }) else { return nil }
-        let ids = Set(train.lanes.map(\.lane))
-        var seen = Set<String>()
-        let tickets = plan.lanes.filter { ids.contains($0.id) && $0.state == .landing }.flatMap(\.cards)
-            .filter { seen.insert($0.task).inserted }.count
-        let since = train.phaseSince(in: plan)
+        let live = plan.liveLandings.filter { $0.phase(in: plan) != .ciFailed && $0.phase(in: plan) != .stalled }
+        guard let landing = live.max(by: { $0.phase(in: plan).progress < $1.phase(in: plan).progress }) else { return nil }
+        let tickets = Set(plan.lines(on: landing).filter { $0.stage == .landing }.map(\.task)).count
+        let since = landing.phaseSince(in: plan)
         return (tickets, since > 0 ? since : nil)
     }
 }
 
-// MARK: - The pipeline from today's wire
+// MARK: - The pipeline from the line
 
 extension PlanColumn {
     static func pipeline(_ plan: PlanModel, statuses: [String: TaskStatus], titles: [String: String]) -> [Group] {
-        let isTrainAgent = Set(plan.laneIsTrain.map(\.lane))
-        let lanes = plan.lanes.filter { !isTrainAgent.contains($0.id) && $0.state.isLive && $0.state != .queued }
-        let live = plan.liveTrains
-        // A landing lane on a live train is the train's lander's.
-        var trainOf: [String: PlanTrain] = [:]
-        for train in live { for ref in train.lanes { trainOf[ref.lane] = train } }
+        let live = plan.lines.filter { $0.stage.isPastWaiting && statuses[$0.task] != .cancelled }
+        let liveByTask = Dictionary(live.map { ($0.task, $0) }, uniquingKeysWith: { first, _ in first })
 
-        func ticket(_ ref: PlanCardRef, lane: PlanLane?, stage: Stage) -> Ticket {
-            let theme = plan.theme(ofTask: ref.task)
-            let known = plan.card(ref.task)?.title ?? titles[ref.task]
+        func ticket(_ line: PlanTicketLine, stage: Stage) -> Ticket {
+            let theme = plan.theme(ofTask: line.task)
+            let known = plan.card(line.task)?.title ?? titles[line.task]
             let title: String = {
+                if !line.title.isEmpty { return line.title }
                 if let known, !known.isEmpty { return known }
-                if let lane, lane.cards.count == 1, lane.title?.isEmpty == false { return lane.heading }
-                return ref.key
+                return line.key
             }()
-            return Ticket(task: ref.task, key: ref.key, title: title, initiative: theme?.name, initiativeID: theme?.id, stage: stage)
+            return Ticket(task: line.task, key: line.key, title: title, initiative: theme?.name, initiativeID: theme?.id, stage: stage)
         }
-        func stage(of lane: PlanLane) -> Stage {
-            if lane.state == .landing, let train = trainOf[lane.id] {
-                let phase = train.phase(in: plan)
-                return phase.needsAttention ? .stuck : .landing
-            }
-            if lane.stale { return .stuck }
-            switch lane.state {
-            case .review: return .reviewing
+        /// Where a ticket's own state puts it, whoever works it.
+        func stage(of line: PlanTicketLine) -> Stage {
+            if line.stale || line.stage == .needsYou { return .stuck }
+            switch line.stage {
+            case .reviewing: return .reviewing
             case .landing: return .landing
             default: return .building
             }
         }
-        func tickets(_ lane: PlanLane) -> [Ticket] {
-            let s = stage(of: lane)
-            return lane.cards.filter { statuses[$0.task] != .cancelled }.map { ticket($0, lane: lane, stage: s) }
-        }
 
-        var cards: [(stage: Stage, agent: Agent, started: Int64, card: String?)] = []
+        var cards: [(stage: Stage, agent: Agent, started: Int64, tasks: Set<String>)] = []
         var attended = Set<String>()
-        var trainsDrawn = Set<String>()
         let agents = plan.agents.filter { $0.role != .orchestrator }
         for agent in agents {
-            let lane = agent.lane.flatMap { ref in lanes.first { $0.id == ref.id } }
-            let train = agent.train.flatMap { ref in live.first { $0.id == ref.id } }
-            var role = Role(agent.role)
-            var mine: [Ticket] = []
+            let role = Role(agent.role)
+            let lines = agent.tickets.compactMap { liveByTask[$0.task] }
+            // The landing a lander works: its phase says if it is stuck.
+            let landing = role == .lander ? lines.compactMap { line in line.landing.flatMap(plan.landing(number:)) }.first : nil
             var s: Stage
-            var doing = agent.label
+            var doing = agent.doingNow
             var trouble = false
-            var laneID: String?
-            if let train {
-                // The agent landing a train: the lander, over the train's tickets.
-                role = .lander
-                trainsDrawn.insert(train.id)
-                let ids = Set(train.lanes.map(\.lane))
-                mine = lanes.filter { ids.contains($0.id) && $0.state == .landing }.flatMap(tickets)
-                let phase = train.phase(in: plan)
-                s = phase.needsAttention ? .stuck : .landing
-                (doing, trouble) = phaseWords(phase, label: agent.label)
-            } else if let lane {
-                mine = tickets(lane)
-                s = stage(of: lane)
-                laneID = lane.id
-                if s == .stuck, let stale = PlanWords.stale(lane, now: plan.nowMs) {
-                    (doing, trouble) = (stale, true)
-                } else if doing.isEmpty {
-                    doing = lane.heading
-                }
-            } else {
-                if let ref = agent.card { mine = [ticket(ref, lane: nil, stage: role == .reviewer ? .reviewing : .building)] }
-                s = role == .reviewer ? .reviewing : role == .lander ? .landing : .building
-                if doing.isEmpty { doing = agent.working ? "Working" : "Idle" }
+            switch role {
+            case .lander:
+                let phase = landing?.phase(in: plan)
+                s = (phase?.needsAttention ?? false) ? .stuck : .landing
+                if let phase, phase.needsAttention { (doing, trouble) = phaseWords(phase) }
+            case .reviewer: s = .reviewing
+            case .builder, .agent: s = .building
             }
-            mine = mine.map { var t = $0; t.stage = s; return t }
+            if s != .stuck, let stale = lines.first(where: \.stale) {
+                s = .stuck
+                if let words = PlanWords.stale(stale, now: plan.nowMs) { (doing, trouble) = (words, true) }
+            } else if s != .stuck, lines.contains(where: { $0.stage == .needsYou }) {
+                s = .stuck
+            }
+            if doing.isEmpty { doing = agent.title.isEmpty ? (agent.working ? "Working" : "Idle") : agent.title }
+            let mine = lines.map { ticket($0, stage: s) }
             attended.formUnion(mine.map(\.task))
             cards.append(
                 (
@@ -403,40 +377,29 @@ extension PlanColumn {
                     Agent(
                         id: agent.id, role: role, name: role.word, doing: doing, doingIsTrouble: trouble,
                         elapsed: agent.startedAt > 0 ? max(0, plan.nowMs - agent.startedAt) : nil, terminal: agent.terminal,
-                        lane: laneID, tickets: mine, working: agent.working),
-                    agent.startedAt, agent.card?.task
-                ))
-        }
-        // A live train whose integrating agent isn't listed: its own record
-        // says who lands it, so it still has a lander.
-        for train in live where !trainsDrawn.contains(train.id) {
-            guard let record = train.agent, record.isWorking else { continue }
-            let ids = Set(train.lanes.map(\.lane))
-            let phase = train.phase(in: plan)
-            let s: Stage = phase.needsAttention ? .stuck : .landing
-            let mine = lanes.filter { ids.contains($0.id) && $0.state == .landing }.flatMap(tickets).map { var t = $0; t.stage = s; return t }
-            guard !mine.isEmpty else { continue }
-            attended.formUnion(mine.map(\.task))
-            let (doing, trouble) = phaseWords(phase, label: "")
-            cards.append(
-                (
-                    s,
-                    Agent(
-                        id: "train:\(train.id)", role: .lander, name: Role.lander.word, doing: doing, doingIsTrouble: trouble,
-                        elapsed: record.startedAt > 0 ? max(0, plan.nowMs - record.startedAt) : nil, terminal: nil, lane: nil,
-                        tickets: mine, working: true),
-                    record.startedAt, nil
+                        ticket: lines.first?.task, tickets: mine, working: agent.working),
+                    agent.startedAt, Set(agent.tickets.map(\.task))
                 ))
         }
 
-        // Each ticket is on one agent: the lander of its train first, then the
-        // agent whose own card it is, then the first to claim it.
+        // Each ticket is on one agent: the lander of its landing first, then
+        // the agent whose job matches its stage, then the first to claim it.
+        func rank(_ agent: Agent, _ task: String) -> Int {
+            if agent.role == .lander { return 0 }
+            let wanted: Role? =
+                switch liveByTask[task]?.stage {
+                case .building: .builder
+                case .reviewing: .reviewer
+                default: nil
+                }
+            return wanted == agent.role ? 1 : 2
+        }
         var owner: [String: (rank: Int, index: Int)] = [:]
         for (index, card) in cards.enumerated() {
             for t in card.agent.tickets {
-                let rank = card.agent.role == .lander ? 0 : card.card == t.task ? 1 : 2
-                if let have = owner[t.task], (have.rank, have.index) <= (rank, index) { continue }
-                owner[t.task] = (rank, index)
+                let r = rank(card.agent, t.task)
+                if let have = owner[t.task], (have.rank, have.index) <= (r, index) { continue }
+                owner[t.task] = (r, index)
             }
         }
         for index in cards.indices {
@@ -451,11 +414,12 @@ extension PlanColumn {
             for (n, index) in ordered.enumerated() { cards[index].agent.name = "\(role.word) \(n + 1)" }
         }
 
-        // Tickets nobody is on, by the stage of their lane.
+        // Tickets nobody is on, by the stage their own state gives them.
         var unattended: [Stage: [Ticket]] = [:]
         var seen = attended
-        for lane in lanes {
-            for t in tickets(lane) where seen.insert(t.task).inserted { unattended[t.stage, default: []].append(t) }
+        for line in live where seen.insert(line.task).inserted {
+            let s = stage(of: line)
+            unattended[s, default: []].append(ticket(line, stage: s))
         }
 
         return Stage.allCases.compactMap { stage in
@@ -472,13 +436,11 @@ extension PlanColumn {
     /// Agents with tickets first, then by name's number (start order).
     private static func order(_ agent: Agent) -> Int { agent.tickets.isEmpty ? 1 : 0 }
 
-    /// What a lander says it does: its train's phase as a sentence, the
-    /// orchestrator's label first when it gave one. ov-872: the new wire
-    /// says what the lander does now.
-    static func phaseWords(_ phase: TrainPhase, label: String) -> (String, Bool) {
-        if !label.isEmpty, !phase.needsAttention { return (label, false) }
+    /// What a lander in trouble says: its landing's phase as a sentence.
+    static func phaseWords(_ phase: LandingPhase) -> (String, Bool) {
         let sentence = phase.sentence
-        return (sentence.prefix(1).uppercased() + sentence.dropFirst(), phase.needsAttention)
+        let lead = sentence.prefix(1).uppercased() + sentence.dropFirst()
+        return (lead, phase.needsAttention)
     }
 }
 

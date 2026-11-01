@@ -1,44 +1,36 @@
 import Foundation
 
-// The plan layer (ov-268), as a client reads it: themes (why a group of cards
-// exists), lanes (one unit of execution) and the plan (the queued lanes, first
-// is next up). EXPERIMENTAL, behind the runner's `board_plan` capability, and
+// The plan layer (ov-268, ov-872), as a client reads it: themes (why a group of
+// cards exists), the line (one ticket per card in the plan: its stage, who
+// worked it, its branch and pull request), agents (who is working now, and
+// what each is doing) and landings (finished tickets going into the product
+// together). EXPERIMENTAL, behind the runner's `board_plan` capability, and
 // removable: nothing on a task points here, and nothing outside the Plan view
 // and the one line on a task page reads it.
 //
 // The Mac reads `farcooler plan --json` (`crates/cli/src/plan.rs`,
-// `plan_json`), and a theme's or lane's timeline from `plan theme show` and
-// `plan lane show`, which add `events`. Every rule the Plan view draws is here,
-// so `swift test --package-path apps/shared/AgentKit` reaches it; the views
-// only lay it out. The design is `.claude/agent/reports/ov-268/design.md`, 6.1
-// to 6.4.
+// `plan_json`), and a theme's or ticket's timeline from `plan theme show` and
+// `plan ticket show`, which add `events`. Every rule the Plan view draws is
+// here, so `swift test --package-path apps/shared/AgentKit` reaches it; the
+// views only lay it out. The wire is `test/fixtures/plan.json`.
 
-/// A card a theme or lane names, by id and key; a lane's may name a slice.
+/// A card a theme, a landing or a ticket's stack names, by id and key.
 public struct PlanCardRef: Decodable, Equatable, Hashable, Sendable {
     public var task: String
     public var key: String
-    /// Empty when the lane works the whole card. Absent on a theme's.
-    public var slice: String
-    /// Where this card's pull request stands (ov-316); nil from a runner
-    /// before ov-312, and when it has nothing to say.
-    public var stage: PlanPrStage?
 
-    public init(task: String, key: String, slice: String = "", stage: PlanPrStage? = nil) {
+    public init(task: String, key: String) {
         self.task = task
         self.key = key
-        self.slice = slice
-        self.stage = stage
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         task = try c.decode(String.self, forKey: .task)
         key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
-        slice = try c.decodeIfPresent(String.self, forKey: .slice) ?? ""
-        stage = try c.decodeIfPresent(PlanPrStage.self, forKey: .stage)
     }
 
-    private enum CodingKeys: String, CodingKey { case task, key, slice, stage }
+    private enum CodingKeys: String, CodingKey { case task, key }
 }
 
 /// How many of a theme's cards are in each of the board's statuses.
@@ -72,8 +64,7 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     public var ordinal: Int64
     public var cards: [PlanCardRef]
     public var counts: PlanCounts
-    /// What its lanes spent on its cards, each lane's spend shared over its
-    /// cards (ov-306). Nil from a runner before it.
+    /// What its tickets spent (ov-306). Nil from a runner before it.
     public var spend: PlanSpend?
     /// Its token budget (ov-307), counted as `spend` is; nil when it has none
     /// or from a runner without `board_cost`.
@@ -81,26 +72,40 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     /// Its tokens on each of the last seven UTC days, oldest first and today
     /// last (ov-307); nil from a runner without `board_cost`.
     public var trendTokens: [UInt64]?
-    /// When it last moved, by the runner's reckoning (its story, lanes,
+    /// When it last moved, by the runner's reckoning (its story, tickets,
     /// rulings and cards, ov-331); nil from a runner before it, and a client
     /// then works it out from what it has.
     public var lastMovedAt: Int64?
 }
 
-// `LaneState` is in `PlanGlance.swift`, which the watch and the widgets
+// `TicketStage` is in `PlanGlance.swift`, which the watch and the widgets
 // compile without this file (ov-310).
 
-public struct PlanAgent: Decodable, Equatable, Sendable {
-    public var harness: String
-    public var agentId: String
-    /// `build`, `review` or `fix`.
-    public var role: String
-    public var model: String
-    public var startedAt: Int64
-    public var endedAt: Int64?
+/// Who worked a ticket and as what, on the line (ov-872).
+public enum WorkRole: String, Decodable, Sendable, CaseIterable {
+    case build, fix, review, land, unknown
+
+    public init(from decoder: Decoder) throws {
+        self = WorkRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
 }
 
-/// What a lane's agents spent. An agent the runner has read no turn of is
+/// One agent's turn at a ticket, oldest first on the ticket.
+public struct PlanWork: Decodable, Equatable, Sendable {
+    /// The agent's id, as `PlanAgent.id` has it.
+    public var agent: String
+    public var role: WorkRole
+    public var startedAt: Int64
+    public var endedAt: Int64?
+    /// What the agent said when it ended: `finished`, or its verdict.
+    public var verdict: String
+    /// Recorded from the agent's description, not by the agent itself.
+    public var linkedByDescription: Bool
+
+    public var isOpen: Bool { endedAt == nil }
+}
+
+/// What an agent, a ticket or a landing spent. An agent the runner has read no turn of is
 /// `unmeasuredAgents`, which reads "Not reported", never zero.
 public struct PlanSpend: Decodable, Equatable, Sendable {
     public var inputTokens: UInt64 = 0
@@ -111,8 +116,8 @@ public struct PlanSpend: Decodable, Equatable, Sendable {
     public var costMicros: Int64?
     public var runs = 0
     public var unmeasuredAgents = 0
-    /// Agents also recorded on another lane, whose spend is split evenly
-    /// across their lanes: the figures hold this lane's part.
+    /// Agents also recorded on another ticket, whose spend is split evenly
+    /// across their tickets: the figures hold this ticket's part.
     public var sharedAgents = 0
 
     public init() {}
@@ -139,62 +144,58 @@ public struct PlanSpend: Decodable, Equatable, Sendable {
     public var totalTokens: UInt64 { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens }
 }
 
-public struct PlanLane: Decodable, Equatable, Identifiable, Sendable {
-    public var id: String
-    public var short: String
-    public var name: String
-    public var state: LaneState
+/// One ticket on the line (ov-872): a card in the plan, with where it stands.
+public struct PlanTicketLine: Decodable, Equatable, Identifiable, Sendable {
+    /// The card's id.
+    public var task: String
+    public var key: String
+    /// The card's title.
+    public var title: String
+    /// The card's status in the board's words ("In Review").
+    public var status: String
+    public var stage: TicketStage
     /// One line: why it's in the plan, or why it's where it is now.
     public var reason: String
     /// 1 is next up; nil outside the plan.
     public var planRank: Int?
     public var worktreePath: String
     public var branch: String
-    public var harness: String
-    public var model: String
-    public var train: String?
+    /// The ticket this one's branch is stacked on; it lands first.
+    public var stackParent: PlanCardRef?
+    public var sameBranch: String?
+    public var prNumber: Int?
     public var landedSha: String?
-    public var stateSince: Int64
-    /// Sat in one live state for over an hour, by the runner's clock.
+    public var stageSince: Int64
+    /// Taken off a landing by hand.
+    public var heldOff: Bool
+    /// Sat in one live stage for over an hour, by the runner's clock.
     public var stale: Bool
     public var fixRounds: Int
-    public var cards: [PlanCardRef]
-    public var agents: [PlanAgent]
+    /// The number of the landing it is on, if any.
+    public var landing: Int?
+    /// Everyone who worked it, oldest first.
+    public var work: [PlanWork]
     public var spend: PlanSpend
     /// Its token budget (ov-307); nil when it has none.
     public var budgetTokens: UInt64?
-    /// What a person reads for it (ov-462): the title the orchestrator wrote,
-    /// else one the runner derived from its cards' titles. Nil or empty from
-    /// a runner before it, and for a lane with no cards and no title.
-    public var title: String?
-    /// The heading of the train it is on, set when the plan is read: rows say
-    /// "in Train 9", not the slug.
-    public var trainHeading: String?
-    /// Where its pull request stands, the least advanced of its cards' (ov-316);
-    /// nil from a runner before ov-312. Read it through `shownStage`.
-    public var stage: PlanPrStage?
+    /// Where its pull request stands (ov-316); nil when the runner had
+    /// nothing to say. Read it through `shownStage`.
+    public var prStage: PlanPrStage?
 
-    /// What every surface shows first: the title, else the name.
-    public var heading: String {
-        if let title, !title.isEmpty { return title }
-        return name
-    }
+    public var id: String { task }
 
-    /// The slug, shown second where there is room: nil when the heading is
-    /// the name already.
-    public var slug: String? { heading == name ? nil : name }
-}
+    /// What every surface shows first: the card's title, else its key.
+    public var heading: String { title.isEmpty ? key : title }
 
-/// A lane the plan flags because a live train has its name (ov-461): the
-/// integrating agent modeled as a lane.
-public struct PlanFlaggedLane: Decodable, Equatable, Sendable {
-    public var lane: String
-    public var name: String
+    /// The ticket as a card reference.
+    public var card: PlanCardRef { PlanCardRef(task: task, key: key) }
 
-    public init(lane: String, name: String) {
-        self.lane = lane
-        self.name = name
-    }
+    /// A builder has it again, for a fix round after a review or a failed
+    /// landing: the work open on it is a fix.
+    public var isFixing: Bool { stage == .building && work.last(where: \.isOpen)?.role == .fix }
+
+    /// The work that is still open, newest first.
+    public var openWork: [PlanWork] { work.filter(\.isOpen).reversed() }
 }
 
 /// A card's row, as the plan read it: what a theme page lists for a card
@@ -206,7 +207,7 @@ public struct PlanCard: Decodable, Equatable, Sendable {
     public var status: String
 }
 
-/// A card `plan --json` flags in `no_lane` or `landed_not_closed`: its key
+/// A card `plan --json` flags in `off_the_line` or `landed_not_closed`: its key
 /// and status, with no title (the CLI sends none).
 public struct PlanFlaggedCard: Decodable, Equatable, Sendable {
     public var task: String
@@ -225,20 +226,19 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// The runner's clock when it answered.
     public var nowMs: Int64
     public var themes: [PlanTheme]
-    /// Live lanes, and the ones that finished in the last week.
-    public var lanes: [PlanLane]
-    /// The queued lanes in the plan, by id; first is next up.
-    public var order: [String]
+    /// The line (ov-872): the live tickets, and the ones that landed in the
+    /// last week. The plan is the waiting ones with a rank, first is next up.
+    public var lines: [PlanTicketLine]
     public var cards: [PlanCard]
     /// Decided for you (ov-304): standing rulings newest first, then the
     /// settled ones, in the runner's order. Empty from a runner without
     /// `board_rulings`, and absent from an older CLI's answer.
     public var rulings: [PlanRuling]
-    /// Trains (ov-309): those not landed or dropped, oldest first, then the
-    /// settled ones. Empty from a runner without `board_trains`.
-    public var trains: [PlanTrain]
+    /// Landings (ov-309, ov-872): those not landed or dropped, oldest first,
+    /// then the settled ones.
+    public var landings: [PlanLanding]
     /// What the runner last read of CI for each subject the board names: its
-    /// trains' pushed SHAs and its pages' CI references (ov-306).
+    /// landings' pushed SHAs and its pages' CI references (ov-306).
     public var ci: [PlanCIRead]
     /// How many of the board's cards are in each status (ov-306), what a
     /// page's card counts draw; nil from a runner before it.
@@ -246,44 +246,35 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// The week's tokens and the harness and model comparison (ov-307); nil
     /// from a runner without `board_cost`.
     public var cost: PlanCostRead?
-    /// "Worth a look" (ov-331): open cards in review or progress that no
-    /// lane is working, and open cards whose lanes have all landed. Empty
-    /// from an older runner.
-    public var noLane: [PlanFlaggedCard]
+    /// "Worth a look" (ov-331): open cards in review or progress that are not
+    /// on the line, and open cards whose tickets have landed. Empty from an
+    /// older runner.
+    public var offTheLine: [PlanFlaggedCard]
     public var landedNotClosed: [PlanFlaggedCard]
-    /// Live lanes named like a live train (ov-461): Now draws the train once,
-    /// and "Worth a look" says to record its agent on the train.
-    public var laneIsTrain: [PlanFlaggedLane]
     /// Every agent that still exists, the orchestrator included (ov-503,
-    /// ov-518, behind `board_agents`). Empty from a runner without it;
-    /// whether the runner has it is the capability's to say
-    /// (`PlanSections.agentsSupported`), not this list's.
-    public var agents: [PlanFleetAgent]
+    /// ov-518, ov-872).
+    public var agents: [PlanAgent]
     /// What every agent of the last 24 hours spent, those no longer in
     /// `agents` included; nil from a runner before ov-518.
     public var agentsSpend: PlanSpend?
 
     public init(
-        nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
-        cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
-        boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, noLane: [PlanFlaggedCard] = [],
-        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = [], agents: [PlanFleetAgent] = [],
-        agentsSpend: PlanSpend? = nil
+        nowMs: Int64 = 0, themes: [PlanTheme] = [], lines: [PlanTicketLine] = [],
+        cards: [PlanCard] = [], rulings: [PlanRuling] = [], landings: [PlanLanding] = [], ci: [PlanCIRead] = [],
+        boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, offTheLine: [PlanFlaggedCard] = [],
+        landedNotClosed: [PlanFlaggedCard] = [], agents: [PlanAgent] = [], agentsSpend: PlanSpend? = nil
     ) {
         self.nowMs = nowMs
         self.themes = themes
-        self.lanes = lanes
-        self.order = order
+        self.lines = lines
         self.cards = cards
         self.rulings = rulings
-        self.trains = trains
-        self.lanes = Self.naming(trains: trains, in: lanes)
+        self.landings = landings
         self.ci = ci
         self.boardCounts = boardCounts
         self.cost = cost
-        self.noLane = noLane
+        self.offTheLine = offTheLine
         self.landedNotClosed = landedNotClosed
-        self.laneIsTrain = laneIsTrain
         self.agents = agents
         self.agentsSpend = agentsSpend
     }
@@ -292,34 +283,21 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         nowMs = try c.decode(Int64.self, forKey: .nowMs)
         themes = try c.decode([PlanTheme].self, forKey: .themes)
-        lanes = try c.decode([PlanLane].self, forKey: .lanes)
-        order = try c.decode([String].self, forKey: .order)
+        lines = try c.decode([PlanTicketLine].self, forKey: .lines)
         cards = try c.decode([PlanCard].self, forKey: .cards)
         rulings = try c.decodeIfPresent([PlanRuling].self, forKey: .rulings) ?? []
-        trains = try c.decodeIfPresent([PlanTrain].self, forKey: .trains) ?? []
-        lanes = Self.naming(trains: trains, in: lanes)
+        landings = try c.decodeIfPresent([PlanLanding].self, forKey: .landings) ?? []
         ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
         boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
         cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
-        noLane = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .noLane) ?? []
+        offTheLine = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .offTheLine) ?? []
         landedNotClosed = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .landedNotClosed) ?? []
-        laneIsTrain = try c.decodeIfPresent([PlanFlaggedLane].self, forKey: .laneIsTrain) ?? []
-        agents = try c.decodeIfPresent([PlanFleetAgent].self, forKey: .agents) ?? []
+        agents = try c.decodeIfPresent([PlanAgent].self, forKey: .agents) ?? []
         agentsSpend = try c.decodeIfPresent(PlanSpend.self, forKey: .agentsSpend)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain, agents, agentsSpend
-    }
-
-    /// `lanes`, each told its train's heading (ov-462).
-    static func naming(trains: [PlanTrain], in lanes: [PlanLane]) -> [PlanLane] {
-        lanes.map { lane in
-            guard let name = lane.train, let train = trains.first(where: { $0.name.lowercased() == name.lowercased() }) else { return lane }
-            var named = lane
-            named.trainHeading = train.label
-            return named
-        }
+        case nowMs, themes, lines, cards, rulings, landings, ci, boardCounts, cost, offTheLine, landedNotClosed, agents, agentsSpend
     }
 
     public static let empty = PlanModel()
@@ -328,16 +306,16 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         try PlanJSON.decoder.decode(PlanModel.self, from: data)
     }
 
-    /// Nothing planned: no theme and no lane. Rulings don't count: they
+    /// Nothing planned: no theme and no ticket on the line. Rulings don't count: they
     /// never switch a board into its plan layout (review 1005a F1).
-    public var isEmpty: Bool { themes.isEmpty && lanes.isEmpty }
+    public var isEmpty: Bool { themes.isEmpty && lines.isEmpty }
 
     /// Nothing at all to show: nothing planned and no ruling, so the Plan
     /// view's "Nothing is planned" notice stands alone.
     public var showsNothing: Bool { isEmpty && rulings.isEmpty }
 }
 
-/// One entry in a theme's or lane's record, oldest first.
+/// One entry in a theme's or ticket's record, oldest first.
 public struct PlanEvent: Decodable, Equatable, Sendable {
     public struct Extra: Decodable, Equatable, Sendable {
         /// A `story` event's new story; its `body` is the one it replaced.
@@ -353,7 +331,7 @@ public struct PlanEvent: Decodable, Equatable, Sendable {
     public var extra: Extra?
 }
 
-/// `plan theme show --json` and `plan lane show --json`: the subject, with
+/// `plan theme show --json` and `plan ticket show --json`: the subject, with
 /// its record. Only the record is read; the subject is the plan's.
 public struct PlanRecord: Decodable, Equatable, Sendable {
     public var events: [PlanEvent]
@@ -374,32 +352,33 @@ enum PlanJSON {
 // MARK: - What the overview derives
 
 extension PlanModel {
-    /// Next Up: the plan's queued lanes, first is next.
-    public var nextUp: [PlanLane] {
-        order.compactMap { id in lanes.first { $0.id == id && $0.state == .queued } }
+    /// Next Up: the waiting tickets the plan ranks, first is next.
+    public var nextUp: [PlanTicketLine] {
+        lines.filter { $0.stage == .waiting && $0.planRank != nil }
+            .sorted { ($0.planRank ?? .max) < ($1.planRank ?? .max) }
     }
 
-    /// Now: the lanes being built, reviewed, fixed or landed, in the order
-    /// they started.
-    public var working: [PlanLane] {
-        lanes.filter { $0.state.isLive && $0.state != .queued }
+    /// Now: the tickets being built, reviewed, waiting on the owner or
+    /// landed, in the order the line lists them.
+    public var working: [PlanTicketLine] {
+        lines.filter { $0.stage.isPastWaiting }
     }
 
-    /// Queued lanes the plan doesn't rank: written, but not yet ordered.
-    public var unranked: [PlanLane] {
-        lanes.filter { $0.state == .queued && !order.contains($0.id) }
+    /// Waiting tickets the plan doesn't rank: written, but not yet ordered.
+    public var unranked: [PlanTicketLine] {
+        lines.filter { $0.stage == .waiting && $0.planRank == nil }
     }
 
-    /// The lanes that landed on the runner's day, in `calendar`'s time zone,
+    /// The tickets that landed on the runner's day, in `calendar`'s time zone,
     /// most recent first.
-    public func landedToday(calendar: Calendar = .current) -> [PlanLane] {
+    public func landedToday(calendar: Calendar = .current) -> [PlanTicketLine] {
         let today = Date(timeIntervalSince1970: Double(nowMs) / 1000)
-        return lanes
+        return lines
             .filter {
-                $0.state == .landed
-                    && calendar.isDate(Date(timeIntervalSince1970: Double($0.stateSince) / 1000), inSameDayAs: today)
+                $0.stage == .landed
+                    && calendar.isDate(Date(timeIntervalSince1970: Double($0.stageSince) / 1000), inSameDayAs: today)
             }
-            .sorted { $0.stateSince > $1.stateSince }
+            .sorted { $0.stageSince > $1.stageSince }
     }
 
     /// The themes as the overview lists them: active, then paused, then
@@ -412,26 +391,18 @@ extension PlanModel {
         }
     }
 
-    /// The theme a lane serves: the one most of its cards are in, the
-    /// earlier on the board when two tie. Nil when none of them is in one.
-    public func theme(of lane: PlanLane) -> PlanTheme? {
-        var best: (theme: PlanTheme, count: Int)?
-        for theme in shownThemes {
-            let keys = Set(theme.cards.map(\.task))
-            let count = lane.cards.filter { keys.contains($0.task) }.count
-            if count > 0, count > (best?.count ?? 0) { best = (theme, count) }
-        }
-        return best?.theme
-    }
+    /// The theme a ticket serves: the one its card is in, the earlier on the
+    /// board when two list it. Nil when none does.
+    public func theme(of line: PlanTicketLine) -> PlanTheme? { theme(ofTask: line.task) }
 
-    /// The lanes working any of a theme's cards: live ones as they're
-    /// listed, then queued in plan order, then the finished.
-    public func lanes(in theme: PlanTheme) -> [PlanLane] {
+    /// The tickets on the line for any of a theme's cards: live ones as
+    /// they're listed, then waiting in plan order, then the finished.
+    public func lines(in theme: PlanTheme) -> [PlanTicketLine] {
         let keys = Set(theme.cards.map(\.task))
-        let mine = lanes.filter { lane in lane.cards.contains { keys.contains($0.task) } }
-        func group(_ lane: PlanLane) -> Int {
-            switch lane.state {
-            case .queued: 1
+        let mine = lines.filter { keys.contains($0.task) }
+        func group(_ line: PlanTicketLine) -> Int {
+            switch line.stage {
+            case .waiting: 1
             case .landed, .dropped: 2
             default: 0
             }
@@ -440,7 +411,7 @@ extension PlanModel {
             let (a, b) = (group(l.element), group(r.element))
             if a != b { return a < b }
             if a == 1 { return (l.element.planRank ?? .max, l.offset) < (r.element.planRank ?? .max, r.offset) }
-            if a == 2 { return l.element.stateSince > r.element.stateSince }
+            if a == 2 { return l.element.stageSince > r.element.stageSince }
             return l.offset < r.offset
         }.map(\.element)
     }
@@ -450,58 +421,56 @@ extension PlanModel {
         themes.first { $0.state != "dropped" && $0.cards.contains { $0.task == task } }
     }
 
-    /// The lane a card's page names: one working it now, else one queued for
-    /// it, else the last that landed it.
-    public func lane(ofTask task: String) -> PlanLane? {
-        let mine = lanes.filter { lane in lane.cards.contains { $0.task == task } && lane.state != .dropped }
-        return mine.first { $0.state.isLive && $0.state != .queued }
-            ?? mine.filter { $0.state == .queued }.min { ($0.planRank ?? .max) < ($1.planRank ?? .max) }
-            ?? mine.filter { $0.state == .landed }.max { $0.stateSince < $1.stateSince }
+    /// The ticket a card is: its line, unless it was dropped.
+    public func line(ofTask task: String) -> PlanTicketLine? {
+        lines.first { $0.task == task && $0.stage != .dropped }
     }
 
-    /// The line under a task page's title (6.4), or nil when the card is in
-    /// no lane and no theme.
+    /// The ticket with this key, as a person types it.
+    public func line(key: String) -> PlanTicketLine? {
+        lines.first { $0.key.lowercased() == key.lowercased() }
+    }
+
+    /// The line under a task page's title (6.4), or nil when the card is on
+    /// no line and in no theme.
     public func taskLine(_ task: String) -> PlanTaskLine? {
-        let lane = lane(ofTask: task)
+        let line = line(ofTask: task)
         let theme = theme(ofTask: task)
-        guard lane != nil || theme != nil else { return nil }
-        let stage = lane.flatMap { lane in
-            lane.state.isLive ? lane.cards.first { $0.task == task }?.stage : nil
-        }.flatMap { $0.shown == nil ? nil : $0 }
-        return PlanTaskLine(lane: lane, theme: theme, stage: stage)
+        guard line != nil || theme != nil else { return nil }
+        let stage = line.flatMap { $0.stage.isLive ? $0.shownStage : nil }
+        return PlanTaskLine(line: line, theme: theme, stage: stage)
     }
 
-    /// Whether a live lane is waiting on the owner: one of its cards needs
-    /// a decision, by the board's own statuses. With staleness, the only
-    /// thing that draws a lane in color.
-    public func waitsOnOwner(_ lane: PlanLane, statuses: [String: TaskStatus]) -> Bool {
-        lane.state.isLive && lane.cards.contains { statuses[$0.task] == .needsDecision }
+    /// Whether a live ticket is waiting on the owner: the runner says so, or
+    /// its card needs a decision, by the board's own statuses. With
+    /// staleness, the only thing that draws a ticket in color.
+    public func waitsOnOwner(_ line: PlanTicketLine, statuses: [String: TaskStatus]) -> Bool {
+        line.stage.isLive && (line.stage == .needsYou || statuses[line.task] == .needsDecision)
     }
 
     /// A card's row, from the plan's own read: for a card the board hasn't.
     public func card(_ task: String) -> PlanCard? { cards.first { $0.task == task } }
+
+    /// The agent with this id.
+    public func agent(_ id: String) -> PlanAgent? { agents.first { $0.id == id } }
 }
 
-/// "In lane mac-ux · Visual language": where a card stands in the plan.
+/// "In Review · Visual language": where a card stands in the plan.
 public struct PlanTaskLine: Equatable, Sendable {
-    public var lane: PlanLane?
+    public var line: PlanTicketLine?
     public var theme: PlanTheme?
-    /// The card's own pull request stage, while its lane is live (ov-316).
+    /// The card's own pull request stage, while its ticket is live (ov-316).
     public var stage: PlanPrStage?
 
-    /// The lane's half: "In lane mac-ux", "Queued in mac-fu3", "Landed in
-    /// land-129"; nil without a lane.
-    public var laneWords: String? {
-        guard let lane else { return nil }
-        switch lane.state {
-        case .queued: return "Queued in \(lane.heading)"
-        case .landed: return "Landed in \(lane.heading)"
-        default: return "In lane \(lane.heading)"
-        }
+    /// The ticket's half: "Building", "Waiting · 2nd", "Landed · ac840108"; nil
+    /// without a ticket on the line.
+    public var stageWords: String? {
+        guard let line else { return nil }
+        return PlanWords.status(line, stage: false)
     }
 
     /// The whole line, as VoiceOver reads it.
-    public var text: String { [laneWords, stage?.fullWords, theme?.name].compactMap { $0 }.joined(separator: " · ") }
+    public var text: String { [stageWords, stage?.fullWords, theme?.name].compactMap { $0 }.joined(separator: " · ") }
 }
 
 // MARK: - Words
@@ -511,7 +480,7 @@ public struct PlanTaskLine: Equatable, Sendable {
 public enum PlanWords {
     public static let nothingPlanned = "Nothing is planned on this board yet."
     public static let nothingPlannedDetail =
-        "The orchestrator writes the plan: themes say why a group of cards exists, and lanes are the agents working them."
+        "The orchestrator writes the plan: themes say why a group of cards exists, and agents work the tickets that make them up."
     /// Under it with no orchestrator, where the plan comes from: the job, then
     /// the first step.
     public static let nothingPlannedStart =
@@ -519,7 +488,7 @@ public enum PlanWords {
     /// With one running: the next step is a message to it.
     public static let nothingPlannedRunning =
         "Tell the orchestrator what you want built, and it writes the plan here. "
-        + "Themes say why a group of cards exists, and lanes are the agents working them."
+        + "Themes say why a group of cards exists, and agents work the tickets that make them up."
     /// Under "Nothing is queued.": what moves work in, with an orchestrator, and
     /// without one.
     public static let nothingQueuedNext = "Tell the orchestrator which theme to move forward."
@@ -538,21 +507,21 @@ public enum PlanWords {
     public static let staleNotInstalled = "Far Cooler isn’t installed on this runner. Showing the last plan."
     public static let notReported = TaskUsageFormat.notReported
 
-    /// A lane's state alone.
-    public static func state(_ state: LaneState) -> String { state.word }
+    /// A ticket's stage alone.
+    public static func stage(_ stage: TicketStage) -> String { stage.word }
 
-    /// A lane's state with what it needs said beside it: "Fixing · round
-    /// 1", "Landing · in integ-8", "Queued · 2nd", "Landed · ac840108".
-    public static func status(_ lane: PlanLane) -> String { status(lane, stage: true) }
+    /// A ticket's stage with what it needs said beside it: "Fixing · round
+    /// 1", "Landing · in Landing 8", "Waiting · 2nd", "Landed · ac840108".
+    public static func status(_ line: PlanTicketLine) -> String { status(line, stage: true) }
 
     /// `status`, with or without the pull request's stage (ov-316): a row that
     /// draws the stage on a line of its own leaves it out here.
-    public static func status(_ lane: PlanLane, stage: Bool) -> String {
-        var parts = [state(lane.state)]
+    public static func status(_ line: PlanTicketLine, stage: Bool) -> String {
+        var parts = [line.isFixing ? "Fixing" : line.stage.word]
         // A pull request's stage says more than "In Review" or "Landing", so it
-        // takes the state's place; one the runner could not read is added, for
-        // it says less than the state does (ov-316).
-        if let shown = lane.shownStage, let words = shown.fullWords {
+        // takes the stage's place; one the runner could not read is added, for
+        // it says less than the stage does (ov-316).
+        if let shown = line.shownStage, let words = shown.fullWords {
             if !stage {
                 // A row that draws the stage on its own line keeps what the
                 // stage leaves to the state ("Approved" beside "Checks Failing").
@@ -563,10 +532,10 @@ public enum PlanWords {
                 parts[0] = words
             }
         }
-        if lane.state == .fixing, lane.fixRounds > 0 { parts.append("round \(lane.fixRounds)") }
-        if lane.state == .queued, let rank = lane.planRank { parts.append(ordinal(rank)) }
-        if lane.state == .landed, let sha = lane.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if lane.state.isLive, let train = lane.train, !train.isEmpty { parts.append("in \(lane.trainHeading ?? train)") }
+        if line.isFixing, line.fixRounds > 0 { parts.append("round \(line.fixRounds)") }
+        if line.stage == .waiting, let rank = line.planRank { parts.append(ordinal(rank)) }
+        if line.stage == .landed, let sha = line.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
+        if line.stage.isLive, let landing = line.landing { parts.append("in Landing \(landing)") }
         return parts.joined(separator: " · ")
     }
 
@@ -641,7 +610,7 @@ public enum PlanWords {
         if s.sharedAgents > 0 {
             parts.append(
                 s.sharedAgents == 1
-                    ? "1 agent’s spend split with other lanes" : "\(s.sharedAgents) agents’ spend split with other lanes")
+                    ? "1 agent’s spend split with other tickets" : "\(s.sharedAgents) agents’ spend split with other tickets")
         }
         return parts.joined(separator: " · ")
     }
@@ -649,17 +618,18 @@ public enum PlanWords {
     /// "0 fix rounds", "1 fix round".
     public static func fixRounds(_ n: Int) -> String { n == 1 ? "1 fix round" : "\(n) fix rounds" }
 
-    /// "Builder Opus, 3 h": one agent, its role, model and how long it ran
-    /// (to now while it's open).
-    public static func agent(_ a: PlanAgent, now: Int64) -> String {
+    /// "Builder Opus, 3 h": one turn at a ticket, the agent's role, model and
+    /// how long it ran (to now while it's open).
+    public static func work(_ w: PlanWork, agent: PlanAgent?, now: Int64) -> String {
         let role =
-            switch a.role {
-            case "review": "Reviewer"
-            case "fix": "Fixer"
-            default: "Builder"
+            switch w.role {
+            case .review: "Reviewer"
+            case .fix: "Fixer"
+            case .land: "Lander"
+            case .build, .unknown: "Builder"
             }
-        let model = model(a.model)
-        let ran = TaskUsageFormat.duration(ms: max(0, (a.endedAt ?? now) - a.startedAt))
+        let model = model(agent?.model ?? "")
+        let ran = TaskUsageFormat.duration(ms: max(0, (w.endedAt ?? now) - w.startedAt))
         return model.isEmpty ? "\(role), \(ran)" : "\(role) \(model), \(ran)"
     }
 
@@ -674,16 +644,11 @@ public enum PlanWords {
         }
     }
 
-    /// A stale lane's warning, in words beside its mark: "No move in 2 h".
-    public static func stale(_ lane: PlanLane, now: Int64) -> String? {
-        guard lane.stale else { return nil }
-        let minutes = max(0, now - lane.stateSince) / 60_000
+    /// A stale ticket's warning, in words beside its mark: "No move in 2 h".
+    public static func stale(_ line: PlanTicketLine, now: Int64) -> String? {
+        guard line.stale else { return nil }
+        let minutes = max(0, now - line.stageSince) / 60_000
         return minutes < 120 ? "No move in an hour" : "No move in \(minutes / 60) h"
-    }
-
-    /// A lane's cards, by key, with each slice: "ov-113 s3-4 phones".
-    public static func cardKeys(_ lane: PlanLane) -> String {
-        lane.cards.map { $0.slice.isEmpty ? $0.key : "\($0.key) \($0.slice)" }.joined(separator: ", ")
     }
 }
 
@@ -696,7 +661,7 @@ public struct PlanSegment: Equatable, Sendable {
 
 // MARK: - Records
 
-/// One line of a theme's or lane's timeline.
+/// One line of a theme's or ticket's timeline.
 public struct PlanTimelineRow: Equatable, Sendable, Identifiable {
     public var id: Int
     public var at: Int64

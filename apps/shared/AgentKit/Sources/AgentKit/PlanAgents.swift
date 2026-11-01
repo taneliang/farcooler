@@ -1,59 +1,62 @@
 import Foundation
 
 // Every agent that still exists for a board, as the plan carries them (ov-503,
-// design 6; ov-518): derived on the runner from the turns it read, never
-// typed, so the orchestrator and a subagent nobody recorded are in it. An
-// agent that finished or exited is not: the runner leaves it out, and its
-// spend stays in the day's total. Behind
-// `board_agents`. The type is `PlanFleetAgent` because `PlanAgent` is a lane's
-// typed agent record, which this is not.
+// design 6; ov-518; ov-872): derived on the runner from the turns it read and
+// the agents it recorded, so the orchestrator is in it. An agent that finished
+// or exited is not: the runner leaves it out, and its spend stays in the day's
+// total. An agent has a role (builder, reviewer, lander, or the
+// orchestrator), the tickets it works now, and what it is doing now.
 
-/// What an agent does.
-public enum PlanFleetRole: String, Decodable, Sendable, CaseIterable {
-    case orchestrator, build, review, fix, integrator, subagent, agent
+/// What an agent is for.
+public enum PlanAgentRole: String, Decodable, Sendable, CaseIterable {
+    case orchestrator, builder, reviewer, lander, unknown
 
     public init(from decoder: Decoder) throws {
-        self = PlanFleetRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .agent
+        self = PlanAgentRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
     public var word: String {
         switch self {
         case .orchestrator: "Orchestrator"
-        case .build: "Builder"
-        case .review: "Reviewer"
-        case .fix: "Fixer"
-        case .integrator: "Integrator"
-        case .subagent: "Subagent"
-        case .agent: "Agent"
+        case .builder: "Builder"
+        case .reviewer: "Reviewer"
+        case .lander: "Lander"
+        case .unknown: "Agent"
         }
     }
 }
 
-public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
-    public struct Lane: Decodable, Equatable, Sendable {
-        public var id: String
-        public var name: String
-    }
-    public struct Train: Decodable, Equatable, Sendable {
-        public var id: String
-        public var title: String
-    }
+/// A ticket an agent works now, and as what.
+public struct PlanAgentTicket: Decodable, Equatable, Sendable {
+    public var task: String
+    public var key: String
+    public var role: WorkRole
+    public var startedAt: Int64
+}
 
-    /// `agent:<agentId>`, `pane:<terminal id>` or `turns:<harness>`.
+public struct PlanAgent: Decodable, Equatable, Identifiable, Sendable {
+    /// The agent's id.
     public var id: String
-    public var role: PlanFleetRole
+    public var short: String
+    public var role: PlanAgentRole
     public var harness: String
     /// The model that spent the most; empty when none was named.
     public var model: String
-    /// What the orchestrator called a subagent; empty when nothing kept it.
-    public var label: String
-    public var lane: Lane?
-    public var train: Train?
-    public var card: PlanCardRef?
+    /// What the orchestrator called it; empty when it gave no title.
+    public var title: String
     /// The pane, to open it.
     public var terminal: String?
-    public var working: Bool
+    /// A subagent's id inside its parent's pane; empty for a pane of its own.
+    public var subagentId: String
+    public var parentTerminal: String?
     public var startedAt: Int64
+    /// When a person asked it to stop; nil if nobody has.
+    public var stopAskedAt: Int64?
+    /// The tickets it works now.
+    public var tickets: [PlanAgentTicket]
+    public var working: Bool
+    /// What it is doing now, in its own words; empty when it says nothing.
+    public var doingNow: String
     public var lastAt: Int64
     public var spend: PlanSpend
 
@@ -63,14 +66,11 @@ public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
         return "\(role.word) · \(model.isEmpty ? harness : model)"
     }
 
-    /// What it works for: the plan, a lane, a train or a card, else "Not on a
-    /// lane".
+    /// What it works for: the plan, its tickets by key, else "On no ticket".
     public var worksFor: String {
         if role == .orchestrator { return "Plan" }
-        if let lane { return lane.name }
-        if let train { return train.title }
-        if let card { return card.key }
-        return PlanWords.notOnALane
+        if !tickets.isEmpty { return tickets.map(\.key).joined(separator: ", ") }
+        return PlanWords.onNoTicket
     }
 
     /// "Working · 22 min" while it works; "Idle · active 1 h ago" for a pane
@@ -92,12 +92,12 @@ public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
-extension PlanFleetAgent {
-    /// "“Design ov-503” · Not on a lane · Working · 22 min": what it was told, what it
+extension PlanAgent {
+    /// "“Design ov-503” · ov-503 · Working · 22 min": what it was told, what it
     /// works for, and its state.
     public func second(now: Int64) -> String {
         var parts: [String] = []
-        if !label.isEmpty { parts.append("\u{201C}\(label)\u{201D}") }
+        if !title.isEmpty { parts.append("\u{201C}\(title)\u{201D}") }
         parts.append(worksFor)
         parts.append(state(now: now))
         return parts.joined(separator: " \u{00B7} ")
@@ -105,19 +105,19 @@ extension PlanFleetAgent {
 }
 
 extension PlanWords {
-    public static let notOnALane = "Not on a lane"
+    public static let onNoTicket = "On no ticket"
 }
 
 /// The agents list as the Plan draws it: the agents that exist, working
 /// first, by spend. The header's total is the day's, the agents that finished
 /// included, as the runner counts it.
 public struct PlanFleet: Equatable, Sendable {
-    public var agents: [PlanFleetAgent]
+    public var agents: [PlanAgent]
     /// What every agent of the last 24 hours spent, those gone included; nil
     /// from a runner before ov-518, and the listed agents' sum stands in.
     public var spend: PlanSpend?
 
-    public init(_ agents: [PlanFleetAgent], spend: PlanSpend? = nil) {
+    public init(_ agents: [PlanAgent], spend: PlanSpend? = nil) {
         self.agents = agents.sorted {
             if $0.working != $1.working { return $0.working }
             return $0.spend.totalTokens > $1.spend.totalTokens

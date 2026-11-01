@@ -3,7 +3,7 @@ import Foundation
 // What the phone's Plan view decides, as values (ov-538). These rules used to
 // live in the iOS views' bodies, where only a launched app could check them:
 // which of Waiting's groups are named, the sentence VoiceOver reads for a
-// train, an agent, a theme tile and the band, which rulings and buttons show,
+// landing, an agent, a theme tile and the band, which rulings and buttons show,
 // and what keeping a ruling does to the plan on screen. The iOS target has no
 // unit tests, so they are here, and the views only draw what these answer.
 
@@ -13,7 +13,7 @@ extension PlanSections.Waiting {
     /// One of Waiting's groups.
     public struct Group: Equatable, Identifiable, Sendable {
         public var title: String
-        public var rows: [PlanSections.LaneRow]
+        public var rows: [PlanSections.TicketRow]
         /// Its rows carry their place, 1, 2, 3: the plan's own order.
         public var ranked: Bool
         /// It waits on the owner: drawn with the amber mark.
@@ -37,22 +37,22 @@ extension PlanSections.Waiting {
     public var namesGroups: Bool { groups.count > 1 }
 }
 
-// MARK: Trains
+// MARK: Landings
 
-extension PlanSections.TrainCard {
-    /// What VoiceOver reads for a train row, and what the UI tests read as its
-    /// label: "Train 86, Teams on a shared runner, …, Checking on CI · step 2
-    /// of 3, 3f78754f · … · Integrator · Opus".
+extension PlanSections.LandingCard {
+    /// What VoiceOver reads for a landing row, and what the UI tests read as its
+    /// label: "Landing 86, Teams on a shared runner, …, Checking on CI · step 2
+    /// of 3, 3f78754f · … · Lander · Opus".
     public func spoken(ci: PlanCIRead?, now: Int64) -> String {
-        [train.label, train.subtitle, train.carries, PlanLadder.compact(phase), facts(ci: ci, now: now)]
+        [landing.label, landing.subtitle, landing.carries, PlanLadder.compact(phase), facts(ci: ci, now: now)]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
-    /// A long press says what a train is, then each step of the ladder, the
+    /// A long press says what a landing is, then each step of the ladder, the
     /// one it stands on in the phase's own words.
     public var explanation: [String] {
         let current = PlanLadder.step(phase)
-        return [PlanWords.trainExplanation]
+        return [PlanWords.landingExplanation]
             + PlanLadder.steps.indices.map { index in
                 "\(PlanLadder.label(index, current: current, phase: phase)): \(PlanLadder.explanation(index, current: current, phase: phase))"
             }
@@ -61,7 +61,7 @@ extension PlanSections.TrainCard {
 
 // MARK: Agents, tiles and the band
 
-extension PlanFleetAgent {
+extension PlanAgent {
     /// What VoiceOver reads for an agent's row: who, for what and its state,
     /// then its tokens.
     public func spoken(now: Int64) -> String {
@@ -94,7 +94,7 @@ extension PlanThemeTile {
 }
 
 extension PlanGlanceSentence {
-    /// What VoiceOver reads for the band: "No lanes moving. Next: nothing
+    /// What VoiceOver reads for the band: "No tickets moving. Next: nothing
     /// queued. 2 need you." At the sheet's medium detent (`nowOnly`) the Now
     /// line alone.
     public func spoken(needsYou: Int, nowOnly: Bool = false) -> String {

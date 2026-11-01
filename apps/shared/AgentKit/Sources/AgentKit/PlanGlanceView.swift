@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The plan's glance, drawn (ov-310): the board and what needs you on it, the
-/// lanes in Now and the one next up.
+/// tickets in Now and the one next up.
 ///
 /// One view for every surface that says it, so the phone's widget, the Live
 /// Activity, the watch app and its complication can't word it four ways.
@@ -9,16 +9,16 @@ import SwiftUI
 /// goes on at the largest text size it allows (review H3, `PlanGlanceFitTests`):
 ///
 /// - `.lines`, four at most, for a lock screen or Smart Stack accessory: the
-///   board, one line per Now lane, next up. Text size stops at Large, the
+///   board, one line per Now ticket, next up. Text size stops at Large, the
 ///   default, because an accessory has no room to grow.
-/// - `.rows`, the same four with each lane's state set right, for a home
+/// - `.rows`, the same four with each ticket's stage set right, for a home
 ///   screen widget and the watch app's list. Text size stops at xxx-Large.
 /// - `.card`, two lines in the card's own fixed type, for the Live Activity:
 ///   the board and next up, then Now.
 ///
 /// A `caveat` says the plan isn't current: a quiet runner's Now becomes
-/// "Can't reach Studio · 3h ago" (its lanes are a claim nobody vouches for),
-/// and a remembered plan keeps its lanes with "As of 3h ago" on top.
+/// "Can't reach Studio · 3h ago" (its tickets are a claim nobody vouches for),
+/// and a remembered plan keeps its tickets with "As of 3h ago" on top.
 ///
 /// Amber only on the count, the one part that asks for the owner. VoiceOver
 /// reads the whole glance as one sentence.
@@ -41,7 +41,7 @@ public struct PlanGlanceView: View {
         self.stale = stale
     }
 
-    /// The longest a lane's name is drawn, in characters, before it's cut
+    /// The longest a ticket's key is drawn, in characters, before it's cut
     /// with an ellipsis. Branch-like slugs fit; a long one keeps its state
     /// word on the line.
     public static let nameShown = 20
@@ -66,11 +66,11 @@ public struct PlanGlanceView: View {
             VStack(alignment: .leading, spacing: style == .rows ? 3 : 1) {
                 heading
                 if let caveat, caveat.cantReach != nil {
-                    // Two lines: it stands for both lanes, so it keeps the
+                    // Two lines: it stands for both tickets, so it keeps the
                     // style inside its four.
                     line(caveat.line, lines: 2)
                 } else {
-                    ForEach(Array(glance.now.enumerated()), id: \.offset) { _, each in laneRow(each) }
+                    ForEach(Array(glance.now.enumerated()), id: \.offset) { _, each in ticketRow(each) }
                 }
                 if let next = glance.next { line("Next: \(Self.shown(next))") }
             }
@@ -98,16 +98,16 @@ public struct PlanGlanceView: View {
         }
     }
 
-    @ViewBuilder private func laneRow(_ lane: PlanGlance.Lane) -> some View {
+    @ViewBuilder private func ticketRow(_ ticket: PlanGlance.Ticket) -> some View {
         switch style {
         case .rows:
             HStack(spacing: 6) {
-                Text(Self.shown(lane.name)).font(caption(mono: true)).lineLimit(1)
+                Text(Self.shown(ticket.ticket)).font(caption(mono: true)).lineLimit(1)
                 Spacer(minLength: 4)
-                Text(lane.state.word).font(caption()).foregroundStyle(GlancePalette.ink2(scheme)).lineLimit(1).layoutPriority(1)
+                Text(ticket.stage.word).font(caption()).foregroundStyle(GlancePalette.ink2(scheme)).lineLimit(1).layoutPriority(1)
             }
         default:
-            line("\(Self.shown(lane.name)) · \(lane.state.word)")
+            line("\(Self.shown(ticket.ticket)) · \(ticket.stage.word)")
         }
     }
 
@@ -120,12 +120,12 @@ public struct PlanGlanceView: View {
         ([glance.heading] + [glance.next.map { "Next: \(Self.shown($0))" }].compactMap { $0 }).joined(separator: " · ")
     }
 
-    /// Now, or why it isn't said: "Now: mac-ux In Review, ov-310 Building",
+    /// Now, or why it isn't said: "Now: ov-312 In Review, ov-310 Building",
     /// "Can’t reach Studio · 3h ago", "As of 3h ago"; nil on a stale card.
     private var cardSecond: String? {
         if let caveat, caveat.cantReach != nil { return caveat.line }
         if stale { return nil }
-        let now = glance.now.isEmpty ? nil : "Now: " + glance.now.map { "\(Self.shown($0.name)) \($0.state.word)" }.joined(separator: ", ")
+        let now = glance.now.isEmpty ? nil : "Now: " + glance.now.map { "\(Self.shown($0.ticket)) \($0.stage.word)" }.joined(separator: ", ")
         return [caveat?.line, now].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
     }
 

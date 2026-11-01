@@ -93,7 +93,7 @@ public enum ClaudeSignIn {
 
     public static let sectionTitle = "Claude"
     public static let notSignedInBody =
-        "Sign in so your rep and the lanes you start use your own Claude account and its connectors."
+        "Sign in so your rep and the agents you start use your own Claude account and its connectors."
 
     /// The not-signed-in body. `sharedAccount` is non-nil where this member's
     /// panes use the runner's own Claude login until they sign in (ov-652):
@@ -101,7 +101,7 @@ public enum ClaudeSignIn {
     public static func notSignedInBody(sharedAccount: String?) -> String {
         guard let sharedAccount else { return notSignedInBody }
         let whose = sharedAccount.isEmpty ? "this runner’s own Claude account" : "this runner’s own Claude account, \(sharedAccount)"
-        return "Until you sign in, your rep and the lanes you start use \(whose). "
+        return "Until you sign in, your rep and the agents you start use \(whose). "
             + "Sign in to use your own account and its connectors."
     }
     public static let signInButton = "Sign In to Claude…"
@@ -149,13 +149,13 @@ public enum ClaudeSignIn {
     }
 
     public static func signOutTitle(runner: String) -> String { "Sign out of Claude on \(runner)?" }
-    public static let signOutMessage = "Your rep and lanes there stop until you sign in again."
+    public static let signOutMessage = "Your rep and agents there stop until you sign in again."
 
     /// The sign-out question's message: where members share the runner's
     /// Claude login (ov-652), their panes move to it rather than stop.
     public static func signOutMessage(shared: Bool) -> String {
         shared
-            ? "Your rep and lanes there use this runner’s own Claude account from the next time each starts."
+            ? "Your rep and agents there use this runner’s own Claude account from the next time each starts."
             : signOutMessage
     }
 
@@ -169,8 +169,8 @@ public enum ClaudeSignIn {
     /// workspace and this is per runner, so it names no one.
     public static func trustCopy(runner: String) -> String {
         "Your Claude login is kept on \(runner). Its owner, and anyone with Control of it, could use it. "
-            + "Far Cooler uses it only for your rep and the lanes you start. "
-            + "Lanes the orchestrator starts for your asks use the workspace lead’s login."
+            + "Far Cooler uses it only for your rep and the agents you start. "
+            + "Agents the orchestrator starts for your asks use the workspace lead’s login."
     }
 
     /// What the owner reads where the shared account used to be named, on a

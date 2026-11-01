@@ -2,7 +2,7 @@ import Foundation
 
 // What a theme's entry in the canvas says, and in what order (ov-331, design
 // 2.1): its outcome, its story with its age, what it needs from the owner,
-// what's next, the lanes moving it, what landed this week, what was decided
+// what's next, the tickets moving it, what landed this week, what was decided
 // and, against a budget, its spend. An empty line takes no space: a theme
 // with no story says nothing of one.
 //
@@ -10,8 +10,8 @@ import Foundation
 // their rows keep; this is the one place that says which parts there are.
 
 public struct PlanThemeBrief: Equatable, Sendable {
-    /// How many lanes the entry lists before "+2 more".
-    public static let laneLimit = 3
+    /// How many tickets the entry lists before "+2 more".
+    public static let ticketLimit = 3
     /// How many standing rulings it lists.
     public static let rulingLimit = 2
     /// The outcome's lines when the entry is open, and the story's.
@@ -26,8 +26,8 @@ public struct PlanThemeBrief: Equatable, Sendable {
     public var storyAge: String?
     public var ask: String?
     public var next: String?
-    /// The lanes moving it, then queued for it: at most `laneLimit`.
-    public var moving: [PlanLane]
+    /// The tickets moving it, then waiting for it: at most `ticketLimit`.
+    public var moving: [PlanTicketLine]
     public var movingMore: Int
     /// "rulings, plan-v2-glance, +2 more"; nil when none landed this week.
     public var landed: String?
@@ -46,11 +46,11 @@ public struct PlanThemeBrief: Equatable, Sendable {
         storyAge = PlanWords.storyAge(theme, now: plan.nowMs)
         ask = theme.ownerAsk.isEmpty ? nil : theme.ownerAsk
         next = theme.next.isEmpty ? nil : theme.next
-        let lanes = plan.lanes(in: theme).filter { $0.state.isLive }
-        moving = Array(lanes.prefix(Self.laneLimit))
-        movingMore = max(0, lanes.count - Self.laneLimit)
+        let lines = plan.lines(in: theme).filter { $0.stage.isLive }
+        moving = Array(lines.prefix(Self.ticketLimit))
+        movingMore = max(0, lines.count - Self.ticketLimit)
         let landed = plan.landedThisWeek(in: theme)
-        self.landed = landed.isEmpty ? nil : PlanWords.lanesLine(landed)
+        self.landed = landed.isEmpty ? nil : PlanWords.ticketsLine(landed)
         let standing = plan.rulings(in: theme).filter(\.isStanding)
         decided = Array(standing.prefix(Self.rulingLimit))
         decidedMore = max(0, standing.count - Self.rulingLimit)

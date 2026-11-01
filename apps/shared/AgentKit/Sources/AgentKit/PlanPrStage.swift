@@ -1,6 +1,6 @@
 import Foundation
 
-// Where a lane's or a card's pull request stands (ov-316, team mode T5): the
+// Where a ticket's pull request stands (ov-316, team mode T5): the
 // runner derives the stage on read (`pr_stage.rs`, ov-312) and sends its kind
 // and facts; this file words it in the apps' own style, for the Mac now and the
 // phones next (ov-317). Every field is optional on the wire: a runner before
@@ -130,7 +130,7 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
         kind == .changesRequested || kind == .approvedChecksFailing || kind == .approvedConflicts
     }
 
-    /// What a lane row or a card line draws for the stage (ov-317): the problem
+    /// What a ticket row or a card line draws for the stage (ov-317): the problem
     /// alone when it needs a person, since the gray state line keeps "Approved"
     /// (`stateWords`); one phrase for every other.
     public var rowWords: String? { needsAttention ? words : (fullWords ?? words) }
@@ -143,8 +143,8 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
     /// runner named (`prNumber`), not one it could not read.
     public var canMarkReady: Bool { isDraft && prNumber > 0 }
 
-    /// What a row says about the stage, or nil when the lane's own state word
-    /// already says it ("Building" under a building lane) or this build cannot
+    /// What a row says about the stage, or nil when the ticket's own stage word
+    /// already says it ("Building" under a building ticket) or this build cannot
     /// word it.
     public var shown: String? { kind == .building ? nil : words }
 
@@ -164,11 +164,11 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
     }
 }
 
-extension PlanLane {
-    /// The stage a lane row shows: only while the lane is live and the stage
-    /// has something to add to the state word.
+extension PlanTicketLine {
+    /// The pull request stage a ticket row shows: only while the ticket is
+    /// live and the stage has something to add to the stage word.
     public var shownStage: PlanPrStage? {
-        guard state.isLive, let stage, stage.shown != nil else { return nil }
-        return stage
+        guard stage.isLive, let prStage, prStage.shown != nil else { return nil }
+        return prStage
     }
 }

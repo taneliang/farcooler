@@ -1,12 +1,12 @@
 import Foundation
 
 // Cost on the plan (ov-307, folding in ov-261): a token budget on a theme or a
-// lane, a theme's seven-day trend, the runner's tokens this week, and cost per
+// ticket, a theme's seven-day trend, the runner's tokens this week, and cost per
 // finished card by harness and model. EXPERIMENTAL with the plan layer, behind
 // `board_cost`: a runner without it sends none of this, and nothing here draws.
 //
 // Tokens come first and dollars second, and every dollar is API-equivalent. A
-// budget is a number of tokens counted as a lane's spend counts them (input,
+// budget is a number of tokens counted as a ticket's spend counts them (input,
 // output and both cache counts), so what the plan flags over budget is what
 // the plan prints as "6.1M tokens".
 //
@@ -182,16 +182,16 @@ extension PlanWords {
         return used > budget ? .over(used: used, budget: budget) : .within(used: used, budget: budget)
     }
 
-    /// The warning a lane over its budget carries, in the words a row draws
+    /// The warning a ticket over its budget carries, in the words a row draws
     /// in amber; nil when it has no budget or is within it.
-    public static func overBudget(_ lane: PlanLane, locale: Locale = .current) -> String? {
-        guard let b = budget(lane.spend, against: lane.budgetTokens), b.isOver else { return nil }
+    public static func overBudget(_ line: PlanTicketLine, locale: Locale = .current) -> String? {
+        guard let b = budget(line.spend, against: line.budgetTokens), b.isOver else { return nil }
         return budgetLine(b, locale: locale)
     }
 
     /// The same, said for VoiceOver with the counts as words.
-    public static func overBudgetSpoken(_ lane: PlanLane, locale: Locale = .current) -> String? {
-        guard let b = budget(lane.spend, against: lane.budgetTokens), b.isOver else { return nil }
+    public static func overBudgetSpoken(_ line: PlanTicketLine, locale: Locale = .current) -> String? {
+        guard let b = budget(line.spend, against: line.budgetTokens), b.isOver else { return nil }
         return budgetSpoken(b, locale: locale)
     }
 

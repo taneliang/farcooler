@@ -3,16 +3,17 @@ import Foundation
 // One tree (ov-321, Concept 1 of .claude/agent/reports/ov-321/ia.md, 3.1 and
 // 4): the workspace's sidebar as one outline that follows containment,
 //
-//   Theme › Task › Lane › Terminals
+//   Theme › Task › Ticket › Terminals
 //
-// where a lane IS its worktree. The board has two hierarchies that meet at the
-// task: the why (theme › task) and the how (lane › worktree › terminals). The
+// where a ticket's row IS its worktree. The board has two hierarchies that meet
+// at the task: the why (theme › task) and the how (ticket › worktree ›
+// terminals). The
 // old sidebar listed kinds (Themes, Pages, Tasks, Terminals, Worktrees) and
 // drew none of the joins; this draws them.
 //
 // Every rule is here, as values, so the Mac's sidebar and (later) the phones'
-// push navigation read one model: what's under what, which lane shows under
-// two cards ("also ov-303"), where a Needs You dot rolls up to, which theme
+// push navigation read one model: what's under what, where a Needs You dot
+// rolls up to, which theme
 // opens by default, and the path the jump bar shows. The views only lay out
 // `OneTree.rows`.
 
@@ -93,7 +94,7 @@ public struct OneTreeTerminal: Equatable, Sendable {
     }
 }
 
-/// A worktree: a lane's, a task's own, the main checkout or a loose one.
+/// A worktree: a ticket's, a task's own, the main checkout or a loose one.
 public struct OneTreeWorktree: Equatable, Sendable {
     public var id: String
     /// Its name as the fleet says it (`.claude/worktrees/<name>`).
@@ -105,7 +106,7 @@ public struct OneTreeWorktree: Equatable, Sendable {
     public var isHidden: Bool
     public var terminals: [OneTreeTerminal]
     /// The tasks whose panes it holds (`terminals.task_id`) or that it is
-    /// the lane of (`open_tasks`), by id.
+    /// the ticket of (`open_tasks`), by id.
     public var taskIDs: [String]
     /// This workspace's own, rather than another's that holds one of its
     /// cards: only its own can be loose here (ruling R-23).
@@ -239,7 +240,7 @@ public struct OneTreeInput: Equatable, Sendable {
     /// The board's cards, in the board's order.
     public var tasks: [OneTreeTask]
     public var plan: PlanModel
-    /// The workspace's worktrees: lanes', tasks' and loose ones. Not the
+    /// The workspace's worktrees: tickets', tasks' and loose ones. Not the
     /// main checkout, which is `mainCheckout`.
     public var worktrees: [OneTreeWorktree]
     /// The repository's own checkout, holding the project terminals.
@@ -286,8 +287,9 @@ public enum OneTreeTarget: Hashable, Sendable {
     case plan
     case theme(String)
     case task(String)
-    case lane(String)
-    /// A worktree opened whole: a task's own with no lane, or a loose one.
+    /// A ticket on the line, by its card's id.
+    case ticket(String)
+    /// A worktree opened whole: a task's own with no ticket, or a loose one.
     case worktree(String)
     case terminal(worktree: String, terminal: String)
     case page(String)
@@ -301,9 +303,9 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
         case task
         /// "4 done": a theme's finished cards, folded.
         case doneFold
-        /// A lane: a plan lane (with its worktree, if any), or a task's own
-        /// worktree with no lane recorded.
-        case lane
+        /// A ticket: a plan ticket (with its worktree, if any), or a task's own
+        /// worktree with no ticket recorded.
+        case ticket
         case terminal
         /// An agent with no pane: it runs inside the orchestrator.
         case subagent
@@ -313,21 +315,20 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
         case worktree
     }
 
-    /// Unique in the tree: its path from the root. A lane under two cards
-    /// is two nodes, with one target.
+    /// Unique in the tree: its path from the root. A row has one target.
     public var id: String
     public var kind: Kind
     public var title: String
     /// A task's key, before its title.
     public var key: String = ""
-    /// A lane's slug, when its title is words (ov-466): what a row's
+    /// A ticket's key, when its title is its branch (ov-466): what a row's
     /// accessibility identifier and the search still go by.
     public var slug: String = ""
-    /// Trailing, quiet: a theme's progress, a lane's state, a count.
+    /// Trailing, quiet: a theme's progress, a ticket's stage, a count.
     public var detail: String = ""
     /// A second, quieter line: a subagent's "No terminal; …".
     public var caption: String = ""
-    /// "also ov-303": the lane works other cards too.
+    /// "also ov-303": kept for a row that names other cards it carries.
     public var also: String = ""
     /// An SF Symbol name for the row's glyph.
     public var glyph: String = ""
@@ -339,22 +340,22 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
     public var holdsAsk = false
     /// Open until someone closes it.
     public var expandedByDefault = false
-    /// Drawn quieter: a finished card, a landed lane.
+    /// Drawn quieter: a finished card, a landed ticket.
     public var quiet = false
-    /// For a lane: its state, so the view can tint a stale or waiting one.
-    public var laneState: LaneState?
-    /// The worktree a lane, a worktree or a terminal row is in: what its
+    /// For a ticket: its stage, so the view can tint a stale or waiting one.
+    public var ticketStage: TicketStage?
+    /// The worktree a ticket, a worktree or a terminal row is in: what its
     /// menu acts on.
     public var worktreeID: String?
 
     public var hasChildren: Bool { !children.isEmpty }
 
     /// Whether choosing `target` lands on this node: its own target, or,
-    /// for a lane, its worktree opened whole.
+    /// for a ticket, its worktree opened whole.
     public func stands(for target: OneTreeTarget?) -> Bool {
         guard let target else { return false }
         if self.target == target { return true }
-        guard kind == .lane, case .worktree(let id) = target else { return false }
+        guard kind == .ticket, case .worktree(let id) = target else { return false }
         return children.contains {
             if case .terminal(id, _)? = $0.target { return true }
             return false
@@ -402,7 +403,7 @@ public enum OneTreeWords {
     /// "3/10": a theme's cards done of those counted.
     public static func progress(_ counts: PlanCounts) -> String { "\(counts.done)/\(PlanWords.total(counts))" }
 
-    /// "also ov-303", "also ov-303 +2": the other cards a lane works.
+    /// "also ov-303", "also ov-303 +2": the other cards a row names.
     public static func also(_ keys: [String]) -> String {
         guard let first = keys.first else { return "" }
         return keys.count == 1 ? "also \(first)" : "also \(first) +\(keys.count - 1)"
@@ -423,22 +424,13 @@ public enum OneTreeWords {
         return model.isEmpty ? role : "\(role) · \(model)"
     }
 
-    /// A lane agent's role, as people say it.
-    public static func role(_ raw: String) -> String {
-        switch raw {
-        case "review": "Reviewer"
-        case "fix": "Fixer"
-        default: "Builder"
-        }
-    }
-
-    /// A lane state's glyph.
-    public static func glyph(_ state: LaneState) -> String {
-        switch state {
-        case .queued: "clock"
+    /// A ticket stage's glyph.
+    public static func glyph(_ stage: TicketStage) -> String {
+        switch stage {
+        case .waiting: "clock"
         case .building: "hammer"
-        case .review: "eye"
-        case .fixing: "wrench.adjustable"
+        case .reviewing: "eye"
+        case .needsYou: "person.crop.circle.badge.exclamationmark"
         case .landing: "arrow.down.to.line"
         case .landed: "checkmark.circle"
         case .dropped: "xmark.circle"
@@ -454,17 +446,17 @@ struct OneTreeBuilder {
     let input: OneTreeInput
     let tasksByID: [String: OneTreeTask]
     let themes: [PlanTheme]
-    let lanes: [PlanLane]
-    /// Each lane's worktree, by lane id.
-    let laneWorktrees: [String: OneTreeWorktree]
-    /// The joins, indexed once (ov-321 review H2): a lane's cards, a card's
-    /// lanes, the worktrees by id and by the cards they hold, and the
-    /// lane-reached worktrees. Every node then reads them in constant time,
-    /// so a build is linear in the board.
-    let lanesByTask: [String: [PlanLane]]
+    let lines: [PlanTicketLine]
+    /// Each ticket's worktree, by task id.
+    let lineWorktrees: [String: OneTreeWorktree]
+    /// The joins, indexed once (ov-321 review H2): a card's ticket, the
+    /// worktrees by id and by the cards they hold, and the ticket-reached
+    /// worktrees. Every node then reads them in constant time, so a build is
+    /// linear in the board.
+    let linesByTask: [String: PlanTicketLine]
     let worktreesByID: [String: OneTreeWorktree]
     let worktreesByTask: [String: [OneTreeWorktree]]
-    let laneWorktreeIDs: Set<String>
+    let lineWorktreeIDs: Set<String>
 
     init(_ input: OneTreeInput) {
         self.input = input
@@ -475,13 +467,10 @@ struct OneTreeBuilder {
         }
         tasksByID = byID
         themes = input.plan.shownThemes
-        lanes = input.plan.lanes.filter { $0.state != .dropped }
-        var byTask: [String: [PlanLane]] = [:]
-        for lane in lanes {
-            var seen = Set<String>()
-            for card in lane.cards where seen.insert(card.task).inserted { byTask[card.task, default: []].append(lane) }
-        }
-        lanesByTask = byTask
+        lines = input.plan.lines.filter { $0.stage != .dropped }
+        var byTask: [String: PlanTicketLine] = [:]
+        for line in lines where byTask[line.task] == nil { byTask[line.task] = line }
+        linesByTask = byTask
         var wtByID: [String: OneTreeWorktree] = [:]
         var wtByTask: [String: [OneTreeWorktree]] = [:]
         for worktree in input.worktrees where wtByID[worktree.id] == nil {
@@ -492,11 +481,11 @@ struct OneTreeBuilder {
         worktreesByTask = wtByTask
         let join = OneTreeJoin(input.worktrees)
         var joined: [String: OneTreeWorktree] = [:]
-        for lane in lanes {
-            if let worktree = join.worktree(of: lane) { joined[lane.id] = worktree }
+        for line in lines {
+            if let worktree = join.worktree(of: line) { joined[line.task] = worktree }
         }
-        laneWorktrees = joined
-        laneWorktreeIDs = Set(joined.values.map(\.id))
+        lineWorktrees = joined
+        lineWorktreeIDs = Set(joined.values.map(\.id))
     }
 
     func build() -> OneTree {
@@ -505,7 +494,7 @@ struct OneTreeBuilder {
             places: places(), tree: tree, below: [mainCheckoutNode(), looseNode(reached: Self.worktrees(in: tree))].compactMap { $0 })
     }
 
-    /// The worktrees the rows in `nodes` reach: a lane's, a card's own, and
+    /// The worktrees the rows in `nodes` reach: a ticket's, a card's own, and
     /// those whose panes are listed.
     static func worktrees(in nodes: [OneTreeNode]) -> Set<String> {
         var out = Set<String>()
@@ -522,21 +511,20 @@ struct OneTreeBuilder {
 
     // MARK: Joins
 
-    /// The worktree a lane works in: the one at its path, else (a path
+    /// The worktree a ticket works in: the one at its path, else (a path
     /// recorded relative to the repository) the one whose path ends with
-    /// it, else the one on its branch. Nil for a lane with no worktree yet.
-    static func worktree(of lane: PlanLane, in worktrees: [OneTreeWorktree]) -> OneTreeWorktree? {
-        OneTreeJoin(worktrees).worktree(of: lane)
+    /// it, else the one on its branch. Nil for a ticket with no worktree yet.
+    static func worktree(of line: PlanTicketLine, in worktrees: [OneTreeWorktree]) -> OneTreeWorktree? {
+        OneTreeJoin(worktrees).worktree(of: line)
     }
 
-    /// The lanes working `task`, in the plan's order: a fix round's lane
-    /// after the lane it fixes.
-    func lanes(of task: String) -> [PlanLane] { lanesByTask[task] ?? [] }
+    /// The ticket for `task` on the line, if it has one.
+    func line(of task: String) -> PlanTicketLine? { linesByTask[task] }
 
-    /// The worktrees `task` works in with no lane recorded: its own, and
-    /// any holding its panes, that no lane already stands for.
+    /// The worktrees `task` works in with no ticket recorded: its own, and
+    /// any holding its panes, that no ticket already stands for.
     func ownWorktrees(of task: OneTreeTask) -> [OneTreeWorktree] {
-        let taken = Set(lanes(of: task.id).compactMap { laneWorktrees[$0.id]?.id })
+        let taken = Set(line(of: task.id).flatMap { lineWorktrees[$0.task]?.id }.map { [$0] } ?? [])
         var out: [OneTreeWorktree] = []
         if let own = task.worktreeID, let found = worktreesByID[own], !taken.contains(own) {
             out.append(found)
@@ -593,10 +581,10 @@ struct OneTreeBuilder {
                 }
             }
             let id = "theme:\(theme.id)"
-            // A theme with work moving starts open: a lane being worked under
-            // one of its cards (not one still queued). The rest show their name
+            // A theme with work moving starts open: a ticket being worked under
+            // one of its cards (not one still waiting). The rest show their name
             // and progress (ov-334).
-            let live = ids.contains { lanes(of: $0).contains { $0.state.isLive && $0.state != .queued } }
+            let live = ids.contains { line(of: $0)?.stage.isPastWaiting ?? false }
             var children = shown.map { taskNode($0, under: id, themeLive: live) }
             if folds {
                 // A finished card keeps its id under the theme whichever
@@ -666,58 +654,50 @@ struct OneTreeBuilder {
     /// Whether finished cards fold under their theme: under Not Done alone.
     var folds: Bool { input.filter == .open && input.narrow == nil }
 
-    // MARK: Tasks and lanes
+    // MARK: Tasks and tickets
 
     func taskNode(_ task: OneTreeTask, under parent: String, themeLive: Bool) -> OneTreeNode {
         let id = "\(parent)/task:\(task.id)"
-        let mine = lanes(of: task.id)
-        var children = mine.map { laneNode($0, for: task, under: id) }
-        children += ownWorktrees(of: task).map { worktreeLaneNode($0, for: task, under: id) }
-        // Subagents with no lane to sit under sit under the card.
-        if mine.isEmpty {
-            children += subagents(lane: nil, task: task, under: id)
+        let mine = line(of: task.id)
+        var children = mine.map { [ticketNode($0, for: task, under: id)] } ?? []
+        children += ownWorktrees(of: task).map { worktreeTicketNode($0, for: task, under: id) }
+        // Subagents with no ticket to sit under sit under the card.
+        if mine == nil {
+            children += subagents(line: nil, task: task, under: id)
         }
         var node = OneTreeNode(
             id: id, kind: .task, title: task.title, key: task.key, glyph: OneTreeGlyph.task(task.status),
             target: .task(task.id), children: children, quiet: task.status.isFinished)
         node.asks = input.asks.tasks.contains(task.id)
-        // A card being worked opens on its lanes inside the theme that's
+        // A card being worked opens on its ticket inside the theme that's
         // open by default; the rest stay closed.
-        node.expandedByDefault = themeLive
-            && mine.contains { $0.state.isLive && $0.state != .queued }
+        node.expandedByDefault = themeLive && (mine?.stage.isPastWaiting ?? false)
         return finish(node)
     }
 
-    /// What a lane's row says (ov-466): its title, else the one derived from
-    /// its cards, else "Train 9" for a train's own lane `integ-9`, as the
-    /// Mac's Now list does, and only then its slug.
-    static func laneTitle(_ lane: PlanLane) -> String {
-        if lane.heading != lane.name { return lane.heading }
-        return PlanWords.trainNumber(lane.name).map { "Train \($0)" } ?? lane.name
-    }
-
-    func laneNode(_ lane: PlanLane, for task: OneTreeTask, under parent: String) -> OneTreeNode {
-        let id = "\(parent)/lane:\(lane.id)"
-        let others = lane.cards.filter { $0.task != task.id }.map(\.key)
+    /// A ticket's row: its branch when it has one (ov-466), else its key, and
+    /// its stage beside it.
+    func ticketNode(_ line: PlanTicketLine, for task: OneTreeTask, under parent: String) -> OneTreeNode {
+        let id = "\(parent)/ticket:\(line.task)"
         var children: [OneTreeNode] = []
-        if let worktree = laneWorktrees[lane.id] { children += terminalNodes(worktree, under: id) }
-        children += subagents(lane: lane, task: task, under: id)
+        if let worktree = lineWorktrees[line.task] { children += terminalNodes(worktree, under: id) }
+        children += subagents(line: line, task: task, under: id)
         var node = OneTreeNode(
-            id: id, kind: .lane, title: Self.laneTitle(lane), slug: lane.name, detail: PlanWords.state(lane.state),
-            also: OneTreeWords.also(others), glyph: OneTreeGlyph.lane(lane.state), target: .lane(lane.id),
-            children: children, quiet: !lane.state.isLive)
-        node.laneState = lane.state
-        node.worktreeID = laneWorktrees[lane.id]?.id
+            id: id, kind: .ticket, title: line.branch.isEmpty ? line.key : line.branch, slug: line.key,
+            detail: line.isFixing ? "Fixing" : PlanWords.stage(line.stage), glyph: OneTreeGlyph.ticket(line.stage),
+            target: .ticket(line.task), children: children, quiet: !line.stage.isLive)
+        node.ticketStage = line.stage
+        node.worktreeID = lineWorktrees[line.task]?.id
         return finish(node)
     }
 
-    /// A task's own worktree with no lane recorded: a lane all the same,
-    /// with no state to say.
-    func worktreeLaneNode(_ worktree: OneTreeWorktree, for task: OneTreeTask, under parent: String) -> OneTreeNode {
+    /// A task's own worktree with no ticket recorded: a ticket row all the
+    /// same, with no stage to say.
+    func worktreeTicketNode(_ worktree: OneTreeWorktree, for task: OneTreeTask, under parent: String) -> OneTreeNode {
         let id = "\(parent)/worktree:\(worktree.id)"
         return finish(
             OneTreeNode(
-                id: id, kind: .lane, title: worktree.name, glyph: OneTreeGlyph.worktree,
+                id: id, kind: .ticket, title: worktree.name, glyph: OneTreeGlyph.worktree,
                 target: .worktree(worktree.id), children: terminalNodes(worktree, under: id),
                 worktreeID: worktree.id))
     }
@@ -734,36 +714,26 @@ struct OneTreeBuilder {
         }
     }
 
-    /// The agents with no pane of their own: a lane's open agents
-    /// (`lane_agents`), or, where the lane records none, the card's open
-    /// subagents (`task_workers`). The same agent is often recorded in
-    /// both; the lane's record wins, so it shows once.
-    func subagents(lane: PlanLane?, task: OneTreeTask, under parent: String) -> [OneTreeNode] {
-        if let lane {
-            guard lane.state.isLive else { return [] }
-            let open = lane.agents.filter { $0.endedAt == nil }
+    /// The agents with no pane of their own: the ones the plan lists on the
+    /// ticket that have no terminal, or, where it lists none, the card's open
+    /// subagents (`task_workers`). The same agent is often in both; the plan's
+    /// record wins, so it shows once.
+    func subagents(line: PlanTicketLine?, task: OneTreeTask, under parent: String) -> [OneTreeNode] {
+        if let line {
+            guard line.stage.isLive else { return [] }
+            let open = input.plan.agents.filter { agent in
+                agent.terminal == nil && agent.role != .orchestrator && agent.tickets.contains { $0.task == line.task }
+            }
             if !open.isEmpty {
                 return open.enumerated().map { index, agent in
                     subagentNode(
-                        id: "\(parent)/agent:\(agent.agentId.isEmpty ? "\(index)" : agent.agentId)",
-                        title: OneTreeWords.subagent(role: OneTreeWords.role(agent.role), model: agent.model))
+                        id: "\(parent)/agent:\(agent.id.isEmpty ? "\(index)" : agent.id)",
+                        title: OneTreeWords.subagent(role: agent.role.word, model: agent.model))
                 }
             }
         }
-        // The cards' own record (`task_workers`): each card's open subagents
-        // sit on its newest live lane only, so a lane and its fix round
-        // don't list one agent twice, and a lane's copies under its cards
-        // list the same ones (review L3).
-        let workers: [TaskWorker]
-        if let lane {
-            workers = lane.cards.flatMap { card -> [TaskWorker] in
-                guard lanes(of: card.task).last(where: { $0.state.isLive })?.id == lane.id else { return [] }
-                return tasksByID[card.task]?.workers ?? []
-            }
-        } else {
-            workers = task.workers
-        }
-        return workers.filter(\.state.isOpen).enumerated().map { index, worker in
+        // The card's own record (`task_workers`).
+        return task.workers.filter(\.state.isOpen).enumerated().map { index, worker in
             subagentNode(
                 id: "\(parent)/worker:\(index)",
                 title: OneTreeWords.subagent(role: "Subagent", model: worker.model.isEmpty ? worker.harness : worker.model))
@@ -830,11 +800,11 @@ struct OneTreeBuilder {
     }
 
     /// The board's cards `worktree` holds: its own task's, its panes' and
-    /// open tasks', and those of the lanes working in it.
+    /// open tasks', and those of the tickets working in it.
     func cards(of worktree: OneTreeWorktree) -> [OneTreeTask] {
         var ids = Set(worktree.taskIDs)
         for task in input.tasks where task.worktreeID == worktree.id { ids.insert(task.id) }
-        for lane in lanes where laneWorktrees[lane.id]?.id == worktree.id { ids.formUnion(lane.cards.map(\.task)) }
+        for line in lines where lineWorktrees[line.task]?.id == worktree.id { ids.insert(line.task) }
         return ids.compactMap { tasksByID[$0] }
     }
 
@@ -862,7 +832,7 @@ struct OneTreeBuilder {
     }
 }
 
-/// Lanes to worktrees, by path and by branch, indexed once.
+/// Tickets to worktrees, by path and by branch, indexed once.
 struct OneTreeJoin {
     var byPath: [String: OneTreeWorktree] = [:]
     /// By every trailing run of path components: "worktrees/x", "x".
@@ -881,16 +851,16 @@ struct OneTreeJoin {
         }
     }
 
-    /// The worktree a lane works in: the one at its path, else (a path
+    /// The worktree a ticket works in: the one at its path, else (a path
     /// recorded relative to the repository) the one whose path ends with
-    /// it, else the one on its branch. Nil for a lane with no worktree yet.
-    func worktree(of lane: PlanLane) -> OneTreeWorktree? {
-        let path = lane.worktreePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    /// it, else the one on its branch. Nil for a ticket with no worktree yet.
+    func worktree(of line: PlanTicketLine) -> OneTreeWorktree? {
+        let path = line.worktreePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if !path.isEmpty {
-            if let exact = byPath[lane.worktreePath] { return exact }
+            if let exact = byPath[line.worktreePath] { return exact }
             if let suffix = bySuffix[path] { return suffix }
         }
-        return lane.branch.isEmpty ? nil : byBranch[lane.branch]
+        return line.branch.isEmpty ? nil : byBranch[line.branch]
     }
 }
 
@@ -913,9 +883,9 @@ public enum TaskStatusGlyph {
 
 /// Which nodes are open: the person's own choices, by node id, over each
 /// node's default, which is worked out from the board as it is now (a theme
-/// with a lane being worked, or an ask, is open). Only what the person did is
+/// with a ticket being worked, or an ask, is open). Only what the person did is
 /// kept, so a node they never touched follows the work, and a theme that
-/// gains a live lane opens unless they closed it. Kept per window.
+/// gains a live ticket opens unless they closed it. Kept per window.
 public struct OneTreeExpansion: Equatable, Sendable, Codable {
     public var choices: [String: Bool]
 
@@ -943,7 +913,7 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
     }
 
     /// Expand All and Collapse All (ov-334). Collapse closes every node with
-    /// children. Expand opens the themes, cards and lanes (and No Theme), which are the
+    /// children. Expand opens the themes, cards and tickets (and No Theme), which are the
     /// work: not a theme's finished-cards fold, nor Hidden, nor the
     /// checkout and loose worktrees, which stay as they were.
     public mutating func setAll(_ expanded: Bool, in nodes: [OneTreeNode]) {
@@ -1010,16 +980,16 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
 
 extension OneTreeNode {
     /// What a row's accessibility identifier is made of, stable when its
-    /// words change: a task's key, a lane's slug, else the title (ov-466).
+    /// words change: a task's key, a ticket's key, else the title (ov-466).
     public var rowName: String { !key.isEmpty ? key : (!slug.isEmpty ? slug : title) }
 
-    /// Whether Expand All opens it: a theme, a card or a lane, No Theme,
-    /// which holds the cards of none, and the Lanes list's groups that hold
-    /// work in motion (a train, In Review, Building, Without a Lane). Waiting
+    /// Whether Expand All opens it: a theme, a card or a ticket, No Theme,
+    /// which holds the cards of none, and the Tickets list's groups that hold
+    /// work in motion (a landing, In Review, Building, Off the Line). Waiting
     /// and Waiting for the Next Landing stay folded, as Hidden does (ov-503).
     var opensWithExpandAll: Bool {
-        kind == .theme || kind == .task || kind == .lane || id == "group:no-theme"
-            || (id.hasPrefix("lanes:") && id != "lanes:waiting" && id != "lanes:onLandedTrain")
+        kind == .theme || kind == .task || kind == .ticket || id == "group:no-theme"
+            || (id.hasPrefix("tickets:") && id != "tickets:waiting" && id != "tickets:onLandedLanding")
     }
 }
 
@@ -1048,7 +1018,7 @@ extension OneTree {
     }
 
     /// The nodes from a root down to the node for `target`: the one named
-    /// `hint` when it is one (a lane chosen under its second card), else
+    /// `hint` when it is one (a ticket chosen under its card), else
     /// the first in the tree. Nil when nothing goes there.
     public func path(to target: OneTreeTarget, hint: String? = nil) -> [OneTreeNode]? {
         var first: [OneTreeNode]?
@@ -1065,22 +1035,22 @@ extension OneTree {
         }
         walk(roots, [])
         if let found = hinted ?? first { return found }
-        // A lane's worktree opened whole is its lane: the node whose panes
+        // A ticket's worktree opened whole is its ticket: the node whose panes
         // are that worktree's.
         guard case .worktree(let id) = target else { return nil }
-        var lane: [OneTreeNode]?
+        var ticket: [OneTreeNode]?
         func find(_ nodes: [OneTreeNode], _ trail: [OneTreeNode]) {
-            for node in nodes where lane == nil {
+            for node in nodes where ticket == nil {
                 let here = trail + [node]
-                let holds = node.kind == .lane && node.children.contains {
+                let holds = node.kind == .ticket && node.children.contains {
                     if case .terminal(id, _)? = $0.target { return true }
                     return false
                 }
-                if holds { lane = here } else { find(node.children, here) }
+                if holds { ticket = here } else { find(node.children, here) }
             }
         }
         find(roots, [])
-        return lane
+        return ticket
     }
 
     /// The breadcrumb for `target`: the targets on its path, each named,

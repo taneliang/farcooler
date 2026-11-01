@@ -5,7 +5,7 @@ import SwiftUI
 // and amber only for a budget gone over, which says so in words as well.
 // (The Mac draws its own in the canvas's pane sizes: `PlanThemeEntry`.)
 
-/// "mac-ux is in review", "Queued, 1st up", "No lane · quiet for 3 days".
+/// "Mac polish is in review", "Queued, 1st up", "No ticket · quiet for 3 days".
 public struct PlanTrackLine: View {
     public let track: PlanTrack
     public let now: Int64

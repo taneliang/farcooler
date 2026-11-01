@@ -6,7 +6,7 @@ import Foundation
 // meant hunting for it in Tasks.
 //
 // Built from what the app has already read: the boards (`TaskBoardModel`), a
-// board's plan when it was read (themes and lanes), and the records of the
+// board's plan when it was read (themes and the line), and the records of the
 // cards that were opened (their latest note). A hover is a dictionary lookup,
 // never a read of the runner. A key that isn't on a board this runner's app
 // has read, or a link to another runner's task, has no card, and shows
@@ -21,30 +21,30 @@ public struct TaskKeyCard: Equatable, Hashable, Sendable {
     /// The plan theme it's in, by name; nil when no plan was read or no
     /// theme names it.
     public var theme: String?
-    /// The plan lane working it, by name: a live one if any, else the last
-    /// to finish. Nil when no plan was read or no lane names it.
-    public var lane: String?
+    /// Where it stands on the line, in words ("Building"). Nil when no plan
+    /// was read or the card is not on the line.
+    public var stage: String?
     /// The latest thing written on it, one line: its newest note a person or
     /// agent wrote, when its record was read, else its intent's first line.
     /// Empty when it has neither.
     public var excerpt: String
 
     public init(
-        key: String, title: String, status: TaskStatus, theme: String? = nil, lane: String? = nil,
+        key: String, title: String, status: TaskStatus, theme: String? = nil, stage: String? = nil,
         excerpt: String = ""
     ) {
         self.key = key
         self.title = title
         self.status = status
         self.theme = theme
-        self.lane = lane
+        self.stage = stage
         self.excerpt = excerpt
     }
 
-    /// The line under the title: status, theme and lane, those it has.
+    /// The line under the title: status, theme and stage, those it has.
     /// "In Progress · Task-key hovercards · key-hover".
     public var details: String {
-        ([status.title] + [theme, lane].compactMap { $0 }).joined(separator: " · ")
+        ([status.title] + [theme, stage].compactMap { $0 }).joined(separator: " · ")
     }
 
     /// What VoiceOver and TalkBack say for the key: the key, then the title,
@@ -102,7 +102,7 @@ public struct TaskKeyCards: Equatable, Sendable {
                 let note = notes[row.id].flatMap(Self.latestWritten)
                 cards[row.key] = TaskKeyCard(
                     key: row.key, title: row.title, status: row.status, theme: plan.themes[row.id],
-                    lane: plan.lanes[row.id], excerpt: TaskKeyCard.excerpt(note ?? row.intent))
+                    stage: plan.stages[row.id], excerpt: TaskKeyCard.excerpt(note ?? row.intent))
             }
         }
         self.init(runner: runner, cards: cards)
@@ -127,10 +127,10 @@ public struct TaskKeyCards: Equatable, Sendable {
     }
 }
 
-/// Which theme and lane a plan puts each task in, by task id.
+/// Which theme and stage a plan puts each task in, by task id.
 private struct PlanPlacement {
     var themes: [String: String] = [:]
-    var lanes: [String: String] = [:]
+    var stages: [String: String] = [:]
 
     init() {}
 
@@ -138,13 +138,7 @@ private struct PlanPlacement {
         for theme in plan.themes.sorted(by: { $0.ordinal < $1.ordinal }) {
             for card in theme.cards where themes[card.task] == nil { themes[card.task] = theme.name }
         }
-        // A live lane first, then the most recently moved finished one.
-        let lanes = plan.lanes.sorted {
-            $0.state.isLive != $1.state.isLive ? $0.state.isLive : $0.stateSince > $1.stateSince
-        }
-        for lane in lanes {
-            for card in lane.cards where self.lanes[card.task] == nil { self.lanes[card.task] = lane.name }
-        }
+        for line in plan.lines where stages[line.task] == nil { stages[line.task] = line.stage.word }
     }
 }
 

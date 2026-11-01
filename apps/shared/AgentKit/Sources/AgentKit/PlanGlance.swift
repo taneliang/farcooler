@@ -8,24 +8,24 @@ import Foundation
 /// (`AgentCardState.plan`). The runner decided it (`plan_glance.rs`) and the
 /// relay picked the board (`leadPlan`); a surface only says it.
 ///
-/// Lane names and the board's name, never card text.
+/// Ticket keys and the board's name, never card text.
 public struct PlanGlance: Codable, Sendable, Hashable {
-    /// A lane in Now.
-    public struct Lane: Codable, Sendable, Hashable {
-        public var name: String
-        public var state: LaneState
+    /// A ticket in Now: its key and its stage (ov-872).
+    public struct Ticket: Codable, Sendable, Hashable {
+        public var ticket: String
+        public var stage: TicketStage
 
-        public init(name: String, state: LaneState) {
-            self.name = name
-            self.state = state
+        public init(ticket: String, stage: TicketStage) {
+            self.ticket = ticket
+            self.stage = stage
         }
 
-        private enum CodingKeys: String, CodingKey { case name, state }
+        private enum CodingKeys: String, CodingKey { case ticket, stage }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(name, forKey: .name)
-            try container.encode(state.rawValue, forKey: .state)
+            try container.encode(ticket, forKey: .ticket)
+            try container.encode(stage.rawValue, forKey: .stage)
         }
     }
 
@@ -34,9 +34,9 @@ public struct PlanGlance: Codable, Sendable, Hashable {
     /// The board's Needs You count: the number its title bar says on the Mac
     /// (`WorkspaceNeedsYou.count`), its needs-you items and themes asking.
     public var needsYou: Int
-    /// Up to two lanes being built, reviewed, fixed or landed.
-    public var now: [Lane]
-    /// The lane next up, or nil when nothing is queued.
+    /// Up to two tickets being built, reviewed or landed.
+    public var now: [Ticket]
+    /// The ticket next up, or nil when nothing is queued.
     public var next: String?
     /// The runner that said it, by the name it beats with (ov-310 review H2).
     /// Nil from a relay before it.
@@ -49,7 +49,7 @@ public struct PlanGlance: Codable, Sendable, Hashable {
     public var quiet: Bool
 
     public init(
-        workspace: String, needsYou: Int, now: [Lane], next: String? = nil,
+        workspace: String, needsYou: Int, now: [Ticket], next: String? = nil,
         runner: String? = nil, heardAgo: Double? = nil, quiet: Bool = false
     ) {
         self.workspace = workspace
@@ -74,17 +74,19 @@ public struct PlanGlance: Codable, Sendable, Hashable {
         if quiet { try container.encode(true, forKey: .quiet) }
     }
 
-    /// Lenient, as the card around it is: a lane of the wrong shape costs the
-    /// lane, and a count of the wrong shape reads as none.
+    /// Lenient, as the card around it is: a ticket of the wrong shape costs the
+    /// ticket, and a count of the wrong shape reads as none. Since ov-872 a Now
+    /// entry is `{ticket, stage}`; one in the old `{name, state}` shape is
+    /// dropped, as the relay drops it.
     public init(from decoder: Decoder) throws {
         struct Loose: Decodable {
-            var lane: Lane?
-            init(from decoder: Decoder) throws { lane = try? Lane(from: decoder) }
+            var ticket: Ticket?
+            init(from decoder: Decoder) throws { ticket = try? Ticket(from: decoder) }
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         workspace = try container.decode(String.self, forKey: .workspace)
         needsYou = max(0, ((try? container.decodeIfPresent(Int.self, forKey: .needsYou)) ?? nil) ?? 0)
-        now = (((try? container.decodeIfPresent([Loose].self, forKey: .now)) ?? nil) ?? []).compactMap(\.lane)
+        now = (((try? container.decodeIfPresent([Loose].self, forKey: .now)) ?? nil) ?? []).compactMap(\.ticket)
         let next = (try? container.decodeIfPresent(String.self, forKey: .next)) ?? nil
         self.next = next?.isEmpty == false ? next : nil
         let runner = (try? container.decodeIfPresent(String.self, forKey: .runner)) ?? nil
@@ -106,53 +108,60 @@ public struct PlanGlance: Codable, Sendable, Hashable {
         [workspace, needsYouWords].compactMap { $0 }.joined(separator: " · ")
     }
 
-    /// One lane as a row says it: "mac-ux · In Review".
-    public static func words(_ lane: Lane) -> String {
-        "\(lane.name) · \(lane.state.word)"
+    /// One ticket as a row says it: "ov-312 · In Review".
+    public static func words(_ ticket: Ticket) -> String {
+        "\(ticket.ticket) · \(ticket.stage.word)"
     }
 
-    /// Now on one line: "Now: mac-ux In Review, ov-310 Building"; nil when
-    /// nothing is past queued.
+    /// Now on one line: "Now: ov-312 In Review, ov-310 Building"; nil when
+    /// nothing is past waiting.
     public var nowLine: String? {
         guard !now.isEmpty else { return nil }
-        return "Now: " + now.map { "\($0.name) \($0.state.word)" }.joined(separator: ", ")
+        return "Now: " + now.map { "\($0.ticket) \($0.stage.word)" }.joined(separator: ", ")
     }
 
-    /// "Next: mac-fu3"; nil when nothing is queued.
+    /// "Next: ov-313"; nil when nothing is queued.
     public var nextLine: String? { next.map { "Next: \($0)" } }
 
     /// What VoiceOver reads for the whole glance.
     public var spoken: String {
         var parts = ["\(workspace) board" + (needsYouWords.map { ", \($0)" } ?? "")]
         if !now.isEmpty {
-            parts.append("Now: " + now.map { "\($0.name), \($0.state.word.lowercased())" }.joined(separator: "; "))
+            parts.append("Now: " + now.map { "\($0.ticket), \($0.stage.word.lowercased())" }.joined(separator: "; "))
         }
         if let next { parts.append("Next up: \(next)") }
         return parts.joined(separator: ". ") + "."
     }
 }
 
-/// Where a lane is. Moves go forward, with two loops back to fixing. Here
-/// rather than in `PlanModel.swift` so the watch and the widgets, which
-/// compile this file and not that one, say a state as the Plan view does.
-public enum LaneState: String, Decodable, Sendable, CaseIterable {
-    case queued, building, review, fixing, landing, landed, dropped, unknown
+/// Where a ticket is on the line (ov-872). Here rather than in
+/// `PlanModel.swift` so the watch and the widgets, which compile this file and
+/// not that one, say a stage as the Plan view does. The words are the
+/// runner's store's (`waiting`, `building`, `reviewing`, `needs_you`,
+/// `landing`, `landed`, `dropped`).
+public enum TicketStage: String, Decodable, Sendable, CaseIterable {
+    case waiting, building, reviewing
+    case needsYou = "needs_you"
+    case landing, landed, dropped, unknown
 
     public init(from decoder: Decoder) throws {
-        self = LaneState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        self = TicketStage(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
     /// Neither landed nor dropped.
     public var isLive: Bool { self != .landed && self != .dropped }
 
-    /// The state alone, in title case as the board's statuses are
-    /// (`PlanWords.state`).
+    /// On the line and being worked, or waiting on the owner: past waiting.
+    public var isPastWaiting: Bool { isLive && self != .waiting }
+
+    /// The stage alone, in title case as the board's statuses are
+    /// (`PlanWords.stage`).
     public var word: String {
         switch self {
-        case .queued: "Queued"
+        case .waiting: "Waiting"
         case .building: "Building"
-        case .review: "In Review"
-        case .fixing: "Fixing"
+        case .reviewing: "In Review"
+        case .needsYou: "Needs You"
         case .landing: "Landing"
         case .landed: "Landed"
         case .dropped: "Dropped"

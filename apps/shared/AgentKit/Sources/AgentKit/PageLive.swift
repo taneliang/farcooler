@@ -1,9 +1,9 @@
 import Foundation
 
 // References that draw live (ov-269 design 3.4, the owner's ruling on Q4): a
-// page names a card, a lane or a theme, and the app draws that thing's
+// page names a card, a ticket or a theme, and the app draws that thing's
 // *current* words from what it already holds, so a page can't go stale about
-// anything the board knows. A name nothing answers to (a dropped lane, a
+// anything the board knows. A name nothing answers to (a dropped ticket, a
 // runner without the plan layer, a key on another board) draws its label or
 // its name as plain text with no link: never an error, never an empty block.
 //
@@ -17,8 +17,8 @@ public enum PageDestination: Equatable, Hashable, Sendable {
     case task(String)
     /// A task's open question, by the task's id.
     case ask(String)
-    /// A lane's page, by id.
-    case lane(String)
+    /// A ticket's page, by its card's id.
+    case ticket(String)
     /// A theme's page, by id.
     case theme(String)
     /// Another page, by slot.
@@ -37,7 +37,7 @@ public enum PageDestination: Equatable, Hashable, Sendable {
 public struct PageWorld: Equatable, Sendable {
     /// The board's cards by key (`ov-274`), lowercased.
     public var tasks: [String: TaskRow]
-    /// The plan, or nil on a runner without `board_plan`: lane and theme
+    /// The plan, or nil on a runner without `board_plan`: ticket and theme
     /// references then draw as plain text.
     public var plan: PlanModel?
     /// The board's pages, by slot.
@@ -67,10 +67,10 @@ public struct PageWorld: Equatable, Sendable {
 
 /// A reference as it's drawn now.
 public struct PageResolved: Equatable, Sendable {
-    /// Its name: a key, a lane's name, a theme's, a page's title, a link's
+    /// Its name: a key, a ticket's key, a theme's, a page's title, a link's
     /// label, or for one that resolves to nothing, its label or raw name.
     public var name: String
-    /// Its live words, when it has some: a card's status, a lane's state, a
+    /// Its live words, when it has some: a card's status, a ticket's stage, a
     /// theme's progress, a link's domain.
     public var status: String?
     /// Amber only for a question that's still open.
@@ -137,7 +137,7 @@ public enum PageWords {
     /// "2 of 4".
     public static func progress(done: Int, total: Int) -> String { "\(done) of \(total)" }
 
-    /// A lane's tokens for a table cell: "470K", or "Not reported".
+    /// A ticket's tokens for a table cell: "470K", or "Not reported".
     public static func tokens(_ spend: PlanSpend) -> String {
         spend.totalTokens > 0 ? TaskUsageFormat.tokens(spend.totalTokens) : PlanWords.notReported
     }
@@ -162,8 +162,10 @@ extension PageWorld {
                 statusTone: open ? .attention : .neutral, destination: open ? .ask(row.id) : .task(row.id),
                 spoken: [label ?? row.key, row.title, open ? PageWords.needsYou : PageWords.answered].joined(separator: ", "))
         case .lane(let name):
-            guard let lane = plan?.lanes.first(where: { $0.name == name }) else { return plain }
-            return PageResolved(name: label ?? lane.name, status: PlanWords.status(lane), destination: .lane(lane.id))
+            // The page format still names a `lane`; the plan has tickets, so
+            // the name is read as a ticket's key or its branch.
+            guard let line = plan?.ticket(named: name) else { return plain }
+            return PageResolved(name: label ?? line.key, status: PlanWords.status(line), destination: .ticket(line.task))
         case .theme(let name):
             guard let theme = plan?.themes.first(where: { $0.name == name || $0.short == name }) else { return plain }
             return PageResolved(name: label ?? theme.name, status: PlanWords.progress(theme.counts), destination: .theme(theme.id))
@@ -240,7 +242,7 @@ extension PageWorld {
         case .cards:
             return (resolved.status ?? resolved.name, stat.detail, stat.tone)
         case .lane:
-            let value = stat.show == .spend ? lane(of: ref).map { PageWords.tokens($0.spend) } : lane(of: ref).map(PlanWords.status)
+            let value = stat.show == .spend ? ticket(of: ref).map { PageWords.tokens($0.spend) } : ticket(of: ref).map(PlanWords.status)
             return (value ?? resolved.name, stat.detail, stat.tone)
         case .theme:
             let value = stat.show == .spend ? theme(of: ref).map { PageWords.tokens($0.spend ?? PlanSpend()) } : resolved.status
@@ -251,7 +253,7 @@ extension PageWorld {
     }
 
     /// What a reference cell draws: its own text when it has some, else the
-    /// target's name, a lane's state words or a lane's tokens.
+    /// target's name, a ticket's stage words or a ticket's tokens.
     public func cellText(_ cell: PageCell) -> String {
         if let text = cell.text { return text }
         guard let ref = cell.ref else { return "" }
@@ -264,16 +266,16 @@ extension PageWorld {
             default: return resolved.name
             }
         case .state:
-            return lane(of: ref).map(PlanWords.status) ?? resolved.name
+            return ticket(of: ref).map(PlanWords.status) ?? resolved.name
         case .spend:
             if let theme = theme(of: ref) { return PageWords.tokens(theme.spend ?? PlanSpend()) }
-            return lane(of: ref).map { PageWords.tokens($0.spend) } ?? resolved.name
+            return ticket(of: ref).map { PageWords.tokens($0.spend) } ?? resolved.name
         }
     }
 
-    private func lane(of ref: PageRef) -> PlanLane? {
+    private func ticket(of ref: PageRef) -> PlanTicketLine? {
         guard case .lane(let name) = ref.target else { return nil }
-        return plan?.lanes.first { $0.name == name }
+        return plan?.ticket(named: name)
     }
 }
 
@@ -317,5 +319,13 @@ public enum PageShelf {
     public static func anchored(_ pages: [BoardPage], to theme: String, plan: PlanModel?) -> [BoardPage] {
         guard liveThemes(plan).contains(theme) else { return [] }
         return pages.filter { $0.themeAnchor == theme }
+    }
+}
+
+extension PlanModel {
+    /// The ticket a page's `lane` reference names (the page format keeps the
+    /// word): its key, or failing that its branch.
+    func ticket(named name: String) -> PlanTicketLine? {
+        lines.first { $0.key.lowercased() == name.lowercased() } ?? lines.first { !$0.branch.isEmpty && $0.branch == name }
     }
 }

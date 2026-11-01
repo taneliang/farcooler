@@ -305,9 +305,9 @@ public struct PageRef: Equatable, Sendable {
 public enum PageShow: Sendable, Equatable {
     /// The target's name.
     case name
-    /// A lane's state words: "Fixing · round 1".
+    /// A ticket's stage words: "Fixing · round 1".
     case state
-    /// A lane's tokens, or a theme's share of its lanes' (ov-306).
+    /// A ticket's tokens, or a theme's share of its tickets' (ov-306).
     case spend
 }
 

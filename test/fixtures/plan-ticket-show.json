@@ -1,0 +1,87 @@
+{
+  "branch": "ov-1-mac-polish",
+  "budget_tokens": 500000,
+  "events": [
+    {
+      "actor": "manager",
+      "at": 1799989200000,
+      "body": "Waiting.",
+      "extra": {},
+      "kind": "stage"
+    },
+    {
+      "actor": "manager",
+      "at": 1799989200001,
+      "body": "Ranked 1.",
+      "extra": {
+        "rank": 1
+      },
+      "kind": "plan"
+    },
+    {
+      "actor": "manager",
+      "at": 1799992800000,
+      "body": "Started building.",
+      "extra": {
+        "from": "waiting",
+        "to": "building"
+      },
+      "kind": "stage"
+    },
+    {
+      "actor": "manager",
+      "at": 1799996400000,
+      "body": "Moved to review.",
+      "extra": {
+        "from": "building",
+        "to": "reviewing"
+      },
+      "kind": "stage"
+    }
+  ],
+  "fix_rounds": 1,
+  "held_off": false,
+  "key": "ov-1",
+  "landed_sha": null,
+  "landing": null,
+  "plan_rank": null,
+  "pr_number": null,
+  "reason": "Five small Mac fixes, batched",
+  "same_branch": null,
+  "spend": {
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "cost_micros": 31000000,
+    "input_tokens": 300000,
+    "output_tokens": 170000,
+    "runs": 2,
+    "shared_agents": 1,
+    "unmeasured_agents": 1
+  },
+  "stack_parent": null,
+  "stage": "reviewing",
+  "stage_since": 1799999400000,
+  "stale": false,
+  "status": "In Review",
+  "task": "00000000-0000-0000-0000-000000001001",
+  "title": "Title of ov-1",
+  "work": [
+    {
+      "agent": "00000000-0000-0000-0000-000000007002",
+      "ended_at": 1799996400000,
+      "linked_by_description": false,
+      "role": "build",
+      "started_at": 1799989200000,
+      "verdict": "finished"
+    },
+    {
+      "agent": "00000000-0000-0000-0000-000000007003",
+      "ended_at": null,
+      "linked_by_description": false,
+      "role": "review",
+      "started_at": 1799998500000,
+      "verdict": ""
+    }
+  ],
+  "worktree_path": ".claude/worktrees/ov-1"
+}

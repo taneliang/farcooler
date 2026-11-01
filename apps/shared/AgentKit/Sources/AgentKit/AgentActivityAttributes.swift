@@ -282,7 +282,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     public var quiet: [String]
 
     /// The board the glance draws (ov-310): its Needs You count, up to two
-    /// Now lanes and next up. Nil when no runner has a plan, and on every
+    /// Now tickets and next up. Nil when no runner has a plan, and on every
     /// card from a relay older than it. See `leadPlan` in the relay.
     public var plan: PlanGlance?
 

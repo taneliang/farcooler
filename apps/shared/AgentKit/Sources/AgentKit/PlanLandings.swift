@@ -1,103 +1,85 @@
 import Foundation
 
-// Trains (ov-309) and the CI the runner reads (ov-306), as the plan carries
-// them: a train is lanes landing together, with a base, the SHA it pushed and
-// where it stands, and the runner reads that SHA's CI through `gh` and moves
-// a pushed train to green or red. The same reads draw a page's CI
-// references. EXPERIMENTAL with the plan layer, behind `board_trains`.
+// Landings (ov-309, ov-872) and the CI the runner reads (ov-306), as the plan
+// carries them: a landing is tickets going into the product together, with a
+// base, the SHA it pushed and where it stands, and the runner reads that SHA's
+// CI through `gh` and moves a pushed landing to green or red. The same reads
+// draw a page's CI references.
 //
 // The Mac reads `farcooler plan --json` and the phones the client's
 // `plan_json`, both held to `test/fixtures/plan.json`.
 
-/// Where a train stands.
-public enum TrainState: String, Decodable, Sendable, CaseIterable {
-    case integrating, gating, pushed, green, red, landed, dropped, unknown
+/// Where a landing stands.
+public enum LandingState: String, Decodable, Sendable, CaseIterable {
+    case open, gating, pushed, green, red, landed, dropped, unknown
 
     public init(from decoder: Decoder) throws {
-        self = TrainState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        self = LandingState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
     /// Landed or dropped: out of Now, and its CI no longer read.
     public var isSettled: Bool { self == .landed || self == .dropped }
 }
 
-/// A lane on a train, by id and name.
-public struct PlanTrainLane: Decodable, Equatable, Sendable {
-    public var lane: String
-    public var name: String
+/// How a landing gets into the product.
+public enum LandingRoute: String, Decodable, Sendable, CaseIterable {
+    case push, pullRequest = "pull_request", ask, unknown
+
+    public init(from decoder: Decoder) throws {
+        self = LandingRoute(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
 }
 
-public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
+public struct PlanLanding: Decodable, Equatable, Identifiable, Sendable {
     public var id: String
     public var short: String
-    public var name: String
+    /// What a person calls it: "Landing 9".
+    public var number: Int
     /// What it was cut from: `origin/main`, or a SHA.
     public var base: String
     public var pushedSha: String?
-    public var state: TrainState
+    public var route: LandingRoute
+    public var state: LandingState
     public var stateSince: Int64
-    /// The phase the runner derived (ov-503, behind `board_train_phase`). Nil
-    /// from a runner without it, and for phase 0: `state` is all there is,
-    /// and `PlanTrain.phase(in:)` reads it.
-    public var phase: TrainPhase?
-    /// When the train entered `phase`, in ms; nil with it.
+    /// The phase the runner derived (ov-503). Nil for phase 0: `state` is all
+    /// there is, and `PlanLanding.phase(in:)` reads it.
+    public var phase: LandingPhase?
+    /// When the landing entered `phase`, in ms; nil with it.
     public var phaseSince: Int64?
+    /// Gathering tickets that are ready while the landing ahead lands.
+    public var collecting: Bool
     public var actor: String
     public var createdAt: Int64
     public var landedAt: Int64?
-    /// Its lanes, oldest first, finished ones included.
-    public var lanes: [PlanTrainLane]
+    /// Its tickets, by card.
+    public var tickets: [PlanCardRef]
     /// The CI subject its pushed SHA is read under, or empty before it has one.
     public var ciSubject: String
-    /// What a person reads for it (ov-462): the title the orchestrator wrote,
-    /// else "Train 72" for `integ-72`. Nil from a runner before it.
-    public var title: String?
-    /// One line of what it carries: its lanes' titles (ov-462).
-    public var summary: String?
-    /// The card its integrating agent works for it (ov-461).
-    public var card: PlanCardRef?
-    /// The agent integrating it, with its state and spend (ov-461).
-    public var agent: PlanTrainAgent?
+    /// What it is for: the title the orchestrator wrote, else "Landing 72".
+    public var title: String
+    /// One line of what it carries: its tickets' titles (ov-462).
+    public var summary: String
+    /// The agent landing it (ov-872): `PlanAgent.id`. Nil when none is.
+    public var lander: String?
+    /// What the lander spent on it; nil before it has one.
+    public var spend: PlanSpend?
 
-    /// "Train 72" read off the name, else the name: what every surface calls
-    /// the train, as its heading and in a sentence (ov-514, ov-522). The
-    /// title is its subtitle, never its name: a title can run to a line of
-    /// its own, and people learn what a train is by seeing "Train N".
-    public var label: String {
-        PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
-    }
+    /// "Landing 72": what every surface calls the landing, as its heading and
+    /// in a sentence (ov-514, ov-522). The title is its subtitle, never its
+    /// name: a title can run to a line of its own.
+    public var label: String { "Landing \(number)" }
 
-    /// What it is for, under the label: the title without a "Train 72 ·" the
+    /// What it is for, under the label: the title without a "Landing 72 ·" the
     /// runner put in front, or nil when it has none or says no more than the
     /// label.
     public var subtitle: String? {
-        guard var title, !title.isEmpty, title != label else { return nil }
-        if title.hasPrefix(label + " \u{00B7} ") { title = String(title.dropFirst(label.count + 3)) }
-        return title.isEmpty ? nil : title
+        var text = title
+        if text.hasPrefix(label + " \u{00B7} ") { text = String(text.dropFirst(label.count + 3)) }
+        return text.isEmpty || text == label ? nil : text
     }
 
-    /// The slug, shown second where there is room: nil when the label is the
-    /// name already.
-    public var slug: String? { label == name ? nil : name }
-
-    /// Its lanes' titles on one line, or nil when it carries none.
-    public var carries: String? {
-        guard let summary, !summary.isEmpty else { return nil }
-        return summary
-    }
-}
-
-/// The agent integrating a train (ov-461): its state and what it has spent.
-/// Recorded on the train, never as a lane of the train's own name.
-public struct PlanTrainAgent: Decodable, Equatable, Sendable {
-    public var harness: String
-    public var agentId: String
-    public var model: String
-    public var startedAt: Int64
-    public var endedAt: Int64?
-    public var spend: PlanSpend
-
-    public var isWorking: Bool { endedAt == nil }
+    /// Its tickets' titles on one line, or nil when it carries none.
+    public var carries: String? { summary.isEmpty ? nil : summary }
 }
 
 /// Where a CI subject stands, over all its runs.
@@ -159,12 +141,12 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
     public var needsAttention: Bool { status == .failed }
 }
 
-/// One group of Now: a train not yet landed and its lanes working now, or the
-/// lanes on no such train.
+/// One group of Now: a landing not yet landed and its tickets working now, or
+/// the tickets on no such landing.
 public struct PlanNowGroup: Equatable, Identifiable, Sendable {
-    public var train: PlanTrain?
-    public var lanes: [PlanLane]
-    public var id: String { train?.id ?? "lanes" }
+    public var landing: PlanLanding?
+    public var lines: [PlanTicketLine]
+    public var id: String { landing?.id ?? "tickets" }
 }
 
 extension PlanModel {
@@ -181,32 +163,42 @@ extension PlanModel {
         }
     }
 
-    /// A train's CI, once the runner has read it.
-    public func ci(of train: PlanTrain) -> PlanCIRead? {
-        train.ciSubject.isEmpty ? nil : ci(train.ciSubject)
+    /// A landing's CI, once the runner has read it.
+    public func ci(of landing: PlanLanding) -> PlanCIRead? {
+        landing.ciSubject.isEmpty ? nil : ci(landing.ciSubject)
     }
 
-    /// Trains not yet landed or dropped, oldest first.
-    public var liveTrains: [PlanTrain] { trains.filter { !$0.state.isSettled } }
+    /// Landings not yet landed or dropped, oldest first.
+    public var liveLandings: [PlanLanding] { landings.filter { !$0.state.isSettled } }
 
-    /// Now as row groups (ov-309): each live train heading the lanes on it,
-    /// then the lanes on none. A train with no lane working now still heads
-    /// its group, so a pushed train waiting on CI is never out of sight.
+    /// The tickets on a landing: those it lists, plus any that name its
+    /// number, in the line's order.
+    public func lines(on landing: PlanLanding) -> [PlanTicketLine] {
+        let tasks = Set(landing.tickets.map(\.task))
+        return lines.filter { tasks.contains($0.task) || $0.landing == landing.number }
+    }
+
+    /// The landing with this number.
+    public func landing(number: Int) -> PlanLanding? { landings.first { $0.number == number } }
+
+    /// The agent landing it, if the runner lists one.
+    public func lander(of landing: PlanLanding) -> PlanAgent? { landing.lander.flatMap(agent) }
+
+    /// Now as row groups (ov-309): each live landing heading the tickets on
+    /// it, then the tickets on none. A landing with no ticket working now
+    /// still heads its group, so a pushed landing waiting on CI is never out
+    /// of sight.
     public var nowGroups: [PlanNowGroup] {
-        // A lane named like a live train is the train's agent, drawn by the
-        // train (ov-461).
-        let trainNamed = Set(laneIsTrain.map(\.lane))
-        let lanes = (working + unranked).filter { !trainNamed.contains($0.id) }
+        let lines = working
         var grouped = Set<String>()
         var groups: [PlanNowGroup] = []
-        for train in liveTrains {
-            let ids = Set(train.lanes.map(\.lane))
-            let mine = lanes.filter { ids.contains($0.id) }
-            grouped.formUnion(mine.map(\.id))
-            groups.append(PlanNowGroup(train: train, lanes: mine))
+        for landing in liveLandings {
+            let mine = self.lines(on: landing).filter { $0.stage.isPastWaiting }
+            grouped.formUnion(mine.map(\.task))
+            groups.append(PlanNowGroup(landing: landing, lines: mine))
         }
-        let rest = lanes.filter { !grouped.contains($0.id) }
-        if !rest.isEmpty { groups.append(PlanNowGroup(train: nil, lanes: rest)) }
+        let rest = (lines + unranked).filter { !grouped.contains($0.task) }
+        if !rest.isEmpty { groups.append(PlanNowGroup(landing: nil, lines: rest)) }
         return groups
     }
 
@@ -287,28 +279,8 @@ extension PlanWords {
         return head.trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 
-    /// The integrating agent's state and spend: "Agent working · 120K
-    /// tokens", "Agent finished", "Agent working · Not reported".
-    public static func trainAgent(_ agent: PlanTrainAgent) -> String {
-        let state = agent.isWorking ? "Agent working" : "Agent finished"
-        guard agent.spend.runs > 0 || agent.spend.unmeasuredAgents > 0 else { return state }
-        return "\(state) · \(spend(agent.spend))"
-    }
-
-    /// The number in `train-72` or `integ-72`: what a person calls the
-    /// train. Nil for any other name.
-    public static func trainNumber(_ name: String) -> Int? {
-        let lower = name.trimmingCharacters(in: .whitespaces).lowercased()
-        for prefix in ["train-", "integ-"] where lower.hasPrefix(prefix) {
-            let digits = lower.dropFirst(prefix.count)
-            return digits.isEmpty || digits.count > 9 || !digits.allSatisfy(\.isASCII) || !digits.allSatisfy(\.isNumber)
-                ? nil : Int(digits)
-        }
-        return nil
-    }
-
-    /// Whether a train needs the owner: red, or its CI failed.
-    public static func trainNeedsAttention(_ train: PlanTrain, ci: PlanCIRead?) -> Bool {
-        train.state == .red || (ci?.needsAttention ?? false)
+    /// Whether a landing needs the owner: red, or its CI failed.
+    public static func landingNeedsAttention(_ landing: PlanLanding, ci: PlanCIRead?) -> Bool {
+        landing.state == .red || (ci?.needsAttention ?? false)
     }
 }

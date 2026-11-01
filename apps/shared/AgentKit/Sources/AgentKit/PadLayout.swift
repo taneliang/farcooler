@@ -106,7 +106,7 @@ extension PadPick {
         switch target {
         case .plan: .canvas(.plan)
         case .theme(let id): .canvas(.page(.theme(id)))
-        case .lane(let id): .canvas(.page(.lane(id)))
+        case .ticket(let id): .canvas(.page(.ticket(id)))
         case .page(let slot): .canvas(.page(.page(slot)))
         case .task(let id): .canvas(.task(id))
         case .needsYou: .canvas(.needsYou)
@@ -122,7 +122,7 @@ extension PadPick {
         case .board: nil
         case .needsYou: .needsYou
         case .page(.theme(let id)): .theme(id)
-        case .page(.lane(let id)): .lane(id)
+        case .page(.ticket(let id)): .ticket(id)
         case .page(.page(let slot)): .page(slot)
         case .task(let id): .task(id)
         }

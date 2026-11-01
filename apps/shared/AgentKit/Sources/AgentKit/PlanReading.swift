@@ -149,11 +149,12 @@ extension PlanWords {
     public static let tryAgain = "Try Again"
 }
 
-/// A theme's or lane's page on a phone, by the plan's own id, or an
+/// A theme's or ticket's page on a phone, by the plan's own id, or an
 /// orchestrator's page by its slot (ov-285).
 public enum PhonePlanPage: Hashable, Codable, Sendable {
     case theme(String)
-    case lane(String)
+    /// A ticket, by its card's id.
+    case ticket(String)
     /// An orchestrator's page (ov-269), by slot: `train`, `spend`.
     case page(String)
 
@@ -161,7 +162,7 @@ public enum PhonePlanPage: Hashable, Codable, Sendable {
     public var word: String {
         switch self {
         case .theme: "Theme"
-        case .lane: "Lane"
+        case .ticket: "Ticket"
         case .page: "Page"
         }
     }
@@ -190,7 +191,7 @@ public struct PlanNews: Equatable, Sendable {
 /// and nothing of what it held. A plan carries the owner's themes and task
 /// titles, so the value never goes in a log.
 public enum PlanDecodeLog {
-    /// The failing field's path, "lanes[2].state": keys and positions only.
+    /// The failing field's path, "lines[2].stage": keys and positions only.
     /// "(root)" where the bytes aren't JSON at all.
     public static func fieldPath(_ error: Error) -> String {
         guard let error = error as? DecodingError else { return "(root)" }

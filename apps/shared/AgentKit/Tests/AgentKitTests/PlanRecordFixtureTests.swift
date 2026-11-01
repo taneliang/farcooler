@@ -3,8 +3,8 @@ import Testing
 
 @testable import AgentKit
 
-/// A theme's and a lane's record as the CLI prints it (ov-273, review 1004i
-/// P4): `plan theme show --json` and `plan lane show --json`, which
+/// A theme's and a ticket's record as the CLI prints it (ov-273, review 1004i
+/// P4): `plan theme show --json` and `plan ticket show --json`, which
 /// `plan_show_json_is_the_record_the_mac_reads` in `crates/cli/src/plan_tests.rs`
 /// writes byte for byte. The Mac's timeline and What Changed come from these;
 /// a renamed or reshaped key fails here, not silently on screen.
@@ -29,12 +29,12 @@ struct PlanRecordFixtureTests {
         #expect(record.previousStory?.at == Int64(1_799_996_400_000), "the second rewrite, an hour before now")
     }
 
-    @Test("A lane's record from the CLI gives its timeline")
-    func lane() throws {
-        let record = try Self.fixture("plan-lane-show.json")
-        #expect(record.events.map(\.kind) == ["state", "plan", "state", "state"])
-        #expect(record.events[2].extra?.from == "queued" && record.events[2].extra?.to == "building")
-        #expect(record.timeline.map(\.text) == ["Queued.", "Ranked 1.", "Started building.", "Moved to review."])
+    @Test("A ticket's record from the CLI gives its timeline")
+    func ticket() throws {
+        let record = try Self.fixture("plan-ticket-show.json")
+        #expect(record.events.map(\.kind) == ["stage", "plan", "stage", "stage"])
+        #expect(record.events[2].extra?.from == "waiting" && record.events[2].extra?.to == "building")
+        #expect(record.timeline.map(\.text) == ["Waiting.", "Ranked 1.", "Started building.", "Moved to review."])
         #expect(record.previousStory == nil)
     }
 }

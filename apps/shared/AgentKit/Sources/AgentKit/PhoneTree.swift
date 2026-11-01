@@ -7,7 +7,7 @@ import Foundation
 // the Mac's sidebar's; this only maps the phone's own fleet types onto them
 // and push navigation onto the outline.
 //
-// iPhone: Themes › Theme › Task › Lane › Terminal, one level a screen. A row
+// iPhone: Themes › Theme › Task › Ticket › Terminal, one level a screen. A row
 // with children pushes its level; a level opens on its node's own page; a
 // leaf opens what it points at. See .claude/agent/reports/phones-tree/design.md.
 
@@ -178,7 +178,7 @@ enum PhoneTree {
         switch node.target {
         case .theme?: "Theme Page"
         case .task?: "Task Details"
-        case .lane?: "Lane Page"
+        case .ticket?: "Ticket Page"
         case .worktree?: "Open Worktree"
         default: nil
         }
@@ -192,7 +192,7 @@ enum PhoneTree {
         case .orchestrator, .needsYou, .plan: nil
         case .theme(let id): .plan(place, page: .theme(id))
         case .task(let id): .task(place, task: id)
-        case .lane(let id): .plan(place, page: .lane(id))
+        case .ticket(let id): .plan(place, page: .ticket(id))
         case .page(let slot): .plan(place, page: .page(slot))
         case .worktree(let id): .worktree(runner: place.runner, worktree: id, landing: .resume)
         case .terminal(let worktree, let terminal):

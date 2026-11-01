@@ -139,7 +139,7 @@ public enum BoardArrivals {
 
     /// Which items arrived or changed (ov-298): `new`'s rule, by identity,
     /// and also each item still there whose `signature` (what its row shows,
-    /// a lane's state or a theme's count, say) moved. On a first draw (`old`
+    /// a ticket's stage or a theme's count, say) moved. On a first draw (`old`
     /// nil), none; an item that left is not changed, it's gone.
     public static func changed(old: [String: String]?, now: [String: String]) -> Set<String> {
         guard let old else { return [] }

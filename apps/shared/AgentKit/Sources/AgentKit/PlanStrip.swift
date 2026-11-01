@@ -73,14 +73,14 @@ public enum PlanStripTone: Equatable, Sendable {
 
 /// The strip's model.
 public struct PlanStrip: Equatable, Sendable {
-    /// A lane being worked, as the strip names it.
-    public struct Lane: Equatable, Sendable {
+    /// A ticket being worked, as the strip names it.
+    public struct Ticket: Equatable, Sendable {
         public var name: String
-        public var state: LaneState
+        public var stage: TicketStage
 
-        public init(name: String, state: LaneState) {
+        public init(name: String, stage: TicketStage) {
             self.name = name
-            self.state = state
+            self.stage = stage
         }
     }
 
@@ -92,21 +92,21 @@ public struct PlanStrip: Equatable, Sendable {
     /// The workspace's Needs You count (`WorkspaceNeedsYou.count`), the one
     /// number the Mac's title bar and tree say.
     public var needsYou: Int
-    /// Up to `nowShown` lanes in Now, in the plan's order.
-    public var now: [Lane]
-    /// How many more lanes are in Now than are named.
+    /// Up to `nowShown` tickets in Now, in the line's order.
+    public var now: [Ticket]
+    /// How many more tickets are in Now than are named.
     public var moreNow: Int
-    /// The lane next up.
+    /// The ticket next up.
     public var next: String?
-    /// The glance band's two lines (ov-503): Now by train and section, Next by
+    /// The glance band's two lines (ov-503): Now by landing and section, Next by
     /// rank. Set by `init(plan:)`; the strip's own parts above are unchanged.
     public var band: PlanGlanceSentence?
 
-    /// How many Now lanes the strip names, as the Mac's does.
+    /// How many Now tickets the strip names, as the Mac's does.
     public static let nowShown = 2
 
     public init(
-        orchestrator: PlanStripOrchestrator, line: String? = nil, needsYou: Int, now: [Lane], moreNow: Int = 0,
+        orchestrator: PlanStripOrchestrator, line: String? = nil, needsYou: Int, now: [Ticket], moreNow: Int = 0,
         next: String? = nil, band: PlanGlanceSentence? = nil
     ) {
         self.orchestrator = orchestrator
@@ -118,22 +118,22 @@ public struct PlanStrip: Equatable, Sendable {
         self.band = band
     }
 
-    /// The strip for `plan`: its working lanes and its next one. `statuses` is
-    /// the board's card statuses by task id: without them a lane waiting on a
+    /// The strip for `plan`: its working tickets and its next one. `statuses` is
+    /// the board's card statuses by task id: without them a ticket waiting on a
     /// decision would be called Next.
     public init(
         plan: PlanModel, needsYou: Int, orchestrator: PlanStripOrchestrator, line: String? = nil,
         statuses: [String: TaskStatus] = [:]
     ) {
         let working = plan.working
-        // One reading of the plan for the band and for Next, so a lane
+        // One reading of the plan for the band and for Next, so a ticket
         // waiting on a decision is in neither.
         let sections = PlanSections(plan: plan, needsYou: needsYou, statuses: statuses)
         self.init(
             orchestrator: orchestrator, line: line, needsYou: needsYou,
-            now: working.prefix(Self.nowShown).map { Lane(name: PlanWords.short($0.heading), state: $0.state) },
+            now: working.prefix(Self.nowShown).map { Ticket(name: PlanWords.short($0.heading), stage: $0.stage) },
             moreNow: working.count - min(working.count, Self.nowShown),
-            next: sections.waiting.next.first.map { PlanWords.short($0.lane.heading) },
+            next: sections.waiting.next.first.map { PlanWords.short($0.line.heading) },
             band: PlanGlanceSentence(sections: sections))
     }
 
@@ -145,12 +145,12 @@ public struct PlanStrip: Equatable, Sendable {
     }
 
     /// "mac-vis Building".
-    public static func words(_ lane: Lane) -> String { "\(lane.name) \(PlanWords.state(lane.state))" }
+    public static func words(_ ticket: Ticket) -> String { "\(ticket.name) \(PlanWords.stage(ticket.stage))" }
 
     /// "next: plan-phones".
     public var nextWords: String? { next.map { "next: \($0)" } }
 
-    /// "+2": the Now lanes not named.
+    /// "+2": the Now tickets not named.
     public var moreWords: String? { moreNow > 0 ? "+\(moreNow)" : nil }
 
     /// What the strip says after its mark, part by part.
@@ -158,7 +158,7 @@ public struct PlanStrip: Equatable, Sendable {
         [needsYouWords].compactMap { $0 } + now.map(Self.words) + [moreWords, nextWords].compactMap { $0 }
     }
 
-    /// Whether there's anything to draw: with no plan, no asks and no lanes,
+    /// Whether there's anything to draw: with no plan, no asks and no tickets,
     /// the strip isn't drawn at all.
     public var isEmpty: Bool { parts.isEmpty }
 

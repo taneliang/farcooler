@@ -1,6 +1,6 @@
 import Foundation
 
-// The agents at work, as one list (ov-619): Far Cooler's own agents (a lane's
+// The agents at work, as one list (ov-619): Far Cooler's own agents (a ticket's
 // pane, a task's pane, an orchestrator) and the Claude subagents an agent
 // started, read the same way. The phone draws it twice from here: the Agents
 // card beside Now/Next and the agents view it opens, scoped to a workspace,
@@ -25,7 +25,7 @@ public struct RunningAgent: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         /// A workspace's orchestrator.
         case orchestrator
-        /// An agent in a pane of its own: a lane's, a task's, or one started by hand.
+        /// An agent in a pane of its own: a ticket's, a task's, or one started by hand.
         case pane
         /// A Claude subagent, running inside `parent`'s pane.
         case subagent

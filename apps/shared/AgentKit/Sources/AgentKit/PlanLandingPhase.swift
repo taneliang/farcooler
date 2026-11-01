@@ -1,20 +1,19 @@
 import Foundation
 
-// A train's phase (ov-503, design 4): the one reading of where a train stands
-// that every surface shares. The runner derives it (`train_phase.rs`) and
-// sends it on `BoardTrain` behind `board_train_phase`; a runner without it
-// sends nothing, and phase 0 is sent as null. Both read through
-// `PlanTrain.phase(in:)`, which falls back to the stored `state` and to what
-// the plan knows of the train's lanes, so a surface never has to ask which
+// A landing's phase (ov-503, design 4): the one reading of where a landing
+// stands that every surface shares. The runner derives it (`train_phase.rs`)
+// and sends it on the landing; phase 0 is sent as null. Both read through
+// `PlanLanding.phase(in:)`, which falls back to the stored `state` and to what
+// the plan knows of the landing's tickets, so a surface never has to ask which
 // runner it's talking to.
 
-/// Where a train stands, as a person says it.
-public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
-    case waitingForLanes = "waiting_for_lanes"
-    /// The collecting train, gathering ready lanes while the train ahead
+/// Where a landing stands, as a person says it.
+public enum LandingPhase: String, Decodable, Sendable, CaseIterable {
+    case waitingForTickets = "waiting_for_tickets"
+    /// The collecting landing, gathering ready tickets while the landing ahead
     /// lands (ov-520, ov-522). The runner sends it; no `state` reads as it.
-    case waitingForPreviousTrain = "waiting_for_previous_train"
-    /// The collecting train with nothing ahead, held off until main's own
+    case waitingForPreviousLanding = "waiting_for_previous_landing"
+    /// The collecting landing with nothing ahead, held off until main's own
     /// checks pass (ov-520, proto 11). The runner sends it; no `state` reads
     /// as it.
     case waitingForMain = "waiting_for_main"
@@ -29,16 +28,16 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     case unknown
 
     public init(from decoder: Decoder) throws {
-        self = TrainPhase(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        self = LandingPhase(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
     /// The phase alone, in title case. Every word maps to a state the runner
-    /// derives; combining the lanes, the local gates and the full test run
+    /// derives; combining the tickets, the local gates and the full test run
     /// are one step to a person, "Checking Here" (ov-522).
     public var word: String {
         switch self {
-        case .waitingForLanes: "Waiting for Lanes"
-        case .waitingForPreviousTrain: "Waiting for the Earlier Landing"
+        case .waitingForTickets: "Waiting for Tickets"
+        case .waitingForPreviousLanding: "Waiting for the Earlier Landing"
         case .waitingForMain: "Waiting for Main's Checks to Pass"
         case .integrating, .gatingLocally: "Checking Here"
         case .waitingForCi: "Checking on CI"
@@ -51,11 +50,11 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         }
     }
 
-    /// The phase inside a sentence: "Train 86 checking on CI".
+    /// The phase inside a sentence: "Landing 86 checking on CI".
     public var sentence: String {
         switch self {
-        case .waitingForLanes: "waiting for lanes"
-        case .waitingForPreviousTrain: "waiting for the earlier landing"
+        case .waitingForTickets: "waiting for tickets"
+        case .waitingForPreviousLanding: "waiting for the earlier landing"
         case .waitingForMain: "waiting for main's checks to pass"
         case .integrating, .gatingLocally: "checking here"
         case .waitingForCi: "checking on CI"
@@ -71,9 +70,9 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     /// One line on what is happening, for a hover or a long press.
     public var explanation: String {
         switch self {
-        case .waitingForLanes: "Some of its lanes aren't ready to land yet."
-        case .waitingForPreviousTrain: "Ready lanes are collected here while the earlier landing finishes."
-        case .waitingForMain: "Ready lanes are collected here until main's checks pass, then they land."
+        case .waitingForTickets: "Some of its tickets aren't ready to land yet."
+        case .waitingForPreviousLanding: "Ready tickets are collected here while the earlier landing finishes."
+        case .waitingForMain: "Ready tickets are collected here until main's checks pass, then they land."
         case .integrating, .gatingLocally: "The full test run, on the runner."
         case .waitingForCi: "Pushed, with CI running its checks."
         case .ciFailed: "A CI check failed, so it needs a fix."
@@ -85,8 +84,8 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         }
     }
 
-    /// How far along it is, for ordering trains furthest first. A stalled
-    /// train has lost its place, and an unknown one never leads.
+    /// How far along it is, for ordering landings furthest first. A stalled
+    /// landing has lost its place, and an unknown one never leads.
     public var progress: Int {
         switch self {
         case .landed, .dropped: 8
@@ -95,7 +94,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         case .ciFailed: 5
         case .gatingLocally: 4
         case .integrating: 3
-        case .waitingForLanes, .waitingForPreviousTrain, .waitingForMain: 2
+        case .waitingForTickets, .waitingForPreviousLanding, .waitingForMain: 2
         case .stalled: 1
         case .unknown: 0
         }
@@ -105,16 +104,16 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     public var needsAttention: Bool { self == .ciFailed || self == .stalled }
 }
 
-extension PlanTrain {
-    /// The phase to show: the runner's, else what `state` and the lanes say.
+extension PlanLanding {
+    /// The phase to show: the runner's, else what `state` and the tickets say.
     ///
-    /// A runner without `board_train_phase`, one that sent phase 0, and one
-    /// with a phase this build has no word for all read the same way. Pushed,
-    /// red, green, landed and dropped are one-to-one with a phase. Gating is
-    /// gating locally. Integrating is waiting for lanes while any live lane on
-    /// the train isn't ready (`landing`), else integrating. The fallback
-    /// never says stalled: that needs the runner's clock.
-    public func phase(in plan: PlanModel) -> TrainPhase {
+    /// A runner that sent phase 0, and one with a phase this build has no word
+    /// for, read the same way. Pushed, red, green, landed and dropped are
+    /// one-to-one with a phase. Gating is gating locally. Open is waiting for
+    /// tickets while any live ticket on the landing isn't ready (`landing`),
+    /// else integrating. The fallback never says stalled: that needs the
+    /// runner's clock.
+    public func phase(in plan: PlanModel) -> LandingPhase {
         if let phase, phase != .unknown { return phase }
         switch state {
         case .pushed: return .waitingForCi
@@ -123,34 +122,24 @@ extension PlanTrain {
         case .landed: return .landed
         case .dropped: return .dropped
         case .gating: return .gatingLocally
-        case .integrating, .unknown:
-            let blocked = plan.lanes(on: self).contains { $0.state.isLive && $0.state != .landing }
-            return blocked ? .waitingForLanes : .integrating
+        case .open, .unknown:
+            let blocked = plan.lines(on: self).contains { $0.stage.isLive && $0.stage != .landing }
+            return blocked ? .waitingForTickets : .integrating
         }
     }
 
-    /// When the train entered the phase to show: the runner's clock, else the
-    /// state's.
+    /// When the landing entered the phase to show: the runner's clock, else
+    /// the state's.
     public func phaseSince(in plan: PlanModel) -> Int64 {
         if let phase, phase != .unknown, let phaseSince { return phaseSince }
         return stateSince
     }
 }
 
-extension PlanModel {
-    /// The plan's lanes on `train`: those it lists, plus any lane that names
-    /// it, in the plan's order.
-    public func lanes(on train: PlanTrain) -> [PlanLane] {
-        let ids = Set(train.lanes.map(\.lane))
-        let name = train.name.lowercased()
-        return lanes.filter { ids.contains($0.id) || $0.train?.lowercased() == name }
-    }
-}
-
 extension PlanWords {
-    /// What a train is, for a hover or a long press where one first appears
-    /// (ov-522): the Landing header and the train card.
-    public static let trainExplanation = "Reviewed lanes land on main together, after one round of checks."
+    /// What a landing is, for a hover or a long press where one first appears
+    /// (ov-522): the Landing header and the landing card.
+    public static let landingExplanation = "Reviewed tickets land on main together, after one round of checks."
 
     /// How long, coarsely: "45 min", "2 h", "3 d".
     public static func span(_ ms: Int64) -> String {
@@ -163,11 +152,11 @@ extension PlanWords {
     }
 }
 
-/// The ladder a train climbs: three steps, and which one a phase is on. The
+/// The ladder a landing climbs: three steps, and which one a phase is on. The
 /// Mac draws it as three segments; the phones say it as "Checking on CI ·
 /// step 2 of 3" (ov-503, design 7; ov-522). Waiting for the Earlier Landing
-/// and Waiting for Main's Checks to Pass (the collecting train), Waiting for
-/// Lanes, CI Failed and Stalled are said in place of the step they stand on.
+/// and Waiting for Main's Checks to Pass (the collecting landing), Waiting for
+/// Tickets, CI Failed and Stalled are said in place of the step they stand on.
 public enum PlanLadder {
     public static let steps = ["Checking Here", "Checking on CI", "Landed"]
 
@@ -179,49 +168,49 @@ public enum PlanLadder {
     ]
 
     /// The step a phase is standing on, 0 to 2; 3 once everything is done.
-    public static func step(_ phase: TrainPhase) -> Int {
+    public static func step(_ phase: LandingPhase) -> Int {
         switch phase {
-        case .waitingForPreviousTrain, .waitingForMain, .waitingForLanes, .unknown, .integrating, .gatingLocally, .stalled: 0
+        case .waitingForPreviousLanding, .waitingForMain, .waitingForTickets, .unknown, .integrating, .gatingLocally, .stalled: 0
         case .waitingForCi, .ciFailed: 1
         case .readyToLand: 2
         case .landed, .dropped: 3
         }
     }
 
-    /// What step `index` says while a train stands on `current` in `phase`:
+    /// What step `index` says while a landing stands on `current` in `phase`:
     /// the phase's own word on the step it's on.
-    public static func label(_ index: Int, current: Int, phase: TrainPhase) -> String {
+    public static func label(_ index: Int, current: Int, phase: LandingPhase) -> String {
         index == current ? phase.word : steps[index]
     }
 
     /// What step `index` explains: the phase's own line on the step it's on.
-    public static func explanation(_ index: Int, current: Int, phase: TrainPhase) -> String {
+    public static func explanation(_ index: Int, current: Int, phase: LandingPhase) -> String {
         index == current ? phase.explanation : explanations[index]
     }
 
     /// "Checking on CI · step 2 of 3": the phase and where it is on the
-    /// ladder. A train past the ladder (landed, dropped) says the phase alone.
-    public static func compact(_ phase: TrainPhase) -> String {
+    /// ladder. A landing past the ladder (landed, dropped) says the phase alone.
+    public static func compact(_ phase: LandingPhase) -> String {
         let at = step(phase)
         return at >= steps.count ? phase.word : "\(phase.word) \u{00B7} step \(at + 1) of \(steps.count)"
     }
 }
 
-extension PlanSections.TrainCard {
-    /// "3f78754f · 2 of 5 jobs done · 12 min · Integrator · Opus · 1.4M": the
-    /// commit, how CI stands, how long the train has been in this phase and
-    /// who integrates. Empty when none of it is known.
+extension PlanSections.LandingCard {
+    /// "3f78754f · 2 of 5 jobs done · 12 min · Lander · Opus · 1.4M": the
+    /// commit, how CI stands, how long the landing has been in this phase and
+    /// who lands it. Empty when none of it is known.
     public func facts(ci: PlanCIRead?, now: Int64) -> String {
         var parts: [String] = []
-        if let sha = train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
+        if let sha = landing.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
         if let ci {
             parts.append(PlanWords.ciSummary(ci))
             if let stale = PlanWords.ciStale(ci, now: now) { parts.append(stale) }
-        } else if train.pushedSha != nil {
+        } else if landing.pushedSha != nil {
             parts.append("CI not read yet")
         }
         if since > 0 { parts.append(PlanWords.span(now - since)) }
-        if let agent = train.agent { parts.append(Self.integrator(agent)) }
+        if let lander { parts.append(Self.landerWords(lander)) }
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -239,14 +228,14 @@ extension PlanSections.TrainCard {
             .joined(separator: " \u{00B7} ")
     }
 
-    /// "Integrator · Opus · 1.4M", or "Integrator · Opus · done".
-    public static func integrator(_ agent: PlanTrainAgent) -> String {
-        var parts = ["Integrator"]
+    /// "Lander · Opus · 1.4M", or "Lander · Opus · done".
+    public static func landerWords(_ agent: PlanAgent) -> String {
+        var parts = [PlanAgentRole.lander.word]
         let model = PlanWords.model(agent.model)
         if !model.isEmpty { parts.append(model) }
         if agent.spend.totalTokens > 0 {
             parts.append(TaskUsageFormat.tokens(agent.spend.totalTokens))
-        } else if !agent.isWorking {
+        } else if !agent.working {
             parts.append("done")
         }
         return parts.joined(separator: " \u{00B7} ")

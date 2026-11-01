@@ -3,7 +3,7 @@ import Foundation
 // The track line (ov-331): one plain-words line per theme that says whether
 // the work is moving, for the owner who wants to stay on track. It is computed
 // from facts the plan already carries, never from a stored health flag: an
-// agent's "at risk" is a guess the owner can't check, and "No lane · quiet for
+// agent's "at risk" is a guess the owner can't check, and "No ticket · quiet for
 // 3 days" is something they can.
 //
 // Amber is for what the owner has to act on, and a track line is only ever
@@ -13,7 +13,7 @@ import Foundation
 //
 // The design is `.claude/agent/reports/theme-detail/design.md`, 2.2.
 
-/// How long a theme sits with no lane and nothing moving before it reads as
+/// How long a theme sits with no ticket and nothing moving before it reads as
 /// quiet (the owner's ruling D3, 5 Oct): a day.
 public let planQuietAfterMs: Int64 = 24 * 3_600_000
 
@@ -21,18 +21,18 @@ public let planQuietAfterMs: Int64 = 24 * 3_600_000
 public enum PlanTrack: Equatable, Sendable {
     /// Past its token budget.
     case overBudget(PlanBudget)
-    /// Every lane working it has sat in one state for over an hour: the one
+    /// Every ticket working it has sat in one stage for over an hour: the one
     /// that has sat longest is named.
-    case stuck(lane: String, since: Int64)
-    /// At least one lane is building, in review, fixing or landing it, and
-    /// is still moving. A lane that has sat over an hour beside them is
+    case stuck(ticket: String, since: Int64)
+    /// At least one ticket is being built, reviewed, fixed or landed for it,
+    /// and is still moving. A ticket that has sat over an hour beside them is
     /// named after: the others are moving, and the line says so first.
-    case moving(lanes: [PlanTrackLane], stalled: PlanTrackStalled?)
-    /// No lane is working it and the plan has one queued for it.
+    case moving(tickets: [PlanTrackTicket], stalled: PlanTrackStalled?)
+    /// Nothing is working it and the plan has a ticket waiting for it.
     case queued(rank: Int?)
-    /// Open cards, no lane, and nothing moved for a day or more.
+    /// Open cards, no ticket in flight, and nothing moved for a day or more.
     case quiet(since: Int64)
-    /// Open cards, no lane, and something moved within the day.
+    /// Open cards, no ticket in flight, and something moved within the day.
     case idle
     /// Every card is done.
     case allDone
@@ -75,29 +75,32 @@ public enum PlanTrack: Equatable, Sendable {
     }
 }
 
-/// The working lane that has sat longest in one state, named beside lanes
+/// The working ticket that has sat longest in one stage, named beside tickets
 /// that are moving.
 public struct PlanTrackStalled: Equatable, Sendable {
-    public var lane: String
+    public var ticket: String
     public var since: Int64
 }
 
-/// A lane moving a theme, as the track line names it.
-public struct PlanTrackLane: Equatable, Sendable {
+/// A ticket moving a theme, as the track line names it.
+public struct PlanTrackTicket: Equatable, Sendable {
     public var name: String
-    public var state: LaneState
+    public var stage: TicketStage
+    /// A builder has it again for a fix round.
+    public var fixing: Bool
     public var fixRounds: Int
 }
 
 extension PlanModel {
-    /// The lanes working any of `theme`'s cards right now: building, in
-    /// review, fixing or landing. Queued lanes are waiting, not working.
-    public func workingLanes(in theme: PlanTheme) -> [PlanLane] {
-        lanes(in: theme).filter { $0.state.isLive && $0.state != .queued }
+    /// The tickets for `theme`'s cards being worked right now: building, in
+    /// review, waiting on the owner or landing. Waiting tickets are waiting,
+    /// not working.
+    public func workingLines(in theme: PlanTheme) -> [PlanTicketLine] {
+        lines(in: theme).filter { $0.stage.isPastWaiting }
     }
 
-    /// When `theme` last moved, in ms: the newest of its story, the lanes on
-    /// its cards (a dropped lane is gone, and doesn't count), its rulings
+    /// When `theme` last moved, in ms: the newest of its story, the tickets on
+    /// its cards (a dropped ticket is gone, and doesn't count), its rulings
     /// (made or settled), the board's own word on its cards (`activity`, by
     /// task id) and the runner's, if it sent one. 0 for a theme nothing has
     /// ever touched.
@@ -105,8 +108,8 @@ extension PlanModel {
         var at = max(theme.storyAt, theme.lastMovedAt ?? 0)
         let tasks = Set(theme.cards.map(\.task))
         for task in tasks { at = max(at, activity[task] ?? 0) }
-        for lane in lanes where lane.state != .dropped && lane.cards.contains(where: { tasks.contains($0.task) }) {
-            at = max(at, lane.stateSince)
+        for line in lines where line.stage != .dropped && tasks.contains(line.task) {
+            at = max(at, line.stageSince)
         }
         for ruling in rulings(in: theme) { at = max(at, ruling.createdAt, ruling.settledAt ?? 0) }
         return at
@@ -117,18 +120,20 @@ extension PlanModel {
         if theme.state == "paused" { return .paused }
         if theme.state == "done" { return .done }
         if let over = PlanWords.overBudget(theme) { return .overBudget(over) }
-        let working = workingLanes(in: theme)
-        // The lane stalled longest, not the first in plan order; and it only
+        let working = workingLines(in: theme)
+        // The ticket stalled longest, not the first in plan order; and it only
         // stands alone when nothing else is moving (an hour is routine for a
-        // build, so it never hides the lanes that are).
-        let stalled = working.filter(\.stale).min { $0.stateSince < $1.stateSince }
-        if let stalled, working.allSatisfy(\.stale) { return .stuck(lane: stalled.heading, since: stalled.stateSince) }
+        // build, so it never hides the tickets that are).
+        let stalled = working.filter(\.stale).min { $0.stageSince < $1.stageSince }
+        if let stalled, working.allSatisfy(\.stale) { return .stuck(ticket: stalled.heading, since: stalled.stageSince) }
         if !working.isEmpty {
             return .moving(
-                lanes: working.map { PlanTrackLane(name: $0.heading, state: $0.state, fixRounds: $0.fixRounds) },
-                stalled: stalled.map { PlanTrackStalled(lane: $0.heading, since: $0.stateSince) })
+                tickets: working.map {
+                    PlanTrackTicket(name: $0.heading, stage: $0.stage, fixing: $0.isFixing, fixRounds: $0.fixRounds)
+                },
+                stalled: stalled.map { PlanTrackStalled(ticket: $0.heading, since: $0.stageSince) })
         }
-        let queued = lanes(in: theme).filter { $0.state == .queued }
+        let queued = lines(in: theme).filter { $0.stage == .waiting }
         if !queued.isEmpty {
             return .queued(rank: queued.compactMap(\.planRank).min())
         }
@@ -144,28 +149,27 @@ extension PlanModel {
         rulings.filter { $0.themeId == theme.id }
     }
 
-    /// The lanes that landed on `theme`'s cards in the last seven days,
+    /// The tickets that landed on `theme`'s cards in the last seven days,
     /// newest first.
-    public func landedThisWeek(in theme: PlanTheme) -> [PlanLane] {
-        lanes(in: theme)
-            .filter { $0.state == .landed && nowMs - $0.stateSince < 7 * 24 * 3_600_000 }
-            .sorted { $0.stateSince > $1.stateSince }
+    public func landedThisWeek(in theme: PlanTheme) -> [PlanTicketLine] {
+        lines(in: theme)
+            .filter { $0.stage == .landed && nowMs - $0.stageSince < 7 * 24 * 3_600_000 }
+            .sorted { $0.stageSince > $1.stageSince }
     }
 
-    /// What the week did outside every theme: the lanes (live, or landed in
-    /// the last week) none of whose cards is in one, and the open cards in no
+    /// What the week did outside every theme: the tickets (live, or landed in
+    /// the last week) whose cards are in no theme, and the open cards in no
     /// theme, from the board's statuses by task id.
     public func outsideThemes(statuses: [String: TaskStatus]) -> PlanOutside {
         let inThemes = Set(shownThemes.flatMap { $0.cards.map(\.task) })
-        let outsideLanes = lanes.filter { lane in
-            lane.state != .dropped && !lane.cards.contains { inThemes.contains($0.task) }
-                && (lane.state.isLive || nowMs - lane.stateSince < 7 * 24 * 3_600_000)
+        let outsideLines = lines.filter { line in
+            line.stage != .dropped && !inThemes.contains(line.task)
+                && (line.stage.isLive || nowMs - line.stageSince < 7 * 24 * 3_600_000)
         }
         let open = statuses.filter { id, status in
             !inThemes.contains(id) && status != .done && status != .cancelled
         }.count
-        return PlanOutside(
-            lanes: outsideLanes.map(\.heading), openCards: open, tidy: noLane + landedNotClosed, trainLanes: laneIsTrain)
+        return PlanOutside(tickets: outsideLines.map(\.heading), openCards: open, tidy: offTheLine + landedNotClosed)
     }
 
     /// "3 waiting on you · 4 moving · 1 quiet": the Themes section's one
@@ -203,48 +207,45 @@ extension PlanModel {
 
 /// The work outside every theme.
 public struct PlanOutside: Equatable, Sendable {
-    /// The lanes' names, in the plan's order.
-    public var lanes: [String]
+    /// The tickets' headings, in the line's order.
+    public var tickets: [String]
     public var openCards: Int
-    /// The cards the CLI's "Worth a look" lists: in review with no lane
-    /// working them, or whose lanes all landed.
+    /// The cards the CLI's "Worth a look" lists: in progress or in review and
+    /// off the line, or whose ticket landed.
     public var tidy: [PlanFlaggedCard]
-    /// The lanes named like a live train (ov-461), which "Worth a look" also
-    /// lists: record the agent on the train and drop the lane.
-    public var trainLanes: [PlanFlaggedLane] = []
 
-    public var isEmpty: Bool { lanes.isEmpty && openCards == 0 && tidy.isEmpty && trainLanes.isEmpty }
-    /// Everything "to tidy": cards and lanes.
-    public var tidyCount: Int { tidy.count + trainLanes.count }
+    public var isEmpty: Bool { tickets.isEmpty && openCards == 0 && tidy.isEmpty }
+    /// Everything "to tidy".
+    public var tidyCount: Int { tidy.count }
 }
 
 extension PlanWords {
-    /// "2 lanes moving", or "fix-gestures is fixing, round 1": a lane named
-    /// when one is the whole story.
+    /// "2 tickets moving", or "Fix gestures is fixing, round 1": a ticket
+    /// named when one is the whole story.
     public static func track(_ track: PlanTrack, now: Int64) -> String {
         switch track {
         case .overBudget(let budget):
             return budgetLine(budget)
-        case .stuck(let lane, let since):
-            return "\(lane): \(noMove(since: since, now: now))"
-        case .moving(let lanes, let stalled):
-            let tail = stalled.map { " · \($0.lane): \(noMove(since: $0.since, now: now))" } ?? ""
-            guard lanes.count == 1, let lane = lanes.first else { return "\(lanes.count) lanes moving" + tail }
+        case .stuck(let ticket, let since):
+            return "\(ticket): \(noMove(since: since, now: now))"
+        case .moving(let tickets, let stalled):
+            let tail = stalled.map { " · \($0.ticket): \(noMove(since: $0.since, now: now))" } ?? ""
+            guard tickets.count == 1, let ticket = tickets.first else { return "\(tickets.count) tickets moving" + tail }
             let verb =
-                switch lane.state {
-                case .building: "building"
-                case .review: "in review"
-                case .fixing: lane.fixRounds > 0 ? "fixing, round \(lane.fixRounds)" : "fixing"
+                switch ticket.stage {
+                case .building: ticket.fixing ? (ticket.fixRounds > 0 ? "fixing, round \(ticket.fixRounds)" : "fixing") : "building"
+                case .reviewing: "in review"
+                case .needsYou: "waiting on you"
                 case .landing: "landing"
                 default: "moving"
                 }
-            return "\(lane.name) is \(verb)" + tail
+            return "\(ticket.name) is \(verb)" + tail
         case .queued(let rank):
             return rank.map { "Queued, \(ordinal($0)) up" } ?? "Queued"
         case .quiet(let since):
             let days = max(1, max(0, now - since) / 86_400_000)
-            return days == 1 ? "No lane · quiet for 1 day" : "No lane · quiet for \(days) days"
-        case .idle: return "No lane yet"
+            return days == 1 ? "No ticket · quiet for 1 day" : "No ticket · quiet for \(days) days"
+        case .idle: return "No ticket yet"
         case .allDone: return "Every card is done"
         case .paused: return "Paused"
         case .done: return "Done"
@@ -270,18 +271,18 @@ extension PlanWords {
         theme.storyAt > 0 && !theme.story.isEmpty ? "Updated \(ago(theme.storyAt, now: now))" : nil
     }
 
-    /// "Landed this week": lane names, newest first, "+3 more" past `limit`.
-    public static func lanesLine(_ lanes: [PlanLane], limit: Int = 3) -> String {
-        let names = lanes.prefix(limit).map(\.heading).joined(separator: ", ")
-        return lanes.count > limit ? "\(names), +\(lanes.count - limit) more" : names
+    /// "Landed this week": ticket titles, newest first, "+3 more" past `limit`.
+    public static func ticketsLine(_ tickets: [PlanTicketLine], limit: Int = 3) -> String {
+        let names = tickets.prefix(limit).map(\.heading).joined(separator: ", ")
+        return tickets.count > limit ? "\(names), +\(tickets.count - limit) more" : names
     }
 
-    /// "Outside any theme: 2 lanes this week · 11 open cards"; nil when empty.
-    /// The lanes are the week's, and the open cards are every one, however old.
+    /// "Outside any theme: 2 tickets this week · 11 open cards"; nil when empty.
+    /// The tickets are the week's, and the open cards are every one, however old.
     public static func outside(_ outside: PlanOutside) -> String? {
         var parts: [String] = []
-        if !outside.lanes.isEmpty {
-            parts.append((outside.lanes.count == 1 ? "1 lane" : "\(outside.lanes.count) lanes") + " this week")
+        if !outside.tickets.isEmpty {
+            parts.append((outside.tickets.count == 1 ? "1 ticket" : "\(outside.tickets.count) tickets") + " this week")
         }
         if outside.openCards > 0 { parts.append(outside.openCards == 1 ? "1 open card" : "\(outside.openCards) open cards") }
         return parts.isEmpty ? nil : "Outside any theme: " + parts.joined(separator: " · ")
@@ -290,16 +291,6 @@ extension PlanWords {
     /// "11 cards to tidy".
     public static func tidy(_ n: Int) -> String { n == 1 ? "1 card to tidy" : "\(n) cards to tidy" }
 
-    /// "11 cards to tidy", "1 lane to tidy" or "2 cards and 1 lane to tidy":
-    /// the cards and the lanes "Worth a look" names.
-    public static func tidy(_ outside: PlanOutside) -> String {
-        let (cards, lanes) = (outside.tidy.count, outside.trainLanes.count)
-        guard lanes > 0 else { return tidy(cards) }
-        let lane = lanes == 1 ? "1 lane" : "\(lanes) lanes"
-        guard cards > 0 else { return "\(lane) to tidy" }
-        return "\(cards == 1 ? "1 card" : "\(cards) cards") and \(lane) to tidy"
-    }
-
-    /// Why a lane is on the list: "integ-2 is a lane and a landing".
-    public static func trainLane(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a landing" }
+    /// "11 cards to tidy": the cards "Worth a look" names.
+    public static func tidy(_ outside: PlanOutside) -> String { tidy(outside.tidy.count) }
 }

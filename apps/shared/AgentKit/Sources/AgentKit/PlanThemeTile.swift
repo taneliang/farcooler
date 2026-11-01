@@ -41,7 +41,7 @@ public struct PlanThemeTile: Equatable, Identifiable, Sendable {
     public var cards: [Card]
     /// What waits on the owner: the one amber line. Nil when nothing does.
     public var ownerAsk: String?
-    /// A lane of it is shipping, in review or building.
+    /// A ticket of it is landing, in review or building.
     public var isMoving: Bool
     /// When it last moved, in ms.
     public var lastMoved: Int64
@@ -68,7 +68,7 @@ public struct PlanThemeTile: Equatable, Identifiable, Sendable {
         self.total = total
         ownerAsk = theme.ownerAsk.isEmpty ? nil : theme.ownerAsk
         lastMoved = plan.lastMoved(theme, activity: activity)
-        isMoving = plan.lanes(in: theme).contains { moving.contains($0.id) }
+        isMoving = plan.lines(in: theme).contains { moving.contains($0.id) }
         isFinished = theme.state == "done" || (total > 0 && theme.counts.done == total)
 
         // The board's status wins; else the plan's own word for it. A card

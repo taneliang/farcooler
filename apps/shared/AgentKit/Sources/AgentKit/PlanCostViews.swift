@@ -70,7 +70,7 @@ public struct PlanBudgetLine: View {
     }
 }
 
-/// A theme's spend: what its lanes spent, the budget against it, and the last
+/// A theme's spend: what its tickets spent, the budget against it, and the last
 /// seven days. Draw it only when `hasSomething`.
 public struct PlanThemeSpend: View {
     public let theme: PlanTheme

@@ -1,30 +1,32 @@
 import Foundation
 
 // The Plan view as sections (ov-503, design 2): what moves main first, then
-// what is queued, then what it costs, then why. Every rule is here, as values:
-// which lane is in which section, which train is furthest along, what a lane
-// inside a train says about itself, and what each section says when it is
-// empty. The views only lay it out, so the Mac, the phones and the watch's
-// glance read one answer.
+// what is waiting, then what it costs, then why. Every rule is here, as values:
+// which ticket is in which section, which landing is furthest along, what a
+// ticket inside a landing says about itself, and what each section says when
+// it is empty. The views only lay it out, so the Mac, the phones and the
+// watch's glance read one answer.
 //
-// Order (owner decision 7; ov-522): Needs You, Landing (the trains), In Review,
-// Building, Waiting, Agents, Themes. The word is landing, never shipping.
+// Order (owner decision 7; ov-522): Needs You, Landing (the landings), In
+// Review, Building, Waiting, Agents, Themes. The word is landing, never
+// shipping.
 //
-// A lane belongs to exactly one place:
-// - on a live train, it's in that train's card (Landing), whatever its state;
-// - naming a train that landed while it's still queued or landing, it's in On
-//   a Landed Train (folded, and each row says which train);
-// - in review, fixing, or landing with no train, it's In Review;
-// - building, it's Building;
-// - a lane building, in review or fixing is never hidden by a landed train: it
-//   routes by its state and the row says it names that train (`landedTrain`);
-// - queued, it's Waiting on You when a card needs a decision, else Next Up
+// A ticket belongs to exactly one place:
+// - on a live landing, it's in that landing's card (Landing), whatever its
+//   stage;
+// - naming a landing that landed while it's still waiting or landing, it's in
+//   Waiting for the Next Landing (folded, and each row says which landing);
+// - in review, needing the owner, or landing with no landing, it's In Review;
+// - building (or fixing), it's Building;
+// - a ticket building or in review is never hidden by a landed landing: it
+//   routes by its stage and the row says it names that landing
+//   (`landedLanding`);
+// - waiting, it's Waiting on You when its card needs a decision, else Next Up
 //   when the plan ranks it, else Not Ranked.
-// A lane named like a live train is that train's agent and is left out (ov-461).
 
 public struct PlanSections: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case needsYou, landing, inReview, building, waiting, onLandedTrain, agents, themes
+        case needsYou, landing, inReview, building, waiting, onLandedLanding, agents, themes
 
         public var title: String {
             switch self {
@@ -33,7 +35,7 @@ public struct PlanSections: Equatable, Sendable {
             case .inReview: "In Review"
             case .building: "Building"
             case .waiting: "Waiting"
-            case .onLandedTrain: "Waiting for the Next Landing"
+            case .onLandedLanding: "Waiting for the Next Landing"
             case .agents: "Agents"
             case .themes: "Themes"
             }
@@ -47,81 +49,84 @@ public struct PlanSections: Equatable, Sendable {
             case .building: "Nothing is building."
             case .waiting: "Nothing is queued."
             case .agents: PlanWords.noAgents
-            case .needsYou, .inReview, .onLandedTrain, .themes: nil
+            case .needsYou, .inReview, .onLandedLanding, .themes: nil
             }
         }
 
         /// Drawn folded until opened.
-        public var startsFolded: Bool { self == .onLandedTrain }
+        public var startsFolded: Bool { self == .onLandedLanding }
     }
 
-    /// A lane row in In Review, Building or Waiting.
-    public struct LaneRow: Equatable, Identifiable, Sendable {
-        public var lane: PlanLane
+    /// A ticket row in In Review, Building or Waiting.
+    public struct TicketRow: Equatable, Identifiable, Sendable {
+        public var line: PlanTicketLine
         /// The agent that works it, for the line under its title.
-        public var agent: PlanFleetAgent?
-        /// One of its cards needs the owner's decision.
+        public var agent: PlanAgent?
+        /// It waits on the owner: the runner says so, or its card needs a
+        /// decision.
         public var waitsOnOwner: Bool
-        /// The heading of the landed train the lane still names, or nil.
-        public var landedTrain: String?
-        public var id: String { lane.id }
+        /// The label of the landing that landed which the ticket still names,
+        /// or nil.
+        public var landedLanding: String?
+        public var id: String { line.id }
     }
 
-    /// How a lane stands relative to the train it's on.
+    /// How a ticket stands relative to the landing it's on.
     public enum Standing: Equatable, Sendable {
         case ready
         case fixing(round: Int)
         case landed(sha: String?)
-        /// Not ready yet: queued, building or in review.
-        case notReady(LaneState)
+        /// Not ready yet: waiting, building or in review.
+        case notReady(TicketStage)
 
         public var word: String {
             switch self {
             case .ready: "Ready"
             case .fixing(let round): round > 0 ? "Fixing · round \(round)" : "Fixing"
             case .landed(let sha): sha.map { $0.isEmpty ? "Landed" : "Landed · \($0.prefix(8))" } ?? "Landed"
-            case .notReady(let state): state.word
+            case .notReady(let stage): stage.word
             }
         }
     }
 
-    public struct TrainLane: Equatable, Identifiable, Sendable {
-        public var id: String
-        public var name: String
-        public var lane: PlanLane
+    public struct LandingTicket: Equatable, Identifiable, Sendable {
+        public var id: String { line.id }
+        public var key: String
+        public var line: PlanTicketLine
         public var standing: Standing
-        /// One of its cards needs the owner's decision.
+        /// It waits on the owner.
         public var waitsOnOwner: Bool
 
-        /// What a lane aboard says about itself, or nil when it is simply
-        /// aboard (ov-522). "Ready" said nothing: the train is being tested,
-        /// ready for what? Only what matters is said: a lane that waits on
-        /// the owner, and a lane that has landed. (A lane never keeps its train
-        /// from leaving, ov-523, so none says so.)
+        /// What a ticket aboard says about itself, or nil when it is simply
+        /// aboard (ov-522). "Ready" said nothing: the landing is being tested,
+        /// ready for what? Only what matters is said: a ticket that waits on
+        /// the owner, and a ticket that has landed.
         public var note: String? {
             if waitsOnOwner { return "Needs you" }
             if case .landed = standing { return standing.word }
             return nil
         }
 
-        /// The note is drawn in amber: the lane waits on the owner.
+        /// The note is drawn in amber: the ticket waits on the owner.
         public var noteNeedsAttention: Bool { waitsOnOwner }
     }
 
-    /// A live train and its lanes.
-    public struct TrainCard: Equatable, Identifiable, Sendable {
-        public var train: PlanTrain
-        public var phase: TrainPhase
+    /// A live landing and its tickets.
+    public struct LandingCard: Equatable, Identifiable, Sendable {
+        public var landing: PlanLanding
+        public var phase: LandingPhase
         public var since: Int64
-        public var lanes: [TrainLane]
-        public var id: String { train.id }
+        public var tickets: [LandingTicket]
+        /// The agent landing it, when the runner lists one.
+        public var lander: PlanAgent?
+        public var id: String { landing.id }
     }
 
     public struct Waiting: Equatable, Sendable {
         /// Ranked, in the plan's order.
-        public var next: [LaneRow]
-        public var notRanked: [LaneRow]
-        public var onYou: [LaneRow]
+        public var next: [TicketRow]
+        public var notRanked: [TicketRow]
+        public var onYou: [TicketRow]
         public var isEmpty: Bool { next.isEmpty && notRanked.isEmpty && onYou.isEmpty }
         public var count: Int { next.count + notRanked.count + onYou.count }
     }
@@ -129,16 +134,16 @@ public struct PlanSections: Equatable, Sendable {
     /// The Needs You count the title bar says; the section's rows are the
     /// runner's own list, which the plan doesn't carry.
     public var needsYou: Int
-    /// Live trains, furthest along first.
-    public var trains: [TrainCard]
-    public var inReview: [LaneRow]
-    public var building: [LaneRow]
+    /// Live landings, furthest along first.
+    public var landings: [LandingCard]
+    public var inReview: [TicketRow]
+    public var building: [TicketRow]
     public var waiting: Waiting
     public var fleet: PlanFleet
     public var themes: PlanThemeGrid
-    /// Queued or landing lanes that name a train that has landed.
-    public var onLandedTrain: [LaneRow]
-    /// Whether the runner lists agents (`board_agents`); without it the
+    /// Waiting or landing tickets that name a landing that has landed.
+    public var onLandedLanding: [TicketRow]
+    /// Whether the runner lists agents (`board_line`); without it the
     /// Agents section isn't drawn, since "No agents running" would be false.
     public var agentsSupported: Bool
     /// The runner's clock.
@@ -149,7 +154,7 @@ public struct PlanSections: Equatable, Sendable {
     ///   - statuses: the board's card statuses by task id, which say whether
     ///     a card waits on a decision and which glyph a theme's card gets.
     ///   - activity: when each card last moved (ms), by task id.
-    ///   - agentsSupported: whether the runner advertises `board_agents`.
+    ///   - agentsSupported: whether the runner advertises `board_line`.
     public init(
         plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus] = [:], activity: [String: Int64] = [:],
         agentsSupported: Bool = true
@@ -157,80 +162,81 @@ public struct PlanSections: Equatable, Sendable {
         self.needsYou = max(0, needsYou)
         self.agentsSupported = agentsSupported
         now = plan.nowMs
-        let isTrainAgent = Set(plan.laneIsTrain.map(\.lane))
-        let candidates = plan.lanes.filter { !isTrainAgent.contains($0.id) }
+        let candidates = plan.lines
 
-        func agent(of lane: PlanLane) -> PlanFleetAgent? {
-            let mine = plan.agents.filter { $0.lane?.id == lane.id && $0.role != .orchestrator }
+        func agent(of line: PlanTicketLine) -> PlanAgent? {
+            let mine = plan.agents.filter { agent in agent.role != .orchestrator && agent.tickets.contains { $0.task == line.task } }
             return mine.sorted {
                 if $0.working != $1.working { return $0.working }
                 return $0.spend.totalTokens > $1.spend.totalTokens
             }.first
         }
-        // A live lane on a landed train names it still.
-        let landedTrains = plan.trains.filter { $0.state == .landed }
-        func landed(_ lane: PlanLane) -> PlanTrain? {
-            landedTrains.first { train in
-                train.lanes.contains { $0.lane == lane.id } || lane.train?.lowercased() == train.name.lowercased()
+        // A live ticket on a landed landing names it still.
+        let landedLandings = plan.landings.filter { $0.state == .landed }
+        func landed(_ line: PlanTicketLine) -> PlanLanding? {
+            landedLandings.first { landing in
+                landing.tickets.contains { $0.task == line.task } || line.landing == landing.number
             }
         }
-        func row(_ lane: PlanLane) -> LaneRow {
-            LaneRow(
-                lane: lane, agent: agent(of: lane), waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses),
-                landedTrain: landed(lane)?.label)
+        func row(_ line: PlanTicketLine) -> TicketRow {
+            TicketRow(
+                line: line, agent: agent(of: line), waitsOnOwner: plan.waitsOnOwner(line, statuses: statuses),
+                landedLanding: landed(line)?.label)
         }
 
-        // Trains, furthest along first; the plan's order breaks a tie.
-        let live = plan.liveTrains.enumerated().sorted {
+        // Landings, furthest along first; the plan's order breaks a tie.
+        let live = plan.liveLandings.enumerated().sorted {
             let (a, b) = ($0.element.phase(in: plan).progress, $1.element.phase(in: plan).progress)
             return a != b ? a > b : $0.offset < $1.offset
         }.map(\.element)
         var onLive = Set<String>()
-        trains = live.map { train in
-            let phase = train.phase(in: plan)
-            let since = train.phaseSince(in: plan)
-            let mine = plan.lanes(on: train).filter { !isTrainAgent.contains($0.id) }
+        landings = live.map { landing in
+            let phase = landing.phase(in: plan)
+            let since = landing.phaseSince(in: plan)
+            let mine = plan.lines(on: landing)
             onLive.formUnion(mine.map(\.id))
-            return TrainCard(
-                train: train, phase: phase, since: since,
-                lanes: mine.map { lane in
-                    TrainLane(
-                        id: lane.id, name: lane.name, lane: lane, standing: Self.standing(lane),
-                        waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses))
-                })
+            return LandingCard(
+                landing: landing, phase: phase, since: since,
+                tickets: mine.map { line in
+                    LandingTicket(
+                        key: line.key, line: line, standing: Self.standing(line),
+                        waitsOnOwner: plan.waitsOnOwner(line, statuses: statuses))
+                }, lander: plan.lander(of: landing))
         }
 
-        let free = candidates.filter { $0.state.isLive && !onLive.contains($0.id) }
-        // Only queued and landing lanes go to the folded section; the rest
-        // route by their state and are flagged.
-        let parked = free.filter { ($0.state == .queued || $0.state == .landing) && landed($0) != nil }
-        onLandedTrain = parked.map(row)
+        let free = candidates.filter { $0.stage.isLive && !onLive.contains($0.id) }
+        // Only waiting and landing tickets go to the folded section; the rest
+        // route by their stage and are flagged.
+        let parked = free.filter { ($0.stage == .waiting || $0.stage == .landing) && landed($0) != nil }
+        onLandedLanding = parked.map(row)
         let parkedIDs = Set(parked.map(\.id))
         let loose = free.filter { !parkedIDs.contains($0.id) }
 
-        inReview = loose.filter { [.review, .fixing, .landing].contains($0.state) }.map(row)
-        building = loose.filter { $0.state == .building }.map(row)
-        let queued = loose.filter { $0.state == .queued }
-        let blocked = queued.filter { plan.waitsOnOwner($0, statuses: statuses) }
+        inReview = loose.filter { [.reviewing, .needsYou, .landing].contains($0.stage) }.map(row)
+        building = loose.filter { $0.stage == .building }.map(row)
+        let waitingLines = loose.filter { $0.stage == .waiting }
+        let blocked = waitingLines.filter { plan.waitsOnOwner($0, statuses: statuses) }
         let blockedIDs = Set(blocked.map(\.id))
-        let ranked = plan.order.compactMap { id in queued.first { $0.id == id && !blockedIDs.contains(id) } }
+        let ranked = waitingLines.filter { $0.planRank != nil && !blockedIDs.contains($0.id) }
+            .sorted { ($0.planRank ?? .max) < ($1.planRank ?? .max) }
         let rankedIDs = Set(ranked.map(\.id))
         waiting = Waiting(
-            next: ranked.map(row), notRanked: queued.filter { !rankedIDs.contains($0.id) && !blockedIDs.contains($0.id) }.map(row),
+            next: ranked.map(row),
+            notRanked: waitingLines.filter { !rankedIDs.contains($0.id) && !blockedIDs.contains($0.id) }.map(row),
             onYou: blocked.map(row))
 
         fleet = PlanFleet(plan.agents, spend: plan.agentsSpend)
-        let moving = Set(trains.flatMap { $0.lanes.map(\.id) } + (inReview + building).map(\.id))
+        let moving = Set(landings.flatMap { $0.tickets.map(\.id) } + (inReview + building).map(\.id))
         themes = PlanThemeGrid(plan: plan, moving: moving, statuses: statuses, activity: activity)
     }
 
-    /// A lane's standing on its train.
-    static func standing(_ lane: PlanLane) -> Standing {
-        switch lane.state {
-        case .landing: .ready
-        case .fixing: .fixing(round: lane.fixRounds)
-        case .landed: .landed(sha: lane.landedSha)
-        default: .notReady(lane.state)
+    /// A ticket's standing on its landing.
+    static func standing(_ line: PlanTicketLine) -> Standing {
+        if line.isFixing { return .fixing(round: line.fixRounds) }
+        switch line.stage {
+        case .landing: return .ready
+        case .landed: return .landed(sha: line.landedSha)
+        default: return .notReady(line.stage)
         }
     }
 
@@ -246,7 +252,7 @@ public struct PlanSections: Equatable, Sendable {
             switch kind {
             case .needsYou: needsYou > 0
             case .landing, .waiting: true
-            case .onLandedTrain: !onLandedTrain.isEmpty
+            case .onLandedLanding: !onLandedLanding.isEmpty
             case .inReview: !inReview.isEmpty
             case .building: !building.isEmpty || !waiting.next.isEmpty
             case .agents: agentsSupported
@@ -260,11 +266,11 @@ public struct PlanSections: Equatable, Sendable {
     public func count(_ kind: Kind) -> Int {
         switch kind {
         case .needsYou: needsYou
-        case .landing: trains.count
+        case .landing: landings.count
         case .inReview: inReview.count
         case .building: building.count
         case .waiting: waiting.count
-        case .onLandedTrain: onLandedTrain.count
+        case .onLandedLanding: onLandedLanding.count
         case .agents: fleet.agents.count
         case .themes: themes.tiles.count + themes.finished.count
         }
@@ -279,20 +285,20 @@ public struct PlanSections: Equatable, Sendable {
 }
 
 extension PlanWords {
-    /// "Building · ov-481, ov-482 · Builder · Sonnet · 380K · 3 h": a lane row's
-    /// second line. The state with its round and train, the cards (their count
-    /// past three), the main agent and its tokens, and how long the lane has
-    /// been in this state (`aged`, left off when a warning already says so).
-    /// `state` replaces the lane's own words for its state: a lane on a train
-    /// says how it stands relative to the train ("Ready", "Fixing · round 2").
-    public static func laneSecond(
-        _ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true, state: String? = nil
+    /// "Building · ov-481 · Builder · Sonnet · 380K · 3 h": a ticket row's second
+    /// line. The stage with its round and landing, its key, the main agent and its tokens,
+    /// and how long the ticket has been in this stage (`aged`, left off when a
+    /// warning already says so). `state` replaces the ticket's own words for
+    /// its stage: a ticket on a landing says how it stands relative to the
+    /// landing ("Ready", "Fixing · round 2").
+    public static func ticketSecond(
+        _ line: PlanTicketLine, agent: PlanAgent?, landedLanding: String?, now: Int64, aged: Bool = true, state: String? = nil
     ) -> String {
-        var parts = [state ?? status(lane)]
-        if let landedTrain, !parts[0].contains(landedTrain) { parts.append("\(landedTrain) landed") }
-        parts.append(lane.cards.count > 3 ? cards(lane.cards.count) : cardKeys(lane))
+        var parts = [state ?? status(line)]
+        if let landedLanding, !parts[0].contains(landedLanding) { parts.append("\(landedLanding) landed") }
+        parts.append(line.key)
         if let agent { parts.append([agent.who, agent.tokens()].compactMap { $0 }.joined(separator: " \u{00B7} ")) }
-        if aged, lane.stateSince > 0, now > lane.stateSince { parts.append(span(now - lane.stateSince)) }
+        if aged, line.stageSince > 0, now > line.stageSince { parts.append(span(now - line.stageSince)) }
         return parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
     }
 }

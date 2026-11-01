@@ -7,7 +7,7 @@ import AppKit
 // A task key's card (ov-299): the Mac's hovercard and the iPhone's long-press
 // preview draw this one view, from `TaskKeyCard`.
 
-/// The card: the title first and largest, then status, theme and lane on one
+/// The card: the title first and largest, then status, theme and stage on one
 /// line, then the latest note or the intent, a few lines at most.
 public struct TaskKeyCardView: View {
     public let card: TaskKeyCard

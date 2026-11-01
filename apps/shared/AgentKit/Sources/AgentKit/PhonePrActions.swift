@@ -1,7 +1,7 @@
 import Foundation
 
 // A phone acting on a pull request as the runner's own `gh` login (ov-317, team
-// mode T6): mark a lane's draft pull request ready for review, and reply to a
+// mode T6): mark a ticket's draft pull request ready for review, and reply to a
 // review thread an agent escalated. The runner does both (`pr.ready` and
 // `pr.thread_reply`, `pr_actions`, Control scope); this holds what a phone sends,
 // what it asks before sending, and what it says when the runner refuses.
@@ -29,10 +29,10 @@ enum PhonePrActions {
     /// family into one.
     static let replyMax = 2000
 
-    /// `pr.ready`'s arguments: the lane, and the number of the draft the lane
-    /// row showed, so a lane with two drafts readies the one the person saw.
-    static func readyRequest(lane: String, number: Int) -> [String: Any] {
-        ["lane": lane, "pr_number": number]
+    /// `pr.ready`'s arguments: the ticket's card, and the number of the draft
+    /// the ticket row showed, so the one the person saw is the one readied.
+    static func readyRequest(task: String, number: Int) -> [String: Any] {
+        ["task": task, "pr_number": number]
     }
 
     /// `pr.thread_reply`'s arguments for the card whose Needs You row is the
@@ -118,7 +118,7 @@ enum PhonePrActions {
     static let markReady = "Mark Ready"
     /// Somebody else's pull request, on a Needs You row: reviewed there.
     static let reviewOnGitHub = "Review on GitHub"
-    /// A thread, and a lane's own pull request: opened there.
+    /// A thread, and a ticket's own pull request: opened there.
     static let openOnGitHub = "Open on GitHub"
     static let reply = "Reply\u{2026}"
     static let sendReply = "Send Reply"
@@ -127,7 +127,7 @@ enum PhonePrActions {
     /// else by its code. `action` finishes "Couldn’t …".
     static func refusal(word: String?, what: String?, action: String) -> String {
         switch what {
-        case "lane_pr": return "This lane has no draft pull request to mark ready. It may already be ready, or closed."
+        case "ticket_pr": return "This ticket has no draft pull request to mark ready. It may already be ready, or closed."
         case "thread_link": return "Couldn’t find that thread on GitHub. Open it there to reply."
         case "already_answered": return "This thread was already answered."
         case "reply_body": return "A reply has to be between 1 and \(replyMax) characters."
