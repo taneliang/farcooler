@@ -489,6 +489,9 @@ final class TranscriptLayout {
 ///   view: a knob dragged, a click in the track, or VoiceOver's value set
 ///   or increment arrives here, with AppKit's own tracking, paging repeat
 ///   and "Jump to the spot that's clicked".
+/// - **A late frame's scroll.** In a gesture, a move of the clip farther
+///   than it is tall is made `stride` of its height a frame (`clipMoved`,
+///   ov-862).
 @MainActor
 final class TranscriptScroller: NSObject {
     weak var layout: TranscriptLayout?
@@ -554,6 +557,29 @@ final class TranscriptScroller: NSObject {
     private var watching: [NSObjectProtocol] = []
     private var monitor: Any?
 
+    /// How much of its height the clip moves a frame, in a gesture, when
+    /// one frame's scroll would take it past every row on screen (ov-862). A frame 200 to 300 ms late in a 12,000 pt/s fling scrolls
+    /// 2,500 to 3,300 pt at once, past every row the lazy stack has built;
+    /// the stack, bottom-aligned, then puts the rows it has where the clip
+    /// went, the rows on screen moving 100 to 800 pt, and the rest of the
+    /// scroll is lost. Moved a part of its height a frame, the clip always
+    /// shares a row with the frame before, and the stack builds the rows
+    /// above it as any scroll does.
+    static let stride: CGFloat = 0.75
+    /// What's left of such a move, made `stride` a frame (`ticked`).
+    private(set) var carry: CGFloat = 0
+    /// Where the clip was, and the content's height, when last seen.
+    private var clipWas: (y: CGFloat, document: CGFloat)?
+    /// The clip moved by this, not by the reader or the stack.
+    private var carrying = false
+    /// The content resized since the last frame's step: the stack moved the
+    /// clip by what it took off or put on above, so the step waits a frame.
+    private var resizedSinceStep = false
+    /// How far, all told, this moved the clip from where the reader's
+    /// scroll put it: plus what it cut from a move, less what it carried
+    /// on after. For a test to read what the reader saw.
+    private(set) var shifted: CGFloat = 0
+
     init(layout: TranscriptLayout) {
         self.layout = layout
         super.init()
@@ -591,6 +617,11 @@ final class TranscriptScroller: NSObject {
             watching.append(center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
                 MainActor.assumeIsolated { self?.readerScrolled(appKitLive: true) }
             })
+            // The clip moved: a late frame's scroll is spread over frames.
+            watching.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.clipMoved() }
+            })
+            scroll.contentView.postsBoundsChangedNotifications = true
             // The content resized (a row grew, the stack sized its content
             // again): the clip view sets the scroller from it on the same
             // notification, which may come after the pass above in a frame,
@@ -598,7 +629,10 @@ final class TranscriptScroller: NSObject {
             // own, so ours is set last.
             if let doc = scroll.documentView {
                 watching.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: nil) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.apply() }
+                    MainActor.assumeIsolated {
+                        self?.resizedSinceStep = true
+                        self?.apply()
+                    }
                 })
             }
         }
@@ -618,6 +652,8 @@ final class TranscriptScroller: NSObject {
         monitor = nil
         aimed = nil
         dragging = false
+        carry = 0
+        clipWas = nil
         endLive()
         if let scroller, scroller.target === self {
             scroller.target = theirTarget
@@ -645,6 +681,7 @@ final class TranscriptScroller: NSObject {
     private func pass() {
         guard let scroll, let scroller else { return }
         let now = TranscriptLayout.Geometry(scroll)
+        clipWas = (now.y, now.document)
         let reset = shown.map { scroller.doubleValue != $0.value || scroller.knobProportion != $0.proportion } ?? true
         guard needsApply || reset || now != appliedFor else { return }
         apply()
@@ -748,11 +785,14 @@ final class TranscriptScroller: NSObject {
             apply(confirmed: true)
         }
         if aimed != nil { settle() }
+        if carry != 0 {
+            if resizedSinceStep { resizedSinceStep = false } else { carryOn() }
+        }
         if widthLeft > 0 {
             widthLeft -= 1
             if widthLeft == 0 { widthHeld() }
         }
-        if aimed == nil, widthLeft == 0, heldFrom == nil {
+        if aimed == nil, widthLeft == 0, heldFrom == nil, carry == 0 {
             ticker?.invalidate()
             ticker = nil
         }
@@ -772,6 +812,61 @@ final class TranscriptScroller: NSObject {
         aim(value, scroll)
     }
 
+    // MARK: A late frame's scroll
+
+    /// The clip moved. In a gesture of the reader's, the content the same
+    /// height since last seen (the stack sizing its content again moves the
+    /// clip by what it took off above, which is no scroll), a move farther
+    /// than the clip is tall is cut to `stride` of its height, and the rest
+    /// carried to the frames after (ov-862).
+    private func clipMoved() {
+        guard let scroll else { return }
+        let clip = scroll.contentView.bounds
+        let document = scroll.documentView?.frame.height ?? 0
+        defer { clipWas = (scroll.contentView.bounds.minY, document) }
+        guard !carrying, let was = clipWas else { return }
+        let moved = clip.minY - was.y
+        // The content resized: the stack moved the clip by what it took off
+        // or put on above, which is no scroll.
+        guard abs(document - was.document) <= 0.5 else { return }
+        // The reader turned back: what was carried is theirs no longer. Not
+        // the clip put on a whole pixel, a tenth of a point (ov-862).
+        if carry != 0, moved * carry < 0, abs(moved) > 0.5 { carry = 0 }
+        // Past every row on screen, as a frame's scroll never is.
+        guard abs(moved) > clip.height, aimed == nil, !live, LiveScroll.scrolls(scroll) else { return }
+        let most = clip.height * Self.stride
+        let made = moved > 0 ? most : -most
+        carry += moved - made
+        resizedSinceStep = false
+        move(to: was.y + made, scroll)
+        tick()
+    }
+
+    /// A frame of what's carried, no farther than `stride` of the clip's
+    /// height, and none past either end.
+    private func carryOn() {
+        guard let scroll else { return carry = 0 }
+        let clip = scroll.contentView.bounds
+        let insets = scroll.contentInsets
+        let most = clip.height * Self.stride
+        let step = min(most, max(-most, carry))
+        let end = (scroll.documentView?.frame.height ?? 0) + insets.bottom - clip.height
+        let y = min(max(clip.minY + step, -insets.top), max(-insets.top, end))
+        carry = abs(y - (clip.minY + step)) > 0.5 ? 0 : carry - step
+        if abs(carry) < 0.5 { carry = 0 }
+        move(to: y, scroll)
+    }
+
+    private func move(to y: CGFloat, _ scroll: NSScrollView) {
+        let clip = scroll.contentView.bounds
+        guard abs(clip.minY - y) > 0.5 else { return }
+        carrying = true
+        defer { carrying = false }
+        scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        shifted += scroll.contentView.bounds.minY - clip.minY
+    }
+
     // MARK: Aiming
 
     /// The pointer is held down on the scroller.
@@ -781,6 +876,7 @@ final class TranscriptScroller: NSObject {
     /// the clip right each frame until it agrees.
     func aim(_ value: Double, _ scroll: NSScrollView) {
         resizedFrom = nil
+        carry = 0
         beginLive(scroll)
         aimed = value
         settleLeft = Self.settleFrames
@@ -828,6 +924,7 @@ final class TranscriptScroller: NSObject {
     private func readerScrolled(appKitLive: Bool) {
         guard !posting else { return }
         resizedFrom = nil
+        carry = 0
         guard aimed != nil else { return }
         aimed = nil
         dragging = false
@@ -915,6 +1012,7 @@ final class TranscriptScroller: NSObject {
     /// window's height less the context the scroll view keeps.
     func page(_ direction: CGFloat, _ scroll: NSScrollView) {
         resizedFrom = nil
+        carry = 0
         aimed = nil
         beginLive(scroll)
         let clip = scroll.contentView.bounds

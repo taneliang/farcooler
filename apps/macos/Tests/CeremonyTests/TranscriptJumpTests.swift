@@ -70,6 +70,13 @@ struct TranscriptJumpTests {
     /// asked since it last moved. The scroll view applies a move on the
     /// frame after it's asked (ov-715), and all it owes at once. Counted as
     /// the clip's move, it read a 3,351 pt jump on the nightly (ov-734).
+    ///
+    /// The scroller can move the clip too: a late frame's scroll past every
+    /// row on screen is cut to a part of the clip's height and the rest
+    /// made a frame at a time after (`TranscriptScroller.shifted`, ov-862).
+    /// The reader sees the scroll owed plus that, so on such a frame the
+    /// rows count as moving by both; a carried step on the frame the stack
+    /// sized its content again was otherwise read as 13 to 874 pt lost.
     struct Tally {
         private(set) var asked: CGFloat = 0
         private(set) var moved: CGFloat = 0
@@ -85,13 +92,13 @@ struct TranscriptJumpTests {
 
         init(_ shown: [String: CGRect]) { before = shown }
 
-        mutating func add(asked asking: CGFloat, clip: CGFloat, resized: Bool = false, shown now: [String: CGRect]) {
+        mutating func add(asked asking: CGFloat, clip: CGFloat, resized: Bool = false, shifted: CGFloat = 0, shown now: [String: CGRect]) {
             let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
             shared = !moves.isEmpty
             sharing = moves.count
             rows = moves.isEmpty ? nil : moves[moves.count / 2]
             // Scrolled up, the clip's origin falls and the rows move down.
-            moved += !moves.isEmpty ? moves[moves.count / 2] : resized ? -owed : -clip
+            moved += !moves.isEmpty ? moves[moves.count / 2] : resized ? -(owed + shifted) : -clip
             // Never from the rows' move, so a jump isn't owed back later.
             owed = abs(clip) > 0.5 || resized ? asking : owed + asking
             asked += asking
@@ -149,12 +156,15 @@ struct TranscriptJumpTests {
             var docWas = scroll.documentView?.frame.height ?? 0
             var placeWas = Self.knob(scroll)
             var originWas = scroll.contentView.bounds.minY
+            var shiftedWas = TranscriptScroller.driving(scroll)?.shifted ?? 0
             var over: [String] = []
             var trace: [String] = []
             func track(_ asking: CGFloat) {
                 let doc = scroll.documentView?.frame.height ?? 0
                 let owed = tally.owed
-                tally.add(asked: asking, clip: scroll.contentView.bounds.minY - originWas, resized: doc != docWas, shown: shown(frames, scroll: scroll))
+                let shifted = (TranscriptScroller.driving(scroll)?.shifted ?? 0) - shiftedWas
+                shiftedWas += shifted
+                tally.add(asked: asking, clip: scroll.contentView.bounds.minY - originWas, resized: doc != docWas, shifted: shifted, shown: shown(frames, scroll: scroll))
                 let place = Self.knob(scroll)
                 // A frame's own scroll moves the knob by its share of the
                 // track, a late frame's by up to a few frames' worth.
@@ -234,7 +244,7 @@ struct TranscriptJumpTests {
         let flung = await Self.fling(window, scroll, frames)
         #expect(flung.count > 8, "the flings stopped after \(flung.count)")
         for fling in flung where !fling.top {
-            #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled")
+            #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled: \(fling.trace.suffix(12).joined(separator: "; "))")
         }
     }
 
@@ -294,17 +304,21 @@ struct TranscriptJumpTests {
         #expect(abs(abs(tally.lost) - 150) <= 1, "a 150 pt jump read as \(Int(tally.lost)) pt")
     }
 
-    /// The same in a real fling: one tick held 150 ms early in a 12,000
-    /// pt/s fling, as a loaded Mac holds them, so the next moves the clip
-    /// about 1,700 pt, past every row on screen (ov-708).
+    /// The same in a real fling: one tick held early in a 12,000 pt/s
+    /// fling, as a loaded Mac holds them, so the next moves the clip past
+    /// every row on screen: 150 ms, about 1,700 pt (ov-708); and 260 ms,
+    /// about 3,200 pt, as the nightly's runner held it. There the lazy
+    /// stack put the rows it had where the clip went and the scroll was
+    /// lost, 2,400 to 3,800 pt, until the clip moved no more than
+    /// `TranscriptScroller.stride` of its height a frame (ov-862).
     @Test(
         "A tick so late every row on screen is new is no jump",
-        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
-    func aLateTickIsNoJump() async throws {
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"), arguments: [UInt32(150), 260])
+    func aLateTickIsNoJump(ms: UInt32) async throws {
         let frames = NativePolishTests.Frames()
         let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
         defer { window.close() }
-        let flung = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (4, 150))
+        let flung = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (4, ms))
         let fling = try #require(flung.first)
         #expect(!fling.top, "the fling reached the first row: this checked nothing")
         #expect(abs(fling.lost) <= 12, "a late tick read as a \(Int(fling.lost)) pt jump: \(fling.trace.suffix(12).joined(separator: "; "))")
@@ -385,7 +399,7 @@ struct TranscriptJumpTests {
             worst.knob <= 0.02,
             "the knob jumped \(String(format: "%.1f", worst.knob * 100))% of its track at \(Int(worst.velocity)) pt/s: \(worst.over.prefix(4).joined(separator: "; "))")
         for fling in flung where !fling.top {
-            #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled")
+            #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled: \(fling.trace.suffix(12).joined(separator: "; "))")
         }
     }
 
