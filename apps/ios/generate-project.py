@@ -1181,6 +1181,7 @@ UI_TEST_SOURCES = [
     # overview, its pages, and a read that is refused or never answered.
     "PlanUITests.swift",
     "PhonePlanColumnUITests.swift",
+    "PlanRulingsUITests.swift",
     "PlanSectionsCapturesUITests.swift",
     # Orchestrator pages in the Plan view (ov-285), over the canned runner with
     # a seeded board's plan, pages and cards (`-phone-pages`).

@@ -169,6 +169,27 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "a ticket didn't open its task: \(app.debugDescription)")
     }
 
+    /// **Each footer count opens the list of its tickets, and a ticket in it opens its task**
+    /// (ov-874): a ticket whose initiative is quiet or absent is reached here, and keeps its
+    /// page and its Mark Ready.
+    func testEachFooterCountOpensItsTickets() {
+        var seen = 0
+        for kind in ["waiting", "notStarted", "done"] {
+            let app = openPlan()
+            let count = element(app, "plan-footer-\(kind)")
+            guard app.reveal(count) else { app.terminate(); continue }
+            seen += 1
+            reach(app, count.identifier).tap()
+            XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "\(kind) opened no list: \(app.debugDescription)")
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "\(kind)'s list has no tickets: \(app.debugDescription)")
+            row.tap()
+            XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "\(kind): a ticket didn't open its task")
+            app.terminate()
+        }
+        XCTAssertGreaterThan(seen, 0, "the fixture has no footer counts")
+    }
+
     /// **An agent with no pane opens its first ticket**; one with a pane opens its chat.
     func testAnAgentOpensItsTicketWhenItHasNoPane() {
         let app = openPlan()
@@ -247,8 +268,11 @@ final class PhonePlanColumnUITests: XCTestCase {
         for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
             XCUIDevice.shared.appearance = appearance
             let app = openPlan(["-phone-appearance", name])
-            for (index, id) in ["plan-facts", "plan-stage-building", "plan-stage-landing", "plan-footer"].enumerated() {
-                if id == "plan-footer" {
+            for (index, id) in ["plan-facts", "plan-stage-building", "plan-stage-landing", "plan-footer", "plan-bottom"].enumerated() {
+                if id == "plan-bottom" {
+                    // Past the footer: Pages and the loose worktrees.
+                    for _ in 0..<12 { app.windows.firstMatch.swipeUp() }
+                } else if id == "plan-footer" {
                     XCTAssertTrue(app.reveal(element(app, id)), "no footer")
                     for _ in 0..<3 { app.windows.firstMatch.swipeUp() }
                 } else if index > 0 {

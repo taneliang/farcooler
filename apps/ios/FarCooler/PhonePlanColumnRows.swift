@@ -298,29 +298,27 @@ struct PhoneTicketRow: View {
     }
 #endif
 
-/// "10 tickets waiting for a builder, 22 not started, 796 done". Done opens
-/// its history.
+/// "10 tickets waiting for a builder, 22 not started, 796 done". Each count opens
+/// the list of its tickets.
 struct PhonePlanFooter: View {
     let counts: [PlanColumn.Count]
-    let open: (TaskStatus) -> Void
+    let open: (PlanColumn.Count) -> Void
 
     var body: some View {
         if !counts.isEmpty {
             Section {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     ForEach(counts) { count in
-                        if count.kind == .done {
-                            Button { open(count.status) } label: {
-                                HStack(spacing: 4) {
-                                    Text(count.words)
-                                    Image(systemName: "chevron.forward").font(.caption2.weight(.semibold)).accessibilityHidden(true)
-                                }
+                        // Each count opens its tickets (ov-874): a ticket whose
+                        // initiative is quiet is reached here.
+                        Button { open(count) } label: {
+                            HStack(spacing: 4) {
+                                Text(count.words)
+                                Image(systemName: "chevron.forward").font(.caption2.weight(.semibold)).accessibilityHidden(true)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("plan-footer-\(count.kind.rawValue)")
-                        } else {
-                            Text(count.words).accessibilityIdentifier("plan-footer-\(count.kind.rawValue)")
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("plan-footer-\(count.kind.rawValue)")
                     }
                 }
                 .font(.footnote.monospacedDigit())

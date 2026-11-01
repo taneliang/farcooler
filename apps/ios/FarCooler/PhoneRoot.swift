@@ -646,8 +646,10 @@ struct PhoneScreen: View {
                 RunnerGone()
             }
         case .history(let place, let status):
-            if let connection = fleet.connection(for: place), let status = TaskStatus(rawValue: status) {
-                BoardHistoryScreen(connection: connection, place: place, status: status)
+            // A finished status's History, or a plan footer's list (ov-874).
+            let footer = PlanColumn.Count.Kind(rawValue: status)
+            if let connection = fleet.connection(for: place), let board = TaskStatus(rawValue: status) ?? footer.map({ _ in .todo }) {
+                BoardHistoryScreen(connection: connection, place: place, status: board, footer: footer == .done ? nil : footer)
             } else {
                 RunnerGone()
             }

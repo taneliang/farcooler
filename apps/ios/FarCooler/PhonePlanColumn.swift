@@ -32,6 +32,8 @@ struct PhonePlanColumn<Top: View>: View {
     /// them rather than building the tree on every board move.
     @State private var held = HeldTree()
     @State private var moves = 0
+    /// Whether Past Decisions is open: here, so a re-read can't close it.
+    @State private var pastRulingsOpen = false
     /// What the last quote left on the clipboard, when the runner couldn't paste.
     @State private var notice: String?
 
@@ -118,9 +120,12 @@ struct PhonePlanColumn<Top: View>: View {
         let asks = asks(plan)
         let items = items
         if plan.isEmpty && items.isEmpty && asks.isEmpty {
-            Section {
-                PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
-                    .accessibilityIdentifier("plan-empty")
+            // Rulings alone plan nothing, but they are something to show.
+            if !(connection.keepsRulings && !plan.rulings.isEmpty) {
+                Section {
+                    PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
+                        .accessibilityIdentifier("plan-empty")
+                }
             }
         } else {
             let rows = connection.boards[summary.id]?.rows ?? []
@@ -132,10 +137,28 @@ struct PhonePlanColumn<Top: View>: View {
             needsYou(asks: asks, items: items)
             PhonePlanInitiatives(column: column) { navigator?.open(.plan(place, page: .theme($0))) }
             PhonePlanPipeline(column: column, actions: actions)
-            PhonePlanFooter(counts: column.footer) { navigator?.open(.history(place, status: $0.rawValue)) }
+            PhonePlanFooter(counts: column.footer) {
+                navigator?.open(.history(place, status: $0.kind == .done ? TaskStatus.done.rawValue : $0.kind.rawValue))
+            }
         }
+        rulings(plan)
         pages(plan)
         worktrees
+    }
+
+    /// Decided For You (ov-304), under the footer as on the web: the calls the
+    /// orchestrator made for the owner, with Keep, Reverse and Discuss.
+    @ViewBuilder private func rulings(_ plan: PlanModel) -> some View {
+        PlanRulingsSection(
+            plan: plan, keeps: connection.keepsRulings,
+            actions: connection.rulingActions(
+                summary, place: place,
+                open: { [navigator, inSheet] route in
+                    // Reverse and Discuss draft into the orchestrator's pane,
+                    // under the sheet: closing it is the way there (ov-643).
+                    if inSheet { navigator?.plan = nil } else { navigator?.open(route) }
+                }),
+            pastOpen: $pastRulingsOpen)
     }
 
     /// The orchestrator's pages, which the plan's list has always led to.
