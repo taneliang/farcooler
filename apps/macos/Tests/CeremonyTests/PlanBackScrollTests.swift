@@ -19,6 +19,16 @@ struct PlanBackScrollTests {
         (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap { scrollViews(in: $0) }
     }
 
+    /// The window's layout and scroll offsets have held still: what a fixed settle stood in for.
+    static func still(_ window: NSWindow) async {
+        await Settle.still(
+            window.contentView,
+            reading: {
+                window.displayIfNeeded()
+                return Settle.frames(under: window.contentView) + Settle.scrollOffsets(under: window.contentView)
+            })
+    }
+
     @Test("Scroll the plan, open a ticket, go Back: the plan is at the same offset")
     func backRestoresThePlansScroll() async throws {
         let board = try await PlanColumnViewTests.store()
@@ -46,23 +56,24 @@ struct PlanBackScrollTests {
         let host = NSHostingView(rootView: AnyView(root(nil)))
         window.contentView = host
         TestWindow.show(window)
-        await T.settle(window, 600)
-
-        let plan = try #require(
+        func tallest() -> NSScrollView? {
             Self.scrollViews(in: host).filter { ($0.documentView?.frame.height ?? 0) > $0.contentView.bounds.height + 200 }
-                .max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) },
-            "the plan's scroll view")
+                .max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }
+        }
+        try await Capture.wait(expecting: "the plan is laid out and tall enough to scroll", until: { tallest() != nil })
+        await Self.still(window)
+        let plan = try #require(tallest(), "the plan's scroll view")
         let scrolled = min(300, (plan.documentView?.frame.height ?? 0) - plan.contentView.bounds.height)
         plan.contentView.scroll(to: NSPoint(x: 0, y: scrolled))
         plan.reflectScrolledClipView(plan.contentView)
-        await T.settle(window, 200)
+        await Self.still(window)
         let before = plan.contentView.bounds.origin.y
         #expect(before > 100, "the plan scrolled: \(before)")
 
         host.rootView = AnyView(root("ov-880"))
-        await T.settle(window, 600)
+        await Self.still(window)
         host.rootView = AnyView(root(nil))
-        await T.settle(window, 600)
+        await Self.still(window)
 
         #expect(plan.window === window, "the same plan view is still mounted")
         #expect(abs(plan.contentView.bounds.origin.y - before) < 1, "back at \(plan.contentView.bounds.origin.y), was \(before)")

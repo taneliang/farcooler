@@ -48,12 +48,9 @@ struct PlanColumnCaptures {
             window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background { WindowPlane() })
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
-            try await Capture.wait(expecting: expecting, until: reached)
-            await T.settle(window, 900)
             try await Capture.keep(
-                to: URL(fileURLWithPath: out).appendingPathComponent("c10f-plan-\(Int(width))-\(variant).png"), expecting: expecting,
-                until: reached
-            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
+                window, to: URL(fileURLWithPath: out).appendingPathComponent("c10f-plan-\(Int(width))-\(variant).png"), expecting: expecting,
+                until: reached)
             window.close()
         }
     }
@@ -121,12 +118,9 @@ struct PlanColumnCaptures {
             window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background { WindowPlane() })
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
-            try await Capture.wait(expecting: expecting, until: reached)
-            await T.settle(window, 900)
             try await Capture.keep(
-                to: URL(fileURLWithPath: out).appendingPathComponent("ticket-plan-\(Int(width))-\(variant).png"), expecting: expecting,
-                until: reached
-            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
+                window, to: URL(fileURLWithPath: out).appendingPathComponent("ticket-plan-\(Int(width))-\(variant).png"), expecting: expecting,
+                until: reached)
             window.close()
         }
     }
