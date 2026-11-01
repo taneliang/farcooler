@@ -480,10 +480,14 @@ struct PlanLineRow: View {
         }
     }
 
+    static func accessibleLabel(_ words: String, agent: PlanAgent?) -> String {
+        PlanWords.accessibleModel(words, raw: agent?.model ?? "")
+    }
+
     private var accessibility: String {
         var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, line.heading, theme?.name, second, line.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(line)]
         parts.removeAll { $0 == nil }
-        return PlanWords.accessibleModel(parts.compactMap { $0 }.joined(separator: ", "), raw: agent?.model ?? "")
+        return Self.accessibleLabel(parts.compactMap { $0 }.joined(separator: ", "), agent: agent)
     }
 }
 
