@@ -256,7 +256,7 @@ struct AppControlTests {
         #expect(Self.ask(path, #"{"op":"about","relaunch":false}"#).count == 1)
     }
 
-    /// ov-608: Train 172's gate saw the test above fail once, and the cause
+    /// ov-608: Landing 172's gate saw the test above fail once, and the cause
     /// was not a descriptor a child kept for good (`Process` hands a child
     /// nothing it isn't told to), but the fork-to-exec gap, which no
     /// close-on-exec flag shortens. Many rounds beside programs being

@@ -22,7 +22,7 @@ struct JumpBarGlyphTests {
         return root
     }
 
-    /// A tree over the seeded plan: every theme, the lanes that have a
+    /// A tree over the seeded plan: every theme, the tickets that have a
     /// worktree with an agent and a shell open, a task of every status, a loose
     /// worktree, the main checkout and a page. The filter is All, as the jump
     /// bar's outline is (`pathTree`), the sidebar's own two lists (ov-512).
@@ -46,10 +46,13 @@ struct JumpBarGlyphTests {
                     OneTreeTerminal(id: "\(name)-shell", title: "zsh", isAgent: false),
                 ])
         }
-        let lanes = plan.lanes.filter { !$0.worktreePath.isEmpty }.map { worktree($0.name, path: $0.worktreePath) }
+        // Tickets share a worktree: one per branch.
+        var branches = Set<String>()
+        let lines = plan.lines.filter { !$0.worktreePath.isEmpty && branches.insert($0.branch).inserted }
+            .map { worktree($0.branch, path: $0.worktreePath) }
         let tree = SidebarOutline.build(
             OneTreeInput(
-                tasks: tasks, plan: plan, worktrees: lanes + [worktree("spike", path: "/repo/spike")],
+                tasks: tasks, plan: plan, worktrees: lines + [worktree("spike", path: "/repo/spike")],
                 mainCheckout: OneTreeWorktree(
                     id: "main", name: "repo", isMainCheckout: true,
                     terminals: [OneTreeTerminal(id: "main-shell", title: "zsh", isAgent: false)]),
@@ -70,7 +73,7 @@ struct JumpBarGlyphTests {
         let reached = tree.allNodes.filter { $0.target != nil && $0.kind != .place && $0.kind != .doneFold }
         // The tree is rich enough to mean it: each kind the bar can name.
         let kinds = Set(reached.map(\.kind))
-        for kind: OneTreeNode.Kind in [.theme, .task, .lane, .terminal, .page, .group, .worktree] {
+        for kind: OneTreeNode.Kind in [.theme, .task, .ticket, .terminal, .page, .group, .worktree] {
             #expect(kinds.contains(kind), "\(kind) missing from the fixture")
         }
         for node in reached {

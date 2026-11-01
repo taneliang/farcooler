@@ -40,7 +40,7 @@ extension ContentView {
     }
 
     /// A row's context menu (review M2): a card's, as the Board view's row
-    /// has it; a lane's or worktree's, the sidebar row's (New Terminal and
+    /// has it; a ticket's or worktree's, the sidebar row's (New Terminal and
     /// Unhide among them); a terminal's; New Terminal in the checkout.
     @ViewBuilder
     func treeMenu(_ node: OneTreeNode, host: String, workspace: WorkspaceSummary, client: DaemonClient) -> some View {
@@ -153,7 +153,7 @@ extension ContentView {
         case .workspace(_, workspace, .plan(let page)?)?:
             switch page {
             case .theme(let id): return .theme(id)
-            case .lane(let id): return .lane(id)
+            case .ticket(let id): return .ticket(id)
             case .page(let slot): return .page(slot)
             case .needsYou: return .needsYou
             }
@@ -165,7 +165,7 @@ extension ContentView {
     }
 
     /// The node `place` is, with a worktree opened whole read as the pane
-    /// selected in it: the terminal row, not the lane's worktree.
+    /// selected in it: the terminal row, not the ticket's worktree.
     func treeTarget(_ place: Selection?, workspace: String) -> OneTreeTarget? {
         let target = Self.treeTarget(place, workspace: workspace)
         if case .worktree(let id)? = target, let pane = selectedPane, pane.worktree == id {
@@ -182,7 +182,7 @@ extension ContentView {
         case .plan: return .workspace(host: host, workspace: workspace, focus: nil)
         case .needsYou: return .workspace(host: host, workspace: workspace, focus: .plan(.needsYou))
         case .theme(let id): return .workspace(host: host, workspace: workspace, focus: .plan(.theme(id)))
-        case .lane(let id): return .workspace(host: host, workspace: workspace, focus: .plan(.lane(id)))
+        case .ticket(let id): return .workspace(host: host, workspace: workspace, focus: .plan(.ticket(id)))
         case .page(let slot): return .workspace(host: host, workspace: workspace, focus: .plan(.page(slot)))
         case .task(let id): return .workspace(host: host, workspace: workspace, focus: .task(id))
         case .worktree(let id):
@@ -206,7 +206,7 @@ extension ContentView {
             selection = next
         case .needsYou: openPlan(.needsYou, host: host, workspace: workspace.id)
         case .theme(let id): openPlan(.theme(id), host: host, workspace: workspace.id)
-        case .lane(let id): openPlan(.lane(id), host: host, workspace: workspace.id)
+        case .ticket(let id): openPlan(.ticket(id), host: host, workspace: workspace.id)
         case .page(let slot): openPlan(.page(slot), host: host, workspace: workspace.id)
         case .task(let id): chooseTask(id, host: host, workspace: workspace.id, glance: true)
         case .worktree(let id):
@@ -233,7 +233,7 @@ extension ContentView {
     }
 
     /// The jump bar's path for `place`: the workspace, then what the
-    /// sidebar shows above it, Theme › Card or Group › Lane › Agent or
+    /// sidebar shows above it, Theme › Card or Group › Ticket › Agent or
     /// Terminal, each a way there. Nil where the outline has no path, which
     /// leaves the jump bar as it was.
     func treePath(for place: Selection, host: String, workspace: WorkspaceSummary?, name: String) -> TreePath? {
@@ -303,7 +303,7 @@ extension ContentView {
             return
         }
         guard let up = treeUp, up.selection != selection || up.hint != treeHint else { return }
-        // The parent's own row, so a lane under a group goes back up to it.
+        // The parent's own row, so a ticket under a group goes back up to it.
         treeHint = up.hint
         trail = nil
         focusColumn = false

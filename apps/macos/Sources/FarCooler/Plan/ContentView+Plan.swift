@@ -4,7 +4,7 @@ import SwiftUI
 /// Where the Plan view's pages open, and what they need from the window
 /// (ov-273).
 extension ContentView {
-    /// A theme's or lane's page, in the main area where a task opens. The
+    /// A theme's or ticket's page, in the main area where a task opens. The
     /// navigator keeps the keyboard, as it does for the History page.
     func openPlan(_ page: PlanPage, host: String, workspace: String) {
         let next = Selection.workspace(host: host, workspace: workspace, focus: .plan(page))
@@ -57,7 +57,7 @@ extension ContentView {
 
     /// What the plan column's rows do (ov-867): a Needs You row is quoted into
     /// the orchestrator's input, unsent, as Ask the Orchestrator does; an
-    /// agent opens its chat, else its lane's page; a ticket opens as a row
+    /// agent opens its chat, else its ticket's page; a ticket opens as a row
     /// clicked in the navigator does; a footer count opens the board's list.
     func planColumnActions(host: String, workspace: WorkspaceSummary) -> PlanColumnActions {
         let live = WorkspaceScreen.workspace(
@@ -89,8 +89,8 @@ extension ContentView {
                     let terminal = ws.terminals.first(where: { $0.id == id })
                 {
                     go(to: BoardPane(terminal: terminal, worktree: ws))
-                } else if let lane = agent.lane {
-                    openPlan(.lane(lane), host: host, workspace: workspace.id)
+                } else if let ticket = agent.ticket {
+                    openPlan(.ticket(ticket), host: host, workspace: workspace.id)
                 } else {
                     errorBanner = "\(agent.name) has no chat to open."
                 }
@@ -102,8 +102,8 @@ extension ContentView {
                 var target: Selection?
                 if let terminal = agent.terminal, let ws = worktrees.first(where: { $0.terminals.contains { $0.id == terminal } }) {
                     target = Self.opening(ws, terminal: terminal, in: store.fleet)
-                } else if let lane = agent.lane {
-                    target = .workspace(host: host, workspace: workspace.id, focus: .plan(.lane(lane)))
+                } else if let ticket = agent.ticket {
+                    target = .workspace(host: host, workspace: workspace.id, focus: .plan(.ticket(ticket)))
                 }
                 jumpBar.planOrigin = PlanStack.Origin(task: id, agent: agent.name, doing: agent.doing, target: target)
             },
@@ -157,7 +157,7 @@ extension ContentView {
     }
 
     /// What a plan page reads from the board: its rows, and where a task,
-    /// a lane or a theme opens.
+    /// a ticket or a theme opens.
     func planContext(_ board: TaskBoardStore, host: String, workspace: String) -> PlanPageContext {
         let worktrees = store.fleet.worktrees.filter { ($0.host ?? "") == host && $0.workspace == workspace }
         return PlanPageContext(
@@ -190,7 +190,7 @@ extension ContentView {
 
     /// Where a reference on an orchestrator's page goes (ov-284), past a
     /// waiting question (`askItem`): a card, or a question no longer
-    /// waiting, to the task, a lane, a theme or a page to its page, a
+    /// waiting, to the task, a ticket, a theme or a page to its page, a
     /// worktree whole, a terminal to its pane. A link to the web never
     /// reaches here: `PageView` hands it to the system.
     static func pageSelection(
@@ -199,8 +199,8 @@ extension ContentView {
         switch destination {
         case .task(let id), .ask(let id):
             return .workspace(host: host, workspace: workspace, focus: .task(id))
-        case .lane(let id):
-            return .workspace(host: host, workspace: workspace, focus: .plan(.lane(id)))
+        case .ticket(let id):
+            return .workspace(host: host, workspace: workspace, focus: .plan(.ticket(id)))
         case .theme(let id):
             return .workspace(host: host, workspace: workspace, focus: .plan(.theme(id)))
         case .page(let slot):

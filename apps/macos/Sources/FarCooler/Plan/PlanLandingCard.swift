@@ -1,23 +1,23 @@
 import AgentKit
 import SwiftUI
 
-// A train in Landing (ov-503, design 2; ov-522): a card headed "Train 86" with
-// its title under it and what it carries, a ladder of where it stands in three
-// plain steps (each explained on hover), the CI line, and its lanes. A lane
-// aboard says nothing; it speaks only once landed or when it waits on the
-// owner. Amber only for CI that failed, a train that stalled, and a lane
-// waiting on the owner, each with words.
+// A landing in Landing (ov-503, design 2; ov-522): a card headed "Landing 86"
+// with its title under it and what it carries, a ladder of where it stands in
+// three plain steps (each explained on hover), the CI line, and its tickets. A
+// ticket aboard says nothing; it speaks only once landed or when it waits on
+// the owner. Amber only for CI that failed, a landing that stalled, and a
+// ticket waiting on the owner, each with words.
 //
-//   Train 86
+//   Landing 86
 //   The team directory; the iPhone composer
 //   ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 //   Checking Here    Checking on CI  Landed
-//   3f78754f · 2 of 5 jobs done · 12 min · Integrator · Opus · 1.4M
+//   3f78754f · 2 of 5 jobs done · 12 min · Lander · Opus · 1.4M
 //   ✓ team-dir
 //   ios-overwrite                                   Needs you
 
-struct PlanTrainCard: View {
-    let card: PlanSections.TrainCard
+struct PlanLandingCard: View {
+    let card: PlanSections.LandingCard
     let ci: PlanCIRead?
     let now: Int64
     let selected: PlanPage?
@@ -26,7 +26,7 @@ struct PlanTrainCard: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
-    private var train: PlanTrain { card.train }
+    private var landing: PlanLanding { card.landing }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
 
     var body: some View {
@@ -34,12 +34,12 @@ struct PlanTrainCard: View {
             heading
             PlanLadderView(phase: card.phase)
             facts
-            if !card.lanes.isEmpty {
+            if !card.tickets.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(card.lanes) { lane in
-                        PlanTrainLaneRow(
-                            lane: lane, now: now,
-                            selected: selected == .lane(lane.id), keyed: keyed, onOpen: { onOpen(.lane(lane.id)) })
+                    ForEach(card.tickets) { ticket in
+                        PlanLandingTicketRow(
+                            ticket: ticket, now: now,
+                            selected: selected == .ticket(ticket.id), keyed: keyed, onOpen: { onOpen(.ticket(ticket.id)) })
                     }
                 }
             }
@@ -50,40 +50,39 @@ struct PlanTrainCard: View {
         .surface(.inset, in: .card)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibility)
-        .identified("plan-train-\(train.name)")
+        .identified("plan-landing-\(landing.number)")
     }
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-            Text(train.label)
+            Text(landing.label)
                 .font(.system(size: WorkspaceStyle.PaneText.title, weight: .semibold))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-                .identified("plan-train-\(train.name)-label")
-            if let subtitle = train.subtitle {
+                .identified("plan-landing-\(landing.number)-label")
+            if let subtitle = landing.subtitle {
                 Text(subtitle)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .identified("plan-train-\(train.name)-subtitle")
+                    .identified("plan-landing-\(landing.number)-subtitle")
             }
-            if let carries = train.carries {
+            if let carries = landing.carries {
                 Text(carries)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.quietInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .identified("plan-train-\(train.name)-carries")
+                    .identified("plan-landing-\(landing.number)-carries")
             }
         }
-        // What a train is, then the slug for a person who needs it: here, and
-        // nowhere in the text.
-        .help([PlanWords.trainExplanation, train.slug].compactMap { $0 }.joined(separator: " "))
+        // What a landing is, said here and nowhere in the text.
+        .help(PlanWords.landingExplanation)
     }
 
-    /// "3f78754f · 2 of 5 jobs done · 12 min · Integrator · Opus · 1.4M": the
-    /// commit, how CI stands, how long it has been here and who integrates.
-    /// The commit opens its run, the one place a train goes.
+    /// "3f78754f · 2 of 5 jobs done · 12 min · Lander · Opus · 1.4M": the
+    /// commit, how CI stands, how long it has been here and who lands it.
+    /// The commit opens its run, the one place a landing goes.
     private var facts: some View {
         let words = Self.facts(card, ci: ci, now: now)
         return Group {
@@ -97,7 +96,7 @@ struct PlanTrainCard: View {
                 line(words)
             }
         }
-        .identified("plan-train-\(train.name)-words")
+        .identified("plan-landing-\(landing.number)-words")
     }
 
     private func line(_ words: String) -> some View {
@@ -111,20 +110,20 @@ struct PlanTrainCard: View {
     }
 
     /// The facts line's words (AgentKit's), apart so a test reads them.
-    static func facts(_ card: PlanSections.TrainCard, ci: PlanCIRead?, now: Int64) -> String { card.facts(ci: ci, now: now) }
+    static func facts(_ card: PlanSections.LandingCard, ci: PlanCIRead?, now: Int64) -> String { card.facts(ci: ci, now: now) }
 
     private var accessibility: String {
         let step = PlanLadder.step(card.phase)
         let place = step >= PlanLadder.steps.count ? "" : ", step \(step + 1) of \(PlanLadder.steps.count)"
-        return [train.label, train.subtitle, train.carries, card.phase.word + place].compactMap { $0 }.joined(separator: ", ")
+        return [landing.label, landing.subtitle, landing.carries, card.phase.word + place].compactMap { $0 }.joined(separator: ", ")
     }
 }
 
-/// Where a train stands, as three segments and the words under them, each
+/// Where a landing stands, as three segments and the words under them, each
 /// explained on hover. Roomy, the three steps are named; narrow, the phase
 /// alone is.
 struct PlanLadderView: View {
-    let phase: TrainPhase
+    let phase: LandingPhase
     @Environment(\.colorScheme) private var scheme
 
     private var current: Int { PlanLadder.step(phase) }
@@ -182,9 +181,9 @@ struct PlanLadderView: View {
     }
 }
 
-/// One lane inside a train: its title and how it stands, and its cards.
-struct PlanTrainLaneRow: View {
-    let lane: PlanSections.TrainLane
+/// One ticket inside a landing: its title and how it stands, and its key.
+struct PlanLandingTicketRow: View {
+    let ticket: PlanSections.LandingTicket
     let now: Int64
     let selected: Bool
     let keyed: Bool
@@ -192,10 +191,10 @@ struct PlanTrainLaneRow: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
-    /// "Needs you" is the lane's note, said once, on the right.
-    private var warning: String? { lane.waitsOnOwner ? nil : PlanWords.stale(lane.lane, now: now) }
+    /// "Needs you" is the ticket's note, said once, on the right.
+    private var warning: String? { ticket.waitsOnOwner ? nil : PlanWords.stale(ticket.line, now: now) }
     /// Over its token budget (ov-307), beside whatever else it says.
-    private var overBudget: String? { PlanWords.overBudget(lane.lane) }
+    private var overBudget: String? { PlanWords.overBudget(ticket.line) }
     private var amber: Bool { warning != nil || overBudget != nil }
 
     var body: some View {
@@ -209,25 +208,25 @@ struct PlanTrainLaneRow: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                            Text(lane.lane.heading)
+                            Text(ticket.line.heading)
                                 .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .layoutPriority(1)
                             Spacer(minLength: 0)
-                            if let note = lane.note {
+                            if let note = ticket.note {
                                 Text(note)
-                                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: lane.noteNeedsAttention ? .medium : .regular))
-                                    .foregroundStyle(lane.noteNeedsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: ticket.noteNeedsAttention ? .medium : .regular))
+                                    .foregroundStyle(ticket.noteNeedsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                                     .lineLimit(1)
                                     .fixedSize()
                                     .layoutPriority(2)
-                                    // Needs you is the lane's warning, said once, here: its id is the warning's.
-                                    .probed(lane.noteNeedsAttention ? "plan-lane-\(lane.name)-warning" : "plan-train-lane-\(lane.name)-note")
+                                    // Needs you is the ticket's warning, said once, here: its id is the warning's.
+                                    .probed(ticket.noteNeedsAttention ? "plan-ticket-\(ticket.key)-warning" : "plan-landing-ticket-\(ticket.key)-note")
                             }
                         }
-                        if !lane.lane.cards.isEmpty {
-                            TaskKeyText(keysIn: PlanWords.cardKeys(lane.lane))
+                        if !ticket.line.title.isEmpty {
+                            TaskKeyText(keysIn: ticket.key)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
                                 .foregroundStyle(.quietInk)
                                 .lineLimit(1)
@@ -237,7 +236,7 @@ struct PlanTrainLaneRow: View {
                             Text(line)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                                 .foregroundStyle(Tint.attention(scheme))
-                                .probed(line == overBudget ? "plan-lane-\(lane.name)-over-budget" : "plan-lane-\(lane.name)-warning")
+                                .probed(line == overBudget ? "plan-ticket-\(ticket.key)-over-budget" : "plan-ticket-\(ticket.key)-warning")
                         }
                     }
                 }
@@ -250,20 +249,20 @@ struct PlanTrainLaneRow: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel([lane.lane.heading, lane.note, warning, PlanWords.overBudgetSpoken(lane.lane)].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityLabel([ticket.line.heading, ticket.note, warning, PlanWords.overBudgetSpoken(ticket.line)].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-            .help(lane.lane.slug ?? "")
-            .identified("plan-train-lane-\(lane.name)")
+            .help(ticket.line.branch)
+            .identified("plan-landing-ticket-\(ticket.key)")
         }
     }
 
     private var glyph: String {
-        switch lane.standing {
+        switch ticket.standing {
         // Simply aboard says nothing: its state's own mark, never a check that reads as "ready".
-        case .ready: return PlanGlyph.name(lane.lane.state)
+        case .ready: return PlanGlyph.name(ticket.line)
         case .fixing: return "wrench.and.screwdriver"
         case .landed: return "checkmark.circle.fill"
-        case .notReady(let state): return PlanGlyph.name(state)
+        case .notReady(let stage): return PlanGlyph.name(stage)
         }
     }
 }

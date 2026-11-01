@@ -283,7 +283,7 @@ struct FoldedMarkdown: View {
         // jumped up as the reader scrolled past one.
         FoldStack(fold: .height(lines: lines), open: open) {
             // Folded, only the start that shows and enough past it to know
-            // that it folds (ov-788): a lane's report drawn whole under the
+            // that it folds (ov-788): a subagent's report drawn whole under the
             // fold was a third of the main thread while flinging past it.
             MarkdownText(text: open ? text : Markdown.foldPrefix(text, lines: lines))
                 .identified("native-folded-markdown")

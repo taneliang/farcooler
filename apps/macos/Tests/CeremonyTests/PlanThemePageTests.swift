@@ -55,14 +55,23 @@ struct PlanThemePageTests {
 
     @Test("The footer counts what's outside every theme, and lists the cards to tidy")
     func outsideFooter() async throws {
-        let none = try await PlanCostViewTests.drawn(PlanViewTests.fixture())
+        // The fixture keeps ov-4 and ov-5 outside its theme, and flags both for tidying:
+        // everything is in the theme once the theme holds all five cards and nothing is flagged.
+        let none = try await PlanCostViewTests.drawn(
+            PlanCostViewTests.edit { object in
+                var themes = try #require(object["themes"] as? [[String: Any]])
+                themes[0]["cards"] = (1...5).map { ["task": PlanScenario.task($0), "key": "ov-\($0)"] }
+                object["themes"] = themes
+                object["off_the_line"] = [] as [Any]
+                object["landed_not_closed"] = [] as [Any]
+            })
         #expect(none["plan-outside"] == nil && none["plan-outside-tidy"] == nil, "every card is in a theme")
         let outside = try await PlanCostViewTests.drawn(
             PlanCostViewTests.edit { object in
                 var themes = try #require(object["themes"] as? [[String: Any]])
                 themes[0]["cards"] = []
                 object["themes"] = themes
-                object["no_lane"] = [["task": PlanViewTests.tasks[0].0, "key": "ov-1", "status": "in_review"]]
+                object["off_the_line"] = [["task": PlanViewTests.tasks[0].0, "key": "ov-1", "status": "in_review"]]
             })
         #expect(outside["plan-outside"] != nil, "open cards in no theme: \(outside.keys.sorted())")
         #expect(outside["plan-outside-tidy"] != nil, "and a cards-to-tidy button")

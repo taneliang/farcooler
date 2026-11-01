@@ -19,7 +19,7 @@ enum PlanStack {
         var agent: String
         /// What it is doing now, as its card says it ("Reviewing the diff").
         var doing = ""
-        /// Its chat, else its lane's page; nil when it has neither.
+        /// Its chat, else its ticket's page; nil when it has neither.
         var target: Selection?
     }
 

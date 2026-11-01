@@ -5,7 +5,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// A theme's or lane's page on a runner that can't answer (ov-273, review
+/// A theme's or ticket's page on a runner that can't answer (ov-273, review
 /// 1004i P6): the page restored at launch before anything was read, or on a
 /// runner that has gone. Once the read fails it shows the unavailable state,
 /// never a spinner forever.
@@ -77,7 +77,7 @@ struct PlanPageUnavailableTests {
             client: client, workspace: .implicit(repository: "r"), host: "mini",
             defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
         let ids = await Self.drawn(
-            plan, page: .lane("00000000-0000-0000-0000-000000002002"), until: "plan-page-reading")
+            plan, page: .ticket("00000000-0000-0000-0000-000000001001"), until: "plan-page-reading")
         #expect(ids.contains("plan-page-reading"), "drew \(ids)")
         #expect(!ids.contains("plan-page-unavailable"))
         held.release()

@@ -6,7 +6,7 @@ import Testing
 
 /// The plan C10f was drawn over (ov-867), on today's wire: real initiatives
 /// with goals, next steps and asks; builders with what they do now; a stuck
-/// lane; a reviewer with more waiting; a train landing six tickets; and the
+/// ticket; a reviewer with more waiting; a landing of four tickets; and the
 /// board's counts. Long real titles throughout, so the column is judged with
 /// what it will really say.
 @MainActor
@@ -30,18 +30,21 @@ enum PlanColumnScenario {
         return theme
     }
 
-    static func lane(
-        _ n: Int, _ name: String, state: String, cards: [Int], since: Int64 = 30, train: String? = nil, stale: Bool = false
+    /// A ticket on the line, titled as its card is.
+    static func line(
+        _ card: Int, _ title: String, stage: String, since: Int64 = 30, landing: Int? = nil, stale: Bool = false,
+        fixing: String? = nil
     ) -> [String: Any] {
-        PlanScenario.lane(n, name, "", state: state, since: since, cards: cards.map { "ov-\($0)" }, train: train, stale: stale)
+        PlanScenario.line(
+            card, "ov-\(card)", title, stage: stage, since: since, landing: landing, stale: stale, fixing: fixing)
     }
 
-    static func agent(_ id: String, _ role: String, lane: Int? = nil, train: Int? = nil, label: String, started: Int64) -> [String: Any] {
-        var agent = PlanScenario.agent(
-            id, role, model: "sonnet", lane: lane.map { ($0, "lane-\($0)") }, train: train.map { ($0, "Train \($0)") }, label: label,
-            working: true, started: started, tokens: 100_000, dollars: nil)
-        agent["terminal"] = NSNull()
-        return agent
+    static func agent(
+        _ id: String, _ role: String, tickets: [(Int, String)], doing: String, started: Int64
+    ) -> [String: Any] {
+        PlanScenario.agent(
+            id, role, model: "sonnet", tickets: tickets, doing: doing, working: true, started: started, tokens: 100_000,
+            dollars: nil)
     }
 
     /// Whether `plan` is this scenario as read.
@@ -53,11 +56,9 @@ enum PlanColumnScenario {
         plan["rulings"] = [] as [Any]
         plan["cost"] = NSNull()
         plan["ci"] = [] as [Any]
-        plan["order"] = [] as [Any]
         plan["agents_spend"] = NSNull()
-        plan["no_lane"] = [] as [Any]
+        plan["off_the_line"] = [] as [Any]
         plan["landed_not_closed"] = [] as [Any]
-        plan["lane_is_train"] = [] as [Any]
         plan["board_counts"] = [
             "backlog": 22, "todo": 10, "needs_decision": 1, "in_progress": 9, "in_review": 15, "done": 282, "cancelled": 6,
         ]
@@ -93,44 +94,52 @@ enum PlanColumnScenario {
             card(892, "A late tick loses no rows on a fling", status: "In Review"),
             card(885, "Finished subagents don't pile up at the end"),
             card(867, "The plan reads like an assembly line"),
-            card(868, "Builder, reviewer and lander agents replace lanes"),
+            card(868, "Builder, reviewer and lander agents replace the old plan model"),
             card(894, "Queued: the watch says what's landing", status: "To Do"),
         ]
-        plan["lanes"] = [
-            lane(1, "web-paired", state: "building", cards: [869], since: 30),
-            lane(2, "web-workspaces", state: "building", cards: [870], since: 23),
-            lane(3, "ios-scroll", state: "building", cards: [881, 882], since: 2),
-            lane(4, "agent-view", state: "building", cards: [885], since: 23),
-            lane(5, "android-crash", state: "fixing", cards: [880], since: 150, stale: true),
-            lane(6, "ios-photo", state: "building", cards: [883], since: 32),
-            lane(7, "plan-c10", state: "building", cards: [867], since: 32),
-            lane(8, "agents-model", state: "building", cards: [868], since: 6),
-            lane(9, "web-errors", state: "review", cards: [871, 876], since: 8),
-            lane(10, "team-revoke", state: "review", cards: [877], since: 40),
-            lane(11, "people", state: "landing", cards: [884], since: 14, train: "train-120"),
-            lane(12, "mac-terminal", state: "landing", cards: [891], since: 14, train: "train-120"),
-            lane(13, "fling", state: "landing", cards: [892], since: 14, train: "train-120"),
-            lane(14, "step-up", state: "landing", cards: [890], since: 14, train: "train-120"),
-            lane(15, "watch", state: "queued", cards: [894], since: 5),
+        let titles: [Int: String] = Dictionary(
+            uniqueKeysWithValues: (plan["cards"] as? [[String: Any]] ?? []).compactMap { card in
+                (card["key"] as? String).flatMap { Int($0.dropFirst(3)) }.flatMap { number in (card["title"] as? String).map { (number, $0) } }
+            })
+        func t(_ card: Int, _ stage: String, since: Int64 = 30, landing: Int? = nil, stale: Bool = false, fixing: String? = nil) -> [String: Any] {
+            line(card, titles[card] ?? "", stage: stage, since: since, landing: landing, stale: stale, fixing: fixing)
+        }
+        plan["lines"] = [
+            t(869, "building", since: 30),
+            t(870, "building", since: 23),
+            t(881, "building", since: 2),
+            t(882, "building", since: 2),
+            t(885, "building", since: 23),
+            t(880, "building", since: 150, stale: true, fixing: "agent:b5"),
+            t(883, "building", since: 32),
+            t(867, "building", since: 32),
+            t(868, "building", since: 6),
+            t(871, "reviewing", since: 8),
+            t(876, "reviewing", since: 8),
+            t(877, "reviewing", since: 40),
+            t(884, "landing", since: 14, landing: 120),
+            t(891, "landing", since: 14, landing: 120),
+            t(892, "landing", since: 14, landing: 120),
+            t(890, "landing", since: 14, landing: 120),
+            t(894, "waiting", since: 5),
         ]
-        var train = PlanScenario.train(
-            120, "Train 120", summary: "People; terminals; fling; step-up",
-            lanes: [(11, "people"), (12, "mac-terminal"), (13, "fling"), (14, "step-up")], phase: "gating_locally",
-            state: "gating", since: 14)
-        train["title"] = "Train 120"
-        plan["trains"] = [train]
+        plan["landings"] = [
+            PlanScenario.landing(
+                120, "Landing 120", summary: "People; terminals; fling; step-up", cards: [884, 891, 892, 890],
+                phase: "gating_locally", state: "gating", since: 14, lander: "agent:i1")
+        ]
         plan["agents"] = [
             PlanScenario.agent("pane:orchestrator", "orchestrator", model: "opus", working: true, started: 240, tokens: 2_100_000, dollars: nil),
-            agent("agent:b1", "build", lane: 1, label: "Finding why a paired browser sticks on Starting", started: 30),
-            agent("agent:b2", "build", lane: 2, label: "Grouping the web's panes by workspace", started: 23),
-            agent("agent:b3", "build", lane: 3, label: "Reading the chat list's scroll code", started: 2),
-            agent("agent:b4", "build", lane: 4, label: "Keeping finished subagents in their turns", started: 23),
-            agent("agent:b5", "fix", lane: 5, label: "Rerunning the Android unit tests", started: 47),
-            agent("agent:b6", "build", lane: 6, label: "Moving the photo's X out of the hold area", started: 32),
-            agent("agent:b7", "build", lane: 7, label: "Drawing the plan around agents and their tickets", started: 32),
-            agent("agent:b8", "build", lane: 8, label: "Reading how lanes are dispatched today", started: 6),
-            agent("agent:r1", "review", lane: 9, label: "Reading the diff for a failed web connection", started: 8),
-            agent("agent:i1", "integrator", train: 120, label: "", started: 14),
+            agent("agent:b1", "builder", tickets: [(869, "build")], doing: "Finding why a paired browser sticks on Starting", started: 30),
+            agent("agent:b2", "builder", tickets: [(870, "build")], doing: "Grouping the web's panes by workspace", started: 23),
+            agent("agent:b3", "builder", tickets: [(881, "build"), (882, "build")], doing: "Reading the chat list's scroll code", started: 2),
+            agent("agent:b4", "builder", tickets: [(885, "build")], doing: "Keeping finished subagents in their turns", started: 23),
+            agent("agent:b5", "builder", tickets: [(880, "fix")], doing: "Rerunning the Android unit tests", started: 47),
+            agent("agent:b6", "builder", tickets: [(883, "build")], doing: "Moving the photo's X out of the hold area", started: 32),
+            agent("agent:b7", "builder", tickets: [(867, "build")], doing: "Drawing the plan around agents and their tickets", started: 32),
+            agent("agent:b8", "builder", tickets: [(868, "build")], doing: "Reading how the old plan is dispatched today", started: 6),
+            agent("agent:r1", "reviewer", tickets: [(871, "review"), (876, "review")], doing: "Reading the diff for a failed web connection", started: 8),
+            agent("agent:i1", "lander", tickets: [(884, "land"), (891, "land"), (892, "land"), (890, "land")], doing: "", started: 14),
         ]
         return try JSONSerialization.data(withJSONObject: plan)
     }

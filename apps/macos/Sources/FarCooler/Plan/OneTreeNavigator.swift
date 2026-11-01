@@ -2,11 +2,11 @@ import AgentKit
 import SwiftUI
 
 // The navigator as two lists (ov-503 phase 6, replacing ov-321's one tree):
-// the pinned places, then Themes › Cards (the why), then Lanes › Agents and
+// the pinned places, then Themes › Cards (the why), then Tickets › Agents and
 // terminals (the how), then under a divider the main checkout and the loose
 // worktrees. Each pane scrolls on its own and the dividers drag
 // (`NavigatorSplitView`). Every rule (what's under what, the roll-up of a
-// Needs You dot, which theme opens first, which lane a card lights) is
+// Needs You dot, which theme opens first, which ticket a card lights) is
 // AgentKit's `SidebarOutline`; this lays out its rows.
 //
 // It takes the place of the sections a planned board drew (Themes, Pages,
@@ -20,17 +20,17 @@ struct OneTreeSidebar {
     var tree: (OneTreeFilter) -> SidebarOutline
     /// What the window shows, as the node it is.
     var selected: OneTreeTarget?
-    /// The row chosen last, by id: which copy of a lane under two cards.
+    /// The row chosen last, by id: which copy of a ticket under two cards.
     var hint: String?
     /// Where this window keeps the tree's choices: the runner and workspace.
     var key: String
     /// A row chosen: the window goes where it points.
     var onChoose: (OneTreeNode) -> Void
-    /// The board and its plan are read: before that a lane's worktree
+    /// The board and its plan are read: before that a ticket's worktree
     /// looks loose, and revealing it would open the wrong group.
     /// Asked as the navigator draws, which watches the board and its plan.
     var settled: () -> Bool = { true }
-    /// A row's context menu: a card's, a lane's or worktree's, a
+    /// A row's context menu: a card's, a ticket's or worktree's, a
     /// terminal's, the checkout's (review M2).
     var menu: (OneTreeNode) -> AnyView = { _ in AnyView(EmptyView()) }
     /// View > Collapse All or Expand All, asked of the tree (ov-334).
@@ -116,8 +116,8 @@ struct OneTreeNavigator: View {
         let rows = groups.flatMap { $0 }
         // Four areas, each scrolling on its own, the dividers fixed unless
         // dragged (ov-335): the places, the themes under their filter, the
-        // lanes, and the shells below. Each is as tall as its rows while the
-        // room allows; the places, the lanes and the shells stop at a share
+        // tickets, and the shells below. Each is as tall as its rows while the
+        // room allows; the places, the tickets and the shells stop at a share
         // of it and scroll; the themes take what's left. The outer container
         // never scrolls.
         NavigatorSplitView(
@@ -126,7 +126,7 @@ struct OneTreeNavigator: View {
         )
         .padding(.top, NavigatorRhythm.band)
         // Again when the path to it appears: the window can open on a
-        // terminal before the plan that puts its lane under a card is read.
+        // terminal before the plan that puts its ticket under a card is read.
         .onChange(of: RevealKey(target: sidebar.settled() ? sidebar.selected : nil, path: sidebar.selected.map { tree.ancestors(of: $0, hint: sidebar.hint) } ?? []), initial: true) { _, key in
             reveal(key.target, in: tree)
         }
@@ -150,10 +150,10 @@ struct OneTreeNavigator: View {
         .accessibilityIdentifier("one-tree")
     }
 
-    /// The four groups as drawn: places, themes, lanes, below; narrowed and
+    /// The four groups as drawn: places, themes, tickets, below; narrowed and
     /// all open while the filter field holds something.
     private func shown(_ tree: SidebarOutline) -> [[OneTreeRow]] {
-        [tree.places, tree.themes, tree.lanes, tree.below].map { nodes in
+        [tree.places, tree.themes, tree.tickets, tree.below].map { nodes in
             guard narrowing else { return OneTree.rows(nodes, expansion: expansion) }
             let kept = OneTree.narrowed(nodes, to: filterText)
             return OneTree.rows(kept, expansion: OneTree.allOpen(kept))
@@ -215,8 +215,8 @@ struct OneTreeNavigator: View {
         if !groups[2].isEmpty {
             out.append(
                 NavigatorSplitPane(
-                    id: "lanes", maxShare: Self.lanesShare, expanded: true,
-                    header: AnyView(paneTitle("Lanes").padding(.horizontal, NavigatorGrid.edge)),
+                    id: "tickets", maxShare: Self.ticketsShare, expanded: true,
+                    header: AnyView(paneTitle("Tickets").padding(.horizontal, NavigatorGrid.edge)),
                     content: AnyView(section(groups[2], in: tree))))
         }
         if !groups[3].isEmpty {
@@ -232,9 +232,9 @@ struct OneTreeNavigator: View {
     /// short, and it takes a very tall one to reach it.
     static let placesShare: CGFloat = 0.5
 
-    /// The most of the sidebar the lanes take before they scroll, so a long
+    /// The most of the sidebar the tickets take before they scroll, so a long
     /// board leaves the themes room: half.
-    static let lanesShare: CGFloat = 0.5
+    static let ticketsShare: CGFloat = 0.5
 
     /// What drags of the dividers chose, kept for the window (the keys the
     /// other choices use), and held here where there's no scene to keep it.
@@ -289,7 +289,7 @@ struct OneTreeNavigator: View {
         .padding(.bottom, NavigatorRhythm.air)
     }
 
-    /// A list's name over it: Lanes, as Themes has its filter.
+    /// A list's name over it: Tickets, as Themes has its filter.
     private func paneTitle(_ title: String) -> some View {
         Text(title)
             .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
@@ -302,16 +302,16 @@ struct OneTreeNavigator: View {
 
     // MARK: Selection
 
-    /// Whether `node` is what the window shows. Every copy of a lane under
-    /// two cards is lit, so the two read as one lane.
+    /// Whether `node` is what the window shows. Every copy of a ticket under
+    /// two cards is lit, so the two read as one ticket.
     private func isSelected(_ node: OneTreeNode) -> Bool {
-        // A lane group is no page of its own: ⌘↑ from a lane lands on the
+        // A ticket group is no page of its own: ⌘↑ from a ticket lands on the
         // Plan's home with the group's row as the hint (ov-512).
-        if node.target == nil, node.kind == .group, node.id.hasPrefix("lanes:") {
+        if node.target == nil, node.kind == .group, node.id.hasPrefix("tickets:") {
             return sidebar.selected == .plan && sidebar.hint == node.id
         }
         // ...and then the group is the one lit, not the Plan row beside it.
-        if node.target == .plan, sidebar.selected == .plan, sidebar.hint?.hasPrefix("lanes:") == true { return false }
+        if node.target == .plan, sidebar.selected == .plan, sidebar.hint?.hasPrefix("tickets:") == true { return false }
         return node.stands(for: sidebar.selected)
     }
 
@@ -409,7 +409,7 @@ struct OneTreeRowView: View {
     let row: OneTreeRow
     let selected: Bool
     let keyed: Bool
-    /// The card of the lane chosen, or the lane of the card: lit quietly.
+    /// The card of the ticket chosen, or the ticket of the card: lit quietly.
     var related = false
     let onToggle: () -> Void
     /// What VoiceOver's Expand and Collapse do: the row alone, never its siblings.
@@ -424,10 +424,10 @@ struct OneTreeRowView: View {
     static let indent: CGFloat = 12
     /// The disclosure's cell, before the glyph.
     static let disclosure: CGFloat = 12
-    /// The most a card's trailing lane name takes of the row.
-    static let laneNameMax: CGFloat = 84
+    /// The most a card's trailing stage name takes of the row.
+    static let stageNameMax: CGFloat = 84
     /// And the least, so a long title never crushes it to one letter.
-    static let laneNameMin: CGFloat = 52
+    static let stageNameMin: CGFloat = 52
 
     private var node: OneTreeNode { row.node }
 
@@ -545,13 +545,13 @@ struct OneTreeRowView: View {
             }
             if !node.detail.isEmpty {
                 if node.kind == .task {
-                    // A lane's name, which may be long: it gives way before the title does.
+                    // A stage's words, which may be long: it gives way before the title does.
                     Text(node.detail)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(detailStyle)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(minWidth: Self.laneNameMin, maxWidth: Self.laneNameMax, alignment: .trailing)
+                        .frame(minWidth: Self.stageNameMin, maxWidth: Self.stageNameMax, alignment: .trailing)
                 } else {
                     Text(node.detail)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())

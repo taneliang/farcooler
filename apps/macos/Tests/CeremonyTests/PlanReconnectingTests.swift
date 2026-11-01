@@ -116,9 +116,9 @@ struct PlanReconnectingTests {
     @Test("A malformed plan still can't be read, names the failing field and not its value, and isn't retried")
     func malformed() async throws {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
-        var lanes = try #require(object["lanes"] as? [[String: Any]])
-        lanes[0]["name"] = 12345
-        object["lanes"] = lanes
+        var lines = try #require(object["lines"] as? [[String: Any]])
+        lines[0]["title"] = 12345
+        object["lines"] = lines
         let runner = Runner()
         runner.answer = try JSONSerialization.data(withJSONObject: object)
         let plan = Self.store(runner)
@@ -127,7 +127,7 @@ struct PlanReconnectingTests {
         await plan.reload()
         #expect(plan.trouble == PlanWords.couldntRead)
         #expect(!plan.reconnecting)
-        #expect(logged.count == 1 && logged[0].hasPrefix("lanes[0]."), "logged \(logged)")
+        #expect(logged.count == 1 && logged[0].hasPrefix("lines[0]."), "logged \(logged)")
         #expect(!logged.joined().contains("12345"), "a path, never a value")
         try await Task.sleep(for: .milliseconds(150))
         #expect(runner.asked == 1, "a plan that's wrong stays wrong; only silence is asked again")

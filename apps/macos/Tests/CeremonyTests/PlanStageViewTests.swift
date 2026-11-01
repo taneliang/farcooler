@@ -5,10 +5,10 @@ import Testing
 
 @testable import Far_Cooler
 
-/// A pull request's stage on the Mac's plan (ov-316): the words on a lane row,
-/// the card page's "In lane" line and the lane page, over the runner's own
+/// A pull request's stage on the Mac's plan (ov-316): the words on a ticket row,
+/// the card page's stage line and the ticket page, over the runner's own
 /// bytes (`test/fixtures/plan-stages.json`, written by
-/// `plan_stages_json_is_the_shape_the_mac_reads`). Lane `lane-N` works card
+/// `plan_stages_json_is_the_shape_the_mac_reads`). Ticket `ov-N` is card
 /// `ov-N`, whose task id ends in the hex of 0x1000 + N.
 @MainActor
 @Suite(.serialized)
@@ -58,11 +58,14 @@ struct PlanStageViewTests {
         }
         #expect(await line(4)["plan-task-stage"] != nil, "waiting on a reviewer")
         #expect(await line(14)["plan-task-stage"] != nil, "PR state unknown is said, never left out as no PR")
-        #expect(await line(1)["plan-task-stage"] == nil, "Building is the lane's own word")
-        #expect(await line(15)["plan-task-line"] == nil, "the silent lane's card is in no lane here")
+        #expect(await line(1)["plan-task-stage"] == nil, "Building is the ticket's own word")
+        #expect(await line(1)["plan-task-ticket-stage"] != nil, "and the ticket's stage is said")
+        let silent = await line(256)
+        #expect(silent["plan-task-ticket-stage"] != nil && silent["plan-task-stage"] == nil, "a ticket the runner said nothing of has its stage only")
+        #expect(await line(300)["plan-task-line"] == nil, "a card on no ticket and in no theme says nothing")
     }
 
-    @Test("A long reviewer login never squeezes the line: it stacks under the lane and stays inside the column")
+    @Test("A long reviewer login never squeezes the line: it stacks under the stage and stays inside the column")
     func longLoginStacks() async throws {
         let store = try await Self.store()
         await store.plan.reload()
@@ -74,8 +77,8 @@ struct PlanStageViewTests {
         let stage = try #require(narrow["plan-task-stage"])
         #expect(narrowLine.height > wideLine.height * 1.5, "stacked at 260, one line at 900: \(narrowLine) \(wideLine)")
         #expect(stage.maxX <= 260 + 1, "inside the column: \(stage)")
-        // Stacked, it starts at the column's edge; squeezed beside the lane's
-        // button it would start after it (the mutation that drew one HStack).
+        // Stacked, it starts at the column's edge; squeezed beside the stage's
+        // words it would start after them (the mutation that drew one HStack).
         #expect(stage.minX <= narrowLine.minX + 1, "stacked, not squeezed: \(stage)")
         let wideStage = try #require(wide["plan-task-stage"])
         #expect(stage.height > 0 && wideStage.height <= wideLine.height + 1)
@@ -83,33 +86,33 @@ struct PlanStageViewTests {
         #expect(stage.height <= shortStage.height + 1, "elided to one line, not wrapped: \(stage) \(shortStage)")
     }
 
-    @Test("A lane row draws only a stage that needs a person in color, on a line of its own")
-    func laneRowColorsOnlyWhatNeedsAPerson() async throws {
+    @Test("A ticket row draws only a stage that needs a person in color, on a line of its own")
+    func ticketRowColorsOnlyWhatNeedsAPerson() async throws {
         let store = try await Self.store()
         await store.plan.reload()
-        let lanes = store.plan.plan.lanes
+        let lines = store.plan.plan.lines
         func row(_ n: Int) async -> [String: CGRect] {
-            let lane = lanes[n - 1]
+            let line = lines[n - 1]
             return await Self.drawn(
-                PlanLaneRow(
-                    lane: lane, theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
+                PlanLineRow(
+                    line: line, theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
                     keyed: false, action: {}), width: 420)
         }
         // Amber exactly when the stage says it needs a person, read from the
-        // stage and not from a list of lanes.
+        // stage and not from a list of tickets.
         for n in 1...15 {
-            let lane = lanes[n - 1]
+            let line = lines[n - 1]
             let drawn = await row(n)
-            let amber = drawn["plan-lane-lane-\(n)-stage-attention"] != nil
-            let gray = drawn["plan-lane-lane-\(n)-stage"] != nil
-            #expect(amber == (lane.shownStage?.needsAttention == true), "lane-\(n) amber")
-            #expect(gray == (lane.shownStage != nil && lane.shownStage?.needsAttention == false), "lane-\(n) gray")
+            let amber = drawn["plan-ticket-\(line.key)-stage-attention"] != nil
+            let gray = drawn["plan-ticket-\(line.key)-stage"] != nil
+            #expect(amber == (line.shownStage?.needsAttention == true), "\(line.key) amber")
+            #expect(gray == (line.shownStage != nil && line.shownStage?.needsAttention == false), "\(line.key) gray")
         }
-        #expect(lanes.filter { $0.shownStage?.needsAttention == true }.count == 3, "the fixture holds three that need a person")
+        #expect(lines.filter { $0.shownStage?.needsAttention == true }.count == 3, "the fixture holds three that need a person")
         // The state line keeps the state; the stage has a line of its own.
         func second(_ n: Int) -> String {
-            PlanLaneRow.second(lanes[n - 1], agent: nil, landedTrain: nil, now: store.plan.plan.nowMs, aged: false,
-                state: lanes[n - 1].shownStage == nil ? nil : PlanWords.status(lanes[n - 1], stage: false))
+            PlanLineRow.second(lines[n - 1], agent: nil, landedLanding: nil, now: store.plan.plan.nowMs, aged: false,
+                state: lines[n - 1].shownStage == nil ? nil : PlanWords.status(lines[n - 1], stage: false))
         }
         #expect(second(6).hasPrefix("In Review"))
         #expect(second(8).hasPrefix("Approved \u{00B7} "))
@@ -122,13 +125,13 @@ struct PlanStageViewTests {
     func longLoginElidesInARow() async throws {
         let store = try await Self.store()
         await store.plan.reload()
-        let lanes = store.plan.plan.lanes
+        let lines = store.plan.plan.lines
         func stage(_ n: Int, _ width: CGFloat) async throws -> CGRect {
             let drawn = await Self.drawn(
-                PlanLaneRow(
-                    lane: lanes[n - 1], theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
+                PlanLineRow(
+                    line: lines[n - 1], theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
                     keyed: false, action: {}), width: width)
-            return try #require(drawn["plan-lane-lane-\(n)-stage"])
+            return try #require(drawn["plan-ticket-ov-\(n)-stage"])
         }
         let short = try await stage(4, 260)
         let long = try await stage(5, 260)
@@ -136,29 +139,29 @@ struct PlanStageViewTests {
         #expect(long.maxX <= 260, "inside the column: \(long)")
     }
 
-    @Test("The lane page says the stage under its title, with the pull request to open, and says nothing for a silent lane")
-    func lanePageStage() async throws {
+    @Test("The ticket page says the stage under its title, with the pull request to open, and says nothing for a silent ticket")
+    func ticketPageStage() async throws {
         let store = try await Self.store()
         await store.plan.reload()
         let plan = store.plan.plan
         func page(_ n: Int) async -> [String: CGRect] {
             await Self.drawn(
-                PlanLanePage(
-                    lane: plan.lanes[n - 1], plan: plan, record: nil,
+                PlanTicketRecordPage(
+                    line: plan.lines[n - 1], plan: plan, record: nil,
                     context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })),
                 width: 560)
         }
-        #expect(await page(4)["plan-lane-stage"] != nil)
-        #expect(await page(6)["plan-lane-stage"] != nil)
-        #expect(PlanWords.status(plan.lanes[5], stage: false) == "In Review", "the title keeps the state; the stage has its line")
-        // A long login on the lane page: one line, then the pull request under it.
+        #expect(await page(4)["plan-ticket-stage"] != nil)
+        #expect(await page(6)["plan-ticket-stage"] != nil)
+        #expect(PlanWords.status(plan.lines[5], stage: false) == "In Review", "the title keeps the state; the stage has its line")
+        // A long login on the ticket page: one line, then the pull request under it.
         let narrow = await Self.drawn(
-            PlanLanePage(lane: plan.lanes[3], plan: plan, record: nil, context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })),
+            PlanTicketRecordPage(line: plan.lines[3], plan: plan, record: nil, context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })),
             width: 300)
-        let stage = try #require(narrow["plan-lane-stage"])
-        let wide = try #require(await page(4)["plan-lane-stage"])
+        let stage = try #require(narrow["plan-ticket-stage"])
+        let wide = try #require(await page(4)["plan-ticket-stage"])
         #expect(stage.height > wide.height * 1.5, "PR 31 goes under the stage when stacked: \(stage) \(wide)")
-        #expect(await page(1)["plan-lane-stage"] == nil)
-        #expect(await page(15)["plan-lane-stage"] == nil)
+        #expect(await page(1)["plan-ticket-stage"] == nil)
+        #expect(await page(15)["plan-ticket-stage"] == nil)
     }
 }

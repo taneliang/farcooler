@@ -206,7 +206,7 @@ struct PlanRulingsViewTests {
         let defaults = PlanViewTests.defaults()
         let calls = PlanViewTests.Calls()
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
-        for key in ["themes", "lanes", "order", "cards"] { object[key] = [] }
+        for key in ["themes", "lines", "landings", "agents", "cards"] { object[key] = [] }
         calls.plan = try JSONSerialization.data(withJSONObject: object)
         let store = try await PlanViewTests.store(plan: true, defaults: defaults, calls: calls)
         let drawn = await PlanViewTests.draw(store, defaults: defaults)

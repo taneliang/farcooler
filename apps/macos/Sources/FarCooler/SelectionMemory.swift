@@ -42,7 +42,7 @@ enum SelectionMemory {
             case .worktree(let worktree, let terminal): third = opened(worktree, terminal)
             case .history(let status): third = "history:\(status.rawValue)"
             case .plan(.theme(let theme)): third = "plan:theme:\(theme)"
-            case .plan(.lane(let lane)): third = "plan:lane:\(lane)"
+            case .plan(.ticket(let ticket)): third = "plan:ticket:\(ticket)"
             case .plan(.page(let slot)): third = "plan:page:\(slot)"
             case .plan(.needsYou): third = "plan:needs-you"
             }
@@ -69,8 +69,8 @@ enum SelectionMemory {
             focus = .history(status)
         } else if third.hasPrefix("plan:theme:"), third.count > "plan:theme:".count {
             focus = .plan(.theme(String(third.dropFirst("plan:theme:".count))))
-        } else if third.hasPrefix("plan:lane:"), third.count > "plan:lane:".count {
-            focus = .plan(.lane(String(third.dropFirst("plan:lane:".count))))
+        } else if third.hasPrefix("plan:ticket:"), third.count > "plan:ticket:".count {
+            focus = .plan(.ticket(String(third.dropFirst("plan:ticket:".count))))
         } else if third == "plan:needs-you" {
             focus = .plan(.needsYou)
         } else if third.hasPrefix("plan:page:"), third.count > "plan:page:".count {

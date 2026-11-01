@@ -8,8 +8,8 @@ import Testing
 
 /// The sidebar as two lists (ov-503 phase 6), in a real window off every
 /// screen, no input but the key events a test sends the window itself: the
-/// keyboard walks Themes into Lanes, choosing one side lights the other,
-/// revealing a pane opens its lane for the view only, and Collapse All and
+/// keyboard walks Themes into Tickets, choosing one side lights the other,
+/// revealing a pane opens its ticket for the view only, and Collapse All and
 /// Expand All reach both lists.
 @MainActor
 @Suite(.serialized)
@@ -24,8 +24,9 @@ struct SidebarListsTests {
         var chosen: [OneTreeTarget] = []
     }
 
-    /// Two themes. The lane `relay` works t1 and t3, one card in each, and
-    /// `solo` works t2; both have a worktree with panes.
+    /// Two themes. The ticket `relay` is card t1, in review, and `solo` is
+    /// card t2, building; t3 has no ticket. Both tickets have a worktree with
+    /// panes.
     static func outline() throws -> SidebarOutline {
         func theme(_ name: String, _ cards: [String], _ ordinal: Int) -> [String: Any] {
             [
@@ -36,20 +37,21 @@ struct SidebarListsTests {
                            "done": 0, "cancelled": 0],
             ]
         }
-        func lane(_ name: String, _ state: String, _ cards: [String]) -> [String: Any] {
+        func ticket(_ name: String, _ stage: String, _ card: String) -> [String: Any] {
             [
-                "id": "lane-\(name)", "short": name, "name": name, "state": state, "reason": "", "plan_rank": NSNull(),
-                "worktree_path": ".claude/worktrees/\(name)", "branch": name, "harness": "claude", "model": "opus",
-                "train": NSNull(), "landed_sha": NSNull(), "state_since": 999_000_000, "stale": false, "fix_rounds": 0,
-                "cards": cards.map { ["task": $0, "key": "ov-\($0.dropFirst())", "slice": ""] },
-                "agents": [], "spend": ["input_tokens": 0, "runs": 0, "unmeasured_agents": 0],
+                "task": card, "key": "ov-\(card.dropFirst())", "title": "Card \(card)", "status": "In Progress", "stage": stage,
+                "reason": "", "plan_rank": NSNull(), "worktree_path": ".claude/worktrees/\(name)", "branch": name,
+                "stack_parent": NSNull(), "same_branch": NSNull(), "pr_number": NSNull(), "landed_sha": NSNull(),
+                "stage_since": 999_000_000, "held_off": false, "stale": false, "fix_rounds": 0, "landing": NSNull(),
+                "work": [] as [Any], "budget_tokens": NSNull(),
+                "spend": ["input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "runs": 0, "unmeasured_agents": 0, "shared_agents": 0],
             ]
         }
         let object: [String: Any] = [
             "now_ms": 1_000_000_000,
             "themes": [theme("Alpha", ["t1", "t2"], 1), theme("Beta", ["t3"], 2)],
-            "lanes": [lane("relay", "building", ["t1", "t3"]), lane("solo", "review", ["t2"])],
-            "order": [], "cards": [],
+            "lines": [ticket("relay", "reviewing", "t1"), ticket("solo", "building", "t2")],
+            "cards": [],
         ]
         let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
         func worktree(_ name: String) -> OneTreeWorktree {
@@ -128,48 +130,54 @@ struct SidebarListsTests {
     private static let alphaT1 = "tree-theme:theme-Alpha/task:t1"
     private static let betaT3 = "tree-theme:theme-Beta/task:t3"
     private static let alphaT2 = "tree-theme:theme-Alpha/task:t2"
-    private static let relay = "tree-lane:lane-relay"
-    private static let solo = "tree-lane:lane-solo"
+    private static let relay = "tree-ticket:t1"
+    private static let solo = "tree-ticket:t2"
 
-    @Test("A card lights the lane working it, and a lane lights each of its cards; nothing else is lit")
+    @Test("A card lights its ticket, and a ticket lights its card; nothing else is lit")
     func crossHighlight() async throws {
         let drawn = try await Self.draw(selected: .task("t1"))
         defer { drawn.window.close() }
         func lit() -> Set<String> { Set(drawn.ids.filter { $0.hasPrefix("tree-related-") }.map { "tree-" + $0.dropFirst("tree-related-".count) }) }
-        #expect(lit() == [Self.relay], "card ov-1 lights its lane: \(drawn.ids.sorted())")
-        drawn.pick.selected = .lane("lane-relay")
+        #expect(lit() == [Self.relay], "card ov-1 lights its ticket: \(drawn.ids.sorted())")
+        drawn.pick.selected = .ticket("t1")
         await drawn.settle()
-        #expect(lit() == [Self.alphaT1, Self.betaT3], "the lane lights both its cards, one in each theme")
-        drawn.pick.selected = .lane("lane-solo")
+        #expect(lit() == [Self.alphaT1], "the ticket lights its card")
+        drawn.pick.selected = .ticket("t2")
         await drawn.settle()
         #expect(lit() == [Self.alphaT2])
         drawn.pick.selected = .theme("theme-Alpha")
         await drawn.settle()
-        #expect(lit().isEmpty, "a theme goes with no lane")
+        #expect(lit().isEmpty, "a theme goes with no ticket")
     }
 
-    @Test("↓ walks from the Themes list into the Lanes list and chooses a lane on arrival")
+    @Test("↓ walks from the Themes list into the Tickets list and chooses a ticket on arrival")
     func keyboardCrossesTheLists() async throws {
         let drawn = try await Self.draw(selected: .task("t3"))
         defer { drawn.window.close() }
         drawn.pick.request += 1
         await drawn.settle()
-        for _ in 0..<4 {
+        func down() async {
             OneTreeKeyboardTests.key(125, NSDownArrowFunctionKey, in: drawn.window)
             await drawn.settle()
         }
-        // t3 is the last card; below it the Lanes list: Building (a group, so
-        // the cursor stops there without choosing), then the lane relay.
-        #expect(drawn.heard.chosen.contains(.lane("lane-relay")), "chosen: \(drawn.heard.chosen)")
-        #expect(drawn.heard.chosen.first != .lane("lane-relay"))
+        // t3 is the last card; below it the Tickets list opens with In Review, a
+        // group, so the cursor stops there without choosing a ticket...
+        await down()
+        #expect(!drawn.heard.chosen.contains(.ticket("t1")), "the group is not a ticket: \(drawn.heard.chosen)")
+        // ...and the next row is the ticket relay, chosen on arrival.
+        await down()
+        #expect(drawn.heard.chosen.contains(.ticket("t1")), "chosen: \(drawn.heard.chosen)")
+        await down()
+        await down()
+        #expect(drawn.heard.chosen.contains(.ticket("t2")), "and on past the next group to solo: \(drawn.heard.chosen)")
     }
 
-    @Test("Revealing a lane's pane opens its lane for the view only, and shuts it when the selection leaves")
-    func revealOpensTheLane() async throws {
+    @Test("Revealing a ticket's pane opens its ticket for the view only, and shuts it when the selection leaves")
+    func revealOpensTheTicket() async throws {
         let drawn = try await Self.draw()
         defer { drawn.window.close() }
         let pane = "\(Self.relay)/terminal:relay-sh"
-        #expect(drawn.ids.contains(Self.relay) && !drawn.ids.contains(pane), "lanes start closed")
+        #expect(drawn.ids.contains(Self.relay) && !drawn.ids.contains(pane), "tickets start closed")
         drawn.pick.selected = .terminal(worktree: "wt-relay", terminal: "relay-sh")
         await drawn.settle()
         #expect(drawn.ids.contains(pane), "opened to show the pane: \(drawn.ids.sorted())")
@@ -187,10 +195,10 @@ struct SidebarListsTests {
         drawn.pick.fold.collapse()
         await drawn.settle()
         #expect(!drawn.ids.contains(Self.alphaT1), "the themes closed")
-        #expect(!drawn.ids.contains(Self.relay), "and the lane groups")
+        #expect(!drawn.ids.contains(Self.relay), "and the ticket groups")
         drawn.pick.fold.expand()
         await drawn.settle()
         #expect(drawn.ids.contains(Self.alphaT1) && drawn.ids.contains(Self.relay))
-        #expect(drawn.ids.contains("\(Self.relay)/terminal:relay-sh"), "a lane opens to its panes")
+        #expect(drawn.ids.contains("\(Self.relay)/terminal:relay-sh"), "a ticket opens to its panes")
     }
 }

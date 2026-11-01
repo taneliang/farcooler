@@ -29,8 +29,8 @@ struct OneTreeRevealViewTests {
             ]
         }
         let object: [String: Any] = [
-            "now_ms": 1_000_000, "themes": [theme("Alpha", "t1", 1), theme("Beta", "t2", 2)], "lanes": [],
-            "order": [], "cards": [],
+            "now_ms": 1_000_000, "themes": [theme("Alpha", "t1", 1), theme("Beta", "t2", 2)], "lines": [],
+            "cards": [],
         ]
         let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
         return SidebarOutline.build(

@@ -6,7 +6,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The Plan view, a theme's page, a lane's page and a task page's line
+/// The Plan view, a theme's page, a ticket's page and a task page's line
 /// (ov-273), rendered offscreen in both appearances at a narrow and a wide
 /// width, written where `FARCOOLER_GLANCE_OUT` says. Beside them, the board
 /// with Tasks chosen and the board on a runner without a plan, which should
@@ -156,13 +156,13 @@ struct PlanSpecimenTests {
         // On a runner without a plan, and the planned navigator (ov-298).
         try await Self.write("board-old-runner-narrow", size: narrow) { Board(store: source.old) }
         let model = plan.plan
-        let lane = model.lanes.first { $0.name == "mac-rel" } ?? model.lanes[0]
+        let line = model.lines.first { $0.branch == "mac-rel" } ?? model.lines[0]
         let theme = model.shownThemes.first { $0.name == "Visual language" } ?? model.themes[0]
         try await Self.write("plan-navigator-narrow", size: narrow) { Board(store: store, page: .theme(theme.id)) }
 
         // The overview, on its own.
         try await Self.write("plan-overview-narrow", size: narrow) {
-            PlanOverviewView(plan: plan, statuses: store.board.statuses, selected: .lane(lane.id), onOpen: { _ in })
+            PlanOverviewView(plan: plan, statuses: store.board.statuses, selected: .ticket(line.id), onOpen: { _ in })
                 .padding(.horizontal, NavigatorGrid.edge).background(WorkspaceStyle.canvas)
         }
         try await Self.write("plan-overview-wide", size: wide) {
@@ -175,7 +175,7 @@ struct PlanSpecimenTests {
             rows: Dictionary(store.board.rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
             onTask: { _ in }, onOpen: { _ in })
         await plan.readRecord(.theme(theme.id))
-        await plan.readRecord(.lane(lane.id))
+        await plan.readRecord(.ticket(line.id))
         let page = { (width: CGFloat) in CGSize(width: width, height: 1250) }
         try await Self.write("plan-theme-narrow", size: page(560)) {
             PlanThemePage(
@@ -184,15 +184,15 @@ struct PlanSpecimenTests {
         try await Self.write("plan-theme-wide", size: page(980)) {
             PlanThemePage(theme: theme, plan: model, record: plan.records[.theme(theme.id)], context: context)
         }
-        try await Self.write("plan-lane-narrow", size: page(560)) {
-            PlanLanePage(lane: lane, plan: model, record: plan.records[.lane(lane.id)], context: context)
+        try await Self.write("plan-ticket-narrow", size: page(560)) {
+            PlanTicketRecordPage(line: line, plan: model, record: plan.records[.ticket(line.id)], context: context)
         }
-        try await Self.write("plan-lane-wide", size: page(980)) {
-            PlanLanePage(lane: lane, plan: model, record: plan.records[.lane(lane.id)], context: context)
+        try await Self.write("plan-ticket-wide", size: page(980)) {
+            PlanTicketRecordPage(line: line, plan: model, record: plan.records[.ticket(line.id)], context: context)
         }
 
         // A task page's header, with its line.
-        if let card = lane.cards.first, let row = store.board.rows.first(where: { $0.id == card.task }) {
+        if let row = store.board.rows.first(where: { $0.id == line.task }) {
             try await Self.write("plan-task-line", size: CGSize(width: 760, height: 90)) {
                 VStack(spacing: 0) {
                     TaskViewHeader(row: row)

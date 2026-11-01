@@ -2,14 +2,14 @@ import AgentKit
 import SwiftUI
 
 // The navigator of a board with a plan (ov-298). The owner, Oct 4: "we
-// basically have 3 levels of planning -- themes, lanes, tasks and they should
+// basically have 3 levels of planning -- themes, [tickets], tasks and they should
 // be treated separately", and "Let's make that the primary way of working.
 // Can you remove the Tasks and Plan toggle". The navigator is navigation,
 // ordered by that hierarchy, every section a peer pane:
 //
 //   the orchestrator's row, one line;
 //   Themes, a row each with its progress, opening the theme's page, where
-//   its lanes and cards are;
+//   its tickets and cards are;
 //   Pages, the orchestrator's own, when it has published any;
 //   Tasks, the status groups as an index, collapsed until opened;
 //   Terminals and Worktrees, as before.
@@ -72,18 +72,18 @@ enum PlanNavigator {
     }
 }
 
-/// What tells that a lane or a theme changed (`listChanges`): what its row
-/// shows. A lane's state, reason, cards, rank and whether it waits on the
+/// What tells that a ticket or a theme changed (`listChanges`): what its row
+/// shows. A ticket's stage, reason, key, rank and whether it waits on the
 /// owner; a theme's name, state, counts, next and ask.
 enum PlanChanges {
-    static func lanes(_ lanes: [PlanLane], _ model: PlanModel, statuses: [String: TaskStatus]) -> [ListChangeRow] {
-        lanes.enumerated().map { index, lane in
+    static func tickets(_ lines: [PlanTicketLine], _ model: PlanModel, statuses: [String: TaskStatus]) -> [ListChangeRow] {
+        lines.enumerated().map { index, line in
             ListChangeRow(
-                id: lane.id,
+                id: line.id,
                 signature: [
-                    lane.state.rawValue, lane.reason, lane.name, model.theme(of: lane)?.name ?? "",
-                    "\(lane.cards.count)", "\(lane.stale)", "\(model.waitsOnOwner(lane, statuses: statuses))",
-                    lane.state == .queued ? "\(index)" : "",
+                    line.stage.rawValue, line.reason, line.key, line.title, model.theme(of: line)?.name ?? "",
+                    "\(line.isFixing)", "\(line.stale)", "\(model.waitsOnOwner(line, statuses: statuses))",
+                    line.stage == .waiting ? "\(index)" : "",
                 ].joined(separator: "\u{1}"))
         }
     }
@@ -151,7 +151,7 @@ struct PlanNavigatorPages: View {
 
 /// One theme in the navigator: its name, its progress trailing, and, in
 /// amber, that it needs the owner. Its glyph is its state's, a shape to scan
-/// by. The theme's page has the rest: its outcome, story, lanes and cards.
+/// by. The theme's page has the rest: its outcome, story, tickets and cards.
 struct PlanThemeRow: View {
     let theme: PlanTheme
     let selected: Bool

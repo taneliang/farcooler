@@ -37,22 +37,15 @@ struct PlanOutsideRow: View {
         }
     }
 
-    private var tidyList: some View { PlanTidyList(cards: outside.tidy, trainLanes: outside.trainLanes) }
+    private var tidyList: some View { PlanTidyList(cards: outside.tidy) }
 }
 
 /// Each card the CLI's "Worth a look" names, with why, a key to hover each.
 struct PlanTidyList: View {
     let cards: [PlanFlaggedCard]
-    /// Lanes named like a live train (ov-461).
-    var trainLanes: [PlanFlaggedLane] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            ForEach(trainLanes, id: \.lane) { lane in
-                Text(PlanWords.trainLane(lane))
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .probed("plan-tidy-lane-\(lane.name)")
-            }
             ForEach(cards, id: \.task) { card in
                 TaskKeyText(keysIn: "\(card.key) · \(card.status.replacingOccurrences(of: "_", with: " ").capitalized)")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))

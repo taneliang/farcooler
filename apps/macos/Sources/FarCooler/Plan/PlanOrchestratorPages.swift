@@ -61,7 +61,7 @@ struct PlanPageRow: View {
         .identified("plan-page-\(page.slot)")
     }
 
-    /// "Page, Train integ-10, In review · 3 of 4 lanes green, Updated 12 min
+    /// "Page, Landing 10, In review · 3 of 4 tickets green, Updated 12 min
     /// ago".
     static func spoken(_ page: BoardPage, now: Int64) -> String {
         (["Page", page.title] + (page.summary.isEmpty ? [] : [page.summary]) + [PageWords.updated(page, now: now)])
@@ -90,7 +90,7 @@ extension PlanPageContext {
     }
 }
 
-/// A page in the main area, as a theme's or lane's page opens: a document on
+/// A page in the main area, as a theme's or ticket's page opens: a document on
 /// the paper.
 struct PlanOrchestratorPage: View {
     let page: BoardPage

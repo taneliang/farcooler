@@ -19,7 +19,7 @@ struct OneTreeFoldTests {
         @ObservedObject var fold: Fold
         let seen: NavigatorFilterTests.Seen
 
-        /// A card under No Theme, open on a board with no plan, with a worktree in the Lanes list.
+        /// A card under No Theme, open on a board with no plan, with a worktree in the Tickets list.
         private var sidebar: OneTreeSidebar {
             let input = OneTreeInput(
                 tasks: [OneTreeTask(id: "t1", key: "ov-1", title: "One", status: .inProgress, worktreeID: "w")],
@@ -88,9 +88,9 @@ struct OneTreeFoldTests {
     }
 
     private static let card = "tree-group:no-theme/task:t1"
-    /// The card's worktree has no plan lane, so the Lanes list holds it under
-    /// Without a Lane (ov-503).
-    private static let lane = "tree-lanes:other/worktree:w"
+    /// The card's worktree has no ticket on the line, so the Tickets list holds
+    /// it under Off the Line (ov-503).
+    private static let offTheLine = "tree-tickets:other/worktree:w"
 
     @Test("The toggle beside the filter collapses the whole tree, then expands all of it")
     func toggleButton() async {
@@ -101,11 +101,11 @@ struct OneTreeFoldTests {
         #expect(drawn.press("one-tree-fold"))
         await drawn.settle()
         #expect(!drawn.ids.contains(Self.card), "Collapse All closed No Theme")
-        #expect(!drawn.ids.contains(Self.lane), "and Without a Lane, in the other list")
+        #expect(!drawn.ids.contains(Self.offTheLine), "and Off the Line, in the other list")
         #expect(drawn.press("one-tree-fold"))
         await drawn.settle()
-        #expect(drawn.ids.contains(Self.card) && drawn.ids.contains(Self.lane), "Expand All opened both lists")
-        #expect(drawn.ids.contains("\(Self.lane)/terminal:s"), "and the lane to its terminal")
+        #expect(drawn.ids.contains(Self.card) && drawn.ids.contains(Self.offTheLine), "Expand All opened both lists")
+        #expect(drawn.ids.contains("\(Self.offTheLine)/terminal:s"), "and the worktree to its terminal")
     }
 
     @Test("The menu's request folds the tree, and asking the same twice is two asks")
@@ -117,7 +117,7 @@ struct OneTreeFoldTests {
         #expect(!drawn.ids.contains(Self.card))
         drawn.fold.request.expand()
         await drawn.settle()
-        #expect(drawn.ids.contains(Self.lane))
+        #expect(drawn.ids.contains(Self.offTheLine))
         drawn.fold.request.collapse()
         await drawn.settle()
         #expect(!drawn.ids.contains(Self.card))

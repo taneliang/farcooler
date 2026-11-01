@@ -29,7 +29,7 @@ final class TerminalKeyHover {
         // A pane mounted out of sight (opacity 0 under an opened task, or a
         // tile behind a zoomed one) still has its tracking area, which
         // SwiftUI's opacity and hit-testing don't clip: no card from it
-        // (train 1004r, K1).
+        // (landing 1004r, K1).
         guard view.isShown else { return exited() }
         let cell = view.cellForTesting(event)
         let x = view.convert(event.locationInWindow, from: nil).x

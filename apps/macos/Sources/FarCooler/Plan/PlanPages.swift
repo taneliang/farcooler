@@ -1,13 +1,13 @@
 import AgentKit
 import SwiftUI
 
-// A theme's page and a lane's page (ov-268 design 6.2 and 6.3), opened in the
+// A theme's page and a ticket's page (ov-268 design 6.2 and 6.3), opened in the
 // main area from the Plan view, as a task opens from the board. Laid out as
 // the History page is: a document column, a title, and sections under small
 // headings.
 
 /// What a plan page needs from the board: its tasks, to draw a card as the
-/// board draws it, and where a task, a lane or a theme opens.
+/// board draws it, and where a task, a ticket or a theme opens.
 struct PlanPageContext {
     /// The board's rows by task id.
     var rows: [String: TaskRow]
@@ -37,11 +37,11 @@ struct PlanPageView: View {
                 } else {
                     missing("Theme Not Found")
                 }
-            case .lane(let id):
-                if let lane = plan.lane(id) {
-                    PlanLanePage(lane: lane, plan: plan.plan, record: plan.records[page], context: context)
+            case .ticket(let id):
+                if let line = plan.ticket(id) {
+                    PlanTicketRecordPage(line: line, plan: plan.plan, record: plan.records[page], context: context)
                 } else {
-                    missing("Lane Not Found")
+                    missing("Ticket Not Found")
                 }
             case .page(let slot):
                 if let found = plan.page(slot) {
@@ -179,7 +179,7 @@ private extension Text {
 // MARK: - Theme
 
 /// A theme's page: its outcome, where it stands and what changed, what's
-/// next and what needs the owner, its lanes, and its cards as the board
+/// next and what needs the owner, its tickets, and its cards as the board
 /// draws them.
 struct PlanThemePage: View {
     let theme: PlanTheme
@@ -231,7 +231,7 @@ struct PlanThemePage: View {
                     }
                 }
             }
-            // After Needs You and before Lanes (ov-269 design 6.1).
+            // After Needs You and before Tickets (ov-269 design 6.1).
             PlanAnchoredPages(pages: anchored, world: world, context: context, onHide: onHide)
             decided
             if PlanThemeSpend.hasSomething(theme) {
@@ -241,7 +241,7 @@ struct PlanThemePage: View {
                         secondaryFont: .system(size: WorkspaceStyle.PaneText.secondary))
                 }
             }
-            lanes
+            tickets
             cards
         }
     }
@@ -298,13 +298,13 @@ struct PlanThemePage: View {
         }
     }
 
-    @ViewBuilder private var lanes: some View {
-        let lanes = plan.lanes(in: theme)
-        if !lanes.isEmpty {
-            PlanSection(title: "Lanes") {
+    @ViewBuilder private var tickets: some View {
+        let lines = plan.lines(in: theme)
+        if !lines.isEmpty {
+            PlanSection(title: "Tickets") {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(lanes) { lane in
-                        PlanPageLaneRow(lane: lane) { context.onOpen(.lane(lane.id)) }
+                    ForEach(lines) { line in
+                        PlanPageTicketRow(line: line) { context.onOpen(.ticket(line.id)) }
                     }
                 }
             }
@@ -322,31 +322,31 @@ struct PlanThemePage: View {
     }
 }
 
-/// A lane on a theme's page: its name, its state, and its cards' keys.
-private struct PlanPageLaneRow: View {
-    let lane: PlanLane
+/// A ticket on a theme's page: its title, its stage, and its key.
+private struct PlanPageTicketRow: View {
+    let line: PlanTicketLine
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
-                Image(systemName: PlanGlyph.name(lane.state))
+                Image(systemName: PlanGlyph.name(line))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.quietInk)
                     .frame(width: ColumnGrid.step)
-                Text(lane.heading)
+                Text(line.heading)
                     .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
-                Text(PlanWords.status(lane))
+                Text(PlanWords.status(line))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.quietInk)
                     .lineLimit(1)
                 Spacer(minLength: Spacing.group)
                 // Each key shows its card on hover (ov-299).
-                TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
+                TaskKeyText(keysIn: line.key)
                     .font(TaskKeyColumn.font)
                     .foregroundStyle(.quietInk)
                     .lineLimit(1)
@@ -364,7 +364,7 @@ private struct PlanPageLaneRow: View {
         .padding(.horizontal, -NavigatorGrid.outset)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .identified("plan-page-lane-\(lane.name)")
+        .identified("plan-page-ticket-\(line.key)")
     }
 }
 
@@ -381,12 +381,9 @@ private struct PlanCardList: View {
             ForEach(refs, id: \.self) { ref in
                 if let row = context.rows[ref.task] {
                     CompactTaskRow(key: row.key, title: row.title) {
-                        HStack(spacing: Spacing.tight) {
-                            Text(row.status.title)
-                            if !ref.slice.isEmpty { Text("· \(ref.slice)") }
-                        }
-                        .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                        .foregroundStyle(.quietInk)
+                        Text(row.status.title)
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                            .foregroundStyle(.quietInk)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { context.onTask(row) }
@@ -407,38 +404,38 @@ private struct PlanCardList: View {
     }
 }
 
-// MARK: - Lane
+// MARK: - Ticket
 
-/// A lane's page: why it exists, where it runs, its cards, what it spent,
-/// its agents, and its timeline.
-struct PlanLanePage: View {
-    let lane: PlanLane
+/// A ticket's page in the plan: why it exists, where it runs, its card, what
+/// it spent, the agents that worked it, and its timeline.
+struct PlanTicketRecordPage: View {
+    let line: PlanTicketLine
     let plan: PlanModel
     let record: PlanRecord?
     let context: PlanPageContext
 
     var body: some View {
-        PlanDocument(id: "plan-lane-page") {
+        PlanDocument(id: "plan-ticket-record-page") {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 // The stage has its own line below, so the title keeps the state alone.
-                PlanTitle(title: lane.heading, state: PlanWords.status(lane, stage: false))
-                if !lane.reason.isEmpty { Text(lane.reason).planBody() }
+                PlanTitle(title: line.heading, state: PlanWords.status(line, stage: false))
+                if !line.reason.isEmpty { Text(line.reason).planBody() }
                 if !place.isEmpty {
                     Text(place)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                         .foregroundStyle(.quietInk)
                         .textSelection(.enabled)
                 }
-                if let theme = plan.theme(of: lane) {
+                if let theme = plan.theme(of: line) {
                     Button { context.onOpen(.theme(theme.id)) } label: {
                         Label(theme.name, systemImage: "map").labelStyle(.titleAndIcon)
                     }
                     .buttonStyle(.link)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
-                    .help("Open the theme this lane serves")
-                    .identified("plan-lane-theme")
+                    .help("Open the theme this ticket serves")
+                    .identified("plan-ticket-theme")
                 }
-                if let stage = lane.shownStage, let words = stage.words {
+                if let stage = line.shownStage, let words = stage.words {
                     // One line when it fits, else the pull request under the
                     // stage: never in the middle of an elided login.
                     ViewThatFits(in: .horizontal) {
@@ -446,22 +443,22 @@ struct PlanLanePage: View {
                         stageLine(stage, words, stacked: true)
                     }
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .identified("plan-lane-stage")
+                    .identified("plan-ticket-stage")
                 }
-                if let stale = PlanWords.stale(lane, now: plan.nowMs) {
+                if let stale = PlanWords.stale(line, now: plan.nowMs) {
                     StaleLine(text: stale)
                 }
             }
             PlanSection(title: "Cards") {
-                PlanCardList(refs: lane.cards, plan: plan, context: context)
+                PlanCardList(refs: [line.card], plan: plan, context: context)
             }
             PlanSection(title: "Spend") {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
-                    Text("\(PlanWords.spend(lane.spend)) · \(PlanWords.fixRounds(lane.fixRounds))").planBody()
-                    if let budget = PlanWords.budget(lane.spend, against: lane.budgetTokens) {
+                    Text("\(PlanWords.spend(line.spend)) · \(PlanWords.fixRounds(line.fixRounds))").planBody()
+                    if let budget = PlanWords.budget(line.spend, against: line.budgetTokens) {
                         PlanBudgetLine(budget: budget, font: .system(size: WorkspaceStyle.PaneText.secondary))
                     }
-                    if lane.spend.totalTokens > 0, (lane.spend.costMicros ?? 0) > 0 {
+                    if line.spend.totalTokens > 0, (line.spend.costMicros ?? 0) > 0 {
                         Text(TaskUsageFormat.apiEquivalent)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
                             .foregroundStyle(.quietInk)
@@ -469,11 +466,11 @@ struct PlanLanePage: View {
                     }
                 }
             }
-            if !lane.agents.isEmpty {
+            if !line.work.isEmpty {
                 PlanSection(title: "Agents") {
                     VStack(alignment: .leading, spacing: Spacing.tight) {
-                        ForEach(Array(lane.agents.enumerated()), id: \.offset) { _, agent in
-                            Text(PlanWords.agent(agent, now: plan.nowMs)).planBody()
+                        ForEach(Array(line.work.enumerated()), id: \.offset) { _, work in
+                            Text(PlanWords.work(work, agent: plan.agent(work.agent), now: plan.nowMs)).planBody()
                         }
                     }
                 }
@@ -502,16 +499,16 @@ struct PlanLanePage: View {
         }
     }
 
-    /// ".claude/worktrees/mac-ux · mac-ux · Opus · in integ-9".
+    /// ".claude/worktrees/mac-ux · mac-ux · in Landing 9".
     private var place: String {
         [
-            lane.slug ?? "", lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch, PlanWords.model(lane.model),
-            lane.train.map { "in \($0)" } ?? "",
+            line.worktreePath, line.branch == line.worktreePath ? "" : line.branch,
+            line.landing.map { "in Landing \($0)" } ?? "",
         ].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
 
-/// A stale lane's warning on its page: amber words, with their glyph.
+/// A stale ticket's warning on its page: amber words, with their glyph.
 private struct StaleLine: View {
     let text: String
     @Environment(\.colorScheme) private var scheme
@@ -523,7 +520,7 @@ private struct StaleLine: View {
     }
 }
 
-/// A lane's record, oldest first: the time, then what happened.
+/// A ticket's record, oldest first: the time, then what happened.
 private struct PlanTimeline: View {
     let rows: [PlanTimelineRow]
 
@@ -555,8 +552,8 @@ private struct PlanTimeline: View {
 
 // MARK: - The task page's line
 
-/// "In lane mac-ux · Visual language" under a task's title, on a runner
-/// that keeps a plan (6.4): each half opens its page. Read from the plan the
+/// "In Review · Waiting on alice · Visual language" under a task's title, on a
+/// runner that keeps a plan (6.4): the theme opens its page. Read from the plan the
 /// window already holds; nothing new is asked of the runner.
 struct PlanTaskLineView: View {
     @ObservedObject var plan: PlanStore
@@ -566,7 +563,7 @@ struct PlanTaskLineView: View {
     var body: some View {
         if plan.available, let line = plan.plan.taskLine(task) {
             // One line when it fits, else the halves stacked: a long reviewer's
-            // login never squeezes the lane or the theme to an ellipsis.
+            // login never squeezes the stage or the theme to an ellipsis.
             ViewThatFits(in: .horizontal) {
                 halves(line, stacked: false)
                 halves(line, stacked: true)
@@ -587,19 +584,18 @@ struct PlanTaskLineView: View {
         }
     }
 
-    /// The lane, its pull request's stage, and the theme.
+    /// The ticket's stage, its pull request's stage, and the theme.
     @ViewBuilder private func halves(_ line: PlanTaskLine, stacked: Bool) -> some View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(spacing: Spacing.tight))
         layout {
-            if let lane = line.lane, let words = line.laneWords {
-                Button(words) { onOpen(.lane(lane.id)) }
-                    .help("Open lane \(lane.heading)")
+            if let words = line.stageWords {
+                Text(words).foregroundStyle(.quietInk).identified("plan-task-ticket-stage")
             }
-            if let stage = line.stage, let words = stage.fullWords {
-                if !stacked { Text("\u{00B7}").foregroundStyle(.quietInk) }
+            if let stage = line.stage, let words = stage.rowWords {
+                if !stacked, line.stageWords != nil { Text("\u{00B7}").foregroundStyle(.quietInk) }
                 PlanStageText(stage: stage, words: words).identified("plan-task-stage")
             }
-            if line.lane != nil, line.theme != nil, !stacked {
+            if !stacked, line.line != nil, line.theme != nil {
                 Text("\u{00B7}").foregroundStyle(.quietInk)
             }
             if let theme = line.theme {

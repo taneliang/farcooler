@@ -48,7 +48,7 @@ extension ContentView {
             },
             breadcrumb: { place in
                 // The path through the sidebar's outline (ov-512), Theme ›
-                // Card or Group › Lane › Agent, where it has one; else as before.
+                // Card or Group › Ticket › Agent, where it has one; else as before.
                 let tree = treePath(for: place, host: host, workspace: summary, name: workspaceName(host, summary))
                 let worktrees = tree == nil ? worktreeCrumb(for: place, scene: scene) : nil
                 let outline = tree?.crumbs ?? WorkspaceWorktrees.crumbs(

@@ -92,7 +92,7 @@ struct PlanStripRow: View {
 
     /// The strip as the phones draw it (`WorkspaceCards`): the band's Now and
     /// Next, a line each, and what needs you as an amber dot with its count.
-    /// Always drawn, so an empty board says "No lanes moving" rather than
+    /// Always drawn, so an empty board says "No tickets moving" rather than
     /// leaving the row bare.
     @ViewBuilder private var content: some View {
         let strip = PlanStrip(plan: plan.plan, needsYou: needsYou, orchestrator: .idle, statuses: statuses)

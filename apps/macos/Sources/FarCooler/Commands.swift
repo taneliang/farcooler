@@ -247,7 +247,7 @@ struct FarCoolerCommands: Commands {
             // ⌘L, a browser's "focus the location bar": nothing here or in
             // the system's menus holds it, and ⌘ never reaches a terminal.
             // ⌘↑, Finder's and Xcode's "enclosing" (ov-321): a terminal to
-            // its lane, a lane to its card, a card to its theme.
+            // its ticket, a ticket to its card, a card to its theme.
             Button("Enclosing Item") { AppCommand.goUp.post() }
                 .keyboardShortcut(.upArrow, modifiers: .command)
                 .disabled(!MainWindowFocus.goes(\.goesUp, mainWindow))

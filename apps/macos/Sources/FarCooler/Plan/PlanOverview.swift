@@ -1,13 +1,13 @@
 import AgentKit
 import SwiftUI
 
-// The plan's overview (ov-268 design 6.1): the lanes working now, Next Up,
-// the themes as short briefs, the orchestrator's pages and what landed today. A lane
+// The plan's overview (ov-268 design 6.1): the tickets working now, Next Up,
+// the themes as short briefs, the orchestrator's pages and what landed today. A ticket
 // or a theme opens its page in the main area, where a task opens. Since
 // ov-298 there's no Tasks | Plan control to show it in the navigator's place;
 // the navigator lists the themes and the task index (`PlanNavigator`).
 //
-// Every list here moves as the task list does when the plan changes: a lane
+// Every list here moves as the task list does when the plan changes: a ticket
 // or theme that arrives or changes washes, and rows come, go and move on the
 // shared spring (`listChanges`).
 
@@ -15,7 +15,7 @@ import SwiftUI
 /// scroll view and takes its inset.
 struct PlanOverviewView: View {
     @ObservedObject var plan: PlanStore
-    /// Each card's status as the board read it, by task id: whether a lane
+    /// Each card's status as the board read it, by task id: whether a ticket
     /// is waiting on the owner.
     let statuses: [String: TaskStatus]
     /// The page open in the main area, drawn selected.
@@ -67,7 +67,7 @@ struct PlanOverviewView: View {
             PlanEmptyNotice().identified("plan-empty")
         } else {
             // The sections, in the owner's order (ov-503, decision 7): Needs You
-            // is the home's, above; Shipping, In Review, Building, Waiting,
+            // is the home's, above; Landing, In Review, Building, Waiting,
             // Agents and Themes are `PlanSectionsView`'s; then what is
             // unchanged: Cost, Pages and Landed Today.
             let sections = plan.sections(needsYou: needsYou, statuses: statuses, activity: activity)
@@ -129,16 +129,16 @@ struct PlanOverviewView: View {
     /// stamp, and the Mac's is close enough for minutes.
     static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    private func landedToday(_ landed: [PlanLane], _ model: PlanModel) -> some View {
+    private func landedToday(_ landed: [PlanTicketLine], _ model: PlanModel) -> some View {
         CollapsibleSection("Landed Today", id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,
             expandedByDefault: false, count: landed.count
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(landed) { lane in
-                    PlanLaneRow(
-                        lane: lane, theme: model.theme(of: lane), rank: nil, now: model.nowMs, waitsOnOwner: false,
-                        selected: selected == .lane(lane.id), keyed: keyed
-                    ) { onOpen(.lane(lane.id)) }
+                ForEach(landed) { line in
+                    PlanLineRow(
+                        line: line, theme: model.theme(of: line), rank: nil, now: model.nowMs, waitsOnOwner: false,
+                        selected: selected == .ticket(line.id), keyed: keyed
+                    ) { onOpen(.ticket(line.id)) }
                 }
             }
         }
@@ -317,11 +317,11 @@ struct PlanNotice: View {
     }
 }
 
-/// One lane's row: its name and the theme it serves, then its reason or
-/// state. In Next Up its rank sits in the glyph column; elsewhere its state's
+/// One ticket's row: its title and the theme it serves, then its reason or
+/// stage. In Next Up its rank sits in the glyph column; elsewhere its stage's
 /// glyph does, amber only when it's stale or waiting on the owner.
-struct PlanLaneRow: View {
-    let lane: PlanLane
+struct PlanLineRow: View {
+    let line: PlanTicketLine
     let theme: PlanTheme?
     /// Its place in Next Up, or nil.
     let rank: Int?
@@ -330,26 +330,26 @@ struct PlanLaneRow: View {
     let selected: Bool
     let keyed: Bool
     /// The agent that works it, for the line under its title (ov-503).
-    var agent: PlanFleetAgent?
-    /// The landed train it still names, when its state doesn't already say.
-    var landedTrain: String?
+    var agent: PlanAgent?
+    /// The landed landing it still names, when its stage doesn't already say.
+    var landedLanding: String?
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
-    /// Over its token budget (ov-307), drawn beside whatever else it is: a lane
+    /// Over its token budget (ov-307), drawn beside whatever else it is: a ticket
     /// that waits on the owner and is over budget says both.
-    private var overBudget: String? { PlanWords.overBudget(lane) }
+    private var overBudget: String? { PlanWords.overBudget(line) }
 
-    /// Stale, waiting on the owner or over its token budget: the only lanes
+    /// Stale, waiting on the owner or over its token budget: the only tickets
     /// drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(line, now: now)
     }
 
     /// What a row draws under its state: the pull request's stage, gray, or
     /// amber for one that needs a person (changes requested, checks failing,
-    /// conflicts, ov-316), then the lane's own warnings. Each has its probe id.
+    /// conflicts, ov-316), then the ticket's own warnings. Each has its probe id.
     private struct Line: Identifiable {
         let text: String
         let id: String
@@ -357,23 +357,23 @@ struct PlanLaneRow: View {
         var isStage = false
     }
 
-    private var lines: [Line] {
+    private var notes: [Line] {
         var out: [Line] = []
-        if let stage = lane.shownStage, let words = stage.words {
+        if let stage = line.shownStage, let words = stage.words {
             let attention = stage.needsAttention
             out.append(Line(
                 text: attention ? words : (stage.fullWords ?? words),
-                id: attention ? "plan-lane-\(lane.name)-stage-attention" : "plan-lane-\(lane.name)-stage",
+                id: attention ? "plan-ticket-\(line.key)-stage-attention" : "plan-ticket-\(line.key)-stage",
                 amber: attention, isStage: true))
         }
-        if let warning { out.append(Line(text: warning, id: "plan-lane-\(lane.name)-warning", amber: true)) }
-        if let overBudget { out.append(Line(text: overBudget, id: "plan-lane-\(lane.name)-over-budget", amber: true)) }
+        if let warning { out.append(Line(text: warning, id: "plan-ticket-\(line.key)-warning", amber: true)) }
+        if let overBudget { out.append(Line(text: overBudget, id: "plan-ticket-\(line.key)-over-budget", amber: true)) }
         return out
     }
 
     /// Its stage's tooltip: every word of it, and the pull request.
     private var stageHelp: String {
-        guard let stage = lane.shownStage else { return "" }
+        guard let stage = line.shownStage else { return "" }
         return [stage.fullWords, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -402,16 +402,16 @@ struct PlanLaneRow: View {
                         .foregroundStyle(.quietInk)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    ForEach(lines) { line in
-                        Text(line.text)
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: line.amber ? .medium : .regular))
-                            .foregroundStyle(line.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                    ForEach(notes) { note in
+                        Text(note.text)
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: note.amber ? .medium : .regular))
+                            .foregroundStyle(note.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                             // A reviewer's login may be long: one line, elided in
                             // the middle, never wrapped (ov-316).
-                            .lineLimit(line.isStage ? 1 : 2)
+                            .lineLimit(note.isStage ? 1 : 2)
                             .truncationMode(.middle)
-                            .help(line.isStage ? stageHelp : "")
-                            .probed(line.id)
+                            .help(note.isStage ? stageHelp : "")
+                            .probed(note.id)
                     }
                 }
             }
@@ -426,12 +426,12 @@ struct PlanLaneRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .help(lane.slug ?? "")
-        .identified("plan-lane-\(lane.name)")
+        .help(line.branch)
+        .identified("plan-ticket-\(line.key)")
     }
 
     private var title: some View {
-        Text(lane.heading)
+        Text(line.heading)
             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
             .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)
@@ -445,26 +445,26 @@ struct PlanLaneRow: View {
                 .foregroundStyle(.quietInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .probed("plan-lane-\(lane.name)-theme")
+                .probed("plan-ticket-\(line.key)-theme")
         }
     }
 
-    /// Next Up's reason; elsewhere, the state with its round, train or
-    /// commit, and the cards.
+    /// Next Up's reason; elsewhere, the stage with its round, landing or
+    /// commit, and the key.
     private var second: String {
-        if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
+        if rank != nil { return line.reason.isEmpty ? line.key : line.reason }
         return Self.second(
-            lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil,
-            state: lane.shownStage == nil ? nil : PlanWords.status(lane, stage: false))
+            line, agent: agent, landedLanding: landedLanding, now: now, aged: warning == nil,
+            state: line.shownStage == nil ? nil : PlanWords.status(line, stage: false))
     }
 
-    /// "Building · ov-481, ov-482 · Builder · Sonnet · 380K · 3 h": the state
-    /// with its round and train, the cards (their count past three), the main
-    /// agent and its tokens, and how long it has been in this state.
+    /// "Building · ov-481 · Builder · Sonnet · 380K · 3 h": the stage with its
+    /// round and landing, the key, the main agent and its tokens, and how long
+    /// it has been in this stage.
     static func second(
-        _ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true, state: String? = nil
+        _ line: PlanTicketLine, agent: PlanAgent?, landedLanding: String?, now: Int64, aged: Bool = true, state: String? = nil
     ) -> String {
-        PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: aged, state: state)
+        PlanWords.ticketSecond(line, agent: agent, landedLanding: landedLanding, now: now, aged: aged, state: state)
     }
 
     @ViewBuilder private var mark: some View {
@@ -473,28 +473,33 @@ struct PlanLaneRow: View {
                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.quietInk)
         } else {
-            Image(systemName: PlanGlyph.name(lane.state))
+            Image(systemName: PlanGlyph.name(line))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true ? AnyShapeStyle(.quietInk) : AnyShapeStyle(Tint.attention(scheme)))
+                .foregroundStyle(warning == nil && overBudget == nil && line.shownStage?.needsAttention != true ? AnyShapeStyle(.quietInk) : AnyShapeStyle(Tint.attention(scheme)))
                 .accessibilityHidden(true)
         }
     }
 
     private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.heading, theme?.name, second, lane.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(lane)]
+        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, line.heading, theme?.name, second, line.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(line)]
         parts.removeAll { $0 == nil }
         return parts.compactMap { $0 }.joined(separator: ", ")
     }
 }
 
-/// A lane state's glyph: neutral, a shape to scan by.
+/// A ticket stage's glyph: neutral, a shape to scan by.
 enum PlanGlyph {
-    static func name(_ state: LaneState) -> String {
-        switch state {
-        case .queued: "clock"
+    /// A ticket's: a fix in progress has its own mark.
+    static func name(_ line: PlanTicketLine) -> String {
+        line.isFixing ? "wrench.and.screwdriver" : name(line.stage)
+    }
+
+    static func name(_ stage: TicketStage) -> String {
+        switch stage {
+        case .waiting: "clock"
         case .building: "hammer"
-        case .review: "eye"
-        case .fixing: "wrench.and.screwdriver"
+        case .reviewing: "eye"
+        case .needsYou: "flag"
         case .landing: "arrow.down.to.line"
         case .landed: "checkmark.circle"
         case .dropped: "xmark.circle"

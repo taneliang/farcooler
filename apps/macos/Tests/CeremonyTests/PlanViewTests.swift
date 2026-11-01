@@ -35,10 +35,10 @@ struct PlanViewTests {
         var plan: Data?
     }
 
-    /// The fixture with nothing planned: no theme, no lane, no ruling.
+    /// The fixture with nothing planned: no theme, no ticket, no ruling.
     static func emptyPlan() throws -> Data {
         var object = try #require(try JSONSerialization.jsonObject(with: fixture()) as? [String: Any])
-        for key in ["themes", "lanes", "order", "cards", "rulings"] { object[key] = [] }
+        for key in ["themes", "lines", "landings", "agents", "cards", "rulings"] { object[key] = [] }
         return try JSONSerialization.data(withJSONObject: object)
     }
 
@@ -289,7 +289,7 @@ struct PlanViewTests {
         #expect(reads() == 2, "this board's plan moved, once")
     }
 
-    @Test("A task's page names its lane and theme wherever the runner keeps a plan")
+    @Test("A task's page names its stage and theme wherever the runner keeps a plan")
     func taskLine() async throws {
         func drawn(_ store: TaskBoardStore) async -> Set<String> {
             let seen = NavigatorFilterTests.Seen()
@@ -312,19 +312,19 @@ struct PlanViewTests {
         #expect(!(await drawn(old)).contains("plan-task-line"))
         let store = try await Self.store(plan: true, defaults: Self.defaults())
         #expect((await drawn(store)).contains("plan-task-line"), "read on its own, with no navigator")
-        #expect(store.plan.plan.taskLine("00000000-0000-0000-0000-000000001001")?.text == "In lane Mac interface polish · Visual language")
+        #expect(store.plan.plan.taskLine("00000000-0000-0000-0000-000000001001")?.text == "In Review · Visual language")
     }
 
     @Test("A plan page is kept across a relaunch, and its crumb is its name")
     func pageKept() {
         let theme = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.theme("t-1")))
-        let lane = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.lane("l-1")))
+        let ticket = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.ticket("t-1")))
         #expect(SelectionMemory.decode(SelectionMemory.encode(theme)!) == theme)
-        #expect(SelectionMemory.decode(SelectionMemory.encode(lane)!) == lane)
-        #expect(SelectionMemory.decode("h|w|plan:lane:") == nil)
+        #expect(SelectionMemory.decode(SelectionMemory.encode(ticket)!) == ticket)
+        #expect(SelectionMemory.decode("h|w|plan:ticket:") == nil)
         let crumbs = WorkspaceNavigation.crumbs(
-            lane, trail: nil, workspace: "Main", task: { $0 }, worktree: { $0 }, plan: { _ in "mac-ux" })
-        #expect(crumbs.map(\.title) == ["Main", "mac-ux"])
+            ticket, trail: nil, workspace: "Main", task: { $0 }, worktree: { $0 }, plan: { _ in "ov-1" })
+        #expect(crumbs.map(\.title) == ["Main", "ov-1"])
         #expect(crumbs.first?.target == .workspace(host: "h", workspace: "w", focus: nil))
     }
 }

@@ -115,9 +115,9 @@ struct EmptyActionsTests {
         #expect(!drawn.contains("start-orchestrator"), "\(drawn.ids)")
     }
 
-    // MARK: - Lanes
+    // MARK: - Tickets
 
-    private static func lanes(_ invite: OrchestratorInvite?) async throws -> [String: CGRect] {
+    private static func overview(_ invite: OrchestratorInvite?) async throws -> [String: CGRect] {
         let store = try await PlanSectionViewTests.store(.quiet)
         return await PlanThemePageTests.frames(
             PlanOverviewView(
@@ -129,16 +129,16 @@ struct EmptyActionsTests {
 
     @Test("A queue with nothing in it says how work gets in: Show Orchestrator with one, Start without")
     func emptyQueueOffersTheStep() async throws {
-        let seated = try await Self.lanes(Self.invite(seated: true))
+        let seated = try await Self.overview(Self.invite(seated: true))
         #expect(seated["plan-waiting-empty"] != nil && seated["plan-next-step"] != nil, "\(seated.keys.sorted())")
         let step = try #require(seated["plan-next-step"])
         let line = try #require(seated["plan-waiting-empty"])
         #expect(step.minY >= line.maxY - 0.5, "the step is under what it follows: \(line) \(step)")
-        let unseated = try await Self.lanes(Self.invite())
+        let unseated = try await Self.overview(Self.invite())
         #expect(unseated["plan-next-step"] != nil && unseated["start-orchestrator"] != nil, "\(unseated.keys.sorted())")
-        let none = try await Self.lanes(nil)
+        let none = try await Self.overview(nil)
         #expect(none["plan-waiting-empty"] != nil && none["plan-next-step"] == nil, "\(none.keys.sorted())")
-        let readOnly = try await Self.lanes(Self.invite(canAct: false))
+        let readOnly = try await Self.overview(Self.invite(canAct: false))
         #expect(readOnly["plan-next-step"] == nil)
     }
 

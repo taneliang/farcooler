@@ -60,19 +60,19 @@ struct PlanCostViewTests {
         #expect(none["plan-tile-Visual language-over-budget"] == nil, "no budget, nothing to flag")
     }
 
-    @Test("A lane that waits on you and is over its budget says both")
-    func aLaneSaysBothWarnings() async throws {
-        // mac-ux's card ov-1 needs a decision, so it waits on the owner; give it a budget it is past.
+    @Test("A ticket that waits on you and is over its budget says both")
+    func aTicketSaysBothWarnings() async throws {
+        // ov-1 needs a decision, so it waits on the owner; its 470K of spend is past a budget of 100K.
         let both = try await Self.drawn(
             try Self.edit { object in
-                var lanes = try #require(object["lanes"] as? [[String: Any]])
-                for index in lanes.indices where lanes[index]["name"] as? String == "mac-ux" { lanes[index]["budget_tokens"] = 100_000 }
-                object["lanes"] = lanes
+                var lines = try #require(object["lines"] as? [[String: Any]])
+                for index in lines.indices where lines[index]["key"] as? String == "ov-1" { lines[index]["budget_tokens"] = 100_000 }
+                object["lines"] = lines
             })
-        #expect(both["plan-lane-mac-ux-warning"] != nil, "Needs you is still said: \(both.keys.sorted())")
-        #expect(both["plan-lane-mac-ux-over-budget"] != nil, "and so is the budget")
+        #expect(both["plan-ticket-ov-1-warning"] != nil, "Needs you is still said: \(both.keys.sorted())")
+        #expect(both["plan-ticket-ov-1-over-budget"] != nil, "and so is the budget")
         let within = try await Self.drawn(PlanViewTests.fixture())
-        #expect(within["plan-lane-mac-ux-warning"] != nil && within["plan-lane-mac-ux-over-budget"] == nil, "within 500K: only Needs you")
+        #expect(within["plan-ticket-ov-1-warning"] != nil && within["plan-ticket-ov-1-over-budget"] == nil, "within 500K: only Needs you")
     }
 
     @Test("The Cost section is there when the runner sent cost, and not when it didn't")

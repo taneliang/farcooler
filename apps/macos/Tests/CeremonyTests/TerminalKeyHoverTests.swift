@@ -93,7 +93,7 @@ struct TerminalKeyHoverTests {
         #expect(view.keyHover.shown == nil)
     }
 
-    @Test("A pane mounted out of sight shows no card, and one going out of sight closes its card (train 1004r, K1)")
+    @Test("A pane mounted out of sight shows no card, and one going out of sight closes its card (landing 1004r, K1)")
     func outOfSightShowsNothing() async throws {
         // The orchestrator kept mounted at opacity 0 under an opened task:
         // its tracking area still sees the pointer, so the gate is the view's.

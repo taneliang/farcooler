@@ -157,7 +157,7 @@ enum WorkspaceColumns {
     /// (ov-298): the navigator's width and the chat's columns as kept, at
     /// the terminal's cell. Each tier starts where its parts fit, so the
     /// chat is its width in whole columns in every tier that has a canvas,
-    /// whatever the navigator's width (train 1004r, P2).
+    /// whatever the navigator's width (landing 1004r, P2).
     struct Canvas: Equatable {
         var navigator: CGFloat = navigatorDefault
         var chatColumns: Int = chatColumnsDefault
@@ -186,7 +186,7 @@ enum WorkspaceColumns {
     /// fit, and the chat alone, the canvas folded, where they don't; the
     /// navigator floats (shown only while `floating`) wherever it doesn't
     /// fit beside them. Without, `layout`. One rule for the view that draws
-    /// it and the window that decides what's seen and keyed (train 1004r, P1).
+    /// it and the window that decides what's seen and keyed (landing 1004r, P1).
     static func arrangement(
         width: CGFloat, canvas: Canvas?, opened: Bool, hasConversation: Bool, hasBoard: Bool, boardExists: Bool,
         floating: Bool, focused: Bool

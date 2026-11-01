@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-// The board's data-change motion, shared (ov-298). The owner, Oct 4: lanes
+// The board's data-change motion, shared (ov-298). The owner, Oct 4: tickets
 // and themes "just appear or change subtly, and it's hard to tell what
 // changed". The task list already answered that: a row that arrives washes in
 // the accent and fades over `BoardMotion.highlightFade`, and rows come, go
@@ -21,7 +21,7 @@ enum ListChangeEvent: Equatable {
 }
 
 /// One row of a list, as `listChanges` tells what changed: its identity, and
-/// what it shows (a lane's state and reason, a theme's counts). A row whose
+/// what it shows (a ticket's stage and reason, a theme's counts). A row whose
 /// signature moves washes as a new one does.
 struct ListChangeRow: Hashable {
     var id: String

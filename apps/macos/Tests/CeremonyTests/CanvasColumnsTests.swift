@@ -45,7 +45,7 @@ struct CanvasColumnsTests {
         #expect(Self.frames(2200).chat > Self.frames(1800).chat, "widening grows the chat with the canvas")
     }
 
-    /// Train 1004r, P2: a navigator wider than about 338 pt, or a chat wider
+    /// Landing 1004r, P2: a navigator wider than about 338 pt, or a chat wider
     /// than 88 columns, shrank the chat as the window crossed 1,500 pt.
     @Test("The chat is its columns, or the canvas's width where that is more, in every tier with a canvas")
     func chatHoldsThroughTheTiers() {
@@ -113,7 +113,7 @@ struct CanvasColumnsTests {
         #expect(WorkspaceColumns.chatColumns(91.4) == 91 && WorkspaceColumns.chatColumns(.nan) == 88)
     }
 
-    /// Train 1004r, P1: the window decided what's seen and keyed with the
+    /// Landing 1004r, P1: the window decided what's seen and keyed with the
     /// old layout, which hid the orchestrator whenever something was opened.
     @Test("Beside the canvas the orchestrator's layout is on screen with something opened")
     func chatIsVisibleWithSomethingOpened() {

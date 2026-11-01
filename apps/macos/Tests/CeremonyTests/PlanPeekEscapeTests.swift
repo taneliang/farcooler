@@ -5,7 +5,7 @@ import Testing
 
 /// What a bare Esc puts away before the window's other keys hear it (ov-298).
 struct PlanPeekEscapeTests {
-    /// Train 1004r, P3: Esc reached the terminal under the peek and
+    /// Landing 1004r, P3: Esc reached the terminal under the peek and
     /// interrupted the orchestrator.
     @Test("A bare Esc puts the peek away first, then a floated navigator, and nothing else")
     func escapePutsAwayFirst() {

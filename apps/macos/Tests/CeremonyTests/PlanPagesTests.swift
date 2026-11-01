@@ -264,7 +264,7 @@ struct PlanPagesTests {
         // A question no longer in Needs You opens its task.
         #expect(go(.ask("t-1")) == .workspace(host: "h", workspace: "w", focus: .task("t-1")))
         #expect(go(.page("spend")) == .workspace(host: "h", workspace: "w", focus: .plan(.page("spend"))))
-        #expect(go(.lane("l-1")) == .workspace(host: "h", workspace: "w", focus: .plan(.lane("l-1"))))
+        #expect(go(.ticket("t-1")) == .workspace(host: "h", workspace: "w", focus: .plan(.ticket("t-1"))))
         #expect(go(.terminal(worktree: "wt-1", name: "build")) == .workspace(host: "h", workspace: "w", focus: .worktree("wt-1", terminal: "t-build")))
         #expect(go(.url(URL(string: "https://github.com")!)) == nil, "the system opens the web, not the window")
 
@@ -273,6 +273,6 @@ struct PlanPagesTests {
         let world = context.world(plan)
         #expect(world.resolve(PageRef(.terminal(worktree: "integ-10", name: "build"))).destination == .terminal(worktree: "wt-1", name: "build"))
         #expect(world.resolve(PageRef(.worktree("integ-10"))).destination == .worktree("wt-1"))
-        #expect(world.plan == nil, "a plan never read draws lanes and themes as plain text")
+        #expect(world.plan == nil, "a plan never read draws tickets and themes as plain text")
     }
 }

@@ -216,8 +216,8 @@ struct QuietInkTests {
     /// is drawn on: every one is a content card on `WorkspaceStyle.paper`
     /// (`contentCard()`), and a decision's note sits on the inset wash over it.
     static let surfaces: [(name: String, ground: Int)] = [
-        ("Plan home and peek", 0), ("Plan theme page", 0), ("Plan lane page", 0), ("Plan orchestrator page", 0),
-        ("Plan train card", 0), ("Plan Needs You page", 0), ("Plan rulings", 0),
+        ("Plan home and peek", 0), ("Plan theme page", 0), ("Plan ticket page", 0), ("Plan orchestrator page", 0),
+        ("Plan landing card", 0), ("Plan Needs You page", 0), ("Plan rulings", 0),
         ("Task card: intent, acceptance, constraints", 0), ("Task card: usage and subagents", 0),
         ("Task card: record, a decision note", 1), ("Board history", 0), ("Unread summary", 0),
         // The second batch: the Changes and Files panes, and the diff.
@@ -275,7 +275,7 @@ struct QuietInkTests {
         for _ in 0..<3 { root.deleteLastPathComponent() }
         let sources = root.appendingPathComponent("Sources/FarCooler")
         let files = [
-            "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanRulings", "Plan/PlanTrainCard", "Plan/PlanThemeGridView",
+            "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanRulings", "Plan/PlanLandingCard", "Plan/PlanThemeGridView",
             "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
@@ -390,7 +390,7 @@ struct QuietInkTests {
     /// iOS's system colors in sRGB, as Apple publishes them: the ground and
     /// the label's primary ink, light and dark. The Mac test host can't draw
     /// UIKit, so these are the documented values; the iPhone captures in the
-    /// lane's report are the check that they hold on a device.
+    /// subagent's report are the check that they hold on a device.
     static let phoneGrounds: [(name: String, light: (Double, Double, Double), dark: (Double, Double, Double))] = [
         ("systemBackground", (255, 255, 255), (0, 0, 0)),
         ("secondarySystemBackground", (242, 242, 247), (28, 28, 30)),

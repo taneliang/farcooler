@@ -43,7 +43,7 @@ extension ContentView {
         }
     }
 
-    /// Every theme and lane on the plans this window has read (ov-298).
+    /// Every theme and ticket on the plans this window has read (ov-298).
     var palettePlans: [PalettePlanItem] {
         boardStores.values.flatMap { board -> [PalettePlanItem] in
             let host = board.client.target, id = board.workspace.id, name = board.title
@@ -53,12 +53,12 @@ extension ContentView {
                     host: host, workspace: id, workspaceName: name, page: .theme($0.id), name: $0.name,
                     detail: PlanWords.progress($0.counts))
             }
-            let lanes = plan.lanes.filter { $0.state != .dropped }.map {
+            let tickets = plan.lines.filter { $0.stage != .dropped }.map {
                 PalettePlanItem(
-                    host: host, workspace: id, workspaceName: name, page: .lane($0.id), name: $0.name,
-                    detail: PlanWords.state($0.state))
+                    host: host, workspace: id, workspaceName: name, page: .ticket($0.id), name: $0.heading,
+                    detail: PlanWords.stage($0.stage))
             }
-            return themes + lanes
+            return themes + tickets
         }
     }
 

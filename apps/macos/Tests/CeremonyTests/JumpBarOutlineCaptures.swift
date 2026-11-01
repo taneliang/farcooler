@@ -7,7 +7,7 @@ import Testing
 @testable import Far_Cooler
 
 /// Opt-in (FARCOOLER_CAPTURE_OUT): the jump bar over the sidebar's outline
-/// (ov-512), for a card, a lane and an agent pane, at a narrow and a wide
+/// (ov-512), for a card, a ticket and an agent pane, at a narrow and a wide
 /// width in the four appearances. The production `DrillBreadcrumb` fed the
 /// crumbs and menus `ContentView.treePath` and `JumpMenus.siblings` build over
 /// the Plan scenario's outline (long real titles, as `SidebarCaptures`), in a
@@ -51,12 +51,12 @@ struct JumpBarOutlineCaptures {
         }
     }
 
-    /// The first lane with a pane under it, as the sidebar draws it.
-    static func laneWithPane() throws -> (lane: OneTreeNode, pane: OneTreeNode) {
+    /// The first ticket with a pane under it, as the sidebar draws it.
+    static func ticketWithPane() throws -> (ticket: OneTreeNode, pane: OneTreeNode) {
         let outline = try SidebarCaptures.outline()
-        for group in outline.lanes {
-            for lane in group.children where lane.kind == .lane {
-                if let pane = lane.children.first(where: { $0.kind == .terminal && $0.target != nil }) { return (lane, pane) }
+        for group in outline.tickets {
+            for ticket in group.children where ticket.kind == .ticket {
+                if let pane = ticket.children.first(where: { $0.kind == .terminal && $0.target != nil }) { return (ticket, pane) }
             }
         }
         throw CaptureError.noPane
@@ -72,14 +72,14 @@ struct JumpBarOutlineCaptures {
     }
 
     @Test(arguments: [420.0, 1000.0])
-    func lane(_ width: CGFloat) async throws {
-        let (lane, _) = try Self.laneWithPane()
-        try await Self.shoot("lane", to: try #require(lane.target), hint: lane.id, width: width)
+    func ticket(_ width: CGFloat) async throws {
+        let (ticket, _) = try Self.ticketWithPane()
+        try await Self.shoot("ticket", to: try #require(ticket.target), hint: ticket.id, width: width)
     }
 
     @Test(arguments: [420.0, 1000.0])
     func agentPane(_ width: CGFloat) async throws {
-        let (_, pane) = try Self.laneWithPane()
+        let (_, pane) = try Self.ticketWithPane()
         try await Self.shoot("agent", to: try #require(pane.target), hint: pane.id, width: width)
     }
 }

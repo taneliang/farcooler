@@ -11,15 +11,19 @@ import Testing
 /// `PlanModel.decode`, the parser both apps read with.
 @MainActor
 struct PlanStripWordsTests {
-    /// The CLI's fixture with its lanes replaced by `lanes` (name, state),
-    /// each a copy of the fixture's first lane, and `order` naming the queued.
-    static func plan(_ lanes: [(String, String)], order: [String] = []) throws -> PlanModel {
+    /// The CLI's fixture with its line replaced by `tickets` (branch, stage),
+    /// each a copy of the fixture's first ticket, ranked in `order` when waiting.
+    static func plan(_ tickets: [(String, String)], order: [String] = []) throws -> PlanModel {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
-        let template = try #require((object["lanes"] as? [[String: Any]])?.first)
-        object["lanes"] = lanes.map { name, state in
-            template.merging(["id": "lane-\(name)", "name": name, "short": name, "state": state, "title": ""]) { $1 }
+        let template = try #require((object["lines"] as? [[String: Any]])?.first)
+        object["lines"] = tickets.enumerated().map { index, ticket in
+            let (name, stage) = ticket
+            let rank = order.firstIndex(of: name).map { $0 + 1 }
+            return template.merging([
+                "task": PlanScenario.task(100 + index), "key": "ov-\(100 + index)", "branch": name, "stage": stage, "title": name,
+                "plan_rank": rank as Any? ?? NSNull(), "landing": NSNull(), "work": [] as [Any],
+            ]) { $1 }
         }
-        object["order"] = order.map { "lane-\($0)" }
         return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
     }
 
@@ -33,8 +37,8 @@ struct PlanStripWordsTests {
     func sameWords() throws {
         let plan = try Self.plan(
             [
-                ("mac-vis", "building"), ("phones-b", "review"), ("mac-rel", "fixing"), ("plan-phones", "queued"),
-                ("vis-lint", "queued"), ("land-129", "landed"),
+                ("mac-vis", "building"), ("phones-b", "reviewing"), ("mac-rel", "building"), ("plan-phones", "waiting"),
+                ("vis-lint", "waiting"), ("land-129", "landed"),
             ], order: ["plan-phones", "vis-lint"])
         for needsYou in [0, 1, 2] {
             let mac = try #require(PlanStripRow.words(plan, needsYou: needsYou))
@@ -56,7 +60,7 @@ struct PlanStripWordsTests {
         #expect(mac.hasPrefix("1 needs you · "), Comment(rawValue: mac))
     }
 
-    @Test("With no plan, no asks and no lanes, there are no words")
+    @Test("With no plan, no asks and no tickets, there are no words")
     func nothingToSay() throws {
         #expect(PlanStripRow.words(.empty, needsYou: 0) == nil)
         #expect(PlanStripRow.words(.empty, needsYou: 3) == "3 need you")

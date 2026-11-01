@@ -3,7 +3,7 @@ import Combine
 import Foundation
 
 // The plan layer on the Mac (ov-268, phase P4 is ov-273): the plan's
-// sections, a theme's page and a lane's page.
+// sections, a theme's page and a ticket's page.
 //
 // The primary way of working since ov-298 (the owner, Oct 4: "Let's make that
 // the primary way of working"): there's no Tasks | Plan control. A board whose
@@ -17,8 +17,8 @@ import Foundation
 enum PlanPage: Hashable {
     /// A theme, by id.
     case theme(String)
-    /// A lane, by id.
-    case lane(String)
+    /// A ticket, by task id.
+    case ticket(String)
     /// An orchestrator's page, by slot (ov-284).
     case page(String)
     /// The workspace's Needs You, answered in place (ov-321): where the one
@@ -29,7 +29,7 @@ enum PlanPage: Hashable {
     var word: String {
         switch self {
         case .theme: "Theme"
-        case .lane: "Lane"
+        case .ticket: "Ticket"
         case .page: "Page"
         case .needsYou: "Needs You"
         }
@@ -39,7 +39,7 @@ enum PlanPage: Hashable {
     var symbol: String {
         switch self {
         case .theme: "map"
-        case .lane: "arrow.triangle.branch"
+        case .ticket: "arrow.triangle.branch"
         case .page: "doc.text"
         case .needsYou: "flag"
         }
@@ -63,7 +63,7 @@ final class PlanStore: ObservableObject {
     /// restarts or the link is down (ov-631). Not a broken plan: the last
     /// plan stays on screen, and the read goes round again by itself.
     @Published private(set) var reconnecting = false
-    /// Each theme's and lane's record, by page, once read.
+    /// Each theme's and ticket's record, by page, once read.
     @Published private(set) var records: [PlanPage: PlanRecord] = [:]
     /// The one tree last built for each filter, and what from (ov-321
     /// review H2): the sidebar, the jump bar and ⌘↑ share it, and it's
@@ -94,7 +94,7 @@ final class PlanStore: ObservableObject {
         return tree
     }
 
-    /// The sidebar's Themes and Lanes lists for `input`, from the cache when
+    /// The sidebar's Themes and Tickets lists for `input`, from the cache when
     /// nothing they read moved.
     func sidebarOutline(_ input: OneTreeInput) -> SidebarOutline {
         if let kept = outlines[input.filter], kept.input == input { return kept.outline }
@@ -171,7 +171,7 @@ final class PlanStore: ObservableObject {
     var available: Bool { client.daemonBuild?.can(.boardPlan) == true }
 
     /// Whether the board is drawn around its plan (ov-298): a runner that
-    /// keeps one, a plan read, and something in it, a theme, a lane or a
+    /// keeps one, a plan read, and something in it, a theme, a ticket or a
     /// page. Until then, and on a board with nothing planned, the navigator
     /// is the task list it always was.
     var planned: Bool { available && hasRead && (!plan.isEmpty || !pages.isEmpty) }
@@ -315,7 +315,7 @@ final class PlanStore: ObservableObject {
         await reload()
     }
 
-    /// Read a theme's or lane's record, for its page's timeline and What
+    /// Read a theme's or ticket's record, for its page's timeline and What
     /// Changed.
     func readRecord(_ page: PlanPage) async {
         let data: Data?
@@ -326,22 +326,22 @@ final class PlanStore: ObservableObject {
         case .theme(let id):
             guard let theme = plan.themes.first(where: { $0.id == id }) else { return }
             data = await client.planRecord(of: ["theme", "show", theme.short], repository: repositoryID, workspace: workspace.boardWorkspace).data
-        case .lane(let id):
-            guard let lane = plan.lanes.first(where: { $0.id == id }) else { return }
-            data = await client.planRecord(of: ["lane", "show", lane.name], repository: repositoryID, workspace: workspace.boardWorkspace).data
+        case .ticket(let id):
+            guard let line = plan.lines.first(where: { $0.id == id }) else { return }
+            data = await client.planRecord(of: ["ticket", "show", line.key], repository: repositoryID, workspace: workspace.boardWorkspace).data
         }
         guard let data, let record = try? PlanRecord.decode(data) else { return }
         if records[page] != record { records[page] = record }
     }
 
     func theme(_ id: String) -> PlanTheme? { plan.themes.first { $0.id == id } }
-    func lane(_ id: String) -> PlanLane? { plan.lanes.first { $0.id == id } }
+    func ticket(_ id: String) -> PlanTicketLine? { plan.lines.first { $0.id == id } }
 
     /// What a page's jump bar and the window's title call it.
     func title(_ page: PlanPage) -> String? {
         switch page {
         case .theme(let id): theme(id)?.name
-        case .lane(let id): lane(id)?.heading
+        case .ticket(let id): ticket(id)?.heading
         case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
         }
@@ -357,7 +357,7 @@ extension DaemonClient {
             background: true)
     }
 
-    /// A theme's or lane's page: `plan theme show` or `plan lane show`, with
+    /// A theme's or ticket's page: `plan theme show` or `plan ticket show`, with
     /// its record.
     func planRecord(of verb: [String], repository: String, workspace: String?) async -> (data: Data?, message: String?) {
         await runRaw(

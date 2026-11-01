@@ -3,8 +3,8 @@ import SwiftUI
 
 // Agents (ov-503, design 6; ov-518): one row per agent that still exists,
 // working ones first. An agent that finished or exited is not listed. Each
-// row says who (role and model), what for (a lane, a train, the Plan, or "Not
-// on a lane"), its state and age, then its tokens and, second, the
+// row says who (role and model), what for (its tickets, or "On no
+// ticket"), its state and age, then its tokens and, second, the
 // API-equivalent dollars, in columns that line up down the section. A working agent has a filled dot; an idle one, a ring.
 
 struct PlanAgentsView: View {
@@ -32,7 +32,7 @@ struct PlanAgentsView: View {
 }
 
 struct PlanAgentRow: View {
-    let agent: PlanFleetAgent
+    let agent: PlanAgent
     let now: Int64
     let onOpen: (PlanPage) -> Void
     @State private var hovering = false
@@ -46,11 +46,11 @@ struct PlanAgentRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .navigatorRow(selected: false, keyed: false, leading: 0)
             .background {
-                if hovering && agent.lane != nil { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
+                if hovering && agent.tickets.first != nil { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
             }
         return Group {
-            if let lane = agent.lane {
-                Button { onOpen(.lane(lane.id)) } label: { row }
+            if let first = agent.tickets.first {
+                Button { onOpen(.ticket(first.task)) } label: { row }
                     .buttonStyle(.plain)
                     .onHover { hovering = $0 }
                     .accessibilityAddTraits(.isButton)
@@ -98,9 +98,9 @@ struct PlanAgentRow: View {
             .frame(width: width, alignment: .trailing)
     }
 
-    /// "“Design ov-503” · Not on a lane · Working · 22 min": what it was told, what
+    /// "“Design ov-503” · On no ticket · Working · 22 min": what it was told, what
     /// it works for, and its state.
-    static func second(_ agent: PlanFleetAgent, now: Int64) -> String { agent.second(now: now) }
+    static func second(_ agent: PlanAgent, now: Int64) -> String { agent.second(now: now) }
 
     private var accessibility: String {
         [agent.who, Self.second(agent, now: now), agent.tokens().map { "\($0) tokens" }, agent.cost()]

@@ -222,7 +222,7 @@ struct MacNodeIdentityTests {
     /// without asking (the default keychain locked, or not the login one,
     /// as a script that changed it and didn't put it back leaves it) blocks
     /// `SecItemAdd` in `AuthorizationCopyRights` until someone answers the
-    /// dialog, and the whole run with it: Train 187's gate waited 40 and 80
+    /// dialog, and the whole run with it: Landing 187's gate waited 40 and 80
     /// minutes on this line. With interaction off it fails at once, with
     /// errSecInteractionNotAllowed, and says what to look at.
     @Test func theKeychainKeepsWhatItWasGiven() {

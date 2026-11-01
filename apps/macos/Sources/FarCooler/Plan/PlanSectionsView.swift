@@ -50,7 +50,7 @@ struct PlanColumnsLayout: Layout {
 /// One of Waiting's groups.
 private struct WaitingGroup {
     let title: String
-    let rows: [PlanSections.LaneRow]
+    let rows: [PlanSections.TicketRow]
     let ranked: Bool
     let tone: SectionTitle.Tone
     let id: String
@@ -72,7 +72,7 @@ struct PlanSectionsView: View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             PlanColumnsLayout {
                 column(Self.left)
-                column([.waiting, .onLandedTrain, .agents])
+                column([.waiting, .onLandedLanding, .agents])
             }
             if sections.shown.contains(.themes) { themes }
         }
@@ -91,10 +91,10 @@ struct PlanSectionsView: View {
     @ViewBuilder private func section(_ kind: PlanSections.Kind) -> some View {
         switch kind {
         case .landing: landing
-        case .inReview: laneSection(kind, id: "plan-in-review", rows: sections.inReview)
-        case .building: laneSection(kind, id: "plan-building", rows: sections.building)
+        case .inReview: ticketSection(kind, id: "plan-in-review", rows: sections.inReview)
+        case .building: ticketSection(kind, id: "plan-building", rows: sections.building)
         case .waiting: waiting
-        case .onLandedTrain: landedTrain
+        case .onLandedLanding: landedLanding
         case .agents: agents
         case .needsYou, .themes: EmptyView()
         }
@@ -130,11 +130,11 @@ struct PlanSectionsView: View {
     }
 
     private var landing: some View {
-        chrome(.landing, id: "plan-landing", help: PlanWords.trainExplanation) {
+        chrome(.landing, id: "plan-landing", help: PlanWords.landingExplanation) {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                ForEach(sections.trains) { card in
-                    PlanTrainCard(
-                        card: card, ci: model.ci(of: card.train), now: sections.now,
+                ForEach(sections.landings) { card in
+                    PlanLandingCard(
+                        card: card, ci: model.ci(of: card.landing), now: sections.now,
                         selected: selected, keyed: keyed, onOpen: onOpen
                     )
                     .changeWashed(card.id)
@@ -142,33 +142,33 @@ struct PlanSectionsView: View {
             }
             .padding(.top, NavigatorRhythm.air)
             .listChanges(
-                sections.trains.map {
+                sections.landings.map {
                     ListChangeRow(
                         id: $0.id,
                         signature: [
-                            $0.phase.rawValue, PlanTrainCard.facts($0, ci: model.ci(of: $0.train), now: 0),
-                            $0.lanes.map { "\($0.id)\($0.standing.word)" }.joined(separator: ","),
+                            $0.phase.rawValue, PlanLandingCard.facts($0, ci: model.ci(of: $0.landing), now: 0),
+                            $0.tickets.map { "\($0.id)\($0.standing.word)" }.joined(separator: ","),
                         ].joined(separator: "\u{1}"))
                 })
         }
     }
 
-    private func laneSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.LaneRow]) -> some View {
-        chrome(kind, id: id) { laneRows(rows) }
+    private func ticketSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.TicketRow]) -> some View {
+        chrome(kind, id: id) { ticketRows(rows) }
     }
 
-    private func laneRows(_ rows: [PlanSections.LaneRow], rank: Bool = false) -> some View {
+    private func ticketRows(_ rows: [PlanSections.TicketRow], rank: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                PlanLaneRow(
-                    lane: row.lane, theme: model.theme(of: row.lane), rank: rank ? index + 1 : nil, now: sections.now,
-                    waitsOnOwner: row.waitsOnOwner, selected: selected == .lane(row.id), keyed: keyed, agent: row.agent,
-                    landedTrain: row.landedTrain
-                ) { onOpen(.lane(row.id)) }
+                PlanLineRow(
+                    line: row.line, theme: model.theme(of: row.line), rank: rank ? index + 1 : nil, now: sections.now,
+                    waitsOnOwner: row.waitsOnOwner, selected: selected == .ticket(row.id), keyed: keyed, agent: row.agent,
+                    landedLanding: row.landedLanding
+                ) { onOpen(.ticket(row.id)) }
                 .changeWashed(row.id)
             }
         }
-        .listChanges(PlanChanges.lanes(rows.map(\.lane), model, statuses: statuses))
+        .listChanges(PlanChanges.tickets(rows.map(\.line), model, statuses: statuses))
     }
 
     /// Next Up ranked, then Not Ranked, then Waiting on You, each named only
@@ -189,7 +189,7 @@ struct PlanSectionsView: View {
                                 .padding(.leading, NavigatorGrid.textInset)
                                 .padding(.vertical, NavigatorRhythm.air)
                         }
-                        laneRows(group.rows, rank: group.ranked)
+                        ticketRows(group.rows, rank: group.ranked)
                     }
                     .identified(group.id)
                 }
@@ -197,8 +197,8 @@ struct PlanSectionsView: View {
         }
     }
 
-    private var landedTrain: some View {
-        chrome(.onLandedTrain, id: "plan-on-landed-train", expanded: false) { laneRows(sections.onLandedTrain) }
+    private var landedLanding: some View {
+        chrome(.onLandedLanding, id: "plan-on-landed-landing", expanded: false) { ticketRows(sections.onLandedLanding) }
     }
 
     private var agents: some View {

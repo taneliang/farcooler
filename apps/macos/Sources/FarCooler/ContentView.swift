@@ -204,7 +204,7 @@ struct ContentView: View {
     /// The plan peeked over the chat, with the canvas folded away (ov-298).
     @State var planPeeking = false
     /// The one tree's row chosen last, by node id (ov-321): which copy of a
-    /// lane under two cards the jump bar's path and ⌘↑ go through.
+    /// ticket under two cards the jump bar's path and ⌘↑ go through.
     @State var treeHint: String?
     /// The navigator draws the Board view, the task list by status (View >
     /// Tasks by Status), in place of the one tree (ov-321).
@@ -416,7 +416,7 @@ struct ContentView: View {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 // A peek, or a floated navigator, is put away first, and the
                 // Esc goes no further: never to the terminal under it, where
-                // it would interrupt the orchestrator (train 1004r, P3).
+                // it would interrupt the orchestrator (landing 1004r, P3).
                 if event.window === windowBox.window,
                     let away = OverlayEscape.puts(
                         keyCode: event.keyCode, modifiers: event.modifierFlags, peeking: planPeeking,

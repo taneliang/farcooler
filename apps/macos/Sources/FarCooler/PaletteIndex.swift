@@ -30,7 +30,7 @@ enum PaletteAction: Hashable {
     /// the pane itself grew no button for it.
     /// A file, by its path in a worktree: ⌘P's `/` (ov-189).
     case openFile(worktree: String, path: String)
-    /// A theme's or lane's page, in its workspace's canvas (ov-298).
+    /// A theme's or ticket's page, in its workspace's canvas (ov-298).
     case openPlan(host: String, workspace: String, page: PlanPage)
     /// The navigator's Board view, the task list by status, or the one tree
     /// again (ov-321).
@@ -221,7 +221,7 @@ enum PaletteIndex {
                 score))
         }
 
-        // Themes and lanes from the plans already read, by name (ov-298).
+        // Themes and tickets from the plans already read, by name (ov-298).
         for item in plans {
             guard let score = Fuzzy.score(item.name, query) else { continue }
             let theme = item.page.word == "Theme"
@@ -230,7 +230,7 @@ enum PaletteIndex {
                     id: "plan:\(item.host)|\(item.workspace)|\(item.page)",
                     action: .openPlan(host: item.host, workspace: item.workspace, page: item.page),
                     title: item.name, detail: "\(item.workspaceName) · \(item.detail)",
-                    symbol: item.page.symbol, kind: theme ? "theme" : "lane"),
+                    symbol: item.page.symbol, kind: theme ? "theme" : "ticket"),
                 score))
         }
 
@@ -428,14 +428,14 @@ struct PaletteWorkspace: Equatable {
     var talkTitle = "Orchestrator"
 }
 
-/// A theme or a lane on a plan this window has read, as the palette finds it.
+/// A theme or a ticket on a plan this window has read, as the palette finds it.
 struct PalettePlanItem: Equatable {
     var host: String
     var workspace: String
     var workspaceName: String
     var page: PlanPage
     var name: String
-    /// "3 of 10 done", or a lane's state.
+    /// "3 of 10 done", or a ticket's stage.
     var detail: String
 }
 

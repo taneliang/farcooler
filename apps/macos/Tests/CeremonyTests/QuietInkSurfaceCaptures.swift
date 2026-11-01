@@ -58,18 +58,18 @@ struct QuietInkSurfaceCaptures {
         let store = try await Self.store()
         try await Self.shoot(
             "quiet-plan-home", width: 760, height: 1_350, expecting: "the plan read",
-            until: { store.plan.planned && !store.plan.plan.lanes.isEmpty },
+            until: { store.plan.planned && !store.plan.plan.lines.isEmpty },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
 
-    @Test func lanePage() async throws {
+    @Test func ticketPage() async throws {
         let store = try await Self.store()
         let plan = store.plan.plan
         try await Self.shoot(
-            "quiet-plan-lane", width: 640, height: 700, expecting: "the plan read",
-            until: { store.plan.plan.lanes.count >= 5 },
-            PlanLanePage(
-                lane: plan.lanes[4], plan: plan, record: nil,
+            "quiet-plan-ticket", width: 640, height: 700, expecting: "the plan read",
+            until: { store.plan.plan.lines.count >= 2 },
+            PlanTicketRecordPage(
+                line: plan.lines[1], plan: plan, record: nil,
                 context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })))
     }
 
@@ -111,7 +111,7 @@ struct QuietInkSurfaceCaptures {
             }.padding(TaskTypography.inset))
     }
 
-    /// An orchestrator's page: the train page's heading, byline, text, stats,
+    /// An orchestrator's page: the landing page's heading, byline, text, stats,
     /// progress, table, list, timeline, steps and links, live over the board.
     @Test func orchestratorPage() async throws {
         let (plan, pages) = try Self.seeded("pages-seeded.json")

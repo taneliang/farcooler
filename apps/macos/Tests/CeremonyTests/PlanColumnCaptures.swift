@@ -83,11 +83,11 @@ struct PlanColumnCaptures {
                         crumbs: PlanStack.page(
                             base: [
                                 .init(title: "Far Cooler", target: PlanStackTests.plan),
-                                .init(title: "Android", target: PlanStackTests.lane),
+                                .init(title: "Android", target: PlanStackTests.ticket),
                                 .init(title: "The Android app no longer crashes on a cold start after the Play update", target: nil),
                             ],
                             place: PlanStackTests.task("ov-880"),
-                            origin: PlanStack.Origin(task: "ov-880", agent: "Builder 1", target: PlanStackTests.lane),
+                            origin: PlanStack.Origin(task: "ov-880", agent: "Builder 1", target: PlanStackTests.ticket),
                             besidePlan: true
                         ).crumbs, onGo: { _ in }, onClose: nil)
                 },

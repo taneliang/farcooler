@@ -18,7 +18,7 @@ struct OneTreeWindowTests {
         #expect(at(nil) == .plan)
         #expect(at(.task("t")) == .task("t"))
         #expect(at(.plan(.theme("th"))) == .theme("th"))
-        #expect(at(.plan(.lane("l"))) == .lane("l"))
+        #expect(at(.plan(.ticket("t"))) == .ticket("t"))
         #expect(at(.plan(.page("p"))) == .page("p"))
         #expect(at(.plan(.needsYou)) == .needsYou)
         #expect(at(.worktree("wt", terminal: "x")) == .terminal(worktree: "wt", terminal: "x"))

@@ -847,7 +847,7 @@ struct DrillBreadcrumb: View {
 
     /// A crumb's label: a way to the level it names, the level you're at
     /// plain. Ancestors give way first, to a floor; the current one, a
-    /// card's or a lane's long title, keeps the rest, cut at its tail.
+    /// card's or a ticket's long title, keeps the rest, cut at its tail.
     @ViewBuilder
     private func crumb(_ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style) -> some View {
         let title = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)

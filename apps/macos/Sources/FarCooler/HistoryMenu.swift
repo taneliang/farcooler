@@ -38,7 +38,7 @@ enum HistoryMenu {
         /// What a place was called when it was last seen, for one the runner
         /// hasn't answered about yet (a relaunch's history).
         var remembered: (Selection) -> String? = { _ in nil }
-        /// A theme's or lane's name (ov-273).
+        /// A theme's or ticket's name (ov-273).
         var plan: (_ host: String, _ workspace: String, _ page: PlanPage) -> String? = { _, _, _ in nil }
     }
 

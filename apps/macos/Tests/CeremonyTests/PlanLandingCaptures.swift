@@ -6,8 +6,8 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Opt-in (FARCOOLER_CAPTURE_OUT): the Plan home and the sidebar's Lanes list
-/// with a train in every state of the ladder, at a narrow and a wide width, in
+/// Opt-in (FARCOOLER_CAPTURE_OUT): the Plan home and the sidebar's Tickets list
+/// with a landing in every state of the ladder, at a narrow and a wide width, in
 /// the four appearances (ov-522). The production views in a real titled window
 /// off every screen, taken with `screencapture -l`. Sends no input.
 @MainActor

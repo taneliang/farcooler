@@ -5,8 +5,8 @@ import Testing
 @testable import Far_Cooler
 
 /// The Mac reads budgets, trends and the week from what the real CLI prints
-/// (ov-307): a scratch daemon, a board with a card, a theme and a lane,
-/// budgets set with `plan theme set --budget` and `plan lane set --budget`, then
+/// (ov-307): a scratch daemon, a board with a card, a theme and a ticket,
+/// budgets set with `plan theme set --budget` and `plan ticket set --budget`, then
 /// the plan's own read, decoded by the parser the app uses. The fixture alone
 /// would let the two drift (ov-160). Skipped on a Mac with no CLI build or no
 /// tmux; never on CI, where the swift job builds both binaries and installs
@@ -56,9 +56,8 @@ struct RealCLICostTests {
         let plan = ["plan", "--repo", "demo", "--workspace", "pc", "--actor", "manager"]
         for args in [
             ["theme", "create", "Money", "--outcome", "Rounding is decided.", "--card", "pc-1"],
-            ["lane", "start", "rounding", "--card", "pc-1"],
             ["theme", "set", "Money", "--budget", "5M"],
-            ["lane", "set", "rounding", "--budget", "800k"],
+            ["ticket", "set", "pc-1", "--budget", "800k"],
         ] {
             let ran = await farcooler(plan + args, home: home)
             #expect(ran.ok, "\(args): \(ran.err)")
@@ -68,7 +67,7 @@ struct RealCLICostTests {
         let money = try #require(read.themes.first { $0.name == "Money" })
         #expect(money.budgetTokens == 5_000_000, "the theme's budget, as `--budget 5M` set it")
         #expect(money.trendTokens?.count == 7 && PlanWords.trend(money.trendTokens) == nil, "seven quiet days draw no chart")
-        #expect(read.lanes.first { $0.name == "rounding" }?.budgetTokens == 800_000)
+        #expect(read.lines.first { $0.key == "pc-1" }?.budgetTokens == 800_000)
         let cost = try #require(read.cost, "a runner with board_cost sends cost")
         #expect(cost.weekTokens == 0 && cost.compare.isEmpty && !cost.isWorthShowing)
         #expect(PlanWords.overBudget(money) == nil, "nothing spent is within any budget")

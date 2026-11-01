@@ -16,7 +16,7 @@ import SwiftUI
 struct PlanColumnActions {
     /// Put a reference to a Needs You row in the orchestrator's input.
     var quote: (String) -> Void = { _ in }
-    /// Open an agent's chat (its pane), else its lane's page.
+    /// Open an agent's chat (its pane), else its ticket's page.
     var openAgent: (PlanColumn.Agent) -> Void = { _ in }
     /// Open a ticket.
     var openTicket: (String) -> Void = { _ in }
@@ -366,9 +366,9 @@ struct PlanAgentCard: View {
             Button { actions.openAgent(agent) } label: { header }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
-                .help(agent.terminal == nil ? "Open its lane" : "Open \(agent.name)’s chat")
+                .help(agent.terminal == nil ? "Open its ticket" : "Open \(agent.name)’s chat")
                 .accessibilityLabel("\(agent.name), \(agent.doing)\(agent.time.map { ", \($0)" } ?? "")")
-                .accessibilityHint(agent.terminal == nil ? "Opens its lane" : "Opens its chat")
+                .accessibilityHint(agent.terminal == nil ? "Opens its ticket" : "Opens its chat")
                 .identified("plan-agent-\(agent.id)")
             ForEach(agent.tickets) { ticket in
                 PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }

@@ -290,7 +290,7 @@ extension ContentView {
         guard let selection, let scene = workspaceScene(selection) else { return all }
         // The arrangement `WorkspaceView` draws, by the same rule: beside
         // the canvas the chat is on screen, seen and keyed whatever is
-        // opened (train 1004r, P1).
+        // opened (landing 1004r, P1).
         return WorkspaceScreen.visible(all, arrangement: drawnArrangement(of: scene), taskTab: taskTab(for: selection))
     }
 

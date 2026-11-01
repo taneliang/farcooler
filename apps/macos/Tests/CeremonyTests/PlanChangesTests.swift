@@ -6,7 +6,7 @@ import Testing
 @testable import Far_Cooler
 
 /// The plan's lists move as the task list does when the plan changes
-/// (ov-298, `listChanges`): a lane or theme that arrives or changes washes,
+/// (ov-298, `listChanges`): a ticket or theme that arrives or changes washes,
 /// and the change runs on the shared spring. A selection moving does neither
 /// (ov-293: drawn on the next frame, no transition).
 @MainActor
@@ -48,20 +48,20 @@ struct PlanChangesTests {
         }
     }
 
-    static let laneID = "00000000-0000-0000-0000-000000002001"  // mac-fu3, queued and ranked first
+    static let ticketID = "00000000-0000-0000-0000-000000001002"  // ov-2, waiting and ranked first
 
-    /// The fixture with mac-fu3's reason for being next changed to `state`.
-    static func plan(movingMacUX state: String) throws -> Data {
+    /// The fixture with ov-2's reason for being next changed to `state`.
+    static func plan(movingTicketReason state: String) throws -> Data {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
-        var lanes = try #require(object["lanes"] as? [[String: Any]])
-        let at = try #require(lanes.firstIndex { $0["id"] as? String == laneID })
-        lanes[at]["reason"] = state
-        object["lanes"] = lanes
+        var lines = try #require(object["lines"] as? [[String: Any]])
+        let at = try #require(lines.firstIndex { $0["task"] as? String == ticketID })
+        lines[at]["reason"] = state
+        object["lines"] = lines
         return try JSONSerialization.data(withJSONObject: object)
     }
 
-    @Test("A lane whose state moves washes and changes on the spring; a selection moving does neither")
-    func changedLaneFlashesSelectionDoesNot() async throws {
+    @Test("A ticket whose reason moves washes and changes on the spring; a selection moving does neither")
+    func changedTicketFlashesSelectionDoesNot() async throws {
         let calls = PlanViewTests.Calls()
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
         await store.plan.reload()
@@ -77,24 +77,24 @@ struct PlanChangesTests {
             }
         }
         await settle()
-        #expect(seen.views["plan-lane-mac-fu3"] != nil, "the lane is drawn: \(seen.views.keys)")
+        #expect(seen.views["plan-ticket-ov-2"] != nil, "the ticket is drawn: \(seen.views.keys)")
         #expect(heard.washed.isEmpty, "nothing washes on the first draw")
 
-        // The selection moves onto the lane: no wash, and nothing animated.
+        // The selection moves onto the ticket: no wash, and nothing animated.
         heard.events = []
-        selection.page = .lane(Self.laneID)
+        selection.page = .ticket(Self.ticketID)
         await settle()
         #expect(heard.washed.isEmpty, "a selection isn't a change")
         #expect(!heard.animated.isEmpty, "the rows were drawn again for the selection")
         #expect(!heard.animated.contains(true), "the selection ran animated: \(heard.animated)")
 
-        // The runner changes mac-fu3's reason for being next: it washes, on the
+        // The runner changes ov-2's reason for being next: it washes, on the
         // spring, and nothing else does.
         heard.events = []
-        calls.plan = try Self.plan(movingMacUX: "Now the Mac slot is free")
+        calls.plan = try Self.plan(movingTicketReason: "Now the Mac slot is free")
         await store.plan.reload()
         await settle()
-        #expect(Set(heard.washed) == [Self.laneID], "only the lane that changed washes: \(heard.washed)")
+        #expect(Set(heard.washed) == [Self.ticketID], "only the ticket that changed washes: \(heard.washed)")
         #expect(heard.animated.contains(true), "the change ran on the spring: \(heard.animated)")
     }
 }

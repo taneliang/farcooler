@@ -4,7 +4,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Train 1004r, P4: the strip lay over the orchestrator's last rows, its
+/// Landing 1004r, P4: the strip lay over the orchestrator's last rows, its
 /// input box and status line. It is a row of its own, now the cards' at the
 /// top of the column (ov-641), and the terminal starts under it: never over
 /// the terminal's rows or its input.

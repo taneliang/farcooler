@@ -84,7 +84,7 @@ struct TerminalEvent: Sendable, Decodable {
     var turnFailed: Bool?
     // The task this pane's own notifications fold into, as the runner decided
     // it when it built THIS event (ov-112). Applied from the push because the
-    // answer belongs to the moment of the change: a Done task or a moved lane
+    // answer belongs to the moment of the change: a Done task or a moved ticket
     // since the last full read would otherwise fold a banner into a thread
     // that is not coming. See `DaemonClient.apply(_:)`.
     var noticeTaskId: String?
@@ -577,7 +577,7 @@ final class DecodeMissLimiter: @unchecked Sendable {
     }
 }
 
-/// `{"kind":"plan","workspace":…,"actor":…}`: a theme, a lane or the plan on
+/// `{"kind":"plan","workspace":…,"actor":…}`: a theme, a ticket or the plan on
 /// a board was written (`event_lines::plan_event_json`).
 struct PlanEventLine: Decodable {
     var workspace: String

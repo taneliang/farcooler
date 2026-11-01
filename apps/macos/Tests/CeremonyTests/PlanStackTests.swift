@@ -15,7 +15,7 @@ struct PlanStackTests {
     static let plan = Selection.workspace(host: "h", workspace: "w", focus: nil)
     static let title = "An already-paired browser starts after an update"
     static func task(_ id: String) -> Selection { .workspace(host: "h", workspace: "w", focus: .task(id)) }
-    static let lane = Selection.workspace(host: "h", workspace: "w", focus: .plan(.lane("web-869")))
+    static let ticket = Selection.workspace(host: "h", workspace: "w", focus: .plan(.ticket("web-869")))
 
     /// What the outline gives a card: the workspace, its initiative, the card.
     static let outline = [
@@ -23,13 +23,13 @@ struct PlanStackTests {
         Crumb(title: "Web client", target: .workspace(host: "h", workspace: "w", focus: .plan(.theme("web")))),
         Crumb(title: title, target: nil, glyph: "checklist"),
     ]
-    static let origin = PlanStack.Origin(task: "ov-881", agent: "Builder 1", target: lane)
+    static let origin = PlanStack.Origin(task: "ov-881", agent: "Builder 1", target: ticket)
 
     @Test("Opened under an agent, the crumbs are Plan, the agent, the ticket, with no tab strip")
     func underAnAgent() {
         let page = PlanStack.page(base: Self.outline, place: Self.task("ov-881"), origin: Self.origin, besidePlan: true)
         #expect(page.crumbs.map(\.title) == ["Plan", "Builder 1", Self.title])
-        #expect(page.crumbs.map(\.target) == [Self.plan, Self.lane, nil], "the first two go back; the ticket is where you are")
+        #expect(page.crumbs.map(\.target) == [Self.plan, Self.ticket, nil], "the first two go back; the ticket is where you are")
         #expect(!page.showsTabs, "no Overview, Agent, Changes strip over a page in a stack")
         #expect(!page.keepsMenus)
     }

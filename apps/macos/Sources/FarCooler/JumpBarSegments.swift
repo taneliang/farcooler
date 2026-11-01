@@ -196,8 +196,8 @@ extension View {
 extension JumpBar {
     /// The narrowest an ancestor's label is cut to (ov-512): its glyph and a
     /// few letters, so four levels still fit a narrow bar with where you are
-    /// readable. At 420 pt, Group › Lane › Agent measured 24 pt for the agent
-    /// at a floor of 96, none at all with a long lane.
+    /// readable. At 420 pt, Group › Ticket › Agent measured 24 pt for the agent
+    /// at a floor of 96, none at all with a long ticket.
     static let ancestorFloor: CGFloat = 56
     /// The narrowest where you are is cut to, unless its title is shorter.
     static let currentFloor: CGFloat = 80

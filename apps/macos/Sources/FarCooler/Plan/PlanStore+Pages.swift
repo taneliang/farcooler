@@ -3,7 +3,7 @@ import Foundation
 
 // Orchestrator pages on the Mac (ov-269 design 6.1, ov-284): read with the
 // plan, listed in the Plan view's Pages section, opened in the main area like
-// a theme's or lane's page, and drawn inside a theme's page when anchored to
+// a theme's or ticket's page, and drawn inside a theme's page when anchored to
 // it. Behind `board_pages`, and only ever in the Plan view, so with Plan off
 // the board draws exactly what it drew before.
 //

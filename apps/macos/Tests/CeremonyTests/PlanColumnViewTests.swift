@@ -57,7 +57,7 @@ struct PlanColumnViewTests {
         #expect(drawn.keys.allSatisfy { !$0.hasPrefix("plan-ticket-mark-") }, "no dot")
         let lander = try #require(drawn["plan-agent-agent:i1"])
         let landing = try #require(drawn["plan-stage-landing"])
-        #expect(landing.contains(lander), "the integrator lands the train")
+        #expect(landing.contains(lander), "the lander lands the landing")
     }
 
     @Test("At a 720-pt column, as at 1,440 wide, no ticket title is cut: a long one wraps")

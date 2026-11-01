@@ -47,7 +47,7 @@ enum TreeFold {
     }
 
     static func help(anyExpanded: Bool) -> String {
-        anyExpanded ? "Collapse every theme, card and lane in the tree" : "Expand every theme, card and lane in the tree"
+        anyExpanded ? "Collapse every theme, card and ticket in the tree" : "Expand every theme, card and ticket in the tree"
     }
 
     /// Whether `event` is a mouse click with ⌥ held: the click's own

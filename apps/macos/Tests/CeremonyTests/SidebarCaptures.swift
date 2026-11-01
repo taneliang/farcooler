@@ -8,8 +8,8 @@ import Testing
 
 /// Opt-in (FARCOOLER_CAPTURE_OUT): the sidebar's two lists at a narrow and a
 /// wide width in the four appearances (ov-503, phase 6), over the Plan
-/// scenario's board: long real titles, a lane that combines two cards, one
-/// that combines four, a train, and agents. The production `OneTreeNavigator`
+/// scenario's board: long real titles, a ticket being fixed, one in review
+/// for ages, a landing, and agents. The production `OneTreeNavigator`
 /// over the outline `SidebarOutline` builds from that plan, in a real titled
 /// window off every screen, taken with `screencapture -l`. Sends no input.
 @MainActor
@@ -107,17 +107,17 @@ struct SidebarCaptures {
 
     @Test(arguments: [240.0, 400.0])
     func card(_ width: CGFloat) async throws {
-        // ov-492 is one of the two cards the ios-overwrite lane combines.
+        // ov-492 is the ticket the ios-overwrite worktree works.
         try await Self.shoot("sidebar-card", select: .task(PlanScenario.id(492, 1)), width: width, height: 1500)
     }
 
     @Test(arguments: [240.0, 400.0])
-    func lane(_ width: CGFloat) async throws {
-        try await Self.shoot("sidebar-lane", select: .lane(PlanScenario.id(2)), width: width, height: 1500)
+    func ticket(_ width: CGFloat) async throws {
+        try await Self.shoot("sidebar-ticket", select: .ticket(PlanScenario.task(492)), width: width, height: 1500)
     }
 
     @Test
     func usualHeight() async throws {
-        try await Self.shoot("sidebar-short", select: .lane(PlanScenario.id(2)), width: 320, height: 860)
+        try await Self.shoot("sidebar-short", select: .ticket(PlanScenario.task(492)), width: 320, height: 860)
     }
 }
