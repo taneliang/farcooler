@@ -1,7 +1,7 @@
 // The work screen's Plan half, for plan-capture.mjs: the page's own markup,
 // stylesheet and view code, over a plan written to the shape ov-867's C10f was
 // drawn over (long real titles, a stuck builder, a reviewer with more waiting,
-// a train landing four tickets), instead of a tunnel. The tab switch mirrors
+// a landing of four tickets), instead of a tunnel. The tab switch mirrors
 // app.ts's showTab.
 
 import { PlanBoard, type PlanBoardView } from '../../src/client/plan'
@@ -19,12 +19,12 @@ const theme = (n: number, name: string, goal: string, done: number, total: numbe
   id: `theme-${n}`, name, outcome: goal, story: '', next: o.next ?? '', owner_ask: o.ask ?? '', state: o.state ?? 'active', ordinal: n,
   cards: cards.map(ref), counts: { backlog: total - done, todo: 0, needs_decision: 0, in_progress: 0, in_review: 0, done, cancelled: 0 },
 })
-const lane = (n: number, name: string, state: string, cards: number[], since: number, o: { train?: string; stale?: boolean } = {}) => ({
-  id: `lane-${n}`, name, title: '', state, state_since: NOW - since * MIN, stale: o.stale ?? false, train: o.train ?? null, cards: cards.map(c => ({ ...ref(c), slice: '' })), agents: [],
+const line = (n: number, stage: string, since: number, o: { stale?: boolean; landing?: number } = {}) => ({
+  ...ref(n), title: '', status: 'In Progress', stage, stage_since: NOW - since * MIN, stale: o.stale ?? false, landing: o.landing ?? null, reason: '', plan_rank: null, work: [],
 })
-const agent = (id: string, role: string, started: number, label: string, o: { lane?: number; train?: number; terminal?: string } = {}) => ({
-  id, role, harness: 'claude', model: 'sonnet', label, lane: o.lane ? { id: `lane-${o.lane}`, name: `lane-${o.lane}` } : null,
-  train: o.train ? { id: `train-${o.train}`, title: `Train ${o.train}` } : null, card: null, terminal: o.terminal ?? null, working: true, started_at: NOW - started * MIN, last_at: NOW,
+const agent = (id: string, role: string, started: number, doing: string, tickets: [number, string][] = [], o: { terminal?: string } = {}) => ({
+  id, role, harness: 'claude', model: 'sonnet', title: '', doing_now: doing, terminal: o.terminal ?? null, working: true, started_at: NOW - started * MIN, last_at: NOW,
+  tickets: tickets.map(([n, work]) => ({ ...ref(n), role: work, started_at: NOW - started * MIN })),
 })
 
 const wire = {
@@ -56,32 +56,34 @@ const wire = {
     card(892, 'A late tick loses no rows on a fling', 'In Review'),
     card(885, 'Finished subagents don’t pile up at the end'),
     card(867, 'The plan reads like an assembly line'),
-    card(868, 'Builder, reviewer and lander agents replace lanes'),
+    card(868, 'Builder, reviewer and lander agents replace the old plan words'),
     card(894, 'Queued: the watch says what’s landing', 'To Do'),
   ],
-  lanes: [
-    lane(1, 'web-paired', 'building', [869], 30), lane(2, 'web-workspaces', 'building', [870], 23), lane(3, 'ios-scroll', 'building', [881, 882], 2),
-    lane(4, 'agent-view', 'building', [885], 23), lane(5, 'android-crash', 'fixing', [880], 150, { stale: true }), lane(6, 'ios-photo', 'building', [883], 32),
-    lane(7, 'plan-c10', 'building', [867], 32), lane(8, 'agents-model', 'building', [868], 6), lane(9, 'web-errors', 'review', [871, 876], 8),
-    lane(10, 'team-revoke', 'review', [877], 40), lane(11, 'people', 'landing', [884], 14, { train: 'train-120' }),
-    lane(12, 'mac-terminal', 'landing', [891], 14, { train: 'train-120' }), lane(13, 'fling', 'landing', [892], 14, { train: 'train-120' }),
-    lane(14, 'step-up', 'landing', [890], 14, { train: 'train-120' }), lane(15, 'watch', 'queued', [894], 5),
+  lines: [
+    line(869, 'building', 30), line(870, 'building', 23), line(881, 'building', 2), line(882, 'building', 2), line(885, 'building', 23),
+    line(880, 'building', 150, { stale: true }), line(883, 'building', 32), line(867, 'building', 32), line(868, 'building', 6),
+    line(871, 'reviewing', 8), line(876, 'reviewing', 8), line(877, 'reviewing', 40), line(884, 'landing', 14, { landing: 120 }),
+    line(891, 'landing', 14, { landing: 120 }), line(892, 'landing', 14, { landing: 120 }), line(890, 'landing', 14, { landing: 120 }),
+    line(894, 'waiting', 5),
   ],
-  trains: [{ id: 'train-120', name: 'train-120', title: 'Train 120', summary: '', state: 'gating', phase: 'gating_locally', phase_since: NOW - 14 * MIN, lanes: [11, 12, 13, 14].map(n => ({ lane: `lane-${n}`, name: `lane-${n}` })), agent: null }],
+  landings: [{
+    id: 'landing-120', number: 120, title: '', summary: '', state: 'gating', phase: 'gating_locally', phase_since: NOW - 14 * MIN, collecting: false,
+    tickets: [884, 891, 892, 890].map(ref), lander: 'agent:i1',
+  }],
   agents: [
-    agent('pane:orchestrator', 'orchestrator', 240, '', { terminal: 'orch' }),
-    agent('agent:b1', 'build', 30, 'Finding why a paired browser sticks on Starting', { lane: 1 }),
-    agent('agent:b2', 'build', 23, 'Grouping the web’s panes by workspace', { lane: 2 }),
-    agent('agent:b3', 'build', 2, 'Reading the chat list’s scroll code', { lane: 3 }),
-    agent('agent:b4', 'build', 23, 'Keeping finished subagents in their turns', { lane: 4 }),
-    agent('agent:b5', 'fix', 47, 'Rerunning the Android unit tests', { lane: 5 }),
-    agent('agent:b6', 'build', 32, 'Moving the photo’s X out of the hold area', { lane: 6 }),
-    agent('agent:b7', 'build', 32, 'Drawing the plan around agents and their tickets', { lane: 7 }),
-    agent('agent:b8', 'build', 6, 'Reading how lanes are dispatched today', { lane: 8 }),
-    agent('agent:r1', 'review', 8, 'Reading the diff for a failed web connection', { lane: 9 }),
-    agent('agent:i1', 'integrator', 14, '', { train: 120 }),
+    agent('pane:orchestrator', 'orchestrator', 240, '', [], { terminal: 'orch' }),
+    agent('agent:b1', 'builder', 30, 'Finding why a paired browser sticks on Starting', [[869, 'build']]),
+    agent('agent:b2', 'builder', 23, 'Grouping the web’s panes by workspace', [[870, 'build']]),
+    agent('agent:b3', 'builder', 2, 'Reading the chat list’s scroll code', [[881, 'build'], [882, 'build']]),
+    agent('agent:b4', 'builder', 23, 'Keeping finished subagents in their turns', [[885, 'build']]),
+    agent('agent:b5', 'builder', 47, 'Rerunning the Android unit tests', [[880, 'fix']]),
+    agent('agent:b6', 'builder', 32, 'Moving the photo’s X out of the hold area', [[883, 'build']]),
+    agent('agent:b7', 'builder', 32, 'Drawing the plan around agents and their tickets', [[867, 'build']]),
+    agent('agent:b8', 'builder', 6, 'Reading how the work is dispatched today', [[868, 'build']]),
+    agent('agent:r1', 'reviewer', 8, 'Reading the diff for a failed web connection', [[871, 'review'], [876, 'review']]),
+    agent('agent:i1', 'lander', 14, '', [[884, 'land'], [891, 'land'], [892, 'land'], [890, 'land']]),
   ],
-  order: [], rulings: [], lane_is_train: [],
+  rulings: [],
 }
 const text = JSON.stringify(wire)
 const refuse = (window as any).refuse === true

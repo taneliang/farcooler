@@ -28,7 +28,7 @@
 //! from the next `needs_you.list`.
 //!
 //! **Two workspaces** (ov-871): terminals 1 to 12 work for Main, 13 (a shell)
-//! and 14 (an agent) for Billing, which has a plan of its own with a lane on
+//! and 14 (an agent) for Billing, which has a plan of its own with a ticket on
 //! one card (`bil-7`, a task with notes). Each item Needs You lists names its
 //! workspace. A file called `billing` beside the typed log adds Billing's two
 //! items, an ask and a decision on that task; the decision's answer is a
@@ -315,7 +315,7 @@ fn main() {
                     vec![support::answer(&req, result::Value::Empty(Empty {}))]
                 }
                 // The plan tab's reads (ov-775): Main's board has one theme, and
-                // Billing's a theme and a lane on one card.
+                // Billing's a theme and a ticket on one card.
                 ("workspace.list", _) => vec![support::answer(
                     &req,
                     result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList {
@@ -354,35 +354,36 @@ fn main() {
                                 vec![id_bytes(TASK)],
                                 pb::PlanStatusCounts { done: 1, in_progress: 1, ..Default::default() },
                             )],
-                            lanes: vec![pb::Lane {
-                                id: id_bytes(Uuid::from_u128(0xc01)),
-                                workspace_id: id_bytes(BILLING),
-                                name: "invoice-export".into(),
-                                title: "Invoice export".into(),
-                                state: pb::LaneState::Building as i32,
+                            lines: vec![pb::TicketLine {
+                                task_id: id_bytes(TASK),
+                                stage: pb::TicketStage::Building as i32,
                                 reason: "Writing the PDF".into(),
-                                cards: vec![pb::LaneCard { task_id: id_bytes(TASK), ..Default::default() }],
+                                stage_since: now - 5 * 60_000,
                                 ..Default::default()
                             }],
                             cards: vec![pb::PlanCard { task_id: id_bytes(TASK), key: "bil-7".into(), title: "Invoice export".into(), ..Default::default() }],
                             agents: vec![
-                                pb::PlanAgent {
-                                    id: format!("pane:{}", terminal(14)),
-                                    role: pb::PlanAgentRole::Orchestrator as i32,
+                                pb::Agent {
+                                    id: id_bytes(Uuid::from_u128(0xa01)),
+                                    role: pb::AgentRole::Orchestrator as i32,
                                     harness: "claude".into(),
+                                    terminal_id: Some(id_bytes(terminal(14))),
                                     working: true,
                                     started_at: now - 60 * 60_000,
                                     last_at: now,
                                     ..Default::default()
                                 },
-                                pb::PlanAgent {
-                                    id: "agent:b1".into(),
-                                    role: pb::PlanAgentRole::Build as i32,
+                                pb::Agent {
+                                    id: id_bytes(Uuid::from_u128(0xa02)),
+                                    role: pb::AgentRole::Builder as i32,
                                     harness: "claude".into(),
-                                    label: "Writing the PDF".into(),
-                                    lane_id: Some(id_bytes(Uuid::from_u128(0xc01))),
-                                    lane_name: "invoice-export".into(),
+                                    doing_now: "Writing the PDF".into(),
                                     terminal_id: Some(id_bytes(terminal(BILLING_FROM))),
+                                    tickets: vec![pb::AgentTicket {
+                                        task_id: id_bytes(TASK),
+                                        role: pb::WorkRole::Build as i32,
+                                        started_at: now - 5 * 60_000,
+                                    }],
                                     working: true,
                                     started_at: now - 5 * 60_000,
                                     last_at: now,

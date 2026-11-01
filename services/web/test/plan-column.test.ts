@@ -15,31 +15,36 @@ const MIN = 60_000
 
 const text = (c: ReturnType<typeof columnOf>['facts']) => c.map(f => f.runs.map(r => r.text).join(''))
 
-const agent = (id: string, role: string, o: { lane?: string; train?: string; label?: string; terminal?: string; started: number; card?: string }) => ({
+const agent = (
+  id: string,
+  role: string,
+  o: { title?: string; doing?: string; terminal?: string; started: number; tickets?: [string, string][]; working?: boolean },
+) => ({
   id,
   role,
   harness: 'claude',
   model: 'sonnet',
-  label: o.label ?? '',
-  lane: o.lane ? { id: `lane-${o.lane}`, name: o.lane } : null,
-  train: o.train ? { id: `train-${o.train}`, title: o.train } : null,
-  card: o.card ? { task: o.card, key: `ov-${o.card.slice(1)}` } : null,
+  title: o.title ?? '',
+  doing_now: o.doing ?? '',
   terminal: o.terminal ?? null,
-  working: true,
+  working: o.working ?? true,
   started_at: NOW - o.started * MIN,
   last_at: NOW,
+  tickets: (o.tickets ?? []).map(([t, work]) => ({ task: t, key: `ov-${t.slice(1)}`, role: work, started_at: NOW - o.started * MIN })),
 })
 
-const lane = (id: string, state: string, cards: string[], o: { since?: number; train?: string; stale?: boolean; title?: string } = {}) => ({
-  id: `lane-${id}`,
-  name: id,
+const line = (task: string, stage: string, o: { since?: number; landing?: number; stale?: boolean; title?: string } = {}) => ({
+  task,
+  key: `ov-${task.slice(1)}`,
   title: o.title ?? '',
-  state,
-  state_since: NOW - (o.since ?? 5) * MIN,
+  status: 'In Progress',
+  stage,
+  stage_since: NOW - (o.since ?? 5) * MIN,
   stale: o.stale ?? false,
-  train: o.train ?? null,
-  cards: cards.map(t => ({ task: t, key: `ov-${t.slice(1)}`, slice: '' })),
-  agents: [],
+  landing: o.landing ?? null,
+  reason: '',
+  plan_rank: null,
+  work: [],
 })
 
 const theme = (name: string, cards: string[], ordinal: number, o: { done?: number; total?: number; next?: string; ask?: string; state?: string } = {}) => ({
@@ -55,35 +60,36 @@ const theme = (name: string, cards: string[], ordinal: number, o: { done?: numbe
   counts: { backlog: (o.total ?? 1) - (o.done ?? 0), todo: 0, needs_decision: 0, in_progress: 0, in_review: 0, done: o.done ?? 0, cancelled: 0 },
 })
 
-const train = (name: string, phase: string, lanes: string[], phaseSince = NOW - 14 * MIN) => ({
-  id: `train-${name}`,
-  name,
-  title: name,
+const landing = (number: number, phase: string, tickets: string[], o: { phaseSince?: number; lander?: string } = {}) => ({
+  id: `landing-${number}`,
+  number,
+  title: `Landing ${number}`,
   summary: '',
   state: phase === 'ci_failed' ? 'red' : 'gating',
   phase,
-  phase_since: phaseSince,
-  lanes: lanes.map(l => ({ lane: `lane-${l}`, name: l })),
-  agent: null,
+  phase_since: o.phaseSince ?? NOW - 14 * MIN,
+  collecting: false,
+  tickets: tickets.map(t => ({ task: t, key: `ov-${t.slice(1)}` })),
+  lander: o.lander ?? null,
 })
 
 const card = (task: string, title: string, status = 'In Progress') => ({ task, key: `ov-${task.slice(1)}`, title, status })
 
-function plan(o: { themes?: any[]; lanes?: any[]; trains?: any[]; agents?: any[]; cards?: any[]; counts?: any; laneIsTrain?: any[] }): Plan {
-  const wire: any = { now_ms: NOW, themes: o.themes ?? [], lanes: o.lanes ?? [], order: [], cards: o.cards ?? [], trains: o.trains ?? [], agents: o.agents ?? [], lane_is_train: o.laneIsTrain ?? [] }
+function plan(o: { themes?: any[]; lines?: any[]; landings?: any[]; agents?: any[]; cards?: any[]; counts?: any }): Plan {
+  const wire: any = { now_ms: NOW, themes: o.themes ?? [], lines: o.lines ?? [], cards: o.cards ?? [], landings: o.landings ?? [], agents: o.agents ?? [] }
   if (o.counts) wire.board_counts = o.counts
   return parsePlan(JSON.stringify(wire))!
 }
 
 describe('the pipeline', () => {
-  it('gives each agent one card in its lane’s stage, with the lane’s tickets under it and each ticket’s own initiative', () => {
+  it('gives each agent one card in the stage its work is, with its tickets under it and each ticket’s own initiative', () => {
     const p = plan({
       themes: [theme('Web client', ['t1'], 1), theme('Mobile experience', ['t2', 't3'], 2)],
-      lanes: [lane('b1', 'building', ['t1', 't2']), lane('r1', 'review', ['t3'])],
+      lines: [line('t1', 'building'), line('t2', 'building'), line('t3', 'reviewing')],
       agents: [
-        agent('pane:orchestrator', 'orchestrator', { started: 300 }),
-        agent('agent:b', 'build', { lane: 'b1', label: 'Reading the chat list’s scroll code', terminal: 'term-b', started: 30 }),
-        agent('agent:r', 'review', { lane: 'r1', started: 8 }),
+        agent('orchestrator', 'orchestrator', { started: 300 }),
+        agent('agent:b', 'builder', { doing: 'Reading the chat list’s scroll code', terminal: 'term-b', started: 30, tickets: [['t1', 'build'], ['t2', 'build']] }),
+        agent('agent:r', 'reviewer', { started: 8, tickets: [['t3', 'review']] }),
       ],
       cards: [card('t1', 'A paired browser starts after an update'), card('t2', 'Chat scrolling stutters')],
     })
@@ -99,18 +105,33 @@ describe('the pipeline', () => {
     expect(c.agentWords).toBe('2 agents')
   })
 
+  it('says an agent’s own words for what it does, else its title, else whether it works', () => {
+    const p = plan({
+      agents: [
+        agent('agent:a', 'builder', { doing: '2/5 · Reviewing the plan', title: 'Build the glance', started: 9 }),
+        agent('agent:b', 'builder', { title: 'Build the glance', started: 8 }),
+        agent('agent:c', 'builder', { started: 7 }),
+        agent('agent:d', 'builder', { started: 6, working: false }),
+      ],
+    })
+    expect(columnOf(p).pipeline[0].agents.map(a => a.doing)).toEqual(['2/5 · Reviewing the plan', 'Build the glance', 'Working', 'Idle'])
+  })
+
   it('numbers several agents of one role in the order they started', () => {
     const p = plan({
-      lanes: [lane('a', 'building', ['t1']), lane('b', 'building', ['t2'])],
-      agents: [agent('agent:late', 'build', { lane: 'a', started: 5 }), agent('agent:early', 'build', { lane: 'b', started: 40 })],
+      lines: [line('t1', 'building'), line('t2', 'building')],
+      agents: [agent('agent:late', 'builder', { started: 5, tickets: [['t1', 'build']] }), agent('agent:early', 'builder', { started: 40, tickets: [['t2', 'build']] })],
     })
     expect(columnOf(p).pipeline[0].agents.map(a => `${a.id}=${a.name}`).sort()).toEqual(['agent:early=Builder 1', 'agent:late=Builder 2'])
   })
 
-  it('puts a stale lane’s agent in Stuck, saying why, and counts it on the facts line with the longest time', () => {
+  it('puts a stale ticket’s agent in Stuck, saying why, and counts it on the facts line with the longest time', () => {
     const p = plan({
-      lanes: [lane('s', 'building', ['t1'], { since: 150, stale: true }), lane('ok', 'building', ['t2'])],
-      agents: [agent('agent:s', 'build', { lane: 's', label: 'Running the tests', started: 47 }), agent('agent:ok', 'build', { lane: 'ok', started: 3 })],
+      lines: [line('t1', 'building', { since: 150, stale: true }), line('t2', 'building')],
+      agents: [
+        agent('agent:s', 'builder', { doing: 'Running the tests', started: 47, tickets: [['t1', 'build']] }),
+        agent('agent:ok', 'builder', { started: 3, tickets: [['t2', 'build']] }),
+      ],
     })
     const c = columnOf(p, 2)
     expect(c.pipeline[0].stage).toBe('stuck')
@@ -121,10 +142,16 @@ describe('the pipeline', () => {
     expect(c.facts.find(f => f.kind === 'stuck')?.attention).toBe(true)
   })
 
+  it('puts a ticket that needs the owner in Stuck, with no agent invented for it', () => {
+    const c = columnOf(plan({ lines: [line('t1', 'needs_you')] }))
+    expect(c.pipeline.map(g => g.stage)).toEqual(['stuck'])
+    expect([c.pipeline[0].agents, c.pipeline[0].unattended.map(t => t.task), c.pipeline[0].unattendedWords]).toEqual([[], ['t1'], '1 ticket with no agent on it'])
+  })
+
   it('says tickets nobody is on under their stage, never giving them an invented agent', () => {
     const p = plan({
-      lanes: [lane('r1', 'review', ['t1']), lane('r2', 'review', ['t2', 't3']), lane('b', 'building', ['t4'])],
-      agents: [agent('agent:r', 'review', { lane: 'r1', started: 8 })],
+      lines: [line('t1', 'reviewing'), line('t2', 'reviewing'), line('t3', 'reviewing'), line('t4', 'building')],
+      agents: [agent('agent:r', 'reviewer', { started: 8, tickets: [['t1', 'review']] })],
     })
     const c = columnOf(p)
     const reviewing = c.pipeline.find(g => g.stage === 'reviewing')!
@@ -137,17 +164,22 @@ describe('the pipeline', () => {
     expect(c.agentCount).toBe(1)
   })
 
-  // The ticket on two agents is the failure this guards: a lane two builders
-  // claim, and the lander of its train, would list one ticket three times.
-  it('puts each ticket under exactly one agent, though several claim its lane: the lander first, then the first builder', () => {
+  it('leaves tickets that wait for a builder, landed ones and dropped ones out of the pipeline', () => {
+    const c = columnOf(plan({ lines: [line('t1', 'waiting'), line('t2', 'landed'), line('t3', 'dropped')] }))
+    expect(c.pipeline).toEqual([])
+  })
+
+  // The ticket on two agents is the failure this guards: a ticket a builder
+  // and its lander both list would be counted twice.
+  it('puts each ticket under exactly one agent, though several list it: its lander first, then the first to claim it', () => {
     const p = plan({
-      lanes: [lane('l1', 'landing', ['t1'], { train: 'integ-9' }), lane('b', 'building', ['t2'])],
-      trains: [train('integ-9', 'gating_locally', ['l1'])],
+      lines: [line('t1', 'landing', { landing: 9 }), line('t2', 'building')],
+      landings: [landing(9, 'gating_locally', ['t1'], { lander: 'agent:i' })],
       agents: [
-        agent('agent:b1', 'build', { lane: 'l1', started: 9 }),
-        agent('agent:i', 'integrator', { train: 'integ-9', started: 20 }),
-        agent('agent:b2', 'build', { lane: 'b', started: 8 }),
-        agent('agent:b3', 'build', { lane: 'b', started: 7 }),
+        agent('agent:b1', 'builder', { started: 9, tickets: [['t1', 'build']] }),
+        agent('agent:i', 'lander', { started: 20, tickets: [['t1', 'land']] }),
+        agent('agent:b2', 'builder', { started: 8, tickets: [['t2', 'build']] }),
+        agent('agent:b3', 'builder', { started: 7, tickets: [['t2', 'build']] }),
       ],
     })
     const c = columnOf(p)
@@ -155,19 +187,10 @@ describe('the pipeline', () => {
     expect(all.sort()).toEqual(['t1', 't2'])
     const by = (id: string) => c.pipeline.flatMap(g => g.agents).find(a => a.id === id)!
     expect(by('agent:i').tickets.map(t => t.task)).toEqual(['t1'])
+    expect(by('agent:b1').tickets).toEqual([])
     expect(by('agent:b2').tickets.map(t => t.task)).toEqual(['t2'])
     expect(by('agent:b3').tickets).toEqual([])
     expect(c.pipeline.reduce((n, g) => n + g.count, 0)).toBe(2)
-  })
-
-  it('gives an agent’s own card to that agent when two claim the same lane', () => {
-    const p = plan({
-      lanes: [lane('b', 'building', ['t1'])],
-      agents: [agent('agent:first', 'build', { lane: 'b', started: 9 }), agent('agent:owner', 'build', { lane: 'b', started: 8, card: 't1' })],
-    })
-    const agents = columnOf(p).pipeline[0].agents
-    expect(agents.find(a => a.id === 'agent:owner')!.tickets.map(t => t.task)).toEqual(['t1'])
-    expect(agents.find(a => a.id === 'agent:first')!.tickets).toEqual([])
   })
 
   it('has an empty pipeline, no initiatives, no footer and no facts for an empty plan', () => {
@@ -177,11 +200,11 @@ describe('the pipeline', () => {
     expect(c.quietLine).toBeNull()
   })
 
-  it('makes a live train’s integrator the lander over its landing tickets, and names the next landing on the facts line', () => {
+  it('makes a live landing’s lander the lander over its tickets, and names the next landing on the facts line', () => {
     const p = plan({
-      lanes: [lane('l1', 'landing', ['t1'], { train: 'integ-9' }), lane('l2', 'landing', ['t2', 't3'], { train: 'integ-9' }), lane('l3', 'building', ['t4'], { train: 'integ-9' })],
-      trains: [train('integ-9', 'gating_locally', ['l1', 'l2', 'l3'])],
-      agents: [agent('agent:i', 'integrator', { train: 'integ-9', started: 20 })],
+      lines: [line('t1', 'landing', { landing: 9 }), line('t2', 'landing', { landing: 9 }), line('t3', 'landing', { landing: 9 }), line('t4', 'building')],
+      landings: [landing(9, 'gating_locally', ['t1', 't2', 't3'], { lander: 'agent:i' })],
+      agents: [agent('agent:i', 'lander', { started: 20, tickets: [['t1', 'land'], ['t2', 'land'], ['t3', 'land']] })],
       counts: { backlog: 20, todo: 2, needs_decision: 0, in_progress: 5, in_review: 3, done: 282, cancelled: 4 },
     })
     const c = columnOf(p)
@@ -192,11 +215,20 @@ describe('the pipeline', () => {
     expect(text(c.facts)).toEqual(['Next landing: 3 tickets, 14 min', '282 of 312 done'])
   })
 
-  it('puts the lander of a train whose CI failed in Stuck, and doesn’t call it the next landing', () => {
+  it('finds a lander by its tickets’ landing when the landing names none', () => {
     const p = plan({
-      lanes: [lane('l1', 'landing', ['t1'], { train: 'integ-9' })],
-      trains: [train('integ-9', 'ci_failed', ['l1'], NOW - 5 * MIN)],
-      agents: [agent('agent:i', 'integrator', { train: 'integ-9', label: 'Landing six', started: 20 })],
+      lines: [line('t1', 'landing', { landing: 9 })],
+      landings: [landing(9, 'waiting_for_ci', ['t1'])],
+      agents: [agent('agent:i', 'lander', { started: 20, tickets: [['t1', 'land']] })],
+    })
+    expect(columnOf(p).pipeline[0].agents[0].doing).toBe('Checking on CI')
+  })
+
+  it('puts the lander of a landing whose CI failed in Stuck, and doesn’t call it the next landing', () => {
+    const p = plan({
+      lines: [line('t1', 'landing', { landing: 9 })],
+      landings: [landing(9, 'ci_failed', ['t1'], { phaseSince: NOW - 5 * MIN, lander: 'agent:i' })],
+      agents: [agent('agent:i', 'lander', { doing: 'Landing six', started: 20, tickets: [['t1', 'land']] })],
     })
     const c = columnOf(p)
     expect(c.pipeline.map(g => g.stage)).toEqual(['stuck'])
@@ -216,8 +248,8 @@ describe('initiatives', () => {
         theme('Release', [], 5, { done: 4, total: 4 }),
         theme('Old', [], 6, { done: 1, total: 2, state: 'done' }),
       ],
-      lanes: [lane('b', 'building', ['t1']), lane('p', 'building', ['t7'])],
-      agents: [agent('agent:b', 'build', { lane: 'b', started: 5 }), agent('agent:p', 'build', { lane: 'p', started: 5 })],
+      lines: [line('t1', 'building'), line('t7', 'building')],
+      agents: [agent('agent:b', 'builder', { started: 5, tickets: [['t1', 'build']] }), agent('agent:p', 'builder', { started: 5, tickets: [['t7', 'build']] })],
     })
     const c = columnOf(p)
     expect(c.initiatives.map(i => i.name)).toEqual(['Web client', 'Mobile'])
@@ -231,15 +263,15 @@ describe('initiatives', () => {
 describe('the footer', () => {
   it('counts what waits for a builder, what hasn’t started and what is done, each ticket once', () => {
     const p = plan({
-      lanes: [lane('q1', 'queued', ['t1', 't2']), lane('q2', 'queued', ['t2', 't3'])],
+      lines: [line('t1', 'waiting'), line('t2', 'waiting'), line('t2', 'waiting'), line('t3', 'waiting')],
       cards: [card('t1', 'One', 'To Do'), card('t2', 'Two', 'To Do'), card('t3', 'Three', 'Backlog')],
       counts: { backlog: 20, todo: 5, needs_decision: 0, in_progress: 0, in_review: 0, done: 796, cancelled: 0 },
     })
     expect(columnOf(p).footer.map(f => f.words)).toEqual(['3 tickets waiting for a builder', '22 not started', '796 done'])
   })
 
-  it('leaves a cancelled ticket on a queued lane out, and draws Needs You in amber above zero', () => {
-    const p = plan({ lanes: [lane('q', 'queued', ['t1', 't2'])], cards: [card('t1', 'One', 'To Do'), card('t2', 'Two', 'Cancelled')] })
+  it('leaves a cancelled ticket that waits for a builder out, and draws Needs You in amber above zero', () => {
+    const p = plan({ lines: [line('t1', 'waiting'), line('t2', 'waiting')], cards: [card('t1', 'One', 'To Do'), card('t2', 'Two', 'Cancelled')] })
     const c = columnOf(p, 1)
     expect(c.footer.find(f => f.kind === 'waiting')?.count).toBe(1)
     expect(c.facts.find(f => f.kind === 'needsYou')?.attention).toBe(true)
@@ -247,10 +279,10 @@ describe('the footer', () => {
     expect(statusesOf(plan({ cards: [card('t1', 'One', 'Canceled')] })).get('t1')).toBe('cancelled')
   })
 
-  it('leaves a cancelled ticket out of its lane’s agent as well', () => {
+  it('leaves a cancelled ticket out of its agent as well', () => {
     const p = plan({
-      lanes: [lane('b', 'building', ['t1', 't2'])],
-      agents: [agent('agent:b', 'build', { lane: 'b', started: 5 })],
+      lines: [line('t1', 'building'), line('t2', 'building')],
+      agents: [agent('agent:b', 'builder', { started: 5, tickets: [['t1', 'build'], ['t2', 'build']] })],
       cards: [card('t2', 'Dropped', 'Cancelled')],
     })
     expect(columnOf(p).pipeline[0].agents[0].tickets.map(t => t.task)).toEqual(['t1'])
@@ -264,7 +296,7 @@ describe('the runner’s own plan', () => {
     for (const g of c.pipeline) {
       for (const a of g.agents) {
         expect(a.doing).not.toBe('')
-        expect(p.agents.some(x => x.id === a.id) || a.id.startsWith('train:')).toBe(true)
+        expect(p.agents.some(x => x.id === a.id)).toBe(true)
       }
     }
     expect(c.facts.some(f => f.kind === 'done')).toBe(true)

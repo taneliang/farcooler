@@ -25,24 +25,26 @@ const fixture = () => parsePlan(JSON.stringify(plan))!
 
 describe('the plan', () => {
   // ov-775 acceptance 1: the same plan the Mac decodes, for the same runner.
-  it('keeps the runner’s lanes, trains, themes and rulings, in its order, as the fixture the Mac decodes holds them', () => {
+  it('keeps the runner’s line, landings, agents, themes and rulings, in its order, as the fixture the Mac decodes holds them', () => {
     const shown = fixture()
-    expect(shown.lanes.map(l => l.id)).toEqual(plan.lanes.map(l => l.id))
-    expect(shown.lanes.map(l => l.state)).toEqual(plan.lanes.map(l => l.state))
-    expect(shown.trains.map(t => t.heading)).toEqual(plan.trains.map(t => t.title))
+    expect(shown.lines.map(l => [l.key, l.stage])).toEqual(plan.lines.map(l => [l.key, l.stage]))
+    expect(shown.landings.map(t => t.heading)).toEqual(plan.landings.map(t => t.title))
+    expect(shown.agents.map(a => [a.role, a.doingNow])).toEqual(plan.agents.map(a => [a.role, a.doing_now]))
+    expect(shown.agents[1].tickets.map(t => [t.key, t.role])).toEqual([['ov-1', 'review']])
     expect(shown.themes.map(t => [t.name, t.next, t.ask])).toEqual(plan.themes.map(t => [t.name, t.next, t.owner_ask]))
     expect(shown.rulings.map(r => [r.short, r.decision, r.state])).toEqual(plan.rulings.map(r => [r.short, r.decision, r.state]))
-    expect(shown.order).toEqual(plan.order)
   })
 
-  it('reads a train’s phase from its state when the runner sent none', () => {
-    expect(fixture().trains[0].phase).toBe('ci_failed')
+  it('reads a landing’s phase from its state when the runner sent none, and names it by its number', () => {
+    expect(fixture().landings[0].phase).toBe('ci_failed')
     const wire: any = JSON.parse(JSON.stringify(plan))
-    delete wire.trains[0].phase
-    wire.trains[0].state = 'gating'
-    expect(parsePlan(JSON.stringify(wire))!.trains[0].phase).toBe('gating_locally')
-    wire.trains[0].state = 'pushed'
-    expect(parsePlan(JSON.stringify(wire))!.trains[0].phase).toBe('waiting_for_ci')
+    delete wire.landings[0].phase
+    wire.landings[0].state = 'gating'
+    expect(parsePlan(JSON.stringify(wire))!.landings[0].phase).toBe('gating_locally')
+    wire.landings[0].state = 'pushed'
+    expect(parsePlan(JSON.stringify(wire))!.landings[0].phase).toBe('waiting_for_ci')
+    wire.landings[0].title = ''
+    expect(parsePlan(JSON.stringify(wire))!.landings[0].heading).toBe('Landing 9')
   })
 
   it('shows open rulings newest first and past ones most recently settled first', () => {
@@ -54,10 +56,10 @@ describe('the plan', () => {
     expect(parsePlan('not json')).toBeNull()
     expect(parsePlan('{}')).toBeNull()
     const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.lanes.push({ name: 'no id' }, null)
+    wire.lines.push({ title: 'no task' }, null)
     wire.rulings.push({ id: 'r', decision: 5 })
     const shown = parsePlan(JSON.stringify(wire))!
-    expect(shown.lanes).toHaveLength(plan.lanes.length)
+    expect(shown.lines).toHaveLength(plan.lines.length)
     expect(shown.rulings).toHaveLength(plan.rulings.length)
   })
 })
@@ -104,17 +106,14 @@ function runner() {
   return { state, board: new PlanBoard(deps), last: () => state.views[state.views.length - 1] }
 }
 
-describe('a plan card’s cards', () => {
-  it('keeps each card’s task beside its key, to open its detail', () => {
+describe('a plan ticket’s cards', () => {
+  it('keeps each ticket’s task beside its key, and leaves out an agent’s or a landing’s ticket that has none', () => {
     const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.lanes[0].cards = [{ task: 'task-1', key: 'ov-1' }, { key: 'no-task' }]
-    wire.trains[0].card = { task: 'task-9', key: 'ov-9' }
+    wire.agents[1].tickets = [{ task: 'task-1', key: 'ov-1', role: 'review', started_at: 5 }, { key: 'no-task', role: 'build' }]
+    wire.landings[0].tickets = [{ task: 'task-9', key: 'ov-9' }, { key: 'no-task' }]
     const shown = parsePlan(JSON.stringify(wire))!
-    expect(shown.lanes[0].cards).toEqual(['ov-1', 'no-task'])
-    expect(shown.lanes[0].cardRefs).toEqual([{ task: 'task-1', key: 'ov-1' }])
-    expect(shown.trains[0].cardRef).toEqual({ task: 'task-9', key: 'ov-9' })
-    wire.trains[0].card = null
-    expect(parsePlan(JSON.stringify(wire))!.trains[0].cardRef).toBeNull()
+    expect(shown.agents[1].tickets).toEqual([{ task: 'task-1', key: 'ov-1', role: 'review', startedAt: 5 }])
+    expect(shown.landings[0].tickets).toEqual([{ task: 'task-9', key: 'ov-9' }])
   })
 })
 

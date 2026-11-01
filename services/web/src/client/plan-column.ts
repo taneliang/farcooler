@@ -18,7 +18,7 @@
 /// Nothing here touches the page, so a test plays a plan by hand. The DOM is
 /// plan-view.ts.
 
-import { isLiveTrain, needsAttention, type Counts, type FleetAgent, type Lane, type Phase, type Plan, type Theme, type Train } from './plan'
+import { isLiveLanding, needsAttention, type Counts, type Landing, type Line, type Phase, type Plan, type PlanAgent, type Theme } from './plan'
 
 // MARK: Words
 
@@ -30,19 +30,19 @@ export function span(ms: number): string {
   return `${Math.floor(minutes / 1440)} d`
 }
 
-/// A stale lane's warning, beside its mark: "No move in 2 h".
-function staleWords(lane: Lane, now: number): string | null {
-  if (!lane.stale) return null
-  const minutes = Math.floor(Math.max(0, now - (lane.stateSince ?? now)) / 60_000)
+/// A stale ticket's warning, beside its mark: "No move in 2 h".
+function staleWords(line: Line, now: number): string | null {
+  if (!line.stale) return null
+  const minutes = Math.floor(Math.max(0, now - (line.stageSince ?? now)) / 60_000)
   return minutes < 120 ? 'No move in an hour' : `No move in ${Math.floor(minutes / 60)} h`
 }
 
-/// A train's phase inside a sentence (the Mac's `TrainPhase.sentence`).
+/// A landing's phase inside a sentence (the Mac's `LandingPhase.sentence`).
 function phaseSentence(phase: Phase): string {
   switch (phase) {
-    case 'waiting_for_lanes':
-      return 'waiting for lanes'
-    case 'waiting_for_previous_train':
+    case 'waiting_for_tickets':
+      return 'waiting for tickets'
+    case 'waiting_for_previous_landing':
       return 'waiting for the earlier landing'
     case 'waiting_for_main':
       return 'waiting for main’s checks to pass'
@@ -66,7 +66,7 @@ function phaseSentence(phase: Phase): string {
   }
 }
 
-/// How far along a phase is, to find the train furthest along.
+/// How far along a phase is, to find the landing furthest along.
 function progress(phase: Phase): number {
   switch (phase) {
     case 'landed':
@@ -82,8 +82,8 @@ function progress(phase: Phase): number {
       return 4
     case 'integrating':
       return 3
-    case 'waiting_for_lanes':
-    case 'waiting_for_previous_train':
+    case 'waiting_for_tickets':
+    case 'waiting_for_previous_landing':
     case 'waiting_for_main':
       return 2
     case 'stalled':
@@ -93,8 +93,8 @@ function progress(phase: Phase): number {
   }
 }
 
-/// What a lander says it does: its train's phase as a sentence, the
-/// orchestrator's label first when it gave one and nothing is wrong.
+/// What a lander says it does: its landing's phase as a sentence, the
+/// agent's own words first when it gave some and nothing is wrong.
 function phaseWords(phase: Phase, label: string): { doing: string; trouble: boolean } {
   if (label && !needsAttention(phase)) return { doing: label, trouble: false }
   const sentence = phaseSentence(phase)
@@ -141,18 +141,8 @@ export const STAGE_TITLE: Record<Stage, string> = { stuck: 'Stuck', building: 'B
 export type Role = 'builder' | 'reviewer' | 'lander' | 'agent'
 const ROLE_WORD: Record<Role, string> = { builder: 'Builder', reviewer: 'Reviewer', lander: 'Lander', agent: 'Agent' }
 
-function roleOf(role: FleetAgent['role']): Role {
-  switch (role) {
-    case 'build':
-    case 'fix':
-      return 'builder'
-    case 'review':
-      return 'reviewer'
-    case 'integrator':
-      return 'lander'
-    default:
-      return 'agent'
-  }
+function roleOf(role: PlanAgent['role']): Role {
+  return role === 'builder' || role === 'reviewer' || role === 'lander' ? role : 'agent'
 }
 
 export interface Ticket {
@@ -283,18 +273,16 @@ function initiatives(plan: Plan, moving: Set<string>): { shown: Initiative[]; qu
   return { shown, quiet }
 }
 
-/// Tickets on a queued lane, waiting for a builder, each once and none
-/// cancelled.
+/// Tickets on the line that wait for a builder, in its order, each once and
+/// none cancelled.
 function waitingTickets(plan: Plan, statuses: Statuses): { task: string; key: string }[] {
   const seen = new Set<string>()
   const out: { task: string; key: string }[] = []
-  for (const lane of plan.lanes) {
-    if (lane.state !== 'queued') continue
-    for (const c of lane.cardRefs) {
-      if (statuses.get(c.task) === 'cancelled' || seen.has(c.task)) continue
-      seen.add(c.task)
-      out.push(c)
-    }
+  for (const line of plan.lines) {
+    if (line.stage !== 'waiting') continue
+    if (statuses.get(line.task) === 'cancelled' || seen.has(line.task)) continue
+    seen.add(line.task)
+    out.push({ task: line.task, key: line.key })
   }
   return out
 }
@@ -316,22 +304,18 @@ function footer(plan: Plan, statuses: Statuses): Count[] {
   return counts
 }
 
-/// The live train furthest along: how many tickets it carries, and since
+/// The live landing furthest along: how many tickets it carries, and since
 /// when it has been in its phase.
-function nextLanding(plan: Plan): { tickets: number; since: number | null } | null {
-  const live = plan.trains.filter(t => isLiveTrain(t) && t.phase !== 'ci_failed' && t.phase !== 'stalled')
-  let best: Train | null = null
+function nextLanding(plan: Plan, statuses: Statuses): { tickets: number; since: number | null } | null {
+  const live = plan.landings.filter(t => isLiveLanding(t) && t.phase !== 'ci_failed' && t.phase !== 'stalled')
+  let best: Landing | null = null
   for (const t of live) if (!best || progress(t.phase) > progress(best.phase)) best = t
   if (!best) return null
-  const ids = new Set(best.lanes.map(l => l.id))
-  const seen = new Set<string>()
-  for (const lane of plan.lanes) {
-    if (ids.has(lane.id) && lane.state === 'landing') for (const c of lane.cardRefs) seen.add(c.task)
-  }
-  return { tickets: seen.size, since: best.phaseSince !== null && best.phaseSince > 0 ? best.phaseSince : null }
+  const tickets = new Set(best.tickets.filter(c => statuses.get(c.task) !== 'cancelled').map(c => c.task))
+  return { tickets: tickets.size, since: best.phaseSince !== null && best.phaseSince > 0 ? best.phaseSince : null }
 }
 
-function facts(plan: Plan, needsYou: number, pipeline: Group[]): Fact[] {
+function facts(plan: Plan, statuses: Statuses, needsYou: number, pipeline: Group[]): Fact[] {
   const out: Fact[] = []
   const run = (text: string, strong = false): Run => ({ text, strong })
   if (needsYou > 0) out.push({ kind: 'needsYou', runs: [run(`${needsYou}`, true), run(' need you')], attention: true })
@@ -341,7 +325,7 @@ function facts(plan: Plan, needsYou: number, pipeline: Group[]): Fact[] {
     const longest = times.length ? Math.max(...times) : null
     out.push({ kind: 'stuck', runs: [run(`${stuck.count} stuck${longest !== null ? `, ${span(longest)}` : ''}`)], attention: true })
   }
-  const next = nextLanding(plan)
+  const next = nextLanding(plan, statuses)
   if (next) {
     out.push({
       kind: 'nextLanding',
@@ -363,84 +347,69 @@ interface Built {
   stage: Stage
   agent: Agent
   started: number
-  /// The task of the card the agent's own record names.
-  card: string | null
 }
 
 function pipelineOf(plan: Plan, statuses: Statuses): Group[] {
-  const isTrainAgent = new Set(plan.laneIsTrain)
-  const lanes = plan.lanes.filter(l => !isTrainAgent.has(l.id) && l.state !== 'landed' && l.state !== 'dropped' && l.state !== 'queued')
-  const live = plan.trains.filter(isLiveTrain)
-  const trainOf = new Map<string, Train>()
-  for (const t of live) for (const l of t.lanes) trainOf.set(l.id, t)
+  const live = plan.landings.filter(isLiveLanding)
+  const lineOf = new Map(plan.lines.map(l => [l.task, l]))
+  const landingOf = (number: number | null): Landing | undefined => (number === null ? undefined : live.find(t => t.number === number))
   const cardOf = new Map(plan.cards.map(c => [c.task, c]))
   // The theme a task is in: the first open one.
   const themeOf = (task: string): Theme | undefined => plan.themes.find(t => t.state !== 'dropped' && t.tasks.includes(task))
 
-  const ticket = (ref: { task: string; key: string }, lane: Lane | null, stage: Stage): Ticket => {
-    const known = cardOf.get(ref.task)?.title
-    let title = ref.key
-    if (known) title = known
-    else if (lane && lane.cardRefs.length === 1 && lane.title) title = lane.heading
+  const ticket = (ref: { task: string; key: string }, stage: Stage): Ticket => {
+    const title = cardOf.get(ref.task)?.title || lineOf.get(ref.task)?.title || ref.key
     return { task: ref.task, key: ref.key, title, initiative: themeOf(ref.task)?.name ?? null, stage }
   }
-  const stageOf = (lane: Lane): Stage => {
-    const train = trainOf.get(lane.id)
-    if (lane.state === 'landing' && train) return needsAttention(train.phase) ? 'stuck' : 'landing'
-    if (lane.stale) return 'stuck'
-    switch (lane.state) {
-      case 'review':
-        return 'reviewing'
+  // Where a ticket on the line stands in the pipeline, or null when it isn't
+  // in it (waiting for a builder, landed or dropped).
+  const stageOfLine = (line: Line): Stage | null => {
+    const landing = landingOf(line.landing)
+    switch (line.stage) {
+      case 'needs_you':
+        return 'stuck'
+      case 'building':
+        return line.stale ? 'stuck' : 'building'
+      case 'reviewing':
+        return line.stale ? 'stuck' : 'reviewing'
       case 'landing':
-        return 'landing'
+        return line.stale || (landing && needsAttention(landing.phase)) ? 'stuck' : 'landing'
       default:
-        return 'building'
+        return null
     }
-  }
-  const ticketsOf = (lane: Lane): Ticket[] => {
-    const s = stageOf(lane)
-    return lane.cardRefs.filter(c => statuses.get(c.task) !== 'cancelled').map(c => ticket(c, lane, s))
   }
 
   const cards: Built[] = []
   const attended = new Set<string>()
-  const trainsDrawn = new Set<string>()
   for (const a of plan.agents) {
     if (a.role === 'orchestrator') continue
-    const lane = a.lane ? lanes.find(l => l.id === a.lane) : undefined
-    const train = a.train ? live.find(t => t.id === a.train) : undefined
-    let role = roleOf(a.role)
-    let mine: Ticket[] = []
-    let stage: Stage
-    let doing = a.label
+    const role = roleOf(a.role)
+    const mine = a.tickets.filter(t => statuses.get(t.task) !== 'cancelled')
+    const lines = mine.map(t => lineOf.get(t.task)).filter((l): l is Line => !!l)
+    // The landing it lands: the one naming it, else the one its tickets are in.
+    const landing = role === 'lander' ? (live.find(t => t.lander === a.id) ?? lines.map(l => landingOf(l.landing)).find(t => !!t)) : undefined
+    const stuckLine = lines.find(l => l.stale || l.stage === 'needs_you')
+    let stage: Stage = role === 'reviewer' ? 'reviewing' : role === 'lander' ? 'landing' : 'building'
+    let doing = a.doingNow || a.title
     let trouble = false
-    if (train) {
-      // The agent landing a train: the lander, over the train's tickets.
-      role = 'lander'
-      trainsDrawn.add(train.id)
-      const ids = new Set(train.lanes.map(l => l.id))
-      mine = lanes.filter(l => ids.has(l.id) && l.state === 'landing').flatMap(ticketsOf)
-      stage = needsAttention(train.phase) ? 'stuck' : 'landing'
-      ;({ doing, trouble } = phaseWords(train.phase, a.label))
-    } else if (lane) {
-      mine = ticketsOf(lane)
-      stage = stageOf(lane)
-      const stale = stage === 'stuck' ? staleWords(lane, plan.nowMs) : null
+    if (landing) {
+      if (needsAttention(landing.phase)) stage = 'stuck'
+      ;({ doing, trouble } = phaseWords(landing.phase, a.doingNow || a.title))
+    }
+    if (stuckLine) {
+      stage = 'stuck'
+      const stale = staleWords(stuckLine, plan.nowMs)
       if (stale) {
         doing = stale
         trouble = true
-      } else if (!doing) doing = lane.heading
-    } else {
-      stage = role === 'reviewer' ? 'reviewing' : role === 'lander' ? 'landing' : 'building'
-      if (a.card) mine = [ticket(a.card, null, stage)]
-      if (!doing) doing = a.working ? 'Working' : 'Idle'
+      }
     }
-    mine = mine.map(t => ({ ...t, stage }))
-    for (const t of mine) attended.add(t.task)
+    if (!doing) doing = a.working ? 'Working' : 'Idle'
+    const tickets = mine.map(t => ticket(t, stage))
+    for (const t of tickets) attended.add(t.task)
     cards.push({
       stage,
       started: a.startedAt,
-      card: a.card?.task ?? null,
       agent: {
         id: a.id,
         role,
@@ -449,48 +418,18 @@ function pipelineOf(plan: Plan, statuses: Statuses): Group[] {
         doingIsTrouble: trouble,
         elapsed: a.startedAt > 0 ? Math.max(0, plan.nowMs - a.startedAt) : null,
         terminal: a.terminal,
-        tickets: mine,
+        tickets,
         working: a.working,
         more: 0,
       },
     })
   }
-  // A live train whose integrating agent isn't listed: its own record says
-  // who lands it, so it still has a lander.
-  for (const train of live) {
-    if (trainsDrawn.has(train.id) || !train.integrator?.working) continue
-    const ids = new Set(train.lanes.map(l => l.id))
-    const stage: Stage = needsAttention(train.phase) ? 'stuck' : 'landing'
-    const mine = lanes.filter(l => ids.has(l.id) && l.state === 'landing').flatMap(ticketsOf).map(t => ({ ...t, stage }))
-    if (mine.length === 0) continue
-    for (const t of mine) attended.add(t.task)
-    const { doing, trouble } = phaseWords(train.phase, '')
-    const started = train.integrator.startedAt
-    cards.push({
-      stage,
-      started,
-      card: null,
-      agent: {
-        id: `train:${train.id}`,
-        role: 'lander',
-        name: ROLE_WORD.lander,
-        doing,
-        doingIsTrouble: trouble,
-        elapsed: started > 0 ? Math.max(0, plan.nowMs - started) : null,
-        terminal: null,
-        tickets: mine,
-        working: true,
-        more: 0,
-      },
-    })
-  }
 
-  // Each ticket is on one agent: the lander of its train first, then the
-  // agent whose own card it is, then the first to claim it.
+  // Each ticket is on one agent: its lander first, then the first to claim it.
   const owner = new Map<string, { rank: number; index: number }>()
   cards.forEach((card, index) => {
     for (const t of card.agent.tickets) {
-      const rank = card.agent.role === 'lander' ? 0 : card.card === t.task ? 1 : 2
+      const rank = card.agent.role === 'lander' ? 0 : 1
       const have = owner.get(t.task)
       if (have && (have.rank < rank || (have.rank === rank && have.index <= index))) continue
       owner.set(t.task, { rank, index })
@@ -509,15 +448,14 @@ function pipelineOf(plan: Plan, statuses: Statuses): Group[] {
     ordered.forEach((index, n) => (cards[index].agent.name = `${ROLE_WORD[role]} ${n + 1}`))
   }
 
-  // Tickets nobody is on, by the stage of their lane.
+  // Tickets nobody is on, by their own stage on the line.
   const unattended = new Map<Stage, Ticket[]>()
   const seen = new Set(attended)
-  for (const lane of lanes) {
-    for (const t of ticketsOf(lane)) {
-      if (seen.has(t.task)) continue
-      seen.add(t.task)
-      unattended.set(t.stage, [...(unattended.get(t.stage) ?? []), t])
-    }
+  for (const line of plan.lines) {
+    const stage = stageOfLine(line)
+    if (!stage || seen.has(line.task) || statuses.get(line.task) === 'cancelled') continue
+    seen.add(line.task)
+    unattended.set(stage, [...(unattended.get(stage) ?? []), ticket(line, stage)])
   }
 
   const groups: Group[] = []
@@ -567,7 +505,7 @@ export function columnOf(plan: Plan, needsYou = 0, statuses: Statuses = statuses
   const { shown, quiet } = initiatives(plan, moving)
   const agentCount = pipeline.reduce((n, g) => n + g.agents.length, 0)
   return {
-    facts: facts(plan, needsYou, pipeline),
+    facts: facts(plan, statuses, needsYou, pipeline),
     initiatives: shown,
     quiet,
     pipeline,

@@ -1,12 +1,12 @@
-/// The plan in the browser (ov-775, plan-763 slice 12): the runner's trains and
-/// lanes, its themes with their Next lines, and Decided For You, as the Mac
-/// shows them.
+/// The plan in the browser (ov-775, plan-763 slice 12; ov-872): the runner's
+/// agents with their tickets, the line of tickets, its landings, its themes
+/// with their Next lines, and Decided For You, as the Mac shows them.
 ///
 /// The plan is the runner's own, in the shape every device reads (`plan_json`,
 /// pinned by test/fixtures/plan.json, which is also `farcooler plan --json`).
 /// The daemon decides what is live, what is ranked and who may change what.
 /// What is here is only what a page does with it: read it, sort it into the
-/// Mac's sections with the Mac's words (AgentKit's PlanSections, TrainPhase
+/// Mac's sections with the Mac's words (AgentKit's PlanSections, LandingPhase
 /// and PlanRulings), send the edits a person made, and say in words why a
 /// refusal was one.
 ///
@@ -28,11 +28,6 @@ export interface CardRef {
   key: string
 }
 
-export interface TrainLane {
-  id: string
-  name: string
-}
-
 /// What a card's counts say, as the board's statuses.
 export interface Counts {
   backlog: number
@@ -52,60 +47,83 @@ export interface PlanCard {
   status: string
 }
 
-/// What an agent does, in the runner's words (`board_agents`).
-export type FleetRole = 'orchestrator' | 'build' | 'review' | 'fix' | 'integrator' | 'subagent' | 'agent'
+/// What an agent is, in the runner's words.
+export type AgentRole = 'orchestrator' | 'builder' | 'reviewer' | 'lander' | 'agent'
 
-/// An agent that still exists on the board, as the plan lists it (ov-503).
-export interface FleetAgent {
-  /// `agent:<id>`, `pane:<terminal id>` or `turns:<harness>`.
+/// What an agent does for one ticket.
+export type WorkRole = 'build' | 'fix' | 'review' | 'land' | 'unknown'
+
+/// A ticket an agent works now, with what the agent does for it.
+export interface AgentTicket extends CardRef {
+  role: WorkRole
+  startedAt: number
+}
+
+/// An agent that still exists on the board, with the tickets it works and
+/// what it is doing now (ov-872).
+export interface PlanAgent {
   id: string
-  role: FleetRole
+  role: AgentRole
   /// What the orchestrator called it; empty when nothing kept it.
-  label: string
-  lane: string | null
-  train: string | null
-  card: CardRef | null
+  title: string
+  /// What it says it is doing now; empty when it says nothing.
+  doingNow: string
   /// Its pane, to open its chat.
   terminal: string | null
+  tickets: AgentTicket[]
   working: boolean
   startedAt: number
 }
 
-export interface Train {
+/// Where a ticket stands on the line, in the runner's words.
+export type TicketStage = 'waiting' | 'building' | 'reviewing' | 'needs_you' | 'landing' | 'landed' | 'dropped' | 'unknown'
+
+/// A ticket on the line: a card the plan means to build, and how far it has
+/// got.
+export interface Line extends CardRef {
+  title: string
+  /// The board's status, as the card carries it.
+  status: string
+  stage: TicketStage
+  stageSince: number | null
+  /// Why it is where it is on the line; empty when nothing says.
+  reason: string
+  rank: number | null
+  stale: boolean
+  /// The number of the landing it is in, if any.
+  landing: number | null
+}
+
+/// A phase of a landing, in the runner's words.
+export type Phase =
+  | 'waiting_for_previous_landing'
+  | 'waiting_for_main'
+  | 'waiting_for_tickets'
+  | 'integrating'
+  | 'gating_locally'
+  | 'waiting_for_ci'
+  | 'ci_failed'
+  | 'ready_to_land'
+  | 'landed'
+  | 'stalled'
+  | 'dropped'
+  | 'unknown'
+
+/// Tickets landing on main together, after one round of checks.
+export interface Landing {
   id: string
-  name: string
-  /// "Train 9", else the name.
+  number: number
+  /// "Landing 9", else the title the orchestrator wrote.
   heading: string
   summary: string
   phase: Phase
   phaseSince: number | null
   state: string
-  lanes: TrainLane[]
-  card: string | null
-  cardRef: CardRef | null
-  /// The agent landing it, when the train records one: whether it is working
-  /// and since when.
-  integrator: { working: boolean; startedAt: number } | null
-}
-
-export type LaneState = 'queued' | 'building' | 'review' | 'fixing' | 'landing' | 'landed' | 'dropped' | 'unknown'
-
-export interface Lane {
-  id: string
-  name: string
-  heading: string
-  /// The title the orchestrator wrote, else empty.
-  title: string
-  reason: string
-  state: LaneState
-  stateSince: number | null
-  rank: number | null
-  train: string | null
-  cards: string[]
-  /// The same cards with their task ids, to open their detail.
-  cardRefs: CardRef[]
-  stale: boolean
-  agent: string | null
+  /// It is gathering ready tickets while the one ahead lands.
+  collecting: boolean
+  tickets: CardRef[]
+  /// The agent landing it, when the plan records one.
+  lander: string | null
 }
 
 export interface Theme {
@@ -140,20 +158,18 @@ export interface Ruling {
   reversedSha: string | null
 }
 
+
 export interface Plan {
   nowMs: number
-  trains: Train[]
-  lanes: Lane[]
-  /// Lane ids in the plan's ranking.
-  order: string[]
-  /// Lane ids named like a live train: that train's own agent, left out.
-  laneIsTrain: string[]
+  /// The line, in the plan's ranking.
+  lines: Line[]
+  landings: Landing[]
   themes: Theme[]
   rulings: Ruling[]
   /// Whether the runner sent rulings at all (`board_rulings`).
   hasRulings: boolean
   /// Every agent that still exists, the orchestrator included.
-  agents: FleetAgent[]
+  agents: PlanAgent[]
   /// The cards the plan carries, with their titles and statuses.
   cards: PlanCard[]
   /// The board's cards by status; null from a runner that doesn't say.
@@ -173,27 +189,13 @@ const countsOf = (c: any): Counts => ({
   done: num(c?.done) ?? 0,
 })
 
-const FLEET_ROLES = new Set<string>(['orchestrator', 'build', 'review', 'fix', 'integrator', 'subagent'])
-
-/// A phase of a train, in the runner's words.
-export type Phase =
-  | 'waiting_for_previous_train'
-  | 'waiting_for_main'
-  | 'waiting_for_lanes'
-  | 'integrating'
-  | 'gating_locally'
-  | 'waiting_for_ci'
-  | 'ci_failed'
-  | 'ready_to_land'
-  | 'landed'
-  | 'stalled'
-  | 'dropped'
-  | 'unknown'
-
+const AGENT_ROLES = new Set<string>(['orchestrator', 'builder', 'reviewer', 'lander'])
+const WORK_ROLES = new Set<string>(['build', 'fix', 'review', 'land'])
+const STAGES = new Set<string>(['waiting', 'building', 'reviewing', 'needs_you', 'landing', 'landed', 'dropped'])
 const PHASES = new Set<string>([
-  'waiting_for_previous_train',
+  'waiting_for_previous_landing',
   'waiting_for_main',
-  'waiting_for_lanes',
+  'waiting_for_tickets',
   'integrating',
   'gating_locally',
   'waiting_for_ci',
@@ -203,12 +205,11 @@ const PHASES = new Set<string>([
   'stalled',
   'dropped',
 ])
-const LANE_STATES = new Set<string>(['queued', 'building', 'review', 'fixing', 'landing', 'landed', 'dropped'])
 const RULING_STATES = new Set<string>(['standing', 'confirmed', 'reversed'])
 
-/// A train without a phase reads from its state, as AgentKit's
-/// `PlanTrain.phase(in:)` does: pushed, red, green, landed and dropped are one
-/// each; gating is the local run; integrating is the lanes still gathering.
+/// A landing without a phase reads from its state, as AgentKit's
+/// `PlanLanding.phase(in:)` does: pushed, red, green, landed and dropped are
+/// one each; gating is the local run; open is the tickets still gathering.
 function phaseOf(raw: any): Phase {
   if (PHASES.has(raw.phase)) return raw.phase
   switch (raw.state) {
@@ -224,15 +225,14 @@ function phaseOf(raw: any): Phase {
       return 'dropped'
     case 'gating':
       return 'gating_locally'
-    case 'integrating':
-      return 'integrating'
+    case 'open':
+      return 'waiting_for_tickets'
     default:
       return 'unknown'
   }
 }
 
-/// "Train 9" stays "Train 9"; a name is shown as it is.
-const heading = (title: string, name: string): string => title || name
+const ref = (c: any): CardRef | null => (c && typeof c.task === 'string' && c.task && typeof c.key === 'string' && c.key ? { task: c.task, key: c.key } : null)
 
 /// The plan in the runner's `plan_json`, or null when it isn't one. A row that
 /// isn't an object with an id is left out rather than failing the plan, and a
@@ -244,50 +244,43 @@ export function parsePlan(json: string): Plan | null {
   } catch {
     return null
   }
-  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.lanes) || !Array.isArray(raw.themes)) return null
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.lines) || !Array.isArray(raw.themes)) return null
 
-  const lanes: Lane[] = []
-  for (const l of raw.lanes) {
-    if (!l || typeof l.id !== 'string') continue
-    const live = list(l.agents).filter(a => a && a.ended_at == null)
-    lanes.push({
-      id: l.id,
-      name: text(l.name),
-      heading: heading(text(l.title), text(l.name)),
+  const lines: Line[] = []
+  for (const l of raw.lines) {
+    if (!l || typeof l.task !== 'string' || !l.task) continue
+    lines.push({
+      task: l.task,
+      key: text(l.key),
       title: text(l.title),
+      status: text(l.status),
+      stage: STAGES.has(l.stage) ? l.stage : 'unknown',
+      stageSince: num(l.stage_since),
       reason: text(l.reason),
-      state: LANE_STATES.has(l.state) ? l.state : 'unknown',
-      stateSince: num(l.state_since),
       rank: num(l.plan_rank),
-      train: typeof l.train === 'string' && l.train ? l.train : null,
-      cards: list(l.cards).map(c => text(c?.key)).filter(Boolean),
-      cardRefs: list(l.cards)
-        .filter(c => c && typeof c.task === 'string' && c.task && typeof c.key === 'string' && c.key)
-        .map(c => ({ task: c.task, key: c.key })),
       stale: l.stale === true,
-      agent: live.length ? [text(live[0].role), text(live[0].model)].filter(Boolean).join(' · ') || null : null,
+      landing: num(l.landing),
     })
   }
 
-  const trains: Train[] = []
-  for (const t of list(raw.trains)) {
+  const landings: Landing[] = []
+  for (const t of list(raw.landings)) {
     if (!t || typeof t.id !== 'string') continue
-    trains.push({
+    const number = num(t.number) ?? 0
+    landings.push({
       id: t.id,
-      name: text(t.name),
-      heading: heading(text(t.title), text(t.name)),
+      number,
+      heading: text(t.title) || `Landing ${number}`,
       summary: text(t.summary),
       phase: phaseOf(t),
       phaseSince: num(t.phase_since) ?? num(t.state_since),
       state: text(t.state),
-      lanes: list(t.lanes)
-        .filter(x => x && typeof x.lane === 'string')
-        .map(x => ({ id: x.lane, name: text(x.name) })),
-      card: t.card && typeof t.card.key === 'string' ? t.card.key : null,
-      cardRef: t.card && typeof t.card.key === 'string' && typeof t.card.task === 'string' && t.card.task ? { task: t.card.task, key: t.card.key } : null,
-      integrator: t.agent && typeof t.agent === 'object' ? { working: t.agent.ended_at == null, startedAt: num(t.agent.started_at) ?? 0 } : null,
+      collecting: t.collecting === true,
+      tickets: list(t.tickets).map(ref).filter((c): c is CardRef => c !== null),
+      lander: typeof t.lander === 'string' && t.lander ? t.lander : null,
     })
   }
+
 
   const themes: Theme[] = []
   for (const t of raw.themes) {
@@ -327,17 +320,21 @@ export function parsePlan(json: string): Plan | null {
     })
   }
 
-  const agents: FleetAgent[] = []
+  const agents: PlanAgent[] = []
   for (const a of list(raw.agents)) {
     if (!a || typeof a.id !== 'string') continue
     agents.push({
       id: a.id,
-      role: FLEET_ROLES.has(a.role) ? a.role : 'agent',
-      label: text(a.label).trim(),
-      lane: a.lane && typeof a.lane.id === 'string' ? a.lane.id : null,
-      train: a.train && typeof a.train.id === 'string' ? a.train.id : null,
-      card: a.card && typeof a.card.task === 'string' && typeof a.card.key === 'string' && a.card.task ? { task: a.card.task, key: a.card.key } : null,
+      role: AGENT_ROLES.has(a.role) ? a.role : 'agent',
+      title: text(a.title).trim(),
+      doingNow: text(a.doing_now).trim(),
       terminal: typeof a.terminal === 'string' && a.terminal ? a.terminal : null,
+      tickets: list(a.tickets)
+        .map(t => {
+          const c = ref(t)
+          return c ? { ...c, role: WORK_ROLES.has(t.role) ? (t.role as WorkRole) : ('unknown' as WorkRole), startedAt: num(t.started_at) ?? 0 } : null
+        })
+        .filter((t): t is AgentTicket => t !== null),
       working: a.working === true,
       startedAt: num(a.started_at) ?? 0,
     })
@@ -348,10 +345,8 @@ export function parsePlan(json: string): Plan | null {
 
   return {
     nowMs: num(raw.now_ms) ?? 0,
-    trains,
-    lanes,
-    order: list(raw.order).filter(x => typeof x === 'string'),
-    laneIsTrain: list(raw.lane_is_train).map(x => text(x?.lane)).filter(Boolean),
+    lines,
+    landings,
     themes,
     rulings,
     hasRulings: Array.isArray(raw.rulings),
@@ -363,7 +358,7 @@ export function parsePlan(json: string): Plan | null {
 
 // MARK: Sections
 
-export const isLiveTrain = (t: Train): boolean => t.phase !== 'landed' && t.phase !== 'dropped'
+export const isLiveLanding = (t: Landing): boolean => t.phase !== 'landed' && t.phase !== 'dropped'
 
 /// Open rulings, newest first: all that Decided For You shows.
 export const openRulings = (plan: Plan): Ruling[] => plan.rulings.filter(r => r.state === 'standing').sort((a, b) => b.number - a.number)
@@ -378,7 +373,7 @@ export const WORDS = {
   decidedForYou: 'Decided For You',
   pastDecisions: 'Past Decisions',
   nothingPlanned: 'Nothing is planned on this board yet.',
-  nothingPlannedDetail: 'The orchestrator writes the plan: themes say why a group of cards exists, and lanes are the agents working them.',
+  nothingPlannedDetail: 'The orchestrator writes the plan: themes say why a group of cards exists, tickets are the cards lined up to build, and agents work them.',
 }
 
 /// The ones drawn in amber: CI failed, or nothing has moved.

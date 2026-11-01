@@ -312,7 +312,7 @@ function rulingCard(r: Ruling, view: PlanBoardView, on: PlanHandlers): HTMLEleme
 
 function draw(plan: Plan, column: Column, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
   const out: HTMLElement[] = []
-  const empty = plan.lanes.length === 0 && plan.trains.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && plan.agents.length === 0 && needs.length === 0
+  const empty = plan.lines.length === 0 && plan.landings.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && plan.agents.length === 0 && needs.length === 0
   if (empty) {
     const wrap = make('div', 'plan-none')
     wrap.append(make('h2', 'plan-clear', WORDS.nothingPlanned), make('p', 'plan-empty', WORDS.nothingPlannedDetail))

@@ -696,8 +696,8 @@ async function everyRunner(page) {
 
 /// One runner, two workspaces (ov-871). The fake daemon's Main workspace has
 /// twelve shells, one ask and the plan's Frosted window plane; its Billing has
-/// a shell, an agent, an ask, a decision on a card, and a plan with a lane on
-/// that card. Everything here is the page's own, through the real sshd.
+/// a shell, an agent, an ask, a decision on a card, and a plan with a ticket and
+/// its builder on that card. Everything here is the page's own, through the real sshd.
 async function workspaceWalk(page) {
   writeFileSync(join(runner.dir, 'billing'), '')
   await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }] })
