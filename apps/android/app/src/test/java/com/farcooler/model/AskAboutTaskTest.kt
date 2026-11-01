@@ -82,27 +82,27 @@ class AskAboutTaskTest {
             orchestrator = orchestrator, isImplicit = implicit,
         )
 
-    private fun lane(vararg terminals: Terminal) = Worktree(id = "w1", terminals = terminals.toList())
+    private fun worktree(vararg terminals: Terminal) = Worktree(id = "w1", terminals = terminals.toList())
 
     @Test
     fun theSeatIsALiveOrchestratorOfThisWorkspaceAndNothingElse() {
         val live = Terminal(id = "o", state = "running", role = "orchestrator", workspace = "ws")
-        val found = AskAboutTask.seat("ws", listOf(lane(live)), listOf(workspace("ws")))
+        val found = AskAboutTask.seat("ws", listOf(worktree(live)), listOf(workspace("ws")))
         assertEquals("o", found?.terminal?.id)
         assertEquals("w1", found?.worktreeId)
 
         // Named by the runner when no pane says so itself.
         val plain = Terminal(id = "p", state = "running")
         assertEquals(
-            "p", AskAboutTask.seat("ws", listOf(lane(plain)), listOf(workspace("ws", orchestrator = "p")))?.terminal?.id)
+            "p", AskAboutTask.seat("ws", listOf(worktree(plain)), listOf(workspace("ws", orchestrator = "p")))?.terminal?.id)
 
         // A dead one, another workspace's, an implicit workspace and an unlisted one are none.
         val dead = live.copy(state = "exited")
-        assertNull(AskAboutTask.seat("ws", listOf(lane(dead)), listOf(workspace("ws"))))
-        assertNull(AskAboutTask.seat("other", listOf(lane(live)), listOf(workspace("other"))))
-        assertNull(AskAboutTask.seat("ws", listOf(lane(live)), listOf(workspace("ws", implicit = true))))
-        assertNull(AskAboutTask.seat("ws", listOf(lane(live)), null))
+        assertNull(AskAboutTask.seat("ws", listOf(worktree(dead)), listOf(workspace("ws"))))
+        assertNull(AskAboutTask.seat("other", listOf(worktree(live)), listOf(workspace("other"))))
+        assertNull(AskAboutTask.seat("ws", listOf(worktree(live)), listOf(workspace("ws", implicit = true))))
+        assertNull(AskAboutTask.seat("ws", listOf(worktree(live)), null))
         assertTrue(AskAboutTask.seat("ws", emptyList(), listOf(workspace("ws"))) == null)
-        assertTrue(OrchestratorSeat.of("o", listOf(lane(live)), null, 0, false) is OrchestratorSeat.Live)
+        assertTrue(OrchestratorSeat.of("o", listOf(worktree(live)), null, 0, false) is OrchestratorSeat.Live)
     }
 }

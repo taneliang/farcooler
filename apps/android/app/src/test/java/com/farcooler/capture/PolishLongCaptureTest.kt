@@ -25,7 +25,7 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * The plan, its rulings and the tree with long real content (ov-412 sweep):
  * `test/fixtures/plan-rulings-long.json` is the rulings fixture's board with
- * its themes, lanes and rulings lengthened. Run on other screens with
+ * its themes, tickets and rulings lengthened. Run on other screens with
  * `-Pfarcooler.captureQualifiers=w320dp-h640dp-xxhdpi` (narrowest) or
  * `w891dp-h411dp-xxhdpi` (widest, landscape). Run only under
  * `-Pfarcooler.captures`.

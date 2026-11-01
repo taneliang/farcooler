@@ -51,7 +51,7 @@ class RunningAgentsTest {
     )
 
     /**
-     * Main's orchestrator with two subagents (named, as the runner names them, by what they were asked), a lane agent with
+     * Main's orchestrator with two subagents (named, as the runner names them, by what they were asked), a builder agent with
      * one, a shell, an exited agent; Billing's own agent; an unclaimed worktree's agent.
      */
     private val fleet = Fleet(
@@ -136,7 +136,7 @@ class RunningAgentsTest {
     }
 
     @Test
-    fun `a lane pane's own conversation adds detail to its subagents too`() {
+    fun `a builder pane's own conversation adds detail to its subagents too`() {
         val rows = listOf(entry("sub:b1", "Explore", "Survey the repo for the card"))
         val agents = RunningAgents.workspace(main, runner, fleet) { if (it == "builder") rows else null }
         val sub = agents.agents[3]

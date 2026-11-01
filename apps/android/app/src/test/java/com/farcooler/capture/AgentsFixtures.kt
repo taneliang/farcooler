@@ -6,7 +6,7 @@ import com.farcooler.model.SubagentEntry
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
 
-/** Four agents at work in one workspace (ov-641): the orchestrator's subagents, a lane's pane, and one of its own. */
+/** Four agents at work in one workspace (ov-641): the orchestrator's subagents, a ticket's pane, and one of its own. */
 object AgentsFixtures {
     const val WORKSPACE = "ws"
 
@@ -43,7 +43,7 @@ object AgentsFixtures {
         ),
     )
 
-    /** Running: three of the orchestrator's (two named, one in the background) and a lane's pane. */
+    /** Running: three of the orchestrator's (two named, one in the background) and a ticket's pane. */
     fun running(): RunningAgents = RunningAgents.workspace(WORKSPACE, "runner", fleet(true)) { terminal ->
         if (terminal != "o") {
             null
@@ -70,7 +70,7 @@ fun AgentsFixtures.many(): RunningAgents = RunningAgents.workspace(
                 id = "lane", workspace = AgentsFixtures.WORKSPACE,
                 terminals = (1..9).map { n ->
                     Terminal(
-                        id = "p$n", title = listOf("Build ov-619", "Review ov-616", "Fix ov-640", "Explore the agents tray", "Integrator for train 190", "Mac: the card", "Android: the sheet", "Relay: the retry", "Site: the page")[n - 1],
+                        id = "p$n", title = listOf("Build ov-619", "Review ov-616", "Fix ov-640", "Explore the agents tray", "Lander for landing 190", "Mac: the card", "Android: the sheet", "Relay: the retry", "Site: the page")[n - 1],
                         state = "running", activity = "working", role = "agent", workspace = AgentsFixtures.WORKSPACE,
                         line = "Edit RunningAgents.swift and the tests that go with it, then run the whole suite once",
                         turnStartedAt = (System.currentTimeMillis() - n * 61_000L).toDouble(),

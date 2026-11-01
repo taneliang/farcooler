@@ -108,7 +108,7 @@ class AgentDrillViewTest {
     private fun pane(): com.farcooler.net.NativePaneModel {
         source.answerPage(
             RowJson.page(
-                4, 12, RowJson.turn(0, "Split the feedback into lanes", outcome = null, startedMs = now - 200_000), RowJson.prose(1, "Four lanes are running."),
+                4, 12, RowJson.turn(0, "Split the feedback into tickets", outcome = null, startedMs = now - 200_000), RowJson.prose(1, "Four tickets are in progress."),
                 RowJson.subagent(2, "toolu_1", "agent-a1", description = "Review ov-616", startedMs = now - 190_000),
             ),
         )

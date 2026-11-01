@@ -111,8 +111,8 @@ class NativePolishCaptureTest {
             rows += RowJson.tool(2L + n * 2, "Bash", summary, input, "ok: ${summary.lowercase()}")
             if (n < commands.size - 1) rows += RowJson.thinking(3L + n * 2)
         }
-        rows += RowJson.tasks(30, "Re-evaluate the plan" to "Completed", "Re-check the themes and lanes" to "InProgress", "Learn from the last check-in" to "Pending")
-        rows += RowJson.prose(31, "Check-in done: nothing has changed. Main is green and no lanes are running.")
+        rows += RowJson.tasks(30, "Re-evaluate the plan" to "Completed", "Re-check the themes and tickets" to "InProgress", "Learn from the last check-in" to "Pending")
+        rows += RowJson.prose(31, "Check-in done: nothing has changed. Main is green and no agents are running.")
         rows += RowJson.turn(32, longLine, origin = "Scheduled")
         rows += RowJson.turn(33, longLine)
         return RowJson.page(4, 40, *rows.toTypedArray())

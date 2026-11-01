@@ -89,7 +89,7 @@ class NativeSubagentDrillTest {
             running.scope, ClientCall { _, _ -> throw AssertionError("no call goes to a core here") },
             sourceFor = { source.also { it.children["agent-a1"] = child } },
         )
-        // The agents view opens a lane's pane and its subagent together: the pane isn't made yet.
+        // The agents view opens an agent's pane and its subagent together: the pane isn't made yet.
         panes.open("t1", "sub:toolu_1", "agent-a1")
         assertNull(panes.ifMade("t1"))
         val model = panes.model("t1", memory)

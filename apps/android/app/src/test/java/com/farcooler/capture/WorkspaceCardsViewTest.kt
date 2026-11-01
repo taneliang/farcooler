@@ -84,7 +84,7 @@ class WorkspaceCardsViewTest {
         assertEquals("4 agents", tags.getValue("agents-card").words.substringBefore(" |"))
         assertTrue("the band's two lines are drawn", "plan-band-now" in tags && "plan-band-next" in tags)
         val empty = SemanticsProbe.described { Host(quiet, RunningAgents.EMPTY) }
-        assertTrue("No lanes moving", empty.getValue("plan-band-now").words.contains("No lanes moving"))
+        assertTrue("No tickets moving", empty.getValue("plan-band-now").words.contains("No tickets moving"))
         assertTrue(empty.getValue("plan-band-next").words.contains("Nothing queued"))
     }
 

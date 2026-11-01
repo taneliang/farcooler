@@ -18,15 +18,15 @@ class AgentOpeningTest {
 
     private val orchestratorSub = agent(RunningAgent.Kind.SUBAGENT, "orch", row = "sub:a", agentId = "agent-a")
     private val namedOnly = agent(RunningAgent.Kind.SUBAGENT, "orch")
-    private val laneSub = agent(RunningAgent.Kind.SUBAGENT, "lane", row = "sub:b", agentId = "agent-b")
-    private val lane = agent(RunningAgent.Kind.PANE, "lane")
+    private val builderSub = agent(RunningAgent.Kind.SUBAGENT, "lane", row = "sub:b", agentId = "agent-b")
+    private val builder = agent(RunningAgent.Kind.PANE, "lane")
 
     @Test
     fun `only a subagent with a row and a named agent opens its own conversation`() {
         assertTrue(orchestratorSub.opensOwnConversation)
         assertFalse(namedOnly.opensOwnConversation)
         assertFalse("the unnamed rest is one row for several", agent(RunningAgent.Kind.SUBAGENT, "orch", row = "sub:a").opensOwnConversation)
-        assertFalse(lane.opensOwnConversation)
+        assertFalse(builder.opensOwnConversation)
     }
 
     @Test
@@ -49,12 +49,12 @@ class AgentOpeningTest {
     }
 
     @Test
-    fun `a lane's subagent opens its own conversation in that pane, and a pane opens itself`() {
+    fun `a builder's subagent opens its own conversation in that pane, and a pane opens itself`() {
         assertEquals(
             AgentOpening.OpenOwn("lane", "sub:b", "agent-b", pane = "wt-lane"),
-            AgentOpening.of(laneSub, "orch", wide = false, ownOffered = true),
+            AgentOpening.of(builderSub, "orch", wide = false, ownOffered = true),
         )
-        assertEquals(AgentOpening.OpenPane("wt-lane", "lane"), AgentOpening.of(laneSub, "orch", wide = false, ownOffered = false))
-        assertEquals(AgentOpening.OpenPane("wt-lane", "lane"), AgentOpening.of(lane, "orch", wide = true, ownOffered = true))
+        assertEquals(AgentOpening.OpenPane("wt-lane", "lane"), AgentOpening.of(builderSub, "orch", wide = false, ownOffered = false))
+        assertEquals(AgentOpening.OpenPane("wt-lane", "lane"), AgentOpening.of(builder, "orch", wide = true, ownOffered = true))
     }
 }
