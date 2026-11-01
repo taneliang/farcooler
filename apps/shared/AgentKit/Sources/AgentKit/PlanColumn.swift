@@ -120,6 +120,8 @@ public struct PlanColumn: Equatable, Sendable {
         public var initiative: String?
         public var initiativeID: String?
         public var stage: Stage
+        /// When it entered its stage, in ms; 0 when nothing says.
+        public var since: Int64 = 0
         public var id: String { task }
     }
 
@@ -163,6 +165,18 @@ public struct PlanColumn: Equatable, Sendable {
             Set(agents.flatMap { $0.tickets.map(\.task) } + unattended.map(\.task)).count
         }
 
+        /// How many unattended tickets a stage with no agent draws before
+        /// "Show All": one tall card of them would run past the screen.
+        public static let previewLimit = 3
+
+        /// The unattended tickets drawn in place: a stage with no agent shows
+        /// the first few; a stage with agents shows none, its "more" line
+        /// opening them all.
+        public var preview: [Ticket] { agents.isEmpty ? Array(unattended.prefix(Self.previewLimit)) : [] }
+
+        /// The unattended tickets only the list shows.
+        public var hidden: Int { unattended.count - preview.count }
+
         /// "12 more waiting for review": the tickets with nobody on them.
         public var unattendedWords: String? {
             guard !unattended.isEmpty else { return nil }
@@ -178,6 +192,16 @@ public struct PlanColumn: Equatable, Sendable {
     }
 
     // MARK: The footer
+
+    /// A ticket waiting for a builder, as the footer's list draws it.
+    public struct Waiting: Equatable, Sendable, Identifiable {
+        public var task: String
+        public var key: String
+        public var title: String
+        /// When it began waiting, in ms.
+        public var since: Int64
+        public var id: String { task }
+    }
 
     public struct Count: Equatable, Sendable, Identifiable {
         public enum Kind: String, Sendable { case waiting, notStarted, done }
@@ -205,6 +229,9 @@ public struct PlanColumn: Equatable, Sendable {
     /// The stages with anything in them, in order.
     public var pipeline: [Group]
     public var footer: [Count]
+    /// The tickets waiting for a builder (the footer's first list), each once,
+    /// in the plan's order.
+    public var waiting: [Waiting]
     /// The runner's clock.
     public var now: Int64
 
@@ -235,7 +262,8 @@ public struct PlanColumn: Equatable, Sendable {
         pipeline = Self.pipeline(plan, statuses: statuses, titles: titles)
         let moving = Set(pipeline.flatMap { $0.agents.flatMap(\.tickets) + $0.unattended }.map(\.task))
         (initiatives, quietInitiatives) = Self.initiatives(plan, moving: moving)
-        footer = Self.footer(plan, statuses: statuses)
+        waiting = Self.waiting(plan, statuses: statuses)
+        footer = Self.footer(plan, waiting: waiting.count, statuses: statuses)
         facts = Self.facts(plan, needsYou: needsYou, pipeline: pipeline)
     }
 
@@ -261,16 +289,20 @@ public struct PlanColumn: Equatable, Sendable {
         return (shown, quiet)
     }
 
-    static func footer(_ plan: PlanModel, statuses: [String: TaskStatus]) -> [Count] {
-        // Tickets waiting for a builder, each once.
+    /// Tickets waiting for a builder, each once, a cancelled one left out.
+    static func waiting(_ plan: PlanModel, statuses: [String: TaskStatus]) -> [Waiting] {
         var seen = Set<String>()
-        let waiting = plan.lines.filter { $0.stage == .waiting }
+        return plan.lines.filter { $0.stage == .waiting }
             .filter { statuses[$0.task] != .cancelled && seen.insert($0.task).inserted }
+            .map { Waiting(task: $0.task, key: $0.key, title: $0.heading, since: $0.stageSince) }
+    }
+
+    static func footer(_ plan: PlanModel, waiting: Int, statuses: [String: TaskStatus]) -> [Count] {
         var counts: [Count] = []
-        if !waiting.isEmpty { counts.append(Count(kind: .waiting, count: waiting.count, status: .todo)) }
+        if waiting > 0 { counts.append(Count(kind: .waiting, count: waiting, status: .todo)) }
         if let c = plan.boardCounts {
             // Not started, less the ones already counted as waiting.
-            let unstarted = waiting.filter { [.backlog, .todo].contains(statuses[$0.task] ?? .todo) }.count
+            let unstarted = Self.waiting(plan, statuses: statuses).filter { [.backlog, .todo].contains(statuses[$0.task] ?? .todo) }.count
             let notStarted = max(0, c.backlog + c.todo - unstarted)
             if notStarted > 0 { counts.append(Count(kind: .notStarted, count: notStarted, status: .backlog)) }
             if c.done > 0 { counts.append(Count(kind: .done, count: c.done, status: .done)) }
@@ -288,7 +320,8 @@ public struct PlanColumn: Equatable, Sendable {
             let words = "\(stuck.count) stuck" + (longest.map { ", \(PlanWords.span($0))" } ?? "")
             facts.append(Fact(kind: .stuck, runs: [.init(words)], attention: true))
         }
-        if let next = nextLanding(plan) {
+        // A landing carrying no ticket yet is not a landing to name.
+        if let next = nextLanding(plan), next.tickets > 0 {
             facts.append(
                 Fact(
                     kind: .nextLanding,
@@ -331,7 +364,7 @@ extension PlanColumn {
                 if let known, !known.isEmpty { return known }
                 return line.key
             }()
-            return Ticket(task: line.task, key: line.key, title: title, initiative: theme?.name, initiativeID: theme?.id, stage: stage)
+            return Ticket(task: line.task, key: line.key, title: title, initiative: theme?.name, initiativeID: theme?.id, stage: stage, since: line.stageSince)
         }
         /// Where a ticket's own state puts it, whoever works it.
         func stage(of line: PlanTicketLine) -> Stage {

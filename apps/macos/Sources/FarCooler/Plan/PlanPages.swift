@@ -60,6 +60,8 @@ struct PlanPageView: View {
                 } else {
                     missing("Page Not Found")
                 }
+            case .stage(let raw):
+                PlanStageListPage(plan: plan, stage: raw, context: context)
             case .needsYou:
                 // Drawn by the window, which holds the answers
                 // (`PlanNeedsYouPage`); never reached through here.

@@ -13,31 +13,45 @@ struct BoardHistoryScreen: View {
     /// "not started", whose tickets are the plan's, not one board column.
     /// Nil for a finished status's History.
     var footer: PlanColumn.Count.Kind?
+    /// A pipeline stage's tickets nobody is on (ov-874): what the stage's
+    /// "N more" line opens. Nil for the other lists.
+    var stage: PlanColumn.Stage?
 
     @State private var query = ""
     @State private var area: String?
     @Environment(\.phoneNavigator) private var navigator
 
+    /// The plan, as the plan column reads it; its lists are this screen's.
+    private var column: PlanColumn? {
+        guard case .loaded(let plan)? = connection.plans.state(place.workspace) else { return nil }
+        let board = connection.boards[place.workspace]?.rows ?? []
+        return PlanColumn(
+            plan: plan, statuses: Dictionary(board.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }),
+            titles: Dictionary(board.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    private static func date(_ ms: Int64) -> Date { Date(timeIntervalSince1970: Double(ms) / 1000) }
+
     private var rows: [TaskRow] {
+        if let stage {
+            let tickets = column?.pipeline.first { $0.stage == stage }?.unattended ?? []
+            return tickets.map {
+                TaskRow(id: $0.task, key: $0.key, title: $0.title, status: .inProgress, statusSince: Self.date($0.since))
+            }
+        }
         guard let footer else {
             return connection.boards[place.workspace]?.columns.first { $0.status == status }?.rows ?? []
         }
         let board = connection.boards[place.workspace]?.rows ?? []
-        var waiting: [PlanTicketLine] = []
-        if case .loaded(let plan)? = connection.plans.state(place.workspace) {
-            var seen = Set<String>()
-            waiting = plan.lines.filter { $0.stage == .waiting && seen.insert($0.task).inserted }
-        }
+        let waiting = column?.waiting ?? []
         let ids = Set(waiting.map(\.task))
         switch footer {
         case .waiting:
-            // The plan's own lines, with the board's row where it has one.
-            return waiting.compactMap { line in
-                let row = board.first { $0.id == line.task }
-                if row?.status == .cancelled { return nil }
-                return row ?? TaskRow(
-                    id: line.task, key: line.key, title: line.heading, status: .todo,
-                    statusSince: Date(timeIntervalSince1970: Double(line.stageSince) / 1000))
+            // The plan's own tickets, with the board's row where it has one.
+            return waiting.map { ticket in
+                board.first { $0.id == ticket.task }
+                    ?? TaskRow(
+                        id: ticket.task, key: ticket.key, title: ticket.title, status: .todo, statusSince: Self.date(ticket.since))
             }
         case .notStarted: return board.filter { [.backlog, .todo].contains($0.status) && !ids.contains($0.id) }
         case .done: return board.filter { $0.status == .done }
@@ -52,17 +66,18 @@ struct BoardHistoryScreen: View {
 
     /// A finished status's rows by period; a footer list's in one block.
     private func blocks(_ found: [TaskRow], now: Date) -> [Block] {
-        if footer == .waiting || footer == .notStarted {
+        if footer == .waiting || footer == .notStarted || stage != nil {
             return found.isEmpty ? [] : [Block(id: "all", title: title, rows: found)]
         }
         return BoardHistory.groups(found, now: now).map { Block(id: $0.id, title: $0.period.title, rows: $0.rows) }
     }
 
     private var title: String {
+        if let stage { return stage.title }
         switch footer {
-        case .waiting: "Waiting for a Builder"
-        case .notStarted: "Not Started"
-        default: BoardHistory.title(status)
+        case .waiting: return "Waiting for a Builder"
+        case .notStarted: return "Not Started"
+        default: return BoardHistory.title(status)
         }
     }
 
@@ -95,8 +110,7 @@ struct BoardHistoryScreen: View {
                                             .font(.subheadline)
                                             .lineLimit(2)
                                     }
-                                    Text(footer == .waiting || footer == .notStarted
-                                        ? "\(row.status.title) since \(BoardHistory.landed(row, now: now))" : BoardHistory.landed(row, now: now))
+                                    Text(subtitle(row, now: now))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -136,6 +150,16 @@ struct BoardHistoryScreen: View {
         // Its rows' keys preview their tasks (ov-299).
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .accessibilityIdentifier("board-history")
+    }
+
+    /// Where a list's row stands: a footer or stage list says since when.
+    private func subtitle(_ row: TaskRow, now: Date) -> String {
+        if let stage {
+            return row.statusSince.timeIntervalSince1970 > 0
+                ? "\(stage.title) since \(BoardHistory.landed(row, now: now))" : stage.title
+        }
+        if footer == .waiting || footer == .notStarted { return "\(row.status.title) since \(BoardHistory.landed(row, now: now))" }
+        return BoardHistory.landed(row, now: now)
     }
 
     private func chip(_ name: String) -> some View {

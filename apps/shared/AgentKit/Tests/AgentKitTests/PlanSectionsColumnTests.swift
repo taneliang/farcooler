@@ -205,6 +205,38 @@ struct PlanSectionsColumnTests {
         #expect(!column.facts.contains { $0.kind == .nextLanding }, "a failed landing isn't the next landing")
     }
 
+    @Test("a live landing carrying no ticket yet is not named as the next landing")
+    func emptyLanding() throws {
+        let plan = try Self.plan(
+            lines: [PlanModelTests.line("t1", "landed", landing: 9), PlanModelTests.line("t2", "building")],
+            landings: [PlanModelTests.landing(9, "gating", tickets: ["t1"], phase: "gating_locally", since: Self.now - 20 * Self.minute)])
+        #expect(!PlanColumn(plan: plan).facts.contains { $0.kind == .nextLanding }, "not \"Next landing: 0 tickets, 20 min\"")
+    }
+
+    @Test("a stage with no agent draws the first three unattended tickets and leaves the rest to its list")
+    func previewed() throws {
+        let lines = (1...5).map { PlanModelTests.line("t\($0)", "reviewing") }
+        let bare = PlanColumn(plan: try Self.plan(lines: lines))
+        let group = try #require(bare.pipeline.first)
+        #expect(group.preview.map(\.task) == ["t1", "t2", "t3"] && group.hidden == 2 && group.unattended.count == 5)
+        let few = try #require(PlanColumn(plan: try Self.plan(lines: Array(lines.prefix(2)))).pipeline.first)
+        #expect(few.hidden == 0, "two fit")
+        let staffed = PlanColumn(
+            plan: try Self.plan(lines: lines, agents: [Self.agent("r", "reviewer", tickets: ["t1"], work: "review", started: 8)]))
+        let card = try #require(staffed.pipeline.first)
+        #expect(card.preview.isEmpty && card.hidden == 4, "with agents the more line opens all of them")
+    }
+
+    @Test("the tickets waiting for a builder are the column's, each once, a cancelled one left out")
+    func waitingTickets() throws {
+        let plan = try Self.plan(lines: [
+            PlanModelTests.line("t1", "waiting"), PlanModelTests.line("t1", "waiting"), PlanModelTests.line("t2", "waiting"),
+            PlanModelTests.line("t3", "waiting"),
+        ])
+        let column = PlanColumn(plan: plan, statuses: ["t3": .cancelled])
+        #expect(column.waiting.map(\.task) == ["t1", "t2"] && column.footer.first?.count == 2)
+    }
+
     @Test("initiatives in motion or asking the owner are listed; the rest are one quiet line; done ones are gone")
     func initiatives() throws {
         func theme(_ name: String, _ cards: [String], _ ordinal: Int, done: Int, total: Int, next: String = "", ask: String = "", state: String = "active") -> [String: Any] {

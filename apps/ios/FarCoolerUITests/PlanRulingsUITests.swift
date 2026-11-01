@@ -43,7 +43,13 @@ final class PlanRulingsUITests: XCTestCase {
 
     /// Billing's Plan (its screen with no orchestrator, ov-616), on a runner that keeps a plan and,
     /// unless `rulings` is false, rulings.
-    private func openPlan(rulings: Bool = true, extra: [String] = [], large: Bool = true) -> XCUIApplication {
+    ///
+    /// `shared` is a shared runner (ov-707): Bob's phone, a member who doesn't lead Billing, so he lands on his
+    /// rep with the Plan a sheet behind the strip; `-phone-rep-owner` makes the phone the owner's, on the Plan itself.
+    private func openPlan(
+        rulings: Bool = true, extra: [String] = [], large: Bool = true, shared: Bool = false, owner: Bool = false
+    ) -> XCUIApplication {
+        let extra = extra + (shared ? ["-phone-shared"] : []) + (owner ? ["-phone-rep-owner"] : [])
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-plan-file", Self.fixture]
                 + (rulings ? ["-phone-rulings"] : []) + extra)
@@ -51,7 +57,7 @@ final class PlanRulingsUITests: XCTestCase {
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
         // Led, Billing is its conversation, and its Plan is the sheet (ov-616).
-        if extra.contains("-phone-billing-led") {
+        if extra.contains("-phone-billing-led") || (shared && !owner) {
             let card = app.buttons["plan-strip"]
             XCTAssertTrue(card.waitForExistence(timeout: 15), "no Now/Next card")
             card.tap()
@@ -150,6 +156,45 @@ final class PlanRulingsUITests: XCTestCase {
         fold.tap()
         XCTAssertTrue(reveal(app, "plan-ruling-R-2").label.hasSuffix("Kept"))
         XCTAssertTrue(element(app, "plan-ruling-R-4").exists, "the others are still open")
+    }
+
+    /// A member keeps a ruling as the owner does (ov-736): Keep on the row's swipe, and Keep All
+    /// in the header.
+    func testAMemberIsOfferedKeep() {
+        let app = openPlan(shared: true)
+        let row = reveal(app, "plan-ruling-R-2")
+        for _ in 0..<3 {
+            row.swipeLeft()
+            if app.buttons["Keep"].firstMatch.waitForExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(app.buttons["Keep"].firstMatch.exists, "no Keep for a member: \(app.debugDescription)")
+        row.swipeRight()
+        let all = app.buttons["Keep All"].firstMatch
+        for _ in 0..<8 where !all.exists { scroller(app).swipeDown() }
+        XCTAssertTrue(all.exists, "no Keep All for a member: \(app.debugDescription)")
+    }
+
+    /// A member's rulings are headed Open Decisions (ov-712): the orchestrator's calls aren't made
+    /// for them. The owner's still read Decided For You.
+    func testAMembersRulingsReadOpenDecisions() {
+        for owner in [false, true] {
+            let app = openPlan(shared: true, owner: owner)
+            XCTAssertEqual(
+                app.staticTexts.matching(identifier: "plan-rulings").firstMatch.label,
+                owner ? "Decided For You" : "Open Decisions", owner ? "the owner's" : "Bob's")
+            app.terminate()
+        }
+    }
+
+    /// The owner's phone offers Keep All, found by its own identifier though the header around it
+    /// carries `plan-rulings` (ov-637).
+    func testTheOwnerIsOfferedKeepAllByItsIdentifier() {
+        let app = openPlan(shared: true, owner: true)
+        let shown = app.buttons["Keep All"].firstMatch
+        for _ in 0..<8 where !shown.exists { scroller(app).swipeDown() }
+        XCTAssertTrue(shown.exists, "no Keep All: \(app.debugDescription)")
+        XCTAssertEqual(shown.identifier, "plan-rulings-keep-all")
+        XCTAssertTrue(app.buttons["plan-rulings-keep-all"].exists, "Keep All isn't found by its identifier")
     }
 
     /// Reverse asks first, naming the ruling and the reversal, and sends

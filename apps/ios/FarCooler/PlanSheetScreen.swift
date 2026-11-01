@@ -164,9 +164,6 @@ struct PhonePlanList<Top: View>: View {
                 }
             }
             history
-            if connection.keepsPlan, narrow == nil {
-                PlanBoardSections(hook: hook)
-            }
             if !root.below.isEmpty, narrow == nil {
                 Section {
                     ForEach(root.below) { node in
@@ -190,7 +187,6 @@ struct PhonePlanList<Top: View>: View {
         .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         .refreshable {
             _ = await connection.readBoard(summary)
-            if connection.keepsPlan { await connection.readPlan(summary) }
             if connection.keepsPages { await connection.readPages(summary) }
         }
         .actionFailureAlert($moveFailure)
@@ -242,30 +238,6 @@ struct PhonePlanList<Top: View>: View {
                 }
             }
         }
-    }
-
-    /// What the Plan's own sections read and where they go: the tickets and
-    /// landings, the agents and their spend, pages, cost and rulings, which the
-    /// tree doesn't list, and not the themes, which it does, so no card or
-    /// theme is listed twice.
-    private var hook: PlanBoardHook {
-        var hook = connection.planHomeHook(
-            summary, place: place, onOpen: { [navigator] page in navigator?.open(.plan(place, page: page)) },
-            onRoute: { [navigator] route in navigator?.open(route) },
-            // Reverse and Discuss draft into the orchestrator's pane, which is
-            // the workspace under the sheet (ov-616): closing the sheet is
-            // the way there, as Done is, and no worktree covers it (ov-643).
-            // Without a conversation under it (the Plan is the screen), the
-            // route still opens.
-            onRuling: { [navigator, inSheet] route in
-                if inSheet { navigator?.plan = nil } else { navigator?.open(route) }
-            })
-        // In the sheet the band leads the list, over the orchestrator's line.
-        hook.showsBand = !inSheet
-        // The tree lists every theme. The Agents section stays: its tokens,
-        // cost, role, ticket and the day's spend are the plan's, not the card's.
-        hook.kinds = Set(PlanSections.Kind.allCases).subtracting([.themes])
-        return hook
     }
 }
 

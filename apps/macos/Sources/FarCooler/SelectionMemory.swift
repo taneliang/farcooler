@@ -45,6 +45,8 @@ enum SelectionMemory {
             case .plan(.ticket(let ticket)): third = "plan:ticket:\(ticket)"
             case .plan(.page(let slot)): third = "plan:page:\(slot)"
             case .plan(.needsYou): third = "plan:needs-you"
+            // A stage list is a view of the column, not kept.
+            case .plan(.stage): third = ""
             }
             return "\(host)|\(id)|\(third)"
         case .looseWorktree(let host, let worktree, let terminal):

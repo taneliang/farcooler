@@ -142,6 +142,13 @@ struct PhonePlanInitiatives: View {
     }
 }
 
+/// A stage's list of tickets nobody is on opens as a History route whose
+/// status names the stage.
+enum PlanStageRoute {
+    static let prefix = "stage-"
+    static func status(_ stage: PlanColumn.Stage) -> String { prefix + stage.rawValue }
+}
+
 /// The pipeline: Stuck, Building, Reviewing, Landing, each stage its agents'
 /// cards with their tickets under them.
 struct PhonePlanPipeline: View {
@@ -162,21 +169,48 @@ struct PhonePlanPipeline: View {
                 }
                 ForEach(group.agents) { agent in
                     PhoneAgentCard(
-                        agent: agent, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions)
+                        agent: agent, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions,
+                        openMore: { actions.openStage(group.stage) })
                 }
                 if group.agents.isEmpty, let words = group.unattendedWords {
                     Section {
                         Text(words).font(.subheadline).foregroundStyle(.secondary)
                             .accessibilityIdentifier("plan-more-\(group.stage.rawValue)")
-                        ForEach(group.unattended) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
+                        ForEach(group.preview) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
+                        if group.hidden > 0 {
+                            PhoneMoreButton(words: "Show All \(group.unattended.count)", indent: 0) { actions.openStage(group.stage) }
+                                .accessibilityIdentifier("plan-more-all-\(group.stage.rawValue)")
+                        }
                     }
                 } else if !group.agents.isEmpty, !group.agents.contains(where: { $0.more > 0 }), let words = group.unattendedWords {
-                    Text(words).font(.footnote).foregroundStyle(.secondary)
+                    PhoneMoreButton(words: words, indent: 0) { actions.openStage(group.stage) }
                         .listRowBackground(Color.clear)
                         .accessibilityIdentifier("plan-more-\(group.stage.rawValue)")
                 }
             }
         }
+    }
+}
+
+/// "12 more waiting for review": the tickets nobody is on, which it opens as a list.
+struct PhoneMoreButton: View {
+    let words: String
+    let indent: CGFloat
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 4) {
+                Text(words)
+                Image(systemName: "chevron.forward").font(.caption2.weight(.semibold)).accessibilityHidden(true)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.leading, indent)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the list")
     }
 }
 
@@ -186,6 +220,7 @@ struct PhoneAgentCard: View {
     let agent: PlanColumn.Agent
     var moreWords: String?
     let actions: PhonePlanActions
+    var openMore: () -> Void = {}
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -199,10 +234,7 @@ struct PhoneAgentCard: View {
                 .accessibilityIdentifier("plan-agent-\(agent.id)")
             ForEach(agent.tickets) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
             if let moreWords {
-                Text(moreWords)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, PhoneTicketRow.indent)
+                PhoneMoreButton(words: moreWords, indent: PhoneTicketRow.indent, open: openMore)
                     .accessibilityIdentifier("plan-more-\(agent.id)")
             }
         }

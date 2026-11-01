@@ -326,7 +326,8 @@ function facts(plan: Plan, statuses: Statuses, needsYou: number, pipeline: Group
     out.push({ kind: 'stuck', runs: [run(`${stuck.count} stuck${longest !== null ? `, ${span(longest)}` : ''}`)], attention: true })
   }
   const next = nextLanding(plan, statuses)
-  if (next) {
+  // A landing carrying no ticket yet is not one to name.
+  if (next && next.tickets > 0) {
     out.push({
       kind: 'nextLanding',
       runs: [

@@ -22,20 +22,28 @@ final class PhonePlanColumnUITests: XCTestCase {
         return root.appendingPathComponent("test/fixtures/plan-seeded.json").path
     }
 
+    /// `plan-phones-ov317-themed.json`: eight tickets in Reviewing and no agent on any.
+    private static var bare: String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("test/fixtures/plan-phones-ov317-themed.json").path
+    }
+
     /// The first match: an identifier on a container reaches its text too.
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
     /// Billing's Plan, its screen while it has no orchestrator (ov-616).
-    private func openPlan(_ extra: [String] = []) -> XCUIApplication {
+    private func openPlan(_ extra: [String] = [], fixture: String? = nil, ready: String = "plan-facts") -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", Self.fixture] + extra)
+            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", fixture ?? Self.fixture]
+                + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30) || app.reveal(billing), "no Billing row")
         billing.tap()
         // Under the invitation to start an orchestrator, which at a large type size is a screen tall.
-        XCTAssertTrue(app.reveal(element(app, "plan-facts")), "no Plan: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, ready)), "no Plan: \(app.debugDescription)")
         return app
     }
 
@@ -190,6 +198,65 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertGreaterThan(seen, 0, "the fixture has no footer counts")
     }
 
+    /// **A stage nobody is on shows its first three tickets and a Show All that opens the rest**
+    /// (ov-874): the line is a button, and a row in the list opens its task.
+    func testTheMoreLineOpensItsListAndARowOpensItsTask() {
+        let app = openPlan(fixture: Self.bare, ready: "plan-pipeline")
+        let all = element(app, "plan-more-all-reviewing")
+        XCTAssertTrue(app.reveal(all), "no Show All under Reviewing: \(app.debugDescription)")
+        let tickets = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'plan-ticket-ov-'"))
+        XCTAssertEqual(tickets.count, 3, "the stage draws three of its eight tickets: \(app.debugDescription)")
+        reach(app, all.identifier).tap()
+        XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "Show All opened no list: \(app.debugDescription)")
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), "the list has no tickets")
+        XCTAssertEqual(rows.count, 8, "all eight are in the list")
+        rows.element(boundBy: 5).tap()
+        XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "a row didn't open its task: \(app.debugDescription)")
+    }
+
+    /// **"N more waiting for review" under an agent's card is a button** (ov-874): the tickets
+    /// nobody is on are reached from it.
+    func testAnAgentsMoreLineOpensItsList() throws {
+        // The seeded plan with one reviewing ticket taken off every agent: nobody is on it.
+        var plan = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: Self.fixture))) as? [String: Any])
+        var inner = try XCTUnwrap(plan["plan"] as? [String: Any])
+        let lines = try XCTUnwrap(inner["lines"] as? [[String: Any]])
+        let loose = try XCTUnwrap(lines.first { $0["stage"] as? String == "reviewing" }?["task"] as? String)
+        let agents = try XCTUnwrap(inner["agents"] as? [[String: Any]])
+        inner["agents"] = agents.map { agent -> [String: Any] in
+            var agent = agent
+            agent["tickets"] = (agent["tickets"] as? [[String: Any]] ?? []).filter { $0["task"] as? String != loose }
+            return agent
+        }
+        plan["plan"] = inner
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("plan-loose-\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: plan).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let app = openPlan(fixture: file.path)
+        let more = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'plan-more-agent:'")).firstMatch
+        XCTAssertTrue(app.reveal(more), "no more line under an agent: \(app.debugDescription)")
+        reach(app, more.identifier).tap()
+        XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "the more line opened no list: \(app.debugDescription)")
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the list has no tickets")
+        row.tap()
+        XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "a row didn't open its task: \(app.debugDescription)")
+    }
+
+    /// **A runner with no plan keeps its old screen** (ov-874), not the column.
+    func testARunnerWithNoPlanKeepsItsOldScreen() {
+        let app = XCUIApplication.phoneHarness(["-phone-empty-inbox", "-phone-board-reads"])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30) || app.reveal(billing), "no Billing row")
+        billing.tap()
+        XCTAssertTrue(element(app, "workspace-body").waitForExistence(timeout: 30), "no workspace screen: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "plan-facts").exists || element(app, "plan-pipeline").exists, "the column drew on a runner with no plan")
+    }
+
     /// **An agent with no pane opens its first ticket**; one with a pane opens its chat.
     func testAnAgentOpensItsTicketWhenItHasNoPane() {
         let app = openPlan()
@@ -290,6 +357,30 @@ final class PhonePlanColumnUITests: XCTestCase {
                 add(attachment)
             }
             app.terminate()
+            // A stage nobody is on: three tickets and Show All; and the largest type size.
+            func shoot(_ app: XCUIApplication, _ file: String) throws {
+                Thread.sleep(forTimeInterval: 1)
+                let shot = app.screenshot()
+                if let out {
+                    try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+                    try shot.pngRepresentation.write(to: out.appendingPathComponent("\(file).png"))
+                }
+                let attachment = XCTAttachment(screenshot: shot)
+                attachment.name = file
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            let bare = openPlan(["-phone-appearance", name], fixture: Self.bare, ready: "plan-pipeline")
+            reach(bare, "plan-more-all-reviewing")
+            try shoot(bare, "plan-phone-more-\(name)")
+            reach(bare, "plan-more-all-reviewing").tap()
+            XCTAssertTrue(element(bare, "board-history").waitForExistence(timeout: 10))
+            try shoot(bare, "plan-phone-stage-list-\(name)")
+            bare.terminate()
+            let big = openPlan(["-phone-appearance", name, "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"], fixture: Self.bare, ready: "plan-pipeline")
+            reach(big, "plan-more-all-reviewing")
+            try shoot(big, "plan-phone-more-xxxl-\(name)")
+            big.terminate()
         }
     }
 }

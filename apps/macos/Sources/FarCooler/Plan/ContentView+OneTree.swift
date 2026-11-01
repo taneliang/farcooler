@@ -156,6 +156,7 @@ extension ContentView {
             case .ticket(let id): return .ticket(id)
             case .page(let slot): return .page(slot)
             case .needsYou: return .needsYou
+            case .stage: return .plan
             }
         case .workspace(_, workspace, .worktree(let id, let terminal)?)?, .looseWorktree(_, let id, let terminal)?:
             return terminal.map { .terminal(worktree: id, terminal: $0) } ?? .worktree(id)

@@ -203,7 +203,8 @@ struct PhonePlanColumn<Top: View>: View {
                     navigator?.open(.task(place, task: ticket))
                 }
             },
-            openTicket: { navigator?.open(.task(place, task: $0)) })
+            openTicket: { navigator?.open(.task(place, task: $0)) },
+            openStage: { navigator?.open(.history(place, status: PlanStageRoute.status($0))) })
     }
 
     /// Needs You: one line each. A tap leaves it in the orchestrator's input.
@@ -274,4 +275,6 @@ extension Connection {
 struct PhonePlanActions {
     var openAgent: (PlanColumn.Agent) -> Void = { _ in }
     var openTicket: (String) -> Void = { _ in }
+    /// The list of a stage's tickets nobody is on.
+    var openStage: (PlanColumn.Stage) -> Void = { _ in }
 }

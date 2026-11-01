@@ -24,6 +24,9 @@ enum PlanPage: Hashable {
     /// The workspace's Needs You, answered in place (ov-321): where the one
     /// tree's Needs You row opens.
     case needsYou
+    /// A pipeline stage's tickets nobody is on (ov-874), by `PlanColumn.Stage`
+    /// raw value: where the column's "N more" line opens.
+    case stage(String)
 
     /// What it is, for a menu with no name to give it.
     var word: String {
@@ -32,6 +35,7 @@ enum PlanPage: Hashable {
         case .ticket: "Ticket"
         case .page: "Page"
         case .needsYou: "Needs You"
+        case .stage: "Stage"
         }
     }
 
@@ -42,6 +46,7 @@ enum PlanPage: Hashable {
         case .ticket: "arrow.triangle.branch"
         case .page: "doc.text"
         case .needsYou: "flag"
+        case .stage: "list.bullet"
         }
     }
 }
@@ -320,7 +325,7 @@ final class PlanStore: ObservableObject {
     func readRecord(_ page: PlanPage) async {
         let data: Data?
         switch page {
-        case .page, .needsYou:
+        case .page, .needsYou, .stage:
             // A page has no record: it's replaced whole.
             return
         case .theme(let id):
@@ -344,6 +349,7 @@ final class PlanStore: ObservableObject {
         case .ticket(let id): ticket(id)?.heading
         case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
+        case .stage(let raw): PlanColumn.Stage(rawValue: raw)?.title
         }
     }
 }

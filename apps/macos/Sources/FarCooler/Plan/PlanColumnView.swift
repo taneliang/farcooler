@@ -93,7 +93,7 @@ struct PlanColumnView: View {
             PlanFactsLine(facts: column.facts)
             needs
             PlanInitiativesSection(column: column, onOpen: onOpen)
-            PlanPipelineSection(column: column, actions: actions)
+            PlanPipelineSection(column: column, actions: actions, onOpen: onOpen)
             PlanFooterLine(counts: column.footer, open: actions.openList)
         }
     }
@@ -317,6 +317,8 @@ struct PlanInitiativeRow: View {
 struct PlanPipelineSection: View {
     let column: PlanColumn
     let actions: PlanColumnActions
+    /// Where a stage's "N more" line opens its tickets.
+    var onOpen: (PlanPage) -> Void = { _ in }
 
     var body: some View {
         if !column.pipeline.isEmpty {
@@ -327,17 +329,18 @@ struct PlanPipelineSection: View {
                         title: group.stage.title, count: "\(group.count)", top: index == 0 ? 0 : PlanColumnMetrics.stage)
                     VStack(alignment: .leading, spacing: PlanColumnMetrics.cards) {
                         ForEach(group.agents) { agent in
-                            PlanAgentCard(agent: agent, stage: group.stage, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions)
+                            PlanAgentCard(
+                                agent: agent, stage: group.stage, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions,
+                                openMore: { onOpen(.stage(group.stage.rawValue)) })
                         }
                         if group.agents.isEmpty, let words = group.unattendedWords {
-                            PlanUnattendedCard(words: words, tickets: group.unattended, actions: actions)
+                            PlanUnattendedCard(
+                                words: words, group: group, actions: actions, openAll: { onOpen(.stage(group.stage.rawValue)) })
                         } else if !group.agents.isEmpty, !group.agents.contains(where: { $0.more > 0 }),
                             let words = group.unattendedWords
                         {
                             // No card has tickets to hang it on: its own line.
-                            Text(words)
-                                .font(.callout)
-                                .foregroundStyle(.quietInk)
+                            PlanMoreButton(words: words) { onOpen(.stage(group.stage.rawValue)) }
                                 .padding(.horizontal, Spacing.group)
                                 .identified("plan-more-\(group.stage.rawValue)")
                         }
@@ -358,6 +361,7 @@ struct PlanAgentCard: View {
     /// "12 more waiting for review", under the last card of a stage.
     var moreWords: String?
     let actions: PlanColumnActions
+    var openMore: () -> Void = {}
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
 
@@ -374,13 +378,11 @@ struct PlanAgentCard: View {
                 PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }
             }
             if let moreWords {
-                Text(moreWords)
-                    .font(.callout)
-                    .foregroundStyle(.quietInk)
+                PlanMoreButton(words: moreWords, action: openMore)
                     .padding(.leading, PlanColumnMetrics.ticketIndent)
                     .padding(.trailing, Spacing.section)
                     .padding(.vertical, Spacing.tight)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .identified("plan-more-\(agent.id)")
             }
         }
         .padding(.top, Spacing.tight)
@@ -424,8 +426,9 @@ struct PlanAgentCard: View {
 /// there to name.
 struct PlanUnattendedCard: View {
     let words: String
-    let tickets: [PlanColumn.Ticket]
+    let group: PlanColumn.Group
     let actions: PlanColumnActions
+    let openAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -435,11 +438,42 @@ struct PlanUnattendedCard: View {
                 .padding(.horizontal, Spacing.section)
                 .padding(.vertical, Spacing.tight)
                 .padding(.top, Spacing.tight)
-            ForEach(tickets) { ticket in PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) } }
+            ForEach(group.preview) { ticket in PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) } }
+            // A tall stage shows its first few; the rest are one click away.
+            if group.hidden > 0 {
+                PlanMoreButton(words: "Show All \(group.unattended.count)", action: openAll)
+                    .padding(.leading, PlanColumnMetrics.ticketIndent)
+                    .padding(.trailing, Spacing.section)
+                    .padding(.vertical, Spacing.tight)
+                    .identified("plan-more-all-\(group.stage.rawValue)")
+            }
         }
         .padding(.bottom, Spacing.group)
         .frame(maxWidth: .infinity, alignment: .leading)
         .surface(.content, in: .card, fill: PlanColumnMetrics.cardFill)
+    }
+}
+
+/// "12 more waiting for review": the tickets nobody is on, which it opens as a list.
+struct PlanMoreButton: View {
+    let words: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(words)
+                Image(systemName: "chevron.forward").font(.caption2.weight(.semibold)).accessibilityHidden(true)
+            }
+            .font(.callout)
+            .foregroundStyle(.quietInk)
+            .fixedSize(horizontal: false, vertical: true)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help("Open the list")
+        .accessibilityHint("Opens the list")
     }
 }
 

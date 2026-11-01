@@ -215,6 +215,14 @@ describe('the pipeline', () => {
     expect(text(c.facts)).toEqual(['Next landing: 3 tickets, 14 min', '282 of 312 done'])
   })
 
+  it('doesn’t name a live landing that carries no ticket as the next landing', () => {
+    const p = plan({
+      lines: [line('t1', 'landing', { landing: 9 }), line('t2', 'building')],
+      landings: [landing(9, 'gating_locally', ['t1'])],
+    })
+    expect(columnOf(p, 0, new Map([['t1', 'cancelled']])).facts.some(f => f.kind === 'nextLanding')).toBe(false)
+  })
+
   it('finds a lander by its tickets’ landing when the landing names none', () => {
     const p = plan({
       lines: [line('t1', 'landing', { landing: 9 })],

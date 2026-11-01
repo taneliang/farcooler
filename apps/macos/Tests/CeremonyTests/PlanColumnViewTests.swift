@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -80,5 +81,88 @@ struct PlanColumnViewTests {
         let source = try String(
             contentsOf: root.appendingPathComponent("Sources/FarCooler/Plan/PlanColumnView.swift"), encoding: .utf8)
         for word in ["\"Stop", "\"Assign", "Divider()", "PlanCost"] { #expect(!source.contains(word), "\(word) is in the column") }
+    }
+
+    /// A view hosted in a key window, to read where it drew and to click it.
+    @MainActor private final class Clicking {
+        let seen = NavigatorFilterTests.Seen()
+        var host: NSHostingView<AnyView>!
+        var window: NavigatorFilterTests.KeyWindow!
+        static let height: CGFloat = 1600
+
+        func settle() async {
+            for _ in 0..<10 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
+        func click(_ id: String) -> Bool {
+            guard let frame = seen.views[id] else { return false }
+            let at = NSPoint(x: frame.midX, y: Self.height - frame.midY)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(
+                    NSEvent.mouseEvent(
+                        with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+            }
+            return true
+        }
+    }
+
+    private static func host(_ view: some View) async -> Clicking {
+        let clicking = Clicking()
+        let seen = clicking.seen
+        clicking.host = NSHostingView(
+            rootView: AnyView(
+                view
+                    .frame(width: 720, height: Clicking.height, alignment: .topLeading)
+                    .environment(\.gridProbing, true)
+                    .overlayPreferenceValue(ProbedViewsKey.self) { probed in
+                        GeometryReader { proxy in
+                            let _ = seen.views = Dictionary(
+                                probed.map { ($0.id, proxy[$0.bounds]) }, uniquingKeysWith: { first, _ in first })
+                            Color.clear
+                        }
+                    }))
+        clicking.window = NavigatorFilterTests.KeyWindow(
+            contentRect: NSRect(x: -4000, y: -4000, width: 720, height: Clicking.height), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        clicking.window.isReleasedWhenClosed = false
+        clicking.window.contentView = clicking.host
+        TestWindow.show(clicking.window)
+        await clicking.settle()
+        return clicking
+    }
+
+    @Test("The \"N more\" line under an agent opens its stage's tickets, and a row there opens its task")
+    func moreOpensItsList() async throws {
+        let store = try await Self.store()
+        let column = PlanColumn(
+            plan: store.plan.plan, statuses: store.board.statuses, titles: PlanHome.titles(store.board))
+        let reviewing = try #require(column.pipeline.first { $0.stage == .reviewing })
+        let card = try #require(reviewing.agents.first { $0.more > 0 }, "the scenario has a reviewer with more waiting")
+        var opened: [PlanPage] = []
+        let pipeline = await Self.host(
+            PlanPipelineSection(column: column, actions: PlanColumnActions(), onOpen: { opened.append($0) }))
+        defer { pipeline.window.close() }
+        #expect(pipeline.click("plan-more-\(card.id)"), "the more line is a control: \(pipeline.seen.views.keys.sorted())")
+        #expect(opened == [.stage("reviewing")], "it opens the stage list: \(opened) \(String(describing: pipeline.seen.views["plan-more-\(card.id)"]))")
+
+        let rows = Dictionary(
+            store.board.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var tasks: [String] = []
+        let page = await Self.host(
+            PlanStageListPage(
+                plan: store.plan, stage: "reviewing",
+                context: PlanPageContext(rows: rows, onTask: { tasks.append($0.id) }, onOpen: { opened.append($0) })))
+        defer { page.window.close() }
+        let first = try #require(reviewing.unattended.first)
+        #expect(
+            Set(reviewing.unattended.map { "plan-ticket-\($0.key)" }).isSubset(of: Set(page.seen.views.keys)),
+            "every ticket nobody is on is listed: \(page.seen.views.keys.sorted())")
+        let clicked = page.click("plan-ticket-\(first.key)")
+        #expect(clicked)
+        #expect(tasks == [first.task] || opened.contains(.ticket(first.task)), "a row opens its ticket: \(tasks) \(opened)")
     }
 }
