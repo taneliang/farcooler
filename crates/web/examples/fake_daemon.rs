@@ -328,7 +328,7 @@ fn main() {
                 ("plan.get", Some(request::Payload::PlanGet(get))) => {
                     use farcooler_protocol::v1 as pb;
                     let billing = get.workspace_id == id_bytes(BILLING);
-                    let theme = |id: u128, name: &str, next: &str| pb::BoardThemeView {
+                    let theme = |id: u128, name: &str, next: &str, tasks: Vec<bytes::Bytes>, counts: pb::PlanStatusCounts| pb::BoardThemeView {
                         theme: Some(pb::BoardTheme {
                             id: id_bytes(Uuid::from_u128(id)),
                             name: name.into(),
@@ -336,11 +336,24 @@ fn main() {
                             state: pb::BoardThemeState::Active as i32,
                             ..Default::default()
                         }),
+                        task_ids: tasks,
+                        counts: Some(counts),
                         ..Default::default()
                     };
                     let plan = if billing {
+                        // Billing's plan has the column's parts (ov-875): an
+                        // initiative in motion, one builder with its ticket,
+                        // and the workspace's orchestrator in its pane.
+                        let now = 1_800_000_000_000_i64;
                         pb::Plan {
-                            themes: vec![theme(0xb02, "Invoices", "PDF export")],
+                            now_ms: now,
+                            themes: vec![theme(
+                                0xb02,
+                                "Invoices",
+                                "PDF export",
+                                vec![id_bytes(TASK)],
+                                pb::PlanStatusCounts { done: 1, in_progress: 1, ..Default::default() },
+                            )],
                             lanes: vec![pb::Lane {
                                 id: id_bytes(Uuid::from_u128(0xc01)),
                                 workspace_id: id_bytes(BILLING),
@@ -352,10 +365,37 @@ fn main() {
                                 ..Default::default()
                             }],
                             cards: vec![pb::PlanCard { task_id: id_bytes(TASK), key: "bil-7".into(), title: "Invoice export".into(), ..Default::default() }],
+                            agents: vec![
+                                pb::PlanAgent {
+                                    id: format!("pane:{}", terminal(14)),
+                                    role: pb::PlanAgentRole::Orchestrator as i32,
+                                    harness: "claude".into(),
+                                    working: true,
+                                    started_at: now - 60 * 60_000,
+                                    last_at: now,
+                                    ..Default::default()
+                                },
+                                pb::PlanAgent {
+                                    id: "agent:b1".into(),
+                                    role: pb::PlanAgentRole::Build as i32,
+                                    harness: "claude".into(),
+                                    label: "Writing the PDF".into(),
+                                    lane_id: Some(id_bytes(Uuid::from_u128(0xc01))),
+                                    lane_name: "invoice-export".into(),
+                                    terminal_id: Some(id_bytes(terminal(BILLING_FROM))),
+                                    working: true,
+                                    started_at: now - 5 * 60_000,
+                                    last_at: now,
+                                    ..Default::default()
+                                },
+                            ],
                             ..Default::default()
                         }
                     } else {
-                        pb::Plan { themes: vec![theme(0xb01, "Visual language", "Frosted window plane")], ..Default::default() }
+                        pb::Plan {
+                            themes: vec![theme(0xb01, "Visual language", "Frosted window plane", vec![], pb::PlanStatusCounts { backlog: 2, ..Default::default() })],
+                            ..Default::default()
+                        }
                     };
                     vec![support::answer(&req, result::Value::Plan(plan))]
                 }

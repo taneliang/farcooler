@@ -722,7 +722,8 @@ async function workspaceWalk(page) {
   if ((await page.textContent('#show-needs')) !== 'Needs You (1)') failures.push(`Main's Needs You button says ${await page.textContent('#show-needs')}`)
   if ((await page.textContent('#bar-count')) !== '3 Waiting') failures.push(`the bar says ${await page.textContent('#bar-count')}, not everything waiting`)
   await page.click('#show-plan')
-  await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Frosted window plane'), null, { timeout: 30_000 })
+  // Main's one initiative has nothing moving, so the column folds it into its quiet line.
+  await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Nothing moving: Visual language'), null, { timeout: 30_000 })
   if ((await page.textContent('#plan')).includes('Invoices')) failures.push("Main's plan shows Billing's theme")
   console.log('csp-check: with two workspaces, Main showed its twelve terminals, its one ask and its plan, and nothing of Billing’s')
   await shoot(page, 'workspace-main')
@@ -731,7 +732,8 @@ async function workspaceWalk(page) {
   await page.selectOption('#space-picker', { label: 'Billing (2)' })
   await page.waitForFunction(() => document.querySelector('#plan')?.textContent?.includes('PDF export'), null, { timeout: 30_000 })
   const plan = await page.textContent('#plan')
-  if (plan.includes('Frosted window plane') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)
+  if (plan.includes('Visual language') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)
+  await planColumnWalk(page)
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the invoice tests?', 'Which invoice format first?'])) failures.push(`Billing's Needs You lists ${JSON.stringify(await rows())}`)
@@ -750,6 +752,55 @@ async function workspaceWalk(page) {
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
   if ((await page.inputValue('#space-picker')) === '' || !same(await titles(), ['billing shell', 'billing agent'])) failures.push('the pick was not remembered')
   else console.log('csp-check: the pick survived a reload')
+}
+
+/// The plan column (ov-875), on Billing's plan: its initiative with progress
+/// and Next, its builder with the ticket under it (once), the key in monospace,
+/// a Needs You row quoted into the orchestrator's box without sending, a ticket
+/// opening its card, and an agent opening its terminal.
+async function planColumnWalk(page) {
+  const text = async sel => (await page.locator(sel).allTextContents()).map(t => t.replace(/\s+/g, ' ').trim())
+  const init = await text('#plan .plan-initiative')
+  if (init.length !== 1 || !init[0].includes('Invoices') || !init[0].includes('1 of 2') || !init[0].includes('Next: PDF export')) failures.push(`the initiative reads ${JSON.stringify(init)}`)
+  if ((await page.getAttribute('#plan .plan-init', 'title')) !== null && (await page.getAttribute('#plan .plan-init', 'title')) === '') failures.push('the initiative has an empty title')
+  const agent = (await text('#plan .plan-agent'))[0] ?? ''
+  if (!agent.includes('Builder') || !agent.includes('Writing the PDF') || !agent.includes('5 min') || !agent.includes('bil-7')) failures.push(`the builder reads ${JSON.stringify(agent)}`)
+  const tickets = await page.locator('#plan .plan-ticket').count()
+  if (tickets !== 1) failures.push(`bil-7 is listed ${tickets} times`)
+  const font = await page.locator('#plan .plan-key').first().evaluate(el => getComputedStyle(el).fontFamily)
+  if (!/mono|Menlo/i.test(font)) failures.push(`the ticket's key is set in ${font}`)
+  if (await page.locator('#plan hr, #plan [class*="stop" i], #plan [class*="assign" i]').count()) failures.push('the plan has a rule, Stop or Assign')
+  const flat = await page.evaluate(() => [...document.querySelectorAll('#plan *')].some(el => getComputedStyle(el).borderBottomWidth !== '0px' && getComputedStyle(el).borderBottomStyle !== 'none' && el.tagName !== 'INPUT' && !el.closest('button')))
+  if (flat) failures.push('something in the plan draws a rule')
+  console.log('csp-check: the plan column showed the initiative with its progress and Next, the builder with its one ticket, the key in monospace, and no rules')
+
+  // A Needs You row quotes itself into the orchestrator's box and sends nothing.
+  const rowsText = await text('#plan .plan-need')
+  if (rowsText.length !== 2) failures.push(`the plan's Needs You lists ${JSON.stringify(rowsText)}`)
+  const composes = () => (existsSync(join(runner.dir, 'composed')) ? readFileSync(join(runner.dir, 'composed'), 'utf8') : '')
+  const before = composes()
+  await page.locator('#plan .plan-need').first().click()
+  await page.waitForFunction(() => !document.getElementById('pane').hidden && document.querySelector('.chat-host:not([hidden]) .chat-input')?.value.includes('About'), null, { timeout: 30_000 })
+  const boxText = await page.inputValue('.chat-host:not([hidden]) .chat-input')
+  if (boxText !== 'About \u201CRun the invoice tests?\u201D: ') failures.push(`the quote reads ${JSON.stringify(boxText)}`)
+  if (composes() !== before) failures.push('quoting sent a message')
+  console.log('csp-check: a Needs You row left its quote in the orchestrator’s box, unsent')
+
+  // A ticket opens its card; the sheet closes back to the plan.
+  await page.click('#show-plan')
+  await page.locator('#plan .plan-ticket').first().click()
+  await page.waitForSelector('#detail[open] .detail-note', { timeout: 30_000 })
+  if (!(await page.textContent('#detail')).includes('bil-7')) failures.push("the ticket's card sheet is not bil-7's")
+  await page.click('#detail-close')
+  await page.waitForFunction(() => !document.getElementById('detail').open)
+
+  // An agent opens its terminal.
+  await page.click('#show-plan')
+  await page.locator('#plan .plan-agent-head').first().click()
+  await page.waitForFunction(() => document.querySelector('.terminal-choice[aria-current="true"]')?.textContent === 'billing shell', null, { timeout: 30_000 })
+  console.log('csp-check: a ticket opened its card and the builder opened its terminal')
+  await page.click('#show-plan')
+  await shoot(page, 'workspace-plan')
 }
 
 /// A card's detail (ov-871), after `workspaceWalk`, on Billing.
@@ -789,13 +840,13 @@ async function detailWalk(page) {
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   console.log('csp-check: Details opened the card, a note and the PDF answer reached the runner, and closing it put focus back')
 
-  // And from a plan card.
+  // And from a ticket on the plan.
   await page.click('#show-plan')
-  await page.waitForSelector('#plan .plan-chip', { timeout: 30_000 })
-  await page.locator('#plan .plan-card', { hasText: 'Writing the PDF' }).click({ position: { x: 20, y: 10 } })
+  await page.waitForSelector('#plan .plan-ticket', { timeout: 30_000 })
+  await page.locator('#plan .plan-ticket', { hasText: 'bil-7' }).click()
   await page.waitForSelector('#detail[open] .detail-note', { timeout: 30_000 })
-  if (!(await page.textContent('#detail-title')).includes('Invoice export')) failures.push('a plan card did not open its card')
-  else console.log('csp-check: a plan card opened its card’s detail')
+  if (!(await page.textContent('#detail-title')).includes('Invoice export')) failures.push('a plan ticket did not open its card')
+  else console.log('csp-check: a plan ticket opened its card’s detail')
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.getElementById('detail').open)
   await page.click('#show-terminals')
@@ -1039,8 +1090,8 @@ try {
 
       // The plan tab reads the board's plan over the same connection (ov-775).
       await page.click('#show-plan')
-      await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Frosted window plane'), null, { timeout: 30_000 })
-      console.log('csp-check: the Plan tab showed the runner’s theme and its Next line')
+      await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Visual language'), null, { timeout: 30_000 })
+      console.log('csp-check: the Plan tab showed the runner’s theme')
       await page.click('#show-terminals')
       await shoot(page, 'terminal')
 
