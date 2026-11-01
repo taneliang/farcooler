@@ -62,7 +62,7 @@ struct MainCardsTests {
             // Not the plan's home: since ov-867 (C10f) it sits on the window's
             // plane beside the orchestrator, and its agents' cards are the fills.
             ("plan-theme", AnyView(PlanPageView(plan: plan, page: .theme("t"), context: context))),
-            ("plan-lane", AnyView(PlanPageView(plan: plan, page: .lane("l"), context: context))),
+            ("plan-ticket", AnyView(PlanPageView(plan: plan, page: .ticket("t"), context: context))),
             ("plan-page", AnyView(PlanPageView(plan: plan, page: .page("p"), context: context))),
             (
                 "worktree",
@@ -209,7 +209,7 @@ struct MainCardsTests {
         // Paper as a surface's fill, by count: the card itself, and the plan
         // peeked over the chat, a card that floats over a card. Anything
         // else is a card drawn by hand beside `contentCard()`, which a change
-        // to its gutter or radius would leave behind (train 1004r, M1).
+        // to its gutter or radius would leave behind (landing 1004r, M1).
         let fills: [String: Int] = ["PaneCanvas.swift": 1, "Plan/PlanHome.swift": 1]
         var offenders: [String] = []
         for case let url as URL in walker where url.pathExtension == "swift" {
