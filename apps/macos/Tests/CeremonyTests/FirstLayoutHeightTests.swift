@@ -71,21 +71,27 @@ struct FirstLayoutHeightTests {
     @Test("The overview's theme cards are their real height on the first pass: what's under them doesn't move")
     func themesOnFirstPass() async throws {
         let calls = PlanViewTests.Calls()
-        // The fixture's landed lane is "today" only in some time zones: it
-        // landed at 07:10 UTC and the plan's clock reads 08:00 UTC, so on CI
+        // The fixture's landed ticket is "today" only in some time zones: it
+        // landed at 07:00 UTC and the plan's clock reads 08:00 UTC, so on CI
         // (UTC) a Landed Today section sits under the themes and its header
         // is counted as a gap, while on a Pacific Mac it falls on the day
         // before and there's none. Move it three days back, so the overview
         // ends at the themes in every zone.
         var plan = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
-        var lanes = try #require(plan["lanes"] as? [[String: Any]])
-        for index in lanes.indices where lanes[index]["state"] as? String == "landed" {
-            lanes[index]["state_since"] = 1_800_000_000_000 - 3 * 24 * 3_600_000
+        var lines = try #require(plan["lines"] as? [[String: Any]])
+        for index in lines.indices where lines[index]["stage"] as? String == "landed" {
+            lines[index]["stage_since"] = 1_800_000_000_000 - 3 * 24 * 3_600_000
         }
-        plan["lanes"] = lanes
+        plan["lines"] = lines
         // And no Cost section (ov-307) under them either: this is about the
         // theme cards' height, so the overview must end at them.
         plan["cost"] = NSNull()
+        // Nor the line under them that says what moved outside every theme:
+        // the fixture's landing ticket (ov-4) is in none, and it counts cards
+        // to tidy (off the line, landed but not closed).
+        plan["lines"] = (plan["lines"] as? [[String: Any]] ?? []).filter { $0["key"] as? String != "ov-4" }
+        plan["off_the_line"] = [Any]()
+        plan["landed_not_closed"] = [Any]()
         calls.plan = try JSONSerialization.data(withJSONObject: plan)
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
         await store.plan.reload()
