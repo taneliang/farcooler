@@ -258,6 +258,23 @@ def expand(text, ctx):
     return re.sub(r"\$\{\{(.*?)\}\}", sub, text)
 
 
+def web_asset_skips(steps):
+    """Carry only the web asset producer's deliberate skip to its dry-run.
+
+    A producer that runs (even if it later fails) must not hide a consumer's
+    failure. Track channels separately because both builds write the same dist.
+    """
+    producers = {}
+    for step in steps:
+        build = re.search(r'WEB_WASM_DIR=.*?\./build\.sh --channel (stable|canary)\b', step.run)
+        if build:
+            producers[build.group(1)] = step.skip
+        if re.search(r'\bnpx wrangler deploy --dry-run\b', step.run):
+            channel = "canary" if re.search(r'--env\s+canary\b', step.run) else "stable"
+            if producers.get(channel) and not step.skip:
+                step.skip = f"{channel} web asset build skipped ({producers[channel]}); dry-run left to CI"
+
+
 def steps_for(job, workflows, ctx):
     """The Steps of one job, skip reasons attached."""
     text = workflows["ci"]
@@ -294,6 +311,8 @@ def steps_for(job, workflows, ctx):
                 env = {k: expand(v, ctx) for k, v in env.items()}
                 run = expand(run, ctx)
             steps.append(Step(job, name, run, wd, env, skip))
+    if job == "web":
+        web_asset_skips(steps)
     return steps
 
 
@@ -871,6 +890,28 @@ def _self_test():
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
     expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
     expect("the web job leaves the Linux downloads to CI", any(s.skip and "curl" in s.run for s in plans["web"]), True)
+
+    # The real CI producers and consumers must stay paired by channel. A skipped
+    # producer cannot supply dist, even if a stale dist happens to exist locally.
+    web = plans["web"]
+    for channel, flag in (("stable", ""), ("canary", "--env canary")):
+        producers = [s for s in web if f'./build.sh --channel {channel}' in s.run and 'WEB_WASM_DIR=' in s.run]
+        consumers = [s for s in web if 'npx wrangler deploy --dry-run' in s.run and (('--env canary' in s.run) == bool(flag))]
+        expect(f"{channel} has one CI asset producer and dry-run", (len(producers), len(consumers)), (1, 1))
+        if producers and consumers:
+            expect(f"{channel} skipped producer skips dry-run with reason", bool(producers[0].skip and consumers[0].skip and "build" in consumers[0].skip), True)
+    # A runnable producer, including one that fails at runtime, cannot turn a
+    # missing input into a skip. Exercise the real runner's failure path too.
+    fixture = [Step("web", "build", 'WEB_WASM_DIR=x ./build.sh --channel stable --build sha\n'),
+               Step("web", "dry-run", 'npx wrangler deploy --dry-run --outdir /tmp/web-build\n')]
+    web_asset_skips(fixture)
+    expect("a runnable producer does not hide missing inputs", fixture[1].skip, None)
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        failed_build = run_step_safely(Step("web", "build", "exit 7\n"), t, {"PATH": "/usr/bin:/bin"}, t, t)
+        missing_dist = run_step_safely(Step("web", "dry-run", "test -d dist\n"), t, {"PATH": "/usr/bin:/bin"}, t, t)
+        expect("a failed producer remains a failure", failed_build[3], False)
+        expect("a missing input remains a failure", missing_dist[3], False)
 
     # The iOS job compiles what CI's does (ov-812): the generated project's
     # FarCooler scheme, build-for-testing, after the frameworks and the project.
