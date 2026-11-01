@@ -382,6 +382,7 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         ("a ticket's checkout", ticket(&|p| p.worktree_path = Some("/elsewhere".into()))),
         ("a ticket's checkout by id", ticket(&|p| p.worktree_id = Some(id_bytes(Uuid::now_v7())))),
         ("a ticket's stack", ticket(&|p| p.stack_parent = Some(id_bytes(Uuid::now_v7())))),
+        ("a ticket's pull request", ticket(&|p| p.pr_number = Some(12))),
         ("an agent recorded", Request {
             method: "agent.record".into(),
             payload: Some(P::AgentRecord(pb::AgentRecord { harness: "claude".into(), subagent_id: "a-1".into(), actor: "user".into(), ..Default::default() })),

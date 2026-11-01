@@ -331,3 +331,70 @@ fn an_empty_board_moves_and_the_move_runs_once() {
     let last = crate::migrate::MIGRATIONS.last().unwrap();
     assert!(std::ptr::fn_addr_eq(last.0, LINE_MIGRATION.0), "registered, last");
 }
+
+/// A lane with no `lane_tasks` row is named after its card: `ov-10` exactly,
+/// and `ov-11-fix` by a suffix. Each takes its card's ticket, landed SHA,
+/// train and history, and a lane's title survives in the carried-over event.
+#[test]
+fn a_lane_named_after_its_card_carries_that_card_over() {
+    let (b, ()) = realistic_board_with(|conn| {
+        let ws: Vec<u8> = conn.query_row("SELECT id FROM workspaces", [], |r| r.get(0)).unwrap();
+        let named = Uuid::now_v7();
+        let suffixed = Uuid::now_v7();
+        let train: Vec<u8> = conn.query_row("SELECT id FROM board_trains WHERE name = 'train-71'", [], |r| r.get(0)).unwrap();
+        for (id, name, state, sha, title) in [
+            (named, "ov-10", "landed", Some("beef123"), "The owner's words"),
+            (suffixed, "ov-11-fix", "building", None, ""),
+        ] {
+            conn.execute(
+                "INSERT INTO lanes (id, workspace_id, name, state, branch, landed_sha, state_since, created_at, resource_version, title)
+                 VALUES (?1, ?2, ?3, ?4, ?3, ?5, 1793505471290, 1793505471290, 1, ?6)",
+                params![id.as_bytes().to_vec(), ws, name, state, sha, title],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO train_events (id, train_id, at, actor, kind, lane_id, extra)
+                 VALUES (?1, ?2, 1793505471291, 'manager', 'lane_on', ?3, '{}')",
+                params![Uuid::now_v7().as_bytes().to_vec(), train, id.as_bytes().to_vec()],
+            )
+            .unwrap();
+        }
+        // A lane that names no card is still dropped.
+        conn.execute(
+            "INSERT INTO lanes (id, workspace_id, name, state, state_since, created_at, resource_version)
+             VALUES (?1, ?2, 'red-69', 'dropped', 1, 1, 1)",
+            params![Uuid::now_v7().as_bytes().to_vec(), ws],
+        )
+        .unwrap();
+    });
+    let line = |i: usize| b.store.ticket_line(b.t[i].id).unwrap();
+    assert_eq!(b.store.ticket_lines(b.main).unwrap().len(), 10, "red-69 adds none");
+    assert_eq!((line(9).stage, line(9).landed_sha.as_deref()), (Stage::Landed, Some("beef123")));
+    assert_eq!(line(10).stage, Stage::Building);
+    assert_eq!(line(10).branch, "ov-11-fix");
+
+    let landing = b.store.landings(b.main).unwrap().into_iter().find(|l| l.number == 71).unwrap();
+    for i in [9, 10] {
+        assert!(landing.tickets.contains(&b.t[i].id), "ticket {i} is on train-71");
+        let events = b.store.line_events(LineSubject::Ticket(b.t[i].id), 0).unwrap();
+        assert!(events.iter().any(|e| e.kind == "moved"), "ticket {i} has its history");
+        assert!(events.iter().any(|e| e.kind == "ticket_on"), "ticket {i} has its train event");
+    }
+    let moved = b.store.line_events(LineSubject::Ticket(b.t[9].id), 0).unwrap();
+    assert!(
+        moved.iter().any(|e| e.kind == "moved" && e.body == "Carried over from lane ov-10: The owner's words"),
+        "the lane's title survives"
+    );
+}
+
+/// A builder pane no worker record titled takes its lane's title, else name.
+#[test]
+fn a_builder_pane_takes_its_lanes_name_as_its_title() {
+    let b = realistic_board();
+    let agents = b.store.agents(b.main, true).unwrap();
+    let site = agents
+        .iter()
+        .find(|a| matches!(&a.place, AgentPlace::Pane { terminal } if format!("pane:{terminal}") == "pane:01a19541-ab29-78d3-ac4a-a02745560c8f"))
+        .expect("the site lane's pane");
+    assert_eq!(site.title, "site-4");
+}

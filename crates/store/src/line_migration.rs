@@ -1,5 +1,6 @@
 //! The one-way move from lanes and trains to agents, the line and landings
-//! (ov-872, slice 2).
+//! (ov-872, slice 3 of the card; the 67th schema step, the 58th entry of
+//! `MIGRATIONS`).
 //!
 //! # What it does
 //!
@@ -12,7 +13,10 @@
 //!   that lane's id in `same_branch`, so they still land together. A lane's
 //!   stage word maps over (`stage_of`), its branch, worktree, reason, landed
 //!   SHA and hold carry over, and the plan's lane order becomes a ticket order
-//!   numbered 1, 2, 3 on each board. A lane with no card has no ticket.
+//!   numbered 1, 2, 3 on each board. A lane with no `lane_tasks` row is named
+//!   after its card (`ov-582`, or `ov-204-apple` for `ov-204`) and takes that
+//!   card on its board; only a lane that names no card has no ticket. A lane's
+//!   title goes in its ticket's "Carried over" event.
 //! - **Agents.** One row per agent: each lane agent, train agent and worker
 //!   record, merged by board, harness and id, plus each orchestrator pane. A
 //!   `pane:<terminal>` id is a pane; any other is a subagent.
@@ -38,7 +42,7 @@ use crate::tasks::now_millis;
 
 type Id = Vec<u8>;
 
-/// The last entry of `MIGRATIONS`, the 58th.
+/// The last entry of `MIGRATIONS`: schema step 67, the 58th entry.
 pub(crate) const LINE_MIGRATION: (fn(&Transaction) -> rusqlite::Result<()>, Older) =
     (migration_0067_agents_and_the_line, Older::Refused);
 
@@ -161,6 +165,7 @@ struct OldLane {
     id: Id,
     workspace: Id,
     name: String,
+    title: String,
     state: String,
     reason: String,
     plan_rank: Option<i64>,
@@ -225,6 +230,8 @@ struct Gathered {
     parent: Option<Id>,
     model: String,
     title: String,
+    /// What the earliest lane it worked called itself: its title, else its name.
+    lane_label: Option<String>,
     started: Option<i64>,
     ended: Option<i64>,
     open: bool,
@@ -281,7 +288,7 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
     let lanes: Vec<OldLane> = {
         let mut stmt = tx.prepare(
             "SELECT id, workspace_id, name, state, reason, plan_rank, worktree_id, worktree_path, branch, landed_sha,
-                    state_since, created_at, held_off
+                    state_since, created_at, held_off, title
                FROM lanes ORDER BY created_at, id",
         )?;
         stmt.query_map([], |r| {
@@ -299,6 +306,7 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
                 state_since: r.get(10)?,
                 created_at: r.get(11)?,
                 held_off: r.get(12)?,
+                title: r.get(13)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?
@@ -309,7 +317,21 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
            SELECT DISTINCT lt.lane_id, lt.task_id, t.created_at AS task_created
              FROM lane_tasks lt JOIN lanes l ON l.id = lt.lane_id
              JOIN tasks t ON t.id = lt.task_id AND t.workspace_id = l.workspace_id;
-         CREATE TEMP TABLE ticket_lane (task_id BLOB PRIMARY KEY, lane_id BLOB NOT NULL);",
+         CREATE TEMP TABLE ticket_lane (task_id BLOB PRIMARY KEY, lane_id BLOB NOT NULL);
+         -- A lane with no lane_tasks row is named after its card: the exact
+         -- key, else the longest key it extends with a `-suffix`.
+         INSERT INTO lane_cards
+           SELECT l.id, t.id, t.created_at
+             FROM lanes l JOIN tasks t ON t.workspace_id = l.workspace_id AND t.key = l.name COLLATE NOCASE
+            WHERE NOT EXISTS (SELECT 1 FROM lane_tasks x WHERE x.lane_id = l.id);
+         INSERT INTO lane_cards
+           SELECT l.id, t.id, t.created_at
+             FROM lanes l JOIN tasks t ON t.workspace_id = l.workspace_id
+              AND lower(l.name) LIKE lower(t.key) || '-%'
+            WHERE NOT EXISTS (SELECT 1 FROM lane_tasks x WHERE x.lane_id = l.id)
+              AND NOT EXISTS (SELECT 1 FROM lane_cards c WHERE c.lane_id = l.id)
+              AND NOT EXISTS (SELECT 1 FROM tasks u WHERE u.workspace_id = l.workspace_id
+                                AND lower(l.name) LIKE lower(u.key) || '-%' AND length(u.key) > length(t.key));",
     )?;
     let cards: Vec<(Id, Id)> = {
         let mut stmt = tx.prepare("SELECT lane_id, task_id FROM lane_cards ORDER BY task_created, task_id")?;
@@ -383,8 +405,19 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
         tx.execute("INSERT INTO ticket_lane (task_id, lane_id) VALUES (?1, ?2)", params![task, lane.id])?;
         tx.execute(
             "INSERT INTO line_events (id, at, actor, task_id, kind, body, extra)
-             VALUES (?1, ?2, 'runner', ?3, 'moved', ?4, json_object('lane', ?5))",
-            params![Uuid::now_v7().as_bytes().to_vec(), now, task, format!("Carried over from lane {}.", lane.name), lane.name],
+             VALUES (?1, ?2, 'runner', ?3, 'moved', ?4, json_object('lane', ?5, 'title', ?6))",
+            params![
+                Uuid::now_v7().as_bytes().to_vec(),
+                now,
+                task,
+                if lane.title.is_empty() {
+                    format!("Carried over from lane {}.", lane.name)
+                } else {
+                    format!("Carried over from lane {}: {}", lane.name, lane.title)
+                },
+                lane.name,
+                lane.title
+            ],
         )?;
     }
 
@@ -400,18 +433,20 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
             g.saw(now, None, "");
         }
     }
-    let lane_agents: Vec<(Id, Id, String, String, String, String, i64, Option<i64>)> = {
+    let lane_agents: Vec<(Id, Id, String, String, String, String, i64, Option<i64>, String)> = {
         let mut stmt = tx.prepare(
-            "SELECT a.lane_id, l.workspace_id, a.harness, a.agent_id, a.role, a.model, a.started_at, a.ended_at
+            "SELECT a.lane_id, l.workspace_id, a.harness, a.agent_id, a.role, a.model, a.started_at, a.ended_at,
+                    coalesce(nullif(l.title, ''), l.name)
                FROM lane_agents a JOIN lanes l ON l.id = a.lane_id ORDER BY a.started_at",
         )?;
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))?
             .collect::<rusqlite::Result<_>>()?
     };
-    for (_, workspace, harness, key, role, model, started, ended) in &lane_agents {
+    for (_, workspace, harness, key, role, model, started, ended, label) in &lane_agents {
         let g = gather(&mut agents, workspace, harness, key);
         if g.lane_role.as_ref().is_none_or(|(at, _)| started < at) {
             g.lane_role = Some((*started, role.clone()));
+            g.lane_label = Some(label.clone());
         }
         g.saw(*started, *ended, model);
     }
@@ -472,6 +507,8 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
         let title = if g.title.is_empty() && subagent.is_some() {
             tx.query_row("SELECT description FROM subagent_descriptions WHERE agent_id = ?1", params![g.key], |r| r.get(0))
                 .unwrap_or_default()
+        } else if g.title.is_empty() && !g.orchestrator {
+            g.lane_label.clone().unwrap_or_default()
         } else {
             g.title.clone()
         };
@@ -519,7 +556,7 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
     for (lane, task) in &cards {
         cards_of_lane.entry(lane).or_default().push(task);
     }
-    for (lane, workspace, harness, key, role, _, started, ended) in &lane_agents {
+    for (lane, workspace, harness, key, role, _, started, ended, _) in &lane_agents {
         let agent = id_of(workspace, harness, key);
         let role = if matches!(role.as_str(), "build" | "fix" | "review") { role.as_str() } else { "build" };
         for task in cards_of_lane.get(lane).into_iter().flatten() {

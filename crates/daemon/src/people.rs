@@ -589,6 +589,7 @@ fn records_the_orchestrators(req: &Request) -> bool {
                 || p.worktree_path.is_some()
                 || p.worktree_id.is_some()
                 || p.stack_parent.is_some()
+                || p.pr_number.is_some()
         }
         Some(P::AgentRecord(_) | P::AgentWork(_) | P::AgentEnd(_)) => true,
         Some(P::LandingStart(_)) => true,
