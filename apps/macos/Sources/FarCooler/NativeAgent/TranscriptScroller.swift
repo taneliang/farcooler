@@ -558,8 +558,9 @@ final class TranscriptScroller: NSObject {
     private var monitor: Any?
 
     /// How much of its height the clip moves a frame, in a gesture, when
-    /// one frame's scroll would take it past every row on screen (ov-862). A frame 200 to 300 ms late in a 12,000 pt/s fling scrolls
-    /// 2,500 to 3,300 pt at once, past every row the lazy stack has built;
+    /// one frame's scroll would take it past every row on screen (ov-862).
+    /// A frame 200 to 300 ms late in a 12,000 pt/s fling scrolls 2,500 to
+    /// 3,300 pt at once, past every row the lazy stack has built;
     /// the stack, bottom-aligned, then puts the rows it has where the clip
     /// went, the rows on screen moving 100 to 800 pt, and the rest of the
     /// scroll is lost. Moved a part of its height a frame, the clip always
@@ -575,6 +576,12 @@ final class TranscriptScroller: NSObject {
     /// The content resized since the last frame's step: the stack moved the
     /// clip by what it took off or put on above, so the step waits a frame.
     private var resizedSinceStep = false
+    /// Frames the carry has waited out without a step. A reply streaming
+    /// resizes the content every frame: past `carryWait`, what's left is
+    /// dropped, a part of a scroll lost being better than the clip moving
+    /// on its own after the reader has stopped.
+    private var carryWaited = 0
+    static let carryWait = 10
     /// How far, all told, this moved the clip from where the reader's
     /// scroll put it: plus what it cut from a move, less what it carried
     /// on after. For a test to read what the reader saw.
@@ -786,7 +793,15 @@ final class TranscriptScroller: NSObject {
         }
         if aimed != nil { settle() }
         if carry != 0 {
-            if resizedSinceStep { resizedSinceStep = false } else { carryOn() }
+            if !resizedSinceStep {
+                carryWaited = 0
+                carryOn()
+            } else if carryWaited >= Self.carryWait {
+                carry = 0
+            } else {
+                resizedSinceStep = false
+                carryWaited += 1
+            }
         }
         if widthLeft > 0 {
             widthLeft -= 1
@@ -838,6 +853,7 @@ final class TranscriptScroller: NSObject {
         let made = moved > 0 ? most : -most
         carry += moved - made
         resizedSinceStep = false
+        carryWaited = 0
         move(to: was.y + made, scroll)
         tick()
     }
