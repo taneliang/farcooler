@@ -238,8 +238,8 @@ sealed interface Route {
     ) : Route
 
     /**
-     * A theme's or lane's page of the plan layer on that board (ov-274), or
-     * an orchestrator's page (ov-285): [kind] is `theme`, `lane` or `page`,
+     * A theme's or ticket's page of the plan layer on that board (ov-274), or
+     * an orchestrator's page (ov-285): [kind] is `theme`, `ticket` or `page`,
      * [pageId] the plan's own id or the page's slot. Not a place a relaunch
      * reopens; its workspace is.
      */
@@ -304,7 +304,7 @@ enum class WorkspaceTab(val title: String) {
 
     /**
      * The One tree's root, titled Themes (ov-300): the workspace's themes, its
-     * cards, their lanes and their terminals, then the main checkout and the
+     * cards, their tickets and their terminals, then the main checkout and the
      * loose worktrees. It took the Worktrees tab's place and keeps its wire
      * name, so a saved stack and a link that named Worktrees land here: every
      * worktree is in the tree, under its card or under Loose worktrees.

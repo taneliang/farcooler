@@ -96,7 +96,7 @@ fun PlanBudgetLine(budget: PlanBudget, modifier: Modifier = Modifier) {
 fun planThemeHasSpend(theme: PlanTheme): Boolean =
     (theme.spend?.totalTokens ?: 0L) > 0 || theme.budgetTokens != null || PlanCostWords.trend(theme.trendTokens) != null
 
-/** A theme's spend: what its lanes spent, the budget against it, and the last seven days. Draw it only when [planThemeHasSpend]. */
+/** A theme's spend: what its tickets spent, the budget against it, and the last seven days. Draw it only when [planThemeHasSpend]. */
 @Composable
 fun PlanThemeSpend(theme: PlanTheme, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().testTag("plan-theme-spend"), verticalArrangement = Arrangement.spacedBy(8.dp)) {

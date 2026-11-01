@@ -1,6 +1,6 @@
 package com.farcooler.model
 
-// The agents at work, as one list (ov-619, ov-641): Far Cooler's own agents (a lane's pane, a task's pane, an
+// The agents at work, as one list (ov-619, ov-641): Far Cooler's own agents (a ticket's pane, a task's pane, an
 // orchestrator) and the Claude subagents an agent started, read the same way. The Android twin of AgentKit's
 // `RunningAgents.swift`, rule for rule: the Agents card beside Now/Next counts it and the agents view it opens lists it.
 //

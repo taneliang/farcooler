@@ -9,15 +9,15 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-// Trains (ov-309) and the CI the runner reads (ov-306), read with the plan
-// (`plan.get`'s `trains` and `ci`, the shape the CLI's `plan --json` prints
+// Landings (ov-309, ov-872) and the CI the runner reads (ov-306), read with the plan
+// (`plan.get`'s `landings` and `ci`, the shape the CLI's `plan --json` prints
 // and `test/fixtures/plan.json` holds). The Android twin of AgentKit's
-// `PlanTrains.swift`. EXPERIMENTAL with the plan layer, behind the runner's
-// `board_trains` capability. Copy is Material's: sentence case.
+// `PlanLandings.swift`. EXPERIMENTAL with the plan layer. Copy is Material's:
+// sentence case.
 
-/** Where a train stands. */
-enum class TrainState(val wire: String) {
-    INTEGRATING("integrating"),
+/** Where a landing stands. */
+enum class LandingState(val wire: String) {
+    OPEN("open"),
     GATING("gating"),
     PUSHED("pushed"),
     GREEN("green"),
@@ -30,45 +30,53 @@ enum class TrainState(val wire: String) {
     val isSettled: Boolean get() = this == LANDED || this == DROPPED
 
     companion object {
-        fun parse(word: String?): TrainState = entries.firstOrNull { it.wire == word } ?: UNKNOWN
+        fun parse(word: String?): LandingState = entries.firstOrNull { it.wire == word } ?: UNKNOWN
     }
 }
 
-/** A lane on a train, by id and name. */
-data class PlanTrainLane(val lane: String, val name: String)
+/** How a landing reaches main. */
+enum class LandingRoute(val wire: String) {
+    PUSH("push"), PULL_REQUEST("pull_request"), ASK("ask"), UNKNOWN("unknown");
 
-data class PlanTrain(
+    companion object {
+        fun parse(word: String?): LandingRoute = entries.firstOrNull { it.wire == word } ?: UNKNOWN
+    }
+}
+
+/** Tickets that land on main together, after one round of checks. */
+data class PlanLanding(
     val id: String,
-    val name: String,
+    /** Its number: "Landing 9". */
+    val number: Int,
     /** What it was cut from: `origin/main`, or a SHA. */
     val base: String,
     val pushedSha: String?,
-    val state: TrainState,
+    val state: LandingState,
     val stateSince: Long,
-    val lanes: List<PlanTrainLane>,
+    val route: LandingRoute = LandingRoute.UNKNOWN,
+    /** The tickets it carries, by their cards. */
+    val tickets: List<PlanCardRef>,
     /** The CI subject its pushed SHA is read under; empty before it has one. */
     val ciSubject: String,
-    /** What a person reads for it (ov-462): the title the orchestrator wrote, else "Train 72". Null from a runner before it. */
+    /** What a person reads for it (ov-462): the title the orchestrator wrote, else "Landing 72". */
     val title: String? = null,
-    /** One line of what it carries: its lanes' titles (ov-462). */
+    /** One line of what it carries: its tickets' titles (ov-462). */
     val summary: String? = null,
-    /** The card its integrating agent works for it (ov-461). */
-    val card: PlanCardRef? = null,
-    /** The agent integrating it, with its state and spend (ov-461). */
-    val agent: PlanTrainAgent? = null,
-    /** The phase the runner derived (ov-503, behind `board_train_phase`); null from a runner without it, and for phase 0. */
-    val phase: TrainPhase? = null,
-    /** When the train entered [phase], in ms; null with it. */
+    /** The agent landing it, by id (ov-872); null with none. Look it up in [Plan.agents]. */
+    val lander: String? = null,
+    /** Gathering ready tickets while the landing ahead finishes. */
+    val collecting: Boolean = false,
+    /** The phase the runner derived (ov-503); null from a runner without it, and for phase 0. */
+    val phase: LandingPhase? = null,
+    /** When the landing entered [phase], in ms; null with it. */
     val phaseSince: Long? = null,
+    /** What it spent, its lander's included (ov-872); null from a runner without it. */
+    val spend: PlanSpend? = null,
 ) {
-    /**
-     * "Train 72" read off the name, else the name: what every surface calls the train, as its heading and in a
-     * sentence (ov-514, ov-522). The title is its subtitle, never its name: a title can run to a line of its own, and
-     * people learn what a train is by seeing "Train N".
-     */
-    val label: String get() = TrainWords.number(name)?.let { "Train $it" } ?: name
+    /** "Landing 72": what every surface calls the landing, as its heading and in a sentence (ov-514, ov-522). The title is its subtitle, never its name. */
+    val label: String get() = label(number)
 
-    /** What it is for, under the label: the title without a "Train 72 ·" the runner put in front, or null when it has none or says no more than the label. */
+    /** What it is for, under the label: the title without a "Landing 72 ·" the runner put in front, or null when it has none or says no more than the label. */
     val subtitle: String?
         get() {
             var t = title?.takeIf { it.isNotEmpty() && it != label } ?: return null
@@ -76,46 +84,29 @@ data class PlanTrain(
             return t.takeIf { it.isNotEmpty() }
         }
 
-    /** The slug, shown second where there is room: null when the label is the name already. */
-    val slug: String? get() = name.takeIf { label != it }
-
-    /** Its lanes' titles on one line, or null when it carries none. */
+    /** Its tickets' titles on one line, or null when it carries none. */
     val carries: String? get() = summary?.takeIf { it.isNotEmpty() }
 
     companion object {
-        fun decodeAll(plan: JsonObject): List<PlanTrain> = plan.items("trains").map {
+        /** "Landing 72". */
+        fun label(number: Int): String = "Landing $number"
+
+        fun decodeAll(plan: JsonObject): List<PlanLanding> = plan.items("landings").map {
             val o = it.jsonObject
-            PlanTrain(
-                id = o.text("id"), name = o.text("name"), base = o.text("base"), pushedSha = o.maybeText("pushed_sha"),
-                state = TrainState.parse(o.maybeText("state")), stateSince = o["state_since"]?.jsonPrimitive?.longOrNull ?: 0L,
-                lanes = o.items("lanes").map { l -> l.jsonObject.let { PlanTrainLane(it.text("lane"), it.text("name")) } },
+            PlanLanding(
+                id = o.text("id"), number = o["number"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0, base = o.text("base"),
+                pushedSha = o.maybeText("pushed_sha"),
+                state = LandingState.parse(o.maybeText("state")), stateSince = o["state_since"]?.jsonPrimitive?.longOrNull ?: 0L,
+                route = LandingRoute.parse(o.maybeText("route")),
+                tickets = o.items("tickets").map { t -> t.jsonObject.let { PlanCardRef(it.text("task"), it.text("key")) } },
                 ciSubject = o.text("ci_subject"), title = o.maybeText("title"), summary = o.maybeText("summary"),
-                phase = o.maybeText("phase")?.let(TrainPhase::parse),
+                lander = o.maybeText("lander"), collecting = o["collecting"]?.jsonPrimitive?.contentOrNull == "true",
+                phase = o.maybeText("phase")?.let(LandingPhase::parse),
                 phaseSince = o["phase_since"]?.jsonPrimitive?.longOrNull,
-                card = (o["card"] as? JsonObject)?.let { PlanCardRef(it.text("task"), it.text("key")) },
-                agent = (o["agent"] as? JsonObject)?.let { a ->
-                    PlanTrainAgent(
-                        harness = a.text("harness"), agentId = a.text("agent_id"), model = a.text("model"),
-                        startedAt = a["started_at"]?.jsonPrimitive?.longOrNull ?: 0L,
-                        endedAt = a["ended_at"]?.jsonPrimitive?.longOrNull,
-                        spend = Plan.spend(a["spend"] as? JsonObject),
-                    )
-                },
+                spend = (o["spend"] as? JsonObject)?.let { Plan.spend(it) },
             )
         }
     }
-}
-
-/** The agent integrating a train (ov-461): its state and what it has spent. Never a lane of the train's own name. */
-data class PlanTrainAgent(
-    val harness: String,
-    val agentId: String,
-    val model: String,
-    val startedAt: Long,
-    val endedAt: Long?,
-    val spend: PlanSpend,
-) {
-    val isWorking: Boolean get() = endedAt == null
 }
 
 /** Where a CI subject stands, over all its runs. */
@@ -162,9 +153,6 @@ data class PlanCiRead(
     }
 }
 
-/** One group of Now: a train not yet landed and its lanes working now, or the lanes on none. */
-data class PlanNowGroup(val train: PlanTrain?, val lanes: List<PlanLane>)
-
 /** The read a subject names: `sha:<sha>` matches a read of the same commit however short either was written. */
 fun Plan.ci(subject: String): PlanCiRead? {
     val wanted = subject.lowercase()
@@ -177,25 +165,8 @@ fun Plan.ci(subject: String): PlanCiRead? {
     }
 }
 
-/** A train's CI, once the runner has read it. */
-fun Plan.ciOf(train: PlanTrain): PlanCiRead? = if (train.ciSubject.isEmpty()) null else ci(train.ciSubject)
-
-/** Now as row groups (ov-309): each live train heading the lanes on it, then the lanes on none. */
-val Plan.nowGroups: List<PlanNowGroup>
-    get() {
-        // A lane named like a live train is the train's agent, drawn by the train (ov-461).
-        val shadows = laneIsTrain.map { it.lane }.toSet()
-        val lanes = (working + unranked).filter { it.id !in shadows }
-        val grouped = mutableSetOf<String>()
-        val groups = trains.filter { !it.state.isSettled }.map { train ->
-            val ids = train.lanes.map { it.lane }.toSet()
-            val mine = lanes.filter { it.id in ids }
-            grouped += mine.map { it.id }
-            PlanNowGroup(train, mine)
-        }
-        val rest = lanes.filter { it.id !in grouped }
-        return if (rest.isEmpty()) groups else groups + PlanNowGroup(null, rest)
-    }
+/** A landing's CI, once the runner has read it. */
+fun Plan.ciOf(landing: PlanLanding): PlanCiRead? = if (landing.ciSubject.isEmpty()) null else ci(landing.ciSubject)
 
 /** How many of the board's cards are in [status] (a board status's word, or `open`); null without the counts. */
 fun Plan.cardCount(status: String): Int? {
@@ -213,8 +184,8 @@ fun Plan.cardCount(status: String): Int? {
     }
 }
 
-/** The words for trains and CI, in Material's sentence case. */
-object TrainWords {
+/** The words for landings and CI, in Material's sentence case. */
+object LandingWords {
     fun ciStatus(status: CiStatus): String = when (status) {
         CiStatus.PASSED -> "Passed"
         CiStatus.FAILED -> "Failed"
@@ -232,14 +203,14 @@ object TrainWords {
         fun n(state: String) = read.jobs.count { it.state == state }
         val jobs = if (total == 1) "job" else "jobs"
         return when (read.status) {
-            // A canceled job is superseded, not failed (review train-1005c H1).
+            // A canceled job is superseded, not failed (review 1005c H1).
             CiStatus.FAILED -> "${n("failed")} of $total $jobs failed"
             CiStatus.RUNNING, CiStatus.QUEUED -> "${total - n("running") - n("queued")} of $total $jobs done"
             else -> "$total $jobs"
         }
     }
 
-    /** Older than this a read is stale: GitHub hasn't answered (review train-1005c M1); the CLI and AgentKit hold the same. */
+    /** Older than this a read is stale: GitHub hasn't answered (review 1005c M1); the CLI and AgentKit hold the same. */
     const val CI_STALE_AFTER_MS = 25 * 60_000L
 
     /** "as of 3 h ago" for a read that worked once and not lately; null while current or never read. */
@@ -249,22 +220,15 @@ object TrainWords {
     /** "Failed · 1 of 3 jobs failed". */
     fun ciSummary(read: PlanCiRead): String = listOfNotNull(ciStatus(read.status), ciJobs(read)).joinToString(" · ")
 
-    /** The integrating agent's state and spend: "Agent working · 120K tokens", "Agent finished". */
-    fun agent(agent: PlanTrainAgent): String {
-        val state = if (agent.isWorking) "Agent working" else "Agent finished"
+    /** The lander's state and spend: "Lander working · 120K tokens", "Lander finished". */
+    fun lander(agent: PlanAgent): String {
+        val state = if (agent.working) "Lander working" else "Lander finished"
         if (agent.spend.runs == 0 && agent.spend.unmeasuredAgents == 0) return state
         return "$state · ${PlanWords.spend(agent.spend)}"
     }
 
-    /** The number in `train-72` or `integ-72`: what a person calls the train. Null for any other name. */
-    fun number(name: String): Int? {
-        val lower = name.trim().lowercase()
-        val digits = listOf("train-", "integ-").firstOrNull { lower.startsWith(it) }?.let { lower.removePrefix(it) } ?: return null
-        return if (digits.isEmpty() || digits.length > 9 || !digits.all { it in '0'..'9' }) null else digits.toInt()
-    }
-
     /** Red, or its CI failed. */
-    fun needsAttention(train: PlanTrain, ci: PlanCiRead?): Boolean = train.state == TrainState.RED || ci?.needsAttention == true
+    fun needsAttention(landing: PlanLanding, ci: PlanCiRead?): Boolean = landing.state == LandingState.RED || ci?.needsAttention == true
 }
 
 private fun JsonObject.text(name: String): String = maybeText(name) ?: ""

@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A phone marks a lane's pull request ready and replies to a review thread (ov-317): AgentKit's `PhonePrActionsTests`.
+ * A phone marks a ticket's pull request ready and replies to a review thread (ov-317): AgentKit's `PhonePrActionsTests`.
  * The runner's answers are `test/fixtures/pr-actions/`, written by `the_answers_are_the_bytes_the_phones_read` in
  * `crates/client` from the wire messages, so the decoder is fed what the runner sends.
  */
@@ -38,9 +38,9 @@ class PrActionsTest {
     }
 
     @Test
-    fun `Mark ready names the lane and the number the row showed, never a URL`() {
-        val request = PrActions.readyRequest("lane-id", 41)
-        assertEquals(listOf("lane" to "lane-id", "pr_number" to 41), request)
+    fun `Mark ready names the ticket and the number the row showed, never a URL`() {
+        val request = PrActions.readyRequest("task-id", 41)
+        assertEquals(listOf("task" to "task-id", "pr_number" to 41), request)
         assertEquals(listOf("task" to "task-id", "body" to "Done.", "send" to false), PrActions.replyRequest("task-id", "Done.", false))
         assertEquals("Mark PR 41 ready for review?", PrActions.readyTitle(PlanPrStage(PlanPrStageKind.AGENT_REVIEW, prNumber = 41)))
         assertEquals("Mark ready for review?", PrActions.readyTitle(PlanPrStage(PlanPrStageKind.AGENT_REVIEW)))
@@ -88,7 +88,7 @@ class PrActionsTest {
 
     @Test
     fun `a refusal says what happened in words, never the runner's`() {
-        assertTrue(PrActions.refusal("invalid-argument", "lane_pr", "mark it ready").contains("no draft pull request"))
+        assertTrue(PrActions.refusal("invalid-argument", "ticket_pr", "mark it ready").contains("no draft pull request"))
         assertTrue(PrActions.refusal("invalid-argument", "thread_link", "reply").contains("Open it there"))
         assertTrue(PrActions.refusal("invalid-argument", "reply_body", "reply").contains("2000"))
         assertEquals("This thread was already answered.", PrActions.refusal("invalid-argument", "already_answered", "reply"))

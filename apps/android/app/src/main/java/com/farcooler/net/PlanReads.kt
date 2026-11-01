@@ -17,7 +17,7 @@ import kotlinx.serialization.json.put
 
 /**
  * The plan layer, as one connection reads it (ov-274): a board's plan, and a
- * theme's or lane's record. EXPERIMENTAL and opt-in: nothing is asked of a
+ * theme's or ticket's record. EXPERIMENTAL and opt-in: nothing is asked of a
  * runner without `board_plan`, and nothing until someone picks Plan on a
  * board. The rules are `model/Plan.kt`'s; this reads over the connection and
  * keeps the answers, as the iPhone's `ConnectionPlan.swift` does.
@@ -40,7 +40,7 @@ class PlanReads(
 
     private val _records = MutableStateFlow<Map<PlanPage, PlanRecord>>(emptyMap())
 
-    /** Each theme's and lane's record, by page, once read. */
+    /** Each theme's and ticket's record, by page, once read. */
     val records: StateFlow<Map<PlanPage, PlanRecord>> = _records.asStateFlow()
 
     /** Whether this runner keeps a plan: only then is there a control. */
@@ -51,7 +51,7 @@ class PlanReads(
     private val movedAgain = mutableSetOf<String>()
 
     /**
-     * The theme's or lane's page on screen, if one is: the only record a plan
+     * The theme's or ticket's page on screen, if one is: the only record a plan
      * notice reads again, rather than every page opened since.
      */
     @Volatile var openPage: PlanPage? = null
@@ -107,13 +107,13 @@ class PlanReads(
         set(workspaceId, PlanReadState.Loaded(plan.copy(rulings = moved)))
     }
 
-    /** A theme's or lane's record, for its page's timeline. One that doesn't come back leaves the page without; it doesn't wait on it. */
+    /** A theme's or ticket's record, for its page's timeline. One that doesn't come back leaves the page without; it doesn't wait on it. */
     suspend fun readRecord(page: PlanPage) {
         if (runnerCan() != true) return
         val subject = buildJsonObject {
             when (page) {
                 is PlanPage.Theme -> put("theme", page.id)
-                is PlanPage.Lane -> put("lane", page.id)
+                is PlanPage.Ticket -> put("task", page.id)
                 // An orchestrator's page has no record: it's read whole with the board's pages.
                 is PlanPage.Page -> return
             }

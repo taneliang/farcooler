@@ -64,11 +64,11 @@ class PageTest {
         assertEquals(PageStat("Fixing", "1", tone = PageTone.ATTENTION), (blocks[1] as PageBlock.Stats).items[2])
         assertEquals(PageStat("Build", "41 min", "one Mac slot"), (blocks[1] as PageBlock.Stats).items[3])
         assertEquals(listOf("done", "done", "active", "todo"), (blocks[2] as PageBlock.Steps).steps.map { it.state.wire })
-        assertEquals(PageBlock.Heading("Lanes"), blocks[3])
+        assertEquals(PageBlock.Heading("Tickets"), blocks[3])
         val table = blocks[4] as PageBlock.Table
-        assertEquals(listOf("Lane", "Cards", "Gate", "State"), table.columns.map { it.title })
+        assertEquals(listOf("Ticket", "Cards", "Gate", "State"), table.columns.map { it.title })
         assertTrue(table.columns[2].grow)
-        assertEquals(PageCell(ref = PageRef(PageTarget.Lane("ov-274-phones")), show = PageShow.STATE), table.rows[0][3])
+        assertEquals(PageCell(ref = PageRef(PageTarget.Ticket("ov-274")), show = PageShow.STATE), table.rows[0][3])
         val waiting = (blocks[6] as PageBlock.ListBlock).items
         assertEquals(PageRef(PageTarget.Ask("ov-274")), waiting[0].ref)
         assertEquals(PageState.WAITING, waiting[0].state)
@@ -86,15 +86,15 @@ class PageTest {
                 spoken = "ov-274, The Plan view on the phones, Needs decision"),
             world.resolve(PageRef(PageTarget.Task("OV-274"))),
         )
-        val lane = plan.lanes.first { it.name == "ov-274-phones" }
-        assertEquals(PageResolved("ov-274-phones", "In review · in integ-10", destination = PageDestination.Lane(lane.id)), world.resolve(PageRef(PageTarget.Lane("ov-274-phones"))))
+        val ticket = plan.tickets.first { it.key == "ov-274" }
+        assertEquals(PageResolved("ov-274", "In review", destination = PageDestination.Ticket(ticket.task)), world.resolve(PageRef(PageTarget.Ticket("ov-274"))))
         val theme = world.resolve(PageRef(PageTarget.Theme("Visual language"), label = "Visual"))
         assertEquals("Visual", theme.name)
         assertEquals("0 of 4 done", theme.status)
         assertEquals(PageResolved("Spend", destination = PageDestination.Page("spend")), world.resolve(PageRef(PageTarget.Page("spend"))))
         assertEquals(PageDestination.Terminal("wt-1", "build"), world.resolve(PageRef(PageTarget.Terminal("integ-10", "build"))).destination)
-        assertEquals("In review · in integ-10", world.cellText(PageCell(ref = PageRef(PageTarget.Lane("ov-274-phones")), show = PageShow.STATE)))
-        assertEquals("Not reported", world.cellText(PageCell(ref = PageRef(PageTarget.Lane("mac-ux")), show = PageShow.SPEND)))
+        assertEquals("In review", world.cellText(PageCell(ref = PageRef(PageTarget.Ticket("ov-274")), show = PageShow.STATE)))
+        assertEquals("Not reported", world.cellText(PageCell(ref = PageRef(PageTarget.Ticket("ov-113")), show = PageShow.SPEND)))
     }
 
     @Test
@@ -113,7 +113,7 @@ class PageTest {
     @Test
     fun `a reference to something gone draws its label or name as plain text`() {
         for (ref in listOf(
-            PageRef(PageTarget.Lane("dropped-lane")), PageRef(PageTarget.Task("zz-9")), PageRef(PageTarget.Page("gone")),
+            PageRef(PageTarget.Ticket("dropped-ticket")), PageRef(PageTarget.Task("zz-9")), PageRef(PageTarget.Page("gone")),
             PageRef(PageTarget.Worktree("nowhere")), PageRef(PageTarget.Terminal("integ-10", "shell")), PageRef(PageTarget.Unknown),
         )) {
             val r = world.resolve(ref)
@@ -121,9 +121,9 @@ class PageTest {
             assertEquals(ref.target.rawName, r.name)
         }
         assertEquals("Build terminal", world.resolve(PageRef(PageTarget.Worktree("gone"), label = "Build terminal")).name)
-        // Without the plan layer, lanes and themes are words; cards still draw.
+        // Without the plan layer, tickets and themes are words; cards still draw.
         val noPlan = world.copy(plan = null)
-        assertNull(noPlan.resolve(PageRef(PageTarget.Lane("ov-274-phones"))).destination)
+        assertNull(noPlan.resolve(PageRef(PageTarget.Ticket("ov-274"))).destination)
         assertTrue(noPlan.resolve(PageRef(PageTarget.Task("ov-274"))).destination != null)
     }
 
@@ -164,17 +164,17 @@ class PageTest {
         assertTrue(PageLayout.stepsDown(411))
         val table = page("train").doc!!.blocks[4] as PageBlock.Table
         assertEquals(
-            "Lane, ov-274-phones. Cards, ov-274. Gate, iOS UI class, Android captures. State, In review · in integ-10.",
+            "Ticket, ov-274. Cards, ov-274. Gate, iOS UI class, Android captures. State, In review.",
             PageLayout.spokenRow(table.columns, table.rows[0], world),
         )
-        assertEquals(listOf("Open ov-274-phones", "Open ov-274"), world.actions(table.rows[0]).map { it.first })
+        assertEquals(listOf("Open ov-274", "Open ov-274"), world.actions(table.rows[0]).map { it.first })
     }
 
     @Test
     fun `a table cell's link says its domain to TalkBack, in the row and in its action`() {
         val cell = PageCell(text = "Click here", ref = PageRef(PageTarget.Url("https://evil.example/x")))
-        val columns = listOf(PageColumn("Lane"), PageColumn("Run"))
-        assertEquals("Lane, mac-ux. Run, Click here, link to evil.example.", PageLayout.spokenRow(columns, listOf(PageCell("mac-ux"), cell), PageWorld()))
+        val columns = listOf(PageColumn("Ticket"), PageColumn("Run"))
+        assertEquals("Ticket, mac-ux. Run, Click here, link to evil.example.", PageLayout.spokenRow(columns, listOf(PageCell("mac-ux"), cell), PageWorld()))
         assertEquals(listOf("Open Click here, link to evil.example"), PageWorld().actions(listOf(cell)).map { it.first })
         assertEquals(listOf("Open github.com"), PageWorld().actions(listOf(PageCell(ref = PageRef(PageTarget.Url("https://github.com/x"))))).map { it.first })
     }
@@ -190,7 +190,7 @@ class PageTest {
         assertEquals("Review, Active", PageSpeech.step(PageStep("Review", PageState.ACTIVE)))
         assertEquals("Land, To do", PageSpeech.step(PageStep("Land", PageState.TODO)))
         assertEquals("2 of 4", PageSpeech.progress(PageBlock.Progress("Cards closed", 2, 4)))
-        assertEquals("Page, Train integ-10, In review · 3 of 4 lanes green, Updated 12 min ago", PageSpeech.row(page("train"), world.nowMs))
+        assertEquals("Page, Landing 10, In review · 3 of 4 tickets green, Updated 12 min ago", PageSpeech.row(page("train"), world.nowMs))
     }
 
     @Test

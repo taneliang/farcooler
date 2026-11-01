@@ -6,36 +6,36 @@ package com.farcooler.model
  * the words and rules are held to the same cases by `PlanTrackTest`.
  *
  * Android has no card board to read, so a theme's last move is the runner's own word (`last_moved_at`, which
- * counts its story, lanes, rulings and cards) when it sent one, and what the plan alone shows otherwise.
+ * counts its story, tickets, rulings and cards) when it sent one, and what the plan alone shows otherwise.
  *
  * Amber is for the owner's to act on: an ask, and a budget gone over. A track line is amber only for the latter.
  */
 
-/** How long a theme sits with no lane and nothing moving before it reads as quiet: a day (the owner's ruling D3). */
+/** How long a theme sits with no ticket and nothing moving before it reads as quiet: a day (the owner's ruling D3). */
 const val PLAN_QUIET_AFTER_MS = 24L * 3_600_000
 
-/** The working lane that has sat longest in one state, named beside lanes that are moving. */
-data class PlanTrackStalled(val lane: String, val since: Long)
+/** The working ticket that has sat longest in one stage, named beside tickets that are moving. */
+data class PlanTrackStalled(val ticket: String, val since: Long)
 
-/** A lane moving a theme, as the track line names it. */
-data class PlanTrackLane(val name: String, val state: LaneState, val fixRounds: Int)
+/** A ticket moving a theme, as the track line names it. */
+data class PlanTrackTicket(val name: String, val stage: TicketStage, val fixing: Boolean, val fixRounds: Int)
 
 /** Where a theme stands in motion: the first rule that matches. */
 sealed interface PlanTrack {
     /** Past its token budget. */
     data class OverBudget(val budget: PlanBudget) : PlanTrack
-    /** Every lane working it has sat in one state for over an hour: the one that has sat longest is named. */
-    data class Stuck(val lane: String, val since: Long) : PlanTrack
+    /** Every ticket working it has sat in one stage for over an hour: the one that has sat longest is named. */
+    data class Stuck(val ticket: String, val since: Long) : PlanTrack
     /**
-     * At least one lane is building, in review, fixing or landing it, and is still moving. A lane that has sat over an
+     * At least one ticket is building, in review, fixing or landing, and is still moving. A ticket that has sat over an
      * hour beside them is named after ([stalled]): the others are moving, and the line says so first.
      */
-    data class Moving(val lanes: List<PlanTrackLane>, val stalled: PlanTrackStalled? = null) : PlanTrack
-    /** No lane is working it and one is queued for it. */
+    data class Moving(val tickets: List<PlanTrackTicket>, val stalled: PlanTrackStalled? = null) : PlanTrack
+    /** No ticket is being worked and one waits for a builder. */
     data class Queued(val rank: Int?) : PlanTrack
-    /** Open cards, no lane, and nothing moved for a day or more. */
+    /** Open cards, no ticket, and nothing moved for a day or more. */
     data class Quiet(val since: Long) : PlanTrack
-    /** Open cards, no lane, and something moved within the day. */
+    /** Open cards, no ticket, and something moved within the day. */
     data object Idle : PlanTrack
     /** Every card is done. */
     data object AllDone : PlanTrack
@@ -49,14 +49,14 @@ sealed interface PlanTrack {
 }
 
 /**
- * When [theme] last moved: the newest of its story, the runner's word, its lanes (a dropped lane is gone) and its
+ * When [theme] last moved: the newest of its story, the runner's word, its tickets (a dropped ticket is gone) and its
  * rulings, made or settled.
  */
 fun Plan.lastMoved(theme: PlanTheme): Long {
     val tasks = theme.cards.map { it.task }.toSet()
     var at = maxOf(theme.storyAt, theme.lastMovedAt ?: 0L)
-    for (lane in lanes) {
-        if (lane.state != LaneState.DROPPED && lane.cards.any { it.task in tasks }) at = maxOf(at, lane.stateSince)
+    for (ticket in tickets) {
+        if (ticket.stage != TicketStage.DROPPED && ticket.task in tasks) at = maxOf(at, ticket.stageSince)
     }
     for (ruling in rulings) {
         if (ruling.themeId == theme.id) at = maxOf(at, ruling.createdAt, ruling.settledAt ?: 0L)
@@ -69,20 +69,20 @@ fun Plan.track(theme: PlanTheme): PlanTrack {
     if (theme.state == "paused") return PlanTrack.Paused
     if (theme.state == "done") return PlanTrack.Done
     PlanCostWords.overBudget(theme)?.let { return PlanTrack.OverBudget(it) }
-    val mine = lanesIn(theme)
-    val working = mine.filter { it.state.isLive && it.state != LaneState.QUEUED }
-    // The lane stalled longest, not the first in plan order; it stands alone only when nothing else is moving (an hour
-    // is routine for a build, so it never hides the lanes that are).
-    val stalled = working.filter { it.stale }.minByOrNull { it.stateSince }
-    if (stalled != null && working.all { it.stale }) return PlanTrack.Stuck(stalled.heading, stalled.stateSince)
+    val mine = ticketsIn(theme)
+    val working = mine.filter { it.stage.isLive && it.stage != TicketStage.WAITING }
+    // The ticket stalled longest, not the first in plan order; it stands alone only when nothing else is moving (an hour
+    // is routine for a build, so it never hides the tickets that are).
+    val stalled = working.filter { it.stale }.minByOrNull { it.stageSince }
+    if (stalled != null && working.all { it.stale }) return PlanTrack.Stuck(stalled.heading, stalled.stageSince)
     if (working.isNotEmpty()) {
         return PlanTrack.Moving(
-            working.map { PlanTrackLane(it.heading, it.state, it.fixRounds) },
-            stalled?.let { PlanTrackStalled(it.heading, it.stateSince) },
+            working.map { PlanTrackTicket(it.heading, it.stage, it.isFixing, it.fixRounds) },
+            stalled?.let { PlanTrackStalled(it.heading, it.stageSince) },
         )
     }
-    val queued = mine.filter { it.state == LaneState.QUEUED }
-    if (queued.isNotEmpty()) return PlanTrack.Queued(queued.mapNotNull { it.planRank }.minOrNull())
+    val waiting = mine.filter { it.stage == TicketStage.WAITING }
+    if (waiting.isNotEmpty()) return PlanTrack.Queued(waiting.mapNotNull { it.planRank }.minOrNull())
     val total = PlanWords.total(theme.counts)
     if (total > 0 && theme.counts.done == total) return PlanTrack.AllDone
     val moved = lastMoved(theme)
@@ -109,32 +109,33 @@ fun Plan.trackSummary(): String? {
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
-/** "2 lanes moving", or "fix-gestures is fixing, round 1": a lane named when one is the whole story. */
+/** "2 tickets moving", or "Fix gestures is fixing, round 1": a ticket named when one is the whole story. */
 fun PlanWords.track(track: PlanTrack, now: Long): String = when (track) {
     is PlanTrack.OverBudget -> PlanCostWords.budgetLine(track.budget)
-    is PlanTrack.Stuck -> "${track.lane}: ${noMove(track.since, now)}"
+    is PlanTrack.Stuck -> "${track.ticket}: ${noMove(track.since, now)}"
     is PlanTrack.Moving -> {
-        val tail = track.stalled?.let { " · ${it.lane}: ${noMove(it.since, now)}" } ?: ""
-        val lane = track.lanes.singleOrNull()
-        if (lane == null) {
-            "${track.lanes.size} lanes moving$tail"
+        val tail = track.stalled?.let { " · ${it.ticket}: ${noMove(it.since, now)}" } ?: ""
+        val ticket = track.tickets.singleOrNull()
+        if (ticket == null) {
+            "${track.tickets.size} tickets moving$tail"
         } else {
-            val verb = when (lane.state) {
-                LaneState.BUILDING -> "building"
-                LaneState.REVIEW -> "in review"
-                LaneState.FIXING -> if (lane.fixRounds > 0) "fixing, round ${lane.fixRounds}" else "fixing"
-                LaneState.LANDING -> "landing"
+            val verb = when {
+                ticket.fixing -> if (ticket.fixRounds > 0) "fixing, round ${ticket.fixRounds}" else "fixing"
+                ticket.stage == TicketStage.BUILDING -> "building"
+                ticket.stage == TicketStage.REVIEWING -> "in review"
+                ticket.stage == TicketStage.NEEDS_YOU -> "waiting on you"
+                ticket.stage == TicketStage.LANDING -> "landing"
                 else -> "moving"
             }
-            "${lane.name} is $verb$tail"
+            "${ticket.name} is $verb$tail"
         }
     }
     is PlanTrack.Queued -> track.rank?.let { "Queued, ${ordinal(it)} up" } ?: "Queued"
     is PlanTrack.Quiet -> {
         val days = maxOf(1L, maxOf(0L, now - track.since) / 86_400_000)
-        if (days == 1L) "No lane · quiet for 1 day" else "No lane · quiet for $days days"
+        if (days == 1L) "No ticket · quiet for 1 day" else "No ticket · quiet for $days days"
     }
-    PlanTrack.Idle -> "No lane yet"
+    PlanTrack.Idle -> "No ticket yet"
     PlanTrack.AllDone -> "Every card is done"
     PlanTrack.Paused -> "Paused"
     PlanTrack.Done -> "Done"

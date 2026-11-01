@@ -1,7 +1,6 @@
 {
   "_doc": "The Plan on a phone with every pull request stage a lane or a card can be in (ov-317): plan-stages.json trimmed to the lanes a phone test needs, with titles and PR numbers. lane-2 is a draft in agent review (PR 41) and lane-3 a draft being fixed (PR 42), the two Mark Ready is offered on. For -phone-plan-file.",
   "plan": {
-    "agents": [],
     "agents_spend": null,
     "board_counts": {
       "backlog": 0,
@@ -59,39 +58,31 @@
     "ci": [],
     "cost": null,
     "landed_not_closed": [],
-    "lane_is_train": [],
-    "lanes": [
+    "now_ms": 1800000000000,
+    "rulings": [],
+    "themes": [],
+    "lines": [
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-1",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "building",
-              "label": "Building",
-              "pr_number": 0,
-              "pr_url": "",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001001"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002001",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-1",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001001",
+        "key": "ov-1",
+        "title": "Billing: invoice PDF export",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002001",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": null,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -102,7 +93,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "building",
           "label": "Building",
@@ -112,45 +103,29 @@
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Billing: invoice PDF export",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-2",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "agent_review",
-              "label": "Agent review",
-              "pr_number": 41,
-              "pr_url": "https://github.com/acme/app/pull/41",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001002"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002002",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-2",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001002",
+        "key": "ov-2",
+        "title": "Refunds: a refund endpoint with partial amounts",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002002",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": 41,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -161,7 +136,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "agent_review",
           "label": "Agent review",
@@ -171,45 +146,29 @@
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Refunds: a refund endpoint with partial amounts",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-3",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "fixing",
-              "label": "Fixing",
-              "pr_number": 42,
-              "pr_url": "https://github.com/acme/app/pull/42",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001003"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002003",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-3",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001003",
+        "key": "ov-3",
+        "title": "Ledger: reconcile after a partial refund",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002003",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": 42,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -220,7 +179,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "fixing",
           "label": "Fixing",
@@ -230,47 +189,29 @@
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Ledger: reconcile after a partial refund",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-5",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "waiting_on_reviewer",
-              "label": "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
-              "pr_number": 32,
-              "pr_url": "https://github.com/acme/app/pull/32",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [
-                "maximilian-wolfgang-hohenzollern-schwarzenberg"
-              ],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001005"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002005",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-5",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001005",
+        "key": "ov-5",
+        "title": "Onboarding: the invite flow for new teammates",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002005",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": 32,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -281,7 +222,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "waiting_on_reviewer",
           "label": "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
@@ -293,45 +234,29 @@
             "maximilian-wolfgang-hohenzollern-schwarzenberg"
           ],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Onboarding: the invite flow for new teammates",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-6",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "changes_requested",
-              "label": "Changes requested",
-              "pr_number": 45,
-              "pr_url": "https://github.com/acme/app/pull/45",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001006"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002006",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-6",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001006",
+        "key": "ov-6",
+        "title": "Search: filter invoices by customer and status",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002006",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": 45,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -342,7 +267,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "changes_requested",
           "label": "Changes requested",
@@ -352,45 +277,29 @@
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Search: filter invoices by customer and status",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-8",
-            "slice": "",
-            "stage": {
-              "checks": "failing",
-              "kind": "approved_checks_failing",
-              "label": "Approved \u00b7 checks failing",
-              "pr_number": 33,
-              "pr_url": "https://github.com/acme/app/pull/33",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-000000001008"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002008",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-8",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001008",
+        "key": "ov-8",
+        "title": "Payments: retry a failed charge once",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002008",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": 33,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -401,55 +310,39 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "failing",
           "kind": "approved_checks_failing",
-          "label": "Approved \u00b7 checks failing",
+          "label": "Approved · checks failing",
           "pr_number": 33,
           "pr_url": "https://github.com/acme/app/pull/33",
           "queue_position": 0,
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Payments: retry a failed charge once",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "ov-14",
-            "slice": "",
-            "stage": {
-              "checks": "unknown",
-              "kind": "unknown",
-              "label": "PR state unknown",
-              "pr_number": 0,
-              "pr_url": "",
-              "queue_position": 0,
-              "read_at": 0,
-              "reviewers": [],
-              "unresolved_threads": null
-            },
-            "task": "00000000-0000-0000-0000-00000000100e"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-00000000200e",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-14",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-00000000100e",
+        "key": "ov-14",
+        "title": "Reports: monthly revenue export",
+        "status": "In Review",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "0000200e",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": null,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -460,7 +353,7 @@
           "shared_agents": 0,
           "unmeasured_agents": 0
         },
-        "stage": {
+        "pr_stage": {
           "checks": "unknown",
           "kind": "unknown",
           "label": "PR state unknown",
@@ -470,34 +363,29 @@
           "read_at": 0,
           "reviewers": [],
           "unresolved_threads": null
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Reports: monthly revenue export",
-        "train": null,
-        "worktree_path": ""
+        }
       },
       {
-        "agents": [],
-        "branch": "",
-        "budget_tokens": null,
-        "cards": [
-          {
-            "key": "00001100",
-            "slice": "",
-            "task": "00000000-0000-0000-0000-000000001100"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "",
-        "id": "00000000-0000-0000-0000-000000002100",
-        "landed_sha": null,
-        "model": "",
-        "name": "lane-silent",
-        "plan_rank": null,
+        "task": "00000000-0000-0000-0000-000000001100",
+        "key": "00001100",
+        "title": "Settings: a ticket GitHub has said nothing about",
+        "status": "In Progress",
+        "stage": "reviewing",
+        "stage_since": 1799999400000,
         "reason": "",
-        "short": "00002100",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": null,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [],
         "spend": {
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
@@ -507,21 +395,12 @@
           "runs": 0,
           "shared_agents": 0,
           "unmeasured_agents": 0
-        },
-        "stale": false,
-        "state": "review",
-        "state_since": 1799999400000,
-        "title": "Settings: a lane GitHub has said nothing about",
-        "train": null,
-        "worktree_path": ""
+        }
       }
     ],
-    "no_lane": [],
-    "now_ms": 1800000000000,
-    "order": [],
-    "rulings": [],
-    "themes": [],
-    "trains": []
+    "landings": [],
+    "agents": [],
+    "off_the_line": []
   },
   "records": {}
 }

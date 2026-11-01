@@ -2,7 +2,6 @@ package com.farcooler.model
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -28,12 +27,11 @@ class PlanSectionsCasesTest {
         val name = c["name"]!!.jsonPrimitive.content
         val plan = Plan.decode(c["plan"]!!.jsonObject)
         val needsYou = c["needs_you"]?.jsonPrimitive?.intOrNull ?: 0
-        val agentsSupported = c["agents_supported"]?.jsonPrimitive?.booleanOrNull ?: true
         val statuses: Map<String, TaskStatus> = c["statuses"]!!.jsonObject.mapNotNull { (k, v) ->
             TaskStatus.parse(v.jsonPrimitive.content)?.let { k to it }
         }.toMap()
         val expect = c["expect"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-        val sections get() = PlanSections.of(plan, needsYou, statuses, agentsSupported = agentsSupported)
+        val sections get() = PlanSections.of(plan, needsYou, statuses)
     }
 
     private fun kind(k: PlanSections.Kind) = k.name.lowercase().replace("_", "")
@@ -42,39 +40,34 @@ class PlanSectionsCasesTest {
     private fun outline(c: Case): List<String> {
         val s = c.sections
         val out = mutableListOf("shown: " + s.shown.joinToString(" ") { kind(it) })
-        fun lane(label: String, row: PlanSections.LaneRow) {
-            var line = "  $label ${row.lane.name} | ${PlanWords.status(row.lane)}"
+        fun ticket(label: String, row: PlanSections.TicketRow) {
+            var line = "  $label ${row.ticket.key} | ${PlanWords.status(row.ticket)}"
             row.agent?.let { line += " | agent: ${it.who}" }
             if (row.waitsOnOwner) line += " | owner"
-            row.landedTrain?.let { line += " | names landed $it" }
             out += line
         }
         if (s.needsYou > 0) out += "needs-you ${s.needsYou}"
         out += "landing"
-        for (card in s.trains) {
-            out += "  train ${card.train.label} | ${card.train.subtitle ?: "-"} | ${card.phase.sentence}"
+        for (card in s.landings) {
+            out += "  landing ${card.landing.label} | ${card.landing.subtitle ?: "-"} | ${card.phase.sentence}"
             out += "    ladder: ${PlanLadder.compact(card.phase)} | ${card.phase.explanation}"
-            for (l in card.lanes) {
-                out += "    lane ${l.name} | ${l.note ?: "-"}" + (if (l.waitsOnOwner) " | owner" else "")
+            for (t in card.tickets) {
+                out += "    ticket ${t.key} | ${t.note ?: "-"}" + (if (t.waitsOnOwner) " | owner" else "")
             }
         }
         s.emptyWords(PlanSections.Kind.LANDING)?.let { out += "  empty: $it" }
         if (s.inReview.isNotEmpty()) {
             out += "inreview"
-            s.inReview.forEach { lane("lane", it) }
+            s.inReview.forEach { ticket("ticket", it) }
         }
         out += "building"
-        s.building.forEach { lane("lane", it) }
+        s.building.forEach { ticket("ticket", it) }
         s.emptyWords(PlanSections.Kind.BUILDING)?.let { out += "  empty: $it" }
         out += "waiting"
-        s.waiting.next.forEach { lane("next", it) }
-        s.waiting.notRanked.forEach { lane("notranked", it) }
-        s.waiting.onYou.forEach { lane("onyou", it) }
+        s.waiting.next.forEach { ticket("next", it) }
+        s.waiting.notRanked.forEach { ticket("notranked", it) }
+        s.waiting.onYou.forEach { ticket("onyou", it) }
         s.emptyWords(PlanSections.Kind.WAITING)?.let { out += "  empty: $it" }
-        if (PlanSections.Kind.ON_LANDED_TRAIN in s.shown) {
-            out += "onlandedtrain (folded: ${PlanSections.Kind.ON_LANDED_TRAIN.startsFolded})"
-            s.onLandedTrain.forEach { lane("lane", it) }
-        }
         if (PlanSections.Kind.AGENTS in s.shown) {
             out += "agents"
             out += "  header: ${s.fleet.header(en)}"
@@ -100,23 +93,23 @@ class PlanSectionsCasesTest {
             for (theme in ThemeTree.of(c.plan, filter, c.statuses).themes) {
                 out += "  theme ${theme.name} | ${theme.progress}"
                 for (card in theme.cards) {
-                    out += "    card ${card.glyph.name.lowercase().replace("_", "")} ${card.key}" + (card.lane?.let { " | $it" } ?: "")
+                    out += "    card ${card.glyph.name.lowercase().replace("_", "")} ${card.key}" + (card.ticket?.let { " | $it" } ?: "")
                 }
             }
         }
-        out += "lanetree"
-        for (g in LaneTree.of(c.plan, s, en).groups) {
+        out += "tickettree"
+        for (g in TicketTree.of(c.plan, s, en).groups) {
             out += "  group ${g.title} | ${g.detail ?: "-"} | ${if (g.folded) "folded" else "open"}"
-            for (t in g.trains) {
-                out += "    train ${t.label} | ${t.subtitle ?: "-"} | ${t.phase}"
-                for (l in t.lanes) {
-                    out += "      lane ${l.name} | ${l.state.ifEmpty { "-" }} | ${l.cards.joinToString(",") { it.key }}"
-                    for (a in l.agents) out += "        agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"
+            for (l in g.landings) {
+                out += "    landing ${l.label} | ${l.subtitle ?: "-"} | ${l.phase}"
+                for (t in l.tickets) {
+                    out += "      ticket ${t.key} | ${t.state.ifEmpty { "-" }}"
+                    for (a in t.agents) out += "        agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"
                 }
             }
-            for (l in g.lanes) {
-                out += "    lane ${l.name} | ${l.state} | ${l.cards.joinToString(",") { it.key }}"
-                for (a in l.agents) out += "      agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"
+            for (t in g.tickets) {
+                out += "    ticket ${t.key} | ${t.state}"
+                for (a in t.agents) out += "      agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"
             }
         }
         // Lowercased, and without trailing spaces, which a row with an empty last column leaves.
@@ -127,6 +120,16 @@ class PlanSectionsCasesTest {
     fun `the sections, glance, grid and lists are the fixture's, case by case`() {
         val cases = fixture["cases"]!!.jsonArray
         assertTrue(cases.size >= 10)
+        // Setting FARCOOLER_REGENERATE_CASES to a path writes the outlines this build makes there, for a person to read and
+        // copy into the fixture's `expect`; the test then says it did, and never passes on the strength of its own output.
+        System.getenv("FARCOOLER_REGENERATE_CASES")?.let { path ->
+            val made = cases.joinToString(",\n") { element ->
+                val c = Case(element.jsonObject)
+                "\"${c.name}\": ${Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()), outline(c))}"
+            }
+            File(path).writeText("{\n$made\n}\n")
+            throw AssertionError("Wrote the outlines to $path; copy them into the fixture and run again without FARCOOLER_REGENERATE_CASES.")
+        }
         for (element in cases) {
             val c = Case(element.jsonObject)
             assertTrue("${c.name} has an expected outline", c.expect.isNotEmpty())

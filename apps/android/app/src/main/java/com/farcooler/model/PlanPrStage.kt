@@ -9,7 +9,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-// Where a lane's or a card's pull request stands (ov-317, team mode T6): the
+// Where a ticket's or a card's pull request stands (ov-317, team mode T6): the
 // runner derives the stage on read and sends its kind and facts; this words it
 // in the apps' own style. The Android twin of AgentKit's `PlanPrStage.swift`,
 // rule for rule: Building is hidden, "PR state unknown" is added to the state
@@ -86,7 +86,7 @@ data class PlanPrStage(
     /** What a row draws for the stage: the problem alone when a person has to act, else one phrase. */
     val rowWords: String? get() = if (needsAttention) words else fullWords ?: words
 
-    /** What a row says, or null when the lane's own state word already says it ("Building" under a building lane) or this build cannot word it. */
+    /** What a row says, or null when the ticket's own stage word already says it ("Building" under a building ticket) or this build cannot word it. */
     val shown: String? get() = if (kind == PlanPrStageKind.BUILDING) null else words
 
     /** Whether the pull request is a draft: the runner derives Agent Review and Fixing from a draft and from nothing else. */
@@ -152,6 +152,6 @@ object GitHubLink {
     }
 }
 
-/** A lane's stage, while it is live and the stage has something to add to the state word. */
-val PlanLane.shownStage: PlanPrStage?
-    get() = stage?.takeIf { state.isLive && it.shown != null }
+/** A ticket's pull request stage, while it is live and the stage has something to add to the stage word. */
+val PlanTicket.shownStage: PlanPrStage?
+    get() = prStage?.takeIf { stage.isLive && it.shown != null }

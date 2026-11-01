@@ -27,25 +27,25 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [37], qualifiers = "w411dp-h4200dp-xhdpi")
 class PlanSectionsViewTest {
-    private fun page(fixture: PlanFixture, folds: PlanFolds = PlanFolds.Defaults, columns: Int = 1, agents: Boolean = true): @Composable () -> Unit = {
+    private fun page(fixture: PlanFixture, folds: PlanFolds = PlanFolds.Defaults, columns: Int = 1): @Composable () -> Unit = {
         FarCoolerTheme {
             LazyColumn(Modifier.fillMaxSize()) {
                 planItems(
                     PlanReadState.Loaded(fixture.plan), fixture.statuses, onOpen = {}, onRetry = {}, folds = folds,
-                    needsYou = fixture.needsYou, onNeedsYou = {}, agentsSupported = agents, themeColumns = columns,
+                    needsYou = fixture.needsYou, onNeedsYou = {}, themeColumns = columns,
                 )
             }
         }
     }
 
-    private fun drawn(fixture: PlanFixture, folds: PlanFolds = PlanFolds.Defaults, columns: Int = 1, agents: Boolean = true) =
-        SemanticsProbe.described(content = page(fixture, folds, columns, agents))
+    private fun drawn(fixture: PlanFixture, folds: PlanFolds = PlanFolds.Defaults, columns: Int = 1) =
+        SemanticsProbe.described(content = page(fixture, folds, columns))
 
     @Test fun `the sections come in the design's order, under the band`() {
         val tags = drawn(PlanFixtures.long())
         val order = listOf(
             "plan-band", "plan-needs-you", "plan-landing", "plan-in-review", "plan-building", "plan-waiting",
-            "plan-on-landed-train", "plan-agents", "plan-themes",
+            "plan-agents", "plan-themes",
         )
         for (tag in order) assertTrue("$tag is drawn: ${tags.keys}", tag in tags)
         val tops = order.map { tags.getValue(it).bounds.top }
@@ -54,69 +54,56 @@ class PlanSectionsViewTest {
 
     @Test fun `the band says Now and Next, and Needs you says who`() {
         val tags = drawn(PlanFixtures.long())
-        assertTrue(tags.getValue("plan-band-now").words, "Train 89" in tags.getValue("plan-band-now").words)
+        assertTrue(tags.getValue("plan-band-now").words, "Landing 89" in tags.getValue("plan-band-now").words)
         assertTrue(tags.getValue("plan-band-next").words, "Onboarding" in tags.getValue("plan-band-next").words)
         // The Needs you section follows the band and says it, so the band doesn't say it twice.
         assertFalse("plan-band-needs-you" in tags)
         assertTrue(tags.getValue("plan-needs-you-row").words, "2 need you" in tags.getValue("plan-needs-you-row").words)
     }
 
-    @Test fun `Landing draws each live train as Train N with its title under it, furthest along first, with its ladder compact`() {
+    @Test fun `Landing draws each live landing as Landing N with its title under it, furthest along first, with its ladder compact`() {
         val tags = drawn(PlanFixtures.long())
-        val trains = listOf("integ-89", "integ-86", "integ-84").map { tags.getValue("plan-train-$it").bounds.top }
-        assertEquals("Checking on CI, then waiting for main, then stalled", trains.sorted(), trains)
-        assertEquals("Train 89", tags.getValue("plan-train-integ-89-label").words.substringBefore(" |"))
-        assertTrue(tags.getValue("plan-train-integ-89-subtitle").words, tags.getValue("plan-train-integ-89-subtitle").words.startsWith("The agents table"))
-        assertEquals("Checking on CI · step 2 of 3", tags.getValue("plan-train-integ-89-phase").words.substringBefore(" |"))
-        assertEquals("Waiting for main's checks to pass · step 1 of 3", tags.getValue("plan-train-integ-86-phase").words.substringBefore(" |"))
-        assertEquals("Stalled · step 1 of 3", tags.getValue("plan-train-integ-84-phase").words.substringBefore(" |"))
-        assertTrue("a lane simply aboard says nothing", "plan-train-lane-team-dir-note" !in tags)
-        assertTrue("no train says who holds it", tags.keys.none { it.endsWith("-held") })
-        assertTrue("no lane says it waits for another", tags.values.none { "waiting for ios-overwrite" in it.words.lowercase() })
-        val facts = tags.getValue("plan-train-integ-89-words").words.replace('\u00a0', ' ')
-        assertTrue(facts, "3f78754f" in facts && "2 of 5 jobs done" in facts && "Integrator" in facts)
-        assertTrue("a landed train is not in Landing", "plan-train-integ-83" !in tags)
-        assertTrue("no lane says it holds the train", tags.values.none { "holding the train" in it.words.lowercase() })
-        assertTrue("lanes sit inside their train", "plan-train-lane-team-dir" in tags && "plan-train-lane-ios-overwrite" in tags)
+        val landings = listOf(89, 86, 84).map { tags.getValue("plan-landing-$it").bounds.top }
+        assertEquals("Checking on CI, then waiting for main, then stalled", landings.sorted(), landings)
+        assertEquals("Landing 89", tags.getValue("plan-landing-89-label").words.substringBefore(" |"))
+        assertTrue(tags.getValue("plan-landing-89-subtitle").words, tags.getValue("plan-landing-89-subtitle").words.startsWith("The agents table"))
+        assertEquals("Checking on CI · step 2 of 3", tags.getValue("plan-landing-89-phase").words.substringBefore(" |"))
+        assertEquals("Waiting for main's checks to pass · step 1 of 3", tags.getValue("plan-landing-86-phase").words.substringBefore(" |"))
+        assertEquals("Stalled · step 1 of 3", tags.getValue("plan-landing-84-phase").words.substringBefore(" |"))
+        assertTrue("a ticket simply aboard says nothing", "plan-landing-ticket-ov-485-note" !in tags)
+        assertTrue("no landing says who holds it", tags.keys.none { it.endsWith("-held") })
+        val facts = tags.getValue("plan-landing-89-words").words.replace('\u00a0', ' ')
+        assertTrue(facts, "3f78754f" in facts && "2 of 5 jobs done" in facts && "Lander" in facts)
+        assertTrue("a landed landing is not in Landing", "plan-landing-83" !in tags)
+        assertTrue("tickets sit inside their landing", "plan-landing-ticket-ov-487" in tags && "plan-landing-ticket-ov-485" in tags)
     }
 
-    @Test fun `In review and Building rows carry their agent and the landed train they still name`() {
+    @Test fun `In review and Building rows carry their agent`() {
         val tags = drawn(PlanFixtures.long())
-        for (lane in listOf("fleet-ui", "agent-rows", "fix-482", "tile-grid", "lane-474")) assertTrue("$lane is a row", "plan-lane-$lane" in tags)
-        assertTrue(tags.getValue("plan-lane-tile-grid-agent").words, "Builder · Sonnet" in tags.getValue("plan-lane-tile-grid-agent").words)
-        assertFalse("the reviewer finished, so the lane has no agent line", "plan-lane-fleet-ui-agent" in tags)
-        assertTrue(tags.getValue("plan-lane-fix-482-landed").words, "Names Train 83, which landed" in tags.getValue("plan-lane-fix-482-landed").words)
+        for (ticket in listOf("ov-311", "ov-312", "ov-310", "ov-474")) assertTrue("$ticket is a row", "plan-ticket-$ticket" in tags)
+        assertTrue(tags.getValue("plan-ticket-ov-310-agent").words, "Builder · Sonnet" in tags.getValue("plan-ticket-ov-310-agent").words)
         val review = tags.getValue("plan-in-review").bounds.top
         val building = tags.getValue("plan-building").bounds.top
-        assertTrue(tags.getValue("plan-lane-fleet-ui").bounds.top in review..building)
-        assertTrue(tags.getValue("plan-lane-tile-grid").bounds.top > building)
+        assertTrue(tags.getValue("plan-ticket-ov-311").bounds.top in review..building)
+        assertTrue(tags.getValue("plan-ticket-ov-310").bounds.top > building)
     }
 
     @Test fun `Waiting ranks Next up, then names Not ranked`() {
         val tags = drawn(PlanFixtures.long())
         assertTrue("plan-next-up" in tags && "plan-not-ranked" in tags)
-        val ranked = listOf("onboarding-copy", "tailcat-default", "hero-shot", "docs-pass").map { tags.getValue("plan-lane-$it").bounds.top }
+        val ranked = listOf("onboarding-copy", "tailcat-default", "ov-302").map { tags.getValue("plan-ticket-$it").bounds.top }
         assertEquals(ranked.sorted(), ranked)
-    }
-
-    @Test fun `Waiting for the next landing is folded until opened`() {
-        val closed = drawn(PlanFixtures.long())
-        assertFalse("its row hides", "plan-lane-old-queued" in closed)
-        val open = drawn(PlanFixtures.long(), PlanFolds(listOf("landed-train")) {})
-        assertTrue("plan-lane-old-queued" in open)
-        assertTrue(open.getValue("plan-lane-old-queued-landed").words, "Names Train 85" in open.getValue("plan-lane-old-queued-landed").words)
     }
 
     @Test fun `Agents lists who exists and what it costs, with no Finished fold`() {
         val drawn = drawn(PlanFixtures.long())
-        assertTrue(drawn.getValue("plan-agents-header").words, "4 working" in drawn.getValue("plan-agents-header").words)
+        assertTrue(drawn.getValue("plan-agents-header").words, "working" in drawn.getValue("plan-agents-header").words)
         assertTrue("agents are rows", "plan-agent-pane:orch" in drawn)
         val row = drawn.getValue("plan-agent-pane:orch").words
         assertTrue(row, "Orchestrator · Opus" in row && "2.1M" in row && "≈" in row)
         assertFalse("there is no Finished fold", "plan-agents-finished" in drawn)
-        assertFalse("a finished reviewer is not listed", drawn.keys.any { it.startsWith("plan-agent-") && "Reviewer" in drawn.getValue(it).words })
         val resumed = drawn.getValue("plan-agent-agent:s1").words
-        assertTrue("a subagent resumed for another round reads Working: $resumed", "Working" in resumed && "Not on a lane" in resumed)
+        assertTrue("a subagent resumed for another round reads Working: $resumed", "Working" in resumed && "Not on a ticket" in resumed)
     }
 
     @Test fun `Themes are one column on a phone and two on a tablet, the finished ones in one tile`() {
@@ -142,17 +129,15 @@ class PlanSectionsViewTest {
         assertTrue("plan-waiting" in tags)
         val agents = drawn(PlanFixtures.case("board-agents-empty"))
         assertTrue(agents.getValue("plan-agents-empty").words, "No agents running." in agents.getValue("plan-agents-empty").words)
-        // A runner without board_agents draws no Agents section at all.
-        assertFalse("plan-agents" in drawn(PlanFixtures.case("board-old-runner"), agents = false))
         val building = drawn(PlanFixtures.case("next-ranked"))
         assertTrue(building.getValue("plan-building-empty").words, "Nothing is building." in building.getValue("plan-building-empty").words)
         assertTrue("plan-waiting-empty" !in building)
     }
 
-    @Test fun `an old runner's board still draws, from state alone`() {
-        val tags = drawn(PlanFixtures.case("board-old-runner"), agents = false)
+    @Test fun `a board with no phases and no agents still draws, from stage alone`() {
+        val tags = drawn(PlanFixtures.case("board-no-phases"))
         assertTrue("plan-landing" in tags && "plan-themes" in tags)
-        assertFalse("plan-agents" in tags)
+        assertTrue("plan-agents-empty" in tags)
     }
 
     // The pictures: the whole plan, tall, on a phone and a tablet pane, in light and dark.
@@ -165,11 +150,11 @@ class PlanSectionsViewTest {
     fun tabletPane() = Capture.both("p7-tablet-plan-pane-480") { page(PlanFixtures.long(), columns = 2)() }
 
     @Test fun phoneFolded() = Capture.both("p7-phone-plan-open-folds") {
-        page(PlanFixtures.long(), PlanFolds(listOf("landed-train")) {})()
+        page(PlanFixtures.long(), PlanFolds(listOf("landed-today")) {})()
     }
 
     @Test @Config(qualifiers = "w411dp-h1400dp-xhdpi")
-    fun phoneOldRunner() = Capture.both("p7-phone-plan-old-runner") { page(PlanFixtures.case("board-old-runner"), agents = false)() }
+    fun phoneNoPhases() = Capture.both("p7-phone-plan-no-phases") { page(PlanFixtures.case("board-no-phases"))() }
 
     @Test @Config(qualifiers = "w411dp-h1000dp-xhdpi")
     fun phoneEmptySections() = Capture.both("p7-phone-plan-empty-sections") { page(PlanFixtures.case("next-empty"))() }

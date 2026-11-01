@@ -6,9 +6,12 @@ import java.net.URI
 // the rules a page's layout follows (3.6, 3.7): the Android twin of AgentKit's
 // `PageLive.swift`, `PageLayout.swift` and `PageTable.swift`'s cell rules.
 //
-// A page names a card, a lane or a theme, and the app draws that thing's
-// *current* words from what it already holds. A name nothing answers to (a
-// dropped lane, a runner without the plan layer, a key on another board) draws
+// A page names a card, a ticket or a theme, and the app draws that thing's
+// *current* words from what it already holds. (A page document still spells a
+// ticket's reference `lane`: the runner took lanes out of the plan, but pages
+// written before it keep the word, and it names a ticket by its key.) A name
+// nothing answers to (a
+// dropped ticket, a runner without the plan layer, a key on another board) draws
 // its label or its name as plain text with no link: never an error.
 //
 // Navigation is the only action (Q3). A link outside the app opens only for
@@ -20,7 +23,7 @@ sealed interface PageDestination {
     data class Task(val id: String) : PageDestination
     /** A task's open question, by the task's id: Needs You. */
     data class Ask(val id: String) : PageDestination
-    data class Lane(val id: String) : PageDestination
+    data class Ticket(val id: String) : PageDestination
     data class Theme(val id: String) : PageDestination
     data class Page(val slot: String) : PageDestination
     data class Worktree(val id: String) : PageDestination
@@ -33,9 +36,9 @@ sealed interface PageDestination {
 
 /** A reference as it's drawn now. */
 data class PageResolved(
-    /** Its name: a key, a lane's name, a theme's, a page's title, a link's label; or its label or raw name when it resolves to nothing. */
+    /** Its name: a key, a ticket's key, a theme's, a page's title, a link's label; or its label or raw name when it resolves to nothing. */
     val name: String,
-    /** Its live words: a card's status, a lane's state, a theme's progress, a link's domain. */
+    /** Its live words: a card's status, a ticket's stage, a theme's progress, a link's domain. */
     val status: String? = null,
     /** Amber only for a question that's still open. */
     val statusTone: PageTone = PageTone.NEUTRAL,
@@ -85,7 +88,7 @@ object PageWords {
     /** "2 of 4". */
     fun progress(done: Int, total: Int) = "$done of $total"
 
-    /** A lane's tokens for a table cell: "470K", or "Not reported". */
+    /** A ticket's tokens for a table cell: "470K", or "Not reported". */
     fun tokens(spend: PlanSpend): String = if (spend.totalTokens > 0) TaskUsageFormat.tokens(spend.totalTokens) else PlanWords.NOT_REPORTED
 }
 
@@ -113,7 +116,7 @@ object PageLinks {
 data class PageWorld(
     /** The board's cards. */
     val tasks: List<TaskRow> = emptyList(),
-    /** The plan, or null on a runner without `board_plan`: lane and theme references then draw as plain text. */
+    /** The plan, or null on a runner without `board_plan`: ticket and theme references then draw as plain text. */
     val plan: Plan? = null,
     val pages: List<BoardPage> = emptyList(),
     /** Worktree ids by name. */
@@ -146,8 +149,8 @@ data class PageWorld(
                     listOf(label ?: row.key, row.title, word).joinToString(", "),
                 )
             } ?: plain
-            is PageTarget.Lane -> plan?.lanes?.firstOrNull { it.name == t.name }?.let {
-                PageResolved(label ?: it.name, PlanWords.status(it), destination = PageDestination.Lane(it.id))
+            is PageTarget.Ticket -> ticketOf(t)?.let {
+                PageResolved(label ?: it.key, PlanWords.status(it), destination = PageDestination.Ticket(it.task))
             } ?: plain
             is PageTarget.Theme -> plan?.themes?.firstOrNull { it.name == t.name }?.let {
                 PageResolved(label ?: it.name, PlanWords.progress(it.counts), destination = PageDestination.Theme(it.id))
@@ -167,7 +170,7 @@ data class PageWorld(
                 val name = label ?: ciName(t)
                 val read = plan?.ci(t.ciSubject) ?: return PageResolved(name)
                 PageResolved(
-                    name, listOfNotNull(TrainWords.ciSummary(read), TrainWords.ciStale(read, plan?.nowMs ?: nowMs)).joinToString(" · "),
+                    name, listOfNotNull(LandingWords.ciSummary(read), LandingWords.ciStale(read, plan?.nowMs ?: nowMs)).joinToString(" · "),
                     if (read.needsAttention) PageTone.ATTENTION else PageTone.NEUTRAL,
                     PageLinks.https(read.url)?.let { PageDestination.Url(read.url) },
                 )
@@ -184,8 +187,9 @@ data class PageWorld(
     private fun themeOf(ref: PageRef): PlanTheme? =
         (ref.target as? PageTarget.Theme)?.let { t -> plan?.themes?.firstOrNull { it.name == t.name } }
 
-    private fun laneOf(ref: PageRef): PlanLane? =
-        (ref.target as? PageTarget.Lane)?.let { t -> plan?.lanes?.firstOrNull { it.name == t.name } }
+    private fun ticketOf(t: PageTarget.Ticket): PlanTicket? = plan?.tickets?.firstOrNull { it.key.equals(t.name, ignoreCase = true) }
+
+    private fun ticketOf(ref: PageRef): PlanTicket? = (ref.target as? PageTarget.Ticket)?.let(::ticketOf)
 
     /** A figure as it's drawn (ov-306): its value as written, or its reference's live value, with a detail and a tone. */
     data class StatShown(val value: String, val detail: String?, val tone: PageTone)
@@ -196,12 +200,12 @@ data class PageWorld(
         return when (val t = ref.target) {
             is PageTarget.Ci -> plan?.ci(t.ciSubject)?.let { read ->
                 // A stale read says how old it is before anything else under it.
-                val detail = TrainWords.ciStale(read, plan?.nowMs ?: nowMs) ?: stat.detail ?: TrainWords.ciJobs(read)
-                StatShown(TrainWords.ciStatus(read.status), detail, if (read.needsAttention) PageTone.ATTENTION else stat.tone)
+                val detail = LandingWords.ciStale(read, plan?.nowMs ?: nowMs) ?: stat.detail ?: LandingWords.ciJobs(read)
+                StatShown(LandingWords.ciStatus(read.status), detail, if (read.needsAttention) PageTone.ATTENTION else stat.tone)
             } ?: StatShown(resolved.name, stat.detail, stat.tone)
             is PageTarget.Cards -> StatShown(resolved.status ?: resolved.name, stat.detail, stat.tone)
-            is PageTarget.Lane -> StatShown(
-                laneOf(ref)?.let { if (stat.show == PageShow.SPEND) PageWords.tokens(it.spend) else PlanWords.status(it) } ?: resolved.name,
+            is PageTarget.Ticket -> StatShown(
+                ticketOf(ref)?.let { if (stat.show == PageShow.SPEND) PageWords.tokens(it.spend) else PlanWords.status(it) } ?: resolved.name,
                 stat.detail, stat.tone,
             )
             is PageTarget.Theme -> StatShown(
@@ -212,23 +216,23 @@ data class PageWorld(
         }
     }
 
-    /** What a reference cell draws: its own text when it has some, else the target's name, a lane's state words or tokens. */
+    /** What a reference cell draws: its own text when it has some, else the target's name, a ticket's stage words or tokens. */
     fun cellText(cell: PageCell): String {
         cell.text?.let { return it }
         val ref = cell.ref ?: return ""
-        val lane = laneOf(ref)
+        val ticket = ticketOf(ref)
         return when (cell.show) {
             // Live data draws its value (ov-306): CI's status, a count.
             PageShow.NAME -> resolve(ref).let { if (ref.target is PageTarget.Ci || ref.target is PageTarget.Cards) it.status ?: it.name else it.name }
-            PageShow.STATE -> lane?.let(PlanWords::status) ?: resolve(ref).name
+            PageShow.STATE -> ticket?.let(PlanWords::status) ?: resolve(ref).name
             PageShow.SPEND -> themeOf(ref)?.let { PageWords.tokens(it.spend ?: PlanSpend()) }
-                ?: lane?.let { PageWords.tokens(it.spend) } ?: resolve(ref).name
+                ?: ticket?.let { PageWords.tokens(it.spend) } ?: resolve(ref).name
         }
     }
 
     /**
      * [cell] as it's drawn: a reference drawn by name, or text the
-     * orchestrator wrote over one, is a link; a lane's live state or tokens
+     * orchestrator wrote over one, is a link; a ticket's live stage or tokens
      * are words. A web link's domain follows its words unless they're it.
      */
     fun parts(cell: PageCell): PageCellParts {
@@ -271,7 +275,7 @@ object PageLayout {
     /** Whether steps go down the page rather than across. */
     fun stepsDown(width: Int?): Boolean = width != null && width > 0 && width < NARROW
 
-    /** A table row as TalkBack reads it: "Lane, ov-274-phones. Cards, ov-274. State, In review." Empty cells left out. */
+    /** A table row as TalkBack reads it: "Ticket, ov-274. Cards, ov-274. State, In review." Empty cells left out. */
     fun spokenRow(columns: List<PageColumn>, cells: List<PageCell>, world: PageWorld): String =
         columns.zip(cells).mapNotNull { (column, cell) ->
             val text = world.parts(cell).spoken
@@ -304,7 +308,7 @@ object PageSpeech {
         (listOf(PageWords.progress(block.done, block.total)) + listOfNotNull(block.detail) + block.parts.map { "${it.label} ${it.count}" })
             .joinToString(", ")
 
-    /** "Page, Train integ-10, In review · 3 of 4 lanes green, Updated 12 min ago". */
+    /** "Page, Landing 10, In review · 3 of 4 tickets green, Updated 12 min ago". */
     fun row(page: BoardPage, now: Long): String =
         (listOf("Page", page.title) + listOfNotNull(page.summary.ifEmpty { null }) + PageWords.updated(page, now)).joinToString(", ")
 }

@@ -12,10 +12,10 @@ data class PlanStrip(
     /** The orchestrator's line, for the sheet: the strip sits over the pane that shows it. */
     val line: String?,
     val needsYou: Int,
-    val now: List<Pair<String, LaneState>>,
+    val now: List<Pair<String, TicketStage>>,
     val moreNow: Int,
     val next: String?,
-    /** The glance band's two lines (ov-503): Now by train and section, Next by rank. The strip's own parts are unchanged. */
+    /** The glance band's two lines (ov-503): Now by landing and section, Next by rank. The strip's own parts are unchanged. */
     val band: PlanGlanceSentence? = null,
 ) {
     enum class Orchestrator(val word: String) {
@@ -42,7 +42,7 @@ data class PlanStrip(
 
     val parts: List<String>
         get() = listOfNotNull(needsYouWords) +
-            now.map { (name, state) -> "$name ${PlanWords.state(state)}" } +
+            now.map { (name, stage) -> "$name ${PlanWords.state(stage)}" } +
             listOfNotNull(if (moreNow > 0) "+$moreNow" else null, next?.let { "next: $it" })
 
     val isEmpty: Boolean get() = parts.isEmpty()
@@ -73,18 +73,18 @@ data class PlanStrip(
         }
 
     companion object {
-        /** How many Now lanes the strip names, as the Mac's does. */
+        /** How many Now tickets the strip names, as the Mac's does. */
         const val NOW_SHOWN = 2
 
         fun of(plan: Plan, needsYou: Int, orchestrator: Terminal?, statuses: Map<String, TaskStatus> = emptyMap()): PlanStrip {
             val working = plan.working
             val state = state(orchestrator)
-            // One reading of the plan for the band and for Next, so a lane waiting on a decision is in neither.
+            // One reading of the plan for the band and for Next, so a ticket waiting on a decision is in neither.
             val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses)
             return PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
-                now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.state },
-                moreNow = maxOf(0, working.size - NOW_SHOWN), next = sections.waiting.next.firstOrNull()?.let { PlanWords.short(it.lane.heading) },
+                now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.stage },
+                moreNow = maxOf(0, working.size - NOW_SHOWN), next = sections.waiting.next.firstOrNull()?.let { PlanWords.short(it.ticket.heading) },
                 band = PlanGlanceSentence.of(sections),
             )
         }

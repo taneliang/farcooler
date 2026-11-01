@@ -27,15 +27,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.farcooler.model.PlanFleetAgent
+import com.farcooler.model.PlanAgent
 
 // Agents (ov-503, design 6), drawn for the phone: one row per agent. Who (role and model) with its tokens beside it and
 // its dollars after, then what it works for and its state. A working agent has a filled dot; a finished one, a ring.
-// A row opens its lane when it has one.
+// A row opens its ticket when it has one.
 
 @Composable
-fun PlanAgentRow(agent: PlanFleetAgent, now: Long, onOpenLane: (String) -> Unit) {
-    val lane = agent.laneId
+fun PlanAgentRow(agent: PlanAgent, now: Long, onOpenTicket: (String) -> Unit) {
+    // The first ticket it works: a row opens one page, and an agent with several shows the first.
+    val ticket = agent.tickets.firstOrNull()?.task
     val tokens = agent.tokens()
     val cost = agent.cost()
     val second = agentSecondLine(agent, now)
@@ -44,7 +45,7 @@ fun PlanAgentRow(agent: PlanFleetAgent, now: Long, onOpenLane: (String) -> Unit)
     Row(
         verticalAlignment = Alignment.Top,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            .then(if (lane != null) Modifier.clickable(role = Role.Button) { onOpenLane(lane) } else Modifier)
+            .then(if (ticket != null) Modifier.clickable(role = Role.Button) { onOpenTicket(ticket) } else Modifier)
             .padding(horizontal = 16.dp, vertical = 8.dp).testTag("plan-agent-${agent.id}")
             .semantics(mergeDescendants = true) { contentDescription = spoken },
     ) {
@@ -80,9 +81,10 @@ private fun column(text: String?, width: androidx.compose.ui.unit.Dp) {
     )
 }
 
-/** "“Design ov-503” · Not on a lane · Done 1 h ago": what it was told, what it works for, and its state. */
-internal fun agentSecondLine(agent: PlanFleetAgent, now: Long): String = buildList {
-    if (agent.label.isNotEmpty()) add("“${agent.label}”")
+/** "“Design ov-503” · ov-503 · Working · 22 min": what it was called, what it works for, and its state. What it is doing now leads, else its title. */
+internal fun agentSecondLine(agent: PlanAgent, now: Long): String = buildList {
+    val said = agent.doingNow.ifEmpty { agent.title }
+    if (said.isNotEmpty()) add("“$said”")
     add(agent.worksFor)
     add(agent.state(now))
 }.joinToString(" · ")

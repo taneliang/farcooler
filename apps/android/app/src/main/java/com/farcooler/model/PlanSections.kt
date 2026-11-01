@@ -1,37 +1,29 @@
 package com.farcooler.model
 
-// The Plan view as sections (ov-503, design 2): what moves main first, then what is queued, then what it costs, then
-// why. Every rule is here, as values; the views only lay it out. The Android twin of AgentKit's `PlanSections.swift`,
+// The Plan view as sections (ov-503, design 2; ov-872): what moves main first, then what is waiting, then what it costs,
+// then why. Every rule is here, as values; the views only lay it out. The Android twin of AgentKit's `PlanSections.swift`,
 // held to it by `test/fixtures/plan-sections-cases.json`.
 //
-// Order (owner decision 7; ov-522): Needs You, Landing (the trains), In Review, Building, Waiting, Agents, Themes. The
+// Order (owner decision 7; ov-522): Needs You, Landing (the landings), In Review, Building, Waiting, Agents, Themes. The
 // word is landing, never shipping.
 //
-// A lane belongs to exactly one place:
-// - on a live train, it's in that train's card (Landing), whatever its state;
-// - naming a train that landed while it's still queued or landing, it's in Waiting for the next landing (folded, each row says
-//   which train);
-// - a lane building, in review or fixing is never hidden by a landed train: it routes by its state and the row says
-//   it names that train ([LaneRow.landedTrain]);
-// - in review, fixing, or landing with no train, it's In Review;
+// A ticket belongs to exactly one place:
+// - on a live landing, it's in that landing's card (Landing), whatever its stage;
+// - reviewing, being fixed, at Needs you, or landing with no live landing, it's In Review;
 // - building, it's Building;
-// - queued, it's Waiting on You when a card needs a decision, else Next Up when the plan ranks it, else Not Ranked.
-// A lane named like a live train is that train's agent and is left out (ov-461).
+// - waiting, it's Waiting on You when its card needs a decision, else Next Up when the plan ranks it, else Not Ranked.
+// A ticket that has landed or been dropped is in no section.
 
 data class PlanSections(
     /** The Needs You count the title bar says; the section's rows are the runner's own list, which the plan doesn't carry. */
     val needsYou: Int,
-    /** Live trains, furthest along first. */
-    val trains: List<TrainCard>,
-    val inReview: List<LaneRow>,
-    val building: List<LaneRow>,
+    /** Live landings, furthest along first. */
+    val landings: List<LandingCard>,
+    val inReview: List<TicketRow>,
+    val building: List<TicketRow>,
     val waiting: Waiting,
     val fleet: PlanFleet,
     val themes: PlanThemeGrid,
-    /** Queued or landing lanes that name a train that has landed. */
-    val onLandedTrain: List<LaneRow>,
-    /** Whether the runner lists agents (`board_agents`); without it the Agents section isn't drawn. */
-    val agentsSupported: Boolean,
     /** The runner's clock. */
     val now: Long,
 ) {
@@ -40,27 +32,22 @@ data class PlanSections(
         LANDING("Landing", "Nothing is landing right now."),
         IN_REVIEW("In review", null),
         BUILDING("Building", "Nothing is building."),
-        WAITING("Waiting", "Nothing is queued."),
-        ON_LANDED_TRAIN("Waiting for the next landing", null),
+        WAITING("Waiting", "Nothing is waiting."),
         AGENTS("Agents", PlanWords.NO_AGENTS),
         THEMES("Themes", null);
-
-        /** Drawn folded until opened. */
-        val startsFolded: Boolean get() = this == ON_LANDED_TRAIN
     }
 
-    /** A lane row in In review, Building or Waiting. */
-    data class LaneRow(
-        val lane: PlanLane,
-        val agent: PlanFleetAgent?,
+    /** A ticket row in In review, Building or Waiting. */
+    data class TicketRow(
+        val ticket: PlanTicket,
+        /** The agent working it now, working ones first. */
+        val agent: PlanAgent?,
         val waitsOnOwner: Boolean,
-        /** The heading of the landed train the lane still names, or null. */
-        val landedTrain: String? = null,
     ) {
-        val id: String get() = lane.id
+        val id: String get() = ticket.task
     }
 
-    /** How a lane stands relative to the train it's on. */
+    /** How a ticket stands relative to the landing it's on. */
     sealed interface Standing {
         val word: String
 
@@ -71,57 +58,57 @@ data class PlanSections(
         data class Landed(val sha: String?) : Standing {
             override val word get() = if (sha.isNullOrEmpty()) "Landed" else "Landed · ${sha.take(8)}"
         }
-        /** Not ready yet: queued, building or in review. */
-        data class NotReady(val state: LaneState) : Standing {
-            override val word get() = PlanWords.state(state)
+        /** Not ready yet: waiting, building or in review. */
+        data class NotReady(val stage: TicketStage) : Standing {
+            override val word get() = PlanWords.state(stage)
         }
     }
 
-    data class TrainLane(val lane: PlanLane, val standing: Standing, val waitsOnOwner: Boolean) {
-        val id: String get() = lane.id
-        val name: String get() = lane.name
+    data class LandingTicket(val ticket: PlanTicket, val standing: Standing, val waitsOnOwner: Boolean) {
+        val id: String get() = ticket.task
+        val key: String get() = ticket.key
 
         /**
-         * What a lane aboard says about itself, or null when it is simply aboard (ov-522). "Ready" said nothing: the
-         * train is being tested, ready for what? Only what matters is said: a lane that waits on the owner, and a lane
-         * that has landed. (A lane never keeps its train from leaving, ov-523, so none says so.)
+         * What a ticket aboard says about itself, or null when it is simply aboard (ov-522). "Ready" said nothing: the
+         * landing is being tested, ready for what? Only what matters is said: a ticket that waits on the owner, and a
+         * ticket that has landed.
          */
         val note: String?
             get() = if (waitsOnOwner) "Needs you" else (standing as? Standing.Landed)?.word
 
-        /** The note is drawn in amber: the lane waits on the owner. */
+        /** The note is drawn in amber: the ticket waits on the owner. */
         val noteNeedsAttention: Boolean get() = waitsOnOwner
     }
 
-    /** A live train and its lanes. */
-    data class TrainCard(
-        val train: PlanTrain,
-        val phase: TrainPhase,
+    /** A live landing and its tickets. */
+    data class LandingCard(
+        val landing: PlanLanding,
+        val phase: LandingPhase,
         val since: Long,
-        val lanes: List<TrainLane>,
+        val tickets: List<LandingTicket>,
+        /** The agent landing it, when the plan lists one. */
+        val lander: PlanAgent? = null,
     ) {
-        val id: String get() = train.id
+        val id: String get() = landing.id
     }
 
-    data class Waiting(val next: List<LaneRow>, val notRanked: List<LaneRow>, val onYou: List<LaneRow>) {
+    data class Waiting(val next: List<TicketRow>, val notRanked: List<TicketRow>, val onYou: List<TicketRow>) {
         val isEmpty: Boolean get() = next.isEmpty() && notRanked.isEmpty() && onYou.isEmpty()
         val count: Int get() = next.size + notRanked.size + onYou.size
     }
 
     /**
      * The sections to draw, in order. Needs you, In review and Themes are drawn only with rows; Landing,
-     * Waiting and Agents always are, and say so when empty; Building also when something is queued, since the gap
-     * between Next and Landing is then worth saying. Agents is left out for a runner that lists none.
+     * Waiting and Agents always are, and say so when empty; Building also when something is waiting, since the gap
+     * between Next and Landing is then worth saying.
      */
     val shown: List<Kind>
         get() = Kind.entries.filter { kind ->
             when (kind) {
                 Kind.NEEDS_YOU -> needsYou > 0
-                Kind.LANDING, Kind.WAITING -> true
-                Kind.ON_LANDED_TRAIN -> onLandedTrain.isNotEmpty()
+                Kind.LANDING, Kind.WAITING, Kind.AGENTS -> true
                 Kind.IN_REVIEW -> inReview.isNotEmpty()
                 Kind.BUILDING -> building.isNotEmpty() || waiting.next.isNotEmpty()
-                Kind.AGENTS -> agentsSupported
                 Kind.THEMES -> !themes.isEmpty
             }
         }
@@ -129,11 +116,10 @@ data class PlanSections(
     /** Rows in a section, for deciding whether it's empty. */
     fun count(kind: Kind): Int = when (kind) {
         Kind.NEEDS_YOU -> needsYou
-        Kind.LANDING -> trains.size
+        Kind.LANDING -> landings.size
         Kind.IN_REVIEW -> inReview.size
         Kind.BUILDING -> building.size
         Kind.WAITING -> waiting.count
-        Kind.ON_LANDED_TRAIN -> onLandedTrain.size
         Kind.AGENTS -> fleet.agents.size
         Kind.THEMES -> themes.tiles.size + themes.finished.size
     }
@@ -148,80 +134,61 @@ data class PlanSections(
          * @param statuses the board's card statuses by task id, which say whether a card waits on a decision and which
          *   glyph a theme's card gets.
          * @param activity when each card last moved (ms), by task id.
-         * @param agentsSupported whether the runner advertises `board_agents`.
          */
         fun of(
             plan: Plan,
             needsYou: Int = 0,
             statuses: Map<String, TaskStatus> = emptyMap(),
             activity: Map<String, Long> = emptyMap(),
-            agentsSupported: Boolean = true,
         ): PlanSections {
-            val isTrainAgent = plan.laneIsTrain.map { it.lane }.toSet()
-            val candidates = plan.lanes.filter { it.id !in isTrainAgent }
+            fun row(ticket: PlanTicket) = TicketRow(ticket, plan.agentsOn(ticket).firstOrNull(), plan.waitsOnOwner(ticket, statuses))
 
-            fun agentOf(lane: PlanLane): PlanFleetAgent? = plan.agents
-                .filter { it.laneId == lane.id && it.role != PlanFleetRole.ORCHESTRATOR }
-                .sortedWith(compareByDescending<PlanFleetAgent> { it.working }.thenByDescending { it.spend.totalTokens })
-                .firstOrNull()
-
-            // A live lane on a landed train names it still.
-            val landedTrains = plan.trains.filter { it.state == TrainState.LANDED }
-            fun landed(lane: PlanLane): PlanTrain? = landedTrains.firstOrNull { train ->
-                train.lanes.any { it.lane == lane.id } || lane.train.equals(train.name, ignoreCase = true)
-            }
-
-            fun row(lane: PlanLane) = LaneRow(lane, agentOf(lane), plan.waitsOnOwner(lane, statuses), landed(lane)?.label)
-
-            // Trains, furthest along first; the plan's order breaks a tie.
-            val live = plan.trains.filter { !it.state.isSettled }
-                .withIndex().sortedWith(compareByDescending<IndexedValue<PlanTrain>> { it.value.phaseIn(plan).progress }.thenBy { it.index })
+            // Landings, furthest along first; the plan's order breaks a tie.
+            val live = plan.landings.filter { !it.state.isSettled }
+                .withIndex().sortedWith(compareByDescending<IndexedValue<PlanLanding>> { it.value.phaseIn(plan).progress }.thenBy { it.index })
                 .map { it.value }
             val onLive = mutableSetOf<String>()
-            val trains = live.map { train ->
-                val phase = train.phaseIn(plan)
-                val since = train.phaseSinceIn()
-                val mine = plan.lanesOn(train).filter { it.id !in isTrainAgent }
-                onLive += mine.map { it.id }
-                TrainCard(
-                    train, phase, since,
-                    mine.map { TrainLane(it, standing(it), plan.waitsOnOwner(it, statuses)) },
+            val landings = live.map { landing ->
+                val phase = landing.phaseIn(plan)
+                val since = landing.phaseSinceIn()
+                val mine = plan.ticketsOn(landing)
+                onLive += mine.map { it.task }
+                LandingCard(
+                    landing, phase, since,
+                    mine.map { LandingTicket(it, standing(it), plan.waitsOnOwner(it, statuses)) },
+                    lander = landing.lander?.let { id -> plan.agents.firstOrNull { it.id == id } },
                 )
             }
 
-            val free = candidates.filter { it.state.isLive && it.id !in onLive }
-            // Only queued and landing lanes go to the folded section; the rest route by their state and are flagged.
-            val parked = free.filter { (it.state == LaneState.QUEUED || it.state == LaneState.LANDING) && landed(it) != null }
-            val parkedIds = parked.map { it.id }.toSet()
-            val loose = free.filter { it.id !in parkedIds }
-
-            val queued = loose.filter { it.state == LaneState.QUEUED }
-            val blocked = queued.filter { plan.waitsOnOwner(it, statuses) }
-            val blockedIds = blocked.map { it.id }.toSet()
-            val ranked = plan.order.mapNotNull { id -> queued.firstOrNull { it.id == id && id !in blockedIds } }
-            val rankedIds = ranked.map { it.id }.toSet()
+            val free = plan.tickets.filter { it.stage.isLive && it.task !in onLive }
+            val waitingTickets = free.filter { it.stage == TicketStage.WAITING }
+            val blocked = waitingTickets.filter { plan.waitsOnOwner(it, statuses) }
+            val blockedIds = blocked.map { it.task }.toSet()
+            val ranked = waitingTickets.filter { it.planRank != null && it.task !in blockedIds }.sortedBy { it.planRank }
+            val rankedIds = ranked.map { it.task }.toSet()
             val waiting = Waiting(
                 next = ranked.map(::row),
-                notRanked = queued.filter { it.id !in rankedIds && it.id !in blockedIds }.map(::row),
+                notRanked = waitingTickets.filter { it.task !in rankedIds && it.task !in blockedIds }.map(::row),
                 onYou = blocked.map(::row),
             )
-            val inReview = loose.filter { it.state == LaneState.REVIEW || it.state == LaneState.FIXING || it.state == LaneState.LANDING }
-            val building = loose.filter { it.state == LaneState.BUILDING }
-            val moving = (trains.flatMap { c -> c.lanes.map { it.id } } + (inReview + building).map { it.id }).toSet()
+            val inReview = free.filter {
+                it.stage == TicketStage.REVIEWING || it.stage == TicketStage.NEEDS_YOU || it.stage == TicketStage.LANDING || it.isFixing
+            }
+            val building = free.filter { it.stage == TicketStage.BUILDING && !it.isFixing }
+            val moving = (landings.flatMap { c -> c.tickets.map { it.id } } + (inReview + building).map { it.task }).toSet()
             return PlanSections(
-                needsYou = maxOf(0, needsYou), trains = trains, inReview = inReview.map(::row), building = building.map(::row),
+                needsYou = maxOf(0, needsYou), landings = landings, inReview = inReview.map(::row), building = building.map(::row),
                 waiting = waiting, fleet = PlanFleet.of(plan.agents, plan.agentsSpend),
-                themes = PlanThemeGrid.of(plan, moving, statuses, activity),
-                onLandedTrain = parked.map(::row), agentsSupported = agentsSupported, now = plan.nowMs,
+                themes = PlanThemeGrid.of(plan, moving, statuses, activity), now = plan.nowMs,
             )
         }
 
-        /** A lane's standing on its train. */
-        internal fun standing(lane: PlanLane): Standing = when (lane.state) {
-            LaneState.LANDING -> Standing.Ready
-            LaneState.FIXING -> Standing.Fixing(lane.fixRounds)
-            LaneState.LANDED -> Standing.Landed(lane.landedSha)
-            else -> Standing.NotReady(lane.state)
+        /** A ticket's standing on its landing. */
+        internal fun standing(ticket: PlanTicket): Standing = when {
+            ticket.stage == TicketStage.LANDING -> Standing.Ready
+            ticket.isFixing -> Standing.Fixing(ticket.fixRounds)
+            ticket.stage == TicketStage.LANDED -> Standing.Landed(ticket.landedSha)
+            else -> Standing.NotReady(ticket.stage)
         }
     }
 }

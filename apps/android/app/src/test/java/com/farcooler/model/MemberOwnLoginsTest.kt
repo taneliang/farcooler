@@ -50,12 +50,12 @@ class MemberOwnLoginsTest {
     @Test
     fun `a member's Claude section says whose account their panes use until they sign in`() {
         assertEquals(
-            "Until you sign in, your rep and the lanes you start use this runner’s own Claude account, owner@example.com. " +
+            "Until you sign in, your rep and the agents you start use this runner’s own Claude account, owner@example.com. " +
                 "Sign in to use your own account and its connectors.",
             ClaudeSignIn.body("owner@example.com"),
         )
         assertEquals(ClaudeSignIn.BODY, ClaudeSignIn.body(null))
-        assertEquals("Your rep and lanes there use this runner’s own Claude account from the next time each starts.", ClaudeSignIn.signOutMessage(true))
+        assertEquals("Your rep and agents there use this runner’s own Claude account from the next time each starts.", ClaudeSignIn.signOutMessage(true))
         assertEquals(ClaudeSignIn.SIGN_OUT_MESSAGE, ClaudeSignIn.signOutMessage(false))
     }
 }

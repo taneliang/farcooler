@@ -27,7 +27,7 @@ data class PlanThemeTile(
     val cards: List<Card>,
     /** What waits on the owner: the one amber line. Null when nothing does. */
     val ownerAsk: String?,
-    /** A lane of it is shipping, in review or building. */
+    /** A ticket of it is landing, in review or building. */
     val isMoving: Boolean,
     /** When it last moved, in ms. */
     val lastMoved: Long,
@@ -69,7 +69,7 @@ data class PlanThemeTile(
             return PlanThemeTile(
                 id = theme.id, name = theme.name, done = theme.counts.done, total = total,
                 cards = inProgress + finished + notStarted, ownerAsk = theme.ownerAsk.ifEmpty { null },
-                isMoving = plan.lanesIn(theme).any { it.id in moving },
+                isMoving = plan.ticketsIn(theme).any { it.task in moving },
                 lastMoved = maxOf(plan.lastMoved(theme), tasks.maxOfOrNull { activity[it] ?: 0L } ?: 0L),
                 isFinished = theme.state == "done" || (total > 0 && theme.counts.done == total),
             )

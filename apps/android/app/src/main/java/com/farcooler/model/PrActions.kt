@@ -7,7 +7,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 // A phone acting on a pull request as the runner's own `gh` login (ov-317, team
-// mode T6): mark a lane's draft pull request ready for review, and reply to a
+// mode T6): mark a ticket's draft pull request ready for review, and reply to a
 // review thread an agent escalated. The runner does both (`pr.ready` and
 // `pr.thread_reply`, `pr_actions`, Control scope); this holds what a phone sends,
 // what it asks before sending, and what it says when the runner refuses.
@@ -36,7 +36,7 @@ object PrActions {
     /** Somebody else's pull request, on a Needs You row: reviewed there. */
     const val REVIEW_ON_GITHUB = "Review on GitHub"
 
-    /** A thread, and a lane's own pull request: opened there. */
+    /** A thread, and a ticket's own pull request: opened there. */
     const val OPEN_ON_GITHUB = "Open on GitHub"
     const val REPLY = "Reply"
     const val SEND_REPLY = "Send reply"
@@ -44,8 +44,8 @@ object PrActions {
     /** What it does: reviewers are asked the moment it is ready, so it asks first. */
     const val READY_MESSAGE = "It stops being a draft, and the people asked to review it are notified."
 
-    /** `pr.ready`'s arguments: the lane, and the number of the draft the row showed. */
-    fun readyRequest(lane: String, number: Int): List<Pair<String, Any>> = listOf("lane" to lane, "pr_number" to number)
+    /** `pr.ready`'s arguments: the ticket's task, and the number of the draft the row showed. */
+    fun readyRequest(task: String, number: Int): List<Pair<String, Any>> = listOf("task" to task, "pr_number" to number)
 
     /** `pr.thread_reply`'s arguments for the card whose Needs You row is the thread; with [send] false the runner posts nothing. */
     fun replyRequest(task: String, body: String, send: Boolean, shown: ReplyPreview? = null): List<Pair<String, Any>> =
@@ -112,7 +112,7 @@ object PrActions {
      * "Couldn’t …". Never the runner's own words.
      */
     fun refusal(word: String?, what: String?, action: String): String = when {
-        what == "lane_pr" -> "This lane has no draft pull request to mark ready. It may already be ready, or closed."
+        what == "ticket_pr" -> "This ticket has no draft pull request to mark ready. It may already be ready, or closed."
         what == "thread_link" -> "Couldn’t find that thread on GitHub. Open it there to reply."
         what == "already_answered" -> "This thread was already answered."
         what == "reply_body" -> "A reply has to be between 1 and $REPLY_MAX characters."

@@ -10,7 +10,7 @@ import kotlinx.serialization.json.longOrNull
 import java.util.Locale
 
 // Cost on the plan (ov-307, folding in ov-261): a token budget on a theme or a
-// lane, a theme's seven-day trend, the runner's tokens this week, and cost per
+// ticket, a theme's seven-day trend, the runner's tokens this week, and cost per
 // finished card by harness and model. EXPERIMENTAL with the plan layer, behind
 // `board_cost`: a runner without it sends none of this, and nothing here draws.
 //
@@ -18,7 +18,7 @@ import java.util.Locale
 // on the Mac, the iPhone and here, and pinned to the same fixture.
 //
 // Tokens come first and dollars second, and every dollar is API-equivalent. A
-// budget is a number of tokens counted as a lane's spend counts them (input,
+// budget is a number of tokens counted as a ticket's spend counts them (input,
 // output and both cache counts).
 //
 // **There is no weekly-limit percentage.** The runner can't know a plan's
@@ -190,13 +190,13 @@ object PlanCostWords {
         return if (used > against) PlanBudget.Over(used, against) else PlanBudget.Within(used, against)
     }
 
-    /** The warning a lane over its budget carries, in the words a row draws in amber; null when it has no budget or is within it. */
-    fun overBudget(lane: PlanLane, locale: Locale = Locale.getDefault()): String? =
-        (budget(lane.spend, lane.budgetTokens) as? PlanBudget.Over)?.let { budgetLine(it, locale) }
+    /** The warning a ticket over its budget carries, in the words a row draws in amber; null when it has no budget or is within it. */
+    fun overBudget(ticket: PlanTicket, locale: Locale = Locale.getDefault()): String? =
+        (budget(ticket.spend, ticket.budgetTokens) as? PlanBudget.Over)?.let { budgetLine(it, locale) }
 
     /** The same, said for TalkBack with the counts as words. */
-    fun overBudgetSpoken(lane: PlanLane, locale: Locale = Locale.getDefault()): String? =
-        (budget(lane.spend, lane.budgetTokens) as? PlanBudget.Over)?.let { budgetSpoken(it, locale) }
+    fun overBudgetSpoken(ticket: PlanTicket, locale: Locale = Locale.getDefault()): String? =
+        (budget(ticket.spend, ticket.budgetTokens) as? PlanBudget.Over)?.let { budgetSpoken(it, locale) }
 
     /** The same for a theme. */
     fun overBudget(theme: PlanTheme): PlanBudget.Over? = budget(theme.spend, theme.budgetTokens) as? PlanBudget.Over

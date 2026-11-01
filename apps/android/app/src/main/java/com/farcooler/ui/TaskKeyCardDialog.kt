@@ -17,7 +17,7 @@ import com.farcooler.model.TaskKeyCard
 
 /**
  * A task key's card (ov-299), what a long press on a key shows: the title
- * first and largest, then the key, status, theme and lane on one line, then
+ * first and largest, then the key, status, theme and ticket stage on one line, then
  * the intent or latest note. Material's dialog, as the phone's equivalent of
  * the Mac's hovercard and the iPhone's preview, with Open task, and Copy
  * where there's a key to copy.

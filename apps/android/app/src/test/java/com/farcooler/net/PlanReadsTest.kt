@@ -103,12 +103,12 @@ class PlanReadsTest {
     /** ov-631: a malformed plan says which field failed, as a path, and nothing of what it held. */
     @Test
     fun `a plan that does not decode is logged by the path of the field and never by its value`() = runBlocking {
-        val bad = """{"now_ms":1,"themes":[],"order":[],"cards":[],"lanes":[{"id":"a","name":"fine"},{"id":"b","state":{"leak":"DISTINCTIVE-9X"}}]}"""
+        val bad = """{"now_ms":1,"themes":[],"cards":[],"lines":[{"task":"a","key":"fine"},{"task":"b","stage":{"leak":"DISTINCTIVE-9X"}}]}"""
         val logged = mutableListOf<Throwable>()
         val state = PlanReadState.read(runnerCan = true, onDecodeFailure = { logged += it }) { bad }
         assertEquals(PlanReadState.Unavailable, state)
         val text = planDecodeLogText(logged.single())
-        assertEquals("the plan didn't decode at \$.lanes[1].state", text)
+        assertEquals("the plan didn't decode at \$.lines[1].stage", text)
         assertFalse(text, "DISTINCTIVE" in text || "leak" in text)
         // Not JSON at all: the root, and none of the text.
         val garbage = mutableListOf<Throwable>()
@@ -152,14 +152,14 @@ class PlanReadsTest {
         val eventCalls = mutableListOf<String>()
         val record = Json.parseToJsonElement("""{"events":[]}""").jsonObject
         val plans = PlanReads({ method, args ->
-            if (method == "plan.events") { eventCalls += (args["theme"] ?: args["lane"]).toString(); record } else plan
+            if (method == "plan.events") { eventCalls += (args["theme"] ?: args["task"]).toString(); record } else plan
         }, runnerCan = { true })
         plans.read(workspace)
         plans.readRecord(PlanPage.Theme("a"))
-        plans.readRecord(PlanPage.Lane("b"))
+        plans.readRecord(PlanPage.Ticket("b"))
         plans.readRecord(PlanPage.Theme("c"))
         eventCalls.clear()
-        plans.openPage = PlanPage.Lane("b")
+        plans.openPage = PlanPage.Ticket("b")
         plans.heard("w1", listOf(workspace))
         assertEquals(listOf("\"b\""), eventCalls)
         eventCalls.clear()
@@ -188,9 +188,9 @@ class PlanReadsTest {
         val sent = mutableListOf<JsonObject>()
         val record = Json.parseToJsonElement("""{"events":[{"at":1,"actor":"m","kind":"state","body":"Started."}]}""").jsonObject
         val plans = PlanReads({ method, args -> sent += args; if (method == "plan.events") record else plan }, runnerCan = { true })
-        plans.readRecord(PlanPage.Lane("l1"))
-        assertEquals("l1", sent.single()["lane"]?.toString()?.trim('"'))
-        assertEquals(1, plans.records.value[PlanPage.Lane("l1")]?.events?.size)
+        plans.readRecord(PlanPage.Ticket("l1"))
+        assertEquals("l1", sent.single()["task"]?.toString()?.trim('"'))
+        assertEquals(1, plans.records.value[PlanPage.Ticket("l1")]?.events?.size)
         val broken = PlanReads({ _, _ -> throw CoreException("no") }, runnerCan = { true })
         broken.readRecord(PlanPage.Theme("t1"))
         assertTrue(broken.records.value.isEmpty())

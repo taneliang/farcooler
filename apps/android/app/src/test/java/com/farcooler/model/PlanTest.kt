@@ -32,48 +32,78 @@ class PlanTest {
         assertEquals(listOf("ov-1", "ov-2", "ov-3"), theme.cards.map { it.key })
         assertEquals(1, theme.counts.done)
         assertEquals(2, theme.counts.backlog)
-        assertEquals(listOf(LaneState.QUEUED, LaneState.REVIEW, LaneState.LANDED), plan.lanes.map { it.state })
-        val review = plan.lanes[1]
-        assertEquals("integ-9", review.train)
+        assertEquals(listOf("ov-2", "ov-1", "ov-4", "ov-3"), plan.tickets.map { it.key })
+        assertEquals(listOf(TicketStage.WAITING, TicketStage.REVIEWING, TicketStage.LANDING, TicketStage.LANDED), plan.tickets.map { it.stage })
+        val review = plan.tickets[1]
         assertEquals(1, review.fixRounds)
-        assertEquals("Mac", review.cards.single().slice)
-        assertEquals(listOf("build", "review"), review.agents.map { it.role })
-        assertEquals(now - hour, review.agents[0].endedAt)
-        assertNull(review.agents[1].endedAt)
+        assertEquals("Title of ov-1", review.title)
+        assertEquals("In Review", review.status)
+        assertEquals("ov-1-mac-polish", review.branch)
+        assertEquals(listOf(WorkRole.BUILD, WorkRole.REVIEW), review.work.map { it.role })
+        assertEquals("finished", review.work[0].verdict)
+        assertEquals(now - hour, review.work[0].endedAt)
+        assertNull(review.work[1].endedAt)
         assertEquals(470_000L, review.spend.totalTokens)
         assertEquals(31_000_000L, review.spend.costMicros)
-        assertEquals("4d3c8cb1e2", plan.lanes[2].landedSha)
-        assertEquals(listOf("mac-fu3"), plan.nextUp.map { it.name })
-        assertEquals(listOf("ov-1", "ov-2", "ov-3"), plan.cards.map { it.key })
+        assertEquals(500_000L, review.budgetTokens)
+        assertEquals(9, plan.tickets[2].landing)
+        assertEquals(31, plan.tickets[2].prNumber)
+        assertEquals("ov-1", plan.tickets[2].stackParent?.key)
+        assertEquals("4d3c8cb1e2", plan.tickets[3].landedSha)
+        assertEquals(listOf("ov-2"), plan.nextUp.map { it.key })
+        assertEquals(listOf("ov-1", "ov-2", "ov-3", "ov-4", "ov-5"), plan.cards.map { it.key })
     }
 
     @Test
-    fun `the seeded board the captures draw decodes, with a record for every theme and lane`() {
+    fun `the agents carry their tickets and what they are doing now`() {
+        val plan = Plan.decode(fixture)
+        assertEquals(listOf(AgentRole.ORCHESTRATOR, AgentRole.REVIEWER, AgentRole.BUILDER), plan.agents.map { it.role })
+        val reviewer = plan.agents[1]
+        assertEquals("Reading PlanColumn.swift", reviewer.doingNow)
+        assertEquals("Review ov-1", reviewer.title)
+        assertEquals(listOf("ov-1"), reviewer.tickets.map { it.key })
+        assertEquals(WorkRole.REVIEW, reviewer.tickets.single().role)
+        assertEquals("a3", reviewer.subagentId)
+        assertNull(reviewer.terminal)
+        val builder = plan.agents[2]
+        assertFalse(builder.working)
+        assertEquals("gpt-5.6", builder.model)
+        assertEquals(1_799_999_940_000L, builder.stopAskedAt)
+        assertEquals("Stopping", builder.state(now))
+        assertEquals("2/5 · Reviewing the plan", plan.agents[0].doingNow)
+        assertEquals(listOf(reviewer), plan.agentsOn(plan.tickets[1]))
+    }
+
+    @Test
+    fun `the seeded board the captures draw decodes, with a record for every theme and ticket`() {
         val seeded = Json.parseToJsonElement(repositoryFile("test/fixtures/plan-seeded.json")).jsonObject
         val plan = Plan.decode(seeded["plan"]!!.jsonObject)
         val records = seeded["records"]!!.jsonObject
         assertEquals(5, plan.shownThemes.size)
-        assertEquals(4, plan.nextUp.size)
-        for (id in plan.themes.map { it.id } + plan.lanes.map { it.id }) {
+        assertEquals(5, plan.nextUp.size)
+        for (id in plan.themes.map { it.id } + plan.tickets.map { it.task }) {
             PlanRecord.decode(records[id]!!.jsonObject)
         }
     }
 
     @Test
-    fun `next up is the plan's order and now is every live lane past queued`() {
+    fun `next up is the plan's rank and now is every live ticket past waiting`() {
         val plan = Plan.decode(fixture)
-        assertEquals(listOf("mac-fu3"), plan.nextUp.map { it.name })
-        assertEquals(listOf("mac-ux"), plan.working.map { it.name })
+        assertEquals(listOf("ov-2"), plan.nextUp.map { it.key })
+        assertEquals(listOf("ov-1", "ov-4"), plan.working.map { it.key })
         assertTrue(plan.unranked.isEmpty())
-        assertEquals(listOf("fix-ac84"), plan.landedToday(TimeZone.getTimeZone("UTC")).map { it.name })
-        assertEquals(plan.copy(order = emptyList()).unranked.map { it.name }, listOf("mac-fu3"))
+        assertEquals(listOf("ov-3"), plan.landedToday(TimeZone.getTimeZone("UTC")).map { it.key })
+        val unranked = plan.copy(tickets = plan.tickets.map { it.copy(planRank = null) })
+        assertEquals(listOf("ov-2"), unranked.unranked.map { it.key })
+        assertTrue(unranked.nextUp.isEmpty())
     }
 
     @Test
-    fun `a lane serves the theme most of its cards are in, and each lane names it`() {
+    fun `a ticket serves the theme its card is in, and a card elsewhere serves none`() {
         val plan = Plan.decode(fixture)
-        assertEquals("Visual language", plan.themeOf(plan.lanes[0])?.name)
-        assertNull(plan.themeOf(plan.lanes[0].copy(cards = listOf(PlanCardRef("elsewhere", "ov-9")))))
+        assertEquals("Visual language", plan.themeOf(plan.tickets[0])?.name)
+        assertNull(plan.themeOf(plan.tickets[0].copy(task = "elsewhere")))
+        assertEquals(listOf("ov-1", "ov-2", "ov-3"), plan.ticketsIn(plan.themes.single()).map { it.key })
     }
 
     @Test
@@ -89,41 +119,56 @@ class PlanTest {
     }
 
     @Test
-    fun `a lane's status says its round, its place, its commit and its train`() {
+    fun `a ticket's status says its round, its place, its commit and its landing`() {
         val plan = Plan.decode(fixture)
-        assertEquals("Queued · 1st", PlanWords.status(plan.lanes[0]))
-        assertEquals("In review · in Train 9", PlanWords.status(plan.lanes[1]))
-        assertEquals("Landed · 4d3c8cb1", PlanWords.status(plan.lanes[2]))
-        assertEquals("Fixing · round 2", PlanWords.status(plan.lanes[1].copy(state = LaneState.FIXING, fixRounds = 2, train = null)))
+        assertEquals("Waiting · 1st", PlanWords.status(plan.tickets[0]))
+        assertEquals("In review", PlanWords.status(plan.tickets[1]))
+        assertEquals("Landing · in Landing 9", PlanWords.status(plan.tickets[2]))
+        assertEquals("Landed · 4d3c8cb1", PlanWords.status(plan.tickets[3]))
+        val fixing = plan.tickets[1].copy(
+            stage = TicketStage.BUILDING, fixRounds = 2, landing = null,
+            work = listOf(PlanWork("a", WorkRole.FIX, now - hour, null)),
+        )
+        assertEquals("Fixing · round 2", PlanWords.status(fixing))
         assertEquals(listOf("1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st"), listOf(1, 2, 3, 4, 11, 12, 13, 21).map(PlanWords::ordinal))
     }
 
     @Test
-    fun `a state this build has no word for is unknown, not a failed read`() {
-        assertEquals(LaneState.UNKNOWN, LaneState.parse("teleporting"))
-        assertEquals(LaneState.UNKNOWN, LaneState.parse(null))
+    fun `a stage this build has no word for is unknown, not a failed read`() {
+        assertEquals(TicketStage.UNKNOWN, TicketStage.parse("teleporting"))
+        assertEquals(TicketStage.UNKNOWN, TicketStage.parse(null))
+        assertEquals(WorkRole.UNKNOWN, WorkRole.parse("juggle"))
     }
 
     @Test
-    fun `only a stale lane or one waiting on the owner is a warning`() {
+    fun `only a stale ticket or one waiting on the owner is a warning`() {
         val plan = Plan.decode(fixture)
-        val review = plan.lanes[1]
+        val review = plan.tickets[1]
         assertNull(PlanWords.stale(review, now))
-        assertEquals("No move in 3 h", PlanWords.stale(review.copy(stale = true, stateSince = now - 3 * hour), now))
-        val statuses = mapOf(review.cards[0].task to TaskStatus.NEEDS_DECISION)
+        assertEquals("No move in 3 h", PlanWords.stale(review.copy(stale = true, stageSince = now - 3 * hour), now))
+        val statuses = mapOf(review.task to TaskStatus.NEEDS_DECISION)
         assertTrue(plan.waitsOnOwner(review, statuses))
-        assertFalse(plan.waitsOnOwner(plan.lanes[2], mapOf(plan.lanes[2].cards[0].task to TaskStatus.NEEDS_DECISION)))
+        assertTrue(plan.waitsOnOwner(review.copy(stage = TicketStage.NEEDS_YOU), emptyMap()))
+        assertFalse(plan.waitsOnOwner(plan.tickets[3], mapOf(plan.tickets[3].task to TaskStatus.NEEDS_DECISION)))
     }
 
     @Test
     fun `spend is tokens first, a price is an estimate, and nothing measured is not reported`() {
-        val review = Plan.decode(fixture).lanes[1]
+        val review = Plan.decode(fixture).tickets[1]
         val dollars = TaskUsageFormat.dollars(31_000_000, java.util.Locale.US)
         assertEquals(
-            "470K tokens · about $dollars estimated · 1 agent not reported · 1 agent's spend split with other lanes",
+            "470K tokens · about $dollars estimated · 1 agent not reported · 1 agent's spend split with other tickets",
             PlanWords.spend(review.spend, java.util.Locale.US),
         )
         assertEquals("Not reported", PlanWords.spend(PlanSpend()))
+    }
+
+    @Test
+    fun `a work record says its role, the agent's model and how long it ran`() {
+        val work = PlanWork("a", WorkRole.BUILD, 0, 3 * hour)
+        assertEquals("Builder Opus, 3 h", PlanWords.work(work, now, "claude-opus-5-5"))
+        assertEquals("Reviewer, 3 h", PlanWords.work(work.copy(role = WorkRole.REVIEW), now))
+        assertEquals("Fixer Sonnet, 3 h", PlanWords.work(work.copy(role = WorkRole.FIX), now, "sonnet"))
     }
 
     @Test

@@ -168,7 +168,7 @@ fun BoardTab(
     modifier: Modifier = Modifier,
     /** A finished status's History page (ov-103). */
     onOpenHistory: (TaskStatus) -> Unit = {},
-    /** A theme's or lane's page of the plan layer (ov-274). */
+    /** A theme's or ticket's page of the plan layer (ov-274). */
     onOpenPlan: (com.farcooler.model.PlanPage) -> Unit = {},
     /** Whether an orchestrator is up to tell, which decides what a blank board says (ov-205). */
     orchestratorRunning: Boolean = true,
@@ -374,7 +374,6 @@ fun BoardTab(
                             folds = planFolds,
                             needsYou = PlanStrip.needsYouCount(workspace, board, (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan(), needsYou),
                             onNeedsYou = onNeedsYou,
-                            agentsSupported = daemon?.can(Capability.BOARD_AGENTS_LIST) == true,
                             pages = if (keepsPages) {
                                 PagesHook(pageLists[workspace.id], System.currentTimeMillis()) {
                                     scope.launch { connection.pages.read(workspace) }

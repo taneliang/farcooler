@@ -30,13 +30,13 @@ class PageRouterTest {
     fun `each reference opens what it names, and a question waiting goes to Needs You`() {
         router.open(PageDestination.Task("t1"))
         router.open(PageDestination.Ask("t2"))
-        router.open(PageDestination.Lane("l1"))
+        router.open(PageDestination.Ticket("l1"))
         router.open(PageDestination.Theme("th1"))
         router.open(PageDestination.Page("spend"))
         router.open(PageDestination.Terminal("wt-1", "build"))
         router.open(PageDestination.Worktree("wt-1"))
         assertEquals(
-            listOf("task t1", "needs you", "page lane l1", "page theme th1", "page page spend", "pane wt-1 t-build", "pane wt-1 t-shell"),
+            listOf("task t1", "needs you", "page ticket l1", "page theme th1", "page page spend", "pane wt-1 t-build", "pane wt-1 t-shell"),
             went,
         )
     }

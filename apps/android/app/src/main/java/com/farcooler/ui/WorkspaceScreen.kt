@@ -72,7 +72,7 @@ import kotlinx.coroutines.launch
  *   Start Orchestrator (ruling 8); with a lost one, Restart and Replace.
  * - **Board** is the list form of the workspace's board ([BoardTab]).
  * - **Themes** is the One tree's root ([ThemesTab], ov-300): the themes, their
- *   cards, the cards' lanes and terminals, then the main checkout and the
+ *   cards, their tickets and terminals, then the main checkout and the
  *   loose worktrees, each level pushed. It took the Worktrees tab's place.
  * - The Orchestrator tab carries the plan's strip under the tab row
  *   ([PlanStripBar]), which opens the plan as a bottom sheet.

@@ -36,22 +36,22 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.Capability
-import com.farcooler.model.LaneTree
 import com.farcooler.model.OneTree
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanSections
 import com.farcooler.model.ThemeTree
+import com.farcooler.model.TicketTree
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.Connection
 
 // The two sidebar lists, read from a connection (ov-503, design 7). On a phone the Themes tab's root has two rows,
-// Themes and Lanes, each pushing its list; on a tablet both lists stand in the list pane, one over the other.
+// Themes and Tickets, each pushing its list; on a tablet both lists stand in the list pane, one over the other.
 // `SidebarLists.kt` draws the rows; this reads the plan and the board and hands them over.
 
 /** Both lists' models, built over one reading of the plan. */
-class SidebarModels(val themes: ThemeTree, val lanes: LaneTree)
+class SidebarModels(val themes: ThemeTree, val tickets: TicketTree)
 
 /** [workspace]'s two lists as [connection] holds them, under [filter] (which applies to Themes only); null until the board is read. */
 @Composable
@@ -68,7 +68,7 @@ internal fun rememberSidebarModels(connection: Connection, workspace: WorkspaceS
     val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
     return remember(board, plan, filter) {
         val statuses = board.rows.associate { it.id to it.status }
-        SidebarModels(ThemeTree.of(plan, filter, statuses), LaneTree.of(plan, PlanSections.of(plan, statuses = statuses)))
+        SidebarModels(ThemeTree.of(plan, filter, statuses), TicketTree.of(plan, PlanSections.of(plan, statuses = statuses)))
     }
 }
 
@@ -78,7 +78,7 @@ internal fun rememberSidebarActions(connection: Connection, nav: TreeNavigation)
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     return SidebarActions(
         onOpenTask = nav.onOpenTask,
-        onOpenLane = { nav.onOpenPlan(PlanPage.Lane(it)) },
+        onOpenTicket = { nav.onOpenPlan(PlanPage.Ticket(it)) },
         onOpenTheme = { nav.onOpenPlan(PlanPage.Theme(it)) },
         onOpenTerminal = { terminal ->
             val worktree = fleet.worktrees.firstOrNull { wt -> wt.terminals.any { it.id == terminal } }
@@ -88,7 +88,7 @@ internal fun rememberSidebarActions(connection: Connection, nav: TreeNavigation)
     )
 }
 
-/** Both lists in the tablet's list pane: Themes under its filter, then Lanes, then [below] (the checkout and loose worktrees). */
+/** Both lists in the tablet's list pane: Themes under its filter, then Tickets, then [below] (the checkout and loose worktrees). */
 internal fun LazyListScope.sidebarPaneItems(
     models: SidebarModels,
     filterChips: @Composable () -> Unit,
@@ -99,15 +99,15 @@ internal fun LazyListScope.sidebarPaneItems(
 ) {
     item(key = "sidebar/themes") { SidebarListTitle("Themes", Modifier.testTag("sidebar-themes")) }
     item(key = "sidebar/filter") { filterChips() }
-    themeListItems(models.themes, folds, choice, models.lanes, actions, onChoose)
-    item(key = "sidebar/lanes") { SidebarListTitle("Lanes", Modifier.testTag("sidebar-lanes")) }
-    laneListItems(models.lanes, models.themes, folds, choice, actions, onChoose)
+    themeListItems(models.themes, folds, choice, models.tickets, actions, onChoose)
+    item(key = "sidebar/tickets") { SidebarListTitle("Tickets", Modifier.testTag("sidebar-tickets")) }
+    ticketListItems(models.tickets, models.themes, folds, choice, actions, onChoose)
 }
 
 /** The two rows at the phone's tree root: each pushes its list. */
 internal fun LazyListScope.sidebarRootRows(models: SidebarModels?, onOpenLevel: (String) -> Unit) {
     val themes = models?.themes?.themes?.size
-    val lanes = models?.lanes?.groups?.sumOf { it.lanes.size }
+    val tickets = models?.tickets?.groups?.sumOf { g -> g.tickets.size + g.landings.sumOf { it.tickets.size } }
     item(key = "sidebar/row/themes") {
         ListItem(
             leadingContent = { Icon(Icons.Outlined.Map, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -117,22 +117,22 @@ internal fun LazyListScope.sidebarRootRows(models: SidebarModels?, onOpenLevel: 
             modifier = Modifier.clickable(role = Role.Button) { onOpenLevel(THEMES_LIST) }.testTag("sidebar-row-themes"),
         )
     }
-    item(key = "sidebar/row/lanes") {
+    item(key = "sidebar/row/tickets") {
         ListItem(
             leadingContent = { Icon(Icons.Outlined.AccountTree, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-            headlineContent = { Text("Lanes") },
-            supportingContent = lanes?.let { { Text(if (it == 1) "1 lane" else "$it lanes") } },
+            headlineContent = { Text("Tickets") },
+            supportingContent = tickets?.let { { Text(if (it == 1) "1 ticket" else "$it tickets") } },
             trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline) },
-            modifier = Modifier.clickable(role = Role.Button) { onOpenLevel(LANES_LIST) }.testTag("sidebar-row-lanes"),
+            modifier = Modifier.clickable(role = Role.Button) { onOpenLevel(TICKETS_LIST) }.testTag("sidebar-row-tickets"),
         )
     }
 }
 
 /** The node ids a pushed list goes by, in the tree level's route. */
 const val THEMES_LIST = "list:themes"
-const val LANES_LIST = "list:lanes"
+const val TICKETS_LIST = "list:tickets"
 
-/** A pushed list: Themes (under its filter) or Lanes, with its title and a way back. */
+/** A pushed list: Themes (under its filter) or Tickets, with its title and a way back. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SidebarListScreen(connection: Connection, workspace: WorkspaceSummary, list: String, nav: TreeNavigation, onBack: () -> Unit) {
@@ -146,13 +146,13 @@ internal fun SidebarListScreen(connection: Connection, workspace: WorkspaceSumma
     val themes = list == THEMES_LIST
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(if (themes) "Themes" else "Lanes") },
+            title = { Text(if (themes) "Themes" else "Tickets") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
         )
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             if (models == null) CircularProgressIndicator(Modifier.align(Alignment.Center).testTag("tree-level-loading"))
-            else LazyColumn(Modifier.fillMaxSize().testTag(if (themes) "themes-list" else "lanes-list")) {
+            else LazyColumn(Modifier.fillMaxSize().testTag(if (themes) "themes-list" else "tickets-list")) {
                 if (themes) {
                     item(key = "filter") {
                         TreeFilterChips(filter) { f ->
@@ -160,9 +160,9 @@ internal fun SidebarListScreen(connection: Connection, workspace: WorkspaceSumma
                             prefs.edit().putString(key, f.name).apply()
                         }
                     }
-                    themeListItems(models.themes, folds, choice, models.lanes, actions) { choice = it }
+                    themeListItems(models.themes, folds, choice, models.tickets, actions) { choice = it }
                 } else {
-                    laneListItems(models.lanes, models.themes, folds, choice, actions) { choice = it }
+                    ticketListItems(models.tickets, models.themes, folds, choice, actions) { choice = it }
                 }
             }
         }

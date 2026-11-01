@@ -13,13 +13,13 @@ data class TaskKeyCard(
     val status: TaskStatus,
     /** The plan theme it's in, by name, or null. */
     val theme: String? = null,
-    /** The plan lane working it: a live one, else the last to finish; or null. */
-    val lane: String? = null,
+    /** The plan ticket's stage on the line: "Building", "Landed"; or null for a card that isn't on it. */
+    val ticket: String? = null,
     /** Its intent's first line, or its newest written note when read; may be empty. */
     val excerpt: String = "",
 ) {
-    /** Status, theme and lane, those it has: "In progress · Invoices · rounding". */
-    val details: String get() = (listOf(status.title) + listOfNotNull(theme, lane)).joinToString(" · ")
+    /** Status, theme and ticket stage, those it has: "In progress · Invoices · Building". */
+    val details: String get() = (listOf(status.title) + listOfNotNull(theme, ticket)).joinToString(" · ")
 
     /** What TalkBack says for the key: the key, then the title. */
     val accessibilityLabel: String get() = "$key, $title"
@@ -58,19 +58,16 @@ data class TaskKeyCards(val runner: String, val cards: Map<String, TaskKeyCard>)
             for (workspace in boards.keys.sorted()) {
                 val plan = plans[workspace]
                 val themes = mutableMapOf<String, String>()
-                val lanes = mutableMapOf<String, String>()
+                val tickets = mutableMapOf<String, String>()
                 if (plan != null) {
                     for (theme in plan.themes.sortedBy { it.ordinal }) for (card in theme.cards) themes.putIfAbsent(card.task, theme.name)
-                    val ordered = plan.lanes.sortedWith(
-                        compareByDescending<PlanLane> { it.state.isLive }.thenByDescending { it.stateSince },
-                    )
-                    for (lane in ordered) for (card in lane.cards) lanes.putIfAbsent(card.task, lane.name)
+                    for (ticket in plan.tickets) tickets.putIfAbsent(ticket.task, PlanWords.state(ticket))
                 }
                 for (row in boards[workspace]?.rows.orEmpty()) {
                     if (row.key in cards) continue
                     cards[row.key] = TaskKeyCard(
                         key = row.key, title = row.title, status = row.status, theme = themes[row.id],
-                        lane = lanes[row.id], excerpt = TaskKeyCard.excerpt(row.intent),
+                        ticket = tickets[row.id], excerpt = TaskKeyCard.excerpt(row.intent),
                     )
                 }
             }

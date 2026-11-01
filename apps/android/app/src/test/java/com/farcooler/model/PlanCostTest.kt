@@ -20,12 +20,12 @@ class PlanCostTest {
     private val fixture = repositoryFile("test/fixtures/plan.json")
 
     @Test
-    fun `the plan carries a theme's budget and trend, a lane's budget, the week and the comparison`() {
+    fun `the plan carries a theme's budget and trend, a ticket's budget, the week and the comparison`() {
         val plan = Plan.decode(fixture)
         assertEquals(250_000L, plan.themes[0].budgetTokens)
         assertEquals(listOf(0L, 0, 0, 40_000, 120_000, 0, 160_000), plan.themes[0].trendTokens)
-        assertEquals(500_000L, plan.lanes[1].budgetTokens)
-        assertNull(plan.lanes[0].budgetTokens)
+        assertEquals(500_000L, plan.tickets[1].budgetTokens)
+        assertNull(plan.tickets[0].budgetTokens)
         val cost = plan.cost!!
         assertEquals(34_200_000L, cost.weekTokens)
         assertEquals(2, cost.compareHeldBack)
@@ -37,7 +37,7 @@ class PlanCostTest {
 
     @Test
     fun `an older answer from a runner without board_cost reads and draws nothing`() {
-        val plan = Plan.decode("""{"now_ms":1,"themes":[{"id":"t","name":"Visual","state":"active","ordinal":1,"counts":{}}],"lanes":[],"order":[],"cards":[]}""")
+        val plan = Plan.decode("""{"now_ms":1,"themes":[{"id":"t","name":"Visual","state":"active","ordinal":1,"counts":{}}],"lines":[],"cards":[]}""")
         assertNull(plan.cost)
         assertNull(plan.themes[0].budgetTokens)
         assertNull(plan.themes[0].trendTokens)
@@ -51,13 +51,13 @@ class PlanCostTest {
         val over = PlanCostWords.overBudget(plan.themes[0])!!
         assertEquals(PlanBudget.Over(320_000, 250_000), over)
         assertEquals("Over budget: 320K of 250K tokens", PlanCostWords.budgetLine(over, us))
-        assertNull("470K of 500K is within", PlanCostWords.overBudget(plan.lanes[1]))
-        val within = PlanCostWords.budget(plan.lanes[1].spend, plan.lanes[1].budgetTokens)!!
+        assertNull("470K of 500K is within", PlanCostWords.overBudget(plan.tickets[1]))
+        val within = PlanCostWords.budget(plan.tickets[1].spend, plan.tickets[1].budgetTokens)!!
         assertEquals("470K of 500K tokens budgeted", PlanCostWords.budgetLine(within, us))
         assertEquals(PlanBudget.Within(500, 500), PlanCostWords.budget(PlanSpend(inputTokens = 500), 500))
         assertTrue(PlanCostWords.budget(PlanSpend(inputTokens = 501), 500)!!.isOver)
         assertNull("no budget, nothing to flag", PlanCostWords.budget(PlanSpend(inputTokens = 501), null))
-        assertEquals("Over budget: 470K of 100K tokens", PlanCostWords.overBudget(plan.lanes[1].copy(budgetTokens = 100_000), us))
+        assertEquals("Over budget: 470K of 100K tokens", PlanCostWords.overBudget(plan.tickets[1].copy(budgetTokens = 100_000), us))
     }
 
     @Test

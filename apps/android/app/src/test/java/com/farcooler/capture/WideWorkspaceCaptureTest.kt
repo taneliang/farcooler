@@ -66,14 +66,14 @@ import org.robolectric.annotation.GraphicsMode
 @OptIn(ExperimentalMaterial3Api::class)
 class WideWorkspaceCaptureTest {
     private val plan = Plan.decode(Json.parseToJsonElement(repositoryFile("test/fixtures/plan-seeded.json")).jsonObject["plan"]!!.jsonObject)
-    private val orchestrator = Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to its lane")
+    private val orchestrator = Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to a builder")
     private val strip = PlanStrip.of(plan, 2, orchestrator)
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
-    private val models = SidebarModels(com.farcooler.model.ThemeTree.of(plan), com.farcooler.model.LaneTree.of(plan))
+    private val models = SidebarModels(com.farcooler.model.ThemeTree.of(plan), com.farcooler.model.TicketTree.of(plan))
     private val actions = SidebarActions({}, {}, {}, { false })
     private val rows = listOf(
-        "Where are the phone lanes?",
+        "Where are the phone tickets?",
         "Two are in review and one is still building. I'm dispatching plan-phones next.",
     )
 

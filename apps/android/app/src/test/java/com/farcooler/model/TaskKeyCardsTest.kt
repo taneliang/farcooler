@@ -39,9 +39,9 @@ class TaskKeyCardsTest {
     fun `the CLI's board and plan give each key its card`() {
         val cards = TaskKeyCards.of("r1", mapOf("w" to board), mapOf("w" to plan))
         assertEquals("Total each invoice", cards.card("bil-1")?.title)
-        assertEquals("In progress · Invoices · invoice-totals", cards.card("bil-1")?.details)
+        assertEquals("In progress · Invoices · Waiting", cards.card("bil-1")?.details)
         assertEquals("Invoices show the sum of their lines.", cards.card("bil-1")?.excerpt)
-        assertEquals("Invoices · rounding", cards.card("bil-2")?.details?.substringAfter(" · "))
+        assertEquals("Invoices · Waiting", cards.card("bil-2")?.details?.substringAfter(" · "))
         assertEquals("bil-1, Total each invoice", cards.card("bil-1")?.accessibilityLabel)
         assertNull(cards.card("bil-4"))
     }

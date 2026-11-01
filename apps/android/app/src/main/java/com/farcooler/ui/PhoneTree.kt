@@ -154,7 +154,6 @@ internal fun LazyListScope.planHome(
     onNeedsYou: () -> Unit,
     onOpen: (PlanPage) -> Unit,
     folds: PlanFolds,
-    agentsSupported: Boolean,
     /** The themes grid's columns: one in the phone's sheet, two beside the chat on a tablet. */
     themeColumns: Int = 1,
     /** Which of Now and Next the plan opens with; the peek leaves out what its card behind already says (ov-659). */
@@ -173,7 +172,6 @@ internal fun LazyListScope.planHome(
             folds = folds,
             needsYou = strip.needsYou,
             onNeedsYou = onNeedsYou,
-            agentsSupported = agentsSupported,
             themeColumns = themeColumns,
             band = band,
         )
@@ -208,7 +206,7 @@ fun PlanHome(
             connection, workspace, strip, keepsPlan, planStates[workspace.id],
             boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status },
             rulings, scope, onNeedsYou, onOpenPlan,
-            folds, daemon?.can(Capability.BOARD_AGENTS_LIST) == true, themeColumns = 2,
+            folds, themeColumns = 2,
         )
     }
 }
@@ -290,7 +288,6 @@ fun PlanStripBar(
                         }
                     },
                     folds = folds,
-                    agentsSupported = daemon?.can(Capability.BOARD_AGENTS_LIST) == true,
                     band = band,
                 )
             }
@@ -411,7 +408,7 @@ private fun rememberTree(connection: Connection, workspace: WorkspaceSummary, fi
 }
 
 /**
- * The Themes tab: the tree's root. On a phone, two rows (Themes, Lanes) that push a list each, and the checkout and
+ * The Themes tab: the tree's root. On a phone, two rows (Themes, Tickets) that push a list each, and the checkout and
  * loose worktrees below; [stacked] (the tablet's list pane) draws both lists in place instead (ov-503).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -505,7 +502,7 @@ internal fun TreeRoot(
 @Composable
 fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId: String, nav: TreeNavigation, onBack: () -> Unit) {
     // The two lists the root's rows push (ov-503).
-    if (nodeId == THEMES_LIST || nodeId == LANES_LIST) {
+    if (nodeId == THEMES_LIST || nodeId == TICKETS_LIST) {
         SidebarListScreen(connection, workspace, nodeId, nav, onBack)
         return
     }
@@ -580,7 +577,7 @@ private fun open(target: OneTree.Target, nav: TreeNavigation) {
     when (target) {
         is OneTree.Target.Task -> nav.onOpenTask(target.id)
         is OneTree.Target.Theme -> nav.onOpenPlan(PlanPage.Theme(target.id))
-        is OneTree.Target.Lane -> nav.onOpenPlan(PlanPage.Lane(target.id))
+        is OneTree.Target.Ticket -> nav.onOpenPlan(PlanPage.Ticket(target.id))
         is OneTree.Target.Worktree -> nav.onOpenWorktree(target.id)
         is OneTree.Target.Terminal -> nav.onOpenTerminal(target.worktree, target.terminal)
         is OneTree.Target.Page -> nav.onOpenPlan(PlanPage.Page(target.slot))
@@ -655,7 +652,7 @@ private fun icon(node: OneTree.Node): ImageVector = when (node.kind) {
     OneTree.Kind.THEME -> Icons.Outlined.Map
     OneTree.Kind.TASK -> Icons.Outlined.Circle
     OneTree.Kind.DONE_FOLD -> Icons.Outlined.CheckCircleOutline
-    OneTree.Kind.LANE -> Icons.Outlined.AccountTree
+    OneTree.Kind.TICKET -> Icons.Outlined.AccountTree
     OneTree.Kind.TERMINAL -> if (node.detail == "Agent") Icons.Outlined.AutoAwesome else Icons.Outlined.Terminal
     OneTree.Kind.SUBAGENT -> Icons.Outlined.Person
     OneTree.Kind.PAGE -> Icons.Outlined.Description
@@ -684,7 +681,7 @@ fun treeNavigation(model: AppModel, hostId: String, workspaceId: String, worktre
 /**
  * The worktree menu on the tree's rows (ov-300): what the Worktrees tab's
  * header offered, kept now that the tree has taken its place. A long press on
- * a lane's, a loose worktree's or the checkout's row opens it, and TalkBack
+ * a ticket's, a loose worktree's or the checkout's row opens it, and TalkBack
  * reads each as a custom action. The actions are `WorktreeActions.of`, the
  * rule the Worktrees list reads too.
  */
@@ -698,11 +695,11 @@ class TreeWorktreeMenu internal constructor(
     internal var stack by mutableStateOf<com.farcooler.model.Worktree?>(null)
     internal var removing by mutableStateOf<com.farcooler.model.Worktree?>(null)
 
-    /** The row's worktree: a lane's, a loose one's, or the checkout. */
+    /** The row's worktree: a ticket's, a loose one's, or the checkout. */
     fun worktreeOf(node: OneTree.Node): com.farcooler.model.Worktree? = worktree(node)
 
     private fun worktree(node: OneTree.Node): com.farcooler.model.Worktree? {
-        if (node.kind != OneTree.Kind.LANE && node.kind != OneTree.Kind.WORKTREE && node.id != "group:main") return null
+        if (node.kind != OneTree.Kind.TICKET && node.kind != OneTree.Kind.WORKTREE && node.id != "group:main") return null
         val id = node.worktreeId ?: return null
         return connection.fleet.value.worktrees.firstOrNull { it.id == id }
     }

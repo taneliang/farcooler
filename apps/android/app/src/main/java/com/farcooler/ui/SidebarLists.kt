@@ -43,36 +43,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.farcooler.model.LaneTree
 import com.farcooler.model.OneTree
 import com.farcooler.model.PlanCardGlyph
 import com.farcooler.model.PlanPage
 import com.farcooler.model.ThemeTree
+import com.farcooler.model.TicketTree
 
-// The sidebar as two lists (ov-503, design 3), drawn for the phone and the tablet: Themes › Cards, the why, and
-// Lanes › Agents, the how. `ThemeTree` and `LaneTree` decide what is in each; these lay them out. On a phone the tree's
-// root has two rows that push one list each; on a tablet both lists stand in the list pane. A card and the lane working
-// it light each other: choose one and the other is tinted (`ThemeTree.laneOf`, `LaneTree.cardsOf`).
+// The sidebar as two lists (ov-503, design 3; ov-872), drawn for the phone and the tablet: Themes › Cards, the why, and
+// Tickets › Agents, the how. `ThemeTree` and `TicketTree` decide what is in each; these lay them out. On a phone the tree's
+// root has two rows that push one list each; on a tablet both lists stand in the list pane. A card and its ticket
+// light each other: choose one and the other is tinted (`ThemeTree.ticketOf`, `TicketTree.cardOf`).
 
 /** What was chosen last, which lights the other list's side of the join. */
 sealed interface SidebarChoice {
     data class Card(val task: String) : SidebarChoice
-    data class Lane(val id: String) : SidebarChoice
+    data class Ticket(val id: String) : SidebarChoice
 }
 
 /** How the lists reach the rest of the app. */
 class SidebarActions(
     val onOpenTask: (String) -> Unit,
-    val onOpenLane: (String) -> Unit,
+    val onOpenTicket: (String) -> Unit,
     val onOpenTheme: (String) -> Unit,
     /** An agent's pane, by its terminal id; null when no worktree holds it. */
     val onOpenTerminal: (String) -> Boolean,
 )
 
-private fun SidebarChoice?.isChosen(card: String? = null, lane: String? = null): Boolean = when (this) {
+private fun SidebarChoice?.isChosen(card: String? = null, ticket: String? = null): Boolean = when (this) {
     null -> false
     is SidebarChoice.Card -> card != null && task == card
-    is SidebarChoice.Lane -> lane != null && id == lane
+    is SidebarChoice.Ticket -> ticket != null && id == ticket
 }
 
 /** The row's ground: the chosen row in the secondary container, the one it joins in a quieter tint. */
@@ -98,7 +98,7 @@ fun LazyListScope.themeListItems(
     tree: ThemeTree,
     folds: PlanFolds,
     choice: SidebarChoice?,
-    lanes: LaneTree,
+    tickets: TicketTree,
     actions: SidebarActions,
     onChoose: (SidebarChoice) -> Unit,
 ) {
@@ -110,13 +110,13 @@ fun LazyListScope.themeListItems(
         )
     }
     for (theme in tree.themes) {
-        // A theme a lane works opens; a quiet one starts folded.
-        val open = folds.isOpen("theme:${theme.id}", default = theme.cards.any { it.laneId != null })
+        // A theme with a ticket on the line opens; a quiet one starts folded.
+        val open = folds.isOpen("theme:${theme.id}", default = theme.cards.any { it.ticketId != null })
         item(key = "theme/${theme.id}") {
             ThemeRow(theme, open, onToggle = { folds.toggle("theme:${theme.id}") }, onOpen = { actions.onOpenTheme(theme.id) })
         }
         if (open) for (card in theme.cards) item(key = "theme/${theme.id}/${card.task}") {
-            CardRow(card, chosen = choice.isChosen(card = card.task), lit = choice is SidebarChoice.Lane && lanes.cardsOf(choice.id).any { it.task == card.task }) {
+            CardRow(card, chosen = choice.isChosen(card = card.task), lit = choice is SidebarChoice.Ticket && tickets.cardOf(choice.id)?.task == card.task) {
                 onChoose(SidebarChoice.Card(card.task))
                 actions.onOpenTask(card.task)
             }
@@ -156,13 +156,13 @@ private fun CardRow(card: ThemeTree.CardNode, chosen: Boolean, lit: Boolean, onC
         PlanCardGlyph.IN_PROGRESS -> Icons.Outlined.Contrast
         PlanCardGlyph.NOT_STARTED -> Icons.Outlined.RadioButtonUnchecked
     }
-    val second = listOfNotNull(card.key.ifEmpty { null }, card.lane).joinToString(" · ")
+    val second = listOfNotNull(card.key.ifEmpty { null }, card.ticket).joinToString(" · ")
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().background(rowGround(chosen, lit)).heightIn(min = 48.dp)
             .clickable(role = Role.Button, onClick = onClick).padding(start = 48.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
             .testTag("card-row-${card.key.ifEmpty { card.task }}")
-            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(card.title.ifEmpty { null }, second.ifEmpty { null }, if (lit) "Shares a lane" else null).joinToString(", ") },
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(card.title.ifEmpty { null }, second.ifEmpty { null }, if (lit) "On the ticket you chose" else null).joinToString(", ") },
     ) {
         Icon(glyph, null, Modifier.size(18.dp), tint = if (card.glyph == PlanCardGlyph.NOT_STARTED) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(12.dp))
@@ -177,40 +177,40 @@ private fun CardRow(card: ThemeTree.CardNode, chosen: Boolean, lit: Boolean, onC
 }
 
 /**
- * The Lanes list: Landing first, with its trains inside it as "Train N" and their lanes under them, then In review,
- * Building, and the folded Waiting; each lane with its agents.
+ * The Tickets list: Landing first, with its landings inside it as "Landing N" and their tickets under them, then In
+ * review, Building, and the folded Waiting; each ticket with its agents.
  */
-fun LazyListScope.laneListItems(
-    tree: LaneTree,
+fun LazyListScope.ticketListItems(
+    tree: TicketTree,
     themes: ThemeTree,
     folds: PlanFolds,
     choice: SidebarChoice?,
     actions: SidebarActions,
     onChoose: (SidebarChoice) -> Unit,
 ) {
-    if (tree.groups.isEmpty()) item(key = "lanes/empty") {
+    if (tree.groups.isEmpty()) item(key = "tickets/empty") {
         Text(
-            "No lanes yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("lanes-empty"),
+            "No tickets yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("tickets-empty"),
         )
     }
     for (group in tree.groups) {
         val id = "group:${group.kind}"
         val open = folds.isOpen(id, default = !group.folded)
-        item(key = "lane-group/$id") {
+        item(key = "ticket-group/$id") {
             GroupRow(group.title, group.detail, open, onToggle = { folds.toggle(id) })
         }
-        if (open) for (train in group.trains) {
-            val trainId = "$id/train:${train.id}"
-            item(key = "lane-train/$trainId") { TrainRow(train) }
-            for (lane in train.lanes) laneItems(lane, trainId, indent = 72.dp, themes, choice, actions, onChoose)
+        if (open) for (landing in group.landings) {
+            val landingId = "$id/landing:${landing.id}"
+            item(key = "ticket-landing/$landingId") { LandingRow(landing) }
+            for (ticket in landing.tickets) ticketItems(ticket, landingId, indent = 72.dp, themes, choice, actions, onChoose)
         }
-        if (open) for (lane in group.lanes) laneItems(lane, id, indent = 48.dp, themes, choice, actions, onChoose)
+        if (open) for (ticket in group.tickets) ticketItems(ticket, id, indent = 48.dp, themes, choice, actions, onChoose)
     }
 }
 
-private fun LazyListScope.laneItems(
-    lane: LaneTree.LaneNode,
+private fun LazyListScope.ticketItems(
+    ticket: TicketTree.TicketNode,
     under: String,
     indent: Dp,
     themes: ThemeTree,
@@ -218,30 +218,30 @@ private fun LazyListScope.laneItems(
     actions: SidebarActions,
     onChoose: (SidebarChoice) -> Unit,
 ) {
-    item(key = "lane/$under/${lane.id}") {
-        val lit = choice is SidebarChoice.Card && themes.laneOf(choice.task) == lane.id
-        LaneRow(lane, chosen = choice.isChosen(lane = lane.id), lit = lit, indent = indent) {
-            onChoose(SidebarChoice.Lane(lane.id))
-            actions.onOpenLane(lane.id)
+    item(key = "ticket/$under/${ticket.id}") {
+        val lit = choice is SidebarChoice.Card && themes.ticketOf(choice.task) == ticket.id
+        TicketRow(ticket, chosen = choice.isChosen(ticket = ticket.id), lit = lit, indent = indent) {
+            onChoose(SidebarChoice.Ticket(ticket.id))
+            actions.onOpenTicket(ticket.id)
         }
     }
-    for (agent in lane.agents) item(key = "lane/$under/${lane.id}/${agent.id}") { AgentRow(agent, actions, indent = indent + 24.dp) }
+    for (agent in ticket.agents) item(key = "ticket/$under/${ticket.id}/${agent.id}") { AgentRow(agent, actions, indent = indent + 24.dp) }
 }
 
-/** A train inside Landing: "Train 86", what it is for under it, and where it stands under that. */
+/** A landing inside Landing: "Landing 86", what it is for under it, and where it stands under that. */
 @Composable
-private fun TrainRow(train: LaneTree.TrainNode) {
+private fun LandingRow(landing: TicketTree.LandingNode) {
     Column(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 48.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
-            .testTag("lane-train-${train.label}")
-            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(train.label, train.subtitle, train.phase).joinToString(", ") },
+            .testTag("ticket-landing-${landing.label}")
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(landing.label, landing.subtitle, landing.phase).joinToString(", ") },
     ) {
-        Text(train.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(landing.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // Where it stands leads the second line, as on the Mac; the title follows and truncates first.
         Text(
-            listOfNotNull(train.phase, train.subtitle).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+            listOfNotNull(landing.phase, landing.subtitle).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.testTag("lane-train-${train.label}-line"),
+            modifier = Modifier.testTag("ticket-landing-${landing.label}-line"),
         )
     }
 }
@@ -250,7 +250,7 @@ private fun TrainRow(train: LaneTree.TrainNode) {
 private fun GroupRow(title: String, detail: String?, open: Boolean, onToggle: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle).testTag("lane-group-$title")
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle).testTag("ticket-group-$title")
             .semantics(mergeDescendants = true) {
                 contentDescription = listOfNotNull(title, detail).joinToString(", ")
                 stateDescription = if (open) "Expanded" else "Collapsed"
@@ -262,7 +262,7 @@ private fun GroupRow(title: String, detail: String?, open: Boolean, onToggle: ()
                 Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        // The phase under a train's title, not beside it: at the tablet's 240 dp a long title would be cut to make room.
+        // The count under a group's title, not beside it: at the tablet's 240 dp a long title would be cut to make room.
         Column(Modifier.weight(1f).padding(end = 16.dp, top = 4.dp, bottom = 4.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (detail != null) Text(
@@ -274,27 +274,27 @@ private fun GroupRow(title: String, detail: String?, open: Boolean, onToggle: ()
 }
 
 @Composable
-private fun LaneRow(lane: LaneTree.LaneNode, chosen: Boolean, lit: Boolean, indent: Dp = 48.dp, onClick: () -> Unit) {
+private fun TicketRow(ticket: TicketTree.TicketNode, chosen: Boolean, lit: Boolean, indent: Dp = 48.dp, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().background(rowGround(chosen, lit)).heightIn(min = 48.dp)
             .clickable(role = Role.Button, onClick = onClick).padding(start = indent, end = 16.dp, top = 6.dp, bottom = 6.dp)
-            .testTag("lane-row-${lane.name}")
-            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(lane.heading, lane.state, if (lit) "Works the card you chose" else null).joinToString(", ") },
+            .testTag("ticket-row-${ticket.key}")
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(ticket.heading, ticket.state, if (lit) "Is the card you chose" else null).joinToString(", ") },
     ) {
         Column(Modifier.weight(1f)) {
-            Text(lane.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(ticket.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
-                listOf(lane.name.takeIf { it != lane.heading }, lane.state.takeIf { it.isNotEmpty() }).filterNotNull().joinToString(" · "),
+                listOf(ticket.key.takeIf { it != ticket.heading }, ticket.state.takeIf { it.isNotEmpty() }).filterNotNull().joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
 
-/** An agent under its lane: role and model, a dot while it works, its tokens. Opens its pane when the runner read one. */
+/** An agent under its ticket: role and model, a dot while it works, its tokens. Opens its pane when the runner read one. */
 @Composable
-private fun AgentRow(agent: LaneTree.AgentNode, actions: SidebarActions, indent: Dp = 72.dp) {
+private fun AgentRow(agent: TicketTree.AgentNode, actions: SidebarActions, indent: Dp = 72.dp) {
     val terminal = agent.terminal
     val opens = terminal != null
     Row(

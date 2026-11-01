@@ -174,7 +174,8 @@ sealed interface PageTarget {
 
     data class Task(val key: String) : PageTarget { override val rawName get() = key }
     data class Ask(val key: String) : PageTarget { override val rawName get() = key }
-    data class Lane(val name: String) : PageTarget { override val rawName get() = name }
+    /** A ticket, by its key. A page document spells it `lane`: pages written before lanes left the plan keep the word. */
+    data class Ticket(val name: String) : PageTarget { override val rawName get() = name }
     data class Theme(val name: String) : PageTarget { override val rawName get() = name }
     data class Page(val slot: String) : PageTarget { override val rawName get() = slot }
     data class Worktree(val name: String) : PageTarget { override val rawName get() = name }
@@ -202,7 +203,7 @@ data class PageRef(val target: PageTarget, val label: String? = null) {
             val target = when {
                 o.str("task") != null -> PageTarget.Task(o.str("task")!!)
                 o.str("ask") != null -> PageTarget.Ask(o.str("ask")!!)
-                o.str("lane") != null -> PageTarget.Lane(o.str("lane")!!)
+                o.str("lane") != null -> PageTarget.Ticket(o.str("lane")!!)
                 o.str("theme") != null -> PageTarget.Theme(o.str("theme")!!)
                 o.str("page") != null -> PageTarget.Page(o.str("page")!!)
                 o.str("worktree") != null -> PageTarget.Worktree(o.str("worktree")!!)
@@ -218,7 +219,7 @@ data class PageRef(val target: PageTarget, val label: String? = null) {
     }
 }
 
-/** What a reference cell draws when it has no text of its own: a lane's state, or a lane's or a theme's spend (ov-306). */
+/** What a reference cell draws when it has no text of its own: a ticket's stage, or a ticket's or a theme's spend (ov-306). */
 enum class PageShow {
     NAME, STATE, SPEND;
 

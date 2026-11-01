@@ -34,7 +34,7 @@ import com.farcooler.model.PlanGlanceSentence
 // needs the owner as the one amber mark. The words are `PlanGlanceSentence`'s, which the strip, the watch and the Mac
 // read too.
 //
-//   Now   Train 86 waiting for CI · 2 building · 3 in review
+//   Now   Landing 86 waiting for CI · 2 building · 3 in review
 //   Next  Reps: each person's asks reach the orchestrator, then Onboarding…
 //   ● 2 need you
 

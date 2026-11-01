@@ -27,7 +27,7 @@ class OneTreeTest {
         TaskBoard(TaskStatus.ORDER.map { s -> TaskBoardColumn(s, rows.filter { it.status == s }) })
 
     private val worktrees = listOf(
-        // mac-vis's lane worktree, joined by its path.
+        // mac-vis's ticket worktree, joined by its path.
         Worktree(id = "wt-mac-vis", repository = "repo-1", task = "mac-vis", branch = "mac-vis", worktree = "/repo/.claude/worktrees/mac-vis", workspace = "ws-billing", state = "ready",
             terminals = listOf(Terminal(id = "c1", preset = "claude", state = "running", activity = "working", role = "agent"), Terminal(id = "c2", preset = "zsh", state = "running"), Terminal(id = "c3", preset = "zsh", state = "running", paneMode = "changes"))),
         // bil-9's own worktree.
@@ -65,16 +65,16 @@ class OneTreeTest {
     }
 
     @Test
-    fun `a card's lane is its worktree, with the panes in it, not a changes pane, and its builder`() {
+    fun `a card's ticket is its worktree, with the panes in it, not a changes pane, and its builder`() {
         val tree = tree()
-        val lane = tree.all.first { it.target == OneTree.Target.Lane(plan.lanes.first { l -> l.name == "mac-vis" }.id) }
-        assertEquals("Building", lane.detail)
-        assertEquals(listOf("c1", "c2"), lane.children.filter { it.kind == OneTree.Kind.TERMINAL }.map { (it.target as OneTree.Target.Terminal).terminal })
-        assertEquals("Agent", lane.children.first().detail)
-        val builder = lane.children.single { it.kind == OneTree.Kind.SUBAGENT }
+        val ticket = tree.all.first { it.target == OneTree.Target.Ticket(plan.tickets.first { t -> t.key == "ov-220" }.task) }
+        assertEquals("Building", ticket.detail)
+        assertEquals("ov-220", ticket.title)
+        assertEquals(listOf("c1", "c2"), ticket.children.filter { it.kind == OneTree.Kind.TERMINAL }.map { (it.target as OneTree.Target.Terminal).terminal })
+        assertEquals("Agent", ticket.children.first().detail)
+        val builder = ticket.children.single { it.kind == OneTree.Kind.SUBAGENT }
         assertEquals("Builder · Opus", builder.title)
         assertEquals(OneTree.Words.SUBAGENT_CAPTION, builder.caption)
-        assertTrue(lane.also.startsWith("also ov-"))
     }
 
     @Test
@@ -142,9 +142,9 @@ class OneTreeTest {
     // ---- the strip ----
 
     @Test
-    fun `the strip says what needs you, two Now lanes and how many more, and the next lane`() {
+    fun `the strip says what needs you, two Now tickets and how many more, and the next ticket`() {
         val strip = PlanStrip.of(plan, needsYou = 2, orchestrator = Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
-        assertEquals(listOf("2 need you", "Mac looks like one app Building", "A read-only Files\u2026 In review", "+4", "next: Plan view on iOS and\u2026"), strip.parts)
+        assertEquals(listOf("2 need you", "Mac: window plane and\u2026 Building", "Mac: pane cards and\u2026 Building", "+28", "next: Plan view on iOS and\u2026"), strip.parts)
         assertEquals(PlanStrip.Orchestrator.IDLE, strip.orchestrator)
         assertTrue(strip.accessibilityLabel.startsWith("Orchestrator, idle. 2 need you"))
         assertTrue(PlanStrip.of(Plan(), 0, null).isEmpty)

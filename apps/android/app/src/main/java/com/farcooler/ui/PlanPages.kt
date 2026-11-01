@@ -189,7 +189,7 @@ class PageRouter(
         when (destination) {
             is PageDestination.Task -> onOpenTask(destination.id)
             is PageDestination.Ask -> onNeedsYou()
-            is PageDestination.Lane -> onOpenPage(PlanPage.Lane(destination.id))
+            is PageDestination.Ticket -> onOpenPage(PlanPage.Ticket(destination.id))
             is PageDestination.Theme -> onOpenPage(PlanPage.Theme(destination.id))
             is PageDestination.Page -> onOpenPage(PlanPage.Page(destination.slot))
             is PageDestination.Worktree -> fleet.worktrees.firstOrNull { it.id == destination.id }?.terminals?.firstOrNull()?.let {

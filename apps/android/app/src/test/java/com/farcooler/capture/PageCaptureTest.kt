@@ -60,7 +60,7 @@ class PageCaptureTest {
         LazyColumn(Modifier.fillMaxSize()) {
             item { PlanSwitch(showsPlan = true, onChange = {}) }
             planItems(
-                PlanReadState.Loaded(plan.copy(order = emptyList(), lanes = emptyList())), emptyMap(), onOpen = {}, onRetry = {},
+                PlanReadState.Loaded(plan.copy(tickets = emptyList())), emptyMap(), onOpen = {}, onRetry = {},
                 pages = PagesHook(PageListState.Loaded(pages), now) {},
             )
         }
@@ -83,7 +83,7 @@ class PageCaptureTest {
 
     @Test fun unavailable() = Capture.both("pages-unavailable") {
         LazyColumn(Modifier.fillMaxSize()) {
-            planItems(PlanReadState.Loaded(plan.copy(order = emptyList(), lanes = emptyList())), emptyMap(), onOpen = {}, onRetry = {}, pages = PagesHook(PageListState.Unavailable, now) {})
+            planItems(PlanReadState.Loaded(plan.copy(tickets = emptyList())), emptyMap(), onOpen = {}, onRetry = {}, pages = PagesHook(PageListState.Unavailable, now) {})
         }
     }
 

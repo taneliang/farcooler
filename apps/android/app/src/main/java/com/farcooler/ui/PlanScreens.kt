@@ -56,16 +56,15 @@ import com.farcooler.model.shownStage
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
-import com.farcooler.model.LaneState
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanCounts
-import com.farcooler.model.PlanFleetAgent
+import com.farcooler.model.PlanAgent
 import com.farcooler.model.PlanGlanceSentence
 import com.farcooler.model.PlanSections
-import com.farcooler.model.PlanLane
+import com.farcooler.model.PlanTicket
+import com.farcooler.model.TicketStage
 import com.farcooler.model.ciOf
-import com.farcooler.model.nowGroups
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanSegment
@@ -82,13 +81,13 @@ import com.farcooler.model.TaskStatus
 
 // The Plan view on Android (ov-268 design 6.5): what the board's list shows
 // when Plan is chosen. Next up first, because it's what the owner can't see
-// anywhere else; then the lanes working now, the themes, and what landed
-// today. A lane or a theme opens its page, pushed.
+// anywhere else; then the tickets being worked now, the themes, and what landed
+// today. A ticket or a theme opens its page, pushed.
 //
 // EXPERIMENTAL and opt-in, as the layer is: Tasks is the default, the control
 // only appears on a runner that advertises `board_plan`, and it switches only
 // the task list's sections. Every rule is `model/Plan.kt`'s; this draws, in
-// Material's idiom: sentence case, tonal surfaces, and color only for a lane
+// Material's idiom: sentence case, tonal surfaces, and color only for a ticket
 // that's stale or waiting on you.
 
 /** The Tasks | Plan control: a single-choice segmented row, as Material's own lists have it. */
@@ -112,14 +111,12 @@ fun LazyListScope.planItems(
     statuses: Map<String, TaskStatus>,
     onOpen: (PlanPage) -> Unit,
     onRetry: () -> Unit,
-    /** Which folds are open: Waiting for the next landing, Agents' finished, Landed today. */
+    /** Which folds are open: Landed today. */
     folds: PlanFolds = PlanFolds.Defaults,
     /** The workspace's Needs You count, which the band and the first section say. */
     needsYou: Int = 0,
     /** Where the Needs You row goes; null draws it without a way in. */
     onNeedsYou: (() -> Unit)? = null,
-    /** Whether the runner lists agents (`board_agents`). */
-    agentsSupported: Boolean = true,
     /** The themes grid's columns: one on a phone, two on a tablet. */
     themeColumns: Int = 1,
     /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
@@ -156,7 +153,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, agentsSupported, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
+            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -170,7 +167,6 @@ private fun LazyListScope.loaded(
     folds: PlanFolds,
     needsYou: Int,
     onNeedsYou: (() -> Unit)?,
-    agentsSupported: Boolean,
     themeColumns: Int,
     pages: PagesHook?,
     rulingsShown: Boolean = false,
@@ -185,7 +181,7 @@ private fun LazyListScope.loaded(
         return
     }
     // One reading of the plan for the band and every section, so they can't disagree.
-    val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses, agentsSupported = agentsSupported)
+    val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses)
     if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(sections), sections.needsYou, onNeedsYou = onNeedsYou, pill = false, shown = band) }
     planSections(plan, sections, statuses, folds, themeColumns, onOpen, onNeedsYou)
     // Behind `board_cost`: a runner without it sends no cost (ov-307).
@@ -203,23 +199,23 @@ private fun LazyListScope.loaded(
             PlanHeader("Landed today", landed.size, Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
         }
         if (open) {
-            itemsIndexedLanes(landed, "landed") { _, lane ->
-                PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = false) {
-                    onOpen(PlanPage.Lane(lane.id))
+            itemsIndexedTickets(landed, "landed") { _, ticket ->
+                PlanTicketRow(ticket, plan.themeOf(ticket), rank = null, now = plan.nowMs, waitsOnOwner = false) {
+                    onOpen(PlanPage.Ticket(ticket.task))
                 }
             }
         }
     }
 }
 
-private fun LazyListScope.itemsIndexedLanes(
-    lanes: List<PlanLane>,
+private fun LazyListScope.itemsIndexedTickets(
+    tickets: List<PlanTicket>,
     group: String,
-    row: @Composable (Int, PlanLane) -> Unit,
+    row: @Composable (Int, PlanTicket) -> Unit,
 ) {
-    lanes.forEachIndexed { index, lane ->
-        item(key = "plan/$group/${lane.id}") {
-            row(index, lane)
+    tickets.forEachIndexed { index, ticket ->
+        item(key = "plan/$group/${ticket.task}") {
+            row(index, ticket)
         }
     }
 }
@@ -287,54 +283,51 @@ fun PlanNotice(title: String, detail: String?, modifier: Modifier = Modifier) {
     }
 }
 
-/** A lane state's glyph: neutral, a shape to scan by. */
-fun planGlyph(state: LaneState): ImageVector = when (state) {
-    LaneState.QUEUED -> Icons.Outlined.Schedule
-    LaneState.BUILDING, LaneState.FIXING -> Icons.Outlined.Build
-    LaneState.REVIEW -> Icons.Outlined.Visibility
-    LaneState.LANDING -> Icons.Outlined.VerticalAlignBottom
-    LaneState.LANDED -> Icons.Outlined.CheckCircleOutline
-    LaneState.DROPPED -> Icons.Outlined.Close
-    LaneState.UNKNOWN -> Icons.Outlined.QuestionMark
+/** A ticket stage's glyph: neutral, a shape to scan by. */
+fun planGlyph(stage: TicketStage): ImageVector = when (stage) {
+    TicketStage.WAITING -> Icons.Outlined.Schedule
+    TicketStage.BUILDING -> Icons.Outlined.Build
+    TicketStage.REVIEWING -> Icons.Outlined.Visibility
+    TicketStage.NEEDS_YOU -> Icons.Outlined.ErrorOutline
+    TicketStage.LANDING -> Icons.Outlined.VerticalAlignBottom
+    TicketStage.LANDED -> Icons.Outlined.CheckCircleOutline
+    TicketStage.DROPPED -> Icons.Outlined.Close
+    TicketStage.UNKNOWN -> Icons.Outlined.QuestionMark
 }
 
 /**
- * One lane's row: its name and the theme it serves, then its reason or state.
- * In Next up its rank sits in the leading column; elsewhere its state's glyph
+ * One ticket's row: its title and the theme it serves, then its reason or stage.
+ * In Next up its rank sits in the leading column; elsewhere its stage's glyph
  * does, amber only when it's stale, waiting on you or over its token budget
  * (ov-307).
  */
 @Composable
-fun PlanLaneRow(
-    lane: PlanLane,
+fun PlanTicketRow(
+    ticket: PlanTicket,
     theme: PlanTheme?,
     rank: Int?,
     now: Long,
     waitsOnOwner: Boolean,
     /** Its main agent (ov-503): "Builder · Sonnet · 380K". */
-    agent: PlanFleetAgent? = null,
-    /** The heading of the landed train it still names, or null. */
-    landedTrain: String? = null,
+    agent: PlanAgent? = null,
     onClick: () -> Unit,
 ) {
-    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now)
-    val overBudget = PlanCostWords.overBudget(lane)
+    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(ticket, now)
+    val overBudget = PlanCostWords.overBudget(ticket)
     val amber = glanceColor(GlancePalette.amber)
-    val cards = if (lane.cards.isEmpty()) null else PlanWords.cards(lane.cards.size)
-    val second = if (rank != null) lane.reason.ifEmpty { cards ?: "" }
-    // The stage has a line of its own, so the state keeps only what it leaves to it ("Approved" beside "Checks failing", ov-317).
-    else listOfNotNull(PlanWords.status(lane, stage = lane.shownStage == null), cards).joinToString(" · ")
-    val stage = if (rank == null) lane.shownStage else null
+    val second = if (rank != null) ticket.reason.ifEmpty { ticket.key }
+    // The stage has a line of its own, so the stage word keeps only what it leaves to it ("Approved" beside "Checks failing", ov-317).
+    else listOfNotNull(PlanWords.status(ticket, stage = ticket.shownStage == null), ticket.key).joinToString(" · ")
+    val stage = if (rank == null) ticket.shownStage else null
     val agentWords = agent?.let { listOfNotNull(it.who, it.tokens()).joinToString(" · ") }
-    val landedWords = landedTrain?.let { "Names $it, which landed" }
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, stage?.fullWords, agentWords, landedWords, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
+    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, ticket.heading, theme?.name, second, stage?.fullWords, agentWords, warning, PlanCostWords.overBudgetSpoken(ticket)).joinToString(", ")
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
                 if (rank != null) {
                     Text("$rank", style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null && stage?.needsAttention != true) MaterialTheme.colorScheme.onSurfaceVariant else amber)
+                    Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null && stage?.needsAttention != true) MaterialTheme.colorScheme.onSurfaceVariant else amber)
                 }
             }
         },
@@ -343,12 +336,12 @@ fun PlanLaneRow(
             {
                 Text(
                     it.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("plan-lane-${lane.name}-theme"),
+                    modifier = Modifier.testTag("plan-ticket-${ticket.key}-theme"),
                 )
             }
         },
         headlineContent = {
-            Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(ticket.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
             Column {
@@ -359,11 +352,10 @@ fun PlanLaneRow(
                         it, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (stage.needsAttention) amber else LocalContentColor.current,
-                        modifier = Modifier.testTag("plan-lane-${lane.name}-stage${if (stage.needsAttention) "-attention" else ""}"),
+                        modifier = Modifier.testTag("plan-ticket-${ticket.key}-stage${if (stage.needsAttention) "-attention" else ""}"),
                     )
                 }
-                if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-agent"))
-                if (landedWords != null) Text(landedWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-landed"))
+                if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${ticket.key}-agent"))
                 if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
                 if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
             }
@@ -371,7 +363,7 @@ fun PlanLaneRow(
         trailingContent = {
             Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         },
-        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-lane-${lane.name}").semantics(mergeDescendants = true) { contentDescription = spoken },
+        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-ticket-${ticket.key}").semantics(mergeDescendants = true) { contentDescription = spoken },
     )
 }
 
@@ -449,7 +441,7 @@ fun PlanThemeRow(theme: PlanTheme, track: PlanTrack, now: Long, onClick: () -> U
     }
 }
 
-/** "mac-ux is in review", "Queued, 1st up", "No lane · quiet for 3 days": neutral, and amber only for a budget gone over. */
+/** "Mac UX is in review", "Queued, 1st up", "No ticket · quiet for 3 days": neutral, and amber only for a budget gone over. */
 @Composable
 fun PlanTrackLine(track: PlanTrack, now: Long, modifier: Modifier = Modifier) {
     val amber = glanceColor(GlancePalette.amber)

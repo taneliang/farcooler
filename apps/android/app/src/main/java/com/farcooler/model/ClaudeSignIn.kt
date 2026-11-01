@@ -42,7 +42,7 @@ data class ClaudeLogin(val state: ClaudeLoginState, val email: String) {
  */
 object ClaudeSignIn {
     const val SECTION_TITLE = "Claude"
-    const val BODY = "Sign in so your rep and the lanes you start use your own Claude account and its connectors."
+    const val BODY = "Sign in so your rep and the agents you start use your own Claude account and its connectors."
     const val SIGN_IN = "Sign in to Claude…"
     const val SIGN_IN_AGAIN = "Sign in again…"
     const val SIGN_OUT = "Sign out"
@@ -57,7 +57,7 @@ object ClaudeSignIn {
     const val DONE = "Done"
     const val TRY_AGAIN = "Try again"
     const val START_AGAIN = "Start again"
-    const val SIGN_OUT_MESSAGE = "Your rep and lanes there stop until you sign in again."
+    const val SIGN_OUT_MESSAGE = "Your rep and agents there stop until you sign in again."
 
     /**
      * The not-signed-in body. [sharedAccount] is non-null where this member's panes use the runner's own Claude
@@ -66,12 +66,12 @@ object ClaudeSignIn {
     fun body(sharedAccount: String?): String {
         if (sharedAccount == null) return BODY
         val whose = if (sharedAccount.isEmpty()) "this runner’s own Claude account" else "this runner’s own Claude account, $sharedAccount"
-        return "Until you sign in, your rep and the lanes you start use $whose. Sign in to use your own account and its connectors."
+        return "Until you sign in, your rep and the agents you start use $whose. Sign in to use your own account and its connectors."
     }
 
     /** The sign-out message: where members share the runner's Claude login, their panes move to it rather than stop. */
     fun signOutMessage(shared: Boolean): String =
-        if (shared) "Your rep and lanes there use this runner’s own Claude account from the next time each starts." else SIGN_OUT_MESSAGE
+        if (shared) "Your rep and agents there use this runner’s own Claude account from the next time each starts." else SIGN_OUT_MESSAGE
     const val STOPPED_WORKING = "Claude login stopped working"
     const val NO_APP = "No browser on this phone can open the sign-in page."
 
@@ -95,8 +95,8 @@ object ClaudeSignIn {
      */
     fun trust(runner: String) =
         "Your Claude login is kept on $runner. Its owner, and anyone with Control of it, could use it. " + // casing ok: the access level's name
-            "Far Cooler uses it only for your rep and the lanes you start. " +
-            "Lanes the orchestrator starts for your asks use the workspace lead’s login."
+            "Far Cooler uses it only for your rep and the agents you start. " +
+            "Agents the orchestrator starts for your asks use the workspace lead’s login."
 
     /**
      * Whether the Claude section is drawn: the runner offers sign-in

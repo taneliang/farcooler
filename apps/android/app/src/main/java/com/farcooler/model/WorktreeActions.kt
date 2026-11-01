@@ -2,7 +2,7 @@ package com.farcooler.model
 
 /**
  * What a worktree's menu offers, wherever its row is drawn: the Worktrees
- * list's header and the One tree's lane, loose-worktree and checkout rows
+ * list's header and the One tree's ticket, loose-worktree and checkout rows
  * (ov-300). One rule, so the tree that took the Worktrees tab's place can't
  * offer less than the tab did.
  */

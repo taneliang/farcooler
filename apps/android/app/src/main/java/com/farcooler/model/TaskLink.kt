@@ -52,12 +52,12 @@ object TaskLink {
      * duplicate banner beats an agent nobody hears about.
      *
      * - Never an orchestrator's.
-     * - The task it was opened for, when that task is one of its lane's open
+     * - The task it was opened for, when that task is one of its worktree's open
      *   tasks: the runner folds only into a task it still has.
-     * - Otherwise its lane's one open task; with two, none.
-     * - Not by lane for a pane that names its workspace: the runner refuses
+     * - Otherwise its worktree's one open task; with two, none.
+     * - Not by worktree for a pane that names its workspace: the runner refuses
      *   another workspace's task, and `open_tasks` doesn't say whose it is.
-     * - Never by lane in the repository's main checkout, where ad hoc agents
+     * - Never by worktree in the repository's main checkout, where ad hoc agents
      *   run and one dispatched task would take in all of them. A runner older
      *   than ov-112 still folds there, so an agent there gets both banners,
      *   never neither.

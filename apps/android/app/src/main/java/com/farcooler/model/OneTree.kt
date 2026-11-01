@@ -4,15 +4,15 @@ package com.farcooler.model
  * The One tree on an Android phone (ov-300; ov-321's Concept 1): the
  * workspace's work as one outline that follows containment,
  *
- *     Theme › Task › Lane › Terminals
+ *     Theme › Task › Ticket › Terminals
  *
- * where a lane is its worktree. A port of AgentKit's `OneTree` and
+ * where a ticket is its worktree. A port of AgentKit's `OneTree` and
  * `PhoneTree` (apps/shared/AgentKit/Sources/AgentKit/OneTree.swift,
  * PhoneTree.swift), the rules the Mac's sidebar and the iPhone's push
  * navigation read, kept to what a phone draws: the themes in plan order with
  * their open cards and a fold of done ones, No Theme, then Main checkout and
- * Loose worktrees. Each card's lanes, each lane's terminals and its
- * subagents, a lane under two cards marked "also", and an ask's dot that rolls
+ * Loose worktrees. Each card's ticket, each ticket's terminals and its
+ * subagents, and an ask's dot that rolls
  * up to whatever closes over it. The pinned places are the phone's already:
  * Needs you is the app's front door and the strip's count, and the plan is
  * the sheet.
@@ -37,13 +37,14 @@ object OneTree {
         }
     }
 
-    enum class Kind { THEME, TASK, DONE_FOLD, LANE, TERMINAL, SUBAGENT, PAGE, GROUP, WORKTREE }
+    enum class Kind { THEME, TASK, DONE_FOLD, TICKET, TERMINAL, SUBAGENT, PAGE, GROUP, WORKTREE }
 
     /** Where a node goes when it's chosen. */
     sealed interface Target {
         data class Theme(val id: String) : Target
         data class Task(val id: String) : Target
-        data class Lane(val id: String) : Target
+        /** A ticket, by its task id. */
+        data class Ticket(val id: String) : Target
         data class Worktree(val id: String) : Target
         data class Terminal(val worktree: String, val terminal: String) : Target
         /** An orchestrator's page, by slot. */
@@ -91,7 +92,7 @@ object OneTree {
 
     /**
      * The loose worktrees drawn either side of [nodeId]'s row, by worktree id:
-     * what Move up and Move down pass. Only a loose worktree moves; a lane is
+     * what Move up and Move down pass. Only a loose worktree moves; a ticket is
      * where its card puts it.
      */
     fun neighbors(tree: Tree, nodeId: String): Pair<String?, String?> {
@@ -99,7 +100,7 @@ object OneTree {
         val row = siblings.firstOrNull { it.id == nodeId } ?: return null to null
         val loose = siblings.filter { it.kind == Kind.WORKTREE && it.worktreeId != null }
         val at = loose.indexOf(row)
-        // A lane, a card or a terminal isn't among them, and doesn't move.
+        // A ticket, a card or a terminal isn't among them, and doesn't move.
         if (at < 0) return null to null
         return loose.getOrNull(at - 1)?.worktreeId to loose.getOrNull(at + 1)?.worktreeId
     }
@@ -133,7 +134,7 @@ object OneTree {
     fun ownRow(node: Node): String? = when (node.target) {
         is Target.Theme -> "Theme page"
         is Target.Task -> "Task details"
-        is Target.Lane -> "Lane page"
+        is Target.Ticket -> "Ticket page"
         is Target.Worktree -> "Open worktree"
         else -> null
     }
@@ -153,7 +154,7 @@ object OneTree {
             else -> "also ${keys[0]} +${keys.size - 1}"
         }
         fun shells(n: Int) = when (n) { 0 -> "No shells"; 1 -> "1 shell"; else -> "$n shells" }
-        fun role(raw: String) = when (raw) { "review" -> "Reviewer"; "fix" -> "Fixer"; else -> "Builder" }
+        fun role(role: WorkRole) = role.word
         fun subagent(role: String, model: String): String = PlanWords.model(model).let { if (it.isEmpty()) role else "$role · $it" }
         fun progress(c: PlanCounts) = "${c.done}/${PlanWords.total(c)}"
     }
@@ -197,11 +198,11 @@ object OneTree {
         val unreadable = board?.unreadable.orEmpty()
         val cards: Map<String, Card>
         val themes = plan.shownThemes
-        val lanes = plan.lanes.filter { it.state != LaneState.DROPPED }
-        val lanesByTask: Map<String, List<PlanLane>>
+        val tickets = plan.tickets.filter { it.stage != TicketStage.DROPPED }
+        val ticketsByTask: Map<String, PlanTicket>
         val worktrees: List<Worktree>
         val checkout: Worktree?
-        val laneWorktrees: Map<String, Worktree>
+        val ticketWorktrees: Map<String, Worktree>
         val askTasks: Set<String>
         val askTerminals: Set<String>
         val askThemes: Set<String> = themes.filter { it.ownerAsk.isNotEmpty() }.map { it.id }.toSet()
@@ -211,9 +212,7 @@ object OneTree {
             rows.forEach { byId.putIfAbsent(it.id, Card(it.id, it.key, it.title, it.status, it.lastMovedMs, it.worktreeId, it.workers)) }
             plan.cards.forEach { c -> status(c.status)?.let { byId.putIfAbsent(c.task, Card(c.task, c.key, c.title, it)) } }
             cards = byId
-            val byTask = mutableMapOf<String, MutableList<PlanLane>>()
-            lanes.forEach { lane -> lane.cards.map { it.task }.distinct().forEach { byTask.getOrPut(it) { mutableListOf() }.add(lane) } }
-            lanesByTask = byTask
+            ticketsByTask = tickets.associateBy { it.task }
             val repository = workspace.repository ?: workspace.id
             checkout = allWorktrees.firstOrNull { it.isMainCheckout && it.repository == repository }
             worktrees = allWorktrees.filter { wt ->
@@ -221,7 +220,7 @@ object OneTree {
                 val owned = if (workspace.isImplicit) wt.repository == workspace.id else wt.workspace == workspace.id
                 owned || taskIds(wt).any { it in cards }
             }
-            laneWorktrees = lanes.mapNotNull { lane -> join(lane)?.let { lane.id to it } }.toMap()
+            ticketWorktrees = tickets.mapNotNull { ticket -> join(ticket)?.let { ticket.task to it } }.toMap()
             val mine = items.filter {
                 if (workspace.isImplicit) it.workspaceId == null && it.repositoryId == workspace.id else it.workspaceId == workspace.id
             }
@@ -231,14 +230,14 @@ object OneTree {
 
         fun taskIds(wt: Worktree) = wt.openTasks.map { it.id } + wt.terminals.mapNotNull { it.taskId }
 
-        /** A lane's worktree: at its path, by a path ending with it, else on its branch. */
-        fun join(lane: PlanLane): Worktree? {
-            val path = lane.worktreePath.trim('/')
+        /** A ticket's worktree: at its path, by a path ending with it, else on its branch. */
+        fun join(ticket: PlanTicket): Worktree? {
+            val path = ticket.worktreePath.trim('/')
             if (path.isNotEmpty()) {
-                worktrees.firstOrNull { it.worktree == lane.worktreePath }?.let { return it }
+                worktrees.firstOrNull { it.worktree == ticket.worktreePath }?.let { return it }
                 worktrees.firstOrNull { (it.worktree ?: "").trim('/').let { p -> p == path || p.endsWith("/$path") } }?.let { return it }
             }
-            return if (lane.branch.isEmpty()) null else worktrees.firstOrNull { it.branch == lane.branch }
+            return if (ticket.branch.isEmpty()) null else worktrees.firstOrNull { it.branch == ticket.branch }
         }
 
         fun build(): Tree {
@@ -263,7 +262,7 @@ object OneTree {
                 children = unreadable.map { Node("$id/card:${it.id}", Kind.TASK, it.title, key = it.key, detail = it.status, quiet = true) })
         }
 
-        fun lanes(task: String) = lanesByTask[task].orEmpty()
+        fun ticketsOf(task: String): List<PlanTicket> = listOfNotNull(ticketsByTask[task])
 
         fun themeNodes(): List<Node> = themes.mapNotNull { theme ->
             val ids = theme.cards.map { it.task }
@@ -298,32 +297,31 @@ object OneTree {
 
         fun taskNode(card: Card, parent: String): Node {
             val id = "$parent/task:${card.id}"
-            val mine = lanes(card.id)
-            val children = mine.map { laneNode(it, card, id) }.toMutableList()
+            val mine = ticketsOf(card.id)
+            val children = mine.map { ticketNode(it, id) }.toMutableList()
             children += ownWorktrees(card).map { wt ->
                 val wid = "$id/worktree:${wt.id}"
-                Node(wid, Kind.LANE, wt.task, target = Target.Worktree(wt.id), children = terminalNodes(wt, wid), worktreeId = wt.id)
+                Node(wid, Kind.TICKET, wt.task, target = Target.Worktree(wt.id), children = terminalNodes(wt, wid), worktreeId = wt.id)
             }
             if (mine.isEmpty()) children += workerNodes(card.workers, id)
             return Node(id, Kind.TASK, card.title, key = card.key, target = Target.Task(card.id), children = children, asks = card.id in askTasks, quiet = card.status.isFinished)
         }
 
         fun ownWorktrees(card: Card): List<Worktree> {
-            val taken = lanes(card.id).mapNotNull { laneWorktrees[it.id]?.id }.toSet()
+            val taken = ticketsOf(card.id).mapNotNull { ticketWorktrees[it.task]?.id }.toSet()
             val out = mutableListOf<Worktree>()
             card.worktreeId?.let { own -> worktrees.firstOrNull { it.id == own && it.id !in taken }?.let(out::add) }
             worktrees.filter { card.id in taskIds(it) && it.id !in taken && out.none { o -> o.id == it.id } }.forEach(out::add)
             return out
         }
 
-        fun laneNode(lane: PlanLane, card: Card, parent: String): Node {
-            val id = "$parent/lane:${lane.id}"
-            val wt = laneWorktrees[lane.id]
-            val children = (wt?.let { terminalNodes(it, id) } ?: emptyList()) + subagents(lane, id)
+        fun ticketNode(ticket: PlanTicket, parent: String): Node {
+            val id = "$parent/ticket:${ticket.task}"
+            val wt = ticketWorktrees[ticket.task]
+            val children = (wt?.let { terminalNodes(it, id) } ?: emptyList()) + subagents(ticket, id)
             return Node(
-                id, Kind.LANE, lane.name, detail = PlanWords.state(lane.state),
-                also = Words.also(lane.cards.filter { it.task != card.id }.map { it.key }),
-                target = Target.Lane(lane.id), children = children, quiet = !lane.state.isLive, worktreeId = wt?.id,
+                id, Kind.TICKET, ticket.key, detail = PlanWords.state(ticket),
+                target = Target.Ticket(ticket.task), children = children, quiet = !ticket.stage.isLive, worktreeId = wt?.id,
             )
         }
 
@@ -334,17 +332,14 @@ object OneTree {
                     target = Target.Terminal(wt.id, t.id), asks = t.id in askTerminals, worktreeId = wt.id)
             }
 
-        /** A live lane's open agents; where it records none, its cards' open subagents on their newest live lane. */
-        fun subagents(lane: PlanLane, parent: String): List<Node> {
-            if (!lane.state.isLive) return emptyList()
-            val open = lane.agents.filter { it.endedAt == null }
+        /** A live ticket's agents working it now; where none is recorded, its card's open subagents. */
+        fun subagents(ticket: PlanTicket, parent: String): List<Node> {
+            if (!ticket.stage.isLive) return emptyList()
+            val open = plan.agentsOn(ticket)
             if (open.isNotEmpty()) return open.mapIndexed { i, a ->
-                subagent("$parent/agent:${a.agentId.ifEmpty { "$i" }}", Words.subagent(Words.role(a.role), a.model))
+                subagent("$parent/agent:${a.id.ifEmpty { "$i" }}", Words.subagent(a.role.word, a.model))
             }
-            val workers = lane.cards.flatMap { c ->
-                if (lanes(c.task).lastOrNull { it.state.isLive }?.id != lane.id) emptyList() else cards[c.task]?.workers.orEmpty()
-            }
-            return workerNodes(workers, parent)
+            return workerNodes(cards[ticket.task]?.workers.orEmpty(), parent)
         }
 
         fun workerNodes(workers: List<TaskWorker>, parent: String) = workers.filter { it.state.isOpen }.mapIndexed { i, w ->
@@ -364,11 +359,11 @@ object OneTree {
 
         fun owned(wt: Worktree) = if (workspace.isImplicit) wt.repository == workspace.id else wt.workspace == workspace.id
 
-        /** The board's cards [wt] holds: its own task's, its panes' and open tasks', and its lanes'. */
+        /** The board's cards [wt] holds: its own task's, its panes' and open tasks', and its tickets'. */
         fun cardsOf(wt: Worktree): List<Card> {
             val ids = taskIds(wt).toMutableSet()
             rows.filter { it.worktreeId == wt.id }.forEach { ids += it.id }
-            lanes.filter { laneWorktrees[it.id]?.id == wt.id }.forEach { l -> ids += l.cards.map { it.task } }
+            tickets.filter { ticketWorktrees[it.task]?.id == wt.id }.forEach { t -> ids += t.task }
             return ids.mapNotNull { cards[it] }
         }
 

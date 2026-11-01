@@ -15,55 +15,7 @@
       }
     ],
     "landed_not_closed": [],
-    "lanes": [
-      {
-        "agents": [
-          {
-            "agent_id": "a1b2c3d4",
-            "ended_at": null,
-            "harness": "claude",
-            "model": "sonnet",
-            "role": "build",
-            "started_at": 1791186086572
-          }
-        ],
-        "branch": "",
-        "cards": [
-          {
-            "key": "bil-1",
-            "slice": "",
-            "task": "01a10b00-5adf-7bb1-a19f-adbacb144052"
-          }
-        ],
-        "fix_rounds": 0,
-        "harness": "claude",
-        "id": "01a10b02-aaab-76f0-a7a9-7629edfe85cb",
-        "landed_sha": null,
-        "model": "sonnet",
-        "name": "invoice-totals-with-a-very-long-lane-name-that-wraps",
-        "plan_rank": null,
-        "reason": "Totals first; rounding waits on the owner's answer about half-cent currencies, and the statement waits on rounding, so nothing else can start until then.",
-        "short": "edfe85cb",
-        "spend": {
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "cost_micros": null,
-          "input_tokens": 0,
-          "output_tokens": 0,
-          "runs": 0,
-          "shared_agents": 0,
-          "unmeasured_agents": 1
-        },
-        "stale": false,
-        "state": "building",
-        "state_since": 1791186086571,
-        "train": null,
-        "worktree_path": ""
-      }
-    ],
-    "no_lane": [],
     "now_ms": 1791186097072,
-    "order": [],
     "rulings": [
       {
         "actor": "manager",
@@ -176,7 +128,88 @@
         "story": "",
         "story_at": 0
       }
-    ]
+    ],
+    "lines": [
+      {
+        "task": "01a10b00-5adf-7bb1-a19f-adbacb144052",
+        "key": "bil-1",
+        "title": "Total each invoice",
+        "status": "In Progress",
+        "stage": "building",
+        "stage_since": 1791186086571,
+        "reason": "Totals first; rounding waits on the owner's answer about half-cent currencies, and the statement waits on rounding, so nothing else can start until then.",
+        "plan_rank": null,
+        "branch": "",
+        "worktree_path": "",
+        "stack_parent": null,
+        "same_branch": null,
+        "pr_number": null,
+        "landed_sha": null,
+        "held_off": false,
+        "stale": false,
+        "budget_tokens": null,
+        "fix_rounds": 0,
+        "landing": null,
+        "work": [
+          {
+            "agent": "a1b2c3d4",
+            "role": "build",
+            "started_at": 1791186086572,
+            "ended_at": null,
+            "verdict": "",
+            "linked_by_description": false
+          }
+        ],
+        "spend": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "cost_micros": null,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "runs": 0,
+          "shared_agents": 0,
+          "unmeasured_agents": 1
+        }
+      }
+    ],
+    "landings": [],
+    "agents": [
+      {
+        "id": "agent:a1b2c3d4",
+        "short": "a1b2c3d4",
+        "role": "builder",
+        "harness": "claude",
+        "model": "sonnet",
+        "title": "",
+        "terminal": null,
+        "subagent_id": "a1b2c3d4",
+        "parent_terminal": null,
+        "started_at": 1791186086572,
+        "stop_asked_at": null,
+        "tickets": [
+          {
+            "task": "01a10b00-5adf-7bb1-a19f-adbacb144052",
+            "key": "bil-1",
+            "role": "build",
+            "started_at": 1791186086572
+          }
+        ],
+        "working": true,
+        "doing_now": "",
+        "last_at": 1791186086572,
+        "spend": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "cost_micros": null,
+          "runs": 0,
+          "shared_agents": 0,
+          "unmeasured_agents": 1
+        }
+      }
+    ],
+    "off_the_line": []
   },
   "records": {
     "01a10b02-aa9a-76c0-9c84-a40b8c8030ca": {
@@ -204,7 +237,7 @@
         }
       ]
     },
-    "01a10b02-aaab-76f0-a7a9-7629edfe85cb": {
+    "01a10b00-5adf-7bb1-a19f-adbacb144052": {
       "events": [
         {
           "actor": "manager",

@@ -13,13 +13,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Modifier
-import com.farcooler.model.LaneTree
 import com.farcooler.model.OneTree
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanStrip
 import com.farcooler.model.Terminal
 import com.farcooler.model.ThemeTree
+import com.farcooler.model.TicketTree
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.ui.WorkspaceCards
 import com.farcooler.ui.SheetHeader
@@ -52,10 +52,10 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [37], qualifiers = "w411dp-h891dp-xxhdpi")
 class PhoneTreeCaptureTest {
     private val plan = Plan.decode(Json.parseToJsonElement(repositoryFile("test/fixtures/plan-seeded.json")).jsonObject["plan"]!!.jsonObject)
-    private val strip = PlanStrip.of(plan, 2, Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to its lane"))
+    private val strip = PlanStrip.of(plan, 2, Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to a builder"))
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
-    private val models = SidebarModels(ThemeTree.of(plan), LaneTree.of(plan))
+    private val models = SidebarModels(ThemeTree.of(plan), TicketTree.of(plan))
     private val actions = SidebarActions({}, {}, {}, { false })
 
     @Test fun orchestratorTab() = Capture.both("phone-orchestrator-tab") {
@@ -134,9 +134,9 @@ class PhoneTreeCaptureTest {
         LazyColumn(Modifier.fillMaxSize()) { items(tree.work.first().children, key = { it.id }) { TreeRow(it, nav) } }
     }
 
-    @Test fun treeLane() = Capture.both("phone-tree-lane") {
-        val lane = tree.all.first { it.kind == OneTree.Kind.LANE && it.title == "mac-vis" }
-        LazyColumn(Modifier.fillMaxSize()) { items(lane.children, key = { it.id }) { TreeRow(it, nav) } }
+    @Test fun treeTicket() = Capture.both("phone-tree-ticket") {
+        val ticket = tree.all.first { it.kind == OneTree.Kind.TICKET && it.title == "ov-220" }
+        LazyColumn(Modifier.fillMaxSize()) { items(ticket.children, key = { it.id }) { TreeRow(it, nav) } }
     }
 
     private fun repositoryFile(relative: String): String {

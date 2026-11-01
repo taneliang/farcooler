@@ -2,13 +2,13 @@ package com.farcooler.model
 
 import java.util.Locale
 
-// The two-list sidebar (ov-503, design 3): the why and the how, apart. `ThemeTree` is Themes › Cards; `LaneTree` is
-// Lanes › Agents, grouped as the Plan view's sections are, so the two read in one order. They replace `OneTree`'s
-// single Theme › Task › Lane › Terminals outline. Terminals are the app's own (live panes, not plan data) and hang under
-// a lane node in the view. The Android twin of AgentKit's `PlanSidebarTrees.swift`.
+// The two-list sidebar (ov-503, design 3; ov-872): the why and the how, apart. `ThemeTree` is Themes › Cards; `TicketTree` is
+// Tickets › Agents, grouped as the Plan view's sections are, so the two read in one order. They replace `OneTree`'s
+// single Theme › Task › Ticket › Terminals outline. Terminals are the app's own (live panes, not plan data) and hang under
+// a ticket node in the view. The Android twin of AgentKit's `PlanSidebarTrees.swift`.
 //
-// A lane that works two cards still shows the join: [ThemeTree.laneOf] and [LaneTree.cardsOf] answer both ways, and a
-// view highlights the other side when one is chosen.
+// A ticket is a card: [ThemeTree.ticketOf] and [TicketTree.cardOf] answer both ways, and a view highlights the other
+// side when one is chosen.
 
 data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
     data class CardNode(
@@ -16,9 +16,9 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
         val key: String,
         val title: String,
         val status: TaskStatus,
-        /** The lane working it now, shown as the trailing detail. */
-        val lane: String?,
-        val laneId: String?,
+        /** The ticket on the line for it, shown as the trailing detail: its stage in words. */
+        val ticket: String?,
+        val ticketId: String?,
     ) {
         val glyph: PlanCardGlyph get() = PlanCardGlyph.of(status)
     }
@@ -28,11 +28,11 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
         val progress: String get() = "$done/$total"
     }
 
-    /** The lane working a card, by the card's task id, or null. */
-    fun laneOf(task: String): String? = themes.firstNotNullOfOrNull { t -> t.cards.firstOrNull { it.task == task } }?.laneId
+    /** The live ticket on a card, by the card's task id, or null. */
+    fun ticketOf(task: String): String? = themes.firstNotNullOfOrNull { t -> t.cards.firstOrNull { it.task == task } }?.ticketId
 
-    /** The cards a lane works, by its id, across themes. */
-    fun cardsOf(lane: String): List<CardNode> = themes.flatMap { it.cards }.filter { it.laneId == lane }
+    /** The cards a ticket is, by its task id, across themes. */
+    fun cardsOf(ticket: String): List<CardNode> = themes.flatMap { it.cards }.filter { it.ticketId == ticket }
 
     companion object {
         /**
@@ -45,9 +45,6 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
             filter: OneTree.Filter = OneTree.Filter.OPEN,
             statuses: Map<String, TaskStatus> = emptyMap(),
         ): ThemeTree {
-            // A train's agent isn't a lane, so it isn't "the lane working" a card. A lane naming a landed train still
-            // is: live work never vanishes.
-            val gone = plan.laneIsTrain.map { it.lane }.toSet()
             val themes = plan.shownThemes.mapNotNull { theme ->
                 val cards = theme.cards.mapNotNull { ref ->
                     val known = plan.card(ref.task)
@@ -58,8 +55,8 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
                         OneTree.Filter.ALL -> true
                     }
                     if (!shown) return@mapNotNull null
-                    val lane = liveLane(plan, ref.task, gone)
-                    CardNode(ref.task, ref.key, known?.title ?: "", status, lane?.name, lane?.id)
+                    val ticket = liveTicket(plan, ref.task)
+                    CardNode(ref.task, ref.key, known?.title ?: "", status, ticket?.let { PlanWords.state(it) }, ticket?.task)
                 }
                 if (cards.isEmpty() && !(theme.cards.isEmpty() && filter != OneTree.Filter.IN_REVIEW && theme.state == "active")) return@mapNotNull null
                 ThemeNode(theme.id, theme.name, theme.counts.done, PlanWords.total(theme.counts), cards)
@@ -67,16 +64,13 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
             return ThemeTree(filter, themes)
         }
 
-        /** The live lane working a card: one past queued first, else the queued one ranked highest. Null for a card whose lanes have all landed. */
-        internal fun liveLane(plan: Plan, task: String, gone: Set<String>): PlanLane? {
-            val mine = plan.lanes.filter { lane -> lane.state.isLive && lane.id !in gone && lane.cards.any { it.task == task } }
-            return mine.firstOrNull { it.state != LaneState.QUEUED } ?: mine.minByOrNull { it.planRank ?: Int.MAX_VALUE }
-        }
+        /** The live ticket on a card. Null for a card whose ticket has landed or has none. */
+        internal fun liveTicket(plan: Plan, task: String): PlanTicket? = plan.tickets.firstOrNull { it.stage.isLive && it.task == task }
     }
 }
 
-data class LaneTree(
-    /** Landing (its trains inside it) first, then In review, Building and the folded Waiting; a group with no lanes isn't listed. */
+data class TicketTree(
+    /** Landing (its landings inside it) first, then In review and Building, and the folded Waiting; a group with no tickets isn't listed. */
     val groups: List<Group>,
 ) {
     data class AgentNode(
@@ -90,29 +84,30 @@ data class LaneTree(
         val terminal: String? = null,
     )
 
-    data class LaneNode(
+    data class TicketNode(
+        /** The ticket's task id. */
         val id: String,
-        val name: String,
+        val key: String,
         val heading: String,
         /**
-         * The state beside it: on a train, only what matters ("Waits for you", "Landed · 3f78754f"), and nothing for a
-         * lane that is simply aboard; off one, its state.
+         * The stage beside it: in a landing, only what matters ("Needs you", "Landed · 3f78754f"), and nothing for a
+         * ticket that is simply aboard; off one, its stage.
          */
         val state: String,
         val agents: List<AgentNode>,
-        val cards: List<PlanCardRef>,
+        val card: PlanCardRef,
     )
 
-    /** A train inside the Landing group: "Train 86", what it is for, where it stands, and its lanes (ov-522). */
-    data class TrainNode(
+    /** A landing inside the Landing group: "Landing 86", what it is for, where it stands, and its tickets (ov-522). */
+    data class LandingNode(
         val id: String,
-        /** "Train 86". */
+        /** "Landing 86". */
         val label: String,
         /** Its title, under the label; null when it has none. */
         val subtitle: String?,
         /** "Checking on CI", the ladder step it stands on. */
         val phase: String,
-        val lanes: List<LaneNode>,
+        val tickets: List<TicketNode>,
     )
 
     sealed interface Kind {
@@ -120,7 +115,6 @@ data class LaneTree(
         data object InReview : Kind
         data object Building : Kind
         data object Waiting : Kind
-        data object OnLandedTrain : Kind
     }
 
     data class Group(
@@ -130,37 +124,29 @@ data class LaneTree(
         val detail: String?,
         /** Waiting starts folded. */
         val folded: Boolean,
-        val lanes: List<LaneNode>,
-        /** The trains of the Landing group, each with its lanes inside it; empty for every other group. */
-        val trains: List<TrainNode> = emptyList(),
+        val tickets: List<TicketNode>,
+        /** The landings of the Landing group, each with its tickets inside it; empty for every other group. */
+        val landings: List<LandingNode> = emptyList(),
     )
 
-    /** The cards a lane works, by the lane's id: what a view highlights when a lane is chosen. */
-    fun cardsOf(lane: String): List<PlanCardRef> =
-        groups.asSequence().flatMap { it.lanes + it.trains.flatMap(TrainNode::lanes) }.firstOrNull { it.id == lane }?.cards ?: emptyList()
+    /** The card a ticket is, by its task id: what a view highlights when a ticket is chosen. */
+    fun cardOf(ticket: String): PlanCardRef? =
+        groups.asSequence().flatMap { it.tickets + it.landings.flatMap(LandingNode::tickets) }.firstOrNull { it.id == ticket }?.card
 
     companion object {
-        fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): LaneTree {
-            fun node(agent: PlanFleetAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale), agent.terminal)
-            fun agents(lane: PlanLane): List<AgentNode> {
-                val fleet = plan.agents.filter { it.laneId == lane.id }
-                if (fleet.isNotEmpty()) return PlanFleet.of(fleet).agents.map(::node)
-                // A runner that totals the day's agents (`agents_spend`, ov-518) lists the ones that exist: none of this lane's
-                // does, whatever its records say. A lane in review between the builder and the reviewer has no agent rows.
-                if (plan.agentsSpend != null) return emptyList()
-                // An older runner lists none that exist: the agents the orchestrator recorded on it and has not ended.
-                return lane.agents.withIndex().filter { it.value.endedAt == null }.map { (index, a) -> AgentNode("${lane.id}:$index", PlanWords.agentWho(a), true, null) }
-            }
-            fun laneNode(lane: PlanLane, state: String) =
-                LaneNode(lane.id, lane.name, lane.heading, state, agents(lane), lane.cards)
-            fun rows(rows: List<PlanSections.LaneRow>) = rows.map { laneNode(it.lane, PlanWords.status(it.lane)) }
+        fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): TicketTree {
+            fun node(agent: PlanAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale), agent.terminal)
+            fun agents(ticket: PlanTicket): List<AgentNode> = PlanFleet.of(plan.agentsOn(ticket)).agents.map(::node)
+            fun ticketNode(ticket: PlanTicket, state: String) =
+                TicketNode(ticket.task, ticket.key, ticket.heading, state, agents(ticket), ticket.card)
+            fun rows(rows: List<PlanSections.TicketRow>) = rows.map { ticketNode(it.ticket, PlanWords.status(it.ticket)) }
 
             val groups = mutableListOf<Group>()
-            if (sections.trains.isNotEmpty()) {
+            if (sections.landings.isNotEmpty()) {
                 groups += Group(
                     Kind.Landing, PlanSections.Kind.LANDING.title, null, false, emptyList(),
-                    sections.trains.map { card ->
-                        TrainNode(card.train.id, card.train.label, card.train.subtitle, card.phase.word, card.lanes.map { laneNode(it.lane, it.note?.let { note -> if (note.startsWith("Landed")) "Landed" else note } ?: "") })
+                    sections.landings.map { card ->
+                        LandingNode(card.landing.id, card.landing.label, card.landing.subtitle, card.phase.word, card.tickets.map { ticketNode(it.ticket, it.note?.let { note -> if (note.startsWith("Landed")) "Landed" else note } ?: "") })
                     },
                 )
             }
@@ -169,24 +155,12 @@ data class LaneTree(
                 Quad(Kind.InReview, "In review", sections.inReview, false),
                 Quad(Kind.Building, "Building", sections.building, false),
                 Quad(Kind.Waiting, "Waiting", waiting, true),
-                Quad(Kind.OnLandedTrain, "Waiting for the next landing", sections.onLandedTrain, true),
             )) {
                 if (list.isNotEmpty()) groups += Group(kind, title, if (folded) "${list.size}" else null, folded, rows(list))
             }
-            return LaneTree(groups)
+            return TicketTree(groups)
         }
 
-        private data class Quad(val kind: Kind, val title: String, val list: List<PlanSections.LaneRow>, val folded: Boolean)
+        private data class Quad(val kind: Kind, val title: String, val list: List<PlanSections.TicketRow>, val folded: Boolean)
     }
-}
-
-/** A lane's typed agent record as a row says it: "Builder · Opus". */
-fun PlanWords.agentWho(a: PlanAgent): String {
-    val role = when (a.role) {
-        "review" -> "Reviewer"
-        "fix" -> "Fixer"
-        else -> "Builder"
-    }
-    val m = model(a.model)
-    return if (m.isEmpty()) role else "$role · $m"
 }

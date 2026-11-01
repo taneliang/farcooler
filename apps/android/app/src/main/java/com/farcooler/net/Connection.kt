@@ -2044,12 +2044,12 @@ class Connection(
     }
 
     /**
-     * Marks the draft pull request [stage] names ready for review, on [lane] (`pr.ready`, ov-317). Answers the
-     * sentence for a refusal, null when it went through, and reads the plan again either way so the lane shows where
+     * Marks the draft pull request [stage] names ready for review, on [ticket] (`pr.ready`, ov-317). Answers the
+     * sentence for a refusal, null when it went through, and reads the plan again either way so the ticket shows where
      * it stands now.
      */
-    suspend fun markReady(lane: com.farcooler.model.PlanLane, stage: com.farcooler.model.PlanPrStage, workspace: com.farcooler.model.WorkspaceSummary): String? {
-        val sent = attempt { core.call(com.farcooler.model.PrActions.READY_METHOD, args(*com.farcooler.model.PrActions.readyRequest(lane.id, stage.prNumber).toTypedArray())) }
+    suspend fun markReady(ticket: com.farcooler.model.PlanTicket, stage: com.farcooler.model.PlanPrStage, workspace: com.farcooler.model.WorkspaceSummary): String? {
+        val sent = attempt { core.call(com.farcooler.model.PrActions.READY_METHOD, args(*com.farcooler.model.PrActions.readyRequest(ticket.task, stage.prNumber).toTypedArray())) }
         plans.read(workspace)
         return sent.exceptionOrNull()?.let { refusalOf(it, "mark it ready") }
     }

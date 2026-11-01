@@ -53,7 +53,7 @@ import com.farcooler.model.PageShelf
 import com.farcooler.model.PageWorld
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCardRef
-import com.farcooler.model.PlanLane
+import com.farcooler.model.PlanTicket
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanRecord
@@ -69,7 +69,7 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
 
-// A theme's page and a lane's page (ov-268 design 6.2, 6.3 and 6.5), pushed
+// A theme's page and a ticket's page (ov-268 design 6.2, 6.3 and 6.5), pushed
 // from the Plan view, in one column: the same sections as the Mac's pages. A
 // card on either opens its task, as a card on the board does.
 
@@ -117,7 +117,7 @@ fun PlanPageScreen(
     val taskKeys = rememberTaskKeyLinker(connection) {}
     val title = when (page) {
         is PlanPage.Theme -> plan?.themes?.firstOrNull { it.id == page.id }?.name ?: "Theme"
-        is PlanPage.Lane -> plan?.lanes?.firstOrNull { it.id == page.id }?.heading ?: "Lane"
+        is PlanPage.Ticket -> plan?.ticket(page.id)?.heading ?: "Ticket"
         is PlanPage.Page -> pages.firstOrNull { it.slot == page.id }?.title ?: "Page"
     }
     val world = pageWorld(boards[workspaceId]?.rows.orEmpty(), plan, pages, fleet)
@@ -169,7 +169,7 @@ fun PlanPageScreen(
                             world = world,
                             onDestination = router::open,
                             markReady = if (daemon?.mayActOnPullRequests(viewer) == true) {
-                                { lane, stage -> connection.markReady(lane, stage, workspace) }
+                                { ticket, stage -> connection.markReady(ticket, stage, workspace) }
                             } else null,
                         )
                     }
@@ -192,8 +192,8 @@ fun PlanPageBody(
     pages: List<BoardPage> = emptyList(),
     world: PageWorld = PageWorld(),
     onDestination: (PageDestination) -> Unit = {},
-    /** Marks a lane's draft pull request ready (ov-317); null where this device may not act on pull requests. */
-    markReady: (suspend (PlanLane, com.farcooler.model.PlanPrStage) -> String?)? = null,
+    /** Marks a ticket's draft pull request ready (ov-317); null where this device may not act on pull requests. */
+    markReady: (suspend (PlanTicket, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
     when (page) {
         is PlanPage.Theme -> {
@@ -206,10 +206,10 @@ fun PlanPageBody(
             if (found == null) EmptyState("Page not found", "", Modifier.fillMaxSize())
             else OrchestratorPage(found, world, onDestination)
         }
-        is PlanPage.Lane -> {
-            val lane = plan.lanes.firstOrNull { it.id == page.id }
-            if (lane == null) EmptyState("Lane not found", "", Modifier.fillMaxSize())
-            else PlanLanePage(lane, plan, record, rows, onOpenTask, onOpenPage, markReady)
+        is PlanPage.Ticket -> {
+            val ticket = plan.ticket(page.id)
+            if (ticket == null) EmptyState("Ticket not found", "", Modifier.fillMaxSize())
+            else PlanTicketPage(ticket, plan, record, rows, onOpenTask, onOpenPage, markReady)
         }
     }
 }
@@ -235,7 +235,7 @@ private fun Body(text: String, modifier: Modifier = Modifier, muted: Boolean = f
     )
 }
 
-/** A theme's page: its outcome, where it stands and what changed, what's next and what needs you, its lanes and cards. */
+/** A theme's page: its outcome, where it stands and what changed, what's next and what needs you, its tickets and cards. */
 @Composable
 fun PlanThemePage(
     theme: PlanTheme,
@@ -244,7 +244,7 @@ fun PlanThemePage(
     rows: Map<String, TaskRow>,
     onOpenTask: (String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
-    /** The orchestrator's pages anchored here (ov-285), drawn after Needs you and before Lanes. */
+    /** The orchestrator's pages anchored here (ov-285), drawn after Needs you and before Tickets. */
     anchored: List<BoardPage> = emptyList(),
     world: PageWorld = PageWorld(),
     onDestination: (PageDestination) -> Unit = {},
@@ -296,12 +296,12 @@ fun PlanThemePage(
                 PlanThemeSpend(theme, Modifier.padding(horizontal = 16.dp))
             }
         }
-        val lanes = plan.lanesIn(theme)
-        if (lanes.isNotEmpty()) {
-            item { PlanSectionTitle("Lanes") }
-            lanes.forEach { lane ->
-                item(key = "lane/${lane.id}") {
-                    PageLaneRow(lane) { onOpenPage(PlanPage.Lane(lane.id)) }
+        val tickets = plan.ticketsIn(theme)
+        if (tickets.isNotEmpty()) {
+            item { PlanSectionTitle("Tickets") }
+            tickets.forEach { ticket ->
+                item(key = "ticket/${ticket.task}") {
+                    PageTicketRow(ticket) { onOpenPage(PlanPage.Ticket(ticket.task)) }
                 }
             }
         }
@@ -315,37 +315,37 @@ private fun SectionTitleInline(title: String) {
     Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
 }
 
-/** A lane on a theme's page: its name, its state, and its cards' keys. */
+/** A ticket on a theme's page: its title, its stage, and its key. */
 @Composable
-private fun PageLaneRow(lane: PlanLane, onClick: () -> Unit) {
+private fun PageTicketRow(ticket: PlanTicket, onClick: () -> Unit) {
     ListItem(
-        leadingContent = { Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent = { Text(lane.heading, style = MaterialTheme.typography.titleSmall) },
+        leadingContent = { Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        headlineContent = { Text(ticket.heading, style = MaterialTheme.typography.titleSmall) },
         supportingContent = {
             Column {
-                Text(PlanWords.status(lane))
-                // TalkBack hears each key's title (ov-299).
+                Text(PlanWords.status(ticket))
+                // TalkBack hears the key's title (ov-299).
                 val linker = LocalTaskKeyLinker.current
-                val spoken = lane.cards.joinToString("; ") { ref -> linker.card(ref.key)?.accessibilityLabel ?: ref.key }
+                val spoken = linker.card(ticket.key)?.accessibilityLabel ?: ticket.key
                 Text(
-                    lane.cards.joinToString(" ") { it.key }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall,
+                    ticket.key, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = spoken },
                 )
             }
         },
         trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline) },
-        modifier = Modifier.clickable(onClick = onClick).testTag("plan-page-lane-${lane.name}").semantics(mergeDescendants = true) {},
+        modifier = Modifier.clickable(onClick = onClick).testTag("plan-page-ticket-${ticket.key}").semantics(mergeDescendants = true) {},
     )
 }
 
 /** Cards as the board draws them, from the board's rows; a card the board hasn't read draws from the plan's read of it. */
 private fun LazyListScope.cardRows(
     refs: List<PlanCardRef>, plan: Plan, rows: Map<String, TaskRow>, onOpenTask: (String) -> Unit,
-    /** Whether each card says where its own pull request stands (ov-317): on a live lane's page. */
+    /** Whether each card says where its own pull request stands (ov-317): on a live ticket's page. */
     showsStage: Boolean = false,
 ) {
     refs.forEach { ref ->
-        item(key = "card/${ref.task}/${ref.slice}") {
+        item(key = "card/${ref.task}") {
             val row = rows[ref.task]
             val card = plan.card(ref.task)
             val status = row?.status?.title ?: card?.status.orEmpty()
@@ -359,7 +359,7 @@ private fun LazyListScope.cardRows(
                 headlineContent = { Text(row?.title ?: card?.title.orEmpty(), maxLines = 3, overflow = TextOverflow.Ellipsis) },
                 supportingContent = {
                     Column {
-                        Text(if (ref.slice.isEmpty()) status else "$status · ${ref.slice}")
+                        Text(status)
                         val stage = ref.stage?.takeIf { showsStage && it.shown != null }
                         stage?.rowWords?.let { words ->
                             Text(
@@ -386,56 +386,58 @@ private fun LazyListScope.cardRows(
     }
 }
 
-/** A lane's page: why it exists, where it runs, its cards, what it spent, its agents and its timeline. */
+/** A ticket's page: why it is on the line, where it runs, its card, what it spent, who worked it and its timeline. */
 @Composable
-fun PlanLanePage(
-    lane: PlanLane,
+fun PlanTicketPage(
+    ticket: PlanTicket,
     plan: Plan,
     record: PlanRecord?,
     rows: Map<String, TaskRow>,
     onOpenTask: (String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
     /** Marks its draft pull request ready (ov-317); null where this device may not act on pull requests. */
-    markReady: (suspend (PlanLane, com.farcooler.model.PlanPrStage) -> String?)? = null,
+    markReady: (suspend (PlanTicket, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
-    val theme = plan.themeOf(lane)
+    val theme = plan.themeOf(ticket)
     val place = listOf(
-        lane.slug.orEmpty(), lane.worktreePath, lane.branch.takeIf { it != lane.worktreePath }.orEmpty(), PlanWords.model(lane.model),
-        lane.train?.let { "in $it" }.orEmpty(),
+        ticket.worktreePath, ticket.branch.takeIf { it != ticket.worktreePath }.orEmpty(),
+        ticket.landing?.let { "in ${com.farcooler.model.PlanLanding.label(it)}" }.orEmpty(),
     ).filter { it.isNotEmpty() }.joinToString(" · ")
-    LazyColumn(Modifier.fillMaxSize().testTag("plan-lane-page")) {
+    LazyColumn(Modifier.fillMaxSize().testTag("plan-ticket-page")) {
         item {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(lane.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    Text(PlanWords.status(lane, stage = lane.shownStage == null), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(ticket.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(PlanWords.status(ticket, stage = ticket.shownStage == null), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                lane.shownStage?.let { PlanLaneStage(lane, it, markReady) }
-                if (lane.reason.isNotEmpty()) Text(lane.reason, style = MaterialTheme.typography.bodyLarge)
+                ticket.shownStage?.let { PlanTicketStage(ticket, it, markReady) }
+                if (ticket.reason.isNotEmpty()) Text(ticket.reason, style = MaterialTheme.typography.bodyLarge)
                 if (place.isNotEmpty()) Text(place, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                PlanWords.stale(lane, plan.nowMs)?.let {
+                PlanWords.stale(ticket, plan.nowMs)?.let {
                     Text(it, style = MaterialTheme.typography.labelLarge, color = glanceColor(GlancePalette.amber))
                 }
                 if (theme != null) {
-                    TextButton(onClick = { onOpenPage(PlanPage.Theme(theme.id)) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), modifier = Modifier.testTag("plan-lane-theme")) { Text(theme.name) }
+                    TextButton(onClick = { onOpenPage(PlanPage.Theme(theme.id)) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), modifier = Modifier.testTag("plan-ticket-theme")) { Text(theme.name) }
                 }
             }
         }
-        item { PlanSectionTitle("Cards") }
-        cardRows(lane.cards, plan, rows, onOpenTask, showsStage = lane.state.isLive)
+        item { PlanSectionTitle("Card") }
+        cardRows(listOf(ticket.card), plan, rows, onOpenTask, showsStage = ticket.stage.isLive)
         item {
             PlanSectionTitle("Spend")
-            Column(Modifier.padding(horizontal = 16.dp).testTag("plan-lane-spend")) {
-                Text("${PlanWords.spend(lane.spend)} · ${PlanWords.fixRounds(lane.fixRounds)}", style = MaterialTheme.typography.bodyLarge)
-                PlanCostWords.budget(lane.spend, lane.budgetTokens)?.let { PlanBudgetLine(it) }
-                if (lane.spend.totalTokens > 0 && (lane.spend.costMicros ?: 0) > 0) {
+            Column(Modifier.padding(horizontal = 16.dp).testTag("plan-ticket-spend")) {
+                Text("${PlanWords.spend(ticket.spend)} · ${PlanWords.fixRounds(ticket.fixRounds)}", style = MaterialTheme.typography.bodyLarge)
+                PlanCostWords.budget(ticket.spend, ticket.budgetTokens)?.let { PlanBudgetLine(it) }
+                if (ticket.spend.totalTokens > 0 && (ticket.spend.costMicros ?: 0) > 0) {
                     Text(TaskUsageFormat.API_EQUIVALENT, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        if (lane.agents.isNotEmpty()) {
+        if (ticket.work.isNotEmpty()) {
             item { PlanSectionTitle("Agents") }
-            lane.agents.forEachIndexed { index, agent -> item(key = "agent/$index") { Body(PlanWords.agent(agent, plan.nowMs)) } }
+            ticket.work.forEachIndexed { index, work ->
+                item(key = "agent/$index") { Body(PlanWords.work(work, plan.nowMs, plan.agents.firstOrNull { it.id == work.agent }?.model.orEmpty())) }
+            }
         }
         val timeline = record?.timeline.orEmpty()
         if (timeline.isNotEmpty()) {

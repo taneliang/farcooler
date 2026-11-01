@@ -33,7 +33,7 @@ object PlanFixtures {
     fun case(name: String): PlanFixture =
         fixture(parse("test/fixtures/plan-sections-cases.json")["cases"]!!.jsonArray.map { it.jsonObject }.first { it["name"]!!.jsonPrimitive.content == name })
 
-    /** The board with long real titles, a train waiting for CI and ranked lanes. */
+    /** The board with long real titles, a landing waiting for CI and ranked tickets. */
     fun long(): PlanFixture = fixture(parse("test/fixtures/plan-android-long.json"))
 
     fun repositoryFile(relative: String): String {

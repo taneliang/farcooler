@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Where a lane's pull request stands, and what a phone does about it (ov-317), drawn from the plan the iPhone's UI test
+ * Where a ticket's pull request stands, and what a phone does about it (ov-317), drawn from the plan the iPhone's UI test
  * shares (`test/fixtures/plan-phones-ov317.json`) and the Needs You items the runner sends
  * (`test/fixtures/needs-you.json`). The composables are the app's own (`planItems`, `PlanPageBody`, `NeedsYouItemRow`,
  * `ThreadReplyDialog`), with nothing built for the picture. Run only under `-Pfarcooler.captures`.
@@ -42,7 +42,7 @@ class PrStageCaptureTest {
     private val plan = Plan.decode(json.parseToJsonElement(repositoryFile("test/fixtures/plan-phones-ov317.json")).jsonObject["plan"]!!.jsonObject)
     private val statuses = mapOf<String, TaskStatus>()
 
-    private fun lane(name: String) = plan.lanes.first { it.name == name }
+    private fun ticket(key: String) = plan.tickets.first { it.key == key }
 
     @Test fun rows() = Capture.both("pr-stage-rows") {
         LazyColumn(Modifier.fillMaxSize()) {
@@ -51,16 +51,16 @@ class PrStageCaptureTest {
         }
     }
 
-    @Test fun draftLane() = Capture.both("pr-stage-draft-lane") {
-        PlanPageBody(plan, PlanPage.Lane(lane("lane-2").id), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
+    @Test fun draftTicket() = Capture.both("pr-stage-draft-ticket") {
+        PlanPageBody(plan, PlanPage.Ticket(ticket("ov-2").task), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
     }
 
-    @Test fun attentionLane() = Capture.both("pr-stage-attention-lane") {
-        PlanPageBody(plan, PlanPage.Lane(lane("lane-8").id), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
+    @Test fun attentionTicket() = Capture.both("pr-stage-attention-ticket") {
+        PlanPageBody(plan, PlanPage.Ticket(ticket("ov-8").task), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
     }
 
     @Test fun longLogin() = Capture.both("pr-stage-long-login") {
-        PlanPageBody(plan, PlanPage.Lane(lane("lane-5").id), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
+        PlanPageBody(plan, PlanPage.Ticket(ticket("ov-5").task), null, rows = emptyMap(), onOpenTask = {}, onOpenPage = {}, markReady = { _, _ -> null })
     }
 
     @Test fun needsYou() = Capture.both("pr-stage-needs-you") {

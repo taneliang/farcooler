@@ -252,7 +252,7 @@ class NativePanes(
 
     /**
      * Open subagent [agentId] (row [row]) in [terminal]'s conversation: at once where the pane has been opened, and as soon
-     * as it is where it hasn't (the agents view opens a lane's pane and its subagent together).
+     * as it is where it hasn't (the agents view opens an agent's pane and its subagent together).
      */
     @Synchronized
     fun open(terminal: String, row: String, agentId: String) {

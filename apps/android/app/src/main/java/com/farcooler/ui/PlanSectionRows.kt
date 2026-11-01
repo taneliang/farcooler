@@ -27,13 +27,12 @@ import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanSections
-import com.farcooler.model.TRAIN_EXPLANATION
+import com.farcooler.model.LANDING_EXPLANATION
 import com.farcooler.model.ciOf
 import com.farcooler.model.themeGroups
 
 // The Plan's sections, drawn for the phone and the tablet (ov-503, design 7). `PlanSections` decides what is in each and
-// what it says empty; these lay it out, in its order: Needs you, Landing, In review, Building, Waiting, On a landed
-// train (folded), Agents, Themes. Nothing here re-derives a rule.
+// what it says empty; these lay it out, in its order: Needs you, Landing, In review, Building, Waiting, Agents, Themes. Nothing here re-derives a rule.
 
 /** Which of the plan's folds are open: a fold's own default, flipped by a tap, kept while the screen is. */
 class PlanFolds(private val flipped: List<String>, private val flip: (String) -> Unit) {
@@ -55,7 +54,6 @@ fun rememberPlanFolds(key: Any?): PlanFolds {
 }
 
 internal object PlanFold {
-    const val LANDED_TRAIN = "landed-train"
     const val LANDED_TODAY = "landed-today"
 }
 
@@ -88,15 +86,15 @@ fun LazyListScope.planSections(
             }
             PlanSections.Kind.LANDING -> {
                 item(key = "$id/header") {
-                    // A long press says what a train is, where trains first appear.
-                    ExplainedOnLongPress(listOf(TRAIN_EXPLANATION)) {
+                    // A long press says what a landing is, where landings first appear.
+                    ExplainedOnLongPress(listOf(LANDING_EXPLANATION)) {
                         PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-landing"))
                     }
                 }
                 val empty = sections.emptyWords(kind)
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-landing-empty")) }
-                for (card in sections.trains) item(key = "plan/train/${card.id}") {
-                    PlanTrainCard(card, plan.ciOf(card.train), now, onOpenLane = { onOpen(PlanPage.Lane(it)) })
+                for (card in sections.landings) item(key = "plan/landing/${card.id}") {
+                    PlanLandingCard(card, plan.ciOf(card.landing), now, onOpenTicket = { onOpen(PlanPage.Ticket(it)) })
                 }
             }
             PlanSections.Kind.IN_REVIEW, PlanSections.Kind.BUILDING -> {
@@ -105,7 +103,7 @@ fun LazyListScope.planSections(
                 item(key = "$id/header") { PlanHeader(kind.title, rows.size.takeIf { it > 0 }, Modifier.testTag(tag)) }
                 val empty = sections.emptyWords(kind)
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("$tag-empty")) }
-                laneRows(plan, rows, id, now, rank = false, onOpen)
+                ticketRows(plan, rows, id, now, rank = false, onOpen)
             }
             PlanSections.Kind.WAITING -> {
                 item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-waiting")) }
@@ -120,15 +118,8 @@ fun LazyListScope.planSections(
                 ).filter { it.second.isNotEmpty() }
                 for ((title, rows, tag) in groups) {
                     if (groups.size > 1) item(key = "$id/$tag") { PlanGroupTitle(title, Modifier.testTag(tag)) }
-                    laneRows(plan, rows, "$id/$tag", now, rank = rows === waiting.next, onOpen)
+                    ticketRows(plan, rows, "$id/$tag", now, rank = rows === waiting.next, onOpen)
                 }
-            }
-            PlanSections.Kind.ON_LANDED_TRAIN -> {
-                val open = folds.isOpen(PlanFold.LANDED_TRAIN)
-                item(key = "$id/header") {
-                    PlanHeader(kind.title, sections.onLandedTrain.size, Modifier.testTag("plan-on-landed-train"), open = open) { folds.toggle(PlanFold.LANDED_TRAIN) }
-                }
-                if (open) laneRows(plan, sections.onLandedTrain, id, now, rank = false, onOpen)
             }
             PlanSections.Kind.AGENTS -> {
                 val fleet = sections.fleet
@@ -142,7 +133,7 @@ fun LazyListScope.planSections(
                             modifier = Modifier.padding(horizontal = 16.dp).testTag("plan-agents-header"),
                         )
                     }
-                    for (agent in fleet.agents) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Lane(it)) } }
+                    for (agent in fleet.agents) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Ticket(it)) } }
                 }
             }
             PlanSections.Kind.THEMES -> {
@@ -157,9 +148,9 @@ fun LazyListScope.planSections(
     }
 }
 
-private fun LazyListScope.laneRows(
+private fun LazyListScope.ticketRows(
     plan: Plan,
-    rows: List<PlanSections.LaneRow>,
+    rows: List<PlanSections.TicketRow>,
     group: String,
     now: Long,
     rank: Boolean,
@@ -167,10 +158,10 @@ private fun LazyListScope.laneRows(
 ) {
     rows.forEachIndexed { index, row ->
         item(key = "$group/${row.id}") {
-            PlanLaneRow(
-                row.lane, plan.themeOf(row.lane), rank = if (rank) index + 1 else null, now = now, waitsOnOwner = row.waitsOnOwner,
-                agent = row.agent, landedTrain = row.landedTrain,
-            ) { onOpen(PlanPage.Lane(row.id)) }
+            PlanTicketRow(
+                row.ticket, plan.themeOf(row.ticket), rank = if (rank) index + 1 else null, now = now, waitsOnOwner = row.waitsOnOwner,
+                agent = row.agent,
+            ) { onOpen(PlanPage.Ticket(row.id)) }
         }
     }
 }

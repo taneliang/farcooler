@@ -49,7 +49,7 @@ class PlanCaptureTest {
 
     @Test fun themes() = Capture.both("plan-themes") {
         LazyColumn(Modifier.fillMaxSize()) {
-            // The themes alone, with the plan's lanes in place so each track line reads what is moving (ov-331).
+            // The themes alone, with the plan's tickets in place so each track line reads what is moving (ov-331).
             items(plan.shownThemes.size) { PlanThemeRow(plan.shownThemes[it], plan.track(plan.shownThemes[it]), plan.nowMs) {} }
         }
     }
@@ -59,9 +59,9 @@ class PlanCaptureTest {
         PlanPageBody(plan, PlanPage.Theme(theme.id), record(theme.id), rows = emptyMap(), onOpenTask = {}, onOpenPage = {})
     }
 
-    @Test fun lanePage() = Capture.both("plan-lane-page") {
-        val lane = plan.lanes.first { it.name == "mac-vis" }
-        PlanPageBody(plan, PlanPage.Lane(lane.id), record(lane.id), rows = emptyMap(), onOpenTask = {}, onOpenPage = {})
+    @Test fun ticketPage() = Capture.both("plan-ticket-page") {
+        val ticket = plan.tickets.first { it.key == "ov-220" }
+        PlanPageBody(plan, PlanPage.Ticket(ticket.task), record(ticket.task), rows = emptyMap(), onOpenTask = {}, onOpenPage = {})
     }
 
     /** A runner that is restarting (ov-631): not a broken plan, and the same screen at every width. */

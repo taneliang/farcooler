@@ -5,7 +5,7 @@ package com.farcooler.model
  * holds the rule: the iPhone's `AgentsOpening` and the Mac's `ContentView.destination`.
  *
  * - A subagent whose own conversation the runner serves opens it, in its parent's place: the orchestrator's beside the plan
- *   or on its tab, a lane pane's once that pane is up.
+ *   or on its tab, an agent pane's once that pane is up.
  * - Anything else opens its pane: a subagent known only by name opens its parent's.
  * - The orchestrator's own pane is the conversation already up: nothing to open on a phone, the chat to focus beside a plan.
  */

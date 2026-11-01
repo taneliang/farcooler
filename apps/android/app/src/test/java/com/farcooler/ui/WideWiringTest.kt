@@ -70,7 +70,7 @@ class WideWiringTest {
         )
         val ways = listOf<() -> Unit>(
             { nav.onOpenTask("t") },
-            { nav.onOpenPlan(PlanPage.Lane("l")) },
+            { nav.onOpenPlan(PlanPage.Ticket("l")) },
             { nav.onOpenTerminal("w", "x") },
             { nav.onOpenWorktree("w") },
             { nav.onOpenLevel("l") },

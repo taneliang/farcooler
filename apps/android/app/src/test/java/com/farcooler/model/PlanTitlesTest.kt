@@ -7,9 +7,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Lanes and trains named by what they do (ov-462), and a train's own
- * integrating agent (ov-461), against `test/fixtures/plan.json`. AgentKit's
- * `PlanTitlesTests` holds the Mac and the iPhone to the same file and words.
+ * Tickets and landings named by what they do (ov-462, ov-872), and a landing's own lander (ov-461), against
+ * `test/fixtures/plan.json`. AgentKit's `PlanTitlesTests` holds the Mac and the iPhone to the same file and words.
  */
 class PlanTitlesTest {
     private fun repositoryFile(relative: String): String {
@@ -25,51 +24,45 @@ class PlanTitlesTest {
     private val plan = Plan.decode(repositoryFile("test/fixtures/plan.json"))
 
     @Test
-    fun `a lane's title comes first and its slug second, and a lane with none shows its name`() {
-        assertEquals(listOf("Mac follow-ups", "Mac interface polish", "fix-ac84"), plan.lanes.map { it.heading })
-        assertEquals("mac-ux", plan.lanes[1].slug)
-        assertNull(plan.lanes[2].slug)
-        assertEquals("same", PlanLane("i", "same", LaneState.BUILDING, "", null, "", "", "", "", null, null, 0, false, 0, emptyList(), emptyList(), PlanSpend(), title = "").heading)
+    fun `a ticket shows its card's title, and a card with none shows its key`() {
+        assertEquals(listOf("Title of ov-2", "Title of ov-1", "Title of ov-4", "Title of ov-3"), plan.tickets.map { it.heading })
+        assertEquals("ov-7", plan.tickets[0].copy(title = "", key = "ov-7").heading)
     }
 
     @Test
-    fun `a train reads Train N, what it carries, its agent and its card`() {
-        val train = plan.trains.single()
-        assertEquals("Train 9", train.label)
-        assertEquals("integ-9", train.slug)
-        assertEquals("Mac interface polish", train.carries)
-        assertEquals("ov-2", train.card?.key)
-        val agent = train.agent!!
-        assertTrue(agent.isWorking)
-        assertEquals("i1", agent.agentId)
-        assertEquals(120_000L, agent.spend.totalTokens)
+    fun `a landing reads Landing N, what it carries, and the agent landing it`() {
+        val landing = plan.landings.first()
+        assertEquals("Landing 9", landing.label)
+        assertNull("its title is its label already", landing.subtitle)
+        assertEquals("Title of ov-4", landing.carries)
+        assertEquals("00000000-0000-0000-0000-000000007004", landing.lander)
+        assertEquals("a landing the plan lists no agent for has no lander to name", null, PlanSections.of(plan).landings.first().lander)
+        val earlier = plan.landings[1]
+        assertEquals("Landing 8", earlier.label)
+        assertEquals("Agents message the plan", earlier.subtitle)
     }
 
     @Test
-    fun `a train's number is read off integ-N or train-N`() {
-        assertEquals(72, TrainWords.number("integ-72"))
-        assertEquals(5, TrainWords.number("Train-5"))
-        assertNull(TrainWords.number("integ-x"))
-        assertNull(TrainWords.number("rc-1"))
-        assertNull(TrainWords.number("train-"))
-        val bare = PlanTrain("i", "spring", "", null, TrainState.GATING, 0, emptyList(), "")
-        assertEquals("spring", bare.label)
-        assertNull(bare.slug)
-        assertEquals("Train 72", bare.copy(name = "integ-72").label)
-        val titled = bare.copy(name = "train-3", title = "Phones catch up")
-        assertEquals("Train 3", titled.label)
-        assertEquals("the title is the subtitle, never the name", "Phones catch up", titled.subtitle)
+    fun `a landing's title is its subtitle, never its name, and a number is all its name needs`() {
+        val bare = PlanLanding("i", 72, "", null, LandingState.GATING, 0, tickets = emptyList(), ciSubject = "")
+        assertEquals("Landing 72", bare.label)
         assertNull(bare.subtitle)
+        val titled = bare.copy(number = 3, title = "Phones catch up")
+        assertEquals("Landing 3", titled.label)
+        assertEquals("the title is the subtitle, never the name", "Phones catch up", titled.subtitle)
+        assertEquals("a title that repeats the label says no more", null, bare.copy(title = "Landing 72").subtitle)
+        assertEquals("the runner's own prefix is not said twice", "Phones", bare.copy(title = "Landing 72 \u00b7 Phones").subtitle)
     }
 
     @Test
-    fun `a lane named like a live train is drawn by the train once`() {
-        val object_ = repositoryFile("test/fixtures/plan.json")
-        val withShadow = Plan.decode(object_).let { p ->
-            val shadow = p.lanes[1].copy(id = "lane-shadow", name = "integ-9")
-            p.copy(lanes = p.lanes + shadow, laneIsTrain = listOf(PlanFlaggedLane("lane-shadow", "integ-9")))
-        }
-        assertEquals(listOf(listOf("mac-ux")), withShadow.nowGroups.map { g -> g.lanes.map { it.name } })
-        assertTrue(Plan.decode(object_).laneIsTrain.isEmpty())
+    fun `a lander is told what it landed and what it spent`() {
+        val lander = PlanAgent(
+            "i1", AgentRole.LANDER, "claude", "claude-haiku-4", "", null, "i1", emptyList(), true, "", null, 0, 0,
+            PlanSpend(inputTokens = 120_000, runs = 1),
+        )
+        assertTrue(lander.working)
+        assertEquals("Lander working \u00b7 120K tokens", LandingWords.lander(lander))
+        assertEquals("Lander finished \u00b7 120K tokens", LandingWords.lander(lander.copy(working = false)))
+        assertEquals("Lander finished", LandingWords.lander(lander.copy(working = false, spend = PlanSpend())))
     }
 }

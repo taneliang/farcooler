@@ -22,7 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 
-// A long press explains (ov-522): what a train is, or what each step of the ladder means, in lines a person can read
+// A long press explains (ov-522): what a landing is, or what each step of the ladder means, in lines a person can read
 // in a breath. The Mac says the same words as a tooltip; a phone has no hover, so the press shows them in a popup, and
 // TalkBack offers "Explain".
 
