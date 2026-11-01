@@ -55,6 +55,10 @@ fc() { FARCOOLER_HOME="$home" FARCOOLER_CONFIG="$home/config.toml" "$bin" "$@"; 
 if [ "${1:-}" = "stop" ]; then
     # Gate environments may omit sbin, where macOS installs lsof.
     export PATH="$PATH:/usr/sbin"
+    if ! command -v lsof >/dev/null 2>&1; then
+        echo "mac-capture: stop requires lsof to find the scratch daemon" >&2
+        exit 1
+    fi
     # The daemon, then its tmux server, which `daemon stop` leaves running.
     # With the CLI: `status` names the socket in its recovery line. Without
     # one (target/ already deleted): the daemon is whoever holds the home's
