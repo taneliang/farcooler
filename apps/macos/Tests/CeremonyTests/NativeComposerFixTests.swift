@@ -40,11 +40,19 @@ struct NativeComposerFixTests {
 
     @Test("A large HEIC photo becomes a JPEG under 16 MB, its long edge 2576")
     func aLargeHEICFits() throws {
-        let heic = try Self.noise(6000, 4000, as: .heic)
+        // ImageIO's HEIC encoder can advertise the format yet fail to finalize
+        // on a hosted Mac. Decoding a photo is what this tests, not encoding
+        // one: use real HEIC bytes so an unavailable encoder cannot empty it.
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/composer-large.heic")
+        let heic = try Data(contentsOf: fixture)
+        let source = try #require(CGImageSourceCreateWithData(heic as CFData, nil))
+        #expect(CGImageSourceGetType(source) as String? == UTType.heic.identifier)
+        #expect(Self.longEdge(heic) == 6000)
         let image = try #require(ComposeImage.make(heic, type: .heic))
         #expect(image.mime == "image/jpeg")
         #expect(image.data.count < 16 * 1024 * 1024, "\(image.data.count) bytes")
-        #expect(Self.longEdge(image.data) == ComposeImage.longestEdge)
+        #expect(Self.longEdge(image.data) == 2576)
     }
 
     @Test("A transparent TIFF stays a PNG; an opaque one becomes a JPEG; a small PNG is kept")
