@@ -1,4 +1,4 @@
-// Shipped by Canary at 860ba727a73b0b2bcadab26635f52788f73a28b5. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 1519d46748cc091e045dadac600a6c96b0699351. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -227,11 +227,6 @@ message Request {
     BoardThemeCreate board_theme_create = 161;
     BoardThemeUpdate board_theme_update = 162;
     BoardThemeCards board_theme_cards = 163;
-    LaneCreate lane_create = 164;
-    LaneUpdate lane_update = 165;
-    LaneCards lane_cards = 166;
-    LaneAgentSet lane_agent_set = 167;
-    PlanSet plan_set = 168;
     PlanEventsRequest plan_events = 169;
     // Orchestrator pages (ov-269), behind `board_pages`: a document of typed
     // blocks per slot. Experimental: it may be withdrawn, and 170-179 are
@@ -247,12 +242,6 @@ message Request {
     // through `plan.get`'s `Plan.rulings`, so only the writes are here.
     RulingAdd ruling_add = 180;
     RulingSet ruling_set = 181;
-    // Trains (ov-309), the plan layer's batches of lanes landing together,
-    // behind `board_trains`. Experimental with the layer: 190-199 are theirs,
-    // the rest held by `reserved` below. Read through `plan.get`'s
-    // `Plan.trains`, so only the writes are here.
-    TrainStart train_start = 190;
-    TrainSet train_set = 191;
     // The owner keeps every open ruling at once (ov-333), behind
     // `board_ruling_actions`. Tags from 200, since the rulings' own block
     // (180-189) was reserved whole and a reserved tag is never reused. The
@@ -290,7 +279,7 @@ message Request {
     // a new key. 490-499 are its block, the rest held by `reserved` below.
     ClientRekey client_rekey = 490;
     // `pr.ready` and `pr.thread_reply` (ov-317), behind `pr_actions`: a phone
-    // marks a lane's draft pull request ready, and replies to a review thread
+    // marks a ticket's draft pull request ready, and replies to a review thread
     // an agent escalated. 500-509 are their block, the rest held by `reserved`
     // below.
     PrReady pr_ready = 500;
@@ -341,6 +330,17 @@ message Request {
     ApprovalAsk approval_ask = 590;
     ApprovalGrant approval_grant = 591;
     ApprovalId approval_id = 592;
+    // The line, agents and landings (ov-872), behind `board_line`: a ticket on
+    // the line, the plan's order, an agent and its work, and a landing. They
+    // replace `lane.*`, `plan.set` and `train.*` (164-168, 190 and 191). 600-609
+    // are their block, the rest held by `reserved` below.
+    TicketLineSet line_set = 600;
+    LineOrder line_order = 601;
+    AgentRecord agent_record = 602;
+    AgentWork agent_work = 603;
+    AgentEnd agent_end = 604;
+    LandingStart landing_start = 605;
+    LandingSet landing_set = 606;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -390,6 +390,9 @@ message Request {
   reserved 582 to 589;
   // The rest of phone approval's block (ov-858).
   reserved 593 to 599;
+  // `lane.*` and `plan.set` (ov-268) and `train.*` (ov-309), retired by ov-872.
+  reserved 164 to 168, 190, 191;
+  reserved 607 to 609;
 }
 
 message Response {
@@ -485,10 +488,9 @@ message Result {
     WorktreeDir worktree_dir = 150;
     WorktreeFile worktree_file = 151;
     // The plan layer (ov-268), behind `board_plan`. `board_theme.*` answer
-    // with the theme, `lane.*` with the lane, `plan.get` and `plan.set` with
-    // the whole plan, and `plan.events` with a timeline.
+    // with the theme, `plan.get` and `line.order` with the whole plan, and
+    // `plan.events` with a timeline.
     BoardThemeView board_theme_view = 160;
-    Lane lane = 161;
     Plan plan = 162;
     PlanEventList plan_event_list = 163;
     // Orchestrator pages (ov-269), behind `board_pages`. `page.list` answers
@@ -501,8 +503,6 @@ message Result {
     PageStatsList page_stats_list = 173;
     // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
     BoardRuling board_ruling = 180;
-    // `train.start` and `train.set`, behind `board_trains`: the train.
-    BoardTrain board_train = 190;
     // `repository.landing` (ov-313), behind `landing`: what the runner read of
     // the repository's base branch, and the mode it suggests. 200-209 are
     // landing's, the rest held by `reserved` below.
@@ -570,6 +570,12 @@ message Result {
     // `approval.*` (ov-858), behind `phone_approval`.
     ApprovalState approval_state = 590;
     ApprovalList approval_list = 591;
+    // The line, agents and landings (ov-872), behind `board_line`: `line.set`
+    // answers with the ticket, `agent.*` with the agent, `landing.*` with the
+    // landing. They replace the lane (161) and the train (190).
+    TicketLine ticket_line = 600;
+    Agent agent = 601;
+    Landing landing = 602;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -616,6 +622,9 @@ message Result {
   reserved 561 to 569;
   // The rest of step-up's block (ov-856).
   reserved 582 to 589;
+  // The lane (ov-268) and the train (ov-309), retired by ov-872.
+  reserved 161, 190;
+  reserved 603 to 609;
 }
 
 // ---------------------------------------------------------------------------
@@ -1076,7 +1085,8 @@ message Event {
     // managers and makes every board re-read.
     BoardReads board_reads_changed = 26;
     // The plan layer on a board changed (ov-268), behind `board_plan`: a
-    // theme, a lane or the plan was written. Not `task_changed`: nothing about
+    // theme, a ticket on the line, an agent, a landing or the plan was
+    // written. Not `task_changed`: nothing about
     // a task moved, and that event wakes managers. A client with the Plan view
     // open re-reads `plan.get`; one without it ignores this. A runner without
     // the capability never sends it.
@@ -2293,17 +2303,16 @@ message TerminalCreate {
   // daemon drops the field and would open a pane that knows no task, while
   // the client moved the task into progress.
   optional string task_key = 5;
-  // The plan lane this pane is opened to work (ov-457), by its name on the
-  // task's board, with `task_key` one of its cards. The runner records the
-  // pane as the lane's build agent, moves a queued lane to building, exports
-  // FARCOOLER_LANE on every launch while the pane works it, and its first
-  // message names every card on the lane after the task's own. What
-  // `farcooler plan lane dispatch` sends. Refused as `lane` when no live lane
-  // of that name holds the task.
+  // The plan lane this pane was opened to work (ov-457), until ov-872.
+  reserved 6;
+  // The agent this pane is opened as (ov-872): its role, and the tickets after
+  // `task_key` it works, in order. What `farcooler agent dispatch` sends. The
+  // runner records the pane as that agent and its tickets go on the line.
+  // Refused as `task_key` when a ticket isn't on the task's board.
   //
-  // Gated by the `terminal_lane` capability, named in
+  // Gated by the `board_line` capability, named in
   // `Request.required_capabilities` by a client that fills it in.
-  optional string lane = 6;
+  optional AgentDispatch agent = 7;
 }
 
 message TerminalResize {
@@ -3429,17 +3438,19 @@ message ClientRekeyResult {
   EnrolledClient client = 1;
 }
 
-// A lane's draft pull request, marked ready for review (ov-317, team mode T6,
-// `pr.ready`): the author's action, from a phone, run on the runner with its
-// own `gh` login as `gh pr ready <number>`.
+// A ticket's draft pull request, marked ready for review (ov-317, team mode
+// T6, `pr.ready`): the author's action, from a phone, run on the runner with
+// its own `gh` login as `gh pr ready <number>`.
 //
-// It names the LANE, never a URL or a repository: the runner finds the pull
-// request among the ones its cards work (`plan.get`'s stage), so a phone cannot
-// point it at any other. Control scope.
+// It names the TICKET, never a URL or a repository: the runner finds the pull
+// request it works (`plan.get`'s stage), so a phone cannot point it at any
+// other. Control scope.
 message PrReady {
-  bytes lane_id = 1;
-  // Which of the lane's pull requests, when it has several (one per card). 0
-  // means its only draft one, and is refused when there are two.
+  // A lane, until ov-872.
+  reserved 1;
+  // The ticket whose pull request it is.
+  bytes task_id = 3;
+  // Its pull request; 0 means its own, as `TicketLine.pr_number` reads.
   uint32 pr_number = 2;
 }
 
@@ -4576,24 +4587,27 @@ message TaskUsage {
 // ---------------------------------------------------------------------------
 // The plan layer (ov-268)
 //
-// Themes, lanes and the plan, beside the board and not in it, behind the
-// `board_plan` capability, which is EXPERIMENTAL and may be withdrawn. Every
-// message here is new, and none of them is a field of an existing message: a
-// task carries nothing about the layer, because the layer points at tasks and
-// tasks never point back. That is what lets it be removed (the removal marks
-// request tags 160-169, result tags 160-163 and event tag 27 `reserved`).
+// Themes, the line, agents and the plan, beside the board and not in it,
+// behind the `board_plan` and `board_line` capabilities. A task carries
+// nothing about the layer, because the layer points at tasks and tasks never
+// point back.
 //
 // A THEME is why a group of cards exists: a one-sentence outcome, a short
 // story the orchestrator rewrites at checkpoints, what is next, and what needs
-// the owner. A card is in at most one theme. A LANE is one unit of execution:
-// an agent, or a chain of them, in one worktree on one branch, working whole
-// cards or slices of them. The PLAN is the ordered list of queued lanes.
+// the owner. A card is in at most one theme. THE LINE (ov-872) holds one row
+// per ticket being worked: its stage, its own branch, the ticket it is stacked
+// on, its pull request and how it landed. An AGENT is recorded when it starts:
+// an orchestrator, a builder, a reviewer or a lander, a pane or a subagent,
+// working any number of tickets. The PLAN is the ordered list of waiting
+// tickets.
 //
 // Named `BoardTheme` here because `Theme` is the terminal color theme. Refusals
-// are `Error.what` words: `name`, `name_taken`, `other_board`, `lane_state`,
-// `lane_closed`, `lane_twice`, `plan_state`, `harness`, `agent_id`, `actor`,
-// `outcome`, `story`, `next`, `owner_ask`, `reason`, `train`, `sha`, `path`,
-// `branch`, `model`, `slice`.
+// are `Error.what` words: `name`, `name_taken`, `other_board`, `stage`,
+// `ticket_closed`, `on_the_line`, `not_on_the_line`, `not_waiting`,
+// `duplicate`, `stack_parent`, `stack_cycle`, `parent_not_landed`,
+// `same_branch`, `not_landed`, `role`, `agent_ended`, `harness`, `agent_id`,
+// `actor`, `outcome`, `story`, `next`, `owner_ask`, `reason`, `sha`, `path`,
+// `branch`, `model`, `title`.
 // ---------------------------------------------------------------------------
 
 enum BoardThemeState {
@@ -4603,26 +4617,6 @@ enum BoardThemeState {
   BOARD_THEME_STATE_DONE = 3;
   // Given up; its name is free again and it leaves the plan read.
   BOARD_THEME_STATE_DROPPED = 4;
-}
-
-// Where a lane is. Moves go forward, with two loops: review to fixing and
-// back, and landing to fixing. Any live state may be dropped.
-enum LaneState {
-  LANE_STATE_UNSPECIFIED = 0;
-  LANE_STATE_QUEUED = 1;
-  LANE_STATE_BUILDING = 2;
-  LANE_STATE_REVIEW = 3;
-  LANE_STATE_FIXING = 4;
-  LANE_STATE_LANDING = 5;
-  LANE_STATE_LANDED = 6;
-  LANE_STATE_DROPPED = 7;
-}
-
-enum LaneAgentRole {
-  LANE_AGENT_ROLE_UNSPECIFIED = 0;
-  LANE_AGENT_ROLE_BUILD = 1;
-  LANE_AGENT_ROLE_REVIEW = 2;
-  LANE_AGENT_ROLE_FIX = 3;
 }
 
 message BoardTheme {
@@ -4662,36 +4656,24 @@ message BoardThemeView {
   BoardTheme theme = 1;
   repeated bytes task_ids = 2;
   PlanStatusCounts counts = 3;
-  // What its lanes spent on its cards (ov-306): each lane's spend shared out
-  // over the lane's cards, and this theme's cards' shares summed, finished
-  // lanes included. Unset from a runner before it; a client says nothing then.
-  LaneSpend spend = 4;
+  // What its lanes spent, until ov-872 counted it by ticket in `spend`.
+  reserved 4;
   // Its token budget (ov-307), counting input, output and both cache counts
   // as `spend` does; absent when it has none. Behind `board_cost`.
   optional uint64 budget_tokens = 5;
   // Its tokens on each of the last seven UTC days, oldest first and today
-  // last, each lane's days shared out over its cards as `spend` is. Seven
+  // last, each agent's days shared out over its tickets as `spend` is. Seven
   // values behind `board_cost`, empty without it.
   repeated uint64 trend_tokens = 6;
   // When it last moved, in ms, by the runner's reckoning (ov-331): the newest
-  // of its story, the lanes on its cards (not dropped ones), its rulings made
+  // of its story, its tickets on the line (not dropped ones), its rulings made
   // or settled, and its cards' status moves. Lets every client agree on when a
   // theme reads as quiet. Absent from a runner before it; a client then works
   // it out from what it has.
   optional int64 last_moved_at = 7;
-}
-
-// A card a lane works, or one slice of it.
-message LaneCard {
-  bytes task_id = 1;
-  // Empty when the lane works the whole card.
-  string slice = 2;
-  // Where this card's pull request stands (ov-312), derived on read from the
-  // runner's last read of GitHub and never written. Absent when the runner
-  // has nothing to say: a card with no pull request on a lane that has not
-  // started, or a card already finished. Derived by the runner: ignored on a
-  // request (`lane.create`, `lane.cards`), where a client has nothing to say.
-  optional PrStage stage = 3;
+  // What was spent on its cards (ov-306): each of its tickets' spend summed,
+  // finished tickets included.
+  Spend spend = 8;
 }
 
 // How far a pull request has come (ov-312): the runner names the stage once so
@@ -4728,7 +4710,7 @@ message PrStage {
   repeated string reviewers = 3;
   // The merge queue position, from 1 as GitHub counts it, for `QUEUED`.
   uint32 queue_position = 4;
-  // The pull request this stage is read from; 0 for none. On a lane, the
+  // The pull request this stage is read from; 0 for none. On a ticket, the
   // card pull request that set the rolled-up stage.
   uint32 pr_number = 5;
   string pr_url = 6;
@@ -4741,22 +4723,54 @@ message PrStage {
   CheckState checks = 9;
 }
 
-message LaneAgent {
-  // `claude` or `codex`.
-  string harness = 1;
-  string agent_id = 2;
-  LaneAgentRole role = 3;
-  string model = 4;
-  int64 started_at = 5;
-  optional int64 ended_at = 6;
+// Where a ticket is on the line (ov-872). A ticket's stage is the line's, never
+// its task's status.
+enum TicketStage {
+  TICKET_STAGE_UNSPECIFIED = 0;
+  // In the plan, or waiting for a place in it; nobody is building it.
+  TICKET_STAGE_WAITING = 1;
+  // A builder has it, for the first time or for a fix round.
+  TICKET_STAGE_BUILDING = 2;
+  // A reviewer has it.
+  TICKET_STAGE_REVIEWING = 3;
+  // It waits on a person: a ruling, a pull request a human merges, or a
+  // landing the charter says to ask about.
+  TICKET_STAGE_NEEDS_YOU = 4;
+  // On its way into the product.
+  TICKET_STAGE_LANDING = 5;
+  TICKET_STAGE_LANDED = 6;
+  TICKET_STAGE_DROPPED = 7;
 }
 
-// What a lane's agents have spent, from the runner's own record of their
-// turns. Tokens first: dollars are notional on a subscription. An agent the
-// runner has read no turn of (every codex agent, and a Claude one before its
-// first turn) is counted in `unmeasured_agents`: a client says "Not reported"
-// for it, never zero.
-message LaneSpend {
+// What an agent is for (ov-872).
+enum AgentRole {
+  AGENT_ROLE_UNSPECIFIED = 0;
+  // Turns what you want into tickets, plans them and dispatches the others.
+  AGENT_ROLE_ORCHESTRATOR = 1;
+  // Builds tickets, and fixes them after a review.
+  AGENT_ROLE_BUILDER = 2;
+  // Reviews tickets, from any builder.
+  AGENT_ROLE_REVIEWER = 3;
+  // Puts finished tickets into the product.
+  AGENT_ROLE_LANDER = 4;
+}
+
+// What an agent does for one ticket.
+enum WorkRole {
+  WORK_ROLE_UNSPECIFIED = 0;
+  WORK_ROLE_BUILD = 1;
+  // A fix round after a review or a failed landing.
+  WORK_ROLE_FIX = 2;
+  WORK_ROLE_REVIEW = 3;
+  WORK_ROLE_LAND = 4;
+}
+
+// What agents spent, from the runner's own record of their turns. Tokens
+// first: dollars are notional on a subscription. An agent the runner has read
+// no turn of (every codex agent, and a Claude one before its first turn) is
+// counted in `unmeasured_agents`: a client says "Not reported" for it, never
+// zero.
+message Spend {
   uint64 input_tokens = 1;
   uint64 output_tokens = 2;
   uint64 cache_read_tokens = 3;
@@ -4765,138 +4779,117 @@ message LaneSpend {
   optional int64 cost_micros = 5;
   uint32 runs = 6;
   uint32 unmeasured_agents = 7;
-  // How many of the lane's agents also worked in another lane. Each one's
-  // spend is split evenly across its lanes, so the figures above hold only
-  // this lane's part of it and summing lanes counts it once.
+  // How many of a ticket's agents also worked other tickets. Each one's spend
+  // is split evenly across its tickets, so the figures above hold only this
+  // ticket's part of it and summing tickets counts it once.
   uint32 shared_agents = 8;
 }
 
-message Lane {
-  bytes id = 1;
-  bytes workspace_id = 2;
-  string name = 3;
-  LaneState state = 4;
+// One agent's work on one ticket.
+message TicketWork {
+  // The agent, as `Agent.id`.
+  bytes agent_id = 1;
+  bytes task_id = 2;
+  WorkRole role = 3;
+  int64 started_at = 4;
+  optional int64 ended_at = 5;
+  // How it ended: `finished`, `failed`, `stopped`, `handed_back`,
+  // `task_closed`, `relinked`, `approved` or `changes_asked`. Empty while
+  // open.
+  string verdict = 6;
+  // Linked by the runner from a key at the start of a subagent's
+  // description, rather than recorded by the orchestrator.
+  bool linked_by_description = 7;
+}
+
+// One ticket on the line (ov-872): the landing unit. Its title and key are
+// its card's, in `Plan.cards`.
+message TicketLine {
+  bytes task_id = 1;
+  TicketStage stage = 2;
   // One line: why it is in the plan, or why it is where it is now.
-  string reason = 5;
+  string reason = 3;
+  // Its own branch; empty until one is cut.
+  string branch = 4;
+  optional bytes worktree_id = 5;
+  // The worktree's path. Empty below `host_admin`.
+  string worktree_path = 6;
+  // The ticket whose branch this one's is stacked on; it lands first.
+  optional bytes stack_parent = 7;
+  // Carried over from a lane of several cards: the tickets that share it land
+  // together. Only tickets from before ov-872 have one.
+  optional bytes same_branch = 8;
+  optional uint32 pr_number = 9;
+  optional string landed_sha = 10;
   // 1 is next up; absent outside the plan.
-  optional uint32 plan_rank = 6;
-  optional bytes worktree_id = 7;
-  // The worktree's path as the orchestrator gave it. Empty below `host_admin`.
-  string worktree_path = 8;
-  string branch = 9;
-  string harness = 10;
-  string model = 11;
-  // The train it is landing in, by name.
-  optional string train = 12;
-  optional string landed_sha = 13;
-  int64 state_since = 14;
-  int64 created_at = 15;
-  uint64 resource_version = 16;
-  // From here on, derived on read.
-  repeated LaneCard cards = 17;
-  repeated LaneAgent agents = 18;
-  // How many times it moved into fixing.
-  uint32 fix_rounds = 19;
-  LaneSpend spend = 20;
-  // Sat in one live state for over an hour.
-  bool stale = 21;
-  // Its token budget (ov-307), counted as `spend` is; absent when it has
-  // none. Behind `board_cost`.
-  optional uint64 budget_tokens = 22;
-  // Where its pull requests stand (ov-312): the least advanced of its cards'
-  // stages, derived on read. Absent for a lane not yet started, and for one
-  // with nothing to say.
-  optional PrStage stage = 23;
-  // What a person reads for it (ov-462): the title the orchestrator wrote, or
-  // one the runner derived from its cards' titles; empty when it has neither,
-  // and a client then shows `name`. `name` stays the slug: the branch and the
-  // worktree.
-  string title = 24;
+  optional uint32 plan_rank = 11;
+  int64 stage_since = 12;
+  // Taken off a landing by hand: the runner doesn't put it back on its own.
+  bool held_off = 13;
+  int64 created_at = 14;
+  uint64 resource_version = 15;
+  // From here on, derived on read. Everyone who worked it, oldest first.
+  repeated TicketWork work = 16;
+  // How many fix rounds it has had.
+  uint32 fix_rounds = 17;
+  Spend spend = 18;
+  // Sat in one live stage, not waiting, for over an hour.
+  bool stale = 19;
+  // Its token budget (ov-307), counted as `spend` is; absent when it has none.
+  optional uint64 budget_tokens = 20;
+  // Where its pull request stands (ov-312); absent with nothing to say.
+  optional PrStage pr_stage = 21;
+  // The number of the live landing it is on.
+  optional uint32 landing = 22;
 }
 
-// A card a theme or lane names, enough to draw its row.
-message PlanCard {
+// A ticket an agent works now.
+message AgentTicket {
   bytes task_id = 1;
-  string key = 2;
-  string title = 3;
-  TaskStatus status = 4;
+  WorkRole role = 2;
+  int64 started_at = 3;
 }
 
-// One card's lanes: what the reconciliation's NO-LANE and LANDED-NOT-CLOSED
-// are derived from. `live` lanes are not landed or dropped.
-message PlanCoverage {
+// One agent at work on the board (ov-872): recorded when it started, with
+// what it does now observed on the runner.
+message Agent {
+  bytes id = 1;
+  AgentRole role = 2;
+  // `claude`, `codex`, `cursor`, or an adapter's word.
+  string harness = 3;
+  // Empty when none was named.
+  string model = 4;
+  // What it is called on a row: the orchestrator's title for it, else for a
+  // subagent the description its parent gave it.
+  string title = 5;
+  // A pane: its terminal, to open and type into. Absent for a subagent.
+  optional bytes terminal_id = 6;
+  // A subagent: the harness's own id for it (Claude's agentId), and the pane
+  // it runs under when the runner knows it. For the runner and the CLI, never
+  // for a screen.
+  string subagent_id = 7;
+  optional bytes parent_terminal_id = 8;
+  int64 started_at = 9;
+  // Asked to stop: it reads "Stopping" until it ends, since a tool call
+  // already running finishes first.
+  optional int64 stop_asked_at = 10;
+  // From here on, observed. The tickets it works now, in the order it was
+  // given them.
+  repeated AgentTicket tickets = 11;
+  // Mid-turn.
+  bool working = 12;
+  // What it is doing now, in a line: a pane's last line, a subagent's last
+  // tool call. Empty when the runner can't see it.
+  string doing_now = 13;
+  // Unix milliseconds of its last turn; 0 with none.
+  int64 last_at = 14;
+  // Its turns in the last 24 hours.
+  Spend spend = 15;
+}
+
+// Whom to ask to review one ticket's pull request (ov-580).
+message TicketReviewers {
   bytes task_id = 1;
-  uint32 live = 2;
-  uint32 landed = 3;
-}
-
-// One read draws every Plan surface.
-message Plan {
-  // The runner's clock, so ages and `stale` agree across devices.
-  int64 now_ms = 1;
-  repeated BoardThemeView themes = 2;
-  // Live lanes, and finished ones from the last week (all of them when the
-  // request said so).
-  repeated Lane lanes = 3;
-  // The queued lanes in the plan, first is next up.
-  repeated bytes order = 4;
-  // Every card any theme or lane names, once.
-  repeated PlanCard cards = 5;
-  repeated PlanCoverage coverage = 6;
-  // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
-  // newest first, then the confirmed (said "kept" to the owner, ov-333) and
-  // reversed ones, most recently settled first: the last 100, or all of them
-  // when the request said so. Settled rulings no longer age out after a week,
-  // since they are the owner's Past Decisions. Empty
-  // from a runner without the capability, and a client shows nothing then.
-  repeated BoardRuling rulings = 7;
-  // Trains (ov-309), behind `board_trains`: every one not landed or dropped,
-  // oldest first, then those settled in the last week (all of them when the
-  // request said so), most recent first. Empty from a runner without it.
-  repeated BoardTrain trains = 8;
-  // What the runner last read of CI for each subject the board names: its
-  // trains' pushed SHAs and its pages' CI references (ov-306). Behind
-  // `board_trains`; empty without it, and a CI reference then draws as text.
-  repeated BoardCiRead ci = 9;
-  // How many of the board's cards are in each status, every card counted
-  // (ov-306): what a page's card-count references draw. Unset from a runner
-  // before it, and such a reference then draws as text.
-  PlanStatusCounts board_counts = 10;
-  // The week's tokens and the harness and model comparison (ov-307). Behind
-  // `board_cost`; unset without it.
-  PlanCost cost = 11;
-  // The agents that still exist (ov-503, ov-518), behind `board_agents`: the
-  // orchestrator, every pane whose terminal still runs and every subagent
-  // still running, working ones first, then by tokens, most first. Derived on
-  // read from the runner's record of turns; empty from a runner without it.
-  // Agents that finished or exited are not here.
-  repeated PlanAgent agents = 12;
-  // What every agent of the last 24 hours spent, those no longer in `agents`
-  // included, so the header can say what the day cost. Unset from a runner
-  // before ov-518, and a client then sums `agents`.
-  LaneSpend agents_spend = 13;
-  // How long each reviewer takes (ov-579), behind `board_plan`: for every
-  // reviewer a live lane's ready pull request is waiting on, how many wait on
-  // them and their usual time to a first review. Most waiting first. Empty
-  // when no pull request waits on anyone, and from a runner before it; a
-  // client then says nothing, since an old runner's absence is not "no one is
-  // waiting". Names GitHub logins, so only a peer at Control scope gets it;
-  // below that it is empty, as the review requests of Needs You are (ov-315).
-  // Shows people whom to ask; it throttles nothing.
-  repeated ReviewerWait review_waits = 14;
-  // Whom to ask to review each live lane's pull request (ov-580), behind
-  // `board_plan`: CODEOWNERS, then the commits that last touched the files,
-  // then the repository's reviewer map, never the author. A pull request that
-  // already asks someone or has been reviewed, and one with nobody to suggest,
-  // is left out; so is every lane from a runner before it or below Control
-  // scope (these are GitHub logins, as `review_waits` are). A client then says
-  // nothing.
-  repeated LaneReviewers suggested_reviewers = 15;
-}
-
-// Whom to ask about one lane's pull request (ov-580).
-message LaneReviewers {
-  bytes lane_id = 1;
   // The pull request's number in its repository.
   uint32 pr = 2;
   // GitHub logins or `org/team` slugs, best first. At most three.
@@ -4906,11 +4899,72 @@ message LaneReviewers {
   repeated string sources = 4;
 }
 
+// A card a theme, ticket or landing names, enough to draw its row.
+message PlanCard {
+  bytes task_id = 1;
+  string key = 2;
+  string title = 3;
+  TaskStatus status = 4;
+}
+
+// One read draws every Plan surface.
+message Plan {
+  // The runner's clock, so ages and `stale` agree across devices.
+  int64 now_ms = 1;
+  repeated BoardThemeView themes = 2;
+  // Lanes, their order, coverage, trains, the agents and their spend, and
+  // whom to ask about a lane, until ov-872 replaced them with the fields
+  // from 16 on.
+  reserved 3, 4, 6, 8, 12, 13, 15;
+  // Every card any theme, ticket or landing names, once.
+  repeated PlanCard cards = 5;
+  // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
+  // newest first, then the confirmed (said "kept" to the owner, ov-333) and
+  // reversed ones, most recently settled first: the last 100, or all of them
+  // when the request said so. Empty from a runner without the capability.
+  repeated BoardRuling rulings = 7;
+  // What the runner last read of CI for each subject the board names: its
+  // landings' pushed SHAs and its pages' CI references (ov-306).
+  repeated BoardCiRead ci = 9;
+  // How many of the board's cards are in each status, every card counted
+  // (ov-306): what a page's card-count references draw.
+  PlanStatusCounts board_counts = 10;
+  // The week's tokens and the harness and model comparison (ov-307). Behind
+  // `board_cost`; unset without it.
+  PlanCost cost = 11;
+  // How long each reviewer takes (ov-579): for every reviewer a live ticket's
+  // ready pull request is waiting on, how many wait on them and their usual
+  // time to a first review. Most waiting first. Names GitHub logins, so only a
+  // peer at Control scope gets it; below that it is empty.
+  repeated ReviewerWait review_waits = 14;
+  // The line (ov-872): open tickets, and finished ones from the last week (all
+  // of them when the request said so). The plan's order first (`plan_rank`),
+  // then by how long each has been where it is.
+  repeated TicketLine lines = 16;
+  // Every landing not landed or dropped, oldest first, then those settled in
+  // the last week (all of them when the request said so), most recent first.
+  // The collecting landing with nothing on it is left out.
+  repeated Landing landings = 17;
+  // The agents at work: the orchestrator, every pane whose terminal still runs
+  // and every subagent still running, working ones first, the orchestrator
+  // next, then by tokens, most first.
+  repeated Agent agents = 18;
+  // What every agent of the last 24 hours spent, those no longer in `agents`
+  // included, so the header can say what the day cost.
+  Spend agents_spend = 19;
+  // Whom to ask to review each live ticket's pull request (ov-580):
+  // CODEOWNERS, then the commits that last touched the files, then the
+  // repository's reviewer map, never the author. A pull request that already
+  // asks someone or has been reviewed, and one with nobody to suggest, is left
+  // out; so is every ticket below Control scope (these are GitHub logins).
+  repeated TicketReviewers suggested_reviewers = 20;
+}
+
 // One reviewer pull requests of a board are waiting on (ov-579).
 message ReviewerWait {
   // A GitHub login, or a team slug (`org/team`).
   string reviewer = 1;
-  // Live lanes' ready pull requests that ask this reviewer.
+  // Live tickets' ready pull requests that ask this reviewer.
   uint32 prs = 2;
   // The median, over the reviewer's latest reviews (at most ten), of the time
   // from a pull request being ready to their first review of it, in
@@ -4919,51 +4973,6 @@ message ReviewerWait {
   optional int64 median_wait_ms = 3;
   // How many reviews that median is drawn from.
   uint32 samples = 4;
-}
-
-enum PlanAgentRole {
-  PLAN_AGENT_ROLE_UNSPECIFIED = 0;
-  PLAN_AGENT_ROLE_ORCHESTRATOR = 1;
-  PLAN_AGENT_ROLE_BUILD = 2;
-  PLAN_AGENT_ROLE_REVIEW = 3;
-  PLAN_AGENT_ROLE_FIX = 4;
-  // Integrating a train.
-  PLAN_AGENT_ROLE_INTEGRATOR = 5;
-  // A subagent that no lane, train or card record names.
-  PLAN_AGENT_ROLE_SUBAGENT = 6;
-  // A pane that no lane or card names.
-  PLAN_AGENT_ROLE_AGENT = 7;
-}
-
-// One agent on the plan (ov-503), derived from its turns and joined to what it
-// worked for. An agent nothing joins still appears, with no lane, train or
-// card: a client says "not on a lane".
-message PlanAgent {
-  // `agent:<agentId>` for a subagent, `pane:<terminal id>` for a pane,
-  // `turns:<harness>` for turns filed to no terminal.
-  string id = 1;
-  PlanAgentRole role = 2;
-  string harness = 3;
-  // The model that spent the most; empty when none was named.
-  string model = 4;
-  // What the orchestrator called a subagent, when a worker record kept it.
-  // A subagent's own transcript carries none.
-  string label = 5;
-  optional bytes lane_id = 6;
-  string lane_name = 7;
-  optional bytes train_id = 8;
-  // "Train 86", or the title the orchestrator wrote.
-  string train_title = 9;
-  optional bytes task_id = 10;
-  string task_key = 11;
-  // The pane's terminal, to open it.
-  optional bytes terminal_id = 12;
-  bool working = 13;
-  // Unix milliseconds of its first and last turn in the window.
-  int64 started_at = 14;
-  int64 last_at = 15;
-  // Its turns in the window; tokens first, dollars notional.
-  LaneSpend spend = 16;
 }
 
 // Cost read for a board's plan (ov-307), all derived on read.
@@ -5027,7 +5036,7 @@ message HarnessModelCost {
 // `plan.get`, at `read`.
 message PlanGetRequest {
   bytes workspace_id = 1;
-  // Include every finished lane, not only the last week's.
+  // Include every finished ticket and landing, not only the last week's.
   bool include_closed = 2;
 }
 
@@ -5074,86 +5083,104 @@ message BoardThemeCards {
   string actor = 4;
 }
 
-// An agent to record on a lane, or to fill in what is new about.
-message LaneAgentRecord {
-  string harness = 1;
-  string agent_id = 2;
-  LaneAgentRole role = 3;
-  optional string model = 4;
-  // It finished. Recording it again without this reopens it.
-  bool ended = 5;
-}
-
-// `lane.create`, at `control`. With an agent the lane starts building;
-// without one it starts queued. The agent is also recorded as a worker on
-// the lane's first card that is still open (`task.worker`), which is what
-// makes the runner read its spend.
-message LaneCreate {
-  bytes workspace_id = 1;
-  string name = 2;
-  string reason = 3;
-  repeated LaneCard cards = 4;
-  string worktree_path = 5;
-  string branch = 6;
-  string harness = 7;
-  string model = 8;
-  optional bytes worktree_id = 9;
-  optional LaneAgentRecord agent = 10;
-  string actor = 11;
-  // A title for people (ov-462).
-  string title = 12;
-}
-
-// `lane.update`, at `control`. Each field present is written. A move must
-// follow the arrows in `LaneState`; a lane that leaves queued loses its place
-// in the plan. An empty `train` takes it out of its train.
-message LaneUpdate {
-  bytes lane_id = 1;
-  optional LaneState state = 2;
+// `line.set`, at `control`: put a ticket on the line, or change it there. A
+// ticket not on the line goes on it, waiting, first. Each field present is
+// written. A move must follow the line's arrows; a ticket that leaves waiting
+// loses its place in the plan, one that reaches landing joins the board's
+// collecting landing, and one that leaves landing comes off a landing whose
+// SHA isn't out. Answers with the ticket.
+message TicketLineSet {
+  bytes task_id = 1;
+  optional TicketStage stage = 2;
   optional string reason = 3;
-  optional string train = 4;
-  optional string landed_sha = 5;
+  optional string branch = 4;
+  optional bytes worktree_id = 5;
   optional string worktree_path = 6;
-  optional string branch = 7;
-  optional bytes worktree_id = 8;
-  // Recorded in the same write as the move, like `lane.agent`.
-  optional LaneAgentRecord agent = 9;
-  string actor = 10;
-  // A token budget (ov-307), or 0 to take it away. Needs `board_cost`.
-  optional uint64 budget_tokens = 11;
-  // A title for people (ov-462), or empty to take it away.
-  optional string title = 12;
+  // The ticket this one's branch is stacked on; empty bytes take it away.
+  optional bytes stack_parent = 7;
+  // Its pull request; 0 takes it away.
+  optional uint32 pr_number = 8;
+  // How it landed, with `stage` LANDED or on a ticket already landed.
+  optional string landed_sha = 9;
+  // A token budget (ov-307), or 0 to take it away.
+  optional uint64 budget_tokens = 10;
+  string actor = 11;
 }
 
-// `lane.cards`, at `control`.
-message LaneCards {
-  bytes lane_id = 1;
-  repeated LaneCard add = 2;
-  repeated LaneCard remove = 3;
-  string actor = 4;
-}
-
-// `lane.agent`, at `control`: record an agent on a lane, or that it ended.
-message LaneAgentSet {
-  bytes lane_id = 1;
-  LaneAgentRecord agent = 2;
-  string actor = 3;
-}
-
-// `plan.set`, at `control`: replace the plan whole. These queued lanes in
-// this order, and every other lane out of it. Answers with the new `Plan`.
-message PlanSet {
+// `line.order`, at `control`: set the plan whole. These waiting tickets in
+// this order, next up first, and every other ticket out of it. Answers with
+// the new `Plan`.
+message LineOrder {
   bytes workspace_id = 1;
-  repeated bytes lane_ids = 2;
+  repeated bytes task_ids = 2;
   string actor = 3;
 }
 
-// `plan.events`, at `read`: one theme's or lane's timeline, oldest first.
+// `agent.record`, at `control`: record an agent at work on a board, or fill in
+// what is new about one already recorded (the same subagent id, or the open
+// agent of the same pane). Each ticket goes on the line if it isn't on it, and
+// the agent works it in the role that fits its own. Answers with the agent.
+message AgentRecord {
+  bytes workspace_id = 1;
+  AgentRole role = 2;
+  string harness = 3;
+  // A pane: its terminal. Exactly one of this and `subagent_id`.
+  optional bytes terminal_id = 4;
+  // A subagent: the harness's id for it, and the pane it runs under.
+  string subagent_id = 5;
+  optional bytes parent_terminal_id = 6;
+  optional string session_id = 7;
+  optional string model = 8;
+  optional string title = 9;
+  // The tickets it works, in order.
+  repeated bytes task_ids = 10;
+  string actor = 11;
+}
+
+// `agent.work`, at `control`: an agent starts work on a ticket, or ends it
+// with a verdict. Answers with the agent.
+message AgentWork {
+  bytes agent_id = 1;
+  bytes task_id = 2;
+  WorkRole role = 3;
+  // Set to end the work: `finished`, `failed`, `stopped`, `handed_back`,
+  // `approved` or `changes_asked`.
+  optional string verdict = 4;
+  string actor = 5;
+}
+
+// `agent.end`, at `control`: an agent finished, and every ticket it still
+// works ends with the same verdict. Answers with the agent as it was.
+message AgentEnd {
+  bytes agent_id = 1;
+  // `finished`, `failed`, `stopped` or `handed_back`.
+  string verdict = 2;
+  string actor = 3;
+}
+
+// A pane opened as an agent (ov-872): what `farcooler agent dispatch` sends
+// on `terminal.create` beside the first ticket's `task_key`. The runner
+// records the pane as an agent in `role` working `task_key` and then each of
+// `more_tickets`, puts them on the line, and a builder starts building the
+// first on the pane's branch.
+message AgentDispatch {
+  AgentRole role = 1;
+  // Keys of the tickets after the first, in the order it works them.
+  repeated string more_tickets = 2;
+  // What the orchestrator calls it, for people.
+  string title = 3;
+}
+
+// `plan.events`, at `read`: one theme's, ticket's or landing's timeline,
+// oldest first. A ticket's includes its moves on landings.
 message PlanEventsRequest {
   oneof subject {
     bytes theme_id = 1;
-    bytes lane_id = 2;
+    bytes task_id = 4;
+    bytes landing_id = 5;
   }
+  // A lane, until ov-872.
+  reserved 2;
   int64 since_ms = 3;
 }
 
@@ -5161,7 +5188,8 @@ message PlanEvent {
   bytes id = 1;
   int64 at = 2;
   string actor = 3;
-  // `story`, `state`, `plan`, `cards` or `agent`.
+  // `story`, `state`, `rank`, `cards`, `budget`, `stage`, `plan`, `agent`,
+  // `ticket_on`, `ticket_off`, `landing`, `told` or `moved`.
   string kind = 4;
   // The sentence a timeline shows; for `story`, the story it replaced.
   string body = 5;
@@ -5224,7 +5252,7 @@ message BoardRuling {
   optional int64 settled_at = 14;
   uint64 resource_version = 15;
   // `task_ids`' keys, in the same order. Carried here rather than in
-  // `Plan.cards`, whose cards the reconciliation checks for a lane.
+  // `Plan.cards`, whose cards the reconciliation checks for the line.
   repeated string task_keys = 16;
   // The commit that reversed it, when the orchestrator marked it with one
   // (ov-333). Absent unless the state is reversed.
@@ -5268,12 +5296,12 @@ message RulingsKept {
   repeated BoardRuling rulings = 1;
 }
 
-// A message between a workspace's orchestrator and its lanes (ov-455),
+// A message between a workspace's orchestrator and its agents (ov-455),
 // queued and typed into the recipient's box past the answer wake's gate,
-// attributed ("[from mac-ux]"), in order, and kept across a restart.
+// attributed ("[from ov-12]"), in order, and kept across a restart.
 //
-// `to` is `orchestrator`, a card's key (its lane's agent, or its own when it
-// is on no lane), or a live lane's name. `actor` is the sender, as every
+// `to` is `orchestrator`, or a ticket's key: the pane working it, or for a
+// ticket no pane works the card's own agent. `actor` is the sender, as every
 // board write names it (`agent:<terminal>`, `manager`, `user`); an agent may
 // only message its orchestrator. `task` is the sender's card by key, which
 // files the message when the sender is an agent; empty to read it off the
@@ -5776,119 +5804,103 @@ message DraftWithdraw {
 }
 
 // ---------------------------------------------------------------------------
-// Trains (ov-309)
+// Landings (ov-309, ov-872)
 //
-// A TRAIN is a batch of lanes landing together: a name, the base it was cut
-// from, the SHA it pushed and where it stands. Its lanes are the lanes whose
-// `Lane.train` names it. The runner reads the pushed SHA's CI through `gh`,
-// read only, while the train isn't settled, and moves a pushed train to green
-// or red, and back to pushed when a run starts again. Part of the plan layer
-// and as removable, behind its own `board_trains`. Writes announce
-// `plan_changed`, and so does a CI read that changed what a board shows.
-// Refusals are `Error.what` words: `name`, `name_taken`, `base`, `sha`,
-// `train_settled`, `other_board`, `actor`, `state`, `title`, `harness`,
-// `agent_id`, `model`.
+// A LANDING puts finished tickets into the product along one route: push
+// (fold onto the base, gate, push, watch CI), pull request (one per ticket,
+// which a human merges) or ask (it waits for you to tap Land). A landing of
+// one ticket is the normal case; several ready at once may share one gate. The
+// runner reads the pushed SHA's CI through `gh`, read only, while the landing
+// isn't settled, and moves it to green or red, and back to pushed when a run
+// starts again. Writes announce `plan_changed`, and so does a CI read that
+// changed what a board shows. Refusals are `Error.what` words: `base`, `sha`,
+// `title`, `lander`, `not_ready`, `ticket_in_review`, `ticket_closed`,
+// `landing_moving`, `landing_settled`, `landing_changed`, `no_sha`, `parent_not_landed`,
+// `same_branch`, `other_board`, `actor`.
 // ---------------------------------------------------------------------------
 
-enum BoardTrainState {
-  BOARD_TRAIN_STATE_UNSPECIFIED = 0;
-  // Lanes are being picked into it.
-  BOARD_TRAIN_STATE_INTEGRATING = 1;
-  // Its local gates are running.
-  BOARD_TRAIN_STATE_GATING = 2;
-  // A SHA is out and CI hasn't finished on it.
-  BOARD_TRAIN_STATE_PUSHED = 3;
-  BOARD_TRAIN_STATE_GREEN = 4;
-  BOARD_TRAIN_STATE_RED = 5;
-  BOARD_TRAIN_STATE_LANDED = 6;
-  // Given up; its lanes go on in another train or alone.
-  BOARD_TRAIN_STATE_DROPPED = 7;
+enum LandingRoute {
+  LANDING_ROUTE_UNSPECIFIED = 0;
+  LANDING_ROUTE_PUSH = 1;
+  LANDING_ROUTE_PULL_REQUEST = 2;
+  LANDING_ROUTE_ASK = 3;
 }
 
-message BoardTrain {
+enum LandingState {
+  LANDING_STATE_UNSPECIFIED = 0;
+  // Taking tickets.
+  LANDING_STATE_OPEN = 1;
+  // Its gate is running.
+  LANDING_STATE_GATING = 2;
+  // A SHA is out and CI hasn't finished on it.
+  LANDING_STATE_PUSHED = 3;
+  LANDING_STATE_GREEN = 4;
+  LANDING_STATE_RED = 5;
+  LANDING_STATE_LANDED = 6;
+  // Given up; its tickets land another way.
+  LANDING_STATE_DROPPED = 7;
+}
+
+// What a landing is doing, derived on the runner from its state, its tickets,
+// its lander and the clock. `state` is what was written; this is what is so.
+enum LandingPhase {
+  LANDING_PHASE_UNSPECIFIED = 0;
+  // A ticket on it isn't ready yet.
+  LANDING_PHASE_WAITING_FOR_TICKETS = 1;
+  // Its tickets are ready and no SHA is out.
+  LANDING_PHASE_INTEGRATING = 2;
+  LANDING_PHASE_GATING_LOCALLY = 3;
+  // Pushed, and CI queued or running.
+  LANDING_PHASE_WAITING_FOR_CI = 4;
+  LANDING_PHASE_CI_FAILED = 5;
+  // Green and not landed yet: a pull-request landing, landed by hand.
+  LANDING_PHASE_READY_TO_LAND = 6;
+  LANDING_PHASE_LANDED = 7;
+  // No move and no lander for 2 hours, before it was pushed.
+  LANDING_PHASE_STALLED = 8;
+  LANDING_PHASE_DROPPED = 9;
+  // The collecting landing, while the landing ahead is still on its way.
+  LANDING_PHASE_WAITING_FOR_PREVIOUS_LANDING = 10;
+  // The collecting landing has a ticket ready and nothing ahead, but main's
+  // CI is red.
+  LANDING_PHASE_WAITING_FOR_MAIN = 11;
+}
+
+message Landing {
   bytes id = 1;
   bytes workspace_id = 2;
-  string name = 3;
+  // What a person calls it: Landing 12. Counts up per board.
+  uint32 number = 3;
+  LandingRoute route = 4;
   // What it was cut from: `origin/main`, or a SHA.
-  string base = 4;
-  optional string pushed_sha = 5;
-  BoardTrainState state = 6;
-  int64 state_since = 7;
+  string base = 5;
+  optional string pushed_sha = 6;
+  LandingState state = 7;
+  int64 state_since = 8;
+  // The agent that lands it, as `Agent.id`, when one was started.
+  optional bytes lander_id = 9;
+  // The board's collecting landing, which ready tickets join by themselves.
+  bool collecting = 10;
   // Who started it, in `TaskNote.actor`'s words.
-  string actor = 8;
-  int64 created_at = 9;
-  optional int64 landed_at = 10;
-  // The lanes on it, oldest first, finished ones included.
-  repeated bytes lane_ids = 11;
+  string actor = 11;
+  int64 created_at = 12;
+  optional int64 landed_at = 13;
+  uint64 resource_version = 14;
+  // Its tickets, in the order they joined, finished ones included.
+  repeated bytes task_ids = 15;
   // The CI subject its pushed SHA is read under (`sha:<sha>`), matching a
   // `BoardCiRead.subject` in the same plan once the runner has read it.
-  string ci_subject = 12;
-  uint64 resource_version = 13;
-  // What a person reads for it (ov-462): the title the orchestrator wrote, else
-  // "Train 72" for `integ-72` or `train-72`, else `name`.
-  string title = 14;
-  // One line of what it carries: its lanes' titles, in lane order.
-  string summary = 15;
-  // The agent that integrates it (ov-461), and the card it works for the train.
-  optional TrainAgent agent = 16;
-  optional bytes card_id = 17;
-  // What it is doing, derived on the runner from its state, its lanes, its
-  // agent and the clock (ov-503), behind `board_train_phase`. Every surface
-  // reads this one word; a client that reads it unspecified draws `state`.
-  BoardTrainPhase phase = 18;
-  // Never sent since ov-523: a train is not held for a lane, the lane comes
-  // off the train. The field stays so older clients decode as before.
-  repeated bytes held_by = 19;
-  // When the train entered its phase.
+  string ci_subject = 16;
+  // What a person reads for it: the title the orchestrator wrote, else
+  // "Landing 12".
+  string title = 17;
+  // One line of what it carries: its tickets' titles, in order.
+  string summary = 18;
+  LandingPhase phase = 19;
+  // When it entered its phase.
   int64 phase_since = 20;
-}
-
-// What a train is doing (ov-503). `state` is what was written; this is what is
-// so.
-enum BoardTrainPhase {
-  BOARD_TRAIN_PHASE_UNSPECIFIED = 0;
-  // A lane on it isn't ready yet.
-  BOARD_TRAIN_PHASE_WAITING_FOR_LANES = 1;
-  // Its lanes are ready and no SHA is out.
-  BOARD_TRAIN_PHASE_INTEGRATING = 2;
-  BOARD_TRAIN_PHASE_GATING_LOCALLY = 3;
-  // Pushed, and CI queued or running.
-  BOARD_TRAIN_PHASE_WAITING_FOR_CI = 4;
-  BOARD_TRAIN_PHASE_CI_FAILED = 5;
-  // Green and not on main yet: a pull-request train, landed by hand.
-  BOARD_TRAIN_PHASE_READY_TO_LAND = 6;
-  BOARD_TRAIN_PHASE_LANDED = 7;
-  // No move and no agent for 2 hours, before it was pushed.
-  BOARD_TRAIN_PHASE_STALLED = 8;
-  BOARD_TRAIN_PHASE_DROPPED = 9;
-  // The open train, collecting ready lanes while the train ahead is still on
-  // its way to main (ov-520). Number 10 is taken from origin/main at e7f0a57b5.
-  BOARD_TRAIN_PHASE_WAITING_FOR_PREVIOUS_TRAIN = 10;
-  // The collecting train has a lane ready and nothing ahead, but main's CI is
-  // red, so it waits for main's checks to pass (ov-520). Number 11 is taken
-  // from origin/main at c5d3752ba.
-  BOARD_TRAIN_PHASE_WAITING_FOR_MAIN = 11;
-}
-
-// The agent integrating a train (ov-461), with what it has spent from the
-// runner's own record of its turns, as a lane's agents' is. A train's agent is
-// not a lane.
-message TrainAgent {
-  string harness = 1;
-  string agent_id = 2;
-  string model = 3;
-  int64 started_at = 4;
-  optional int64 ended_at = 5;
-  LaneSpend spend = 6;
-}
-
-// An agent to record on a train, or to fill in what is new about.
-message TrainAgentRecord {
-  string harness = 1;
-  string agent_id = 2;
-  optional string model = 3;
-  // It finished. Recording it again without this reopens it.
-  bool ended = 4;
+  // What its lander has spent; zero without one.
+  Spend spend = 21;
 }
 
 enum BoardCiStatus {
@@ -5905,7 +5917,7 @@ enum BoardCiStatus {
   // `gh` couldn't say: logged out, offline, no such run. Never read as green.
   BOARD_CI_STATUS_UNKNOWN = 6;
   // Nothing failed, and a run was canceled, as CI does when a newer push
-  // supersedes it. Not red: a train waits.
+  // supersedes it. Not red: a landing waits.
   BOARD_CI_STATUS_SUPERSEDED = 7;
 }
 
@@ -5937,33 +5949,32 @@ message BoardCiRead {
   int64 asked_at = 8;
 }
 
-// `train.start`, at `control`: a train, integrating, with these lanes on it.
-message TrainStart {
+// `landing.start`, at `control`: a landing with these tickets, open. The
+// board's collecting landing is adopted when it has one: it keeps its number,
+// carries exactly the tickets listed, and stops collecting.
+message LandingStart {
   bytes workspace_id = 1;
-  string name = 2;
+  LandingRoute route = 2;
   string base = 3;
-  repeated bytes lane_ids = 4;
-  string actor = 5;
-  // A title for people (ov-462), the integrating agent and its card (ov-461).
-  string title = 6;
-  optional TrainAgentRecord agent = 7;
-  optional bytes card_id = 8;
+  repeated bytes task_ids = 4;
+  string title = 5;
+  optional bytes lander_id = 6;
+  string actor = 7;
 }
 
-// `train.set`, at `control`: move it, rebase it, record what it pushed, and
-// put lanes on or off it. A new SHA without a state moves it to pushed.
-message TrainSet {
-  bytes train_id = 1;
-  BoardTrainState state = 2;
+// `landing.set`, at `control`: move it, rebase it, record what it pushed,
+// name its lander, and put tickets on or off it. A new SHA without a state
+// moves it to pushed.
+message LandingSet {
+  bytes landing_id = 1;
+  LandingState state = 2;
   optional string base = 3;
   optional string sha = 4;
-  repeated bytes add_lane_ids = 5;
-  repeated bytes remove_lane_ids = 6;
-  string actor = 7;
-  // A title for people, or empty to take it away (ov-462).
-  optional string title = 8;
-  optional TrainAgentRecord agent = 9;
-  optional bytes card_id = 10;
+  repeated bytes add_task_ids = 5;
+  repeated bytes remove_task_ids = 6;
+  optional string title = 7;
+  optional bytes lander_id = 8;
+  string actor = 9;
 }
 
 // ---------------------------------------------------------------------------
@@ -6388,3 +6399,72 @@ message CrashRecorded {
   uint32 count = 1;
   string task_key = 2;
 }
+
+// ---------------------------------------------------------------------------
+// Retired by ov-872
+//
+// Lanes and trains, replaced by the line, agents and landings. Each keeps its
+// name with its numbers reserved, so no message reuses a number an older
+// client still decodes.
+// ---------------------------------------------------------------------------
+
+enum LaneState {
+  LANE_STATE_UNSPECIFIED = 0;
+  reserved 1 to 7;
+}
+
+enum LaneAgentRole {
+  LANE_AGENT_ROLE_UNSPECIFIED = 0;
+  reserved 1 to 3;
+}
+
+message LaneCard { reserved 1 to 3; }
+
+message LaneAgent { reserved 1 to 6; }
+
+message LaneSpend { reserved 1 to 8; }
+
+message Lane { reserved 1 to 24; }
+
+message PlanCoverage { reserved 1 to 3; }
+
+message LaneReviewers { reserved 1 to 4; }
+
+enum PlanAgentRole {
+  PLAN_AGENT_ROLE_UNSPECIFIED = 0;
+  reserved 1 to 7;
+}
+
+message PlanAgent { reserved 1 to 16; }
+
+message LaneAgentRecord { reserved 1 to 5; }
+
+message LaneCreate { reserved 1 to 12; }
+
+message LaneUpdate { reserved 1 to 12; }
+
+message LaneCards { reserved 1 to 4; }
+
+message LaneAgentSet { reserved 1 to 3; }
+
+message PlanSet { reserved 1 to 3; }
+
+enum BoardTrainState {
+  BOARD_TRAIN_STATE_UNSPECIFIED = 0;
+  reserved 1 to 7;
+}
+
+message BoardTrain { reserved 1 to 20; }
+
+enum BoardTrainPhase {
+  BOARD_TRAIN_PHASE_UNSPECIFIED = 0;
+  reserved 1 to 11;
+}
+
+message TrainAgent { reserved 1 to 6; }
+
+message TrainAgentRecord { reserved 1 to 4; }
+
+message TrainStart { reserved 1 to 8; }
+
+message TrainSet { reserved 1 to 10; }
