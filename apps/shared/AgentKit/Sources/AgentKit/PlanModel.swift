@@ -639,6 +639,16 @@ public enum PlanWords {
         return model.isEmpty ? "\(role), \(ran)" : "\(role) \(model), \(ran)"
     }
 
+    /// Add the recorded ID only when presentation changed it.
+    public static func accessibleModel(_ words: String, raw: String) -> String {
+        guard !raw.isEmpty, model(raw) != raw else { return words }
+        return "\(words), Model ID: \(raw)"
+    }
+
+    public static func accessibleWork(_ work: PlanWork, agent: PlanAgent?, now: Int64) -> String {
+        accessibleModel(self.work(work, agent: agent, now: now), raw: agent?.model ?? "")
+    }
+
     /// How long ago, coarsely: "just now", "5 min ago", "3 h ago", "2 d ago".
     public static func ago(_ ms: Int64, now: Int64) -> String {
         let minutes = max(0, now - ms) / 60_000

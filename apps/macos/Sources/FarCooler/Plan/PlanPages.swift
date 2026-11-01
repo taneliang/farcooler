@@ -472,7 +472,8 @@ struct PlanTicketRecordPage: View {
                 PlanSection(title: "Agents") {
                     VStack(alignment: .leading, spacing: Spacing.tight) {
                         ForEach(Array(line.work.enumerated()), id: \.offset) { _, work in
-                            Text(PlanWords.work(work, agent: plan.agent(work.agent), now: plan.nowMs)).planBody()
+                            Text(PlanWords.work(work, agent: plan.agent(work.agent), now: plan.nowMs))
+                            .accessibilityLabel(PlanWords.accessibleWork(work, agent: plan.agent(work.agent), now: plan.nowMs)).planBody()
                         }
                     }
                 }

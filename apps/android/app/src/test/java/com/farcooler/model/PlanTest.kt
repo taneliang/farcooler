@@ -177,6 +177,14 @@ class PlanTest {
     }
 
     @Test
+    fun `work accessibility keeps branded model identity and literal fallback`() {
+        val work = PlanWork("a", WorkRole.BUILD, 0, 3 * hour)
+        assertEquals("Builder GPT-6.1 Sol, 3 h, Model ID: gpt-6.1-sol", PlanWords.accessibleWork(work, now, "gpt-6.1-sol"))
+        assertEquals("Builder gpt-6.1-sol-20260101, 3 h", PlanWords.accessibleWork(work, now, "gpt-6.1-sol-20260101"))
+        assertEquals("Builder, 3 h", PlanWords.accessibleWork(work, now))
+    }
+
+    @Test
     fun `a run of cards added in one write is one line, and a story rewrite is said once`() {
         val record = PlanRecord(
             listOf(

@@ -216,9 +216,7 @@ extension PlanSections.LandingCard {
 
     /// Facts for assistive technology, retaining the exact recorded model ID.
     public func accessibleFacts(ci: PlanCIRead?, now: Int64) -> String {
-        let words = facts(ci: ci, now: now)
-        guard let model = lander?.model, !model.isEmpty, PlanWords.model(model) != model else { return words }
-        return "\(words), Model ID: \(model)"
+        PlanWords.accessibleModel(facts(ci: ci, now: now), raw: lander?.model ?? "")
     }
 
     /// `facts` with each "·"-separated span held together, so a line breaks

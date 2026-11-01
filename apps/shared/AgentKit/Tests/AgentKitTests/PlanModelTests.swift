@@ -351,6 +351,24 @@ struct PlanModelTests {
         #expect(PlanWords.spend(s, locale: us) == "470K tokens · 2 agents’ spend split with other tickets")
     }
 
+    @Test("work and ticket accessibility retain branded model IDs without repeating literal IDs")
+    func accessibleWorkModel() throws {
+        let plan = try Self.fixture()
+        let work = try #require(plan.line(key: "ov-1")?.work.first)
+        var agent = try #require(plan.agent(work.agent))
+        agent.model = "gpt-6.1-sol"
+        #expect(PlanWords.accessibleWork(work, agent: agent, now: plan.nowMs).contains("GPT-6.1 Sol"))
+        #expect(PlanWords.accessibleWork(work, agent: agent, now: plan.nowMs).contains("Model ID: gpt-6.1-sol"))
+        #expect(PlanWords.accessibleModel("Ticket, GPT-6.1 Sol", raw: agent.model) == "Ticket, GPT-6.1 Sol, Model ID: gpt-6.1-sol")
+        agent.model = "gpt-6.1-sol-20260101"
+        let literal = PlanWords.accessibleWork(work, agent: agent, now: plan.nowMs)
+        #expect(literal.components(separatedBy: agent.model).count == 2)
+        #expect(PlanWords.accessibleModel("Ticket, \(agent.model)", raw: agent.model) == "Ticket, \(agent.model)")
+        agent.model = ""
+        #expect(!PlanWords.accessibleWork(work, agent: agent, now: plan.nowMs).contains("Model ID:"))
+        #expect(!PlanWords.accessibleWork(work, agent: nil, now: plan.nowMs).contains("Model ID:"))
+    }
+
     @Test("Work reads as its role, the agent's model and how long it ran, to now while it's open")
     func work() throws {
         let plan = try Self.fixture()

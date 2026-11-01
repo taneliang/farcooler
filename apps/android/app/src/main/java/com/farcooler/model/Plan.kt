@@ -667,6 +667,13 @@ object PlanWords {
         return if (named.isEmpty()) "${w.role.word}, $ran" else "${w.role.word} $named, $ran"
     }
 
+    /** Add the recorded ID only when presentation changed it. */
+    fun accessibleModel(words: String, raw: String): String =
+        if (raw.isNotEmpty() && model(raw) != raw) "$words, Model ID: $raw" else words
+
+    fun accessibleWork(work: PlanWork, now: Long, model: String = ""): String =
+        accessibleModel(work(work, now, model), model)
+
     /** How long ago, coarsely: "just now", "5 min ago", "3 h ago", "2 d ago". */
     fun ago(ms: Long, now: Long): String {
         val minutes = maxOf(0, now - ms) / 60_000

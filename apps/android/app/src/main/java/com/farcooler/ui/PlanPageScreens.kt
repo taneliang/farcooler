@@ -436,7 +436,12 @@ fun PlanTicketPage(
         if (ticket.work.isNotEmpty()) {
             item { PlanSectionTitle("Agents") }
             ticket.work.forEachIndexed { index, work ->
-                item(key = "agent/$index") { Body(PlanWords.work(work, plan.nowMs, plan.agents.firstOrNull { it.id == work.agent }?.model.orEmpty())) }
+                item(key = "agent/$index") {
+                    val model = plan.agents.firstOrNull { it.id == work.agent }?.model.orEmpty()
+                    Body(PlanWords.work(work, plan.nowMs, model), modifier = Modifier.semantics {
+                        contentDescription = PlanWords.accessibleWork(work, plan.nowMs, model)
+                    })
+                }
             }
         }
         val timeline = record?.timeline.orEmpty()

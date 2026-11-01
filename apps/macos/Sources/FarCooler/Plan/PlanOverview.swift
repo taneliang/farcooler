@@ -483,7 +483,7 @@ struct PlanLineRow: View {
     private var accessibility: String {
         var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, line.heading, theme?.name, second, line.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(line)]
         parts.removeAll { $0 == nil }
-        return parts.compactMap { $0 }.joined(separator: ", ")
+        return PlanWords.accessibleModel(parts.compactMap { $0 }.joined(separator: ", "), raw: agent?.model ?? "")
     }
 }
 

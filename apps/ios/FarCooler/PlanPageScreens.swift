@@ -462,6 +462,7 @@ struct PlanTicketPage: View {
                 Section("Work") {
                     ForEach(Array(line.work.enumerated()), id: \.offset) { _, work in
                         Text(PlanWords.work(work, agent: plan.agent(work.agent), now: plan.nowMs))
+                            .accessibilityLabel(PlanWords.accessibleWork(work, agent: plan.agent(work.agent), now: plan.nowMs))
                     }
                 }
             }
