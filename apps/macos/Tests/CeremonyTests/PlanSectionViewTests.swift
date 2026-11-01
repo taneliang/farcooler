@@ -141,7 +141,7 @@ struct PlanSectionViewTests {
         let sections = store.plan.sections(needsYou: 0, statuses: store.board.statuses, activity: [:])
         let building = try #require(sections.building.first { $0.line.key == "ov-490" })
         let words = PlanLineRow.second(building.line, agent: building.agent, landedLanding: nil, now: sections.now)
-        #expect(words == "Building \u{00B7} ov-490 \u{00B7} Builder \u{00B7} Sonnet \u{00B7} 380K \u{00B7} 1 h", "\(words)")
+        #expect(words == "Building \u{00B7} ov-490 \u{00B7} Builder \u{00B7} sonnet \u{00B7} 380K \u{00B7} 1 h", "\(words)")
         #expect(sections.waiting.next.map(\.line.key) == ["ov-494", "ov-495", "ov-496"])
         #expect(sections.waiting.onYou.map(\.line.key) == ["ov-1"], "a card waiting on a decision")
         let drawn = try await Self.drawn(.busy, width: 600)
