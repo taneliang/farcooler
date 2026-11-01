@@ -28,7 +28,6 @@ use crate::ticket_lines::{LineSubject, Stage, check_tickets, line_event, line_in
 
 const BASE_MAX: usize = 200;
 const TITLE_MAX: usize = 80;
-const SHA_MAX: usize = 64;
 
 /// How a ticket gets into the product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,7 +204,7 @@ fn row_to_landing(r: &Row) -> rusqlite::Result<Landing> {
     })
 }
 
-fn landing_in(conn: &Connection, id: Uuid) -> Result<Landing> {
+pub(crate) fn landing_in(conn: &Connection, id: Uuid) -> Result<Landing> {
     let mut landing = conn
         .query_row(&format!("SELECT {COLS} FROM landings WHERE id = ?1"), params![uuid_blob(id)], row_to_landing)
         .optional()
@@ -222,7 +221,7 @@ fn landing_in(conn: &Connection, id: Uuid) -> Result<Landing> {
     Ok(landing)
 }
 
-fn landings_where(conn: &Connection, filter: &str, id: Uuid) -> Result<Vec<Landing>> {
+pub(crate) fn landings_where(conn: &Connection, filter: &str, id: Uuid) -> Result<Vec<Landing>> {
     let ids: Vec<Uuid> = {
         let mut stmt = conn
             .prepare(&format!("SELECT id FROM landings WHERE {filter} ORDER BY number, id"))
@@ -247,31 +246,87 @@ fn check_lander(conn: &Connection, workspace: Uuid, lander: Uuid) -> Result<()> 
     Ok(())
 }
 
-/// Put `tickets` on `landing`. Each must be in the landing stage, or waiting
-/// on you when the route is ask, and on no other open landing. A ticket that
-/// shares a branch comes with its whole group, and one stacked on a ticket
-/// that hasn't landed comes with that ticket.
-fn add_tickets(conn: &Connection, landing: &Landing, tickets: &[Uuid], actor: Actor) -> Result<()> {
+/// "Landing 12", or the title the orchestrator wrote.
+pub fn landing_title(landing: &Landing) -> String {
+    if landing.title.is_empty() { format!("Landing {}", landing.number) } else { landing.title.clone() }
+}
+
+/// The open landing other than `except` that `task` is on.
+fn other_live_landing(conn: &Connection, task: Uuid, except: Uuid) -> Result<Option<Landing>> {
+    let found: Option<Uuid> = conn
+        .query_row(
+            "SELECT l.id FROM landing_tickets lt JOIN landings l ON l.id = lt.landing_id
+              WHERE lt.task_id = ?1 AND l.id <> ?2 AND l.state NOT IN ('landed', 'dropped')
+              ORDER BY l.created_at DESC LIMIT 1",
+            params![uuid_blob(task), uuid_blob(except)],
+            |r| get_uuid(r, 0),
+        )
+        .optional()
+        .map_err(map_err)?;
+    found.map(|id| landing_in(conn, id)).transpose()
+}
+
+/// Take `task` off `landing`, with its timeline entries. `by_hand` marks it
+/// held off, so the runner doesn't put it back on its own. True when it was on.
+pub(crate) fn take_off(conn: &Connection, landing: &Landing, task: Uuid, by_hand: bool, actor: Actor) -> Result<bool> {
+    let gone = conn
+        .execute(
+            "DELETE FROM landing_tickets WHERE landing_id = ?1 AND task_id = ?2",
+            params![uuid_blob(landing.id), uuid_blob(task)],
+        )
+        .map_err(map_err)?;
+    if gone == 0 {
+        return Ok(false);
+    }
+    if by_hand {
+        conn.execute(
+            "UPDATE ticket_lines SET held_off = 1, resource_version = resource_version + 1 WHERE task_id = ?1",
+            params![uuid_blob(task)],
+        )
+        .map_err(map_err)?;
+    }
+    let body = format!("{} came off {}.", task_key(conn, task), landing_title(landing));
+    let subject = LineSubject::TicketOnLanding { task, landing: landing.id };
+    line_event(conn, subject, "ticket_off", actor, &body, serde_json::json!({ "by_hand": by_hand }))?;
+    Ok(true)
+}
+
+/// Every ticket in `tickets` must be ready to go on a landing: in the landing
+/// stage, or waiting on you when the route is ask. One still in review is
+/// `ticket_in_review` (the CLI's `--force` moves it on first), a finished one
+/// `ticket_closed`, any other `not_ready`.
+fn check_ready(conn: &Connection, landing: &Landing, tickets: &[Uuid]) -> Result<()> {
+    for task in tickets {
+        if landing.tickets.contains(task) {
+            continue;
+        }
+        let line = line_in(conn, *task).map_err(|e| if matches!(e, DomainError::NotFound) { invalid("not_on_the_line") } else { e })?;
+        match line.stage {
+            Stage::Landing => {}
+            Stage::NeedsYou if landing.route == Route::Ask => {}
+            Stage::Reviewing => return Err(invalid("ticket_in_review")),
+            s if s.is_closed() => return Err(invalid("ticket_closed")),
+            _ => return Err(invalid("not_ready")),
+        }
+    }
+    Ok(())
+}
+
+/// Put `tickets` on `landing`. Each must be ready (`check_ready`). One on
+/// another open landing moves here, unless that one is past open: its gate or
+/// its push carries the ticket (`landing_moving`). A ticket that shares a
+/// branch comes with its whole group, and one stacked on a ticket that hasn't
+/// landed comes with that ticket.
+pub(crate) fn add_tickets(conn: &Connection, landing: &Landing, tickets: &[Uuid], actor: Actor) -> Result<()> {
     check_tickets(conn, landing.workspace_id, tickets)?;
+    check_ready(conn, landing, tickets)?;
     let joining: HashSet<Uuid> = tickets.iter().chain(landing.tickets.iter()).copied().collect();
     for task in tickets {
-        let line = line_in(conn, *task).map_err(|e| if matches!(e, DomainError::NotFound) { invalid("not_on_the_line") } else { e })?;
-        let ready = line.stage == Stage::Landing || (line.stage == Stage::NeedsYou && landing.route == Route::Ask);
-        if !ready {
-            return Err(invalid("not_ready"));
-        }
-        let elsewhere: bool = conn
-            .query_row(
-                "SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id = lt.landing_id
-                  WHERE lt.task_id = ?1 AND l.id <> ?2 AND l.state NOT IN ('landed', 'dropped')",
-                params![uuid_blob(*task), uuid_blob(landing.id)],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(map_err)?
-            .is_some();
-        if elsewhere {
-            return Err(invalid("on_a_landing"));
+        let line = line_in(conn, *task)?;
+        if let Some(other) = other_live_landing(conn, *task, landing.id)?
+            && other.state != LandingState::Open
+        {
+            return Err(invalid("landing_moving"));
         }
         if let Some(parent) = line.stack_parent
             && !joining.contains(&parent)
@@ -295,17 +350,26 @@ fn add_tickets(conn: &Connection, landing: &Landing, tickets: &[Uuid], actor: Ac
     }
     let now = now_millis();
     for task in tickets {
+        if let Some(other) = other_live_landing(conn, *task, landing.id)? {
+            take_off(conn, &other, *task, false, actor)?;
+            crate::collecting::drop_if_emptied(conn, other.id, actor)?;
+        }
         let added = conn
             .execute(
                 "INSERT OR IGNORE INTO landing_tickets (landing_id, task_id, added_at) VALUES (?1, ?2, ?3)",
                 params![uuid_blob(landing.id), uuid_blob(*task), now],
             )
             .map_err(map_err)?;
+        conn.execute(
+            "UPDATE ticket_lines SET held_off = 0, resource_version = resource_version + 1 WHERE task_id = ?1",
+            params![uuid_blob(*task)],
+        )
+        .map_err(map_err)?;
         if line_in(conn, *task)?.stage == Stage::NeedsYou {
             move_stage(conn, *task, Stage::Landing, None, Some(landing.id), actor)?;
         }
         if added > 0 {
-            let body = format!("{} went on Landing {}.", task_key(conn, *task), landing.number);
+            let body = format!("{} went on {}.", task_key(conn, *task), landing_title(landing));
             let subject = LineSubject::TicketOnLanding { task: *task, landing: landing.id };
             line_event(conn, subject, "ticket_on", actor, &body, serde_json::json!({}))?;
         }
@@ -313,23 +377,43 @@ fn add_tickets(conn: &Connection, landing: &Landing, tickets: &[Uuid], actor: Ac
     Ok(())
 }
 
-/// Land every ticket of `landing` at `sha`, each stacked parent before its
-/// child.
-fn land_tickets(conn: &Connection, landing: &Landing, sha: &str, actor: Actor) -> Result<()> {
-    let mut left: Vec<Uuid> = landing.tickets.clone();
+/// A landing landed: land every ticket on it that was ready (landing, or in
+/// review), each stacked parent before its child, at the landing's SHA, unless
+/// the workspace lands by pull request, where the landing was a rehearsal never
+/// pushed. A ticket on it that never was ready (a stray, or one sent back for a
+/// fix) comes off and keeps its stage: a landing says nothing about work it
+/// didn't carry.
+fn land_tickets(conn: &Connection, landing: &Landing, actor: Actor) -> Result<()> {
+    let rehearsal = crate::landing::read(conn, landing.workspace_id)?.mode == Some(crate::landing::LandingMode::PullRequests);
+    let sha = if rehearsal { None } else { landing.pushed_sha.as_deref() };
+    let mut left = Vec::new();
+    for task in &landing.tickets {
+        let line = line_in(conn, *task)?;
+        match line.stage {
+            Stage::Landing | Stage::Reviewing => left.push(*task),
+            s if s.is_closed() => {}
+            _ => {
+                conn.execute(
+                    "DELETE FROM landing_tickets WHERE landing_id = ?1 AND task_id = ?2",
+                    params![uuid_blob(landing.id), uuid_blob(*task)],
+                )
+                .map_err(map_err)?;
+                let body = format!("Taken off {}, which landed without it.", landing_title(landing));
+                let subject = LineSubject::TicketOnLanding { task: *task, landing: landing.id };
+                line_event(conn, subject, "ticket_off", actor, &body, serde_json::json!({ "landed_without": true }))?;
+            }
+        }
+    }
     while !left.is_empty() {
         let before = left.len();
         let mut next = Vec::new();
         for task in &left {
             let line = line_in(conn, *task)?;
-            if line.stage.is_closed() {
-                continue;
-            }
             if line.stack_parent.is_some_and(|p| left.contains(&p) && line_in(conn, p).is_ok_and(|l| !l.stage.is_closed())) {
                 next.push(*task);
                 continue;
             }
-            move_stage(conn, *task, Stage::Landed, Some(sha), Some(landing.id), actor)?;
+            move_stage(conn, *task, Stage::Landed, sha, Some(landing.id), actor)?;
         }
         if next.len() == before {
             return Err(invalid("stack_cycle"));
@@ -339,9 +423,55 @@ fn land_tickets(conn: &Connection, landing: &Landing, sha: &str, actor: Actor) -
     Ok(())
 }
 
+/// Release every ticket of a dropped landing, so none still says it is on it.
+fn release_tickets(conn: &Connection, landing: &Landing, actor: Actor) -> Result<()> {
+    for task in &landing.tickets {
+        take_off(conn, landing, *task, false, actor)?;
+    }
+    Ok(())
+}
+
+/// What a person reads for `state`, in a landing's timeline.
+fn state_said(state: LandingState) -> &'static str {
+    match state {
+        LandingState::Open => "Open.",
+        LandingState::Gating => "Gating.",
+        LandingState::Pushed => "Pushed.",
+        LandingState::Green => "CI passed.",
+        LandingState::Red => "CI failed.",
+        LandingState::Landed => "Landed.",
+        LandingState::Dropped => "Dropped.",
+    }
+}
+
+/// Move `landing` to `to` and write it down, with `extra` merged into the
+/// event's `from` and `to`.
+pub(crate) fn move_landing(conn: &Connection, landing: &Landing, to: LandingState, actor: Actor, extra: serde_json::Value) -> Result<()> {
+    let now = now_millis();
+    conn.execute(
+        "UPDATE landings SET state = ?2, state_since = ?3,
+                landed_at = CASE WHEN ?2 = 'landed' THEN coalesce(landed_at, ?3) ELSE landed_at END,
+                collecting = CASE WHEN ?2 = 'open' THEN collecting ELSE 0 END,
+                resource_version = resource_version + 1
+          WHERE id = ?1",
+        params![uuid_blob(landing.id), to.as_str(), now],
+    )
+    .map_err(map_err)?;
+    let mut said = serde_json::json!({ "from": landing.state.as_str(), "to": to.as_str() });
+    if let (Some(said), Some(more)) = (said.as_object_mut(), extra.as_object()) {
+        said.extend(more.clone());
+    }
+    line_event(conn, LineSubject::Landing(landing.id), "state", actor, state_said(to), said)
+}
+
 impl Store {
     /// Start a landing on `workspace`'s board with `tickets`: one, normally.
-    /// It is numbered after the board's last.
+    ///
+    /// The board always has a collecting landing (`collecting.rs`). A landing
+    /// started by hand adopts it: the same landing, with its number, takes the
+    /// route, base, title and lander, carries exactly the tickets listed, and
+    /// stops collecting. Tickets it held that weren't listed move to a fresh
+    /// collecting landing behind it.
     pub fn start_landing(&self, workspace: Uuid, new: &NewLanding, tickets: &[Uuid], actor: Actor) -> Result<Landing> {
         let base = clean(&new.base, BASE_MAX, false, "base")?;
         let title = clean(&new.title, TITLE_MAX, false, "title")?;
@@ -351,49 +481,88 @@ impl Store {
         if let Some(lander) = new.lander {
             check_lander(&tx, workspace, lander)?;
         }
-        let number: i64 = tx
-            .query_row(
-                "SELECT coalesce(max(number), 0) + 1 FROM landings WHERE workspace_id = ?1",
-                params![uuid_blob(workspace)],
-                |r| r.get(0),
-            )
-            .map_err(map_err)?;
-        let id = Uuid::now_v7();
         let now = now_millis();
-        tx.execute(
-            "INSERT INTO landings (id, workspace_id, number, route, base, state, state_since, lander_id, title, collecting,
-                                   actor, created_at, resource_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6, ?7, ?8, ?9, ?10, ?6, 1)",
-            params![
-                uuid_blob(id),
-                uuid_blob(workspace),
-                number,
-                new.route.as_str(),
-                base,
-                now,
-                new.lander.map(uuid_blob),
-                title,
-                new.collecting,
-                actor.to_string(),
-            ],
-        )
-        .map_err(map_err)?;
-        line_event(&tx, LineSubject::Landing(id), "state", actor, "Started.", serde_json::json!({ "to": "open" }))?;
+        let id = match crate::collecting::collecting(&tx, workspace)? {
+            Some(open) => {
+                tx.execute(
+                    "UPDATE landings SET route = ?2, base = ?3, title = ?4, lander_id = ?5, collecting = ?6, actor = ?7,
+                            resource_version = resource_version + 1
+                      WHERE id = ?1",
+                    params![
+                        uuid_blob(open.id),
+                        new.route.as_str(),
+                        base,
+                        title,
+                        new.lander.map(uuid_blob),
+                        new.collecting,
+                        actor.to_string()
+                    ],
+                )
+                .map_err(map_err)?;
+                let unlisted: Vec<Uuid> = open.tickets.iter().filter(|t| !tickets.contains(t)).copied().collect();
+                if !unlisted.is_empty() {
+                    for task in &unlisted {
+                        take_off(&tx, &open, *task, false, Actor::Runner)?;
+                    }
+                    let fresh = crate::collecting::ensure_collecting(&tx, workspace, Actor::Runner)?;
+                    add_tickets(&tx, &fresh, &unlisted, Actor::Runner)?;
+                }
+                open.id
+            }
+            None => {
+                let number: i64 = tx
+                    .query_row(
+                        "SELECT coalesce(max(number), 0) + 1 FROM landings WHERE workspace_id = ?1",
+                        params![uuid_blob(workspace)],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_err)?;
+                let id = Uuid::now_v7();
+                tx.execute(
+                    "INSERT INTO landings (id, workspace_id, number, route, base, state, state_since, lander_id, title,
+                                           collecting, actor, created_at, resource_version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6, ?7, ?8, ?9, ?10, ?6, 1)",
+                    params![
+                        uuid_blob(id),
+                        uuid_blob(workspace),
+                        number,
+                        new.route.as_str(),
+                        base,
+                        now,
+                        new.lander.map(uuid_blob),
+                        title,
+                        new.collecting,
+                        actor.to_string(),
+                    ],
+                )
+                .map_err(map_err)?;
+                line_event(&tx, LineSubject::Landing(id), "state", actor, "Open.", serde_json::json!({ "to": "open" }))?;
+                id
+            }
+        };
         let landing = landing_in(&tx, id)?;
         add_tickets(&tx, &landing, tickets, actor)?;
+        if !new.collecting {
+            crate::collecting::ensure_collecting(&tx, workspace, Actor::Runner)?;
+        }
         let landing = landing_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
         Ok(landing)
     }
 
-    /// Change a landing: move it, record a pushed SHA, name its lander, and put
-    /// tickets on or take them off, in one write. Landing it lands its tickets
-    /// at its pushed SHA; dropping it leaves them in the landing stage, to land
-    /// another way.
+    /// Change a landing: move it, rebase it, record what it pushed, name its
+    /// lander, and put tickets on or take them off, in one write.
+    ///
+    /// A settled landing (landed or dropped) takes no more writes. A ticket
+    /// comes off only while the landing is open: from gating on, its gate or
+    /// its push carries the ticket (`landing_moving`). Landing it lands its
+    /// tickets; dropping it lets them go, to land another way. Moving it on,
+    /// or naming a lander, stops it collecting, and the board's collecting
+    /// landing then departs if it can.
     pub fn update_landing(&self, id: Uuid, update: &LandingUpdate, actor: Actor) -> Result<Landing> {
         let base = update.base.as_deref().map(|v| clean(v, BASE_MAX, false, "base")).transpose()?;
         let title = update.title.as_deref().map(|v| clean(v, TITLE_MAX, false, "title")).transpose()?;
-        let sha = update.sha.as_deref().map(|v| clean(v, SHA_MAX, true, "sha")).transpose()?;
+        let sha = update.sha.as_deref().map(clean_sha).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let before = landing_in(&tx, id)?;
@@ -408,52 +577,53 @@ impl Store {
         if let Some(lander) = update.lander {
             check_lander(&tx, before.workspace_id, lander)?;
         }
+        check_tickets(&tx, before.workspace_id, &update.remove_tickets)?;
+        if before.state != LandingState::Open && update.remove_tickets.iter().any(|t| before.tickets.contains(t)) {
+            return Err(invalid("landing_moving"));
+        }
         let state = match (update.state, &sha) {
             (Some(state), _) => state,
-            (None, Some(_)) if before.state != LandingState::Pushed => LandingState::Pushed,
-            (None, _) => before.state,
+            (None, Some(_)) => LandingState::Pushed,
+            (None, None) => before.state,
         };
         let pushed = sha.clone().or_else(|| before.pushed_sha.clone());
+        if matches!(state, LandingState::Pushed | LandingState::Green | LandingState::Red) && pushed.is_none() {
+            return Err(invalid("sha"));
+        }
         if state == LandingState::Landed && pushed.is_none() {
             return Err(invalid("no_sha"));
         }
-        let now = now_millis();
         tx.execute(
-            "UPDATE landings SET state = ?2, state_since = CASE WHEN state = ?2 THEN state_since ELSE ?3 END,
-                    pushed_sha = coalesce(?4, pushed_sha), base = coalesce(?5, base), title = coalesce(?6, title),
-                    lander_id = coalesce(?7, lander_id),
-                    landed_at = CASE WHEN ?2 = 'landed' THEN ?3 ELSE landed_at END,
-                    collecting = CASE WHEN ?2 IN ('landed', 'dropped') THEN 0 ELSE collecting END,
+            "UPDATE landings SET pushed_sha = coalesce(?2, pushed_sha), base = coalesce(?3, base), title = coalesce(?4, title),
+                    lander_id = coalesce(?5, lander_id),
+                    collecting = CASE WHEN ?5 IS NOT NULL THEN 0 ELSE collecting END,
                     resource_version = resource_version + 1
               WHERE id = ?1",
-            params![uuid_blob(id), state.as_str(), now, sha, base, title, update.lander.map(uuid_blob)],
+            params![uuid_blob(id), sha, base, title, update.lander.map(uuid_blob)],
         )
         .map_err(map_err)?;
-        if state != before.state {
-            let extra = serde_json::json!({ "from": before.state.as_str(), "to": state.as_str() });
-            line_event(&tx, LineSubject::Landing(id), "state", actor, &format!("Moved to {}.", state.as_str()), extra)?;
-        }
         for task in &update.remove_tickets {
-            let gone = tx
-                .execute(
-                    "DELETE FROM landing_tickets WHERE landing_id = ?1 AND task_id = ?2",
-                    params![uuid_blob(id), uuid_blob(*task)],
-                )
-                .map_err(map_err)?;
-            if gone > 0 {
-                let body = format!("{} came off Landing {}.", task_key(&tx, *task), before.number);
-                let subject = LineSubject::TicketOnLanding { task: *task, landing: id };
-                line_event(&tx, subject, "ticket_off", actor, &body, serde_json::json!({}))?;
+            if take_off(&tx, &before, *task, !update.add_tickets.contains(task), actor)? {
+                crate::collecting::drop_if_emptied(&tx, id, actor)?;
             }
         }
         if !update.add_tickets.is_empty() {
             let landing = landing_in(&tx, id)?;
             add_tickets(&tx, &landing, &update.add_tickets, actor)?;
         }
-        let landing = landing_in(&tx, id)?;
-        if state == LandingState::Landed {
-            land_tickets(&tx, &landing, pushed.as_deref().unwrap_or_default(), actor)?;
+        if state != before.state {
+            let now_on = landing_in(&tx, id)?;
+            move_landing(&tx, &now_on, state, actor, serde_json::json!({}))?;
         }
+        let landing = landing_in(&tx, id)?;
+        match (state != before.state, state) {
+            (true, LandingState::Landed) => land_tickets(&tx, &landing, actor)?,
+            (true, LandingState::Dropped) => release_tickets(&tx, &landing, actor)?,
+            _ => {}
+        }
+        crate::collecting::depart(&tx, before.workspace_id, Actor::Runner)?;
+        crate::collecting::ensure_collecting(&tx, before.workspace_id, Actor::Runner)?;
+        let landing = landing_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
         Ok(landing)
     }
@@ -463,6 +633,21 @@ impl Store {
         landing_in(&self.conn(), id)
     }
 
+    /// A board's landing by its number.
+    pub fn landing_numbered(&self, workspace: Uuid, number: u32) -> Result<Landing> {
+        let conn = self.conn();
+        let id: Uuid = conn
+            .query_row(
+                "SELECT id FROM landings WHERE workspace_id = ?1 AND number = ?2",
+                params![uuid_blob(workspace), number],
+                |r| get_uuid(r, 0),
+            )
+            .optional()
+            .map_err(map_err)?
+            .ok_or(DomainError::NotFound)?;
+        landing_in(&conn, id)
+    }
+
     /// Every landing on `workspace`'s board, by number.
     pub fn landings(&self, workspace: Uuid) -> Result<Vec<Landing>> {
         landings_where(&self.conn(), "workspace_id = ?1", workspace)
@@ -470,15 +655,106 @@ impl Store {
 
     /// The open landing `task` is on, if any.
     pub fn landing_of(&self, task: Uuid) -> Result<Option<Landing>> {
-        let conn = self.conn();
-        Ok(landings_where(
-            &conn,
-            "state NOT IN ('landed', 'dropped') AND id IN (SELECT landing_id FROM landing_tickets WHERE task_id = ?1)",
-            task,
-        )?
-        .into_iter()
-        .next())
+        landing_of_in(&self.conn(), task)
     }
+
+    /// Every board's landings whose CI the runner reads: pushed, green or red,
+    /// with a SHA. What the runner's CI watch walks (`daemon/src/ci_watch.rs`).
+    pub fn landings_following_ci(&self) -> Result<Vec<Landing>> {
+        let conn = self.conn();
+        let ids: Vec<Uuid> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id FROM landings WHERE state IN ('pushed', 'green', 'red') AND pushed_sha IS NOT NULL
+                      ORDER BY created_at, id",
+                )
+                .map_err(map_err)?;
+            stmt.query_map([], |r| get_uuid(r, 0))
+                .map_err(map_err)?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(map_err)?
+        };
+        ids.into_iter().map(|id| landing_in(&conn, id)).collect()
+    }
+}
+
+/// The open landing `task` is on, read on `conn`.
+pub(crate) fn landing_of_in(conn: &Connection, task: Uuid) -> Result<Option<Landing>> {
+    Ok(landings_where(
+        conn,
+        "state NOT IN ('landed', 'dropped') AND id IN (SELECT landing_id FROM landing_tickets WHERE task_id = ?1)",
+        task,
+    )?
+    .into_iter()
+    .next())
+}
+
+/// A SHA as given, lowercased: 7 to 40 hex digits.
+pub fn clean_sha(value: &str) -> Result<String> {
+    let sha = value.trim().to_ascii_lowercase();
+    if !(7..=40).contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(invalid("sha"));
+    }
+    Ok(sha)
+}
+
+impl Landing {
+    /// The CI subject its pushed SHA is read under, once it has one.
+    pub fn ci_subject(&self) -> Option<String> {
+        self.pushed_sha.as_deref().map(crate::board_ci::sha_subject)
+    }
+
+    /// Whether the runner moves it with its CI: once a SHA is out and until it
+    /// settles.
+    pub fn follows_ci(&self) -> bool {
+        matches!(self.state, LandingState::Pushed | LandingState::Green | LandingState::Red)
+    }
+}
+
+/// Move `workspace`'s landings that follow CI on `subject` to what it now
+/// says: green when it passed, red when it failed, pushed while it runs again.
+/// The landings moved, by id.
+pub(crate) fn follow_ci(conn: &Connection, workspace: Uuid, subject: &str, status: crate::board_ci::CiStatus) -> Result<Vec<Uuid>> {
+    use crate::board_ci::CiStatus;
+    let to = match status {
+        CiStatus::Passed => LandingState::Green,
+        CiStatus::Failed => LandingState::Red,
+        CiStatus::Running | CiStatus::Queued => LandingState::Pushed,
+        // Nothing ran yet, GitHub couldn't be asked, or a newer push canceled
+        // its run: the landing stays put.
+        CiStatus::None | CiStatus::Unknown | CiStatus::Superseded => return Ok(Vec::new()),
+    };
+    let landings = landings_where(
+        conn,
+        "workspace_id = ?1 AND state IN ('pushed', 'green', 'red') AND pushed_sha IS NOT NULL",
+        workspace,
+    )?;
+    let mut moved = Vec::new();
+    for landing in landings.into_iter().filter(|l| l.ci_subject().as_deref() == Some(subject) && l.state != to) {
+        move_landing(conn, &landing, to, Actor::Runner, serde_json::json!({}))?;
+        moved.push(landing.id);
+    }
+    Ok(moved)
+}
+
+/// A board's landings for the plan read: every one not settled, oldest first,
+/// then those settled at or after `settled_since_ms`, most recent first.
+pub(crate) fn landings_for_plan(conn: &Connection, workspace: Uuid, settled_since_ms: i64) -> Result<Vec<Landing>> {
+    let ids: Vec<Uuid> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM landings
+                  WHERE workspace_id = ?1 AND (state NOT IN ('landed', 'dropped') OR state_since >= ?2)
+                  ORDER BY state IN ('landed', 'dropped'),
+                           CASE WHEN state IN ('landed', 'dropped') THEN -state_since ELSE created_at END, id",
+            )
+            .map_err(map_err)?;
+        stmt.query_map(params![uuid_blob(workspace), settled_since_ms], |r| get_uuid(r, 0))
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(map_err)?
+    };
+    ids.into_iter().map(|id| landing_in(conn, id)).collect()
 }
 
 #[cfg(test)]

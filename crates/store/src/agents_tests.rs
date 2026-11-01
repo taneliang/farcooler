@@ -1,10 +1,9 @@
 use super::*;
 
-use crate::line_migration::store_with_the_line;
 use crate::ticket_work::{LinkedBy, WorkRole};
 
 fn board() -> (Store, Uuid, Uuid) {
-    let store = store_with_the_line();
+    let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
     let task = store.create_task(main, "card", Actor::Manager).unwrap().id;

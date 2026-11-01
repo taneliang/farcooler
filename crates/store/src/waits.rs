@@ -354,8 +354,9 @@ pub(crate) fn sweep_unfitting(conn: &Connection) -> Result<()> {
         .query_row(
             &format!(
                 "SELECT EXISTS (SELECT 1 FROM tasks WHERE wait_kind IS NOT NULL AND NOT {FITS_SQL})
-                     OR EXISTS (SELECT 1 FROM task_workers w JOIN tasks t ON t.id = w.task_id
-                                 WHERE w.ended_at IS NULL AND t.status IN ('done', 'cancelled'))"
+                     OR EXISTS (SELECT 1 FROM ticket_work w JOIN agents a ON a.id = w.agent_id
+                                  JOIN tasks t ON t.id = w.task_id
+                                 WHERE a.kind = 'subagent' AND w.ended_at IS NULL AND t.status IN ('done', 'cancelled'))"
             ),
             [],
             |r| r.get(0),
@@ -366,13 +367,22 @@ pub(crate) fn sweep_unfitting(conn: &Connection) -> Result<()> {
     }
     conn.execute(&format!("UPDATE tasks SET {CLEARED} WHERE wait_kind IS NOT NULL AND NOT {FITS_SQL}"), [])
         .map_err(map_err)?;
-    conn.execute(
-        "UPDATE task_workers SET ended_at = ?1, end_reason = 'task_closed'
-          WHERE ended_at IS NULL
-            AND task_id IN (SELECT id FROM tasks WHERE status IN ('done', 'cancelled'))",
-        params![now_millis()],
-    )
-    .map_err(map_err)?;
+    let finished: Vec<Uuid> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT w.task_id FROM ticket_work w JOIN agents a ON a.id = w.agent_id
+                   JOIN tasks t ON t.id = w.task_id
+                  WHERE a.kind = 'subagent' AND w.ended_at IS NULL AND t.status IN ('done', 'cancelled')",
+            )
+            .map_err(map_err)?;
+        stmt.query_map([], |r| crate::models::get_uuid(r, 0))
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(map_err)?
+    };
+    for task in finished {
+        crate::workers::close_open(conn, task, crate::workers::EndReason::TaskClosed)?;
+    }
     Ok(())
 }
 

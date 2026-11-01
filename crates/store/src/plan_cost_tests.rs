@@ -1,7 +1,10 @@
 use super::*;
 
 use crate::models::Task;
-use crate::plan::{AgentRecord, AgentRole, LaneCard, LaneState, LaneUpdate, NewLane, NewTheme};
+use crate::agents::{AgentPlace, AgentRole, NewAgent};
+use crate::plan::NewTheme;
+use crate::ticket_lines::{LineUpdate, NewTicketLine, Stage};
+use crate::ticket_work::{LinkedBy, WorkRole};
 use crate::usage::{NewTurn, Surface, TurnKind, TurnModel};
 use farcooler_core::usage::TokenCounts;
 
@@ -25,7 +28,7 @@ fn the_repo(store: &Store) -> Uuid {
     store.conn().query_row("SELECT repository_id FROM workspaces", [], |r| get_uuid(r, 0)).unwrap()
 }
 
-/// A Claude subagent's run, the kind a lane's agent is read from.
+/// A Claude subagent's run, the kind a ticket's agent is read from.
 fn agent_turn(store: &Store, agent: &str, tokens: u64, ended_at: i64) {
     turn(store, &format!("claude-log:agent:{agent}"), None, "claude", "claude-opus-5", tokens, Some(1_000), ended_at);
 }
@@ -87,18 +90,28 @@ fn turn_between(store: &Store, key: &str, started: i64, ended: i64, tokens: u64)
         .unwrap();
 }
 
-fn card(task: &Task) -> LaneCard {
-    LaneCard { task_id: task.id, slice: String::new() }
+fn card(task: &Task) -> &Task {
+    task
 }
 
-fn claude(id: &str) -> AgentRecord {
-    AgentRecord { harness: "claude".into(), agent_id: id.into(), role: AgentRole::Build, model: None, ended: false }
-}
-
-fn lane(store: &Store, main: Uuid, name: &str, cards: &[LaneCard], agent: &str) -> crate::plan::Lane {
-    store
-        .create_lane(main, &NewLane { name: name.into(), ..Default::default() }, cards, Some(&claude(agent)), Actor::Manager)
-        .unwrap()
+/// Put `cards` on the line, each worked by the Claude subagent `agent`.
+fn lane(store: &Store, main: Uuid, _name: &str, cards: &[&Task], agent: &str) {
+    let new = NewAgent {
+        role: AgentRole::Builder,
+        place: AgentPlace::Subagent { id: agent.into(), parent: None },
+        harness: "claude".into(),
+        session_id: None,
+        session_cwd: None,
+        model: None,
+        title: None,
+    };
+    let agent = store.record_agent(main, &new).unwrap();
+    for task in cards {
+        if store.ticket_line(task.id).is_err() {
+            store.put_on_line(task.id, &NewTicketLine::default(), Actor::Manager).unwrap();
+        }
+        store.start_work(agent.id, task.id, WorkRole::Build, LinkedBy::Orchestrator, Actor::Manager).unwrap();
+    }
 }
 
 fn theme(store: &Store, main: Uuid, name: &str, tasks: &[&Task]) -> crate::plan::BoardTheme {
@@ -106,58 +119,48 @@ fn theme(store: &Store, main: Uuid, name: &str, tasks: &[&Task]) -> crate::plan:
     store.create_theme(main, &NewTheme { name: name.into(), outcome: String::new() }, &ids, Actor::Manager).unwrap()
 }
 
-fn total(s: &crate::plan_read::LaneSpend) -> u64 {
+fn total(s: &crate::plan_read::Spend) -> u64 {
     s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens
 }
 
-/// A budget is stored per theme and per lane, read back on the plan, changed
+/// A budget is stored per theme and per ticket, read back on the plan, changed
 /// by a second set, removed by `None`, and refused at nothing or at nonsense.
 #[test]
 fn a_budget_is_kept_changed_and_removed() {
     let (store, main, t) = board(1);
     let th = theme(&store, main, "Cost", &[&t[0]]);
-    let ln = lane(&store, main, "cost-lane", &[card(&t[0])], "a1");
+    lane(&store, main, "cost-lane", &[card(&t[0])], "a1");
 
-    store.set_budget(Subject::Theme(th.id), Some(5_000), Actor::Manager).unwrap();
-    store.set_budget(Subject::Lane(ln.id), Some(900), Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Theme(th.id), Some(5_000), Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Ticket(t[0].id), Some(900), Actor::Manager).unwrap();
     let plan = store.plan(main, 0).unwrap();
     assert_eq!(plan.themes[0].budget_tokens, Some(5_000));
-    assert_eq!(plan.lanes[0].budget_tokens, Some(900));
+    assert_eq!(plan.lines[0].budget_tokens, Some(900));
 
-    store.set_budget(Subject::Theme(th.id), Some(7_000), Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Theme(th.id), Some(7_000), Actor::Manager).unwrap();
     assert_eq!(store.plan(main, 0).unwrap().themes[0].budget_tokens, Some(7_000), "a second set replaces, never adds");
-    store.set_budget(Subject::Theme(th.id), None, Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Theme(th.id), None, Actor::Manager).unwrap();
     assert_eq!(store.plan(main, 0).unwrap().themes[0].budget_tokens, None);
 
-    assert!(matches!(store.set_budget(Subject::Lane(ln.id), Some(0), Actor::Manager), Err(DomainError::InvalidArgument { .. })));
-    assert!(matches!(store.set_budget(Subject::Lane(Uuid::from_u128(77)), Some(1), Actor::Manager), Err(DomainError::NotFound)));
+    assert!(matches!(store.set_budget(LineSubject::Ticket(t[0].id), Some(0), Actor::Manager), Err(DomainError::InvalidArgument { .. })));
+    assert!(matches!(store.set_budget(LineSubject::Ticket(Uuid::from_u128(77)), Some(1), Actor::Manager), Err(DomainError::NotFound)));
+    assert!(matches!(store.set_budget(LineSubject::Landing(Uuid::from_u128(77)), Some(1), Actor::Manager), Err(DomainError::InvalidArgument { .. })));
 
-    let events = store.plan_events(Subject::Theme(th.id), 0).unwrap();
+    let events = store.line_events(LineSubject::Theme(th.id), 0).unwrap();
     let budget: Vec<_> = events.iter().filter(|e| e.kind == "budget").map(|e| e.body.as_str()).collect();
     assert_eq!(budget, ["budget 5000 tokens", "budget 7000 tokens", "budget removed"]);
 }
 
-/// A budget goes with its lane, and with the layer: the drill drops the table
-/// with the rest and the board reads the same.
-#[test]
-fn a_lanes_budget_goes_with_the_lane() {
-    let (store, main, t) = board(1);
-    let ln = lane(&store, main, "gone", &[card(&t[0])], "a1");
-    store.set_budget(Subject::Lane(ln.id), Some(10), Actor::Manager).unwrap();
-    store.conn().execute("DELETE FROM lanes", []).unwrap();
-    let left: i64 = store.conn().query_row("SELECT count(*) FROM plan_budgets", [], |r| r.get(0)).unwrap();
-    assert_eq!(left, 0);
-}
-
-/// A theme's trend is its lanes' tokens by UTC day, shared out over their
-/// cards as its spend is: a lane on one card inside and one outside gives half.
+/// A theme's trend is its tickets' tokens by UTC day, an agent's shared out
+/// over its tickets as its spend is: an agent on one card inside and one
+/// outside gives half.
 #[test]
 fn a_theme_trend_is_its_lanes_by_day_and_shares_like_its_spend() {
     let (store, main, t) = board(3);
     let th = theme(&store, main, "Cost", &[&t[0], &t[1]]);
     lane(&store, main, "half", &[card(&t[0]), card(&t[2])], "a1");
-    let whole = lane(&store, main, "whole", &[card(&t[1])], "a2");
-    store.record_lane_agent(whole.id, &claude("a3"), Actor::Manager).unwrap();
+    lane(&store, main, "whole", &[card(&t[1])], "a2");
+    lane(&store, main, "whole", &[card(&t[1])], "a3");
     let now = now_millis();
     let today = now.div_euclid(DAY) * DAY;
     agent_turn(&store, "a1", 1000, today + 1);
@@ -203,13 +206,12 @@ fn what_a_run_spent_before_the_window_is_not_in_it() {
     assert!(week.abs_diff(2_000) <= 2, "a quarter of the run, not the whole: {week}");
 }
 
-/// An agent on two lanes gives each half its tokens each day.
+/// An agent on two tickets gives each half its tokens each day.
 #[test]
 fn a_shared_agent_is_split_in_the_trend() {
     let (store, main, t) = board(2);
     let th = theme(&store, main, "Cost", &[&t[0]]);
-    lane(&store, main, "one", &[card(&t[0])], "a1");
-    lane(&store, main, "two", &[card(&t[1])], "a1");
+    lane(&store, main, "one", &[card(&t[0]), card(&t[1])], "a1");
     agent_turn(&store, "a1", 1000, now_millis().div_euclid(DAY) * DAY + 1);
     let plan = store.plan(main, 0).unwrap();
     let view = plan.themes.iter().find(|v| v.theme.id == th.id).unwrap();
@@ -365,14 +367,14 @@ fn spend_on_cards_that_did_not_land_is_in_flight_and_a_shared_card_is_one_card()
     assert_eq!(opus.cost_micros, Some(36_000), "only its spend on landed cards");
 }
 
-/// A lane that landed still counts in the trend, and a dropped one too.
+/// A ticket that landed still counts in the trend, and a dropped one too.
 #[test]
-fn a_closed_lane_keeps_its_days() {
+fn a_closed_ticket_keeps_its_days() {
     let (store, main, t) = board(1);
     let th = theme(&store, main, "Cost", &[&t[0]]);
-    let ln = lane(&store, main, "done", &[card(&t[0])], "a1");
+    lane(&store, main, "done", &[card(&t[0])], "a1");
     agent_turn(&store, "a1", 70, now_millis());
-    store.update_lane(ln.id, &LaneUpdate { state: Some(LaneState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
+    store.update_line(t[0].id, &LineUpdate { stage: Some(Stage::Dropped), ..Default::default() }, Actor::Manager).unwrap();
     let plan = store.plan(main, i64::MAX).unwrap();
     assert_eq!(plan.themes.iter().find(|v| v.theme.id == th.id).unwrap().trend.iter().sum::<u64>(), 70);
 }

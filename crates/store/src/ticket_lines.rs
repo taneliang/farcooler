@@ -106,6 +106,7 @@ impl Stage {
                     | (Building, Reviewing)
                     | (Reviewing, Building)
                     | (Reviewing, Landing)
+                    | (Reviewing, Landed)
                     | (NeedsYou, Waiting)
                     | (NeedsYou, Building)
                     | (NeedsYou, Reviewing)
@@ -370,16 +371,26 @@ pub(crate) fn move_stage(
         "UPDATE ticket_lines SET stage = ?2, stage_since = ?3,
                 plan_rank = CASE WHEN ?4 THEN plan_rank ELSE NULL END,
                 landed_sha = coalesce(?5, landed_sha),
+                held_off = CASE WHEN ?2 = 'landing' THEN held_off ELSE 0 END,
                 resource_version = resource_version + 1
           WHERE task_id = ?1",
         params![uuid_blob(task), to.as_str(), now_millis(), rank_kept, sha],
     )
     .map_err(map_err)?;
-    let extra = serde_json::json!({ "from": line.stage.as_str(), "to": to.as_str() });
     let subject = match landing {
         Some(landing) => LineSubject::TicketOnLanding { task, landing },
         None => LineSubject::Ticket(task),
     };
+    // Landing straight from review is one write that passes through landing,
+    // and the timeline says so, as it would for the two writes.
+    let from = if line.stage == Stage::Reviewing && to == Stage::Landed {
+        let via = serde_json::json!({ "from": "reviewing", "to": "landing" });
+        line_event(conn, subject, "stage", actor, Stage::Landing.said(), via)?;
+        Stage::Landing
+    } else {
+        line.stage
+    };
+    let extra = serde_json::json!({ "from": from.as_str(), "to": to.as_str() });
     line_event(conn, subject, "stage", actor, to.said(), extra)
 }
 
@@ -459,7 +470,10 @@ impl Store {
         )
         .map_err(map_err)?;
         match update.stage {
-            Some(to) => move_stage(&tx, task, to, sha.as_deref(), None, actor)?,
+            Some(to) => {
+                move_stage(&tx, task, to, sha.as_deref(), None, actor)?;
+                crate::collecting::stage_moved(&tx, task, before.stage, to, actor)?;
+            }
             None if sha.is_some() && before.stage == Stage::Landed => {
                 tx.execute("UPDATE ticket_lines SET landed_sha = ?2 WHERE task_id = ?1", params![uuid_blob(task), sha])
                     .map_err(map_err)?;
@@ -513,6 +527,19 @@ impl Store {
         Ok(out)
     }
 
+    /// Put `task` on the line if it isn't on it: what dispatching an agent to
+    /// it does. A ticket already on the line is left as it is.
+    pub fn ensure_on_line(&self, task: Uuid, actor: Actor) -> Result<TicketLine> {
+        match self.ticket_line(task) {
+            Ok(line) => Ok(line),
+            Err(DomainError::NotFound) => match self.put_on_line(task, &NewTicketLine::default(), actor) {
+                Err(DomainError::InvalidArgument { what: "on_the_line" }) => self.ticket_line(task),
+                other => other,
+            },
+            Err(e) => Err(e),
+        }
+    }
+
     /// A ticket's place on the line.
     pub fn ticket_line(&self, task: Uuid) -> Result<TicketLine> {
         line_in(&self.conn(), task)
@@ -521,16 +548,7 @@ impl Store {
     /// Every ticket on `workspace`'s line: the plan in order, then the rest by
     /// how long they have been where they are.
     pub fn ticket_lines(&self, workspace: Uuid) -> Result<Vec<TicketLine>> {
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {} FROM ticket_lines l JOIN tasks t ON t.id = l.task_id WHERE t.workspace_id = ?1
-                  ORDER BY l.plan_rank IS NULL, l.plan_rank, l.stage_since, l.task_id",
-                LINE_COLS.split(", ").map(|c| format!("l.{c}")).collect::<Vec<_>>().join(", ")
-            ))
-            .map_err(map_err)?;
-        let rows = stmt.query_map(params![uuid_blob(workspace)], row_to_line).map_err(map_err)?;
-        rows.collect::<rusqlite::Result<_>>().map_err(map_err)
+        lines_of(&self.conn(), workspace)
     }
 
     /// A theme's, a ticket's or a landing's timeline since `since_ms`, oldest
@@ -566,6 +584,20 @@ impl Store {
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(map_err)
     }
+}
+
+/// Every ticket on `workspace`'s line, read on `conn`: the plan in order, then
+/// the rest by how long they have been where they are.
+pub(crate) fn lines_of(conn: &Connection, workspace: Uuid) -> Result<Vec<TicketLine>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {} FROM ticket_lines l JOIN tasks t ON t.id = l.task_id WHERE t.workspace_id = ?1
+              ORDER BY l.plan_rank IS NULL, l.plan_rank, l.stage_since, l.task_id",
+            LINE_COLS.split(", ").map(|c| format!("l.{c}")).collect::<Vec<_>>().join(", ")
+        ))
+        .map_err(map_err)?;
+    let rows = stmt.query_map(params![uuid_blob(workspace)], row_to_line).map_err(map_err)?;
+    rows.collect::<rusqlite::Result<_>>().map_err(map_err)
 }
 
 #[cfg(test)]

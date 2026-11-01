@@ -42,7 +42,7 @@ fn the_migration_is_welcome() {
     let col = &crate::migrate::MIGRATIONS[29];
     assert!(std::ptr::fn_addr_eq(col.0, migration_0030_ruling_reversals as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(col.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 57);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 58);
 }
 
 /// A ruling starts standing, keeps what it was given trimmed, and takes the
@@ -220,7 +220,7 @@ fn a_ruling_s_cards_carry_keys_and_stay_out_of_the_plan_s_cards() {
     store.add_ruling(main, &new("R1"), &[t[1].id, t[0].id], Actor::Manager).unwrap();
     let plan = store.plan(main, 0).unwrap();
     assert!(plan.cards.is_empty(), "{:?}", plan.cards);
-    assert!(plan.coverage.is_empty());
+    assert!(plan.lines.is_empty());
     assert_eq!(plan.rulings[0].task_keys, vec![t[1].key.clone(), t[0].key.clone()]);
     let added = store.ruling(plan.rulings[0].id).unwrap();
     assert_eq!(added.task_keys, vec![t[1].key.clone(), t[0].key.clone()]);

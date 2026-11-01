@@ -1,5 +1,5 @@
 //! What the runner last read of CI (ov-309, ov-306): one row per subject a
-//! board names, so a train's pushed SHA and a page's CI reference draw from
+//! board names, so a landing's pushed SHA and a page's CI reference draw from
 //! the same read.
 //!
 //! A **subject** is `sha:<sha>` (every run on that commit), `run:<id>` (one
@@ -9,8 +9,7 @@
 //! whole. Nothing is derived from a guess: a subject `gh` couldn't answer for
 //! reads `unknown`, never green.
 //!
-//! Part of the plan layer and as removable: the table is migration 0027's
-//! (`trains.rs`), and the removal drill drops it with the rest.
+//! The table is migration 0027's (`lane_migrations.rs`).
 
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -211,19 +210,19 @@ pub struct CiWrite {
     /// What was heard differs from the last read (its status, SHA, link or a
     /// job), so a client with the plan open should read it again.
     pub changed: bool,
-    /// Trains moved to green, red or back to pushed by it.
-    pub trains_moved: Vec<Uuid>,
+    /// Landings moved to green, red or back to pushed by it.
+    pub landings_moved: Vec<Uuid>,
 }
 
 impl Store {
     /// Keep what the runner just heard about `read.subject` on `workspace`'s
-    /// board, and move the trains that follow it. An `unknown` read never
+    /// board, and move the landings that follow it. An `unknown` read never
     /// replaces a known one: GitHub being unreachable says nothing new about
     /// the runs, so only `fetched_at` moves.
     pub fn record_ci(&self, workspace: Uuid, read: &CiRead) -> Result<CiWrite> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        crate::plan::board_exists(&tx, workspace)?;
+        crate::agents::board_exists(&tx, workspace)?;
         let now = now_millis();
         let before = read_in(&tx, workspace, &read.subject)?;
         if read.status == CiStatus::Unknown {
@@ -264,15 +263,15 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
-        let trains_moved = crate::trains::follow_ci(&tx, workspace, &read.subject, read.status)?;
-        // Main turning from red may be what the collecting train was waiting for.
+        let landings_moved = crate::landings::follow_ci(&tx, workspace, &read.subject, read.status)?;
+        // Main turning from red may be what the collecting landing was waiting for.
         let departed = if read.subject == MAIN_SUBJECT && read.status != CiStatus::Failed {
-            crate::open_train::depart(&tx, workspace, Actor::Runner)?.is_some()
+            crate::collecting::depart(&tx, workspace, Actor::Runner)?.is_some()
         } else {
             false
         };
         tx.commit().map_err(map_err)?;
-        Ok(CiWrite { changed: changed || departed || !trains_moved.is_empty(), trains_moved })
+        Ok(CiWrite { changed: changed || departed || !landings_moved.is_empty(), landings_moved })
     }
 
     /// Forget the reads of subjects `workspace`'s board no longer names. How

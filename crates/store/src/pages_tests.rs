@@ -3,7 +3,8 @@ use super::*;
 use crate::models::NoteKind;
 use crate::models::Task;
 use crate::models::TaskStatus::{InProgress, InReview};
-use crate::plan::{AgentRecord, AgentRole, LaneCard, NewLane, NewTheme, ThemeUpdate};
+use crate::plan::{NewTheme, ThemeUpdate};
+use crate::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 use crate::tasks::TaskScope;
 use crate::workers::{LinkedBy, WorkerRecord};
 use farcooler_core::page_doc::{self, Caps};
@@ -261,7 +262,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[24];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0025_pages as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 57);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 58);
 }
 
 /// Nothing existing carries a column for pages, nothing points into the pages'
@@ -351,21 +352,10 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
         .create_theme(main, &NewTheme { name: "Visual language".into(), outcome: "One app.".into() }, &[t[0].id, t[1].id], Actor::Manager)
         .unwrap();
     store.update_theme(theme.id, &ThemeUpdate { story: Some("Going.".into()), ..Default::default() }, Actor::Manager).unwrap();
-    let agent = AgentRecord { harness: "claude".into(), agent_id: "a1".into(), role: AgentRole::Build, model: None, ended: false };
-    let lane = store
-        .create_lane(
-            main,
-            &NewLane { name: "mac-ux".into(), ..Default::default() },
-            &[LaneCard { task_id: t[1].id, slice: String::new() }],
-            Some(&agent),
-            Actor::Manager,
-        )
-        .unwrap();
-    assert_eq!(lane.name, "mac-ux");
-    let queued = store
-        .create_lane(main, &NewLane { name: "next-one".into(), ..Default::default() }, &[LaneCard { task_id: t[3].id, slice: String::new() }], None, Actor::Manager)
-        .unwrap();
-    store.set_plan(main, &[queued.id], Actor::Manager).unwrap();
+    store.put_on_line(t[1].id, &NewTicketLine { branch: "mac-ux".into(), ..Default::default() }, Actor::Manager).unwrap();
+    store.update_line(t[1].id, &LineUpdate { stage: Some(Stage::Building), ..Default::default() }, Actor::Manager).unwrap();
+    store.put_on_line(t[3].id, &NewTicketLine::default(), Actor::Manager).unwrap();
+    store.set_line_order(main, &[t[3].id], Actor::Manager).unwrap();
     put(&store, main, "train", &doc("Train"));
     store
         .set_page(

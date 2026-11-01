@@ -62,7 +62,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // link (SET NULL). No column on a table old code writes, and no trigger.
     // Older builds never read them, so a rollback past the experiment keeps a
     // working database.
-    (crate::plan::migration_0023_plan_layer, Older::Welcome),
+    (crate::lane_migrations::migration_0023_plan_layer, Older::Welcome),
     // One new table (ov-199) only lfs_pointers.rs touches, whose rows go with
     // their worktree by cascade, whichever build deletes it. An older build
     // never reads or writes which large files weren't downloaded.
@@ -74,7 +74,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // working database.
     (crate::pages::migration_0025_pages, Older::Welcome),
     (crate::rulings::migration_0026_rulings, Older::Welcome), // ov-304: new tables only (rulings.rs says why)
-    (crate::trains::migration_0027_trains, Older::Welcome), // ov-309: new tables only (trains.rs says why)
+    (crate::lane_migrations::migration_0027_trains, Older::Welcome), // ov-309: new tables only (lane_migrations.rs keeps it)
     (crate::plan_cost::migration_0028_plan_budgets, Older::Welcome), // ov-307: one new table (plan_cost.rs says why)
     (crate::landing::migration_0029_workspace_landing, Older::Welcome), // ov-313: one new table (landing.rs says why)
     (crate::rulings::migration_0030_ruling_reversals, Older::Welcome), // ov-333: one column on 0026's own table (rulings.rs says why)
@@ -82,14 +82,14 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::web_panes::migration_0040_web_url, Older::Welcome), // ov-435: one nullable column (web_panes.rs says why)
     (crate::usage::migration_0042_cache_write_1h, Older::Welcome), // ov-460: one nullable column (usage.rs says why)
     (crate::messages::migration_0043_message_wakes, Older::Welcome), // ov-455: one new table (messages.rs says why)
-    (crate::plan::migration_0044_plan_titles, Older::Welcome), // ov-461, ov-462: titles, and a train's agent, on the layer's own tables (plan.rs says why)
+    (crate::lane_migrations::migration_0044_plan_titles, Older::Welcome), // ov-461, ov-462: titles, and a train's agent, on the layer's own tables (lane_migrations.rs keeps it)
     (crate::compose_holds::migration_0045_compose_holds, Older::Welcome), // ov-468: two new tables (compose_holds.rs says why)
     (crate::people::migration_0046_people, Older::Welcome), // ov-494: six new tables (people.rs says why)
-    (crate::trains::migration_0047_train_truth, Older::Welcome), // ov-503: rows only, no schema (trains.rs says why)
-    (crate::train_phase::migration_0048_train_events, Older::Welcome), // ov-503: one new table (train_phase.rs says why)
+    (crate::lane_migrations::migration_0047_train_truth, Older::Welcome), // ov-503: rows only, no schema (lane_migrations.rs keeps it)
+    (crate::lane_migrations::migration_0048_train_events, Older::Welcome), // ov-503: one new table (lane_migrations.rs keeps it)
     (crate::subagent_notes::migration_0049_subagent_descriptions, Older::Welcome), // ov-509: one new table (subagent_notes.rs says why)
     (crate::people::migration_0050_member_accounts, Older::Welcome), // ov-525: two nullable columns on 0046's members (people.rs says why)
-    (crate::open_train::migration_0051_collecting_train, Older::Welcome), // ov-520: two defaulted columns on the layer's own tables (open_train.rs says why)
+    (crate::lane_migrations::migration_0051_collecting_train, Older::Welcome), // ov-520: two defaulted columns on the layer's own tables (lane_migrations.rs keeps it)
     (crate::pr_nudges::migration_0052_pr_nudge, Older::Welcome), // ov-580: two columns on 0029's workspace_landing, one new table (pr_nudges.rs says why)
     (crate::claude_logins::migration_0053_terminal_logins, Older::Welcome), // ov-583: two new tables (claude_logins.rs says why)
     (crate::member_connectors::migration_0054_member_connectors, Older::Welcome), // ov-586: one new table (member_connectors.rs says why)
@@ -105,6 +105,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::revoked_marks::migration_0064_revoked_marks, Older::Welcome), // ov-832: one new table (revoked_marks.rs says why)
     (crate::device_added_by::migration_0065_device_added_by, Older::Welcome), // ov-838: one new table and its index (device_added_by.rs says why)
     (crate::access::migration_0066_person_access, Older::Welcome), // ov-856: four new tables (access.rs says why)
+    crate::line_migration::LINE_MIGRATION, // ov-872: agents, the line and landings replace lanes and trains, one way (line_migration.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

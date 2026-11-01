@@ -15,6 +15,7 @@
 //! `compatible_down_to` at or below this build's schema. See `compat`.
 
 pub mod agents;
+pub mod agent_panes;
 mod backup;
 pub mod claude_logins;
 pub mod member_connectors;
@@ -27,7 +28,10 @@ mod crash_signatures;
 mod error;
 pub mod landing;
 pub mod landings;
+pub mod landing_phase;
+mod lane_migrations;
 mod line_migration;
+pub mod collecting;
 pub mod lfs_pointers;
 mod migrate;
 pub mod read_counts;
@@ -35,14 +39,10 @@ pub mod pages;
 pub mod plan;
 pub mod plan_read;
 pub mod plan_agents;
-pub mod plan_panes;
 pub mod review;
 pub mod rulings;
 pub mod ticket_lines;
 pub mod ticket_work;
-pub mod trains;
-pub mod train_phase;
-pub mod open_train;
 pub mod pr_nudges;
 pub mod plan_cost;
 pub mod board_ci;

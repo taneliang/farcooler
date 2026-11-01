@@ -1,14 +1,14 @@
-//! What the plan layer says about a board, derived on read (ov-268).
+//! What the plan says about a board, derived on read (ov-268, ov-872).
 //!
-//! One read, `Store::plan`, draws every Plan surface: themes with their
-//! cards' status counts, lanes with their cards, agents, fix rounds and spend,
-//! and the plan's order. Nothing here is stored that could go stale: progress,
-//! a card's coverage, a lane's cost and whether it has sat too long are
-//! computed against the board as it is, the way ov-212 derives a task's place
-//! in a line.
+//! One read, `Store::plan`, draws every Plan surface: themes with their cards'
+//! status counts, the tickets on the line with who works them, their fix
+//! rounds and spend, the landings, and (from `Store::plan_with_agents`) the
+//! agents. Nothing here is stored that could go stale: progress, a ticket's
+//! cost and whether it has sat too long are computed against the board as it
+//! is.
 //!
 //! A card now on another board is left out of every list (`prune_moved` in
-//! `plan.rs` removes its rows on the next write).
+//! `plan.rs` removes its theme row on the next write).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -17,21 +17,21 @@ use uuid::Uuid;
 
 use farcooler_core::Result;
 
-use crate::error::map_err;
-use crate::models::{TaskStatus, get_uuid, uuid_blob};
-use crate::plan::{
-    AgentRole, BoardTheme, LANE_COLS, THEME_COLS, Lane, LaneAgent, LaneCard, LaneState, PlanEvent, Subject, row_to_lane, row_to_theme,
-};
-use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
-use crate::train_phase::{LaneOn, PhaseInput, derive, last_lane_on, left_ready_at};
-use crate::trains::{Train, TrainAgent, TrainState, trains_of};
-use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
+use crate::error::map_err;
+use crate::landing_phase::{LandingPhase, PhaseInput, TicketOn, derive, last_ticket_on, left_ready_at};
+use crate::landings::{Landing, LandingState, landing_title, landings_for_plan};
+use crate::models::{TaskStatus, get_uuid, uuid_blob};
+use crate::plan::{BoardTheme, THEME_COLS, row_to_theme};
+use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, ticket_days, trend_start};
+use crate::rulings::{Ruling, rulings_of};
 use crate::store::Store;
 use crate::tasks::now_millis;
+use crate::ticket_lines::{Stage, TicketLine};
+use crate::ticket_work::TicketWork;
 
-/// A lane sitting in one state longer than this reads as stale. Derived from
-/// `state_since`, so nothing ever has to clear it.
+/// A ticket sitting in one stage longer than this reads as stale. Derived from
+/// `stage_since`, so nothing ever has to clear it.
 pub const STALE_AFTER_MS: i64 = 60 * 60 * 1000;
 
 /// How many of a theme's cards are in each status, using the board's own
@@ -67,7 +67,7 @@ impl StatusCounts {
     }
 }
 
-/// A card a theme or a lane names: enough to draw its row.
+/// A card a theme or a ticket names: enough to draw its row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardRef {
     pub task_id: Uuid,
@@ -83,32 +83,28 @@ pub struct ThemeView {
     /// Its cards, oldest first.
     pub tasks: Vec<Uuid>,
     pub counts: StatusCounts,
-    /// What its lanes spent on its cards (ov-306): each lane's spend shared
-    /// out over the lane's cards, and the theme's cards' shares summed, so a
-    /// lane working two themes' cards is counted once across them. Every lane
-    /// that ever worked its cards, finished ones included.
-    pub spend: LaneSpend,
+    /// What was spent on its cards (ov-306): each of its tickets' spend
+    /// summed, finished tickets included.
+    pub spend: Spend,
     /// Its token budget, when it has one (ov-307).
     pub budget_tokens: Option<u64>,
     /// Its tokens on each of the last seven UTC days, oldest first, today
-    /// last: each lane's days shared out over its cards as `spend` is.
+    /// last.
     pub trend: [u64; TREND_DAYS],
-    /// When it last moved (ov-331): its story, the lanes on its cards, its
-    /// rulings and its cards' status moves, whichever is newest. 0 for a
-    /// theme nothing has touched.
+    /// When it last moved (ov-331): its story, its tickets on the line, its
+    /// rulings and its cards' status moves, whichever is newest. 0 for a theme
+    /// nothing has touched.
     pub last_moved_at: i64,
 }
 
-/// What a lane's agents have spent, from the runner's own record of their
-/// turns.
+/// What agents spent, from the runner's own record of their turns.
 ///
 /// Tokens first and dollars second: dollars are notional on a subscription.
-/// Only a Claude agent's turns are keyed by agent, so `unmeasured_agents`
-/// counts the lane's agents (a codex one, or a Claude one the runner has read
-/// no turn of) whose spend isn't in the totals, and a client says "Not
-/// reported" for them rather than zero.
+/// `unmeasured_agents` counts the agents (a codex one, or a Claude one the
+/// runner has read no turn of) whose spend isn't in the totals, and a client
+/// says "Not reported" for them rather than zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct LaneSpend {
+pub struct Spend {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -118,103 +114,89 @@ pub struct LaneSpend {
     /// How many runs the totals cover.
     pub runs: u32,
     pub unmeasured_agents: u32,
-    /// How many of the lane's Claude agents are also recorded on another
-    /// lane. Each such agent's spend is split evenly across its lanes, so
-    /// summing lanes counts it once (review 1004j P1), and a client says the
-    /// lane's figure holds a split.
+    /// How many of a ticket's agents also worked other tickets. Each such
+    /// agent's spend is split evenly across its tickets, so summing tickets
+    /// counts it once, and a client says the ticket's figure holds a split.
     pub shared_agents: u32,
 }
 
-/// A lane, with everything about it that is derived.
+impl Spend {
+    /// All four token counts.
+    pub fn tokens(&self) -> u64 {
+        self.input_tokens + self.output_tokens + self.cache_read_tokens + self.cache_write_tokens
+    }
+}
+
+/// A ticket on the line, with everything about it that is derived.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LaneView {
-    pub lane: Lane,
-    pub cards: Vec<LaneCard>,
-    pub agents: Vec<LaneAgent>,
-    /// How many times it moved into `fixing`.
+pub struct LineView {
+    pub line: TicketLine,
+    /// Who worked it, oldest first, finished work included.
+    pub work: Vec<TicketWork>,
+    /// How many fix rounds it has had.
     pub fix_rounds: u32,
-    pub spend: LaneSpend,
+    pub spend: Spend,
     /// Its token budget, when it has one (ov-307).
     pub budget_tokens: Option<u64>,
-    /// Has sat in a state that isn't `queued` or finished for over an hour.
+    /// Has sat in a stage that isn't waiting or finished for over an hour.
     pub stale: bool,
-    /// What a person reads for it (ov-462): the title the orchestrator wrote,
-    /// else one derived from its cards' titles, else empty (a lane with
-    /// neither shows its name).
-    pub title: String,
+    /// The number of the live landing it is on.
+    pub landing: Option<u32>,
 }
 
-/// One card's lanes: what NO-LANE and LANDED-NOT-CLOSED are derived from.
+/// A landing, with its derived words.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Coverage {
-    pub task_id: Uuid,
-    /// Lanes working it that aren't landed or dropped.
-    pub live: u32,
-    pub landed: u32,
-}
-
-/// A train (ov-309), with the lanes on it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrainView {
-    pub train: Train,
-    /// The lanes whose `train` names it, oldest first, finished ones included:
-    /// a train that landed still says what it carried.
-    pub lanes: Vec<Uuid>,
-    /// What a person reads for it (ov-462): the title the orchestrator wrote,
-    /// else "Train 72" for `integ-72` or `train-72`, else its name.
+pub struct LandingView {
+    pub landing: Landing,
+    /// "Landing 72", or the title the orchestrator wrote.
     pub title: String,
-    /// One line of what it carries: its lanes' titles, in lane order.
+    /// One line of what it carries: its tickets' titles, in the order they
+    /// joined.
     pub summary: String,
-    /// What its integrating agent has spent (ov-461); zero without an agent.
-    pub spend: LaneSpend,
-    /// What it is doing, derived from its state, its lanes, its agent and the
-    /// clock (ov-503, `train_phase.rs`), and since when.
-    pub phase: crate::train_phase::TrainPhase,
+    /// What its lander has spent; zero without one.
+    pub spend: Spend,
+    /// What it is doing (`landing_phase.rs`), and since when.
+    pub phase: LandingPhase,
     pub phase_since: i64,
 }
 
-/// The plan layer's whole read for one board.
+/// The plan's whole read for one board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     /// The runner's clock when this was read, so `stale` and ages agree
     /// across devices.
     pub now_ms: i64,
     pub themes: Vec<ThemeView>,
-    /// Live lanes, and finished ones since `closed_since_ms`.
-    pub lanes: Vec<LaneView>,
-    /// The queued lanes in the plan, first is next up.
-    pub order: Vec<Uuid>,
-    /// Every card any theme or lane names, once.
+    /// Open tickets on the line, and finished ones since `closed_since_ms`:
+    /// the plan's order first, then by how long each has been where it is.
+    pub lines: Vec<LineView>,
+    /// Every card any theme, ticket or landing names, once.
     pub cards: Vec<CardRef>,
-    pub coverage: Vec<Coverage>,
-    /// Decided for you (ov-304): every standing ruling, newest first, then
-    /// the settled ones, most recently settled first (`rulings_of` says how many).
+    /// Decided for you (ov-304): every standing ruling, newest first, then the
+    /// settled ones, most recently settled first (`rulings_of` says how many).
     pub rulings: Vec<Ruling>,
-    /// Trains (ov-309): every one not landed or dropped, oldest first, then
-    /// those settled since `closed_since_ms`, most recent first.
-    pub trains: Vec<TrainView>,
+    /// Every landing not landed or dropped, oldest first, then those settled
+    /// since `closed_since_ms`, most recent first. The collecting landing with
+    /// nothing on it is left out: it is the board's standing place for the
+    /// next ticket, not a landing anyone should draw.
+    pub landings: Vec<LandingView>,
     /// What the runner last read of CI for the subjects the board names: its
-    /// trains' pushed SHAs, and its pages' CI references (ov-306).
+    /// landings' pushed SHAs, and its pages' CI references (ov-306).
     pub ci: Vec<CiRead>,
-    /// How many of the board's cards are in each status, every card counted
-    /// (ov-306): what a page's card-count references draw.
+    /// How many of the board's cards are in each status, every card counted.
     pub board_counts: StatusCounts,
-    /// The week's tokens, and finished cards' cost by harness and model
-    /// (ov-307).
+    /// The week's tokens, and finished cards' cost by harness and model.
     pub cost: PlanCost,
-    /// Every agent that still exists, joined to its lane, train or card
-    /// (ov-503, ov-518, `plan_agents`). Empty from `Store::plan`: only
-    /// `Store::plan_with_agents` reads it, since most readers of the plan
-    /// (glance, PR watch, every write's answer) have no use for it.
-    pub agents: Vec<crate::plan_agents::PlanAgent>,
-    /// What every agent of the last 24 hours spent, the ones gone from
-    /// `agents` included (ov-518). Zero from `Store::plan`.
-    pub agents_spend: LaneSpend,
+    /// The agents still at work (`plan_agents.rs`). Empty from `Store::plan`:
+    /// only `Store::plan_with_agents` reads it.
+    pub agents: Vec<crate::plan_agents::AgentView>,
+    /// What every agent of the last 24 hours spent, the ones no longer in
+    /// `agents` included. Zero from `Store::plan`.
+    pub agents_spend: Spend,
 }
 
 impl Store {
-    /// `plan`, with the agents of the last 24 hours read too (ov-503): what
-    /// `plan.get` answers.
+    /// `plan`, with the agents read too: what `plan.get` answers.
     ///
     /// `live` is the runner's live state for a pane's terminal, when it has
     /// one: `Some(true)` mid-turn, `Some(false)` idle or waiting. A turn is
@@ -232,10 +214,10 @@ impl Store {
         Ok(plan)
     }
 
-    /// Per board, its themes asking the owner something: not dropped, with
-    /// an `owner_ask`. What the Needs You count adds to a board's needs-you
-    /// items (ov-310, ov-321's `WorkspaceNeedsYou.count`); one cheap query,
-    /// since the runner's count is taken on every notice.
+    /// Per board, its themes asking the owner something: not dropped, with an
+    /// `owner_ask`. What the Needs You count adds to a board's needs-you
+    /// items; one cheap query, since the runner's count is taken on every
+    /// notice.
     pub fn theme_asks(&self) -> Result<HashMap<Uuid, u32>> {
         let conn = self.conn();
         let mut stmt = conn
@@ -248,13 +230,13 @@ impl Store {
         rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
     }
 
-    /// A board's plan layer. Finished lanes (landed or dropped) appear only if
+    /// A board's plan. Finished tickets (landed or dropped) appear only if
     /// their last move was at or after `closed_since_ms`. Settled rulings are
     /// history and don't age out: the last `SETTLED_READ_CAP` of them, or all
-    /// when `closed_since_ms` is 0.
+    /// when `closed_since_ms` is 0 or less.
     pub fn plan(&self, workspace: Uuid, closed_since_ms: i64) -> Result<Plan> {
         let conn = self.conn();
-        crate::plan::board_exists(&conn, workspace)?;
+        crate::agents::board_exists(&conn, workspace)?;
         let now_ms = now_millis();
         let ws = uuid_blob(workspace);
 
@@ -316,7 +298,7 @@ impl Store {
                     theme,
                     tasks,
                     counts,
-                    spend: LaneSpend::default(),
+                    spend: Spend::default(),
                     budget_tokens: None,
                     trend: [0; TREND_DAYS],
                     last_moved_at: 0,
@@ -326,170 +308,118 @@ impl Store {
 
         let theme_of: HashMap<Uuid, usize> =
             themes.iter().enumerate().flat_map(|(i, v)| v.tasks.iter().map(move |t| (*t, i))).collect();
-        let mut shares = vec![Shares::default(); themes.len()];
+        let mut sums = vec![Sum::default(); themes.len()];
         let budgets = budgets_of(&conn, workspace)?;
         let trend_from = trend_start(now_ms);
         let mut trends = vec![[0.0f64; TREND_DAYS]; themes.len()];
-        let mut lanes = Vec::new();
-        let mut order: Vec<(u32, Uuid)> = Vec::new();
-        let mut live: HashMap<Uuid, u32> = HashMap::new();
-        let mut landed: HashMap<Uuid, u32> = HashMap::new();
-        {
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT {LANE_COLS} FROM lanes WHERE workspace_id = ?1 ORDER BY created_at, id"
-                ))
-                .map_err(map_err)?;
-            let found = stmt
-                .query_map(params![ws], row_to_lane)
-                .map_err(map_err)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(map_err)?;
-            for lane in found {
-                let cards = lane_cards_of(&conn, lane.id, &statuses)?;
-                let linked: HashSet<Uuid> = cards.iter().map(|c| c.task_id).collect();
-                for task in &linked {
-                    match lane.state {
-                        LaneState::Landed => *landed.entry(*task).or_default() += 1,
-                        LaneState::Dropped => {}
-                        _ => *live.entry(*task).or_default() += 1,
-                    }
-                }
-                let in_themes: Vec<usize> = linked.iter().filter_map(|t| theme_of.get(t).copied()).collect();
-                let in_window = !(lane.state.is_closed() && lane.state_since < closed_since_ms);
-                let lane_spend = if in_window || !in_themes.is_empty() {
-                    Some(spend_of(&conn, lane.id, &agents_of(&conn, lane.id)?)?)
-                } else {
-                    None
-                };
-                if let Some(spend) = &lane_spend {
-                    // Each theme once per lane, with the share its cards make
-                    // up, so a lane's runs and agents count once in it (review
-                    // train-1005c L3).
-                    let mut per_theme: BTreeMap<usize, usize> = BTreeMap::new();
-                    for theme in &in_themes {
-                        *per_theme.entry(*theme).or_default() += 1;
-                    }
-                    for (theme, cards) in per_theme {
-                        shares[theme].add(spend, cards as f64 / linked.len() as f64);
-                    }
-                    if !in_themes.is_empty() {
-                        let days = lane_days(&conn, lane.id, trend_from)?;
-                        for theme in &in_themes {
-                            for (sum, n) in trends[*theme].iter_mut().zip(days) {
-                                *sum += n / linked.len() as f64;
-                            }
-                        }
-                    }
-                }
-                if !in_window {
-                    continue;
-                }
-                for card in &cards {
-                    named.insert(card.task_id, ());
-                }
-                if let (LaneState::Queued, Some(rank)) = (lane.state, lane.plan_rank) {
-                    order.push((rank, lane.id));
-                }
-                let agents = agents_of(&conn, lane.id)?;
-                let fix_rounds = fix_rounds_of(&conn, lane.id)?;
-                let spend = lane_spend.unwrap_or_default();
-                let stale = !lane.state.is_closed()
-                    && lane.state != LaneState::Queued
-                    && now_ms - lane.state_since > STALE_AFTER_MS;
-                let budget_tokens = budgets.get(&lane.id).copied();
-                let title = lane_title(&lane, &cards, &statuses);
-                lanes.push(LaneView { lane, cards, agents, fix_rounds, spend, budget_tokens, stale, title });
+        let on_landing = live_landing_numbers(&conn, workspace)?;
+        let mut lines = Vec::new();
+        for line in crate::ticket_lines::lines_of(&conn, workspace)? {
+            if !statuses.contains_key(&line.task_id) {
+                continue;
             }
+            let theme = theme_of.get(&line.task_id).copied();
+            let in_window = !(line.stage.is_closed() && line.stage_since < closed_since_ms);
+            if !in_window && theme.is_none() {
+                continue;
+            }
+            let spend = spend_of_ticket(&conn, line.task_id)?;
+            if let Some(theme) = theme {
+                sums[theme].add(&spend);
+                let days = ticket_days(&conn, line.task_id, trend_from)?;
+                for (sum, n) in trends[theme].iter_mut().zip(days) {
+                    *sum += n;
+                }
+            }
+            if !in_window {
+                continue;
+            }
+            named.insert(line.task_id, ());
+            let work = crate::ticket_work::works(&conn, "task_id", line.task_id)?;
+            let fix_rounds = fix_rounds_of(&conn, line.task_id)?;
+            let stale = !line.stage.is_closed() && line.stage != Stage::Waiting && now_ms - line.stage_since > STALE_AFTER_MS;
+            let budget_tokens = budgets.get(&line.task_id).copied();
+            let landing = on_landing.get(&line.task_id).copied();
+            lines.push(LineView { line, work, fix_rounds, spend, budget_tokens, stale, landing });
         }
-        order.sort();
-        for ((view, share), days) in themes.iter_mut().zip(&shares).zip(&trends) {
-            view.spend = share.total();
+        for ((view, sum), days) in themes.iter_mut().zip(&sums).zip(&trends) {
+            view.spend = sum.total();
             view.budget_tokens = budgets.get(&view.theme.id).copied();
             view.trend = days.map(|n| n.round().max(0.0) as u64);
         }
 
-        // A ruling's cards carry their own keys and stay out of `cards`, which
-        // the reconciliation reads: a card a ruling names is in no lane by
-        // design (review 1005a F2).
+        // A ruling's cards carry their own keys and stay out of `cards`: a card
+        // a ruling names is on no line by design (review 1005a F2).
         let rulings = rulings_of(&conn, workspace, closed_since_ms, &statuses)?;
         let moved = card_moves(&conn, &ws)?;
         for view in &mut themes {
-            view.last_moved_at = theme_last_moved(view, &lanes, &rulings, &moved);
+            view.last_moved_at = theme_last_moved(view, &lines, &rulings, &moved);
         }
 
-        let mut trains = Vec::new();
-        let views: HashMap<Uuid, &LaneView> = lanes.iter().map(|v| (v.lane.id, v)).collect();
-        let all_trains = trains_of(&conn, workspace, closed_since_ms)?;
-        let in_front = |t: &Train| {
-            matches!(t.state, TrainState::Gating | TrainState::Pushed | TrainState::Green | TrainState::Red)
-                || (t.state == TrainState::Integrating && !t.collecting)
-        };
+        let views: HashMap<Uuid, &LineView> = lines.iter().map(|v| (v.line.task_id, v)).collect();
+        let all = landings_for_plan(&conn, workspace, closed_since_ms)?;
         let main_red = ci_of(&conn, workspace)?
             .iter()
             .any(|c| c.subject == crate::board_ci::MAIN_SUBJECT && c.status == crate::board_ci::CiStatus::Failed);
-        let fronts: Vec<Uuid> = all_trains.iter().filter(|t| in_front(t)).map(|t| t.id).collect();
-        for train in all_trains {
-            let ahead = fronts.iter().any(|id| *id != train.id);
-            let mut stmt = conn
-                .prepare("SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE ORDER BY created_at, id")
-                .map_err(map_err)?;
-            let lanes = stmt
-                .query_map(params![ws, train.name], |r| get_uuid(r, 0))
-                .map_err(map_err)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(map_err)?;
-            // The collecting train with nothing on it is the board's standing
-            // place for the next lane, not a train anyone should draw.
-            if train.collecting && lanes.is_empty() {
+        let in_front = |l: &Landing| {
+            matches!(l.state, LandingState::Gating | LandingState::Pushed | LandingState::Green | LandingState::Red)
+                || (l.state == LandingState::Open && !l.collecting)
+        };
+        let fronts: Vec<Uuid> = all.iter().filter(|l| in_front(l)).map(|l| l.id).collect();
+        let mut landings = Vec::new();
+        for landing in all {
+            if landing.collecting && landing.tickets.is_empty() {
                 continue;
             }
-            if let Some(card) = train.card_id.filter(|id| statuses.contains_key(id)) {
-                named.insert(card, ());
+            let ahead = fronts.iter().any(|id| *id != landing.id);
+            for task in &landing.tickets {
+                if statuses.contains_key(task) {
+                    named.insert(*task, ());
+                }
             }
-            let summary = lanes
+            let summary = landing
+                .tickets
                 .iter()
-                .filter_map(|id| views.get(id))
-                .map(|v| match derived_title(&v.lane, &v.cards, &statuses, false) {
-                    t if t.is_empty() => v.lane.name.clone(),
-                    t => t,
-                })
+                .filter_map(|t| statuses.get(t))
+                .map(|c| sentence(&c.title))
                 .collect::<Vec<_>>()
                 .join("; ");
-            let spend = match &train.agent {
-                Some(agent) => agent_spend_of(&conn, agent)?,
-                None => LaneSpend::default(),
+            let (spend, lander) = match landing.lander_id {
+                Some(id) => {
+                    let agent = crate::agents::agent_in(&conn, id)?;
+                    (spend_of_agent(&conn, &agent)?, Some(agent))
+                }
+                None => (Spend::default(), None),
             };
-            let title = train_title(&train);
-            let on: Vec<LaneOn> = lanes
+            let on: Vec<TicketOn> = landing
+                .tickets
                 .iter()
-                .filter_map(|id| views.get(id))
-                .map(|v| {
-                    Ok(LaneOn {
-                        id: v.lane.id,
-                        state: v.lane.state,
-                        state_since: v.lane.state_since,
-                        left_ready_at: left_ready_at(&conn, v.lane.id)?,
+                .filter_map(|t| views.get(t).map(|v| (t, v)))
+                .map(|(t, v)| {
+                    Ok(TicketOn {
+                        task: *t,
+                        stage: v.line.stage,
+                        stage_since: v.line.stage_since,
+                        left_ready_at: left_ready_at(&conn, *t)?,
                     })
                 })
                 .collect::<Result<_>>()?;
-            let open = train.agent.as_ref().filter(|a| a.ended_at.is_none());
+            let open = lander.as_ref().filter(|a| a.ended_at.is_none());
             let derived = derive(&PhaseInput {
-                state: train.state,
-                state_since: train.state_since,
-                agent_open: open.is_some(),
-                agent_started_at: open.map(|a| a.started_at),
-                last_lane_on: last_lane_on(&conn, train.id)?,
-                lanes: &on,
-                collecting: train.collecting,
+                state: landing.state,
+                state_since: landing.state_since,
+                lander_open: open.is_some(),
+                lander_started_at: open.map(|a| a.started_at),
+                last_ticket_on: last_ticket_on(&conn, landing.id)?,
+                tickets: &on,
+                collecting: landing.collecting,
                 main_red,
                 ahead,
                 now: now_ms,
             });
-            trains.push(TrainView {
-                train,
-                lanes,
-                title,
+            landings.push(LandingView {
+                title: landing_title(&landing),
+                landing,
                 summary,
                 spend,
                 phase: derived.phase,
@@ -501,61 +431,36 @@ impl Store {
         for card in statuses.values() {
             board_counts.add(card.status);
         }
-
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
-        let mut coverage: Vec<Coverage> = live
-            .keys()
-            .chain(landed.keys())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .map(|id| Coverage {
-                task_id: *id,
-                live: live.get(id).copied().unwrap_or(0),
-                landed: landed.get(id).copied().unwrap_or(0),
-            })
-            .collect();
-        coverage.sort_by_key(|c| c.task_id);
-        let order = order.into_iter().map(|(_, id)| id).collect();
         let cost = cost_of(&conn, workspace, &statuses, now_ms)?;
-        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost, agents: Vec::new(), agents_spend: LaneSpend::default() })
+        Ok(Plan {
+            now_ms,
+            themes,
+            lines,
+            cards,
+            rulings,
+            landings,
+            ci,
+            board_counts,
+            cost,
+            agents: Vec::new(),
+            agents_spend: Spend::default(),
+        })
     }
+}
 
-    /// A theme's or lane's timeline, oldest first, from `since_ms` on.
-    pub fn plan_events(&self, subject: Subject, since_ms: i64) -> Result<Vec<PlanEvent>> {
-        let conn = self.conn();
-        let (column, id) = match subject {
-            Subject::Theme(id) => ("theme_id", id),
-            Subject::Lane(id) => ("lane_id", id),
-        };
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT id, at, actor, theme_id, lane_id, kind, body, extra FROM plan_events
-                  WHERE {column} = ?1 AND at >= ?2 ORDER BY at, id"
-            ))
-            .map_err(map_err)?;
-        let rows = stmt
-            .query_map(params![uuid_blob(id), since_ms], |r| {
-                let opt = |i: usize| -> rusqlite::Result<Option<Uuid>> {
-                    let raw: Option<Vec<u8>> = r.get(i)?;
-                    Ok(raw.and_then(|b| Uuid::from_slice(&b).ok()))
-                };
-                let extra: String = r.get(7)?;
-                Ok(PlanEvent {
-                    id: get_uuid(r, 0)?,
-                    at: r.get(1)?,
-                    actor: r.get(2)?,
-                    theme_id: opt(3)?,
-                    lane_id: opt(4)?,
-                    kind: r.get(5)?,
-                    body: r.get(6)?,
-                    extra: serde_json::from_str(&extra).unwrap_or_default(),
-                })
-            })
-            .map_err(map_err)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(map_err)?;
-        Ok(rows)
-    }
+/// The number of the live landing each ticket of `workspace` is on.
+fn live_landing_numbers(conn: &Connection, workspace: Uuid) -> Result<HashMap<Uuid, u32>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT lt.task_id, l.number FROM landing_tickets lt JOIN landings l ON l.id = lt.landing_id
+              WHERE l.workspace_id = ?1 AND l.state NOT IN ('landed', 'dropped')",
+        )
+        .map_err(map_err)?;
+    let rows = stmt
+        .query_map(params![uuid_blob(workspace)], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?.max(0) as u32)))
+        .map_err(map_err)?;
+    rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
 }
 
 /// When each card last moved, by task id: `Task::updated_at`, the card's own
@@ -569,18 +474,18 @@ fn card_moves(conn: &Connection, workspace: &[u8]) -> Result<HashMap<Uuid, i64>>
     rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
 }
 
-/// The newest of a theme's story, the lanes on its cards (a dropped lane is
-/// gone, and doesn't count), its rulings made or settled, and its cards' own
-/// last moves (ov-331). The same rule the apps use (`PlanModel.lastMoved`).
-fn theme_last_moved(view: &ThemeView, lanes: &[LaneView], rulings: &[Ruling], moved: &HashMap<Uuid, i64>) -> i64 {
+/// The newest of a theme's story, its tickets' moves on the line (a dropped
+/// ticket is gone, and doesn't count), its rulings made or settled, and its
+/// cards' own last moves (ov-331). The same rule the apps use.
+fn theme_last_moved(view: &ThemeView, lines: &[LineView], rulings: &[Ruling], moved: &HashMap<Uuid, i64>) -> i64 {
     let tasks: HashSet<Uuid> = view.tasks.iter().copied().collect();
     let mut at = view.theme.story_at;
     for task in &view.tasks {
         at = at.max(moved.get(task).copied().unwrap_or(0));
     }
-    for lane in lanes {
-        if lane.lane.state != LaneState::Dropped && lane.cards.iter().any(|c| tasks.contains(&c.task_id)) {
-            at = at.max(lane.lane.state_since);
+    for line in lines {
+        if line.line.stage != Stage::Dropped && tasks.contains(&line.line.task_id) {
+            at = at.max(line.line.stage_since);
         }
     }
     for ruling in rulings {
@@ -591,39 +496,37 @@ fn theme_last_moved(view: &ThemeView, lanes: &[LaneView], rulings: &[Ruling], mo
     at
 }
 
-/// A theme's share of its lanes' spend, summed before rounding.
+/// A theme's tickets' spend, summed.
 #[derive(Debug, Clone, Default)]
-struct Shares {
-    tokens: [f64; 4],
-    cost: Option<f64>,
+struct Sum {
+    tokens: [u64; 4],
+    cost: Option<i64>,
     runs: u32,
     unmeasured: u32,
     shared: u32,
 }
 
-impl Shares {
-    /// `part` of `spend`: the share of a lane's cards that are the theme's.
-    fn add(&mut self, spend: &LaneSpend, part: f64) {
+impl Sum {
+    fn add(&mut self, spend: &Spend) {
         let tokens = [spend.input_tokens, spend.output_tokens, spend.cache_read_tokens, spend.cache_write_tokens];
         for (sum, n) in self.tokens.iter_mut().zip(tokens) {
-            *sum += n as f64 * part;
+            *sum += n;
         }
         if let Some(micros) = spend.cost_micros {
-            *self.cost.get_or_insert(0.0) += micros as f64 * part;
+            *self.cost.get_or_insert(0) += micros;
         }
         self.runs += spend.runs;
         self.unmeasured += spend.unmeasured_agents;
         self.shared += spend.shared_agents;
     }
 
-    fn total(&self) -> LaneSpend {
-        let n = |v: f64| v.round().max(0.0) as u64;
-        LaneSpend {
-            input_tokens: n(self.tokens[0]),
-            output_tokens: n(self.tokens[1]),
-            cache_read_tokens: n(self.tokens[2]),
-            cache_write_tokens: n(self.tokens[3]),
-            cost_micros: self.cost.map(|c| c.round() as i64),
+    fn total(&self) -> Spend {
+        Spend {
+            input_tokens: self.tokens[0],
+            output_tokens: self.tokens[1],
+            cache_read_tokens: self.tokens[2],
+            cache_write_tokens: self.tokens[3],
+            cost_micros: self.cost,
             runs: self.runs,
             unmeasured_agents: self.unmeasured,
             shared_agents: self.shared,
@@ -631,40 +534,9 @@ impl Shares {
     }
 }
 
-/// A lane's title for people (ov-462): its own, else its first card's title
-/// without the "Area: " lead, with "+N more" when it works others. Empty when
-/// it has no card to say it from.
-pub(crate) fn lane_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid, CardRef>) -> String {
-    derived_title(lane, cards, titles, true)
-}
-
-/// [`lane_title`], with or without the "+N more" a derived title ends in. A
-/// train's summary leaves it off: the lane's row already counts its cards.
-fn derived_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid, CardRef>, with_more: bool) -> String {
-    if !lane.title.is_empty() {
-        return lane.title.clone();
-    }
-    let mut tasks: Vec<Uuid> = Vec::new();
-    for c in cards {
-        if !tasks.contains(&c.task_id) {
-            tasks.push(c.task_id);
-        }
-    }
-    let Some(first) = tasks.first().and_then(|id| titles.get(id)) else { return String::new() };
-    let mut title = sentence(&first.title);
-    if tasks.len() > 1 && with_more {
-        let tail = format!(" +{} more", tasks.len() - 1);
-        let room = crate::plan::TITLE_MAX.saturating_sub(tail.chars().count());
-        title = format!("{}{tail}", shorten(&title, room));
-    } else {
-        title = shorten(&title, crate::plan::TITLE_MAX);
-    }
-    title
-}
-
-/// A card title as a lane's: the area lead ("Plan: ") dropped, and the first
-/// letter capital.
-fn sentence(card_title: &str) -> String {
+/// A card title as a line in a summary: the area lead ("Plan: ") dropped, and
+/// the first letter capital.
+pub(crate) fn sentence(card_title: &str) -> String {
     let t = card_title.trim();
     let body = match t.split_once(": ") {
         Some((lead, rest)) if !rest.trim().is_empty() && lead.chars().count() <= 24 && !lead.contains(char::is_whitespace) => rest.trim(),
@@ -677,189 +549,121 @@ fn sentence(card_title: &str) -> String {
     }
 }
 
-/// `text` cut to `max` characters, at a word, with an ellipsis.
-fn shorten(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let cut: String = text.chars().take(max.saturating_sub(1)).collect();
-    let cut = match cut.rfind(' ') {
-        Some(at) if at > max / 2 => cut[..at].to_string(),
-        _ => cut,
-    };
-    format!("{}\u{2026}", cut.trim_end())
-}
-
-/// A train's title for people (ov-462).
-pub(crate) fn train_title(train: &Train) -> String {
-    if !train.title.is_empty() {
-        return train.title.clone();
-    }
-    match crate::trains::train_number(&train.name) {
-        Some(n) => format!("Train {n}"),
-        None => train.name.clone(),
-    }
-}
-
-/// What a train's integrating agent has spent (ov-461): the turns the runner
-/// read for it, in the lane spend's words. An agent no turn of is read is
-/// `unmeasured_agents`, never zero.
-fn agent_spend_of(conn: &Connection, agent: &TrainAgent) -> Result<LaneSpend> {
-    if agent.harness != "claude" {
-        return Ok(LaneSpend { unmeasured_agents: 1, ..LaneSpend::default() });
-    }
-    let (input, output, read, write, priced, unpriced, runs): (i64, i64, i64, i64, i64, i64, i64) = conn
-        .query_row(
-            "SELECT CAST(coalesce(sum(m.input_tokens), 0) AS INTEGER),
-                    CAST(coalesce(sum(m.output_tokens), 0) AS INTEGER),
-                    CAST(coalesce(sum(m.cache_read_tokens), 0) AS INTEGER),
-                    CAST(coalesce(sum(m.cache_write_tokens), 0) AS INTEGER),
-                    CAST(coalesce(sum(m.cost_micros), 0) AS INTEGER),
-                    coalesce(sum(m.cost_micros IS NULL), 0),
-                    count(DISTINCT t.id)
-               FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE t.turn_key = 'claude-log:agent:' || ?1",
-            params![agent.agent_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-        )
-        .map_err(map_err)?;
-    let n = |v: i64| v.max(0) as u64;
-    Ok(LaneSpend {
-        input_tokens: n(input),
-        output_tokens: n(output),
-        cache_read_tokens: n(read),
-        cache_write_tokens: n(write),
-        cost_micros: (runs > 0 && unpriced == 0).then_some(priced),
-        runs: runs.max(0) as u32,
-        unmeasured_agents: u32::from(runs == 0),
-        shared_agents: 0,
-    })
-}
-
-fn lane_cards_of(conn: &Connection, lane: Uuid, on_board: &HashMap<Uuid, CardRef>) -> Result<Vec<LaneCard>> {
-    let mut stmt = conn
-        .prepare("SELECT task_id, slice FROM lane_tasks WHERE lane_id = ?1 ORDER BY rowid")
-        .map_err(map_err)?;
-    let rows = stmt
-        .query_map(params![uuid_blob(lane)], |r| Ok(LaneCard { task_id: get_uuid(r, 0)?, slice: r.get(1)? }))
-        .map_err(map_err)?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(map_err)?;
-    Ok(rows.into_iter().filter(|c| on_board.contains_key(&c.task_id)).collect())
-}
-
-fn agents_of(conn: &Connection, lane: Uuid) -> Result<Vec<LaneAgent>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT harness, agent_id, role, model, started_at, ended_at FROM lane_agents
-              WHERE lane_id = ?1 ORDER BY started_at, rowid",
-        )
-        .map_err(map_err)?;
-    let rows = stmt
-        .query_map(params![uuid_blob(lane)], |r| {
-            let role: String = r.get(2)?;
-            Ok(LaneAgent {
-                harness: r.get(0)?,
-                agent_id: r.get(1)?,
-                role: AgentRole::parse(&role).unwrap_or(AgentRole::Build),
-                model: r.get(3)?,
-                started_at: r.get(4)?,
-                ended_at: r.get(5)?,
-            })
-        })
-        .map_err(map_err)?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(map_err)?;
-    Ok(rows)
-}
-
-/// Fix rounds are derived: the number of moves into `fixing`.
-fn fix_rounds_of(conn: &Connection, lane: Uuid) -> Result<u32> {
+/// Fix rounds are derived: each fix the ticket's timeline records starting,
+/// and each move into fixing that the lane it came from recorded.
+fn fix_rounds_of(conn: &Connection, task: Uuid) -> Result<u32> {
     let n: i64 = conn
         .query_row(
-            "SELECT count(*) FROM plan_events WHERE lane_id = ?1 AND kind = 'state'
-                AND json_extract(extra, '$.to') = 'fixing'",
-            params![uuid_blob(lane)],
+            "SELECT count(*) FROM line_events WHERE task_id = ?1 AND landing_id IS NULL
+                AND ((kind = 'agent' AND json_extract(extra, '$.role') = 'fix' AND json_extract(extra, '$.verdict') IS NULL)
+                     OR (kind = 'state' AND json_extract(extra, '$.to') = 'fixing'))",
+            params![uuid_blob(task)],
             |r| r.get(0),
         )
         .map_err(map_err)?;
     Ok(n.max(0) as u32)
 }
 
-/// The turns a lane agent `a` ran, joined as `t`: a Claude subagent's are keyed
-/// `claude-log:agent:<agentId>` (`daemon/src/usage.rs`), and a pane's
-/// (`plan_panes::pane_agent_id`, ov-457) are every turn filed under its
-/// terminal, whatever its harness.
-///
-/// A pane's clause leaves out a subagent run the same lane records by its own
-/// id, which the first clause already counts (ov-503).
-const TURNS_OF_AGENT: &str = "((a.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || a.agent_id)
-     OR (a.agent_id LIKE 'pane:%' AND t.terminal_id = unhex(replace(substr(a.agent_id, 6), '-', ''))
-         AND NOT (t.kind = 'subagent' AND EXISTS (SELECT 1 FROM lane_agents o WHERE o.lane_id = a.lane_id
-                  AND o.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || o.agent_id))))";
+/// The turns an agent `a` ran, joined as `t`: a Claude subagent's are keyed
+/// `claude-log:agent:<agentId>` (`daemon/src/usage.rs`), and a pane's are
+/// every turn filed under its terminal, whatever its harness, but for the runs
+/// of subagents recorded as agents of their own, which those count.
+pub(crate) const TURNS_OF_AGENT: &str = "((a.kind = 'subagent' AND a.harness = 'claude'
+          AND t.turn_key = 'claude-log:agent:' || a.subagent_id)
+     OR (a.kind = 'pane' AND t.terminal_id = a.terminal_id
+         AND NOT (t.kind = 'subagent' AND EXISTS (SELECT 1 FROM agents o WHERE o.kind = 'subagent'
+                  AND o.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || o.subagent_id))))";
 
-/// Totals over the turns recorded for the lane's agents (`TURNS_OF_AGENT`).
-///
-/// An agent recorded on several lanes (a reviewer given two branches) did
-/// one run's work for all of them, and its turns can't say which part was
-/// whose. So its spend is split evenly across its lanes: each lane gets
-/// `1 / lanes` of every figure, and the lanes' totals sum to what it spent,
-/// not to that times the lanes. `shared_agents` says how many such agents a
-/// lane holds, so the figure is labeled a split. Runs still count whole: a
-/// run is in each lane it worked for.
-fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneSpend> {
-    let (input, output, read, write, priced, unpriced, runs): (i64, i64, i64, i64, i64, i64, i64) = conn
-        .query_row(
-            &format!("WITH lanes_of AS (
-                 SELECT harness, agent_id, count(*) AS lanes FROM lane_agents GROUP BY harness, agent_id
-             )
-             SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
-                    CAST(coalesce(round(sum(m.output_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
-                    CAST(coalesce(round(sum(m.cache_read_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
-                    CAST(coalesce(round(sum(m.cache_write_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
-                    CAST(coalesce(round(sum(m.cost_micros * 1.0 / s.lanes)), 0) AS INTEGER),
-                    coalesce(sum(m.cost_micros IS NULL), 0),
-                    count(DISTINCT t.id)
-               FROM lane_agents a
-               JOIN lanes_of s ON s.harness = a.harness AND s.agent_id = a.agent_id
-               JOIN agent_turns t ON {TURNS_OF_AGENT}
-               JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE a.lane_id = ?1"),
-            params![uuid_blob(lane)],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-        )
-        .map_err(map_err)?;
-    let shared: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM lane_agents a
-              WHERE a.lane_id = ?1 AND a.harness = 'claude'
-                AND EXISTS (SELECT 1 FROM lane_agents o
-                             WHERE o.harness = a.harness AND o.agent_id = a.agent_id AND o.lane_id != a.lane_id)",
-            params![uuid_blob(lane)],
-            |r| r.get(0),
-        )
-        .map_err(map_err)?;
-    let measured: i64 = conn
-        .query_row(
-            &format!("SELECT count(DISTINCT a.agent_id) FROM lane_agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
-              WHERE a.lane_id = ?1"),
-            params![uuid_blob(lane)],
-            |r| r.get(0),
-        )
-        .map_err(map_err)?;
+/// Totals as a `Spend`: input, output, cache read, cache write, priced micros,
+/// how many turns were unpriced, and runs.
+fn spend_from(row: (i64, i64, i64, i64, i64, i64, i64), unmeasured: u32, shared: u32) -> Spend {
+    let (input, output, read, write, priced, unpriced, runs) = row;
     let n = |v: i64| v.max(0) as u64;
-    Ok(LaneSpend {
+    Spend {
         input_tokens: n(input),
         output_tokens: n(output),
         cache_read_tokens: n(read),
         cache_write_tokens: n(write),
         cost_micros: (runs > 0 && unpriced == 0).then_some(priced),
         runs: runs.max(0) as u32,
-        unmeasured_agents: (agents.len() as i64 - measured).max(0) as u32,
-        shared_agents: shared.max(0) as u32,
-    })
+        unmeasured_agents: unmeasured,
+        shared_agents: shared,
+    }
+}
+
+/// What a ticket's agents spent on it (`TURNS_OF_AGENT`).
+///
+/// An agent that worked several tickets (a reviewer given two, a builder with
+/// a stack) did one run's work for all of them, and its turns can't say which
+/// part was whose. So its spend is split evenly across its tickets: each gets
+/// `1 / tickets` of every figure, and the tickets' totals sum to what it spent.
+/// `shared_agents` says how many such agents a ticket holds, so the figure is
+/// labeled a split. Runs still count whole.
+pub(crate) fn spend_of_ticket(conn: &Connection, task: Uuid) -> Result<Spend> {
+    let row = conn
+        .query_row(
+            &format!(
+                "WITH tickets_of AS (SELECT agent_id, count(DISTINCT task_id) AS n FROM ticket_work GROUP BY agent_id),
+                      worked AS (SELECT DISTINCT agent_id FROM ticket_work WHERE task_id = ?1)
+                 SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / s.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.output_tokens * 1.0 / s.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cache_read_tokens * 1.0 / s.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cache_write_tokens * 1.0 / s.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cost_micros * 1.0 / s.n)), 0) AS INTEGER),
+                        coalesce(sum(m.cost_micros IS NULL), 0),
+                        count(DISTINCT t.id)
+                   FROM worked w
+                   JOIN agents a ON a.id = w.agent_id
+                   JOIN tickets_of s ON s.agent_id = a.id
+                   JOIN agent_turns t ON {TURNS_OF_AGENT}
+                   JOIN agent_turn_models m ON m.turn_id = t.id"
+            ),
+            params![uuid_blob(task)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(map_err)?;
+    let (agents, shared, measured): (i64, i64, i64) = conn
+        .query_row(
+            &format!(
+                "SELECT count(DISTINCT w.agent_id),
+                        count(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM ticket_work o WHERE o.agent_id = w.agent_id
+                                                          AND o.task_id <> w.task_id) THEN w.agent_id END),
+                        count(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
+                                                          WHERE a.id = w.agent_id) THEN w.agent_id END)
+                   FROM ticket_work w WHERE w.task_id = ?1"
+            ),
+            params![uuid_blob(task)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(map_err)?;
+    Ok(spend_from(row, (agents - measured).max(0) as u32, shared.max(0) as u32))
+}
+
+/// What one agent spent, all its turns (`TURNS_OF_AGENT`). An agent no turn
+/// of is read is `unmeasured_agents`, never zero.
+pub(crate) fn spend_of_agent(conn: &Connection, agent: &crate::agents::Agent) -> Result<Spend> {
+    let row: (i64, i64, i64, i64, i64, i64, i64) = conn
+        .query_row(
+            &format!(
+                "SELECT CAST(coalesce(sum(m.input_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.output_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cache_read_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cache_write_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cost_micros), 0) AS INTEGER),
+                        coalesce(sum(m.cost_micros IS NULL), 0),
+                        count(DISTINCT t.id)
+                   FROM agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
+                   JOIN agent_turn_models m ON m.turn_id = t.id
+                  WHERE a.id = ?1"
+            ),
+            params![uuid_blob(agent.id)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(map_err)?;
+    let runs = row.6;
+    Ok(spend_from(row, u32::from(runs == 0), 0))
 }
 
 #[cfg(test)]
-#[path = "plan_moved_tests.rs"]
-mod moved_tests;
+#[path = "plan_read_tests.rs"]
+mod tests;

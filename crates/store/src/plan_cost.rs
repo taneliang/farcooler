@@ -4,15 +4,15 @@
 //! # Additive and removable, as the plan layer is
 //!
 //! One new table (migration 0028, `Older::Welcome`): `plan_budgets`, a token
-//! budget a theme or a lane may carry. Its rows go with their workspace,
-//! theme or lane by cascade. Nothing old gains a column or a trigger, and
+//! budget a theme or a ticket may carry (keyed by ticket since migration
+//! 0067). Its rows go with their workspace, theme or ticket by cascade. Nothing old gains a column or a trigger, and
 //! nothing the board runs on names this table (`scripts/plan-layer-lint.py`
 //! checks). Everything else here is derived on read from `agent_turns`, the
 //! runner's own record of turns, and is never stored.
 //!
 //! # What a "token" is
 //!
-//! The four counts a lane's spend carries, added: input, output, cache read
+//! The four counts a ticket's spend carries, added: input, output, cache read
 //! and cache write. A budget is a number of those, the same figure the plan
 //! prints as "17M tokens", so what the plan flags is what a person can see.
 //!
@@ -35,7 +35,7 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{Actor, TaskStatus, get_uuid, uuid_blob};
-use crate::plan::{Subject, event};
+use crate::ticket_lines::{LineSubject, line_event};
 use crate::plan_read::CardRef;
 use crate::store::Store;
 use crate::tasks::now_millis;
@@ -133,10 +133,10 @@ pub struct HarnessModelCost {
     pub cost_micros: Option<i64>,
 }
 
-/// A board's budgets, by the theme's or lane's id.
+/// A board's budgets, by the theme's or the ticket's id.
 pub(crate) fn budgets_of(conn: &Connection, workspace: Uuid) -> Result<HashMap<Uuid, u64>> {
     let mut stmt = conn
-        .prepare("SELECT coalesce(theme_id, lane_id), tokens FROM plan_budgets WHERE workspace_id = ?1")
+        .prepare("SELECT coalesce(theme_id, task_id), tokens FROM plan_budgets WHERE workspace_id = ?1")
         .map_err(map_err)?;
     let rows = stmt
         .query_map(params![uuid_blob(workspace)], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?.max(0) as u64)))
@@ -177,28 +177,29 @@ pub(crate) fn spread(tokens: f64, started: Option<i64>, ended: i64, window_start
     days
 }
 
-/// A lane's tokens on each of the last seven UTC days, oldest first, each run
-/// spread over the days it ran (see `spread`). A Claude agent shared with
-/// another lane counts here by its even split, as the lane's spend does, so
-/// summing lanes counts it once.
-pub(crate) fn lane_days(conn: &Connection, lane: Uuid, start_ms: i64) -> Result<[f64; TREND_DAYS]> {
+/// A ticket's tokens on each of the last seven UTC days, oldest first, each
+/// run spread over the days it ran (see `spread`). An agent that worked other
+/// tickets counts here by its even split, as the ticket's spend does, so
+/// summing tickets counts it once.
+pub(crate) fn ticket_days(conn: &Connection, task: Uuid, start_ms: i64) -> Result<[f64; TREND_DAYS]> {
     let mut stmt = conn
-        .prepare(
-            "WITH lanes_of AS (
-                 SELECT harness, agent_id, count(*) AS lanes FROM lane_agents GROUP BY harness, agent_id
-             )
+        .prepare(&format!(
+            "WITH tickets_of AS (SELECT agent_id, count(DISTINCT task_id) AS n FROM ticket_work GROUP BY agent_id),
+                  worked AS (SELECT DISTINCT agent_id FROM ticket_work WHERE task_id = ?1)
              SELECT t.started_at, t.ended_at,
-                    sum((m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens) * 1.0 / s.lanes)
-               FROM lane_agents a
-               JOIN lanes_of s ON s.harness = a.harness AND s.agent_id = a.agent_id
-               JOIN agent_turns t ON t.turn_key = 'claude-log:agent:' || a.agent_id
+                    sum((m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens) * 1.0 / s.n)
+               FROM worked w
+               JOIN agents a ON a.id = w.agent_id
+               JOIN tickets_of s ON s.agent_id = a.id
+               JOIN agent_turns t ON {}
                JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE a.lane_id = ?1 AND a.harness = 'claude' AND t.ended_at >= ?2
+              WHERE t.ended_at >= ?2
               GROUP BY t.id",
-        )
+            crate::plan_read::TURNS_OF_AGENT
+        ))
         .map_err(map_err)?;
     let rows = stmt
-        .query_map(params![uuid_blob(lane), start_ms], |r| {
+        .query_map(params![uuid_blob(task), start_ms], |r| {
             Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?))
         })
         .map_err(map_err)?
@@ -374,18 +375,21 @@ pub(crate) fn cost_of(
 }
 
 impl Store {
-    /// Give a theme or a lane a budget of `tokens`, or take it away with
+    /// Give a theme or a ticket a budget of `tokens`, or take it away with
     /// `None`. The event records the old and the new, so a raised budget is
-    /// not silent.
-    pub fn set_budget(&self, subject: Subject, tokens: Option<u64>, actor: Actor) -> Result<()> {
+    /// not silent. A landing takes no budget.
+    pub fn set_budget(&self, subject: LineSubject, tokens: Option<u64>, actor: Actor) -> Result<()> {
         if tokens.is_some_and(|t| t == 0 || t > BUDGET_MAX) {
             return Err(DomainError::InvalidArgument { what: "budget" });
         }
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let (column, id, workspace) = match subject {
-            Subject::Theme(id) => ("theme_id", id, workspace_of(&tx, "board_themes", id)?),
-            Subject::Lane(id) => ("lane_id", id, workspace_of(&tx, "lanes", id)?),
+            LineSubject::Theme(id) => ("theme_id", id, workspace_of(&tx, "board_themes", id)?),
+            LineSubject::Ticket(id) => ("task_id", id, workspace_of(&tx, "tasks", id)?),
+            LineSubject::Landing(_) | LineSubject::TicketOnLanding { .. } => {
+                return Err(DomainError::InvalidArgument { what: "budget" });
+            }
         };
         let before: Option<i64> = tx
             .query_row(
@@ -411,7 +415,7 @@ impl Store {
             Some(t) => format!("budget {t} tokens"),
             None => "budget removed".to_string(),
         };
-        event(&tx, subject, "budget", actor, &body, serde_json::json!({ "from": before, "to": tokens }))?;
+        line_event(&tx, subject, "budget", actor, &body, serde_json::json!({ "from": before, "to": tokens }))?;
         tx.commit().map_err(map_err)
     }
 }

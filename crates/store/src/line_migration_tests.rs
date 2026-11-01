@@ -5,17 +5,20 @@
 
 use super::*;
 
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::agents::{AgentPlace, AgentRole};
 use crate::landings::{LandingState, Route};
-use crate::models::{Actor, Task, TerminalRole};
-use crate::plan::{AgentRecord, Lane, LaneCard, LaneState, LaneUpdate, NewLane, NewTheme, Subject};
+use crate::models::Task;
 use crate::ticket_lines::{LineSubject, Stage};
 use crate::ticket_work::{LinkedBy, Verdict, WorkRole};
-use crate::trains::{NewTrain, TrainAgentRecord, TrainState, TrainUpdate};
-use crate::workers::{EndReason, LinkedBy as WorkerLinkedBy, WorkerRecord};
 use crate::Store;
+
+/// The live board's shapes, built through the old store calls before the move
+/// (one-card and many-card lanes, a card worked twice, slices, a fix round, a
+/// pane, a landed and a collecting train, worker records, budgets), at schema
+/// 57: `fixtures/before_the_line.sql` says how it was made.
+const BEFORE: &str = include_str!("../fixtures/before_the_line.sql");
 
 /// The board, and the ids the assertions name.
 struct Board {
@@ -24,105 +27,41 @@ struct Board {
     t: Vec<Task>,
     orchestrator: Uuid,
     pane: Uuid,
-    lanes: BTreeMap<&'static str, Lane>,
+    lanes: BTreeMap<String, Uuid>,
     theme: Uuid,
 }
 
-fn agent(harness: &str, id: &str, role: crate::plan::AgentRole) -> AgentRecord {
-    AgentRecord { harness: harness.into(), agent_id: id.into(), role, model: Some("opus".into()), ended: false }
+fn uuid(raw: Vec<u8>) -> Uuid {
+    Uuid::from_slice(&raw).unwrap()
 }
 
-fn to(store: &Store, lane: &Lane, state: LaneState) {
-    store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
-}
-
-/// The live board's shapes, built through the calls the runner makes.
+/// The old board, opened by this build, which moves it.
 fn realistic_board() -> Board {
-    use crate::plan::AgentRole::{Build, Fix, Review};
-    let store = Store::open_in_memory().unwrap();
-    let repo = store.register_repository_for_test("overnight");
-    let main = store.ensure_main_workspace(repo).unwrap().id;
-    let worktree = store.create_worktree(repo, "main", "/wt/main", true).unwrap().id;
-    let t: Vec<Task> = (0..11).map(|i| store.create_task(main, &format!("card {i}"), Actor::Manager).unwrap()).collect();
-    let orchestrator = store.create_terminal_for_test(worktree, main);
-    store.set_terminal_role(orchestrator, TerminalRole::Orchestrator).unwrap();
-    let pane = store.create_terminal_for_test(worktree, main);
+    realistic_board_with(|_| ()).0
+}
 
-    let roles = NewTheme { name: "Roles".into(), outcome: "Agents, not lanes.".into() };
-    let theme = store.create_theme(main, &roles, &[t[0].id, t[2].id], Actor::Manager).unwrap().id;
-
-    let mk = |name: &str, cards: &[(usize, &str)], builder: Option<AgentRecord>| {
-        let cards: Vec<LaneCard> = cards.iter().map(|(i, s)| LaneCard { task_id: t[*i].id, slice: s.to_string() }).collect();
-        let new = NewLane {
-            name: name.into(),
-            branch: name.into(),
-            worktree_path: format!("/wt/{name}"),
-            reason: format!("why {name}"),
-            ..Default::default()
-        };
-        store.create_lane(main, &new, &cards, builder.as_ref(), Actor::Manager).unwrap()
+/// The old board, with `before` run on it as it was, then opened by this
+/// build, which moves it. What `before` answers comes back beside it.
+fn realistic_board_with<T>(before: impl FnOnce(&Connection) -> T) -> (Board, T) {
+    let dir = farcooler_core::scratch::dir("line-migration");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.db", Uuid::now_v7()));
+    let (seen, main, orchestrator, pane, lanes, theme) = {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(BEFORE).unwrap();
+        let seen = before(&conn);
+        let main = uuid(conn.query_row("SELECT id FROM workspaces", [], |r| r.get(0)).unwrap());
+        let orchestrator = uuid(conn.query_row("SELECT id FROM terminals WHERE role = 2", [], |r| r.get(0)).unwrap());
+        let pane = uuid(conn.query_row("SELECT id FROM terminals WHERE role <> 2", [], |r| r.get(0)).unwrap());
+        let theme = uuid(conn.query_row("SELECT id FROM board_themes", [], |r| r.get(0)).unwrap());
+        let mut stmt = conn.prepare("SELECT name, id FROM lanes").unwrap();
+        let lanes: BTreeMap<String, Uuid> =
+            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, uuid(r.get(1)?)))).unwrap().map(|r| r.unwrap()).collect();
+        (seen, main, orchestrator, pane, lanes, theme)
     };
-    let mut lanes = BTreeMap::new();
-    // Two queued one-card lanes, in the plan in the opposite order to their making.
-    lanes.insert("store-1", mk("store-1", &[(0, "")], None));
-    lanes.insert("mac-2", mk("mac-2", &[(1, "")], None));
-    store.set_plan(main, &[lanes["mac-2"].id, lanes["store-1"].id], Actor::Manager).unwrap();
-    // A two-card lane that went through review and is in a fix round.
-    let web = mk("web-3", &[(2, ""), (3, "")], Some(agent("claude", "a-build", Build)));
-    store.record_lane_agent(web.id, &agent("claude", "a-rev", Review), Actor::Manager).unwrap();
-    to(&store, &web, LaneState::Review);
-    to(&store, &web, LaneState::Fixing);
-    store.record_lane_agent(web.id, &agent("codex", "a-fix", Fix), Actor::Manager).unwrap();
-    store.set_budget(Subject::Lane(web.id), Some(50_000), Actor::Manager).unwrap();
-    lanes.insert("web-3", web);
-    // A lane landed by a train.
-    let old = mk("old-5", &[(5, "")], Some(agent("claude", "b-build", Build)));
-    to(&store, &old, LaneState::Review);
-    to(&store, &old, LaneState::Landing);
-    let lander = TrainAgentRecord { harness: "codex".into(), agent_id: "lander-1".into(), model: Some("gpt".into()), ended: false };
-    let new = NewTrain { name: "train-70".into(), base: "origin/main".into(), card: Some(t[8].id), agent: Some(lander), ..Default::default() };
-    let train = store.start_train(main, &new, &[old.id], Actor::Manager).unwrap();
-    store.set_train(train.id, &TrainUpdate { sha: Some("abc1234".into()), ..Default::default() }, Actor::Manager).unwrap();
-    store.set_train(train.id, &TrainUpdate { state: Some(TrainState::Landed), ..Default::default() }, Actor::Manager).unwrap();
-    lanes.insert("old-5", old);
-    // One ready to land, built by a pane.
-    let site = mk("site-4", &[(4, "")], Some(agent("claude", &crate::plan_panes::pane_agent_id(pane), Build)));
-    to(&store, &site, LaneState::Review);
-    to(&store, &site, LaneState::Landing);
-    lanes.insert("site-4", site);
-    // A card dropped in one lane and taken up again in another.
-    let gone = mk("gone-6", &[(6, "")], None);
-    to(&store, &gone, LaneState::Dropped);
-    lanes.insert("gone-6", gone);
-    lanes.insert("redo-7", mk("redo-7", &[(6, "")], Some(agent("claude", "c-build", Build))));
-    // One card in two slices of one lane.
-    lanes.insert("slices-8", mk("slices-8", &[(7, "a"), (7, "b")], None));
-    // A lane with no card.
-    lanes.insert("spike-9", mk("spike-9", &[], Some(agent("claude", "d-spike", Build))));
-
-    // Worker records: the builder of web-3 recorded by the orchestrator, and a
-    // subagent the runner linked from its description that finished.
-    let worker = |task: Uuid, id: &str, label: &str, by: WorkerLinkedBy| {
-        let record = WorkerRecord {
-            harness: "claude".into(),
-            agent_id: id.into(),
-            session_id: Some("s-1".into()),
-            session_cwd: Some("/wt/main".into()),
-            orchestrator_terminal: Some(orchestrator),
-            label: Some(label.into()),
-            model: Some("sonnet".into()),
-            linked_by: by,
-        };
-        store.record_worker(task, &record, Actor::Manager).unwrap();
-    };
-    worker(t[2].id, "a-build", "Lane web-3: build", WorkerLinkedBy::Orchestrator);
-    worker(t[9].id, "w-9", "", WorkerLinkedBy::Description);
-    store.end_worker(t[9].id, "claude", Some("w-9"), EndReason::Finished, Actor::Manager).unwrap();
-    store.record_subagent_description("w-9", "ov-9 sweep").unwrap();
-    store.record_subagent_description("a-rev", "Review web-3").unwrap();
-    store.set_budget(Subject::Theme(theme), Some(900_000), Actor::Manager).unwrap();
-
-    Board { store, main, t, orchestrator, pane, lanes, theme }
+    let store = Store::open(&path).unwrap();
+    let t: Vec<Task> = (1..=11).map(|n| store.tasks_with_key(None, &format!("ov-{n}")).unwrap().remove(0)).collect();
+    (Board { store, main, t, orchestrator, pane, lanes, theme }, seen)
 }
 
 fn count(store: &Store, sql: &str) -> i64 {
@@ -156,7 +95,6 @@ fn hex(id: Uuid) -> String {
 fn tickets_take_their_lanes_stage_branch_and_plan_order() {
     let b = realistic_board();
     let (t, lanes) = (&b.t, &b.lanes);
-    apply(&b.store);
     let line = |i: usize| b.store.ticket_line(t[i].id).unwrap();
 
     // Every card a lane works is one ticket; a lane with none adds none, and a
@@ -177,7 +115,7 @@ fn tickets_take_their_lanes_stage_branch_and_plan_order() {
     // A fix round is building; the two cards share the lane's branch.
     for i in [2, 3] {
         assert_eq!(line(i).stage, Stage::Building);
-        assert_eq!(line(i).same_branch, Some(lanes["web-3"].id));
+        assert_eq!(line(i).same_branch, Some(lanes["web-3"]));
         assert_eq!(line(i).branch, "web-3");
     }
     assert_eq!(line(4).stage, Stage::Landing);
@@ -197,7 +135,6 @@ fn tickets_take_their_lanes_stage_branch_and_plan_order() {
 #[test]
 fn agents_are_one_row_each_with_their_role_and_place() {
     let b = realistic_board();
-    apply(&b.store);
     let agents = b.store.agents(b.main, true).unwrap();
     // a-build, a-rev, a-fix, b-build, lander-1, the site pane, c-build,
     // d-spike, w-9, and the orchestrator's pane.
@@ -238,7 +175,6 @@ fn agents_are_one_row_each_with_their_role_and_place() {
 fn who_worked_what_comes_from_lanes_trains_and_worker_records() {
     let b = realistic_board();
     let t = &b.t;
-    apply(&b.store);
     let agents = b.store.agents(b.main, true).unwrap();
     let roles = |i: usize| {
         let mut out: Vec<(String, WorkRole)> = b
@@ -276,25 +212,22 @@ fn who_worked_what_comes_from_lanes_trains_and_worker_records() {
 
 #[test]
 fn trains_become_landings_with_their_numbers_and_tickets() {
-    let b = realistic_board();
-    let t = &b.t;
-    let trains: Vec<(Vec<u8>, String)> = {
-        let conn = b.store.conn();
+    let count_on = |conn: &Connection, sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+    let (b, (trains, site_train, collecting)) = realistic_board_with(|conn| {
         let mut stmt = conn.prepare("SELECT id, name FROM board_trains ORDER BY created_at").unwrap();
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
-    };
-    let site_train: Vec<u8> = b
-        .store
-        .conn()
-        .query_row(
-            "SELECT t.id FROM lanes l JOIN board_trains t ON t.name = l.train COLLATE NOCASE WHERE l.name = 'site-4'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    let collecting = count(&b.store, "SELECT count(*) FROM board_trains WHERE collecting = 1 AND state NOT IN ('landed', 'dropped')");
+        let trains: Vec<(Vec<u8>, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect();
+        let site: Vec<u8> = conn
+            .query_row(
+                "SELECT t.id FROM lanes l JOIN board_trains t ON t.name = l.train COLLATE NOCASE WHERE l.name = 'site-4'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let collecting = count_on(conn, "SELECT count(*) FROM board_trains WHERE collecting = 1 AND state NOT IN ('landed', 'dropped')");
+        (trains, site, collecting)
+    });
+    let t = &b.t;
     assert_eq!(collecting, 1, "the board has its collecting train");
-    apply(&b.store);
     let landings = b.store.landings(b.main).unwrap();
     assert_eq!(landings.len(), trains.len());
     // Each keeps its train's id, and the number in its name.
@@ -323,12 +256,14 @@ fn trains_become_landings_with_their_numbers_and_tickets() {
 
 #[test]
 fn history_and_budgets_move_to_tickets() {
-    let b = realistic_board();
-    let (t, lanes) = (&b.t, &b.lanes);
-    let lane_events = count(&b.store, &format!("SELECT count(*) FROM plan_events WHERE lane_id = x'{}'", hex(lanes["web-3"].id)));
-    let theme_events = count(&b.store, "SELECT count(*) FROM plan_events WHERE theme_id IS NOT NULL");
+    let (b, (lane_events, theme_events)) = realistic_board_with(|conn| {
+        let web: Vec<u8> = conn.query_row("SELECT id FROM lanes WHERE name = 'web-3'", [], |r| r.get(0)).unwrap();
+        let lane: i64 = conn.query_row("SELECT count(*) FROM plan_events WHERE lane_id = ?1", [web], |r| r.get(0)).unwrap();
+        let theme: i64 = conn.query_row("SELECT count(*) FROM plan_events WHERE theme_id IS NOT NULL", [], |r| r.get(0)).unwrap();
+        (lane, theme)
+    });
+    let t = &b.t;
     assert!(lane_events > 0 && theme_events > 0);
-    apply(&b.store);
     // A lane's history is on each of its cards, naming the lane.
     for i in [2, 3] {
         let events = b.store.line_events(LineSubject::Ticket(t[i].id), 0).unwrap();
@@ -345,10 +280,10 @@ fn history_and_budgets_move_to_tickets() {
 
 #[test]
 fn the_old_tables_are_gone_and_the_board_is_untouched() {
-    let b = realistic_board();
-    let tasks_before = count(&b.store, "SELECT count(*) FROM tasks");
-    let notes_before = count(&b.store, "SELECT count(*) FROM task_notes");
-    apply(&b.store);
+    let (b, (tasks_before, notes_before)) = realistic_board_with(|conn| {
+        let n = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        (n("SELECT count(*) FROM tasks"), n("SELECT count(*) FROM task_notes"))
+    });
     for gone in ["lanes", "lane_tasks", "lane_agents", "plan_events", "board_trains", "train_events", "task_workers"] {
         assert!(!table_exists(&b.store, gone), "{gone} is dropped");
     }
@@ -365,19 +300,16 @@ fn the_old_tables_are_gone_and_the_board_is_untouched() {
 /// keeps its name as the landing's title.
 #[test]
 fn a_train_named_without_a_number_takes_the_next_one() {
-    let b = realistic_board();
-    b.store
-        .conn()
-        .execute_batch("UPDATE board_trains SET name = 'hotfix' WHERE name = 'train-70';
-                        UPDATE lanes SET train = 'hotfix' WHERE train = 'train-70';")
+    let (b, highest) = realistic_board_with(|conn| {
+        conn.execute_batch(
+            "UPDATE board_trains SET name = 'hotfix' WHERE name = 'train-70';
+             UPDATE lanes SET train = 'hotfix' WHERE train = 'train-70';",
+        )
         .unwrap();
-    let highest = {
-        let conn = b.store.conn();
         let mut stmt = conn.prepare("SELECT name FROM board_trains").unwrap();
         let names: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
         names.iter().filter_map(|n| train_number(n)).max().unwrap_or(0)
-    };
-    apply(&b.store);
+    });
     let landings = b.store.landings(b.main).unwrap();
     let hotfix = landings.iter().find(|l| l.title == "hotfix").expect("its name is its title");
     assert_eq!(hotfix.number, highest + 1);
@@ -385,14 +317,17 @@ fn a_train_named_without_a_number_takes_the_next_one() {
 }
 
 /// An empty board moves too, and the move is one-way: a second run fails
-/// rather than doubling anything.
+/// rather than doubling anything. It is the last migration, and an older build
+/// is refused the file.
 #[test]
 fn an_empty_board_moves_and_the_move_runs_once() {
     let store = Store::open_in_memory().unwrap();
-    apply(&store);
     assert!(table_exists(&store, "ticket_lines"));
+    assert!(!table_exists(&store, "lanes"));
     let conn = store.conn();
     let tx = conn.unchecked_transaction().unwrap();
     assert!((LINE_MIGRATION.0)(&tx).is_err(), "the tables it made are there");
     assert_eq!(LINE_MIGRATION.1, Older::Refused);
+    let last = crate::migrate::MIGRATIONS.last().unwrap();
+    assert!(std::ptr::fn_addr_eq(last.0, LINE_MIGRATION.0), "registered, last");
 }

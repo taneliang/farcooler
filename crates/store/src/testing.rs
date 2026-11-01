@@ -94,17 +94,19 @@ pub fn note_from_a_newer_build(store: &crate::Store, task: Uuid, kind: &str, act
         .unwrap();
 }
 
-/// Remove the plan layer from a database: its six tables, the two of its
-/// rulings (ov-304) the two of its trains (ov-309) and its budgets (ov-307), children first.
-/// What deleting the experiment's migration would leave behind (ov-268), for
-/// the drill that checks the board reads the same without it.
+/// Remove the plan layer from a database: its themes, rulings (ov-304), the
+/// line and its landings (ov-872), its history, budgets (ov-307) and CI reads,
+/// children first. What deleting the experiment's migrations would leave
+/// behind, for the drill that checks the board reads the same without it.
+/// `agents` and `ticket_work` stay: they are the board's record of who works a
+/// task (ov-213), as `task_workers` was.
 pub fn drop_plan_layer(store: &crate::Store) {
     store
         .conn()
         .execute_batch(
-            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE train_events; DROP TABLE board_trains;
+            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE landing_tickets; DROP TABLE line_events;
+             DROP TABLE landings; DROP TABLE ticket_lines;
              DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
-             DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
              DROP TABLE board_theme_tasks; DROP TABLE board_themes;",
         )
         .unwrap();
@@ -117,10 +119,10 @@ pub fn drop_pages(store: &crate::Store) {
     store.conn().execute_batch("DROP TABLE page_events; DROP TABLE board_pages;").unwrap();
 }
 
-/// Put a lane in `landing` with nothing else written, as a build from before
-/// the open train (ov-520) left it: no train, no event.
-pub fn strand_in_landing(store: &crate::Store, lane: uuid::Uuid) {
-    store.conn().execute("UPDATE lanes SET state = 'landing' WHERE id = ?1", [lane.as_bytes().to_vec()]).unwrap();
+/// Put a ticket in the landing stage with nothing else written, as a build
+/// from before the collecting landing left it: on no landing, no event.
+pub fn strand_in_landing(store: &crate::Store, task: uuid::Uuid) {
+    store.conn().execute("UPDATE ticket_lines SET stage = 'landing' WHERE task_id = ?1", [task.as_bytes().to_vec()]).unwrap();
 }
 
 /// Forget every pane's recorded Claude login, as a pane from before they

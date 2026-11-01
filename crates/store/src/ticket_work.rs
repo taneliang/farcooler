@@ -154,7 +154,7 @@ fn invalid(what: &'static str) -> DomainError {
 
 const WORK_COLS: &str = "agent_id, task_id, role, started_at, ended_at, verdict, linked_by";
 
-fn row_to_work(r: &Row) -> rusqlite::Result<TicketWork> {
+pub(crate) fn row_to_work(r: &Row) -> rusqlite::Result<TicketWork> {
     let role: String = r.get(2)?;
     let verdict: Option<String> = r.get(5)?;
     let linked: String = r.get(6)?;
@@ -180,7 +180,7 @@ fn work_in(conn: &Connection, agent: Uuid, task: Uuid, role: WorkRole) -> Result
     .ok_or(DomainError::NotFound)
 }
 
-fn works(conn: &Connection, column: &str, id: Uuid) -> Result<Vec<TicketWork>> {
+pub(crate) fn works(conn: &Connection, column: &str, id: Uuid) -> Result<Vec<TicketWork>> {
     let mut stmt = conn
         .prepare(&format!("SELECT {WORK_COLS} FROM ticket_work WHERE {column} = ?1 ORDER BY started_at, agent_id, role"))
         .map_err(map_err)?;

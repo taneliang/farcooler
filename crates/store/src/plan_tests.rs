@@ -1,14 +1,15 @@
 use super::*;
 
+use crate::agents::{AgentPlace, AgentRole, NewAgent};
+use crate::landings::{LandingUpdate, NewLanding, Route};
 use crate::models::NoteKind;
+use crate::models::Task;
 use crate::models::TaskStatus::{Done, InProgress, InReview};
 use crate::plan_read::StatusCounts;
 use crate::tasks::TaskScope;
-use crate::usage::{NewTurn, Surface, TurnKind, TurnModel};
+use crate::ticket_lines::{LineUpdate, NewTicketLine, Stage};
+use crate::ticket_work::{LinkedBy as WorkLinkedBy, WorkRole};
 use crate::workers::{LinkedBy, WorkerRecord};
-use farcooler_core::usage::TokenCounts;
-
-use crate::models::Task;
 
 fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
     let store = Store::open_in_memory().unwrap();
@@ -18,15 +19,6 @@ fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
     (store, main, tasks)
 }
 
-fn lane(store: &Store, main: Uuid, name: &str, cards: &[&Task]) -> Lane {
-    let cards: Vec<LaneCard> = cards.iter().map(|t| LaneCard { task_id: t.id, slice: String::new() }).collect();
-    store.create_lane(main, &NewLane { name: name.into(), ..Default::default() }, &cards, None, Actor::Manager).unwrap()
-}
-
-fn builder(id: &str) -> AgentRecord {
-    AgentRecord { harness: "claude".into(), agent_id: id.into(), role: AgentRole::Build, model: None, ended: false }
-}
-
 fn refused(r: Result<impl std::fmt::Debug>) -> &'static str {
     match r {
         Err(DomainError::InvalidArgument { what }) => what,
@@ -34,121 +26,25 @@ fn refused(r: Result<impl std::fmt::Debug>) -> &'static str {
     }
 }
 
-fn set_state(store: &Store, lane: &Lane, state: LaneState) -> Result<Lane> {
-    store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager)
+fn theme_events(store: &Store, theme: Uuid) -> Vec<crate::ticket_lines::LineEvent> {
+    store.line_events(LineSubject::Theme(theme), 0).unwrap()
 }
 
-fn events(store: &Store, subject: Subject) -> Vec<String> {
-    store.plan_events(subject, 0).unwrap().into_iter().map(|e| e.body).collect()
-}
-
-/// A lane with no agent is queued, and one with an agent is building.
-#[test]
-fn a_lane_starts_queued_or_building() {
-    let (store, main, t) = board(2);
-    let queued = lane(&store, main, "mac-fu3", &[&t[0]]);
-    assert_eq!(queued.state, LaneState::Queued);
-    let building = store
-        .create_lane(main, &NewLane { name: "mac-ux".into(), ..Default::default() }, &[], Some(&builder("a1")), Actor::Manager)
-        .unwrap();
-    assert_eq!(building.state, LaneState::Building);
-    let plan = store.plan(main, 0).unwrap();
-    let view = plan.lanes.iter().find(|l| l.lane.id == building.id).unwrap();
-    assert_eq!(view.agents.len(), 1);
-    assert_eq!(view.agents[0].role, AgentRole::Build);
-}
-
-/// States move forward with two loops, and any live state may be dropped; a
-/// finished lane takes no more moves.
-#[test]
-fn lane_states_move_forward_with_two_loops() {
-    let (store, main, t) = board(1);
-    let l = lane(&store, main, "a", &[&t[0]]);
-    assert_eq!(refused(set_state(&store, &l, LaneState::Review)), "lane_state", "queued can't skip building");
-    set_state(&store, &l, LaneState::Building).unwrap();
-    assert_eq!(refused(set_state(&store, &l, LaneState::Landed)), "lane_state");
-    set_state(&store, &l, LaneState::Review).unwrap();
-    set_state(&store, &l, LaneState::Fixing).unwrap();
-    set_state(&store, &l, LaneState::Review).unwrap();
-    set_state(&store, &l, LaneState::Landing).unwrap();
-    set_state(&store, &l, LaneState::Fixing).unwrap();
-    set_state(&store, &l, LaneState::Review).unwrap();
-    set_state(&store, &l, LaneState::Landing).unwrap();
-    let landed = set_state(&store, &l, LaneState::Landed).unwrap();
-    assert_eq!(landed.state, LaneState::Landed);
-    assert_eq!(refused(set_state(&store, &l, LaneState::Dropped)), "lane_closed");
-    assert_eq!(refused(set_state(&store, &l, LaneState::Building)), "lane_closed");
-
-    let d = lane(&store, main, "b", &[]);
-    set_state(&store, &d, LaneState::Building).unwrap();
-    assert_eq!(set_state(&store, &d, LaneState::Dropped).unwrap().state, LaneState::Dropped);
-}
-
-/// Fix rounds are derived from the moves into fixing, not stored.
-#[test]
-fn fix_rounds_are_counted_from_the_moves() {
-    let (store, main, t) = board(1);
-    let l = lane(&store, main, "a", &[&t[0]]);
-    for s in [LaneState::Building, LaneState::Review, LaneState::Fixing, LaneState::Review, LaneState::Landing, LaneState::Fixing] {
-        set_state(&store, &l, s).unwrap();
-    }
-    let plan = store.plan(main, 0).unwrap();
-    assert_eq!(plan.lanes[0].fix_rounds, 2);
-    let moves = store.plan_events(Subject::Lane(l.id), 0).unwrap().into_iter().filter(|e| e.kind == "state").count();
-    assert_eq!(moves, 7, "one event per move, and the first");
-}
-
-/// A live lane name is unique on a board, ignoring case, and free again once
-/// the lane has landed or dropped.
-#[test]
-fn a_live_lane_name_is_taken_until_it_closes() {
-    let (store, main, _) = board(0);
-    let a = lane(&store, main, "mac-ux", &[]);
-    assert_eq!(
-        refused(store.create_lane(main, &NewLane { name: "MAC-ux".into(), ..Default::default() }, &[], None, Actor::Manager)),
-        "name_taken"
-    );
-    assert_eq!(refused(store.create_lane(main, &NewLane { name: "two words".into(), ..Default::default() }, &[], None, Actor::Manager)), "name");
-    set_state(&store, &a, LaneState::Dropped).unwrap();
-    lane(&store, main, "mac-ux", &[]);
-}
-
-/// The plan is replaced whole, only queued lanes can be in it, and a lane
-/// that leaves queued loses its place in the same write.
-#[test]
-fn the_plan_is_replaced_whole_and_holds_only_queued_lanes() {
-    let (store, main, _) = board(0);
-    let [a, b, c] = ["a", "b", "c"].map(|n| lane(&store, main, n, &[]));
-    store.set_plan(main, &[a.id, b.id, c.id], Actor::Manager).unwrap();
-    let ranks = |store: &Store| -> Vec<(String, Option<u32>)> {
-        store.plan(main, 0).unwrap().lanes.into_iter().map(|l| (l.lane.name, l.lane.plan_rank)).collect()
-    };
-    assert_eq!(ranks(&store), [("a".into(), Some(1)), ("b".into(), Some(2)), ("c".into(), Some(3))]);
-
-    store.set_plan(main, &[c.id, a.id], Actor::Manager).unwrap();
-    assert_eq!(ranks(&store), [("a".into(), Some(2)), ("b".into(), None), ("c".into(), Some(1))], "b is out, not behind");
-    assert_eq!(store.plan(main, 0).unwrap().order, [c.id, a.id]);
-    assert_eq!(events(&store, Subject::Lane(b.id)).last().unwrap(), "Out of the plan.");
-
-    assert_eq!(refused(store.set_plan(main, &[a.id, a.id], Actor::Manager)), "lane_twice");
-    set_state(&store, &a, LaneState::Building).unwrap();
-    assert_eq!(refused(store.set_plan(main, &[a.id], Actor::Manager)), "plan_state");
-    assert_eq!(store.plan(main, 0).unwrap().order, [c.id], "leaving queued cleared a's rank, and a refusal wrote nothing");
-}
-
-/// A card is in at most one theme: adding it to a second moves it, and both
+/// A card is in one theme: adding it to a second moves it, and both
 /// themes' timelines say so.
 #[test]
 fn a_card_is_in_one_theme() {
     let (store, main, t) = board(2);
-    let one = store.create_theme(main, &NewTheme { name: "Visual language".into(), outcome: "One app.".into() }, &[t[0].id, t[1].id], Actor::Manager).unwrap();
+    let one = store
+        .create_theme(main, &NewTheme { name: "Visual language".into(), outcome: "One app.".into() }, &[t[0].id, t[1].id], Actor::Manager)
+        .unwrap();
     let two = store.create_theme(main, &NewTheme { name: "Reliability".into(), outcome: String::new() }, &[], Actor::Manager).unwrap();
     store.theme_cards(two.id, &[t[1].id], &[], Actor::Manager).unwrap();
     let plan = store.plan(main, 0).unwrap();
     let tasks = |name: &str| plan.themes.iter().find(|v| v.theme.name == name).unwrap().tasks.clone();
     assert_eq!(tasks("Visual language"), [t[0].id]);
     assert_eq!(tasks("Reliability"), [t[1].id]);
-    assert!(events(&store, Subject::Theme(one.id)).iter().any(|e| e.contains("moved to Reliability")));
+    assert!(theme_events(&store, one.id).iter().any(|e| e.body.contains("moved to Reliability")));
     assert_eq!(
         refused(store.create_theme(main, &NewTheme { name: "visual LANGUAGE".into(), outcome: String::new() }, &[], Actor::Manager)),
         "name_taken"
@@ -165,15 +61,15 @@ fn rewriting_the_story_keeps_the_old_one() {
     let second = store.update_theme(theme.id, &ThemeUpdate { story: Some("Second.".into()), ..Default::default() }, Actor::Manager).unwrap();
     assert_eq!(second.story, "Second.");
     assert!(second.story_at > 0);
-    let kept: Vec<_> = store.plan_events(Subject::Theme(theme.id), 0).unwrap().into_iter().filter(|e| e.kind == "story").collect();
+    let kept: Vec<_> = theme_events(&store, theme.id).into_iter().filter(|e| e.kind == "story").collect();
     assert_eq!(kept.iter().map(|e| e.body.as_str()).collect::<Vec<_>>(), ["", "First."], "each event holds the story it replaced");
     assert_eq!(kept[1].extra["to"], "Second.");
     // Touching another field leaves the story, and writes no story event.
     store.update_theme(theme.id, &ThemeUpdate { next: Some("Ship.".into()), ..Default::default() }, Actor::Manager).unwrap();
-    assert_eq!(store.plan_events(Subject::Theme(theme.id), 0).unwrap().iter().filter(|e| e.kind == "story").count(), 2);
+    assert_eq!(theme_events(&store, theme.id).iter().filter(|e| e.kind == "story").count(), 2);
 }
 
-/// A theme and a lane are on the card's own board.
+/// A theme is on the card's own board, as a ticket's agent is.
 #[test]
 fn a_card_from_another_board_is_refused() {
     let (store, main, t) = board(1);
@@ -181,207 +77,83 @@ fn a_card_from_another_board_is_refused() {
     let other = store.create_workspace(repo, "Other", "ot").unwrap();
     let theme = store.create_theme(other.id, &NewTheme { name: "T".into(), outcome: String::new() }, &[], Actor::Manager).unwrap();
     assert_eq!(refused(store.theme_cards(theme.id, &[t[0].id], &[], Actor::Manager)), "other_board");
-    assert_eq!(
-        refused(store.create_lane(other.id, &NewLane { name: "l".into(), ..Default::default() }, &[LaneCard { task_id: t[0].id, slice: String::new() }], None, Actor::Manager)),
-        "other_board"
-    );
+    let agent = store
+        .record_agent(
+            other.id,
+            &NewAgent {
+                role: AgentRole::Builder,
+                place: AgentPlace::Subagent { id: "a1".into(), parent: None },
+                harness: "claude".into(),
+                session_id: None,
+                session_cwd: None,
+                model: None,
+                title: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(refused(store.start_work(agent.id, t[0].id, WorkRole::Build, WorkLinkedBy::Orchestrator, Actor::Manager)), "other_board");
     assert!(matches!(store.theme_cards(theme.id, &[Uuid::now_v7()], &[], Actor::Manager), Err(DomainError::NotFound)));
 }
 
 /// `task move` needs no hook: a moved card drops out of every read at once,
-/// and the next write on the board removes its rows.
+/// and the next write on the board removes its theme row.
 #[test]
-fn a_moved_card_leaves_its_theme_and_lanes() {
+fn a_moved_card_leaves_its_theme_and_the_line() {
     let (store, main, t) = board(2);
     let repo = store.get_workspace(main).unwrap().repository_id;
     let other = store.create_workspace(repo, "Other", "ot").unwrap();
-    let theme = store.create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[t[0].id, t[1].id], Actor::Manager).unwrap();
-    lane(&store, main, "l", &[&t[0], &t[1]]);
+    let theme = store
+        .create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[t[0].id, t[1].id], Actor::Manager)
+        .unwrap();
+    store.put_on_line(t[0].id, &NewTicketLine::default(), Actor::Manager).unwrap();
+    store.put_on_line(t[1].id, &NewTicketLine::default(), Actor::Manager).unwrap();
     store.move_tasks(&[t[0].id], other.id, Actor::Manager).unwrap();
 
     let plan = store.plan(main, 0).unwrap();
     assert_eq!(plan.themes[0].tasks, [t[1].id], "the read already ignores it");
-    assert_eq!(plan.lanes[0].cards.iter().map(|c| c.task_id).collect::<Vec<_>>(), [t[1].id]);
+    assert_eq!(plan.lines.iter().map(|l| l.line.task_id).collect::<Vec<_>>(), [t[1].id]);
     assert_eq!(plan.themes[0].counts.total(), 1);
     let rows = |sql: &str| -> i64 { store.conn().query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(rows("SELECT count(*) FROM board_theme_tasks"), 2, "nothing wrote yet");
-
     store.theme_cards(theme.id, &[], &[], Actor::Manager).unwrap();
     assert_eq!(rows("SELECT count(*) FROM board_theme_tasks"), 1);
-    assert_eq!(rows("SELECT count(*) FROM lane_tasks"), 1);
 }
 
-/// Progress and coverage are derived: statuses are the board's own, and a card
-/// with all its lanes landed shows as such while its own status is untouched.
+/// Progress is derived: statuses are the board's own, and a ticket that landed
+/// shows as such while its card's status is untouched.
 #[test]
-fn progress_and_coverage_are_derived_from_the_board() {
+fn progress_is_derived_from_the_board() {
     let (store, main, t) = board(3);
-    store.create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[t[0].id, t[1].id, t[2].id], Actor::Manager).unwrap();
+    store
+        .create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[t[0].id, t[1].id, t[2].id], Actor::Manager)
+        .unwrap();
     store.set_task_status(t[0].id, Done, Actor::Manager).unwrap();
     store.set_task_status(t[1].id, InProgress, Actor::Manager).unwrap();
-    let a = lane(&store, main, "a", &[&t[1]]);
-    let b = store
-        .create_lane(main, &NewLane { name: "b".into(), ..Default::default() }, &[LaneCard { task_id: t[1].id, slice: "Mac".into() }], None, Actor::Manager)
-        .unwrap();
     let plan = store.plan(main, 0).unwrap();
     assert_eq!(plan.themes[0].counts, StatusCounts { done: 1, in_progress: 1, backlog: 1, ..Default::default() });
-    let cov = |plan: &crate::plan_read::Plan| plan.coverage.iter().find(|c| c.task_id == t[1].id).map(|c| (c.live, c.landed));
-    assert_eq!(cov(&plan), Some((2, 0)), "one card, two lanes");
-
-    for s in [LaneState::Building, LaneState::Review, LaneState::Landing, LaneState::Landed] {
-        set_state(&store, &a, s).unwrap();
+    store.put_on_line(t[1].id, &NewTicketLine::default(), Actor::Manager).unwrap();
+    for stage in [Stage::Building, Stage::Reviewing, Stage::Landed] {
+        let to = LineUpdate { stage: Some(stage), landed_sha: (stage == Stage::Landed).then(|| "abc1234".into()), ..Default::default() };
+        store.update_line(t[1].id, &to, Actor::Manager).unwrap();
     }
-    assert_eq!(cov(&store.plan(main, 0).unwrap()), Some((1, 1)), "b is still live, so the card isn't covered yet");
-    set_state(&store, &b, LaneState::Dropped).unwrap();
-    assert_eq!(cov(&store.plan(main, 0).unwrap()), Some((0, 1)), "LANDED-NOT-CLOSED: landed lanes, card still in progress");
+    let plan = store.plan(main, 0).unwrap();
+    assert_eq!(plan.lines[0].line.stage, Stage::Landed, "LANDED-NOT-CLOSED: landed, card still in progress");
     assert_eq!(store.get_task(t[1].id).unwrap().status, InProgress);
 }
 
-/// A finished lane shows only for a while.
+/// The migrations that make the layer are `Welcome`, and the one that moved it
+/// to the line is `Refused`: an older build reads tables it drops.
 #[test]
-fn finished_lanes_age_out_of_the_read() {
-    let (store, main, _) = board(0);
-    let l = lane(&store, main, "a", &[]);
-    set_state(&store, &l, LaneState::Dropped).unwrap();
-    assert_eq!(store.plan(main, 0).unwrap().lanes.len(), 1);
-    assert!(store.plan(main, crate::tasks::now_millis() + 1000).unwrap().lanes.is_empty());
-}
-
-fn run_turn(store: &Store, agent: &str, tokens: u64) {
-    run_turn_on(store, agent, tokens, None);
-}
-
-fn run_turn_on(store: &Store, agent: &str, tokens: u64, task_id: Option<Uuid>) {
-    store
-        .record_turn(&NewTurn {
-            key: format!("claude-log:agent:{agent}"),
-            terminal_id: None,
-            worktree_id: None,
-            repository_id: None,
-            workspace_id: None,
-            task_id,
-            harness: "claude".into(),
-            surface: Surface::Terminal,
-            started_at: None,
-            ended_at: 1000,
-            active_ms: None,
-            usage: "reported",
-            models: vec![TurnModel::priced(
-                Some("claude-opus-5".into()),
-                TokenCounts { input: tokens, output: tokens / 2, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false },
-                Some(2_000),
-            )],
-            kind: TurnKind::Subagent,
-        })
-        .unwrap();
-}
-
-/// A lane's spend is the sum of its agents' runs and nothing else's; an agent
-/// the runner has read no turn of is counted apart, never as zero.
-#[test]
-fn a_lane_s_spend_is_its_own_agents_runs() {
-    let (store, main, t) = board(1);
-    let l = store
-        .create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &[LaneCard { task_id: t[0].id, slice: String::new() }], Some(&builder("a1")), Actor::Manager)
-        .unwrap();
-    store
-        .update_lane(l.id, &LaneUpdate { state: Some(LaneState::Review), agent: Some(AgentRecord { role: AgentRole::Review, ..builder("a2") }), ..Default::default() }, Actor::Manager)
-        .unwrap();
-    store
-        .record_lane_agent(l.id, &AgentRecord { harness: "codex".into(), agent_id: "c1".into(), role: AgentRole::Fix, model: None, ended: false }, Actor::Manager)
-        .unwrap();
-    run_turn(&store, "a1", 1000);
-    run_turn(&store, "somebody-else", 99_999);
-
-    let spend = store.plan(main, 0).unwrap().lanes[0].spend;
-    assert_eq!((spend.input_tokens, spend.output_tokens, spend.runs), (1000, 500, 1));
-    assert_eq!(spend.cost_micros, Some(2_000));
-    assert_eq!(spend.unmeasured_agents, 2, "a2 has no turn yet, and codex reports none");
-    run_turn(&store, "a2", 10);
-    assert_eq!(store.plan(main, 0).unwrap().lanes[0].spend.unmeasured_agents, 1);
-}
-
-/// An agent on two lanes counts once across them (review 1004j P1): each
-/// lane holds half its spend and says one agent is shared, so the lanes sum
-/// to what it spent. An agent on one lane still counts whole there.
-#[test]
-fn an_agent_on_two_lanes_is_split_between_them_and_counted_once() {
-    let (store, main, t) = board(2);
-    let card = |i: usize| vec![LaneCard { task_id: t[i].id, slice: String::new() }];
-    let a = store.create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &card(0), Some(&builder("a1")), Actor::Manager).unwrap();
-    let b = store.create_lane(main, &NewLane { name: "b".into(), ..Default::default() }, &card(1), Some(&builder("b1")), Actor::Manager).unwrap();
-    let reviewer = AgentRecord { role: AgentRole::Review, ..builder("rev") };
-    store.record_lane_agent(a.id, &reviewer, Actor::Manager).unwrap();
-    store.record_lane_agent(b.id, &reviewer, Actor::Manager).unwrap();
-    run_turn(&store, "a1", 1000);
-    run_turn(&store, "rev", 600);
-
-    let plan = store.plan(main, 0).unwrap();
-    let spend = |name: &str| plan.lanes.iter().find(|l| l.lane.name == name).unwrap().spend;
-    let (a, b) = (spend("a"), spend("b"));
-    assert_eq!((a.input_tokens, a.output_tokens), (1000 + 300, 500 + 150), "a1 whole, half the reviewer's");
-    assert_eq!((b.input_tokens, b.output_tokens), (300, 150), "half the reviewer's");
-    assert_eq!(a.input_tokens + b.input_tokens, 1000 + 600, "the reviewer counts once across the lanes");
-    assert_eq!((a.cost_micros, b.cost_micros), (Some(2_000 + 1_000), Some(1_000)), "each run is priced 2,000");
-    assert_eq!((a.shared_agents, b.shared_agents), (1, 1));
-    assert_eq!((a.runs, b.runs), (2, 1), "a run is in each lane it worked for");
-}
-
-/// A lane's spend is what `usage.report` says for the same agents: the lane
-/// reads `agent_turns` by agent key, the report reads them by the card the
-/// agents are recorded on, and for one card the two are the same sum.
-#[test]
-fn a_lane_s_spend_matches_the_usage_report_for_its_agents() {
-    use crate::usage::UsageFilter;
-    let (store, main, t) = board(2);
-    let l = store
-        .create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &[LaneCard { task_id: t[0].id, slice: String::new() }], Some(&builder("a1")), Actor::Manager)
-        .unwrap();
-    store.record_lane_agent(l.id, &AgentRecord { role: AgentRole::Fix, ..builder("a2") }, Actor::Manager).unwrap();
-    run_turn_on(&store, "a1", 1000, Some(t[0].id));
-    run_turn_on(&store, "a2", 250, Some(t[0].id));
-    run_turn_on(&store, "other", 77_777, Some(t[1].id));
-
-    let report = store.usage_summary(&UsageFilter { task_id: Some(t[0].id), ..Default::default() }, &[], 0).unwrap().pop().unwrap().totals;
-    let spend = store.plan(main, 0).unwrap().lanes[0].spend;
-    assert_eq!(spend.input_tokens, 1250);
-    assert_eq!(
-        (spend.input_tokens, spend.output_tokens, spend.cache_read_tokens, spend.cache_write_tokens),
-        (report.tokens.input, report.tokens.output, report.tokens.cache_read, report.tokens.cache_write)
-    );
-    assert_eq!(spend.cost_micros, Some(report.cost_reported_micros + report.cost_estimated_micros));
-    assert_eq!(u64::from(spend.runs), report.subagent_runs);
-}
-
-/// An agent recorded again is the same agent: ending it ends it, recording it
-/// without `ended` reopens it.
-#[test]
-fn an_agent_recorded_twice_is_one_agent() {
-    let (store, main, _) = board(0);
-    let l = store.create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &[], Some(&builder("a1")), Actor::Manager).unwrap();
-    store.record_lane_agent(l.id, &AgentRecord { ended: true, ..builder("a1") }, Actor::Manager).unwrap();
-    let ended = |store: &Store| store.plan(main, 0).unwrap().lanes[0].agents.clone();
-    assert_eq!(ended(&store).len(), 1);
-    assert!(ended(&store)[0].ended_at.is_some());
-    store.record_lane_agent(l.id, &builder("a1"), Actor::Manager).unwrap();
-    assert!(ended(&store)[0].ended_at.is_none());
-    assert_eq!(refused(store.record_lane_agent(l.id, &AgentRecord { harness: "gemini".into(), ..builder("x") }, Actor::Manager)), "harness");
-}
-
-/// The migration is the 23rd and `Welcome`, so the build before it can still
-/// open the file. ov-199's LFS record follows it as 0024, ov-269's pages as
-/// 0025, ov-304's rulings as 0026, and ov-309's trains as 0027.
-#[test]
-fn the_migration_is_welcome() {
+fn the_layer_s_migrations_are_marked() {
     use crate::compat::Older;
-    let last = &crate::migrate::MIGRATIONS[22];
-    assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
-    assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 57);
+    let marked = |i: usize| crate::migrate::MIGRATIONS[i].1;
+    assert_eq!(marked(22), Older::Welcome, "0023, the plan layer");
+    assert_eq!(crate::migrate::MIGRATIONS.last().unwrap().1, Older::Refused, "0067, the line");
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 58);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
-/// writes has the columns it had before the migration.
+/// writes has the columns it had before.
 #[test]
 fn no_existing_table_gained_a_column() {
     let store = Store::open_in_memory().unwrap();
@@ -389,17 +161,17 @@ fn no_existing_table_gained_a_column() {
     let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
     let tables: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
     let ours = [
-        "board_themes", "board_theme_tasks", "lanes", "lane_tasks", "lane_agents", "plan_events", "board_rulings",
-        "board_ruling_tasks", "board_trains", "train_events", "board_ci", "plan_budgets",
+        "board_themes", "board_theme_tasks", "board_rulings", "board_ruling_tasks", "board_ci", "plan_budgets", "agents",
+        "ticket_lines", "ticket_work", "landings", "landing_tickets", "line_events",
     ];
     for table in tables.iter().filter(|t| !ours.contains(&t.as_str())) {
         let mut info = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
         let cols: Vec<String> = info.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
         assert!(
             !cols.iter().any(|c| {
-                c.contains("lane") || c.contains("theme") || c.contains("plan_") || c.contains("ruling")
-                    // A train's, as a word ("constraints" holds the letters).
-                    || c.split('_').any(|w| w == "train" || w == "trains" || w == "ci")
+                c.contains("lane") || c.contains("theme") || c.contains("plan_") || c.contains("ruling") || c.contains("landing")
+                    // A task's wait has its own `wait_line` (ov-212), which is not the layer's.
+                    || c.split('_').any(|w| w == "ci" || w == "ticket")
             }),
             "{table} has a column for the plan layer: {cols:?}"
         );
@@ -422,7 +194,7 @@ fn no_existing_table_gained_a_column() {
 /// then the layer on top.
 fn populated() -> (Store, Uuid, Vec<Task>) {
     let (store, main, t) = board(4);
-    store.add_note(t[0].id, NoteKind::Progress, Actor::Manager, "Dispatched in the mac-ux lane.", serde_json::json!({})).unwrap();
+    store.add_note(t[0].id, NoteKind::Progress, Actor::Manager, "Dispatched on its own branch.", serde_json::json!({})).unwrap();
     store.set_task_status(t[1].id, InProgress, Actor::Manager).unwrap();
     store.set_task_status(t[2].id, InProgress, Actor::Manager).unwrap();
     store.set_task_status(t[2].id, InReview, Actor::Manager).unwrap();
@@ -448,22 +220,17 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
         .create_theme(main, &NewTheme { name: "Visual language".into(), outcome: "One app.".into() }, &[t[0].id, t[1].id], Actor::Manager)
         .unwrap();
     store.update_theme(theme.id, &ThemeUpdate { story: Some("Going.".into()), ..Default::default() }, Actor::Manager).unwrap();
-    let a = store
-        .create_lane(
-            main,
-            &NewLane { name: "mac-ux".into(), ..Default::default() },
-            &[LaneCard { task_id: t[1].id, slice: "Mac".into() }, LaneCard { task_id: t[2].id, slice: String::new() }],
-            Some(&builder("a1")),
-            Actor::Manager,
-        )
-        .unwrap();
-    set_state(&store, &a, LaneState::Review).unwrap();
-    set_state(&store, &a, LaneState::Landing).unwrap();
+    for task in [t[1].id, t[2].id] {
+        store.put_on_line(task, &NewTicketLine { branch: format!("b-{task}"), ..Default::default() }, Actor::Manager).unwrap();
+        for stage in [Stage::Building, Stage::Reviewing, Stage::Landing] {
+            store.update_line(task, &LineUpdate { stage: Some(stage), ..Default::default() }, Actor::Manager).unwrap();
+        }
+    }
     // A budget on each (ov-307): the drill drops them with the rest.
-    store.set_budget(crate::plan::Subject::Theme(theme.id), Some(1_000_000), Actor::Manager).unwrap();
-    store.set_budget(crate::plan::Subject::Lane(a.id), Some(500_000), Actor::Manager).unwrap();
-    let q = lane(&store, main, "next-one", &[&t[3]]);
-    store.set_plan(main, &[q.id], Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Theme(theme.id), Some(1_000_000), Actor::Manager).unwrap();
+    store.set_budget(LineSubject::Ticket(t[1].id), Some(500_000), Actor::Manager).unwrap();
+    store.put_on_line(t[3].id, &NewTicketLine::default(), Actor::Manager).unwrap();
+    store.set_line_order(main, &[t[3].id], Actor::Manager).unwrap();
     let ruling = crate::rulings::NewRuling {
         decision: "The inbox is amber.".into(),
         why: "It's the one attention color.".into(),
@@ -473,11 +240,11 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
     let r = store.add_ruling(main, &ruling, &[t[0].id, t[2].id], Actor::Manager).unwrap();
     store.set_ruling(r.id, crate::rulings::RulingState::Confirmed, Some("Fine."), Actor::Manager).unwrap();
     store.add_ruling(main, &ruling, &[t[1].id], Actor::Manager).unwrap();
-    let train = store
-        .start_train(main, &crate::trains::NewTrain { name: "integ-9".into(), base: "origin/main".into(), ..Default::default() }, &[a.id], Actor::Manager)
-        .unwrap();
-    let pushed = crate::trains::TrainUpdate { sha: Some("1a1b3275".into()), ..Default::default() };
-    store.set_train(train.id, &pushed, Actor::Manager).unwrap();
+    let landing = store.landing_of(t[1].id).unwrap().expect("a reviewed ticket joins the collecting landing");
+    let pushed = LandingUpdate { sha: Some("1a1b3275".into()), ..Default::default() };
+    store.update_landing(landing.id, &pushed, Actor::Manager).unwrap();
+    let new = NewLanding { route: Route::Ask, base: "origin/main".into(), title: String::new(), lander: None, collecting: false };
+    assert!(store.start_landing(main, &new, &[], Actor::Manager).is_ok());
     let ci = crate::board_ci::CiRead {
         subject: crate::board_ci::sha_subject("1a1b3275"),
         sha: "1a1b3275".into(),
@@ -506,22 +273,8 @@ fn board_reads(store: &Store, main: Uuid, tasks: &[Task]) -> String {
         out += &format!("{:#?}\n", store.task_facts(std::slice::from_ref(&task)).unwrap());
         out += &format!("{:#?}\n", store.workers_for(t.id).unwrap());
     }
-    out += &format!("{:#?}\n", store.search_notes(repo_of(store, main), "lane", None).unwrap());
+    out += &format!("{:#?}\n", store.search_notes(repo_of(store, main), "branch", None).unwrap());
     out
-}
-
-/// Drop the layer's six tables, its rulings' two, its trains' two and its
-/// budgets' one, children first.
-fn drop_the_layer(store: &Store) {
-    store
-        .conn()
-        .execute_batch(
-            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE train_events; DROP TABLE board_trains;
-             DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
-             DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
-             DROP TABLE board_theme_tasks; DROP TABLE board_themes;",
-        )
-        .unwrap();
 }
 
 /// The drill: with the layer's tables gone, every board read is the same
@@ -539,7 +292,7 @@ fn drill_with(
     extra: &dyn Fn(&Store) -> String,
 ) -> std::result::Result<(), String> {
     let before = board_reads(store, main, tasks) + &extra(store);
-    drop_the_layer(store);
+    crate::testing::drop_plan_layer(store);
     let after = board_reads(store, main, tasks) + &extra(store);
     if before != after {
         return Err("a board read changed when the layer went".into());
@@ -562,7 +315,7 @@ fn drill_with(
 #[test]
 fn the_board_is_the_same_bytes_with_the_layer_dropped() {
     let (store, main, tasks) = populated();
-    let rows: i64 = store.conn().query_row("SELECT count(*) FROM plan_events", [], |r| r.get(0)).unwrap();
+    let rows: i64 = store.conn().query_row("SELECT count(*) FROM line_events", [], |r| r.get(0)).unwrap();
     assert!(rows > 5, "the layer had something to remove");
     drill(&store, main, &tasks).unwrap();
 }
@@ -576,14 +329,14 @@ fn the_drill_goes_red_when_a_task_write_depends_on_the_layer() {
         .conn()
         .execute_batch(
             "CREATE TRIGGER injected AFTER UPDATE OF status ON tasks
-             BEGIN UPDATE lanes SET reason = 'touched' WHERE state = 'queued'; END;",
+             BEGIN UPDATE ticket_lines SET reason = 'touched' WHERE stage = 'waiting'; END;",
         )
         .unwrap();
     let err = drill(&store, main, &tasks).unwrap_err();
     assert!(err.starts_with("set_task_status"), "{err}");
 }
 
-/// The drill can fail on a read too: a task list that joined `lane_tasks`
+/// The drill can fail on a read too: a task list that joined `ticket_lines`
 /// reads differently, or not at all, once the table is gone.
 #[test]
 fn the_drill_goes_red_when_a_read_depends_on_the_layer() {
@@ -591,238 +344,10 @@ fn the_drill_goes_red_when_a_read_depends_on_the_layer() {
     let joined = |store: &Store| -> String {
         store
             .conn()
-            .query_row("SELECT count(*) FROM tasks t JOIN lane_tasks l ON l.task_id = t.id", [], |r| r.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM tasks t JOIN ticket_lines l ON l.task_id = t.id", [], |r| r.get::<_, i64>(0))
             .map(|n| n.to_string())
             .unwrap_or_else(|e| e.to_string())
     };
     let err = drill_with(&store, main, &tasks, &joined).unwrap_err();
     assert_eq!(err, "a board read changed when the layer went");
-}
-
-/// A lane that leaves queued loses its place in the same write. The read hides
-/// a stale rank from `order`, so this reads the lane itself: a building lane
-/// with a rank would go out on the wire as "2nd in the plan".
-#[test]
-fn a_lane_that_leaves_queued_loses_its_rank_in_the_same_write() {
-    let (store, main, _) = board(0);
-    let [a, b] = ["a", "b"].map(|n| lane(&store, main, n, &[]));
-    store.set_plan(main, &[a.id, b.id], Actor::Manager).unwrap();
-    assert_eq!(store.lane(b.id).unwrap().plan_rank, Some(2));
-    let moved = set_state(&store, &b, LaneState::Building).unwrap();
-    assert_eq!(moved.plan_rank, None, "the row handed back");
-    assert_eq!(store.lane(b.id).unwrap().plan_rank, None, "the column, not only the read's filter");
-    assert_eq!(store.lane(a.id).unwrap().plan_rank, Some(1), "the lane that stayed keeps its place");
-    // And a write that doesn't move it leaves the rank alone.
-    store.update_lane(a.id, &LaneUpdate { reason: Some("still next".into()), ..Default::default() }, Actor::Manager).unwrap();
-    assert_eq!(store.lane(a.id).unwrap().plan_rank, Some(1));
-}
-
-/// Every write that takes cards, or lanes, refuses one from another board, and
-/// writes nothing. The CLI resolves names within one board, so only the wire
-/// can send these.
-#[test]
-fn every_write_refuses_another_boards_cards_and_lanes() {
-    let (store, main, t) = board(1);
-    let repo = store.get_workspace(main).unwrap().repository_id;
-    let other = store.create_workspace(repo, "Other", "ot").unwrap();
-    let foreign = store.create_task(other.id, "foreign", Actor::Manager).unwrap();
-    let foreign_card = LaneCard { task_id: foreign.id, slice: String::new() };
-
-    // create_theme
-    let made = store.create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[foreign.id], Actor::Manager);
-    assert_eq!(refused(made), "other_board");
-    let themes: i64 = store.conn().query_row("SELECT count(*) FROM board_themes", [], |r| r.get(0)).unwrap();
-    assert_eq!(themes, 0, "a refusal wrote nothing");
-
-    // lane_cards
-    let ours = lane(&store, main, "ours", &[&t[0]]);
-    assert_eq!(refused(store.lane_cards(ours.id, std::slice::from_ref(&foreign_card), &[], Actor::Manager)), "other_board");
-    assert_eq!(store.plan(main, 0).unwrap().lanes[0].cards.len(), 1);
-
-    // set_plan: another board's queued lane can't be ranked here.
-    let theirs = store
-        .create_lane(other.id, &NewLane { name: "theirs".into(), ..Default::default() }, &[], None, Actor::Manager)
-        .unwrap();
-    assert_eq!(refused(store.set_plan(main, &[theirs.id], Actor::Manager)), "other_board");
-    assert_eq!(store.lane(theirs.id).unwrap().plan_rank, None, "their plan gained nothing");
-}
-
-/// A reviewed lane lands in one write, through landing, and the timeline reads
-/// as it would for the two writes. From building it still can't.
-#[test]
-fn a_reviewed_lane_lands_in_one_write_through_landing() {
-    let (store, main, _) = board(0);
-    let l = lane(&store, main, "a", &[]);
-    set_state(&store, &l, LaneState::Building).unwrap();
-    assert_eq!(refused(set_state(&store, &l, LaneState::Landed)), "lane_state");
-    set_state(&store, &l, LaneState::Review).unwrap();
-    let landed = set_state(&store, &l, LaneState::Landed).unwrap();
-    assert_eq!(landed.state, LaneState::Landed);
-    let said = events(&store, Subject::Lane(l.id));
-    assert_eq!(&said[said.len() - 2..], ["Moved to landing.", "Landed."]);
-    assert_eq!(LaneState::Review.moves(), [LaneState::Fixing, LaneState::Landing, LaneState::Landed, LaneState::Dropped]);
-}
-
-// ---- titles, and a train's own agent (ov-462, ov-461) ----
-
-fn titled(store: &Store, main: Uuid, title: &str) -> Task {
-    store.create_task(main, title, Actor::Manager).unwrap()
-}
-
-fn whole(t: &Task) -> LaneCard {
-    LaneCard { task_id: t.id, slice: String::new() }
-}
-
-/// The migration for titles, the one before ov-468's, is `Welcome`: an older build reads
-/// every table it knows as it did.
-#[test]
-fn the_titles_migration_is_welcome() {
-    use crate::compat::Older;
-    let last = &crate::migrate::MIGRATIONS[34];
-    assert!(std::ptr::fn_addr_eq(last.0, migration_0044_plan_titles as fn(&Transaction) -> rusqlite::Result<()>));
-    assert_eq!(last.1, Older::Welcome);
-}
-
-/// A lane keeps the title the orchestrator wrote, one line, cleared by an
-/// empty one.
-#[test]
-fn a_lane_keeps_its_title() {
-    let (store, main, _) = board(0);
-    let new = NewLane { name: "agent-msg".into(), title: "  Agents message the orchestrator ".into(), ..Default::default() };
-    let l = store.create_lane(main, &new, &[], None, Actor::Manager).unwrap();
-    assert_eq!(l.title, "Agents message the orchestrator");
-    let set = |title: &str| store.update_lane(l.id, &LaneUpdate { title: Some(title.into()), ..Default::default() }, Actor::Manager);
-    assert_eq!(set("Agents tell the orchestrator").unwrap().title, "Agents tell the orchestrator");
-    assert_eq!(refused(set(&"x".repeat(81))), "title");
-    assert_eq!(refused(set("two\nlines")), "title");
-    assert_eq!(store.lane(l.id).unwrap().title, "Agents tell the orchestrator", "a refusal changes nothing");
-    assert_eq!(store.update_lane(l.id, &LaneUpdate { reason: Some("why".into()), ..Default::default() }, Actor::Manager).unwrap().title, "Agents tell the orchestrator");
-    assert_eq!(set("").unwrap().title, "");
-}
-
-/// A lane without a title reads one off its cards: the first card's title
-/// without its "Area: " lead, and "+N more" for the others.
-#[test]
-fn a_lane_without_a_title_reads_one_from_its_cards() {
-    let (store, main, _) = board(0);
-    let (a, b, c) = (
-        titled(&store, main, "Plan: lanes and trains named by what they do"),
-        titled(&store, main, "Mac: a longer note about the sidebar"),
-        titled(&store, main, "no lead here"),
-    );
-    let mk = |name: &str, cards: &[LaneCard]| store.create_lane(main, &NewLane { name: name.into(), ..Default::default() }, cards, None, Actor::Manager).unwrap();
-    mk("one", &[whole(&a)]);
-    mk("two", &[whole(&a), whole(&b), LaneCard { task_id: b.id, slice: "x".into() }]);
-    mk("bare", &[whole(&c)]);
-    mk("empty", &[]);
-    store.create_lane(main, &NewLane { name: "own".into(), title: "Mine".into(), ..Default::default() }, &[whole(&a)], None, Actor::Manager).unwrap();
-    let plan = store.plan(main, 0).unwrap();
-    let title = |name: &str| plan.lanes.iter().find(|l| l.lane.name == name).unwrap().title.clone();
-    assert_eq!(title("one"), "Lanes and trains named by what they do");
-    assert_eq!(title("two"), "Lanes and trains named by what they do +1 more", "a second slice of a card is not another card");
-    assert_eq!(title("bare"), "No lead here");
-    assert_eq!(title("empty"), "", "a client then shows the name");
-    assert_eq!(title("own"), "Mine");
-}
-
-/// A long card title is cut at a word to fit.
-#[test]
-fn a_derived_title_is_cut_to_fit() {
-    let (store, main, _) = board(0);
-    let long = titled(&store, main, &format!("Plan: {}", "word ".repeat(30)));
-    store.create_lane(main, &NewLane { name: "l".into(), ..Default::default() }, &[whole(&long)], None, Actor::Manager).unwrap();
-    let title = store.plan(main, 0).unwrap().lanes[0].title.clone();
-    assert!(title.chars().count() <= 80 && title.ends_with('\u{2026}') && !title.contains(" \u{2026}"), "{title}");
-}
-
-/// A train reads "Train N" from `integ-N` or `train-N`, its own title when it
-/// has one, and its lanes' titles as a summary.
-#[test]
-fn a_train_reads_train_n_and_what_it_carries() {
-    use crate::trains::{NewTrain, TrainUpdate, train_number};
-    let (store, main, _) = board(0);
-    assert_eq!((train_number("integ-72"), train_number("Train-5"), train_number("integ-x"), train_number("rc-1"), train_number("train-")), (Some(72), Some(5), None, None, None));
-    let a = titled(&store, main, "Agents: agents message the orchestrator");
-    let la = store.create_lane(main, &NewLane { name: "agent-msg".into(), ..Default::default() }, &[whole(&a)], None, Actor::Manager).unwrap();
-    let lb = store.create_lane(main, &NewLane { name: "attach".into(), title: "Attach files".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
-    for l in [&la, &lb] {
-        for to in [LaneState::Building, LaneState::Review, LaneState::Landing] {
-            set_state(&store, l, to).unwrap();
-        }
-    }
-    let plain = |name: &str, lanes: &[Uuid]| store.start_train(main, &NewTrain { name: name.into(), ..Default::default() }, lanes, Actor::Manager).unwrap();
-    // One open train at a time: each of these leaves for its checks before the next is started.
-    let leave = |t: &crate::trains::Train| store.set_train(t.id, &TrainUpdate { state: Some(crate::trains::TrainState::Gating), ..Default::default() }, Actor::Manager).unwrap();
-    let t72 = plain("integ-72", &[la.id, lb.id]);
-    leave(&t72);
-    leave(&plain("spring", &[]));
-    let t3 = store.start_train(main, &NewTrain { name: "train-3".into(), title: "Phones catch up".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
-    let read = || store.plan(main, 0).unwrap().trains;
-    let by = |n: &str| read().into_iter().find(|t| t.train.name == n).unwrap();
-    assert_eq!((by("integ-72").title.as_str(), by("integ-72").summary.as_str()), ("Train 72", "Agents message the orchestrator; Attach files"));
-    let more = store.create_lane(main, &NewLane { name: "many".into(), ..Default::default() }, &[whole(&a), whole(&titled(&store, main, "Mac: another"))], None, Actor::Manager).unwrap();
-    for to in [LaneState::Building, LaneState::Review, LaneState::Landing] {
-        set_state(&store, &more, to).unwrap();
-    }
-    store.update_lane(more.id, &LaneUpdate { train: Some("integ-72".into()), ..Default::default() }, Actor::Manager).unwrap();
-    let summary = by("integ-72").summary;
-    assert!(summary.ends_with("; Agents message the orchestrator"), "a derived title carries no '+N more' into the summary: {summary}");
-    assert_eq!(store.plan(main, 0).unwrap().lanes.iter().find(|l| l.lane.name == "many").unwrap().title, "Agents message the orchestrator +1 more");
-    assert_eq!((by("spring").title.as_str(), by("spring").summary.as_str()), ("spring", ""));
-    assert_eq!(by("train-3").title, "Phones catch up");
-    store.set_train(t3.id, &TrainUpdate { title: Some(String::new()), ..Default::default() }, Actor::Manager).unwrap();
-    assert_eq!(by("train-3").title, "Train 3");
-    assert_eq!(by("integ-72").train.id, t72.id);
-}
-
-/// A train records its integrating agent and card (ov-461): the agent's state
-/// and spend come with it, and it is no lane.
-#[test]
-fn a_train_carries_its_integrating_agent_and_spend() {
-    use crate::trains::{NewTrain, TrainAgentRecord, TrainUpdate};
-    let (store, main, t) = board(1);
-    let rec = |id: &str, model: Option<&str>, ended: bool| TrainAgentRecord { harness: "claude".into(), agent_id: id.into(), model: model.map(Into::into), ended };
-    let new = NewTrain { name: "integ-2".into(), card: Some(t[0].id), agent: Some(rec("i1", Some("opus"), false)), ..Default::default() };
-    let train = store.start_train(main, &new, &[], Actor::Manager).unwrap();
-    let agent = train.agent.clone().unwrap();
-    assert_eq!((agent.agent_id.as_str(), agent.model.as_str(), agent.ended_at, train.card_id), ("i1", "opus", None, Some(t[0].id)));
-    assert!(store.plan(main, 0).unwrap().lanes.is_empty(), "the agent is not a lane");
-    let view = || store.plan(main, 0).unwrap();
-    assert_eq!(view().trains[0].spend.unmeasured_agents, 1, "no turn read yet: not reported, never zero");
-    assert!(view().cards.iter().any(|c| c.task_id == t[0].id), "its card is in the plan's cards");
-
-    run_turn(&store, "i1", 1000);
-    run_turn(&store, "somebody-else", 99_999);
-    let spend = view().trains[0].spend;
-    assert_eq!((spend.input_tokens, spend.output_tokens, spend.runs, spend.unmeasured_agents), (1000, 500, 1, 0));
-    assert_eq!(spend.cost_micros, Some(2_000));
-
-    let set = |agent: TrainAgentRecord| store.set_train(train.id, &TrainUpdate { agent: Some(agent), ..Default::default() }, Actor::Manager).unwrap().agent.unwrap();
-    let ended = set(rec("i1", None, true));
-    assert_eq!((ended.model.as_str(), ended.ended_at.is_some(), ended.started_at), ("opus", true, agent.started_at));
-    assert!(set(rec("i1", None, false)).ended_at.is_none(), "recording it again reopens it");
-    assert_eq!(set(rec("i2", None, false)).agent_id, "i2", "another agent replaces it");
-    assert_eq!(view().trains[0].spend.runs, 0);
-
-    let bad = |agent: TrainAgentRecord| refused(store.set_train(train.id, &TrainUpdate { agent: Some(agent), ..Default::default() }, Actor::Manager));
-    assert_eq!(bad(TrainAgentRecord { harness: "gemini".into(), ..rec("x", None, false) }), "harness");
-    assert_eq!(bad(rec(" ", None, false)), "agent_id");
-    let other = Store::open_in_memory().unwrap();
-    let _ = other;
-}
-
-/// A card must be on the train's own board.
-#[test]
-fn a_train_s_card_must_be_on_its_board() {
-    use crate::trains::{NewTrain, TrainUpdate};
-    let (store, main, _) = board(0);
-    let repo2 = store.register_repository_for_test("elsewhere");
-    let there = store.ensure_main_workspace(repo2).unwrap().id;
-    let stranger = store.create_task(there, "not here", Actor::Manager).unwrap();
-    let new = NewTrain { name: "integ-3".into(), card: Some(stranger.id), ..Default::default() };
-    assert_eq!(refused(store.start_train(main, &new, &[], Actor::Manager)), "other_board");
-    let train = store.start_train(main, &NewTrain { name: "integ-3".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
-    let set = TrainUpdate { card: Some(stranger.id), ..Default::default() };
-    assert_eq!(refused(store.set_train(train.id, &set, Actor::Manager)), "other_board");
-    assert!(store.train(train.id).unwrap().card_id.is_none());
 }

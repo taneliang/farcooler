@@ -9,7 +9,8 @@ use uuid::Uuid;
 use super::*;
 use crate::migrate::{MIGRATIONS, migrate, migrate_only_to};
 use crate::models::{Actor, uuid_blob};
-use crate::plan_agents::{PlanAgent, agents_of};
+use crate::agents::{AgentPlace, AgentRole, NewAgent};
+use crate::plan_agents::{AgentView, agents_of};
 use crate::usage::{NewTurn, Surface, TurnKind, TurnModel};
 use crate::workers::{LinkedBy, WorkerRecord};
 use farcooler_core::session_log::subagents::SubagentLogs;
@@ -59,8 +60,19 @@ fn board() -> Board {
 }
 
 impl Board {
-    /// File `turn` as the daemon does, naming the agent when the run did.
+    /// File `turn` as the daemon does, naming the agent when the run did, and
+    /// record its agent as the runner does when it sees one start.
     fn record(&self, turn: &LoggedTurn) {
+        let new = NewAgent {
+            role: AgentRole::Builder,
+            place: AgentPlace::Subagent { id: AGENT.into(), parent: None },
+            harness: "claude".into(),
+            session_id: None,
+            session_cwd: None,
+            model: None,
+            title: None,
+        };
+        self.store.record_agent(self.ws, &new).unwrap();
         self.store
             .record_turn(&NewTurn {
                 key: turn.key.clone(),
@@ -84,7 +96,7 @@ impl Board {
         }
     }
 
-    fn agent(&self, now: i64) -> PlanAgent {
+    fn agent(&self, now: i64) -> AgentView {
         let agents = agents_of(&self.store.conn(), self.ws, now, &|_| None).unwrap().agents;
         assert_eq!(agents.len(), 1, "{agents:?}");
         agents.into_iter().next().unwrap()
@@ -92,8 +104,8 @@ impl Board {
 }
 
 /// The description rides from the parent's `Agent` call, through the sibling
-/// meta file the pane follower reads, to an agent that no lane, train or card
-/// names.
+/// meta file the pane follower reads, to an agent nobody titled and that works
+/// no ticket.
 #[test]
 fn an_unjoined_subagent_shows_the_description_its_parent_gave_it() {
     let (run, root) = the_recorded_run();
@@ -112,8 +124,8 @@ fn an_unjoined_subagent_shows_the_description_its_parent_gave_it() {
     let b = board();
     b.record(&run);
     let agent = b.agent(run.ended_at_ms.unwrap() + 60_000);
-    assert_eq!(agent.id, format!("agent:{AGENT}"));
-    assert!(agent.lane.is_none() && agent.train.is_none() && agent.card.is_none(), "nothing joins it");
+    assert_eq!(agent.agent.place, AgentPlace::Subagent { id: AGENT.into(), parent: None });
+    assert!(agent.tickets.is_empty(), "it works no ticket");
     assert_eq!(agent.label, "Sleep 200 then report");
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -144,7 +156,7 @@ fn a_worker_label_still_wins() {
         .unwrap();
     let agent = b.agent(run.ended_at_ms.unwrap() + 60_000);
     assert_eq!(agent.label, "Design ov-503");
-    assert_eq!(agent.card.map(|c| c.1), Some(card.key));
+    assert_eq!(agent.tickets.iter().map(|w| w.task_id).collect::<Vec<_>>(), [card.id]);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -195,8 +207,8 @@ fn the_latest_description_wins_and_blank_changes_nothing() {
 }
 
 /// A database from before the table migrates cleanly: its rows are as they
-/// were, the plan lists its subagent with no label, and a description can then
-/// be kept.
+/// were, a subagent recorded since is listed with no label, and a description
+/// can then be kept.
 #[test]
 fn an_old_database_migrates_and_lists_its_subagents_unlabeled() {
     let ours = MIGRATIONS
@@ -235,9 +247,16 @@ fn an_old_database_migrates_and_lists_its_subagents_unlabeled() {
 
     migrate(&mut conn, ours).unwrap();
 
+    assert!(agents_of(&conn, ws, 60_000, &|_| None).unwrap().agents.is_empty(), "nothing recorded it");
+    conn.execute(
+        "INSERT INTO agents (id, workspace_id, role, kind, harness, subagent_id, started_at)
+             VALUES (?1, ?2, 'builder', 'subagent', 'claude', 'old', 1000)",
+        params![uuid_blob(Uuid::now_v7()), w],
+    )
+    .unwrap();
     let agents = agents_of(&conn, ws, 60_000, &|_| None).unwrap().agents;
-    assert_eq!(agents.len(), 1, "the old subagent is still listed");
-    assert_eq!((agents[0].id.as_str(), agents[0].label.as_str()), ("agent:old", ""));
+    assert_eq!(agents.len(), 1, "recorded, it is listed");
+    assert_eq!(agents[0].label, "");
     conn.execute(
         "INSERT INTO subagent_descriptions (agent_id, description, recorded_at) VALUES ('old', 'Named late', 1)",
         [],

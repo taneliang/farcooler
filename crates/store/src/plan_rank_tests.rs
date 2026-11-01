@@ -54,10 +54,10 @@ fn the_move_is_recorded_under_who_made_it() {
     let (store, ids) = themes(&["Alpha", "Beta"]);
     let bob = Actor::Member { handle: Handle::new("bob").unwrap() };
     store.move_theme(ids[1], 1, bob).unwrap();
-    let events = store.plan_events(Subject::Theme(ids[1]), 0).unwrap();
+    let events = store.line_events(crate::ticket_lines::LineSubject::Theme(ids[1]), 0).unwrap();
     let ranked: Vec<_> = events.iter().filter(|e| e.kind == "rank").collect();
     assert_eq!(ranked.len(), 1);
     assert_eq!((ranked[0].actor.as_str(), ranked[0].body.as_str()), ("member:bob", "Moved to next up."));
     store.move_theme(ids[1], 1, bob).unwrap();
-    assert_eq!(store.plan_events(Subject::Theme(ids[1]), 0).unwrap().iter().filter(|e| e.kind == "rank").count(), 1);
+    assert_eq!(store.line_events(crate::ticket_lines::LineSubject::Theme(ids[1]), 0).unwrap().iter().filter(|e| e.kind == "rank").count(), 1);
 }

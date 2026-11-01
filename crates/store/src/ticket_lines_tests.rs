@@ -1,9 +1,8 @@
 use super::*;
 
-use crate::line_migration::store_with_the_line;
 
 fn board(n: usize) -> (Store, Uuid, Vec<Uuid>) {
-    let store = store_with_the_line();
+    let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
     let tasks = (0..n).map(|i| store.create_task(main, &format!("card {i}"), Actor::Manager).unwrap().id).collect();
@@ -109,6 +108,7 @@ fn a_stacked_ticket_lands_after_its_parent() {
     stack(t[1], t[0]).unwrap();
     assert_eq!(refused(stack(t[0], t[1])), "stack_cycle");
     walk(&store, t[1], Stage::Landing);
+    assert_eq!(store.landing_of(t[1]).unwrap(), None, "it waits for its parent to go on a landing");
     assert_eq!(refused(to(&store, t[1], Stage::Landed)), "parent_not_landed");
     walk(&store, t[0], Stage::Landed);
     assert_eq!(to(&store, t[1], Stage::Landed).unwrap().stage, Stage::Landed);

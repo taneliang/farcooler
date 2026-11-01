@@ -1,11 +1,10 @@
 use super::*;
 
 use crate::agents::{AgentPlace, NewAgent};
-use crate::line_migration::store_with_the_line;
 use crate::ticket_lines::LineSubject;
 
 fn board(n: usize) -> (Store, Uuid, Vec<Uuid>) {
-    let store = store_with_the_line();
+    let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
     let tasks = (0..n).map(|i| store.create_task(main, &format!("card {i}"), Actor::Manager).unwrap().id).collect();

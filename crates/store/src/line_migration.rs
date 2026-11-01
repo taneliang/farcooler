@@ -1,16 +1,6 @@
 //! The one-way move from lanes and trains to agents, the line and landings
 //! (ov-872, slice 2).
 //!
-//! # Not registered yet
-//!
-//! `MIGRATIONS` doesn't list it. Running it drops the tables that `plan.rs`,
-//! `trains.rs`, `open_train.rs`, `train_phase.rs` and `workers.rs` read and
-//! write, and the daemon still calls them until slice 3 moves it onto
-//! `agents.rs`, `ticket_lines.rs`, `ticket_work.rs` and `landings.rs`. So slice
-//! 3 appends `LINE_MIGRATION` to `MIGRATIONS` in the same change that switches
-//! the daemon, and deletes this note. Registered before then, the runner
-//! would migrate, and every plan read would fail on a missing table.
-//!
 //! # What it does
 //!
 //! `Older::Refused`, by the owner's choice (Oct 31): a build from before it
@@ -48,8 +38,7 @@ use crate::tasks::now_millis;
 
 type Id = Vec<u8>;
 
-/// What slice 3 appends to `MIGRATIONS`.
-#[cfg_attr(not(test), allow(dead_code))]
+/// The last entry of `MIGRATIONS`, the 58th.
 pub(crate) const LINE_MIGRATION: (fn(&Transaction) -> rusqlite::Result<()>, Older) =
     (migration_0067_agents_and_the_line, Older::Refused);
 
@@ -671,21 +660,3 @@ pub(crate) fn migration_0067_agents_and_the_line(tx: &Transaction) -> rusqlite::
 #[cfg(test)]
 #[path = "line_migration_tests.rs"]
 mod tests;
-
-/// A fresh store with the line's tables, as slice 3's registration will leave
-/// one: what the tests of the line's own files open.
-#[cfg(test)]
-pub(crate) fn store_with_the_line() -> crate::Store {
-    let store = crate::Store::open_in_memory().unwrap();
-    apply(&store);
-    store
-}
-
-/// Run the move on `store`, as `MIGRATIONS` will once it is registered.
-#[cfg(test)]
-pub(crate) fn apply(store: &crate::Store) {
-    let conn = store.conn();
-    let tx = conn.unchecked_transaction().unwrap();
-    (LINE_MIGRATION.0)(&tx).unwrap();
-    tx.commit().unwrap();
-}
