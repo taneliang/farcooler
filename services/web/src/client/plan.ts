@@ -33,6 +33,44 @@ export interface TrainLane {
   name: string
 }
 
+/// What a card's counts say, as the board's statuses.
+export interface Counts {
+  backlog: number
+  todo: number
+  needsDecision: number
+  inProgress: number
+  inReview: number
+  done: number
+}
+
+/// A card as the plan read it: for a title and a status the page hasn't.
+export interface PlanCard {
+  task: string
+  key: string
+  title: string
+  /// The board's status, as `Status`'s word; empty when the plan names none.
+  status: string
+}
+
+/// What an agent does, in the runner's words (`board_agents`).
+export type FleetRole = 'orchestrator' | 'build' | 'review' | 'fix' | 'integrator' | 'subagent' | 'agent'
+
+/// An agent that still exists on the board, as the plan lists it (ov-503).
+export interface FleetAgent {
+  /// `agent:<id>`, `pane:<terminal id>` or `turns:<harness>`.
+  id: string
+  role: FleetRole
+  /// What the orchestrator called it; empty when nothing kept it.
+  label: string
+  lane: string | null
+  train: string | null
+  card: CardRef | null
+  /// Its pane, to open its chat.
+  terminal: string | null
+  working: boolean
+  startedAt: number
+}
+
 export interface Train {
   id: string
   name: string
@@ -45,6 +83,9 @@ export interface Train {
   lanes: TrainLane[]
   card: string | null
   cardRef: CardRef | null
+  /// The agent landing it, when the train records one: whether it is working
+  /// and since when.
+  integrator: { working: boolean; startedAt: number } | null
 }
 
 export type LaneState = 'queued' | 'building' | 'review' | 'fixing' | 'landing' | 'landed' | 'dropped' | 'unknown'
@@ -53,6 +94,8 @@ export interface Lane {
   id: string
   name: string
   heading: string
+  /// The title the orchestrator wrote, else empty.
+  title: string
   reason: string
   state: LaneState
   stateSince: number | null
@@ -76,6 +119,9 @@ export interface Theme {
   ordinal: number
   cards: number
   done: number
+  counts: Counts
+  /// The tasks of its cards, to say which initiative a ticket is for.
+  tasks: string[]
 }
 
 export type RulingState = 'standing' | 'confirmed' | 'reversed' | 'unknown'
@@ -106,11 +152,28 @@ export interface Plan {
   rulings: Ruling[]
   /// Whether the runner sent rulings at all (`board_rulings`).
   hasRulings: boolean
+  /// Every agent that still exists, the orchestrator included.
+  agents: FleetAgent[]
+  /// The cards the plan carries, with their titles and statuses.
+  cards: PlanCard[]
+  /// The board's cards by status; null from a runner that doesn't say.
+  boardCounts: Counts | null
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const list = (v: unknown): any[] => (Array.isArray(v) ? v : [])
+
+const countsOf = (c: any): Counts => ({
+  backlog: num(c?.backlog) ?? 0,
+  todo: num(c?.todo) ?? 0,
+  needsDecision: num(c?.needs_decision) ?? 0,
+  inProgress: num(c?.in_progress) ?? 0,
+  inReview: num(c?.in_review) ?? 0,
+  done: num(c?.done) ?? 0,
+})
+
+const FLEET_ROLES = new Set<string>(['orchestrator', 'build', 'review', 'fix', 'integrator', 'subagent'])
 
 /// A phase of a train, in the runner's words.
 export type Phase =
@@ -191,6 +254,7 @@ export function parsePlan(json: string): Plan | null {
       id: l.id,
       name: text(l.name),
       heading: heading(text(l.title), text(l.name)),
+      title: text(l.title),
       reason: text(l.reason),
       state: LANE_STATES.has(l.state) ? l.state : 'unknown',
       stateSince: num(l.state_since),
@@ -221,6 +285,7 @@ export function parsePlan(json: string): Plan | null {
         .map(x => ({ id: x.lane, name: text(x.name) })),
       card: t.card && typeof t.card.key === 'string' ? t.card.key : null,
       cardRef: t.card && typeof t.card.key === 'string' && typeof t.card.task === 'string' && t.card.task ? { task: t.card.task, key: t.card.key } : null,
+      integrator: t.agent && typeof t.agent === 'object' ? { working: t.agent.ended_at == null, startedAt: num(t.agent.started_at) ?? 0 } : null,
     })
   }
 
@@ -239,6 +304,8 @@ export function parsePlan(json: string): Plan | null {
       ordinal: num(t.ordinal) ?? 0,
       cards: list(t.cards).length,
       done: num(counts.done) ?? 0,
+      counts: countsOf(counts),
+      tasks: list(t.cards).map(c => text(c?.task)).filter(Boolean),
     })
   }
 
@@ -260,6 +327,25 @@ export function parsePlan(json: string): Plan | null {
     })
   }
 
+  const agents: FleetAgent[] = []
+  for (const a of list(raw.agents)) {
+    if (!a || typeof a.id !== 'string') continue
+    agents.push({
+      id: a.id,
+      role: FLEET_ROLES.has(a.role) ? a.role : 'agent',
+      label: text(a.label).trim(),
+      lane: a.lane && typeof a.lane.id === 'string' ? a.lane.id : null,
+      train: a.train && typeof a.train.id === 'string' ? a.train.id : null,
+      card: a.card && typeof a.card.task === 'string' && typeof a.card.key === 'string' && a.card.task ? { task: a.card.task, key: a.card.key } : null,
+      terminal: typeof a.terminal === 'string' && a.terminal ? a.terminal : null,
+      working: a.working === true,
+      startedAt: num(a.started_at) ?? 0,
+    })
+  }
+  const cards: PlanCard[] = list(raw.cards)
+    .filter(c => c && typeof c.task === 'string' && c.task)
+    .map(c => ({ task: c.task, key: text(c.key), title: text(c.title), status: text(c.status) }))
+
   return {
     nowMs: num(raw.now_ms) ?? 0,
     trains,
@@ -269,57 +355,15 @@ export function parsePlan(json: string): Plan | null {
     themes,
     rulings,
     hasRulings: Array.isArray(raw.rulings),
+    agents,
+    cards,
+    boardCounts: raw.board_counts && typeof raw.board_counts === 'object' ? countsOf(raw.board_counts) : null,
   }
 }
 
 // MARK: Sections
 
-const isLiveTrain = (t: Train): boolean => t.phase !== 'landed' && t.phase !== 'dropped'
-
-export interface Sections {
-  landing: { train: Train; lanes: Lane[] }[]
-  inReview: Lane[]
-  building: Lane[]
-  /// Queued lanes the plan ranks, in its order.
-  nextUp: Lane[]
-  /// Queued lanes it doesn't.
-  notRanked: Lane[]
-}
-
-/// Which lane is in which section, by AgentKit's PlanSections rules. A lane on
-/// a live train is in that train's card whatever its state; one in review,
-/// fixing or landing with no live train is In Review; one building is
-/// Building; one queued is Next Up when ranked, else Not Ranked. Landed and
-/// dropped lanes are history, and a lane named like a live train is that
-/// train's own agent (ov-461): left out.
-export function sectionsOf(plan: Plan): Sections {
-  const live = plan.trains.filter(isLiveTrain)
-  const onTrain = (l: Lane): Train | undefined => live.find(t => t.name === l.train || t.lanes.some(x => x.id === l.id))
-  const out: Sections = { landing: [], inReview: [], building: [], nextUp: [], notRanked: [] }
-  const rest: Lane[] = []
-  for (const l of plan.lanes) {
-    if (plan.laneIsTrain.includes(l.id)) continue
-    if (l.state === 'landed' || l.state === 'dropped') continue
-    if (onTrain(l)) continue
-    rest.push(l)
-  }
-  out.landing = live.map(train => ({ train, lanes: plan.lanes.filter(l => !plan.laneIsTrain.includes(l.id) && onTrain(l) === train) }))
-  for (const l of rest) {
-    if (l.state === 'review' || l.state === 'fixing' || l.state === 'landing') out.inReview.push(l)
-    else if (l.state === 'building') out.building.push(l)
-    else if (l.state === 'queued') (l.rank !== null || plan.order.includes(l.id) ? out.nextUp : out.notRanked).push(l)
-    else out.building.push(l)
-  }
-  const place = (l: Lane): number => {
-    const i = plan.order.indexOf(l.id)
-    return i >= 0 ? i : l.rank ?? Number.MAX_SAFE_INTEGER
-  }
-  out.nextUp.sort((a, b) => place(a) - place(b))
-  return out
-}
-
-/// The themes still in play, in the plan's order.
-export const liveThemes = (plan: Plan): Theme[] => plan.themes.filter(t => t.state !== 'dropped').sort((a, b) => a.ordinal - b.ordinal)
+export const isLiveTrain = (t: Train): boolean => t.phase !== 'landed' && t.phase !== 'dropped'
 
 /// Open rulings, newest first: all that Decided For You shows.
 export const openRulings = (plan: Plan): Ruling[] => plan.rulings.filter(r => r.state === 'standing').sort((a, b) => b.number - a.number)
@@ -331,74 +375,14 @@ export const pastRulings = (plan: Plan): Ruling[] =>
 // MARK: Words
 
 export const WORDS = {
-  landing: 'Landing',
-  inReview: 'In Review',
-  building: 'Building',
-  nextUp: 'Next Up',
-  notRanked: 'Not Ranked',
-  themes: 'Themes',
   decidedForYou: 'Decided For You',
   pastDecisions: 'Past Decisions',
-  nothingLanding: 'Nothing is landing right now.',
-  nothingBuilding: 'Nothing is building.',
-  nothingQueued: 'Nothing is queued.',
   nothingPlanned: 'Nothing is planned on this board yet.',
   nothingPlannedDetail: 'The orchestrator writes the plan: themes say why a group of cards exists, and lanes are the agents working them.',
 }
 
-/// A train's phase in the owner's words (AgentKit's TrainPhase.title): the
-/// two local steps are one, "Checking Here".
-export function phaseTitle(phase: Phase): string {
-  switch (phase) {
-    case 'waiting_for_lanes':
-      return 'Waiting for Lanes'
-    case 'waiting_for_previous_train':
-      return 'Waiting for the Earlier Landing'
-    case 'waiting_for_main':
-      return 'Waiting for Main’s Checks to Pass'
-    case 'integrating':
-    case 'gating_locally':
-      return 'Checking Here'
-    case 'waiting_for_ci':
-      return 'Checking on CI'
-    case 'ci_failed':
-      return 'CI Failed'
-    case 'ready_to_land':
-      return 'Ready to Land'
-    case 'landed':
-      return 'Landed'
-    case 'stalled':
-      return 'Stalled'
-    case 'dropped':
-      return 'Dropped'
-    case 'unknown':
-      return 'Unknown'
-  }
-}
-
 /// The ones drawn in amber: CI failed, or nothing has moved.
 export const needsAttention = (phase: Phase): boolean => phase === 'ci_failed' || phase === 'stalled'
-
-export function laneStateTitle(state: LaneState): string {
-  switch (state) {
-    case 'queued':
-      return 'Queued'
-    case 'building':
-      return 'Building'
-    case 'review':
-      return 'In Review'
-    case 'fixing':
-      return 'Fixing'
-    case 'landing':
-      return 'Landing'
-    case 'landed':
-      return 'Landed'
-    case 'dropped':
-      return 'Dropped'
-    case 'unknown':
-      return 'Unknown'
-  }
-}
 
 /// A ruling's state: "Open", "Kept", "Reversed", with the commit that
 /// reversed it when the orchestrator named one.
@@ -413,23 +397,6 @@ export function rulingStateTitle(r: Ruling): string {
     case 'unknown':
       return 'Unknown'
   }
-}
-
-/// How long, coarsely: "Just now", "4 min", "3 hr", "2 d"; nothing when the
-/// runner didn't say.
-export function since(at: number | null, now: number): string {
-  if (at === null) return ''
-  const minutes = Math.floor(Math.max(0, now - at) / 60_000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} min`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)} hr`
-  return `${Math.floor(minutes / 1440)} d`
-}
-
-/// "3 cards, 1 done".
-export function cardsLine(theme: Theme): string {
-  const cards = `${theme.cards} ${theme.cards === 1 ? 'card' : 'cards'}`
-  return theme.done > 0 ? `${cards}, ${theme.done} done` : cards
 }
 
 // MARK: The board
@@ -639,6 +606,11 @@ export class PlanBoard {
     await this.refresh()
     this.editing = keep
     this.publish()
+  }
+
+  /// Draw what is known again: for what the page adds to the plan.
+  redraw(): void {
+    if (!this.editing) this.publish()
   }
 
   stop(): void {

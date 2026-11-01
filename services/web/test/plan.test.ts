@@ -9,8 +9,6 @@ import { describe, expect, it } from 'vitest'
 import plan from '../../../test/fixtures/plan.json'
 import { planRefusal } from '../src/client/copy'
 import {
-  cardsLine,
-  liveThemes,
   openRulings,
   PLAN_POLL_MS,
   PlanBoard,
@@ -18,9 +16,6 @@ import {
   type PlanDeps,
   parsePlan,
   pastRulings,
-  phaseTitle,
-  sectionsOf,
-  since,
 } from '../src/client/plan'
 
 const WS = '00000000-0000-0000-0000-00000000aaaa'
@@ -40,73 +35,19 @@ describe('the plan', () => {
     expect(shown.order).toEqual(plan.order)
   })
 
-  it('sorts lanes into the Mac’s sections: on a live train, ranked and queued, and history left out', () => {
-    const s = sectionsOf(fixture())
-    expect(s.landing.map(l => [l.train.heading, l.lanes.map(x => x.name)])).toEqual([['Train 9', ['mac-ux']]])
-    expect(s.nextUp.map(l => l.name)).toEqual(['mac-fu3'])
-    expect(s.inReview).toEqual([])
-    expect(s.building).toEqual([])
-    // The landed lane is in no section at all.
-    const named = [...s.landing.flatMap(l => l.lanes), ...s.inReview, ...s.building, ...s.nextUp, ...s.notRanked].map(l => l.name)
-    expect(named).not.toContain('fix-ac84')
-  })
-
-  it('puts a lane with no live train by its state, and an unranked queued one in Not Ranked', () => {
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.trains = []
-    wire.order = []
-    wire.lanes[0].plan_rank = null
-    const s = sectionsOf(parsePlan(JSON.stringify(wire))!)
-    expect(s.landing).toEqual([])
-    expect(s.inReview.map(l => l.name)).toEqual(['mac-ux'])
-    expect(s.notRanked.map(l => l.name)).toEqual(['mac-fu3'])
-    expect(s.nextUp).toEqual([])
-  })
-
-  it('lists Next Up in the plan’s own order, not the lanes’', () => {
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.trains = []
-    wire.lanes = [
-      { ...wire.lanes[0], id: 'a', name: 'a', title: 'A', plan_rank: null },
-      { ...wire.lanes[0], id: 'b', name: 'b', title: 'B', plan_rank: null },
-      { ...wire.lanes[0], id: 'c', name: 'c', title: 'C', plan_rank: null },
-    ]
-    wire.order = ['c', 'a', 'b']
-    expect(sectionsOf(parsePlan(JSON.stringify(wire))!).nextUp.map(l => l.name)).toEqual(['c', 'a', 'b'])
-  })
-
-  it('leaves a lane named like a live train out: it is that train’s own agent', () => {
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.lane_is_train = [{ lane: wire.lanes[1].id, name: 'integ-9' }]
-    const s = sectionsOf(parsePlan(JSON.stringify(wire))!)
-    expect(s.landing[0].lanes).toEqual([])
-    expect(s.inReview).toEqual([])
-  })
-
-  it('says a train’s phase in the owner’s words, and reads one from its state when the runner sent none', () => {
-    expect(phaseTitle(fixture().trains[0].phase)).toBe('CI Failed')
+  it('reads a train’s phase from its state when the runner sent none', () => {
+    expect(fixture().trains[0].phase).toBe('ci_failed')
     const wire: any = JSON.parse(JSON.stringify(plan))
     delete wire.trains[0].phase
     wire.trains[0].state = 'gating'
-    expect(phaseTitle(parsePlan(JSON.stringify(wire))!.trains[0].phase)).toBe('Checking Here')
+    expect(parsePlan(JSON.stringify(wire))!.trains[0].phase).toBe('gating_locally')
     wire.trains[0].state = 'pushed'
-    expect(phaseTitle(parsePlan(JSON.stringify(wire))!.trains[0].phase)).toBe('Checking on CI')
+    expect(parsePlan(JSON.stringify(wire))!.trains[0].phase).toBe('waiting_for_ci')
   })
 
   it('shows open rulings newest first and past ones most recently settled first', () => {
     expect(openRulings(fixture()).map(r => r.short)).toEqual(['R-2'])
     expect(pastRulings(fixture()).map(r => r.short)).toEqual(['R-1'])
-  })
-
-  it('counts a theme’s cards, leaves a dropped one out, and says how long', () => {
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.themes.push({ ...wire.themes[0], id: 'x', name: 'Gone', state: 'dropped' })
-    const shown = parsePlan(JSON.stringify(wire))!
-    expect(liveThemes(shown).map(t => t.name)).toEqual(['Visual language'])
-    expect(cardsLine(shown.themes[0])).toBe('3 cards, 1 done')
-    expect(since(null, 5)).toBe('')
-    expect(since(0, 90_000)).toBe('1 min')
-    expect(since(0, 3 * 3_600_000)).toBe('3 hr')
   })
 
   it('reads nothing from what is not a plan, and leaves out a row with no id', () => {

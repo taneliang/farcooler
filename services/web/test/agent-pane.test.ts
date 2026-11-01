@@ -140,4 +140,16 @@ describe('the view switch', () => {
     expect(terminals[0].active).toBe(false)
     expect(chat.active).toBe(false)
   })
+
+  // The plan's Needs You rows leave words in the orchestrator's input
+  // (ov-875): only the conversation has one.
+  it('leaves words in the conversation’s message box, and in no other view', () => {
+    const left: string[] = []
+    const chat = Object.assign(new View(false), { prefill: (text: string) => left.push(text) })
+    const agent = new AgentPane<Channels>(chat, () => new View(true))
+    expect(agent.prefill('About ov-1: ')).toBe(true)
+    agent.setMode('terminal')
+    expect(agent.prefill('About ov-2: ')).toBe(false)
+    expect(left).toEqual(['About ov-1: '])
+  })
 })

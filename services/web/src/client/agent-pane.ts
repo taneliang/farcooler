@@ -21,7 +21,7 @@ export class AgentPane<R> implements Pane<R> {
   /// `conversation` is made at once; the terminal's screen is made the first
   /// time it is asked for, since most agents are only ever read.
   constructor(
-    private readonly conversation: Pane<R>,
+    private readonly conversation: Pane<R> & { prefill?(text: string): void },
     private readonly makeTerminal: () => Pane<R>,
   ) {}
 
@@ -63,6 +63,14 @@ export class AgentPane<R> implements Pane<R> {
     }
     this.view = view
     this.show(this.front)
+  }
+
+  /// Leave `text` in the conversation's message box, unsent. The pane must be
+  /// showing its conversation.
+  prefill(text: string): boolean {
+    if (this.view !== 'conversation' || !this.conversation.prefill) return false
+    this.conversation.prefill(text)
+    return true
   }
 
   async attach(runner: R, terminal: string, ended: () => void, resuming: boolean): Promise<void> {

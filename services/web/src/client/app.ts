@@ -26,9 +26,11 @@ import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newRep
 import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
 import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
-import { type BoardView, buttonsFor, countLabel, countOf, pageTitle } from './needs'
+import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
+import { columnOf } from './plan-column'
+import { PlanList } from './plan-list'
 import { parseWorkspaces } from './plan'
 import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scopeBoard, type Space, terminalsIn, waitingIn } from './scope'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
@@ -454,6 +456,11 @@ const buttonFor = new Map<string, HTMLButtonElement>()
 
 /// The plan tab, while a runner is connected.
 let planTab: PlanTab | null = null
+let planList: PlanList | null = null
+
+/// What the plan does to the panes of the runner in front: open a terminal,
+/// and leave words in the orchestrator's message box.
+let paneControls: { open(terminal: string): boolean; quote(terminal: string, text: string): boolean } | null = null
 
 /// Which part of the work screen is in front.
 function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
@@ -486,6 +493,7 @@ let pickerDrawn = ''
 function drawNeeds(view: BoardView): void {
   lastView = view
   const scoped = scopeBoard(view, spaces, chosenSpace, frontRunner)
+  planTab?.setNeeds(scoped.items.filter(i => isCounted(i) && !i.elsewhere))
   const total = countOf(view.items)
   $('show-needs').textContent = countLabel(countOf(scoped.items))
   const bar = $<HTMLButtonElement>('bar-count')
@@ -545,8 +553,10 @@ function answersFor(runner: string, task: string): Answer[] {
 
 function stopNeeds(): void {
   sheet?.close()
+  planList?.close()
   planTab?.stop()
   planTab = null
+  paneControls = null
   clearInterval(boardTimer)
   fleet?.stop()
   fleet = null
@@ -729,9 +739,20 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     else joinRunner(session, r, mine)
   }
   mine.up(target.id)
-  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace,
-    card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
-  )
+  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace, {
+    openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
+    quote: text => {
+      const orchestrator = planTab?.orchestrator()
+      return !!orchestrator && !!paneControls?.quote(orchestrator, text)
+    },
+    openAgent: agent => !!agent.terminal && !!paneControls?.open(agent.terminal),
+    openList: kind => {
+      const plan = planTab?.current()
+      if (!plan) return
+      planList ??= new PlanList($('plan-list') as HTMLDialogElement, $, card => openCard(target.id, { id: card.task, key: card.key, title: '' }))
+      planList.open(plan, kind, columnOf(plan).footer.find(c => c.kind === kind)?.count ?? 0)
+    },
+  })
   showTab('terminals')
   boardTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void mine.refresh()
@@ -803,6 +824,23 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   $('view-terminal').onclick = () => void viewAs('terminal')
   /// The terminals of the workspace showing, as buttons; the first running
   /// one opens. A workspace with none says so.
+  paneControls = {
+    open: id => {
+      const b = buttonFor.get(id)
+      if (!b) return false
+      showTab('terminals')
+      b.click()
+      return true
+    },
+    quote: (id, text) => {
+      if (!paneControls?.open(id)) return false
+      const agent = agentPanes.get(id)
+      if (!agent) return false
+      // The Mac's input is the conversation's: the terminal's view goes back to it.
+      if (agent.mode !== 'conversation') void viewAs('conversation')
+      return agent.prefill(text)
+    },
+  }
   const relist = () => {
     list.replaceChildren()
     buttonFor.clear()

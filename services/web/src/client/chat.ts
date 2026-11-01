@@ -224,6 +224,16 @@ export class ChatView implements Pane<WebRunner> {
     this.follower.start()
   }
 
+  /// Leave `text` in the message box, unsent, after what is already typed,
+  /// and put the cursor at its end (the plan's Needs You rows, ov-875).
+  prefill(text: string): void {
+    const have = this.box.value.trimEnd()
+    this.box.value = have ? `${have}\n${text}` : text
+    this.sizeBox()
+    this.box.focus({ preventScroll: true })
+    this.box.setSelectionRange(this.box.value.length, this.box.value.length)
+  }
+
   detach(): void {
     this.follower?.stop()
     this.follower = null
