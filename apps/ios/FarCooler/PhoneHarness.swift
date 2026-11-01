@@ -915,7 +915,8 @@ final class HarnessRunner {
             // phone copies the reference instead.
             guard args["terminal"] as? String == Self.billingOrchestrator,
                 let text = args["text"] as? String,
-                text.hasPrefix("About bil-") || text.hasPrefix("About ruling ") || text.hasPrefix("Please reverse ruling ")
+                text.hasPrefix("About bil-") || text.hasPrefix("About ruling ")
+                    || text.hasPrefix("About \u{201C}")  // a Needs You row quoted from the Plan (ov-874) || text.hasPrefix("Please reverse ruling ")
             else { throw ClientCore.CoreError.rejected("bad draft", word: "invalid-argument") }
             if CommandLine.arguments.contains("-phone-draft-refused") {
                 throw ClientCore.CoreError.rejected("not safe to paste", word: "agent-not-connected")

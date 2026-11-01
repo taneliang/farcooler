@@ -121,8 +121,17 @@ struct PhonePlanList<Top: View>: View {
     }
 
     var body: some View {
+        if connection.keepsPlan {
+            // The plan as the Mac's plan column draws it (ov-874).
+            PhonePlanColumn(connection: connection, summary: summary, place: place, inSheet: inSheet, top: top)
+        } else {
+            treeList
+        }
+    }
+
+    private var treeList: some View {
         let root = tree
-        List {
+        return List {
             top()
             if inSheet {
                 PlanHomeHeader(connection: connection, summary: summary, compactBand: compactBand) { navigator?.go([]) }

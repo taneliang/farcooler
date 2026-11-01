@@ -132,6 +132,7 @@ SHARDS = {
         "NotificationTapTests",  # 218 s failing, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
     ],
     "phone3": [
+        "PhonePlanColumnUITests",  # not measured yet; -phone-harness -phone-plan -phone-agents (ov-874)
         "PlanSectionsUITests",  # 143 s; -phone-harness -phone-plan (ov-503)
         "RunnerReachTests",  # 8 s; seeded -hosts at an address that never answers
         "SealedReplyUITests",  # 50 s; -sealed-reply (ov-770)

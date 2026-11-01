@@ -101,6 +101,8 @@ SOURCES = [
     "PhoneGlanceBand.swift",
     "PlanSectionRows.swift",
     "PlanThemeTiles.swift",
+    "PhonePlanColumn.swift",
+    "PhonePlanColumnRows.swift",
     "PlanBrowseLists.swift",
     # The top of the Plan, and the iPad's plan column (ov-300, ov-348); the
     # One tree's pushed levels (ov-300); and on an iPad the tree, the plan
@@ -765,6 +767,8 @@ AGENTKIT_SOURCES = [
     # for the owner's runner (ov-797). See `CrashSignatureTests`.
     "CrashSignature.swift",
     "PlanReading.swift",
+    # The plan column's rules, which the Mac, the web and this phone draw (ov-867, ov-874).
+    "PlanColumn.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",
     # Landings and the CI the runner reads for them and for pages (ov-309).
@@ -1177,6 +1181,7 @@ UI_TEST_SOURCES = [
     # overview, its pages, and a read that is refused or never answered.
     "PlanUITests.swift",
     "PlanSectionsUITests.swift",
+    "PhonePlanColumnUITests.swift",
     "PlanSectionsCapturesUITests.swift",
     # Orchestrator pages in the Plan view (ov-285), over the canned runner with
     # a seeded board's plan, pages and cards (`-phone-pages`).
