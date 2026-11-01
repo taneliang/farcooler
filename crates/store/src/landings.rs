@@ -628,6 +628,81 @@ impl Store {
         Ok(landing)
     }
 
+    /// Write one step of the runner's landing job on `landing`'s timeline
+    /// (ov-872): what `landing show` reads back as its progress. `step` is a
+    /// word a client can sort by (`fetched`, `gated`, `pushed`, `stopped`).
+    pub fn note_landing(&self, id: Uuid, step: &str, body: &str, extra: serde_json::Value) -> Result<()> {
+        let conn = self.conn();
+        landing_in(&conn, id)?;
+        let mut said = serde_json::json!({ "step": step });
+        if let (Some(said), Some(more)) = (said.as_object_mut(), extra.as_object()) {
+            said.extend(more.clone());
+        }
+        line_event(&conn, LineSubject::Landing(id), "job", Actor::Runner, body, said)
+    }
+
+    /// The charter asks before `landing` lands (the ask route): it takes the
+    /// ask route, and each ticket on it ready to land waits on you, still on
+    /// it, with `reason`. Only an open landing; a ticket isn't taken off.
+    pub fn hold_for_you(&self, id: Uuid, reason: &str, actor: Actor) -> Result<Landing> {
+        let reason = clean(reason, crate::ticket_lines::LINE_MAX, false, "reason")?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let landing = landing_in(&tx, id)?;
+        if landing.state != LandingState::Open {
+            return Err(invalid(if landing.state.is_settled() { "landing_settled" } else { "landing_moving" }));
+        }
+        tx.execute(
+            "UPDATE landings SET route = 'ask', collecting = 0, resource_version = resource_version + 1 WHERE id = ?1",
+            params![uuid_blob(id)],
+        )
+        .map_err(map_err)?;
+        for task in &landing.tickets {
+            if line_in(&tx, *task)?.stage != Stage::Landing {
+                continue;
+            }
+            tx.execute(
+                "UPDATE ticket_lines SET reason = ?2, resource_version = resource_version + 1 WHERE task_id = ?1",
+                params![uuid_blob(*task), reason],
+            )
+            .map_err(map_err)?;
+            move_stage(&tx, *task, Stage::NeedsYou, None, Some(id), actor)?;
+        }
+        line_event(&tx, LineSubject::Landing(id), "job", actor, &reason, serde_json::json!({ "step": "asked" }))?;
+        let landing = landing_in(&tx, id)?;
+        tx.commit().map_err(map_err)?;
+        Ok(landing)
+    }
+
+    /// You said to land `landing`, which the charter asked about: it takes the
+    /// push route, and each ticket on it waiting on you is ready to land
+    /// again. `not_asked` for a landing that isn't on the ask route.
+    pub fn land_asked(&self, id: Uuid, actor: Actor) -> Result<Landing> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let landing = landing_in(&tx, id)?;
+        if landing.state.is_settled() {
+            return Err(invalid("landing_settled"));
+        }
+        if landing.route != Route::Ask {
+            return Err(invalid("not_asked"));
+        }
+        tx.execute(
+            "UPDATE landings SET route = 'push', resource_version = resource_version + 1 WHERE id = ?1",
+            params![uuid_blob(id)],
+        )
+        .map_err(map_err)?;
+        for task in &landing.tickets {
+            if line_in(&tx, *task)?.stage == Stage::NeedsYou {
+                move_stage(&tx, *task, Stage::Landing, None, Some(id), actor)?;
+            }
+        }
+        line_event(&tx, LineSubject::Landing(id), "job", actor, "Told to land.", serde_json::json!({ "step": "told_to_land" }))?;
+        let landing = landing_in(&tx, id)?;
+        tx.commit().map_err(map_err)?;
+        Ok(landing)
+    }
+
     /// A landing by id.
     pub fn landing(&self, id: Uuid) -> Result<Landing> {
         landing_in(&self.conn(), id)

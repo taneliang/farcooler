@@ -27,7 +27,7 @@ use crate::models::{Actor, get_optional_uuid, get_uuid, uuid_blob};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
-const LINE_MAX: usize = 300;
+pub(crate) const LINE_MAX: usize = 300;
 const BRANCH_MAX: usize = 240;
 const PATH_MAX: usize = 512;
 const SHA_MAX: usize = 64;
