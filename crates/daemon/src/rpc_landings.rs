@@ -21,6 +21,18 @@ use crate::task_ops::{actor_from_wire, required_id};
 use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
+/// A landing approval needs process evidence, as a hook answer does. An
+/// agent's CLI outside a pane defaults to `user` too: the wire actor can
+/// narrow approval further in landing_run, but cannot prove it.
+pub(crate) async fn start_from(svc: &Arc<Service>, watcher: &Arc<Watcher>, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
+    if matches!(&req.payload, Some(request::Payload::LandingStart(p)) if p.run && p.land)
+        && crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person
+    {
+        return Err(DomainError::InvalidArgument { what: "land_is_yours" });
+    }
+    dispatch(svc, watcher, req).await
+}
+
 /// One landing route, as `rpc_plan::dispatch` hands it over.
 pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, req: Request) -> Result<result::Value> {
     let missing = || DomainError::InvalidArgument { what: "payload" };

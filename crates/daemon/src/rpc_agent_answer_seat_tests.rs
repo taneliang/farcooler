@@ -324,3 +324,29 @@ async fn an_answer_from_a_members_own_pane_is_theirs() {
     assert_eq!(said["person"], serde_json::json!({ "handle": "", "name": "" }), "the owner, from the runner's login: {said}");
     assert_eq!(said["for"]["handle"], "bob", "for Bob: {said}");
 }
+
+/// Landing approval uses the same process evidence as answering a held ask.
+#[tokio::test]
+async fn landing_approval_cannot_be_forged_with_a_user_actor() {
+    let mut s = seats().await;
+    let agent = s.under_claude_outside();
+    let (_, person) = s.shell_pane().await;
+    let req = |actor: &str| Request {
+        method: "landing.start".into(),
+        payload: Some(request::Payload::LandingStart(farcooler_protocol::v1::LandingStart {
+            workspace_id: crate::wire::id_bytes(Uuid::now_v7()),
+            run: true, land: true, actor: actor.into(), ..Default::default()
+        })),
+        ..Default::default()
+    };
+    for caller in [agent, NOBODY, crate::caller_seat::UNKNOWN_PID] {
+        for actor in ["user", ""] {
+            let got = refusal(&from(&s.svc, Some(caller)), req(actor)).await;
+            assert_eq!(got.map(|(_, what)| what).as_deref(), Some("land_is_yours"), "caller {caller}, actor {actor:?}");
+        }
+    }
+    for actor in ["user", ""] {
+        let got = refusal(&from(&s.svc, Some(person)), req(actor)).await;
+        assert_eq!(got.map(|(_, what)| what).as_deref(), Some("no_landing_rules"), "a person proceeds to charter validation");
+    }
+}

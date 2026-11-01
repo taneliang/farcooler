@@ -360,9 +360,76 @@ async fn a_moved_base_is_never_pushed_without_a_new_gate() {
         ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
     let sha = rig.remote_head();
     let tree = worktree_for(&setup, &l, &sha).await.unwrap();
-    fold(&setup, &l, &tree, &sha).await.unwrap();
+    let routed = HashMap::from([(t, RoutedTicket { branch: "gated".into(), tip: rev(&rig.repo, "gated").await.unwrap() })]);
+    fold(&setup, &l, &tree, &sha, &routed).await.unwrap();
     rig.ticket("advance", &[("b.txt", "b\n")]);
     sh(&rig.repo, &["push", "--quiet", "origin", "advance:main"]);
     assert!(push(&setup, &l, &tree, "origin/main", &sha).await.is_err());
     assert_eq!(rig.remote_log(), ["advance", "start"]);
+}
+
+/// The CI wait is an actual await between routing and folding. Mutate the
+/// producer there, rather than assembling a synthetic changed-path list.
+struct ChangeDuringCi<'a> {
+    rig: &'a Rig,
+    task: Uuid,
+    landing: Uuid,
+    mode: u8,
+    changed: std::sync::atomic::AtomicBool,
+}
+
+impl Ci for ChangeDuringCi<'_> {
+    async fn status(&self, _sha: &str) -> CiStatus {
+        if !self.changed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            match self.mode {
+                0 => {
+                    sh(&self.rig.repo, &["switch", "--quiet", "safe"]);
+                    write(&self.rig.repo, "services/site/bypass.html", "needs approval\n");
+                    sh(&self.rig.repo, &["add", "-A"]);
+                    sh(&self.rig.repo, &["commit", "--quiet", "-m", "unapproved site"]);
+                    sh(&self.rig.repo, &["switch", "--quiet", "main"]);
+                }
+                1 => {
+                    self.rig.store.update_line(self.task, &LineUpdate { branch: Some("site".into()), ..Default::default() }, Actor::Manager).unwrap();
+                }
+                _ => {
+                    self.rig.store.update_landing(self.landing, &LandingUpdate { add_tickets: vec![self.task], ..Default::default() }, Actor::Manager).unwrap();
+                }
+            }
+            CiStatus::Running
+        } else { CiStatus::Passed }
+    }
+    async fn rerun(&self, _sha: &str) -> bool { false }
+}
+
+async fn changed_during_base_ci(mode: u8) {
+    let rig = Rig::new();
+    let t = rig.ticket("safe", &[("a.txt", "safe\n")]);
+    let site = rig.ticket("site", &[("services/site/bypass.html", "needs approval\n")]);
+    let before = rig.remote_head();
+    let l = rig.landing(&[t]);
+    let ci = ChangeDuringCi { rig: &rig, task: if mode == 2 { site } else { t }, landing: l.id, mode, changed: std::sync::atomic::AtomicBool::new(false) };
+    let announce = |_: Uuid| {};
+    let setup = Setup { store: &rig.store, repo: rig.repo.clone(), scratch: rig.scratch.clone(),
+        rules: parse(PUSH).unwrap().unwrap(), poll: Duration::from_millis(1),
+        ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
+    let out = run(&setup, &ci, l.id, false).await;
+    assert!(matches!(&out[..], [Outcome::Stopped { .. }]), "mode {mode}: {out:?}");
+    assert_eq!(rig.remote_head(), before, "mode {mode}: unapproved work was pushed");
+    assert_ne!(rig.stage(t), Stage::Landed);
+}
+
+#[tokio::test]
+async fn a_branch_tip_changed_during_base_ci_cannot_bypass_ask() {
+    changed_during_base_ci(0).await;
+}
+
+#[tokio::test]
+async fn a_ticket_branch_changed_during_base_ci_cannot_bypass_ask() {
+    changed_during_base_ci(1).await;
+}
+
+#[tokio::test]
+async fn landing_membership_changed_during_base_ci_cannot_bypass_ask() {
+    changed_during_base_ci(2).await;
 }

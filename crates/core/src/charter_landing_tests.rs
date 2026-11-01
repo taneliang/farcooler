@@ -74,3 +74,14 @@ fn a_push_rule_can_override_the_default_ask_route() {
     assert_eq!(rules.route_of(&["docs/readme.md".into()]), (Route::Push, Some("docs/**")));
     assert_eq!(rules.route_of(&["docs/readme.md".into(), "src/main.rs".into()]), (Route::Ask, None));
 }
+
+/// Ask becomes push when a person approves, so its gate must be explicit too.
+#[test]
+fn an_ask_route_requires_an_explicit_gate() {
+    for route in ["- Route: ask", "- Route: pull request\n- Route `services/site/**`: ask"] {
+        let text = format!("## Landing\n{route}\n- CI: none\n");
+        assert!(parse(&text).is_err(), "ask could push without a declared gate: {text}");
+        assert!(parse(&format!("{text}- Gate: none\n")).is_ok());
+        assert!(parse(&format!("{text}- Gate: true\n")).is_ok());
+    }
+}

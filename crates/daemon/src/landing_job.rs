@@ -36,6 +36,7 @@
 //! by design, so it runs the user's own `git` and `sh` as the runner's user,
 //! as an agent pane would. Who may start it is `landing.start`'s gate.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -144,6 +145,16 @@ pub fn prepare(
     Ok(landing)
 }
 
+/// The exact work whose paths were routed. Never resolve a mutable branch
+/// again to choose commits after a CI wait.
+#[derive(Debug)]
+struct RoutedTicket {
+    branch: String,
+    tip: String,
+}
+
+type Routed = HashMap<Uuid, RoutedTicket>;
+
 /// Run the job on `landing`. `approved`: you said to land it, so the charter's
 /// ask route reads as push.
 pub async fn run<C: Ci>(s: &Setup<'_>, ci: &C, landing: Uuid, approved: bool) -> Vec<Outcome> {
@@ -157,24 +168,29 @@ pub async fn run<C: Ci>(s: &Setup<'_>, ci: &C, landing: Uuid, approved: bool) ->
         }
     };
     if !push.is_empty() {
-        land_batch(s, ci, landing, &mut outcomes).await;
+        land_batch(s, ci, landing, &push, &mut outcomes).await;
     }
     outcomes
 }
 
 /// Step 1: split off every ticket whose route isn't push. The push tickets,
 /// left on `l`.
-async fn route_all(s: &Setup<'_>, l: &Landing, approved: bool, out: &mut Vec<Outcome>) -> Step<Vec<Uuid>> {
+async fn route_all(s: &Setup<'_>, l: &Landing, approved: bool, out: &mut Vec<Outcome>) -> Step<Routed> {
     note(s, l, "routing", &format!("Fetching {}.", s.rules.remote), serde_json::json!({}));
     git_ok(&s.repo, &["fetch", "--quiet", &s.rules.remote]).await.map_err(|e| Stop(format!("Couldn't fetch {}: {e}", s.rules.remote)))?;
-    let base = base_ref(s);
+    let base = rev(&s.repo, &base_ref(s)).await?;
+    let mut routed = Routed::new();
     let mut groups: Vec<(Route, Option<String>, Vec<Uuid>)> = Vec::new();
     for task in &l.tickets {
         let line = s.store.ticket_line(*task).map_err(|e| Stop(format!("Couldn't read a ticket: {}", e.what())))?;
         if line.stage.is_closed() {
             continue;
         }
-        let paths = if line.branch.is_empty() { Vec::new() } else { changed_paths(&s.repo, &base, &line.branch).await? };
+        if line.branch.is_empty() {
+            return Err(Stop(format!("{} has no branch to land.", keys(s, &[*task]).join(", "))));
+        }
+        let tip = rev(&s.repo, &line.branch).await?;
+        let paths = changed_paths(&s.repo, &base, &tip).await?;
         let (said, rule) = s.rules.route_of(&paths);
         let mut route = match said {
             charter::Route::Push => Route::Push,
@@ -184,19 +200,21 @@ async fn route_all(s: &Setup<'_>, l: &Landing, approved: bool, out: &mut Vec<Out
         if approved && route == Route::Ask {
             route = Route::Push;
         }
+        if route == Route::Push {
+            routed.insert(*task, RoutedTicket { branch: line.branch, tip });
+        }
         match groups.iter_mut().find(|(r, _, _)| *r == route) {
             Some(group) => group.2.push(*task),
             None => groups.push((route, rule.map(str::to_string), vec![*task])),
         }
     }
-    let mut push = Vec::new();
     // The push group keeps this landing; with none, the first group does.
     groups.sort_by_key(|(r, _, _)| *r != Route::Push);
     for (i, (route, rule, tickets)) in groups.into_iter().enumerate() {
         let on = if i == 0 { l.clone() } else { split_off(s, l, &tickets, route)? };
         let keys = keys(s, &tickets);
         match route {
-            Route::Push => push = tickets,
+            Route::Push => {}
             Route::Ask => {
                 let why = match rule {
                     Some(glob) => format!("The charter asks before landing `{glob}`. Say land it to push it."),
@@ -213,7 +231,7 @@ async fn route_all(s: &Setup<'_>, l: &Landing, approved: bool, out: &mut Vec<Out
             }
         }
     }
-    Ok(push)
+    Ok(routed)
 }
 
 /// Move `tickets` off `l` onto a landing of their own on `route`.
@@ -234,13 +252,13 @@ fn split_off(s: &Setup<'_>, l: &Landing, tickets: &[Uuid], route: Route) -> Step
 }
 
 /// Steps 2 to 6 for the tickets on `landing`, splitting on a red gate.
-async fn land_batch<C: Ci>(s: &Setup<'_>, ci: &C, landing: Uuid, out: &mut Vec<Outcome>) {
+async fn land_batch<C: Ci>(s: &Setup<'_>, ci: &C, landing: Uuid, routed: &Routed, out: &mut Vec<Outcome>) {
     // A batch splits into landings that each go round again; a stack, not
     // recursion, so the future stays a plain one.
     let mut todo = vec![landing];
     while let Some(id) = todo.pop() {
         let Ok(l) = s.store.landing(id) else { continue };
-        match land_one(s, ci, &l).await {
+        match land_one(s, ci, &l, routed).await {
             Ok(Done::Landed(sha)) => {
                 let tickets = keys(s, &l.tickets);
                 out.push(Outcome::Landed { landing: l.number, tickets, sha });
@@ -260,7 +278,7 @@ enum Done {
     Split(Uuid, Uuid),
 }
 
-async fn land_one<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing) -> Step<Done> {
+async fn land_one<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing, routed: &Routed) -> Step<Done> {
     let base = base_ref(s);
     git_ok(&s.repo, &["fetch", "--quiet", &s.rules.remote]).await.map_err(|e| Stop(format!("Couldn't fetch {}: {e}", s.rules.remote)))?;
     let base_sha = rev(&s.repo, &base).await?;
@@ -268,8 +286,9 @@ async fn land_one<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing) -> Step<Done> {
         note(s, l, "base", &format!("Waiting for CI on {base} at {}.", short(&base_sha)), serde_json::json!({ "sha": base_sha }));
         wait_green(s, ci, l, &base_sha).await.map_err(|why| Stop(format!("CI on {base} at {} {why}.", short(&base_sha))))?;
     }
+    unchanged(s, l, routed).await?;
     let tree = worktree_for(s, l, &base_sha).await?;
-    fold(s, l, &tree, &base_sha).await?;
+    fold(s, l, &tree, &base_sha, routed).await?;
     set_state(s, l, LandingState::Gating)?;
     if let Err(Stop(why)) = gate(s, l, &tree).await {
         set_state(s, l, LandingState::Open)?;
@@ -281,6 +300,7 @@ async fn land_one<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing) -> Step<Done> {
         let made = split_off(s, l, &second, Route::Push)?;
         return Ok(Done::Split(l.id, made.id));
     }
+    unchanged(s, l, routed).await?;
     let sha = push(s, l, &tree, &base, &base_sha).await?;
     if s.rules.ci {
         if let Err(why) = wait_green(s, ci, l, &sha).await {
@@ -345,18 +365,28 @@ async fn worktree_for(s: &Setup<'_>, l: &Landing, base_sha: &str) -> Step<PathBu
     Ok(tree)
 }
 
-/// Step 3: every ticket's commits, in order, onto the worktree.
-async fn fold(s: &Setup<'_>, l: &Landing, tree: &Path, base_sha: &str) -> Step<()> {
+/// Refuse stale routing if a ticket, branch tip or landing membership changed.
+/// The fold still uses pinned SHAs: these checks never select new work.
+async fn unchanged(s: &Setup<'_>, l: &Landing, routed: &Routed) -> Step<()> {
+    let current = s.store.landing(l.id).map_err(|e| Stop(e.what().into()))?;
+    if current.tickets != l.tickets {
+        return Err(Stop("The landing's tickets changed after routing; start a fresh attempt.".into()));
+    }
+    for task in &l.tickets {
+        let pin = routed.get(task).ok_or_else(|| Stop("A ticket wasn't routed for push; start a fresh attempt.".into()))?;
+        let line = s.store.ticket_line(*task).map_err(|e| Stop(e.what().into()))?;
+        if line.branch != pin.branch || line.stage.is_closed() || rev(&s.repo, &pin.branch).await? != pin.tip {
+            return Err(Stop(format!("{} changed after routing; start a fresh attempt.", keys(s, &[*task]).join(", "))));
+        }
+    }
+    Ok(())
+}
+
+/// Step 3: every routed ticket's pinned commits, in order, onto the worktree.
+async fn fold(s: &Setup<'_>, l: &Landing, tree: &Path, base_sha: &str, routed: &Routed) -> Step<()> {
     for task in &l.tickets {
         let key = keys(s, &[*task]).remove(0);
-        let line = s.store.ticket_line(*task).map_err(|e| Stop(format!("Couldn't read {key}: {}", e.what())))?;
-        if line.stage.is_closed() {
-            continue;
-        }
-        if line.branch.is_empty() {
-            return Err(Stop(format!("{key} has no branch to land.")));
-        }
-        let tip = rev(tree, &line.branch).await.map_err(|_| Stop(format!("{key}'s branch {} isn't there.", line.branch)))?;
+        let tip = &routed.get(task).ok_or_else(|| Stop(format!("{key} wasn't routed for push.")))?.tip;
         let range = format!("{base_sha}..{tip}");
         let listed = git_ok(tree, &["rev-list", "--reverse", &range]).await.map_err(|e| Stop(format!("Couldn't list {key}'s commits: {e}")))?;
         for commit in listed.lines().filter(|c| !c.is_empty()) {

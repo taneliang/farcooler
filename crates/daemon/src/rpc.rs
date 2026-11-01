@@ -1989,10 +1989,10 @@ impl Rpc {
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"
             | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"
-            | "ruling.add" | "ruling.set" | "ruling.keep_all" | "landing.start" | "landing.set" => {
+            | "ruling.add" | "ruling.set" | "ruling.keep_all" | "landing.set" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
-
+            "landing.start" => crate::rpc_landings::start_from(svc, &self.watcher, self.caller_pid, req).await,
             "agent.stop" => crate::rpc_agent_stop::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-872: a pane by `terminal.stop`'s path and gate
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, self.stepped.get(), req).await, // ov-494, ov-584

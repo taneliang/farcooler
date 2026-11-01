@@ -22,7 +22,7 @@
 //!   route: ask over pull request over push.
 //! - **Gate** (one or more): a command run with `sh -c` at the top of the
 //!   landing's worktree; every one must pass, in order. `Gate: none` says
-//!   there is none on purpose. A section that can push needs one of the two.
+//!   there is none on purpose. A section that can push (including ask after approval) needs one of the two.
 //! - **Base** (once): the branch work lands on; `main` when not said.
 //! - **Remote** (once): the remote it is pushed to; `origin` when not said.
 //! - **CI** (once): `github` waits for GitHub Actions on the base and on the
@@ -218,7 +218,7 @@ pub fn parse(charter: &str) -> Result<Option<LandingRules>, SectionError> {
         return Err(SectionError { line: 0, why: "`Gate: none` and a gate command can't both be said".into() });
     }
     let default_route = default_route.unwrap_or(Route::Push);
-    let pushes = default_route == Route::Push || rules.iter().any(|(_, r)| *r == Route::Push);
+    let pushes = default_route != Route::PullRequest || rules.iter().any(|(_, r)| *r != Route::PullRequest);
     if pushes && gate.is_empty() && !no_gate {
         return Err(SectionError { line: 0, why: "a section that pushes names its gate: `- Gate: <command>`, or `- Gate: none`".into() });
     }
