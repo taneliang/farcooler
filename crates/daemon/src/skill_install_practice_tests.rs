@@ -397,3 +397,16 @@ fn every_agent_description_and_pane_title_starts_with_its_ticket_key() {
         assert!(tail.contains("how the plan shows which agent works on which ticket"), "{h:?}: {tail}");
     }
 }
+
+/// No screen has a Stop button: a person asks the orchestrator, and it stops
+/// the agent with `agent stop` (ov-872), says what happened, and stops one
+/// the runner can't reach with its own harness's tool.
+#[test]
+fn asked_to_stop_an_agent_it_uses_agent_stop() {
+    for h in ALL {
+        let body = prose(h);
+        let rule = "When the user asks to stop an agent, use `agent stop <agent|key> --reason \"<why>\"`";
+        assert!(body.contains(rule), "{h:?}: the stop rule is gone");
+        assert!(body.contains("a subagent it can't reach, stop with your own tool"), "{h:?}");
+    }
+}

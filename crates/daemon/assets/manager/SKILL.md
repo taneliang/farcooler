@@ -90,26 +90,26 @@ lesson on its card as a decision, ask next time. Never keep one for them.
 (`ov-123: polish the sidebar`). It's how the plan shows which agent works on
 which ticket; without the key the agent shows on none.
 
-To put an agent to work, dispatch it in a role on its tickets: `agent dispatch
---role builder --ticket <key>…` opens a pane on the first, briefs it on them
-all, puts them on the line and records the agent itself. A builder gives each
-ticket a branch of its own, stacked on the one before when it builds on it. A
-reviewer may take tickets from any builder; one lander lands. `task dispatch`
-does one card with no role. A worktree is free only when no agent works in it
-(`terminals` in `worktree list --json`, your own pane included),
-unless `## Lanes` says otherwise: two writers in one tree commit over each other.
-A busy one is warned about, not refused: tell the owner. If a dispatch seems not
-to have taken, read `task show <key>` and `worktree list --json` before
-dispatching again, and pass `--again` only if the owner asked for a second agent.
-Confirm each dispatched agent started: dispatch says whether it began.
-On "not yet", wait for the runner's message; a prompt, or `[Far Cooler] … hasn't
-started`, goes to the owner at once with the reason. Claude Code asking whether
-to trust a folder is theirs to answer, in Needs You: never answer it for them.
-An agent reports to you in this pane as "Message from @<key>" (ctrl+o reads it
-all; never answer it with SendMessage) or `[from the builder on <key>] …` when
-it finishes, is stuck or needs a decision, `[Far Cooler] …` when it stops. So end your
-turn rather than poll, and tell the owner the agents report to you. A report is the
-agent's claim: check the board, then act. Steer an agent with `message <key>`.
+To put an agent to work, dispatch it in a role on its tickets: `agent dispatch --role
+builder --ticket <key>…` opens a pane on the first, briefs it on them all, puts them on
+the line and records the agent itself. A builder gives each ticket a branch of its own,
+stacked on the one before when it builds on it. A reviewer may take tickets from any
+builder; one lander lands. `task dispatch` does one card with no role. A worktree is free
+only when no agent works in it (`terminals` in `worktree list --json`, your own pane
+included), unless `## Lanes` says otherwise: two writers in one tree commit over each
+other. A busy one is warned about, not refused: tell the owner. If a dispatch seems not to
+have taken, read `task show <key>` and `worktree list --json` before dispatching again,
+and pass `--again` only if the owner asked for a second agent. Confirm each dispatched
+agent started: dispatch says whether it began. On "not yet", wait for the runner's
+message; a prompt, or `[Far Cooler] … hasn't started`, goes to the owner at once with the
+reason. Claude Code asking whether to trust a folder is theirs to answer, in Needs You:
+never answer it for them. An agent reports to you in this pane as "Message from @<key>"
+(ctrl+o reads it all; never answer it with SendMessage) or `[from the builder on <key>] …`
+when it finishes, is stuck or needs a decision, `[Far Cooler] …` when it stops. So end
+your turn rather than poll, and tell the owner the agents report to you. A report is the
+agent's claim: check the board, then act. Steer an agent with `message <key>`. When the
+user asks to stop an agent, use `agent stop <agent|key> --reason "<why>"` and tell them
+what it said; a subagent it can't reach, stop with your own tool.
 
 Say how each task is being worked, or why it isn't. A subagent in your own
 session: start its description with the key (`fc-12: polish the sidebar`) and
