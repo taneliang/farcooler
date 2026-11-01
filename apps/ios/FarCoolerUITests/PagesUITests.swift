@@ -43,7 +43,7 @@ final class PagesUITests: XCTestCase {
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        XCTAssertTrue(app.reveal(element(app, "plan-landing")), "no plan: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, "plan-facts")), "no plan: \(app.debugDescription)")
         return app
     }
 
@@ -187,12 +187,9 @@ final class PagesUITests: XCTestCase {
     /// Needs You and before Tickets, and opens whole.
     func testAThemePageDrawsItsAnchoredPage() {
         let app = openPlan()
-        let theme = app.buttons["tree-row-Visual language"]
+        let theme = app.buttons["plan-initiative-Visual language"]
         reach(app, theme)
         theme.tap()
-        let own = app.buttons["tree-own"]
-        XCTAssertTrue(own.waitForExistence(timeout: 10), "the theme's level didn't open")
-        own.tap()
         XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
         let open = element(app, "plan-anchored-open-risks")
         reach(app, open)
@@ -220,8 +217,7 @@ final class PagesUITests: XCTestCase {
 
     func testARunnerWithoutPagesShowsNoPagesSection() {
         let app = openPlan([])
-        let landed = element(app, "plan-landing")
-        reach(app, landed)
+        XCTAssertTrue(element(app, "plan-facts").exists, "no plan")
         for _ in 0..<6 { app.swipeUp() }
         XCTAssertFalse(element(app, "plan-pages").exists, "a Pages section on a runner without board_pages")
         XCTAssertFalse(element(app, "plan-pages-unavailable").exists)
@@ -275,10 +271,9 @@ final class PagesUITests: XCTestCase {
             app.swipeUp()
             keep(app, "capture-spend-bottom-\(name)", expecting: .changed(from: beforeSpend, "the spend page scrolled"))
             app.tapBack()
-            let theme = app.buttons["tree-row-Visual language"]
+            let theme = app.buttons["plan-initiative-Visual language"]
             reach(app, theme, down: false)
             theme.tap()
-            app.buttons["tree-own"].tap()
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
             let risks = element(app, "plan-anchored-open-risks")
             reach(app, risks)

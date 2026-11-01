@@ -139,21 +139,21 @@ final class PolishSweepUITests: XCTestCase {
 
     private func planAndRulings(_ names: [String]) {
         each(names) { variant in
-            let app = billing(variant, ["-phone-board-reads", "-phone-plan", "-phone-rulings", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
+            let app = billing(variant, ["-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
             openPlan(app)
             // In the sheet (c602dfd49) the landing section sits under the
             // tree, below the first screen, and the list is lazy: scrolled to.
-            let landing = app.descendants(matching: .any)["plan-landing"]
+            let landing = app.descendants(matching: .any)["plan-facts"]
             XCTAssertTrue(landing.waitForExistence(timeout: 5) || app.reveal(landing), "no plan")
             shoot("plan", variant, expecting: .shows(landing))
             // Scrolled to, then brought up the screen by a drag that holds at
             // its end, and "in reach" is its frame on the screen. Its first
             // match: more than one element carries the id, so the old
             // `isHittable` on the query could never hold.
-            let rulings = app.descendants(matching: .any)["plan-rulings"].firstMatch
+            let rulings = app.descendants(matching: .any)["plan-pipeline"].firstMatch
             let window = app.windows.firstMatch
             let inView = { rulings.exists && rulings.frame.minY > window.frame.height * 0.1 && rulings.frame.minY < window.frame.height * 0.7 }
-            XCTAssertTrue(rulings.exists || app.reveal(rulings), "no rulings")
+            XCTAssertTrue(rulings.exists || app.reveal(rulings), "no pipeline")
             // Into view from either side: a swipe in reveal can carry it
             // past the top as well as leave it below the fold.
             let height = window.frame.height
@@ -166,14 +166,14 @@ final class PolishSweepUITests: XCTestCase {
                     forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: height * to)),
                     withVelocity: .slow, thenHoldForDuration: 0.3)
             }
-            shoot("rulings", variant, expecting: .when("the rulings on the screen") { inView() })
+            shoot("pipeline", variant, expecting: .when("the pipeline on the screen") { inView() })
             let beforeLower = XCUIScreen.main.screenshot().pngRepresentation
             // A drag in the window's own points: `app.swipeUp()` moved
             // nothing in landscape (light-wide, locally).
             origin.withOffset(CGVector(dx: x, dy: height * 0.75)).press(
                 forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: height * 0.35)),
                 withVelocity: .slow, thenHoldForDuration: 0.3)
-            shoot("rulings-lower", variant, expecting: .changed(from: beforeLower, "the rulings scrolled lower"))
+            shoot("pipeline-lower", variant, expecting: .changed(from: beforeLower, "the pipeline scrolled lower"))
             app.terminate()
         }
     }

@@ -99,7 +99,6 @@ SHARDS = {
     ],
     "agent": [
         "PlanSheetAppearanceUITests",  # 131 s; -phone-harness -phone-plan (ov-444)
-        "PlanRulingsUITests",  # 351 s; -phone-harness -phone-plan -phone-rulings (ov-304)
         "FirstRunUITests",  # 392 s; -phone-harness (ov-205 lane P, placed by integ-9)
         "ChangesPullRequestTests",  # 40 s; -changes-layout-harness
         "TaskScreenTests",  # 193 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
@@ -133,7 +132,6 @@ SHARDS = {
     ],
     "phone3": [
         "PhonePlanColumnUITests",  # not measured yet; -phone-harness -phone-plan -phone-agents (ov-874)
-        "PlanSectionsUITests",  # 143 s; -phone-harness -phone-plan (ov-503)
         "RunnerReachTests",  # 8 s; seeded -hosts at an address that never answers
         "SealedReplyUITests",  # 50 s; -sealed-reply (ov-770)
         "FailedLaunchTests",  # under 1 s; launches no app of ours (ov-703)
@@ -246,7 +244,6 @@ SMOKE = {
     "NativeComposerTests/testASlashCommandIsSent": 24.2,
     "NativeComposerTests/testAPhotoAloneCanBeSent": 19.1,
     "PlanUITests/testARunnerWithoutBoardPlanShowsNothingNew": 19.6,
-    "PlanSectionsUITests/testTheBandSaysNowAndNextAndWhatNeedsYou": 20.3,
     "NativeAnswersUITests/testAQuestionIsAnsweredWithAnOption": 29.8,
     "TaskScreenTests/testAnsweringADecisionRemovesItFromNeedsYou": 11.5,
 }

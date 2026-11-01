@@ -42,7 +42,11 @@ final class PlanUITests: XCTestCase {
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 30), "no Plan")
+        // A runner with a plan draws the plan column, whose first line is the facts; one without, the tree.
+        let drawn = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier IN %@", extra.contains("-phone-plan") ? ["plan-facts", "plan-initiatives", "plan-pipeline"] : ["plan-filters"])
+        ).firstMatch
+        XCTAssertTrue(drawn.waitForExistence(timeout: 30), "no Plan")
         return app
     }
 
@@ -98,46 +102,55 @@ final class PlanUITests: XCTestCase {
         app.tapBack()
     }
 
-    /// The first Next Up ticket under the key a new plan gives it, waited for
-    /// where it was before the list is scrolled: `reveal` only moves down it,
-    /// and on a short phone (an iPhone Duo, 678 pt) scrolling before the read
-    /// lands ran past the row and left it above the screen (ov-709).
-    private func renamed(_ app: XCUIApplication) -> Bool {
-        let ticket = element(app, "plan-ticket-ov-274-v2")
-        return ticket.waitForExistence(timeout: 15) || app.reveal(ticket)
+    /// How many times the phone has asked the runner for the plan.
+    private func planReads(_ app: XCUIApplication) -> Int { sent(app).filter { $0 == "plan.get" }.count }
+
+    /// Wait for the plan to be read more times than `before`.
+    private func readsAgain(_ app: XCUIApplication, after before: Int) -> Bool {
+        let deadline = Date().addingTimeInterval(20)
+        while planReads(app) <= before, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.3)) }
+        return planReads(app) > before
     }
 
     /// A `plan` notice reaches the connection and the plan on screen is read again.
     func testAPlanNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274")))
+        XCTAssertTrue(element(app, "plan-facts").waitForExistence(timeout: 30), "the plan never drew: \(app.debugDescription)")
+        let before = planReads(app)
+        XCTAssertGreaterThan(before, 0, "the plan was never read: \(sent(app))")
         Self.notify("plan-news")
-        XCTAssertTrue(renamed(app), "the notice didn't re-read the plan")
+        XCTAssertTrue(readsAgain(app, after: before), "the notice didn't re-read the plan: \(sent(app))")
     }
 
     /// A task notice moves counts the plan derives: it reads the plan again too.
     func testATaskNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274")))
+        XCTAssertTrue(element(app, "plan-facts").waitForExistence(timeout: 30), "the plan never drew: \(app.debugDescription)")
+        let before = planReads(app)
         Self.notify("task-news")
-        XCTAssertTrue(renamed(app), "the task notice didn't re-read the plan")
+        XCTAssertTrue(readsAgain(app, after: before), "the task notice didn't re-read the plan: \(sent(app))")
     }
 
     /// A notice reads the record of the page on screen, not every page opened since.
     func testANoticeReadsOnlyThePageOnScreen() {
         let app = openBoard()
         showPlan(app)
-        let ticket = element(app, "plan-ticket-ov-274")
-        XCTAssertTrue(app.reveal(ticket))
+        // An initiative opens its page, and its ticket opens the ticket's.
+        let initiative = element(app, "plan-initiative-Plan layer")
+        XCTAssertTrue(app.reveal(initiative), "no initiative: \(app.debugDescription)")
+        initiative.tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
+        let ticket = element(app, "plan-page-ticket-ov-274")
+        XCTAssertTrue(app.reveal(ticket), "no ticket on the theme's page")
         ticket.tap()
         XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30))
         element(app, "plan-ticket-theme").tap()
         XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
         let gets = sent(app).filter { $0 == "plan.get" }.count
         let records = sent(app).filter { $0.hasPrefix("plan.events") }.count
-        XCTAssertEqual(records, 2, "one record per page opened: \(sent(app))")
+        XCTAssertEqual(records, 3, "one record per page opened: \(sent(app))")
         Self.notify("plan-news")
         let deadline = Date().addingTimeInterval(15)
         while sent(app).filter({ $0.hasPrefix("plan.events") }).count == records, Date() < deadline {
@@ -147,11 +160,11 @@ final class PlanUITests: XCTestCase {
         let after = sent(app)
         XCTAssertGreaterThan(after.filter { $0 == "plan.get" }.count, gets, "the plan wasn't read again")
         XCTAssertEqual(after.filter { $0.hasPrefix("plan.events") }.count, records + 1, "more than the open page was read: \(after)")
-        // Back twice returns to the plan.
+        // Back three times returns to the plan.
         back(app)
         back(app)
-        // The notice rekeyed the first Next Up ticket, as a new plan does.
-        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-274-v2")), "Back didn't return to the plan")
+        back(app)
+        XCTAssertTrue(app.reveal(initiative) || initiative.waitForExistence(timeout: 15), "Back didn't return to the plan")
     }
 
     // MARK: Pull requests (ov-317)
@@ -160,7 +173,7 @@ final class PlanUITests: XCTestCase {
     private static var stages: String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
-        return root.appendingPathComponent("test/fixtures/plan-phones-ov317.json").path
+        return root.appendingPathComponent("test/fixtures/plan-phones-ov317-themed.json").path
     }
 
     private static let draftTicket = "00000000-0000-0000-0000-000000001002"
@@ -169,12 +182,16 @@ final class PlanUITests: XCTestCase {
     private func openStages(_ extra: [String] = ["-phone-plan", "-phone-pr-actions"]) -> XCUIApplication {
         let app = openBoard(extra, fixture: Self.stages)
         showPlan(app)
-        XCTAssertTrue(app.reveal(element(app, "plan-ticket-ov-2")), "no tickets: \(app.debugDescription)")
+        // The tickets are the initiative's: it opens a page that lists each one.
+        let initiative = element(app, "plan-initiative-Pull requests")
+        XCTAssertTrue(app.reveal(initiative), "no initiative: \(app.debugDescription)")
+        initiative.tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30), "no theme page: \(app.debugDescription)")
         return app
     }
 
     private func openTicketPage(_ app: XCUIApplication, _ name: String) {
-        let row = element(app, "plan-ticket-\(name)")
+        let row = element(app, "plan-page-ticket-\(name)")
         XCTAssertTrue(app.reveal(row), "no row for \(name)")
         row.tap()
         XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30), "\(name) didn't open its page")
@@ -187,34 +204,6 @@ final class PlanUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.25)
         }
         return done()
-    }
-
-    /// **A ticket row says where its pull request stands, by the Mac's rules** (ov-316): Building is
-    /// the state's word already, so it's said once; a problem leads and the gray line keeps
-    /// "Approved"; a pull request the runner couldn't read is added to the state and never
-    /// replaces it. The words are AgentKit's (`PlanPrStage`, pinned in `PhonePrActionsTests`).
-    func testTicketRowsSayWhereTheirPullRequestStands() {
-        let app = openStages()
-        // In the order the section draws them: a lazy list is only ever revealed downward.
-        var labels: [String: String] = [:]
-        for name in ["ov-1", "ov-2", "ov-5", "ov-6", "ov-8", "ov-14", "00001100"] {
-            let row = element(app, "plan-ticket-\(name)")
-            XCTAssertTrue(app.reveal(row), "no row for \(name)")
-            labels[name] = row.label
-        }
-        func label(_ name: String) -> String { labels[name] ?? "" }
-        XCTAssertTrue(label("ov-2").contains("Agent Review"), label("ov-2"))
-        XCTAssertTrue(label("ov-6").contains("Changes Requested"), label("ov-6"))
-        let failing = label("ov-8")
-        XCTAssertTrue(failing.contains("Checks Failing") && failing.contains("Approved"), failing)
-        XCTAssertFalse(failing.contains("Approved, Checks Failing"), "the problem leads: \(failing)")
-        let unknown = label("ov-14")
-        XCTAssertTrue(unknown.contains("PR State Unknown") && unknown.contains("In Review"), unknown)
-        XCTAssertFalse(label("ov-1").contains("Building"), "Building is the state's word already, so the stage leaves it out: \(label("ov-1"))")
-        XCTAssertTrue(label("00001100").contains("In Review") && !label("00001100").contains("Waiting"), label("00001100"))
-        let long = label("ov-5")
-        XCTAssertTrue(long.contains("Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg"), long)
-        keep(app, "stages-plan", expecting: .reads(element(app, "plan-ticket-00001100"), "In Review"))
     }
 
     /// **A draft ticket's page offers Mark Ready, asks first, and marks the number the page showed**
@@ -380,39 +369,5 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "needs-you-item-\(Self.thread)").waitForExistence(timeout: 30))
         XCTAssertFalse(element(app, "needs-you-reply-\(Self.thread)").exists, "Reply to a phone that can only look")
         XCTAssertFalse(element(app, "needs-you-github-\(Self.review)").exists, "a link the runner never sent")
-    }
-
-    /// The sheets: the overview, its themes, a ticket and a theme, light and dark.
-    ///
-    /// Opt-in, like the Android Roborazzi captures: it makes screenshots and
-    /// asserts nothing a behavior test does not, and it flips the whole
-    /// device's appearance, so it stays out of CI and of an ordinary run.
-    /// `TEST_RUNNER_FC_CAPTURES=1 xcodebuild test …` turns it on.
-    func testCaptures() throws {
-        try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["FC_CAPTURES"] == "1",
-            "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the sheets")
-        for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
-            XCUIDevice.shared.appearance = appearance
-            let app = openBoard()
-            showPlan(app)
-            XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 30))
-            keep(app, "capture-overview-\(name)", expecting: .shows(element(app, "plan-landing")))
-            let theme = app.buttons["tree-row-Visual language"]
-            XCTAssertTrue(app.reveal(theme))
-            keep(app, "capture-themes-\(name)", expecting: .shows(theme))
-            theme.tap()
-            app.buttons["tree-own"].tap()
-            XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
-            keep(app, "capture-theme-page-\(name)", expecting: .shows(element(app, "plan-theme-page")))
-            back(app)
-            back(app)
-            let ticket = element(app, "plan-ticket-ov-220")
-            for _ in 0..<8 where !(ticket.exists && ticket.isHittable) { app.swipeDown() }
-            ticket.tap()
-            XCTAssertTrue(element(app, "plan-ticket-page").waitForExistence(timeout: 30))
-            keep(app, "capture-ticket-page-\(name)", expecting: .shows(element(app, "plan-ticket-page")))
-            app.terminate()
-        }
     }
 }

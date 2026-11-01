@@ -78,11 +78,11 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 let strip = app.buttons["plan-strip"]
                 XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
                 strip.tap()
-                XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 20), "no sheet")
+                XCTAssertTrue(element(app, "plan-facts").waitForExistence(timeout: 20), "no sheet")
                 // The sections sit below the tasks in the sheet: scroll to them, and take the sheet large.
-                XCTAssertTrue(app.reveal(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing")), "no \(name)")
-                shoot(name, scheme, expecting: .shows(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing")))
-                XCTAssertTrue(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing").exists, "no \(name)")
+                XCTAssertTrue(app.reveal(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty")), "no \(name)")
+                shoot(name, scheme, expecting: .shows(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty")))
+                XCTAssertTrue(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty").exists, "no \(name)")
                 app.terminate()
             }
         }
@@ -92,35 +92,6 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
         return root.appendingPathComponent("test/fixtures/\(file)").path
-    }
-
-    /// The Plan sheet's Cost section (ov-687, fourth batch), in light and dark,
-    /// over `plan-phones-sheet.json`, the plan with every section the sheet draws.
-    func testQuietCost() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the phone's sheet")
-        for scheme in ["light", "dark"] {
-            XCUIDevice.shared.appearance = scheme == "dark" ? .dark : .light
-            let app = XCUIApplication.phoneHarness(
-                ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-rulings",
-                 "-phone-plan-file", Self.seeded("plan-phones-sheet.json"), "-phone-appearance", scheme])
-            let billing = app.buttons["workspace-row-Billing"]
-            XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
-            billing.tap()
-            let strip = app.buttons["plan-strip"]
-            XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
-            strip.tap()
-            XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
-            let bar = app.navigationBars["Plan"]
-            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
-            let header = element(app, "plan-cost-header")
-            XCTAssertTrue(app.reveal(header), "no Cost in the sheet")
-            shoot("quiet-cost", scheme, expecting: .when("the Cost section is in the tree") { header.exists })
-            let before = XCUIScreen.main.screenshot().pngRepresentation
-            app.swipeUp(velocity: .slow)
-            shoot("quiet-cost-2", scheme, expecting: .changed(from: before, "the sheet scrolled down the Cost section"))
-            app.terminate()
-        }
     }
 
     /// An orchestrator's page, whose quiet text is `Ink.quiet` (ov-687, fourth
@@ -135,7 +106,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
             let row = app.buttons["workspace-row-Billing"]
             XCTAssertTrue(row.waitForExistence(timeout: 30), "no Billing row")
             row.tap()
-            XCTAssertTrue(app.reveal(element(app, "plan-landing")), "no plan")
+            XCTAssertTrue(app.reveal(element(app, "plan-facts")), "no plan")
             let train = element(app, "plan-page-train")
             for _ in 0..<14 where !(train.exists && train.isHittable) { app.swipeUp() }
             train.tap()
@@ -221,8 +192,8 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
                 shoot("strip", scheme, expecting: .shows(strip))
                 strip.tap()
-                XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
-                shoot("sheet-medium", scheme, expecting: .shows(element(app, "plan-sheet-orchestrator")))
+                XCTAssertTrue(element(app, "plan-facts").waitForExistence(timeout: 10), "no sheet")
+                shoot("sheet-medium", scheme, expecting: .shows(element(app, "plan-facts")))
                 let bar = app.navigationBars["Plan"]
                 let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 from.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
@@ -231,12 +202,6 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 walk(app, "sheet", scheme, pages: 8, first: .when("the Plan sheet at its large detent") {
                     bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
                 })
-                // The Plan is the sheet alone (ov-616); its Tickets list is in it.
-                let tickets = element(app, "plan-browse-tickets")
-                for _ in 0..<14 where !(tickets.exists && tickets.isHittable) { app.swipeUp() }
-                tickets.tap()
-                XCTAssertTrue(element(app, "plan-browse-tickets-list").waitForExistence(timeout: 10), "no Tickets list")
-                shoot("tickets-list", scheme, expecting: .shows(element(app, "plan-browse-tickets-list")))
             }
             app.terminate()
         }

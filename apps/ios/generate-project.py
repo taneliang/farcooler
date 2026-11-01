@@ -1180,7 +1180,6 @@ UI_TEST_SOURCES = [
     # The plan layer's view on the canned runner (ov-274): opt-in, the
     # overview, its pages, and a read that is refused or never answered.
     "PlanUITests.swift",
-    "PlanSectionsUITests.swift",
     "PhonePlanColumnUITests.swift",
     "PlanSectionsCapturesUITests.swift",
     # Orchestrator pages in the Plan view (ov-285), over the canned runner with
@@ -1188,7 +1187,6 @@ UI_TEST_SOURCES = [
     "PagesUITests.swift",
     # Decided For You in the Plan view (ov-304), over the canned runner with a
     # seeded board's rulings (`-phone-rulings`).
-    "PlanRulingsUITests.swift",
     # The plan strip, its sheet and the One tree on the phone (ov-300).
     "PhoneTreeUITests.swift",
     # The iPad's workspace in columns (ov-348), on an iPad simulator.

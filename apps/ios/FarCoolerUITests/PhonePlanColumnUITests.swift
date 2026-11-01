@@ -179,6 +179,24 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "an agent opened nothing: \(app.debugDescription)")
     }
 
+    /// **An agent with a pane opens its chat**: `plan-seeded-pane.json` is the seeded plan with its
+    /// first builder on the harness's agent terminal, whose worktree opens on that pane.
+    func testAnAgentWithAPaneOpensItsChat() {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let pane = root.appendingPathComponent("test/fixtures/plan-seeded-pane.json").path
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", pane])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        let agent = element(app, "plan-agent-agent:a7c31e0f2b9d4e18")
+        XCTAssertTrue(app.reveal(agent), "no builder: \(app.debugDescription)")
+        reach(app, agent.identifier).tap()
+        XCTAssertTrue(app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 20), "the agent's pane didn't open: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "task-screen").exists, "it opened the ticket and not the chat")
+    }
+
     /// **Needs You leaves its words in the orchestrator's composer and sends nothing**: a draft
     /// pasted without Enter, then the sheet is closed onto the conversation.
     func testANeedsYouRowDraftsIntoTheOrchestrator() {

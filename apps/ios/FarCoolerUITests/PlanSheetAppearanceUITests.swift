@@ -94,7 +94,7 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         let width = app.windows.firstMatch.frame.width
         let bandTop = bar.maxY + 10
         let content = Self.luminances(shot, x: width * 0.05..<width * 0.95, y: bandTop..<(bandTop + 150))
-        let card = app.descendants(matching: .any)["plan-sheet-orchestrator"].frame
+        let card = app.descendants(matching: .any)["plan-needs-you"].frame
         let cell = Self.luminances(
             shot, x: (card.minX + 8)..<(card.minX + card.width * 0.6), y: (card.minY + 4)..<(card.maxY - 4))
         let ground = Self.median(cell)
@@ -164,15 +164,10 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         let app = openSheet(system: system, theme: theme)
         var stops: [(String, Look)] = []
         stops.append(("medium", look(app, "\(name)-1-medium", expecting: .when("the sheet at its medium detent") { !self.isLarge(app) })))
-        // At the medium detent the band says Now only, so what's under it shows (ov-515).
-        let sheet = app.descendants(matching: .any).matching(identifier: "plan-sheet").firstMatch
-        let band = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
-        XCTAssertTrue(band.waitForExistence(timeout: 15), "no band at medium: \(app.debugDescription)")
-        XCTAssertFalse(band.label.contains("Next:"), "the band says Next at the medium detent: \(band.label)")
-        // And the filters over the tree, which leads the Plan (ov-616), are on its first screenful.
-        let filters = app.descendants(matching: .any).matching(identifier: "plan-filters").firstMatch
-        XCTAssertTrue(filters.waitForExistence(timeout: 10), "the filters aren't drawn at medium")
-        XCTAssertLessThan(filters.frame.minY, app.windows.firstMatch.frame.height * 0.93, "the filters are pushed below the sheet's first screenful: \(filters.frame)")
+        // The facts line leads the Plan, so it is on the sheet's first screenful at the medium detent too.
+        let facts = app.descendants(matching: .any).matching(identifier: "plan-facts").firstMatch
+        XCTAssertTrue(facts.waitForExistence(timeout: 15), "no facts line at medium: \(app.debugDescription)")
+        XCTAssertLessThan(facts.frame.minY, app.windows.firstMatch.frame.height * 0.93, "the facts are pushed below the sheet's first screenful: \(facts.frame)")
         pull(app, to: 0.02)
         XCTAssertTrue(isLarge(app), "the sheet didn't expand")
         stops.append(("large", look(app, "\(name)-2-large", expecting: .when("the sheet at its large detent") { self.isLarge(app) })))

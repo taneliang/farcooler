@@ -119,7 +119,7 @@ final class NavigationCapturesUITests: XCTestCase {
             shoot("plan-large-\(tag)", expecting: .when("the Plan sheet at its large detent") {
                 bar.exists && bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
             })
-            for (section, name) in [("plan-landing", "landing"), ("plan-agents", "agents"), ("plan-cost-header", "cost"), ("plan-rulings", "rulings")] {
+            for (section, name) in [("plan-facts", "facts"), ("plan-initiatives", "initiatives"), ("plan-pipeline", "pipeline"), ("plan-footer", "footer")] {
                 let target = element(app, section)
                 XCTAssertTrue(app.reveal(target), "no \(section) in the sheet")
                 // Drawn, then brought up under the sheet's bar. The drag starts

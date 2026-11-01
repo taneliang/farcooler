@@ -98,13 +98,16 @@ final class DynamicTypeTests: XCTestCase {
     /// **No icon sits over a title** (ov-424): in the tree the icon was
     /// drawn over the title's first letters.
     func testNoRowIconOverlapsItsTitleAtTheLargestSize() throws {
-        let app = openBilling([], size: Self.largest)
+        // A loose worktree is a row of the tree, under the plan (ov-874).
+        let app = openBilling(["-phone-loose-hidden"], size: Self.largest)
         app.buttons["plan-strip"].tap()
         let bar = app.navigationBars["Plan"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
         bar.swipeUp()
         let icon = app.descendants(matching: .any)["tree-row-icon"]
-        XCTAssertTrue(app.reveal(icon), "the tree drew no row")
+        // The plan is long at this size: flung to its end, where the worktrees are.
+        for _ in 0..<80 where !icon.exists { app.swipeUp(velocity: .fast) }
+        XCTAssertTrue(icon.exists, "the tree drew no row")
         let icons = every(app, "tree-row-icon"), titles = every(app, "tree-row-title")
         XCTAssertFalse(titles.isEmpty, "the tree drew no title")
         for icon in icons {

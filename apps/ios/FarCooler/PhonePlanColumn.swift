@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // The Plan on an iPhone, as the Mac's plan column draws it (ov-874, after
@@ -21,7 +22,16 @@ struct PhonePlanColumn<Top: View>: View {
     @ViewBuilder let top: () -> Top
 
     @ObservedObject private var reads: PlanReads
+    @ObservedObject private var pageReads: PageReads
     @Environment(\.phoneNavigator) private var navigator
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var composing = false
+    @State private var fromBranch = false
+    @State private var moveFailure: ActionFailure?
+    /// The worktrees it last drew (ov-791): under a pushed screen it keeps
+    /// them rather than building the tree on every board move.
+    @State private var held = HeldTree()
+    @State private var moves = 0
     /// What the last quote left on the clipboard, when the runner couldn't paste.
     @State private var notice: String?
 
@@ -35,6 +45,7 @@ struct PhonePlanColumn<Top: View>: View {
         self.inSheet = inSheet
         self.top = top
         reads = connection.plans
+        pageReads = connection.pages
     }
 
     var body: some View {
@@ -45,13 +56,18 @@ struct PhonePlanColumn<Top: View>: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
         .environment(\.defaultMinListRowHeight, PlanRowHeight.minimum)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("plan-list")
-        .task { await connection.readTree(summary) }
+        .task {
+            await connection.readTree(summary)
+            if connection.keepsPages { await connection.readPages(summary) }
+        }
+        .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         .refreshable {
             _ = await connection.readBoard(summary)
             await connection.readPlan(summary)
+            if connection.keepsPages { await connection.readPages(summary) }
         }
+        .actionFailureAlert($moveFailure)
+        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
     }
 
@@ -118,6 +134,38 @@ struct PhonePlanColumn<Top: View>: View {
             PhonePlanPipeline(column: column, actions: actions)
             PhonePlanFooter(counts: column.footer) { navigator?.open(.history(place, status: $0.rawValue)) }
         }
+        pages(plan)
+        worktrees
+    }
+
+    /// The orchestrator's pages, which the plan's list has always led to.
+    @ViewBuilder private func pages(_ plan: PlanModel) -> some View {
+        if connection.keepsPages {
+            PlanPagesSection(
+                state: pageReads.state(summary.id), plan: plan, read: read,
+                onOpen: { navigator?.open(.plan(place, page: $0)) })
+        }
+    }
+
+    /// The main checkout and the loose worktrees, and New Worktree: where a
+    /// terminal that no agent is on is found.
+    @ViewBuilder private var worktrees: some View {
+        let below = belowTree
+        if !below.isEmpty {
+            Section {
+                ForEach(below) { node in TreeRow(node: node, connection: connection, place: place, failure: $moveFailure) }
+            }
+        }
+        TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
+    }
+
+    private var belowTree: [OneTreeNode] {
+        _ = moves
+        let covered = sizeClass == .compact && navigator?.isOnTop(inSheet ? nil : .workspace(place)) == false
+        if covered, let kept = held.root { return kept.below }
+        let made = PhoneTree.root(connection.oneTree(summary, filter: .open, narrow: nil))
+        held.root = made
+        return made.below
     }
 
     private var actions: PhonePlanActions {

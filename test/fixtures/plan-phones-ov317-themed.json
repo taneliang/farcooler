@@ -1,0 +1,462 @@
+{
+ "_doc": "The Plan on a phone with every pull request stage a lane or a card can be in (ov-317): plan-stages.json trimmed to the lanes a phone test needs, with titles and PR numbers. lane-2 is a draft in agent review (PR 41) and lane-3 a draft being fixed (PR 42), the two Mark Ready is offered on. For -phone-plan-file. Themed (ov-874): the same tickets under one initiative, so a phone reaches each ticket's page through it, as the plan lists tickets on the Mac and the phone open the task.",
+ "plan": {
+  "agents_spend": null,
+  "board_counts": {
+   "backlog": 0,
+   "cancelled": 0,
+   "done": 0,
+   "in_progress": 0,
+   "in_review": 0,
+   "needs_decision": 0,
+   "todo": 0
+  },
+  "cards": [
+   {
+    "key": "ov-1",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001001",
+    "title": "Billing: invoice PDF export"
+   },
+   {
+    "key": "ov-2",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001002",
+    "title": "Refunds: a refund endpoint with partial amounts"
+   },
+   {
+    "key": "ov-3",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001003",
+    "title": "Ledger: reconcile after a partial refund"
+   },
+   {
+    "key": "ov-5",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001005",
+    "title": "Onboarding: the invite flow for new teammates"
+   },
+   {
+    "key": "ov-6",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001006",
+    "title": "Search: filter invoices by customer and status"
+   },
+   {
+    "key": "ov-8",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-000000001008",
+    "title": "Payments: retry a failed charge once"
+   },
+   {
+    "key": "ov-14",
+    "status": "In Review",
+    "task": "00000000-0000-0000-0000-00000000100e",
+    "title": "Reports: monthly revenue export"
+   }
+  ],
+  "ci": [],
+  "cost": null,
+  "landed_not_closed": [],
+  "now_ms": 1800000000000,
+  "rulings": [],
+  "themes": [
+   {
+    "cards": [
+     {
+      "key": "ov-1",
+      "task": "00000000-0000-0000-0000-000000001001"
+     },
+     {
+      "key": "ov-2",
+      "task": "00000000-0000-0000-0000-000000001002"
+     },
+     {
+      "key": "ov-3",
+      "task": "00000000-0000-0000-0000-000000001003"
+     },
+     {
+      "key": "ov-5",
+      "task": "00000000-0000-0000-0000-000000001005"
+     },
+     {
+      "key": "ov-6",
+      "task": "00000000-0000-0000-0000-000000001006"
+     },
+     {
+      "key": "ov-8",
+      "task": "00000000-0000-0000-0000-000000001008"
+     },
+     {
+      "key": "ov-14",
+      "task": "00000000-0000-0000-0000-00000000100e"
+     },
+     {
+      "key": "00001100",
+      "task": "00000000-0000-0000-0000-000000001100"
+     }
+    ],
+    "counts": {
+     "backlog": 0,
+     "cancelled": 0,
+     "done": 0,
+     "in_progress": 0,
+     "in_review": 8,
+     "needs_decision": 0,
+     "todo": 0
+    },
+    "id": "00000000-0000-0000-0000-00000000aaaa",
+    "name": "Pull requests",
+    "next": "",
+    "ordinal": 1,
+    "outcome": "Pull requests read as the owner expects.",
+    "owner_ask": "",
+    "short": "aaaa",
+    "state": "active",
+    "story": "",
+    "story_at": 0
+   }
+  ],
+  "lines": [
+   {
+    "task": "00000000-0000-0000-0000-000000001001",
+    "key": "ov-1",
+    "title": "Billing: invoice PDF export",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": null,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "building",
+     "label": "Building",
+     "pr_number": 0,
+     "pr_url": "",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001002",
+    "key": "ov-2",
+    "title": "Refunds: a refund endpoint with partial amounts",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": 41,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "agent_review",
+     "label": "Agent review",
+     "pr_number": 41,
+     "pr_url": "https://github.com/acme/app/pull/41",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001003",
+    "key": "ov-3",
+    "title": "Ledger: reconcile after a partial refund",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": 42,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "fixing",
+     "label": "Fixing",
+     "pr_number": 42,
+     "pr_url": "https://github.com/acme/app/pull/42",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001005",
+    "key": "ov-5",
+    "title": "Onboarding: the invite flow for new teammates",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": 32,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "waiting_on_reviewer",
+     "label": "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
+     "pr_number": 32,
+     "pr_url": "https://github.com/acme/app/pull/32",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [
+      "maximilian-wolfgang-hohenzollern-schwarzenberg"
+     ],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001006",
+    "key": "ov-6",
+    "title": "Search: filter invoices by customer and status",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": 45,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "changes_requested",
+     "label": "Changes requested",
+     "pr_number": 45,
+     "pr_url": "https://github.com/acme/app/pull/45",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001008",
+    "key": "ov-8",
+    "title": "Payments: retry a failed charge once",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": 33,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "failing",
+     "kind": "approved_checks_failing",
+     "label": "Approved \u00b7 checks failing",
+     "pr_number": 33,
+     "pr_url": "https://github.com/acme/app/pull/33",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-00000000100e",
+    "key": "ov-14",
+    "title": "Reports: monthly revenue export",
+    "status": "In Review",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": null,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    },
+    "pr_stage": {
+     "checks": "unknown",
+     "kind": "unknown",
+     "label": "PR state unknown",
+     "pr_number": 0,
+     "pr_url": "",
+     "queue_position": 0,
+     "read_at": 0,
+     "reviewers": [],
+     "unresolved_threads": null
+    }
+   },
+   {
+    "task": "00000000-0000-0000-0000-000000001100",
+    "key": "00001100",
+    "title": "Settings: a ticket GitHub has said nothing about",
+    "status": "In Progress",
+    "stage": "reviewing",
+    "stage_since": 1799999400000,
+    "reason": "",
+    "plan_rank": null,
+    "branch": "",
+    "worktree_path": "",
+    "stack_parent": null,
+    "same_branch": null,
+    "pr_number": null,
+    "landed_sha": null,
+    "held_off": false,
+    "stale": false,
+    "budget_tokens": null,
+    "fix_rounds": 0,
+    "landing": null,
+    "work": [],
+    "spend": {
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "runs": 0,
+     "shared_agents": 0,
+     "unmeasured_agents": 0
+    }
+   }
+  ],
+  "landings": [],
+  "agents": [],
+  "off_the_line": []
+ },
+ "records": {}
+}
