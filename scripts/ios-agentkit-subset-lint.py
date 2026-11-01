@@ -26,6 +26,9 @@ name that really is Apple's goes on APPLE_NAMES below, with the reason.
   ./scripts/ios-agentkit-subset-lint.py --self-test  plant breaks, see each caught
 """
 
+# Keep union annotations unevaluated on macOS's system Python 3.9.
+from __future__ import annotations
+
 import ast
 import pathlib
 import re
