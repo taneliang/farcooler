@@ -8,23 +8,60 @@ use super::{Harness, render};
 
 const ALL: [Harness; 3] = [Harness::Claude, Harness::Codex, Harness::Cursor];
 
-/// The `SKILL.md` a harness gets, read as prose: where a line wraps is not
-/// what's being checked.
-fn prose(h: Harness) -> String {
-    let text = render(h, "farcooler")
+/// The actual rendered `SKILL.md`, retaining heading and fence boundaries.
+fn skill(h: Harness) -> String {
+    render(h, "farcooler")
         .into_iter()
         .find(|f| f.relative.ends_with("SKILL.md"))
         .expect("every harness gets a SKILL.md")
-        .contents;
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+        .contents
+}
+
+fn prose(h: Harness) -> String {
+    skill(h).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn only_unfenced_heading_lines_end_a_section() {
+    let body = "## First\nRead `## Inline` too.\n```markdown\n## Example\n```\n\
+        Keep this\nwrapped rule.\n## Next\nLeave this out.\n";
+    assert_eq!(section(body, "First"), "## First Read `## Inline` too. ```markdown ## Example ``` Keep this wrapped rule.");
+    assert_eq!(section(body, "Next"), "## Next Leave this out.");
 }
 
 /// The text under a `## ` heading that starts with `title`, up to the next one.
 fn section(body: &str, title: &str) -> String {
-    let start = body.find(&format!(" ## {title}")).unwrap_or_else(|| panic!("no section {title}"));
-    let rest = &body[start + 1..];
-    let end = rest[3..].find(" ## ").map_or(rest.len(), |i| i + 3);
-    rest[..end].to_string()
+    let mut fenced = false;
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in body.lines() {
+        if line.starts_with("```") {
+            fenced = !fenced;
+        }
+        if !fenced && let Some(heading) = line.strip_prefix("## ") {
+            if found {
+                break;
+            }
+            found = heading.starts_with(title);
+        }
+        if found {
+            lines.push(line);
+        }
+    }
+    assert!(found, "no section {title}");
+    lines.join("\n").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The real asset includes a charter example with its own `## Landing`.
+/// It must not hide the manual landing and PR rules that follow it.
+#[test]
+fn a_charter_example_does_not_end_the_landing_section() {
+    for h in ALL {
+        let land = section(&skill(h), "4. Land");
+        assert!(land.contains("- Route: push"), "{h:?}: {land}");
+        assert!(land.contains("Never push main and never merge without the required approvals"), "{h:?}: {land}");
+        assert!(!land.contains("At each check-in"), "{h:?}: the next section leaked in");
+    }
 }
 
 /// A repository whose main refuses pushes can't be run in direct mode,
@@ -32,7 +69,7 @@ fn section(body: &str, title: &str) -> String {
 #[test]
 fn the_landing_mode_is_known_before_anything_lands() {
     for h in ALL {
-        let body = prose(h);
+        let body = skill(h);
         let first = section(&body, "1. Read the charter");
         assert!(first.contains("`## Workflow` names the landing mode"), "{h:?}: {first}");
         assert!(first.contains("**Direct**") && first.contains("**PR**"), "{h:?}: {first}");
@@ -49,7 +86,7 @@ fn the_landing_mode_is_known_before_anything_lands() {
 #[test]
 fn pr_mode_never_lands_without_approval() {
     for h in ALL {
-        let land = section(&prose(h), "4. Land");
+        let land = section(&skill(h), "4. Land");
         for rule in [
             "Never push main and never merge without the required approvals",
             "no admin bypass",
@@ -70,7 +107,7 @@ fn pr_mode_never_lands_without_approval() {
 #[test]
 fn a_ticket_goes_on_the_line_with_its_dispatch() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Dispatch, answer, or report");
         // An agent dispatch puts its tickets on the line and records the agent
         // by itself (ov-457, ov-872); a subagent is recorded by hand beside
         // its launch.
@@ -91,7 +128,7 @@ fn a_ticket_goes_on_the_line_with_its_dispatch() {
 #[test]
 fn a_dispatched_agent_is_confirmed_started() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Dispatch, answer, or report");
         assert!(third.contains("Confirm each dispatched agent started"), "{h:?}: {third}");
         assert!(third.contains("goes to the owner at once with the reason"), "{h:?}: {third}");
         assert!(third.contains("in Needs You: never answer it for them"), "{h:?}: {third}");
@@ -103,7 +140,7 @@ fn a_dispatched_agent_is_confirmed_started() {
 #[test]
 fn a_reversible_call_is_recorded_as_a_ruling() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Dispatch, answer, or report");
         assert!(third.contains("is a ruling: make it, keep the work moving, and record it"), "{h:?}: {third}");
         assert!(third.contains("`plan ruling add --decision"), "{h:?}: {third}");
         // Until a CLI has the verb, the ruling still gets written down.
@@ -117,7 +154,7 @@ fn a_reversible_call_is_recorded_as_a_ruling() {
 #[test]
 fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Dispatch, answer, or report");
         assert!(third.contains("cite a kept one as precedent"), "{h:?}: {third}");
         assert!(third.contains("`plan ruling reverse R-12 [--sha <commit>]`, note the lesson on its card as a decision, ask next time"), "{h:?}: {third}");
         assert!(third.contains("Never keep one for them."), "{h:?}: {third}");
@@ -132,7 +169,7 @@ fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
 #[test]
 fn landing_is_watched_and_cleaned_up() {
     for h in ALL {
-        let land = section(&prose(h), "4. Land");
+        let land = section(&skill(h), "4. Land");
         assert!(land.contains("After every push or CI rerun, take its run from `gh run list`"), "{h:?}: {land}");
         // A local bare remote made Sonnet decide there was no CI and skip
         // the watch (ov-323, S18): the run list decides, never the URL.
@@ -165,7 +202,7 @@ fn landing_is_watched_and_cleaned_up() {
 #[test]
 fn a_check_in_re_evaluates_and_shows_initiative() {
     for h in ALL {
-        let body = prose(h);
+        let body = skill(h);
         let check = section(&body, "5. Check in");
         for rule in [
             "re-evaluate rather than replay",
@@ -192,7 +229,16 @@ fn every_plan_and_page_write_names_the_manager() {
         .find(|f| f.relative.ends_with("SKILL.md"))
         .unwrap()
         .contents;
-    let writes: Vec<&str> = text
+    let writes = plan_and_page_writes(&text);
+    assert!(writes.len() >= 7, "too few plan writes to check: {writes:?}");
+    assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
+    for line in writes {
+        assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
+    }
+}
+
+fn plan_and_page_writes(text: &str) -> Vec<&str> {
+    text
         .lines()
         .filter(|l| {
             ["farcooler plan ", "farcooler agent ", "farcooler landing ", "farcooler message ", "farcooler page set "]
@@ -200,13 +246,26 @@ fn every_plan_and_page_write_names_the_manager() {
                 .any(|w| l.starts_with(w))
                 // `plan --repo <repo>` reads the plan; it writes nothing.
                 && !l.starts_with("farcooler plan --")
+                // LandingShow has no actor argument: it only reads a landing.
+                && !l.starts_with("farcooler landing show ")
         })
-        .collect();
-    assert!(writes.len() >= 7, "too few plan writes to check: {writes:?}");
-    assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
-    for line in writes {
-        assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
-    }
+        .collect()
+}
+
+#[test]
+fn landing_reads_are_exempt_but_untagged_writes_are_still_checked() {
+    let commands = "farcooler landing show 1 --repo overnight\n\
+        farcooler landing start ov-1 --repo overnight\n\
+        farcooler landing set 1 --state dropped\n\
+        farcooler landing move ov-1 --repo overnight\n\
+        farcooler plan ticket set ov-1 --stage landing\n\
+        farcooler agent stop ov-1\n\
+        farcooler message ov-1 hello\n\
+        farcooler page set status --body hello";
+    let writes = plan_and_page_writes(commands);
+    assert_eq!(writes.len(), 7, "{writes:?}");
+    assert!(writes.iter().all(|line| !line.contains("--actor manager")));
+    assert!(writes.iter().all(|line| !line.starts_with("farcooler landing show ")));
 }
 
 /// The owner's conventions ship as defaults a charter overrides (ov-463):
@@ -218,7 +277,7 @@ fn every_plan_and_page_write_names_the_manager() {
 #[test]
 fn the_owners_conventions_ship_as_defaults() {
     for h in ALL {
-        let body = prose(h);
+        let body = skill(h);
         let first = section(&body, "1. Read the charter");
         assert!(first.contains("That includes the Defaults at the end: each holds until the charter says otherwise."), "{h:?}: {first}");
         let defaults = section(&body, "Defaults");
@@ -266,7 +325,7 @@ fn the_owners_conventions_ship_as_defaults() {
 fn a_drafted_charter_is_gone_through_and_the_interview_stays_the_fallback() {
     let draft = crate::charter_draft::DRAFT_FILE;
     for h in ALL {
-        let interview = section(&prose(h), "The interview");
+        let interview = section(&skill(h), "The interview");
         let asks = interview.find("One question at a time").unwrap_or_else(|| panic!("{h:?}: {interview}"));
         let at = interview.find(&format!("With a `{draft}` beside the charter, don't interview")).unwrap_or_else(|| panic!("{h:?}: {interview}"));
         assert!(asks < at, "{h:?}: {interview}");
@@ -287,7 +346,7 @@ fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
         assert!(prompt.contains(words), "the prompt lacks {words:?}: {prompt}");
     }
     for h in ALL {
-        let check = section(&prose(h), "5. Check in");
+        let check = section(&skill(h), "5. Check in");
         let at = check.find("**Suggesting themes**, when asked:").unwrap_or_else(|| panic!("{h:?}: {check}"));
         let rule = &check[at..];
         for words in [
@@ -307,7 +366,7 @@ fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
 #[test]
 fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch");
+        let third = section(&skill(h), "3. Dispatch");
         assert!(!third.contains("reaches no phone"), "{h:?}: {third}");
         assert!(third.contains("put the question in your reply too: a phone hears it only when one is paired"), "{h:?}: {third}");
     }
@@ -319,7 +378,7 @@ fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
 #[test]
 fn tickets_are_logged_and_routed_by_the_record() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch");
+        let third = section(&skill(h), "3. Dispatch");
         assert!(third.contains("Log each ticket's tokens, model and fix rounds; route by that record"), "{h:?}: {third}");
     }
 }
@@ -331,7 +390,7 @@ fn tickets_are_logged_and_routed_by_the_record() {
 #[test]
 fn every_brief_wants_each_new_test_seen_failing() {
     for h in ALL {
-        let third = section(&prose(h), "3. Dispatch");
+        let third = section(&skill(h), "3. Dispatch");
         let brief = third.find("A brief names the gates").unwrap_or_else(|| panic!("{h:?}: {third}"));
         assert!(third[brief..].contains("wants each new test seen failing"), "{h:?}: {}", &third[brief..]);
     }
@@ -344,7 +403,7 @@ fn every_brief_wants_each_new_test_seen_failing() {
 #[test]
 fn the_orchestrator_ranks_themes_and_records_overrides() {
     for h in ALL {
-        let body = prose(h);
+        let body = skill(h);
         let defaults = section(&body, "Defaults");
         for rule in [
             "**Theme order.** You keep it.",
@@ -372,7 +431,7 @@ fn the_orchestrator_ranks_themes_and_records_overrides() {
 #[test]
 fn ready_tickets_fold_into_the_waiting_landing() {
     for h in ALL {
-        let body = prose(h);
+        let body = skill(h);
         let land = section(&body, "4. Land");
         for rule in [
             "Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket",

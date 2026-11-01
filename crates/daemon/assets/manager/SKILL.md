@@ -144,91 +144,54 @@ Sonnet for well-defined work. Log each ticket's tokens, model and fix rounds; ro
 
 ## 4. Land
 
-Every non-trivial change gets an agent's review first. A ticket that passes
-review moves to landing (`plan ticket set <key> --stage landing`) and joins the
-board's collecting landing, which leaves for its gate by itself when nothing is
-ahead and main is green; the runner tells you when it does. One lander rebases
-what it carries, applies the reviews' fixes and runs every gate once. Never
-queue landings: fold every ticket ready while one waits to land into it (one
-branch off main, one push, one CI watch), and split only for a conflict or a
-risky ticket. Name its lander (`--lander`). Local gates mirror CI: every step, in its environment (display scale,
-`CI=true`, shard timeouts), and a failure only CI caught earns a local gate. A
-red main comes first; when a known-flaky test did it, rerun the failed job
-once, file a flaky card, and keep landing on the rerun's result.
+Every non-trivial change gets an agent's review first. Move reviewed tickets to landing (`plan ticket set <key> --stage landing`);
+each joins the board's collecting landing, which leaves for its gate by itself when nothing is ahead and main is green;
+the runner tells you when it does. One lander rebases what it carries, applies the reviews' fixes and runs every gate once.
+Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket. Name its lander
+(`--lander`). Local gates mirror CI: every step and its environment (display scale, `CI=true`, shard timeouts).
+A CI-only failure earns a local gate. A red main comes first; when a known-flaky test did it, rerun the failed job once,
+file a flaky card, and keep landing on the rerun's result.
 
-**With a `## Landing` section, the runner lands.** `landing start <key>...`
-hands the tickets to its landing job. Each ticket takes the route its changed
-files choose (the first rule that matches a file, else the default; the most
-careful file wins). Push tickets wait for green CI on the base, are folded on
-by cherry-pick, gated with the charter's gate, pushed, watched until CI passes
-(a canceled run is run once more), and land with their SHA. A batch whose gate
-fails splits in two, so a good ticket never waits on a bad one. A ticket the
-charter asks about waits on the owner in Needs you until they say land it
-(`--land`); never pass `--land` yourself. A conflict, a red gate or red CI
-stops the job with why on the landing's timeline: fix it or hand the ticket
-back, then start it again. One job runs per board.
-
+**With a `## Landing` section, the runner lands.** `landing start <key>...` hands off the tickets. Routes follow changed files:
+first matching rule per file, else the default; most careful file wins. Push tickets wait for green base CI, cherry-pick,
+gate, push and watch CI (rerun canceled CI once), then land with their SHA. A failed batch gate splits the batch in two.
+Ask routes wait on the owner in Needs You (`--land`); never pass `--land` yourself. Conflicts, red gates or red CI stop
+the job with why on its timeline: fix or return the ticket, then restart. One job runs per board.
 ```
 ## Landing
-
 - Route: push
 - Route `services/site/**`: ask
 - Gate: `scripts/landing-gate.sh`
-- Base: main
-- Remote: origin
-- CI: github
 ```
-
-Routes are push, pull request or ask; a glob's `*` stays in a folder and `**`
-crosses them. `Gate:` repeats, runs with `sh -c` at the top of the landing's
-worktree, and may be `none`; a section that can push names one. `Base:`
-(main), `Remote:` (origin) and `CI:` (github, or none) are optional. A
-section that doesn't read refuses the charter edit, naming the line.
-
+Routes: push, pull request or ask. Globs: `*` stays in a folder, `**` crosses them. Repeat `Gate:` for multiple commands;
+each runs with `sh -c` in the landing worktree. `none` skips gates; a push-capable section must name a gate.
+Optional defaults: `Base: main`, `Remote: origin`, `CI: github` (or none). An invalid section refuses the edit with its line.
 ```
 {{cli}} landing start <key> <key> --repo <repo> --title "<what it carries>" --actor manager
 {{cli}} landing show <N> --repo <repo>
 ```
-
-Without one, keep landings on the plan by hand, never on a hand-kept page:
-record one with its tickets when you mean to gate now, move it (`--state
-gating`), and give it the SHA it pushed. The runner reads that SHA's CI and
-turns the landing green or red; Now shows it above its tickets.
-
+Without one, keep landings on the plan by hand, never on a hand-kept page: record tickets when gating now, move to
+`--state gating`, then set the pushed SHA. The runner tracks its CI; Now shows it above its tickets.
 ```
 {{cli}} landing start --record-only --repo <repo> --ticket <key> --ticket <key> --base origin/main --title "<what it carries>" --lander <agent> --actor manager
 {{cli}} landing set <N> --repo <repo> --sha <pushed sha> --actor manager
 ```
+- **Direct.** Rebase onto main (merge only if the charter permits), check unpushed work, push, watch, close on green CI.
+- **PR.** Never push main and never merge without the required approvals: no admin bypass, no dismissed reviews,
+  no resolving another's thread, and never approve. One PR per card, under the owner's own `gh` login so teammates approve; stack only
+  oversized cards. Review fixes stay on that PR. The landing becomes a rehearsal merging every ready PR locally,
+  never pushed; failures go back to the breaking ticket. Mark ready only after clean review, green CI and rehearsal.
+  Never slow dispatch for busy reviewers: make review faster with a description naming what to read first, the agent
+  review's summary, captures, files in risk order, suggested reviewers and nudges. Answer comments in their threads
+  with fixes on that branch; disagreements go to the owner. Land approved PRs through the merge queue or one at a time.
+  Label UI cards `ui`, link `*-before-*.png` and `*-after-*.png`; flag missing captures 'Not checked: captures'.
 
-- **Direct.** Rebase the landing onto main (no merge commits unless the charter
-  wants them), check what's unpushed, push, start the watch (below), and close
-  cards on green CI.
-- **PR.** Never push main and never merge without the required approvals: no
-  admin bypass, no dismissed reviews, no resolving another's thread, and never
-  approve. One PR per card, under the owner's own `gh` login, so teammates
-  approve; stack only a card too big to review. A card's review fixes go on
-  its PR. The landing becomes a rehearsal: a local branch merging every ready
-  PR, never pushed; when it fails, the ticket that broke it gets a fix round.
-  Mark a PR ready when its review is clean and CI and the rehearsal are green.
-  Never slow dispatch for busy reviewers: make review faster, with a
-  description that says what to look at first, the agent review's summary,
-  captures, files in risk order, suggested reviewers, and nudges. A comment is
-  a fix round on the same branch, answered in its thread; a disagreement goes
-  to the owner. Land approved PRs through the merge queue, or one at a time.
-  A UI card is labeled `ui` and links `*-before-*.png` and `*-after-*.png` captures, and one with no captures is flagged 'Not checked: captures'.
-
-After every push or CI rerun, take its run from `gh run list` (never decide
-there is no CI from the remote's URL; if none is listed, say so) and start `gh
-run watch <id> --exit-status` as a background command, so a red run reaches you
-and a green one frees the next landing. Without one, check it before you stop.
-
-On landing, tick each verified `--met` line, close the card (`task set --status
-done`), copy out its reports, delete its build output, and `worktree remove` it.
-Direct: a green landing on main lands, its tickets too. PR: `plan ticket set
-<key> --stage landed --sha <sha>` per merged PR; `landing set <N> --state dropped`.
-
-A page names what the runner knows, never types it: `{"ci":"main"}`,
-`{"ci":"<sha>"}`, `{"cards":"in_review"}`, a theme `"show":"spend"`.
+After every push or CI rerun, take its run from `gh run list` (never decide there is no CI from the remote's URL; say if
+none is listed) and start `gh run watch <id> --exit-status` as a background command. Red reaches you; green frees the next
+landing. Without a watch, check before stopping. On landing, tick each verified `--met` line, close (`task set --status done`),
+copy reports, delete its build output, and `worktree remove` it. Direct: green on main lands the landing and its tickets.
+PR: `plan ticket set <key> --stage landed --sha <sha>` per merged PR; `landing set <N> --state dropped` for the rehearsal.
+A page names live data, never types it: `{"ci":"main"}`, `{"ci":"<sha>"}`, `{"cards":"in_review"}`, theme `"show":"spend"`.
 
 ## 5. Check in
 
