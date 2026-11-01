@@ -9,12 +9,19 @@
 //! ```text
 //! farcooler landing list
 //! farcooler landing show 12
-//! farcooler landing start [--ticket KEY]... [--route push|pull_request|ask] [--base origin/main]
+//! farcooler landing start KEY... [--land] [--title T] [--lander AGENT] [--force]
+//! farcooler landing start --record-only [--ticket KEY]... [--route push|pull_request|ask] [--base origin/main]
 //!     [--title T] [--lander AGENT] [--force]
 //! farcooler landing set 12 [--state gating|...] [--sha 1a1b3275] [--base B] [--title T]
 //!     [--add KEY] [--remove KEY] [--lander AGENT]
 //! farcooler landing move KEY [--to next|12]
 //! ```
+//!
+//! `landing start` hands the landing to the runner's landing job (ov-872): the
+//! charter's `## Landing` section routes each ticket, and the push route is
+//! folded, gated, pushed and watched to landed, each step on the landing's
+//! timeline, which `landing show` prints. `--record-only` only records it, for
+//! a landing someone lands by hand.
 //!
 //! The board keeps one collecting landing: a ticket that passes review joins
 //! it on its own, and one that leaves landing comes off a landing whose SHA
@@ -58,17 +65,34 @@ pub(crate) enum LandingCmd {
         /// Its number: 12.
         number: String,
     },
-    /// Start a landing with these tickets. The board's collecting landing is
-    /// taken up rather than a second made.
+    /// Land these tickets: the runner starts a landing with them and runs it.
+    ///
+    /// The charter's ## Landing section chooses each ticket's route by the
+    /// files it changes. Push tickets are folded onto the base, gated with
+    /// the charter's gate, pushed, and watched until CI passes; a batch whose
+    /// gate fails splits in two. A ticket the charter asks about waits for
+    /// you. `landing show` follows the steps.
     ///
     /// Only tickets that are ready to land go on a landing. One still in
     /// review goes on with --force; any other is refused.
     Start {
+        /// A ticket to land, by key.
+        #[arg(value_name = "KEY")]
+        keys: Vec<String>,
         /// A ticket to put on it, by key. Repeat for more.
         #[arg(long = "ticket", value_name = "KEY")]
         tickets: Vec<String>,
-        /// How it lands: push (the default), pull_request or ask.
-        #[arg(long, value_enum)]
+        /// Only record the landing; land it yourself, and give it its SHA
+        /// with `landing set`.
+        #[arg(long)]
+        record_only: bool,
+        /// You say land them: tickets the charter asked about are pushed.
+        /// Only a person says this, never an agent.
+        #[arg(long, conflicts_with = "record_only")]
+        land: bool,
+        /// How a recorded landing lands: push (the default), pull_request or
+        /// ask. With --record-only; otherwise the charter chooses.
+        #[arg(long, value_enum, requires = "record_only")]
         route: Option<RouteArg>,
         /// What it's cut from: origin/main, or a SHA.
         #[arg(long, default_value = "")]
@@ -80,7 +104,7 @@ pub(crate) enum LandingCmd {
         #[arg(long, value_name = "AGENT")]
         lander: Option<String>,
         /// Put a ticket that's still in review on the landing by moving it to landing first.
-        #[arg(long, requires = "tickets")]
+        #[arg(long)]
         force: bool,
     },
     /// Move a landing, record what it pushed, name its lander, or put tickets on or off it.
@@ -176,6 +200,12 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "landing_settled" => "That landing has landed or been dropped, so it takes no more moves, SHAs or tickets.",
         "landing_changed" => "That landing moved while it was being changed. Read it again.",
         "route" => "Use push, pull_request or ask.",
+        "no_landing_rules" => "The charter has no ## Landing section, so the runner doesn't know how this board lands. Add one (`- Route: push`, `- Gate: <command>`), or land it yourself with --record-only.",
+        "charter_landing" => "The charter's ## Landing section doesn't read. `farcooler workspace charter` shows it.",
+        "landing_job_running" => "The runner is already landing on this board. Wait for it, with `farcooler landing list`.",
+        "land_is_yours" => "Only a person says to land what the charter asks about. Ask the owner.",
+        "waits_for_you" => "The charter asks before landing that ticket. It lands when a person says land it (`landing start <key> --land`).",
+        "no_tickets" => "Name a ticket to land.",
         "title" => "A title is one short line.",
         _ => return None,
     })
@@ -421,13 +451,17 @@ pub(super) async fn run_on<L: DispatchLink>(
                 out.join("\n")
             })
         }
-        LandingCmd::Start { tickets, route, base, title, lander, force } => {
+        LandingCmd::Start { keys, tickets, record_only, land, route, base, title, lander, force } => {
+            let tickets: Vec<String> = keys.into_iter().chain(tickets).collect();
+            if (!record_only || force) && tickets.is_empty() {
+                return Err("Name a ticket to land, like `farcooler landing start ov-12`.".into());
+            }
             let tasks = tasks_of(link, board, &tickets).await?;
-            let boarding = ready_to_land(&plan, &tasks, None, route == Some(RouteArg::Ask), force)?;
+            let boarding = ready_to_land(&plan, &tasks, None, route == Some(RouteArg::Ask) || land, force)?;
             let lander_id = lander.map(|a| find_agent(&plan, &a)).transpose()?;
             move_to_landing(link, board, &boarding, actor).await?;
             let p = request::Payload::LandingStart(pb::LandingStart {
-                workspace_id: ws,
+                workspace_id: ws.clone(),
                 route: route.map_or(pb::LandingRoute::Unspecified, |r| match r {
                     RouteArg::Push => pb::LandingRoute::Push,
                     RouteArg::PullRequest => pb::LandingRoute::PullRequest,
@@ -438,9 +472,24 @@ pub(super) async fn run_on<L: DispatchLink>(
                 title: title.unwrap_or_default(),
                 lander_id,
                 actor: actor.into(),
+                run: !record_only,
+                land,
             });
-            let made = send_landing(link, board, "landing.start", p).await?;
-            Ok(said(&plan_with(&plan, &made, &tasks), &made))
+            let made = match send_landing(link, board, "landing.start", p).await {
+                Ok(made) => made,
+                Err(e) if e.to_string() == said_here("charter_landing").unwrap_or_default() => {
+                    // Name the line that didn't read, from the charter itself.
+                    let charter = crate::workspaces::charter::read(link, crate::uuid_of(&ws)).await.ok();
+                    let named = charter.and_then(|c| crate::workspaces::charter::landing_section_problem(&c.text));
+                    return Err(named.map_or(e, Into::into));
+                }
+                Err(e) => return Err(e),
+            };
+            let shown = said(&plan_with(&plan, &made, &tasks), &made);
+            if record_only || json {
+                return Ok(shown);
+            }
+            Ok(format!("{shown}\nThe runner is landing it. `farcooler landing show {}` follows its steps.", made.number))
         }
         LandingCmd::Set { number, state, sha, base, title, add, remove, lander } => {
             let found = find_landing(&plan, &number)?;

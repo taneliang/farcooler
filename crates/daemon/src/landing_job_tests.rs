@@ -9,7 +9,7 @@ use farcooler_store::board_ci::{CiRead, MAIN_SUBJECT};
 use farcooler_store::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 
 use super::*;
-use crate::charter_landing::parse;
+use farcooler_core::charter_landing::parse;
 
 /// CI that says what it's told, in order, then the last thing forever.
 struct FakeCi {
@@ -316,4 +316,53 @@ async fn a_departed_landing_is_taken_up() {
     assert!(matches!(&out[..], [Outcome::Landed { .. }]), "{out:?}");
     let old = rig.store.landing(departed.id).unwrap();
     assert!(old.id == l.id || old.state == LandingState::Dropped, "no empty landing is left behind: {old:?}");
+}
+
+#[tokio::test]
+async fn an_unreadable_branch_never_defaults_to_push() {
+    let rig = Rig::new();
+    assert!(changed_paths(&rig.repo, "origin/main", "missing-branch").await.is_err());
+}
+
+#[tokio::test]
+async fn changed_paths_preserves_git_path_bytes() {
+    let rig = Rig::new();
+    rig.ticket("odd-path", &[("services/site/line\nbreak.html", "new\n")]);
+    let paths = changed_paths(&rig.repo, "origin/main", "odd-path").await.unwrap();
+    assert_eq!(paths, vec!["services/site/line\nbreak.html"]);
+}
+
+#[tokio::test]
+async fn retrying_keeps_the_previous_scratch_worktree() {
+    let rig = Rig::new();
+    let t = rig.ticket("retry", &[("a.txt", "a\n")]);
+    let l = rig.landing(&[t]);
+    let announce = |_: Uuid| {};
+    let setup = Setup { store: &rig.store, repo: rig.repo.clone(), scratch: rig.scratch.clone(),
+        rules: parse(PUSH).unwrap().unwrap(), poll: Duration::from_millis(1),
+        ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
+    let sha = rig.remote_head();
+    let first = worktree_for(&setup, &l, &sha).await.ok().unwrap();
+    write(&first, "previous-report.txt", "keep me\n");
+    let second = worktree_for(&setup, &l, &sha).await.ok().unwrap();
+    assert_ne!(first, second);
+    assert_eq!(std::fs::read_to_string(first.join("previous-report.txt")).unwrap(), "keep me\n");
+}
+
+#[tokio::test]
+async fn a_moved_base_is_never_pushed_without_a_new_gate() {
+    let rig = Rig::new();
+    let t = rig.ticket("gated", &[("a.txt", "a\n")]);
+    let l = rig.landing(&[t]);
+    let announce = |_: Uuid| {};
+    let setup = Setup { store: &rig.store, repo: rig.repo.clone(), scratch: rig.scratch.clone(),
+        rules: parse(PUSH).unwrap().unwrap(), poll: Duration::from_millis(1),
+        ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
+    let sha = rig.remote_head();
+    let tree = worktree_for(&setup, &l, &sha).await.unwrap();
+    fold(&setup, &l, &tree, &sha).await.unwrap();
+    rig.ticket("advance", &[("b.txt", "b\n")]);
+    sh(&rig.repo, &["push", "--quiet", "origin", "advance:main"]);
+    assert!(push(&setup, &l, &tree, "origin/main", &sha).await.is_err());
+    assert_eq!(rig.remote_log(), ["advance", "start"]);
 }

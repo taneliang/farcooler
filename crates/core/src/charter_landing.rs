@@ -1,5 +1,6 @@
 //! A charter's `## Landing` section (ov-872, slice 5): how a workspace lands
-//! its tickets, in a small fixed form the runner reads.
+//! its tickets, in a small fixed form the runner reads. In core so the CLI
+//! reads it the same way, to say which line didn't.
 //!
 //! ```text
 //! ## Landing
@@ -35,8 +36,17 @@
 
 use std::fmt;
 
-/// How a ticket gets into the product, as a charter says it.
-pub use farcooler_store::landings::Route;
+/// How a ticket gets into the product, as a charter says it. The store's
+/// `landings::Route` by another name: core can't name the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Route {
+    /// Fold onto the base, gate, push, and land on green CI.
+    Push,
+    /// A pull request per ticket, which a human merges.
+    PullRequest,
+    /// Needs you: it pushes once you say land it.
+    Ask,
+}
 
 /// What a charter's `## Landing` section says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,15 +250,15 @@ impl LandingRules {
     /// The route of a ticket that changes `paths`, and the rule that chose it
     /// when it wasn't the default: its most careful file's.
     pub fn route_of<'a>(&'a self, paths: &[String]) -> (Route, Option<&'a str>) {
-        let mut best = (self.default_route, None);
+        let mut best = None;
         for path in paths {
             let rule = self.rules.iter().find(|(glob, _)| glob_matches(glob, path));
             let route = rule.map_or(self.default_route, |(_, r)| *r);
-            if care(route) > care(best.0) {
-                best = (route, rule.map(|(g, _)| g.as_str()));
+            if best.as_ref().is_none_or(|(chosen, _)| care(route) > care(*chosen)) {
+                best = Some((route, rule.map(|(g, _)| g.as_str())));
             }
         }
-        best
+        best.unwrap_or((self.default_route, None))
     }
 }
 

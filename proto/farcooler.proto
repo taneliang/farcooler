@@ -5979,6 +5979,14 @@ message LandingStart {
   string title = 5;
   optional bytes lander_id = 6;
   string actor = 7;
+  // The runner runs the landing (ov-872): the charter's `## Landing` section
+  // chooses each ticket's route, and the push route is folded, gated, pushed
+  // and watched to landed by the runner's landing job. `route` is ignored.
+  // Refused `no_landing_rules` when the charter has no such section.
+  bool run = 8;
+  // With `run`: you said to land tickets the charter asked about. Only a
+  // person says it, never an agent (`land_is_yours`).
+  bool land = 9;
 }
 
 // `landing.set`, at `control`: move it, rebase it, record what it pushed,

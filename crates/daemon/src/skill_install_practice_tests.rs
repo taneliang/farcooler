@@ -141,9 +141,13 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        assert!(land.contains("farcooler landing start --repo <repo> --ticket <key>"), "{h:?}: {land}");
+        assert!(land.contains("farcooler landing start --record-only --repo <repo> --ticket <key>"), "{h:?}: {land}");
+        // With a charter's `## Landing` section the runner lands (ov-872).
+        assert!(land.contains("farcooler landing start <key> <key> --repo <repo>"), "{h:?}: {land}");
+        assert!(land.contains("never pass `--land` yourself"), "{h:?}: {land}");
+        assert!(land.contains("- Route `services/site/**`: ask"), "{h:?}: {land}");
         assert!(land.contains("farcooler landing set <N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
-        assert!(land.contains("Keep landings on the plan, never on a hand-kept page"), "{h:?}: {land}");
+        assert!(land.contains("keep landings on the plan by hand, never on a hand-kept page"), "{h:?}: {land}");
         // A PR-mode rehearsal is dropped, never landed: its SHA is never on main (ov-503).
         assert!(land.contains("`landing set <N> --state dropped`"), "{h:?}: {land}");
         assert!(!land.contains("landing set <N> --state landed"), "{h:?}: {land}");

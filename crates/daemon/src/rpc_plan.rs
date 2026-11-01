@@ -9,6 +9,7 @@
 //! coverage test still reads each name out of that file.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, Scope, request, result};
@@ -37,7 +38,7 @@ fn payload_missing() -> DomainError {
 
 /// One plan route, as `Rpc::dispatch` hands it over. `scope` is the
 /// connection's, which decides whether a ticket's worktree path is shown.
-pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: Scope, req: Request) -> Result<result::Value> {
     let admin = scope == Scope::HostAdmin;
     let control = matches!(scope, Scope::Control | Scope::HostAdmin);
     match req.method.as_str() {
@@ -225,7 +226,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
         }
         "ruling.add" | "ruling.set" | "ruling.keep_all" => crate::rpc_rulings::dispatch(svc, watcher, req),
-        "landing.start" | "landing.set" => crate::rpc_landings::dispatch(svc, watcher, req),
+        "landing.start" | "landing.set" => crate::rpc_landings::dispatch(svc, watcher, req).await,
         other => {
             tracing::error!(method = %other, "a plan route with no handler");
             Err(DomainError::NotFound)

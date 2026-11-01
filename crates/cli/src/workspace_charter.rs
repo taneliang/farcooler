@@ -67,14 +67,29 @@ fn set_said(what: &str) -> Option<&'static str> {
         "charter_not_a_file" => "the charter's name on the runner isn't a plain file, so it wasn't written over",
         "charter_too_long" => "a charter is at most 256 KB",
         "charter_empty" => "a charter needs something written in it",
+        "charter_landing" => LANDING_FORMAT,
         _ => return None,
     })
+}
+
+/// What a `## Landing` section holds, for a charter whose section didn't read.
+pub(crate) const LANDING_FORMAT: &str = "the charter's ## Landing section doesn't read. Each line is a bullet: \
+`- Route: push|pull request|ask`, `- Route `<glob>`: <route>`, `- Gate: <command>` (or `none`), `- Base: <branch>`, \
+`- Remote: <name>` or `- CI: github|none`";
+
+/// Why `text`'s `## Landing` section doesn't read, naming the line, or `None`
+/// when it reads or has none (ov-872). The runner refuses the same text.
+pub(crate) fn landing_section_problem(text: &str) -> Option<String> {
+    farcooler_core::charter_landing::parse(text).err().map(|e| format!("{LANDING_FORMAT}. {e}"))
 }
 
 /// `workspace set-charter`, once the workspace is named and the text read.
 pub(crate) async fn set<L: DispatchLink>(link: &mut L, ws: &pb::Workspace, text: String, expected: &str, json: bool) -> Fallible {
     if !link.capabilities().iter().any(|c| c == capability::MEMBER_ROLES) {
         return Err(Box::new(Refused::new(NO_EDIT.to_string(), Some(pb::ErrorCode::CapabilityUnsupported as i32))));
+    }
+    if let Some(problem) = landing_section_problem(&text) {
+        return Err(Box::new(Refused::new(problem, Some(pb::ErrorCode::InvalidArgument as i32))));
     }
     let answer = link.call(set_request(uuid_of(&ws.id), text, expected)).await.map_err(|e| match &e {
         farcooler_transport::ClientError::Daemon { code, what, .. } if set_said(what).is_some() => {
@@ -115,5 +130,15 @@ mod tests {
         let Some(request::Payload::WorkspaceSetCharter(p)) = &r.payload else { panic!("no payload") };
         assert_eq!((p.text.as_str(), p.expected_sha256.as_str()), ("## Who decides\n", "ab12"));
         assert!(!farcooler_daemon::people::rep_may(&r), "a rep's pane asks the orchestrator instead");
+    }
+
+    /// A `## Landing` section that doesn't read is named by its line before
+    /// anything is sent (ov-872).
+    #[test]
+    fn a_landing_section_that_does_not_read_names_its_line() {
+        let said = landing_section_problem("# Charter\n\n## Landing\n\nWe push.\n").expect("refused");
+        assert!(said.contains("line 5:"), "{said}");
+        assert_eq!(landing_section_problem("## Landing\n- Gate: none\n"), None);
+        assert_eq!(landing_section_problem("## Workflow\nDirect.\n"), None);
     }
 }

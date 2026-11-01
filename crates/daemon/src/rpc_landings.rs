@@ -7,6 +7,8 @@
 //! once, and a write that gives a landing a SHA asks the CI watch
 //! (`ci_watch.rs`) to read it now rather than at its next turn.
 
+use std::sync::Arc;
+
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
 use farcooler_store::board_ci::{CiRead, CiStatus};
@@ -20,10 +22,14 @@ use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
 /// One landing route, as `rpc_plan::dispatch` hands it over.
-pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, req: Request) -> Result<result::Value> {
     let missing = || DomainError::InvalidArgument { what: "payload" };
     let ids = |raw: &[bytes::Bytes]| raw.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>();
     match (req.method.as_str(), req.payload) {
+        ("landing.start", Some(request::Payload::LandingStart(p))) if p.run => {
+            let landing = crate::landing_run::start(svc, watcher, p).await?;
+            Ok(result::Value::Landing(view_of(svc, &landing)?))
+        }
         ("landing.start", Some(request::Payload::LandingStart(p))) => {
             let workspace = required_id(&p.workspace_id)?;
             let actor = actor_from_wire(&p.actor)?;

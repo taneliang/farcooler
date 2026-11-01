@@ -44,6 +44,9 @@ That includes the Defaults at the end: each holds until the charter says otherwi
 push it. **PR**: each change is a pull request a person approves. A protected
 main (`gh api repos/<owner>/<name>/branches/main --jq .protected`, or a refused
 push) means PR mode whatever the charter says: work that way, and tell the owner.
+`## Landing`, when the charter has one, is how the runner lands for you, in a
+fixed form it reads (section 4). It isn't an interview heading: offer it once
+the workflow is settled.
 
 ## 2. Read the board
 
@@ -153,13 +156,47 @@ risky ticket. Name its lander (`--lander`). Local gates mirror CI: every step, i
 red main comes first; when a known-flaky test did it, rerun the failed job
 once, file a flaky card, and keep landing on the rerun's result.
 
-Keep landings on the plan, never on a hand-kept page: start one with its
-tickets when you mean to gate now, move it (`--state gating`), and give it the
-SHA it pushed. The runner reads that SHA's CI and turns the landing green or
-red; Now shows it above its tickets.
+**With a `## Landing` section, the runner lands.** `landing start <key>...`
+hands the tickets to its landing job. Each ticket takes the route its changed
+files choose (the first rule that matches a file, else the default; the most
+careful file wins). Push tickets wait for green CI on the base, are folded on
+by cherry-pick, gated with the charter's gate, pushed, watched until CI passes
+(a canceled run is run once more), and land with their SHA. A batch whose gate
+fails splits in two, so a good ticket never waits on a bad one. A ticket the
+charter asks about waits on the owner in Needs you until they say land it
+(`--land`); never pass `--land` yourself. A conflict, a red gate or red CI
+stops the job with why on the landing's timeline: fix it or hand the ticket
+back, then start it again. One job runs per board.
 
 ```
-{{cli}} landing start --repo <repo> --ticket <key> --ticket <key> --base origin/main --title "<what it carries>" --lander <agent> --actor manager
+## Landing
+
+- Route: push
+- Route `services/site/**`: ask
+- Gate: `scripts/landing-gate.sh`
+- Base: main
+- Remote: origin
+- CI: github
+```
+
+Routes are push, pull request or ask; a glob's `*` stays in a folder and `**`
+crosses them. `Gate:` repeats, runs with `sh -c` at the top of the landing's
+worktree, and may be `none`; a section that can push names one. `Base:`
+(main), `Remote:` (origin) and `CI:` (github, or none) are optional. A
+section that doesn't read refuses the charter edit, naming the line.
+
+```
+{{cli}} landing start <key> <key> --repo <repo> --title "<what it carries>" --actor manager
+{{cli}} landing show <N> --repo <repo>
+```
+
+Without one, keep landings on the plan by hand, never on a hand-kept page:
+record one with its tickets when you mean to gate now, move it (`--state
+gating`), and give it the SHA it pushed. The runner reads that SHA's CI and
+turns the landing green or red; Now shows it above its tickets.
+
+```
+{{cli}} landing start --record-only --repo <repo> --ticket <key> --ticket <key> --base origin/main --title "<what it carries>" --lander <agent> --actor manager
 {{cli}} landing set <N> --repo <repo> --sha <pushed sha> --actor manager
 ```
 

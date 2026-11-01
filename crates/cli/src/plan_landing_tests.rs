@@ -94,7 +94,7 @@ async fn show_takes_the_number_and_reads_the_timeline() {
 #[tokio::test]
 async fn start_sends_everything_in_one_write() {
     let mut link = runner();
-    let said = landing_say(&mut link, "start --ticket ov-1 --route pull_request --base origin/main --title Polish --lander a002").await.unwrap();
+    let said = landing_say(&mut link, "start --record-only --ticket ov-1 --route pull_request --base origin/main --title Polish --lander a002").await.unwrap();
     assert_eq!(
         said,
         "Polish (Landing 10) · Open · by pull request · ov-1 · lander Lander sonnet (0000a002)\n  cut from origin/main · open for under a minute"
@@ -104,9 +104,30 @@ async fn start_sends_everything_in_one_write() {
     let Some(request::Payload::LandingStart(p)) = &r.payload else { panic!() };
     assert_eq!((p.route, p.base.as_str(), p.title.as_str()), (pb::LandingRoute::PullRequest as i32, "origin/main", "Polish"));
     assert_eq!((p.task_ids.clone(), p.lander_id.clone(), p.workspace_id.clone()), (vec![tid(0x1001)], Some(tid(LANDER)), id_bytes(WORKSPACE)));
-    landing_say(&mut link, "start").await.expect("a landing of none takes up the collecting one");
+    landing_say(&mut link, "start --record-only").await.expect("a landing of none takes up the collecting one");
     let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
     assert_eq!(p.route, pb::LandingRoute::Unspecified as i32, "the runner's default is push");
+}
+
+/// `landing start KEY` asks the runner to run the landing (ov-872): `run`
+/// set, the charter choosing the route, and a line saying where to follow
+/// it. `--land` says you said land it. A recorded landing doesn't run.
+#[tokio::test]
+async fn start_hands_the_landing_to_the_runner() {
+    let mut link = runner();
+    let said = landing_say(&mut link, "start ov-1").await.unwrap();
+    assert!(said.ends_with("The runner is landing it. `farcooler landing show 10` follows its steps."), "{said}");
+    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.run, p.land, p.task_ids.clone()), (true, false, vec![tid(0x1001)]));
+    assert_eq!(p.route, pb::LandingRoute::Unspecified as i32, "the charter chooses");
+    landing_say(&mut link, "start ov-1 --land").await.unwrap();
+    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
+    assert!(p.run && p.land);
+    landing_say(&mut link, "start --record-only --ticket ov-1").await.unwrap();
+    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
+    assert!(!p.run && !p.land);
+    let err = landing_say(&mut link, "start").await.unwrap_err();
+    assert_eq!(err.to_string(), "Name a ticket to land, like `farcooler landing start ov-12`.");
 }
 
 /// Only a ticket ready to land goes on a landing: one in review goes on with
@@ -134,7 +155,8 @@ async fn only_a_ready_ticket_lands_and_force_moves_one_in_review() {
     let mut link = Runner { plan: Some(plan), ..runner() };
     let err = landing_say(&mut link, "start --ticket ov-2 --force").await.unwrap_err();
     assert_eq!(err.to_string(), "ov-2 is waiting. A landing takes only tickets that are ready to land, so it waits for the next one.");
-    assert!(crate::Cli::try_parse_from(["farcooler", "landing", "start", "--force"]).is_err(), "--force needs a ticket");
+    assert!(landing_say(&mut link, "start --force").await.is_err(), "--force needs a ticket");
+    assert!(landing_say(&mut link, "start --record-only --force").await.is_err(), "a recorded --force needs a ticket too");
 }
 
 /// `landing set` records a SHA, moves the landing and its tickets, and is
@@ -208,6 +230,6 @@ async fn refusals_read_as_landing_sentences() {
     assert_eq!(landing_say(&mut old, "list").await.unwrap_err().to_string(), NEEDS_LINE);
     assert!(old.sent.is_empty());
     for route in ["push", "pull_request", "pull-request", "ask"] {
-        assert!(crate::Cli::try_parse_from(["farcooler", "landing", "start", "--route", route]).is_ok(), "{route}");
+        assert!(crate::Cli::try_parse_from(["farcooler", "landing", "start", "--record-only", "--route", route]).is_ok(), "{route}");
     }
 }

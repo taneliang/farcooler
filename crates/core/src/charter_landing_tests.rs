@@ -66,3 +66,11 @@ fn globs_match_whole_paths() {
     assert!(glob_matches("docs/?.md", "docs/a.md"));
     assert!(!glob_matches("docs/?.md", "docs/ab.md"));
 }
+
+/// An explicit file rule overrides the default; only actual files vote.
+#[test]
+fn a_push_rule_can_override_the_default_ask_route() {
+    let rules = parse("## Landing\n- Route: ask\n- Route `docs/**`: push\n- Gate: none\n").unwrap().unwrap();
+    assert_eq!(rules.route_of(&["docs/readme.md".into()]), (Route::Push, Some("docs/**")));
+    assert_eq!(rules.route_of(&["docs/readme.md".into(), "src/main.rs".into()]), (Route::Ask, None));
+}

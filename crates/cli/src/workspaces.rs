@@ -32,7 +32,7 @@ use crate::tasks::{DispatchLink, Refused, refusal, said_about};
 use crate::workspace_settings::SettingsArgs;
 
 #[path = "workspace_charter.rs"]
-mod charter;
+pub(crate) mod charter;
 use crate::{
     Fallible, Link, connect_to, expect_value, id_bytes, list_worktrees, req, req_for, resolve,
     resolve_repository, short_bytes, truncate, uuid_of, with,

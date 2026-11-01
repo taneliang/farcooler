@@ -2,7 +2,7 @@
 //! daemon, step by step, with nothing left to judgment.
 //!
 //! It is `train.sh`'s mechanical half, generalized, with the charter's
-//! `## Landing` section (`charter_landing`) in place of what the script
+//! `## Landing` section (`farcooler_core::charter_landing`) in place of what the script
 //! hard-coded:
 //!
 //! 1. **Route.** Each ticket on the landing takes the route its changed files
@@ -20,8 +20,9 @@
 //!    batch, the batch splits in two and each half goes back to step 2 on a
 //!    landing of its own, so a good ticket never waits on a bad one. A single
 //!    ticket that fails stops.
-//! 5. **Push.** Rebase onto the base if it moved, push to the base branch,
-//!    and record the SHA on the landing (pushed).
+//! 5. **Push.** Check that the gated base has not moved, push to the base
+//!    branch, and record the SHA on the landing (pushed). A moved base stops
+//!    for a fresh attempt, so an ungated rebase is never pushed.
 //! 6. **Watch CI** on that SHA. A run canceled is run again once. Green lands
 //!    the landing, and its tickets with it, at that SHA; red marks it red and
 //!    stops.
@@ -47,7 +48,7 @@ use farcooler_store::landings::{Landing, LandingState, LandingUpdate, NewLanding
 use farcooler_store::models::Actor;
 use uuid::Uuid;
 
-use crate::charter_landing::LandingRules;
+use farcooler_core::charter_landing::{self as charter, LandingRules};
 
 /// Reads CI for a commit, and runs a canceled run again.
 pub trait Ci: Send + Sync {
@@ -87,6 +88,7 @@ pub enum Outcome {
 }
 
 /// What a step that stops says.
+#[derive(Debug)]
 struct Stop(String);
 
 type Step<T> = std::result::Result<T, Stop>;
@@ -172,8 +174,13 @@ async fn route_all(s: &Setup<'_>, l: &Landing, approved: bool, out: &mut Vec<Out
         if line.stage.is_closed() {
             continue;
         }
-        let paths = if line.branch.is_empty() { Vec::new() } else { changed_paths(&s.repo, &base, &line.branch).await };
-        let (mut route, rule) = s.rules.route_of(&paths);
+        let paths = if line.branch.is_empty() { Vec::new() } else { changed_paths(&s.repo, &base, &line.branch).await? };
+        let (said, rule) = s.rules.route_of(&paths);
+        let mut route = match said {
+            charter::Route::Push => Route::Push,
+            charter::Route::PullRequest => Route::PullRequest,
+            charter::Route::Ask => Route::Ask,
+        };
         if approved && route == Route::Ask {
             route = Route::Push;
         }
@@ -274,7 +281,7 @@ async fn land_one<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing) -> Step<Done> {
         let made = split_off(s, l, &second, Route::Push)?;
         return Ok(Done::Split(l.id, made.id));
     }
-    let sha = push(s, l, &tree, &base).await?;
+    let sha = push(s, l, &tree, &base, &base_sha).await?;
     if s.rules.ci {
         if let Err(why) = wait_green(s, ci, l, &sha).await {
             if why == "failed" {
@@ -322,15 +329,15 @@ async fn wait_green<C: Ci>(s: &Setup<'_>, ci: &C, l: &Landing, sha: &str) -> std
     }
 }
 
-/// A fresh worktree for `l` at `base_sha`, replacing one an earlier try left.
+/// A fresh worktree for `l` at `base_sha`, preserving any earlier attempt.
 async fn worktree_for(s: &Setup<'_>, l: &Landing, base_sha: &str) -> Step<PathBuf> {
-    let tree = s.scratch.join(format!("landing-{}", l.number));
-    let path = tree.to_string_lossy().into_owned();
-    if tree.exists() {
-        let _ = git(&s.repo, &["worktree", "remove", "--force", &path]).await;
-        let _ = std::fs::remove_dir_all(&tree);
+    let mut tree = s.scratch.join(format!("landing-{}", l.number));
+    // A failed attempt can hold a lander's fixes and reports. Keep it;
+    // every retry gets a fresh scratch worktree instead of deleting it.
+    if tree.symlink_metadata().is_ok() {
+        tree = s.scratch.join(format!("landing-{}-{}", l.number, Uuid::now_v7()));
     }
-    let _ = git(&s.repo, &["worktree", "prune"]).await;
+    let path = tree.to_string_lossy().into_owned();
     std::fs::create_dir_all(&s.scratch).map_err(|e| Stop(format!("Couldn't make {}: {e}", s.scratch.display())))?;
     git_ok(&s.repo, &["worktree", "add", "--quiet", "--detach", &path, base_sha])
         .await
@@ -428,13 +435,13 @@ async fn run_gate(tree: &Path, command: &str, log: &Path, limit: Duration) -> (b
     (passed, last_line(&text).to_string())
 }
 
-/// Step 5: onto the base if it moved, then out. The pushed SHA.
-async fn push(s: &Setup<'_>, l: &Landing, tree: &Path, base: &str) -> Step<String> {
+/// Step 5: push only while the gated base remains current. The pushed SHA.
+async fn push(s: &Setup<'_>, l: &Landing, tree: &Path, base: &str, gated_base: &str) -> Step<String> {
     git_ok(tree, &["fetch", "--quiet", &s.rules.remote]).await.map_err(|e| Stop(format!("Couldn't fetch {}: {e}", s.rules.remote)))?;
-    let rebased = git(tree, &["rebase", "--quiet", "--no-autostash", base]).await;
-    if !rebased.ok {
-        let _ = git(tree, &["rebase", "--abort"]).await;
-        return Err(Stop(format!("{base} moved, and the landing doesn't rebase onto it: {}", last_line(&rebased.err))));
+    if rev(tree, base).await? != gated_base {
+        // Rebase changes the tree that passed the gate. Never push that
+        // untested result; a fresh attempt must fold and gate the new base.
+        return Err(Stop(format!("{base} moved after the gate; start a fresh landing attempt to gate it again.")));
     }
     let target = format!("HEAD:refs/heads/{}", s.rules.base);
     git_ok(tree, &["push", "--quiet", &s.rules.remote, &target]).await.map_err(|e| Stop(format!("The push was refused: {e}")))?;
@@ -487,10 +494,11 @@ fn last_line(text: &str) -> &str {
 }
 
 /// The files `branch` changes since it left `base`.
-async fn changed_paths(repo: &Path, base: &str, branch: &str) -> Vec<String> {
+async fn changed_paths(repo: &Path, base: &str, branch: &str) -> Step<Vec<String>> {
     let range = format!("{base}...{branch}");
-    let out = git(repo, &["diff", "--name-only", "--no-renames", &range]).await;
-    out.out.lines().filter(|l| !l.is_empty()).map(str::to_string).collect()
+    let out = git_ok(repo, &["diff", "--name-only", "--no-renames", "-z", &range, "--"]).await
+        .map_err(|why| Stop(format!("Couldn't read {branch}'s changed files: {why}")))?;
+    Ok(out.split('\0').filter(|l| !l.is_empty()).map(str::to_string).collect())
 }
 
 async fn rev(dir: &Path, name: &str) -> Step<String> {

@@ -8,6 +8,7 @@ pub mod activity;
 pub mod base64;
 pub mod claude_keys;
 pub mod composer;
+pub mod charter_landing;
 pub mod config;
 pub mod derive;
 pub mod error;

@@ -298,3 +298,47 @@ async fn a_landing_carries_its_lander_and_title() {
     let mine = read.landings.iter().find(|l| l.id == started.id).unwrap();
     assert_eq!(mine, &started);
 }
+
+/// `landing.start` with `run` (ov-872): the charter's `## Landing` section
+/// decides, so a board with none, or one that doesn't read, is refused; only
+/// a person says land; and a run that starts is handed to the landing job,
+/// whose steps reach the landing's timeline (here, a fetch that can't work:
+/// the repository is only in the store).
+#[tokio::test]
+async fn a_run_reads_the_charter_and_hands_the_landing_to_the_job() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let mut a = connect(&h).await;
+    let refused = |r: Result<result::Value, ClientError>| match r {
+        Err(ClientError::Daemon { what, .. }) => what,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    let task = h.service.store.create_task(repo.workspace, "Ready", Actor::Manager).unwrap();
+    ready(&h, task.id);
+    let run = |land: bool, actor: &str| {
+        payload::Payload::LandingStart(pb::LandingStart { run: true, land, actor: actor.into(), ..start_landing(repo.workspace, &[task.id]) })
+    };
+    assert_eq!(refused(call(&mut a, "landing.start", BOARD_LINE, run(false, "manager")).await), "no_landing_rules");
+    let charter = farcooler_daemon::workspace_home::charter_path(h.service.root_dir(), repo.workspace);
+    std::fs::create_dir_all(charter.parent().unwrap()).unwrap();
+    std::fs::write(&charter, "## Landing\n\nPush it.\n").unwrap();
+    assert_eq!(refused(call(&mut a, "landing.start", BOARD_LINE, run(false, "manager")).await), "charter_landing");
+    std::fs::write(&charter, "## Landing\n- Route: push\n- Gate: true\n- CI: none\n").unwrap();
+    assert_eq!(refused(call(&mut a, "landing.start", BOARD_LINE, run(true, "manager")).await), "land_is_yours");
+
+    let l = landing(&mut a, run(false, "manager"), "landing.start").await;
+    assert_eq!(l.task_ids, vec![id(task.id)]);
+    let landing_id = Uuid::from_slice(&l.id).unwrap();
+    let subject = farcooler_store::ticket_lines::LineSubject::Landing(landing_id);
+    let mut stopped = None;
+    for _ in 0..100 {
+        let events = h.service.store.line_events(subject, 0).unwrap();
+        stopped = events.into_iter().find(|e| e.body.starts_with("Stopped."));
+        if stopped.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let stopped = stopped.expect("the job ran and stopped");
+    assert!(stopped.body.contains("Couldn't fetch origin"), "{}", stopped.body);
+}

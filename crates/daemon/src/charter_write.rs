@@ -15,6 +15,9 @@
 //! panes are its Unix user, and this is a guardrail, as the charter file
 //! always was.
 //!
+//! **A `## Landing` section that doesn't read is refused** (`charter_landing`,
+//! ov-872): how the workspace lands is read from it.
+//!
 //! **Each edit goes to the people log** (`member.events`), with who made it
 //! and the new text's hash.
 
@@ -44,6 +47,12 @@ pub async fn handle(svc: &Service, peer: &Peer, caller_pid: Option<i32>, req: pb
         // An empty charter reads as one someone chose to leave blank
         // (`workspace_home`): the orchestrator would stop asking for one.
         return Err(DomainError::InvalidArgument { what: "charter_empty" });
+    }
+    if let Err(e) = farcooler_core::charter_landing::parse(&p.text) {
+        // How the workspace lands is read from it (ov-872), so a section that
+        // doesn't read is refused rather than saved to fail at landing time.
+        tracing::info!(workspace = %id, error = %e, "a charter's ## Landing section didn't read");
+        return Err(DomainError::InvalidArgument { what: "charter_landing" });
     }
     let workspace = svc.store.get_workspace(id)?;
     let _one = EDITS.lock().await;
