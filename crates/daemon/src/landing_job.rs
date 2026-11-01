@@ -476,8 +476,11 @@ async fn push(s: &Setup<'_>, l: &Landing, tree: &Path, base: &str, gated_base: &
     let target = format!("HEAD:refs/heads/{}", s.rules.base);
     git_ok(tree, &["push", "--quiet", &s.rules.remote, &target]).await.map_err(|e| Stop(format!("The push was refused: {e}")))?;
     let sha = rev(tree, "HEAD").await?;
-    let pushed = LandingUpdate { sha: Some(sha.clone()), ..Default::default() };
-    s.store.update_landing(l.id, &pushed, Actor::Runner).map_err(|e| Stop(format!("Pushed {}, but couldn't record it: {}", short(&sha), e.what())))?;
+    s.store.record_landing_push(l.id, &sha, &l.tickets).map_err(|e| Stop(match e {
+        DomainError::InvalidArgument { what: "landing_changed" } =>
+            format!("Pushed {}, but the landing's tickets changed. Start a fresh landing attempt.", short(&sha)),
+        _ => format!("Pushed {}, but couldn't record it: {}", short(&sha), e.what()),
+    }))?;
     (s.announce)(l.workspace_id);
     crate::ci_watch::kick();
     let body = format!("Pushed {} to {}.", short(&sha), s.rules.base);
@@ -546,8 +549,18 @@ struct GitRun {
 /// The most one git of the job may take: a fetch or push over a slow line.
 const GIT_LIMIT: Duration = Duration::from_secs(10 * 60);
 
+#[cfg(test)]
+thread_local! {
+    // A test pauses a real fetch without changing process-wide PATH.
+    static GIT_PROGRAM: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 async fn git(dir: &Path, args: &[&str]) -> GitRun {
-    let mut cmd = tokio::process::Command::new("git");
+    #[cfg(test)]
+    let program = GIT_PROGRAM.with(|p| p.borrow().clone()).unwrap_or_else(|| "git".into());
+    #[cfg(not(test))]
+    let program = "git";
+    let mut cmd = tokio::process::Command::new(program);
     cmd.arg("-C").arg(dir).args(args).env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null()).kill_on_drop(true);
     match tokio::time::timeout(GIT_LIMIT, cmd.output()).await {
         Ok(Ok(o)) => GitRun {

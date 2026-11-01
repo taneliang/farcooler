@@ -433,3 +433,114 @@ async fn a_ticket_branch_changed_during_base_ci_cannot_bypass_ask() {
 async fn landing_membership_changed_during_base_ci_cannot_bypass_ask() {
     changed_during_base_ci(2).await;
 }
+
+/// Mutate at the post-push CI await, after the job's final unchanged check.
+struct AddDuringPushedCi<'a> {
+    rig: &'a Rig,
+    landing: Uuid,
+    ticket: Uuid,
+    base: String,
+    result: Mutex<Option<farcooler_core::Result<Landing>>>,
+}
+
+impl Ci for AddDuringPushedCi<'_> {
+    async fn status(&self, sha: &str) -> CiStatus {
+        if sha != self.base && self.result.lock().unwrap().is_none() {
+            let add = LandingUpdate { add_tickets: vec![self.ticket], ..Default::default() };
+            *self.result.lock().unwrap() = Some(self.rig.store.update_landing(self.landing, &add, Actor::Manager));
+        }
+        CiStatus::Passed
+    }
+    async fn rerun(&self, _sha: &str) -> bool { false }
+}
+
+#[tokio::test]
+async fn pushed_landing_membership_cannot_absorb_unrouted_tickets_during_ci() {
+    let rig = Rig::new();
+    let safe = rig.ticket("safe", &[("a.txt", "safe\n")]);
+    let site = rig.ticket("site", &[("services/site/bypass.html", "needs approval\n")]);
+    let l = rig.landing(&[safe]);
+    let collecting = rig.store.landing_of(site).unwrap().unwrap();
+    let ci = AddDuringPushedCi { rig: &rig, landing: l.id, ticket: site, base: rig.remote_head(), result: Mutex::new(None) };
+    let announce = |_: Uuid| {};
+    let setup = Setup { store: &rig.store, repo: rig.repo.clone(), scratch: rig.scratch.clone(),
+        rules: parse(PUSH).unwrap().unwrap(), poll: Duration::from_millis(1),
+        ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
+    let out = run(&setup, &ci, l.id, false).await;
+    assert!(matches!(&out[..], [Outcome::Landed { .. }]), "{out:?}");
+    assert_eq!(rig.remote_log(), ["safe", "start"]);
+    assert_eq!(rig.stage(site), Stage::Landing, "unrouted site work was certified as landed");
+    assert_eq!(rig.store.landing_of(site).unwrap().unwrap().id, collecting.id);
+    assert!(matches!(&*ci.result.lock().unwrap(), Some(Err(DomainError::InvalidArgument { what: "landing_moving" }))));
+}
+
+/// Pause real git's second fetch (in the scratch tree, immediately before
+/// push). The thread-local launcher changes no other test's git.
+async fn add_during_push_fetch(reopen: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let rig = Rig::new();
+    let safe = rig.ticket("safe", &[("a.txt", "safe\n")]);
+    let site = rig.ticket("site", &[("services/site/bypass.html", "needs approval\n")]);
+    let l = rig.landing(&[safe]);
+    let dir = rig._dir.path();
+    let marker = dir.join("fetching");
+    let release = dir.join("release");
+    let wrapper = dir.join("git-pause");
+    let real_git = crate::git::absolute_git().unwrap();
+    std::fs::write(&wrapper, format!(r#"#!/bin/sh
+case "$*" in
+    *scratch/landing-*fetch*)
+        touch '{marker}'
+        while [ ! -e '{release}' ]; do sleep 0.01; done
+    ;;
+esac
+exec '{git}' "$@"
+"#, marker = marker.display(), release = release.display(), git = Path::new(&real_git).display())).unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct ResetGit;
+    impl Drop for ResetGit {
+        fn drop(&mut self) { GIT_PROGRAM.with(|p| *p.borrow_mut() = None); }
+    }
+    let _reset = ResetGit;
+    GIT_PROGRAM.with(|p| *p.borrow_mut() = Some(wrapper));
+    let announce = |_: Uuid| {};
+    let setup = Setup { store: &rig.store, repo: rig.repo.clone(), scratch: rig.scratch.clone(),
+        rules: parse(PUSH).unwrap().unwrap(), poll: Duration::from_millis(1),
+        ci_patience: Duration::from_secs(5), gate_timeout: Duration::from_secs(30), announce: &announce };
+    let ci = FakeCi::saying(&[CiStatus::Passed]);
+    let mutate = async {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while !marker.exists() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let paused = marker.exists();
+        if reopen {
+            rig.store.update_landing(l.id, &LandingUpdate { state: Some(LandingState::Open), ..Default::default() }, Actor::Manager).unwrap();
+        }
+        let result = rig.store.update_landing(l.id, &LandingUpdate { add_tickets: vec![site], ..Default::default() }, Actor::Manager);
+        std::fs::write(&release, "go").unwrap();
+        (paused, result)
+    };
+    let (out, (paused, result)) = tokio::join!(run(&setup, &ci, l.id, false), mutate);
+    assert!(paused, "did not reach the push fetch: {out:?}");
+    assert_eq!(rig.remote_log(), ["safe", "start"]);
+    assert_eq!(rig.stage(site), Stage::Landing, "unrouted work was certified during push fetch");
+    if reopen {
+        result.unwrap();
+        assert!(matches!(&out[..], [Outcome::Stopped { .. }]), "{out:?}");
+        assert!(rig.store.landing(l.id).unwrap().pushed_sha.is_none(), "watch must never see this SHA with changed membership");
+    } else {
+        assert!(matches!(result, Err(DomainError::InvalidArgument { what: "landing_moving" })), "{result:?}");
+        assert!(matches!(&out[..], [Outcome::Landed { .. }]), "{out:?}");
+    }
+}
+
+#[tokio::test]
+async fn gating_landing_membership_cannot_absorb_unrouted_tickets_during_push_fetch() {
+    add_during_push_fetch(false).await;
+}
+
+#[tokio::test]
+async fn reopened_landing_membership_cannot_be_certified_during_push_fetch() {
+    add_during_push_fetch(true).await;
+}

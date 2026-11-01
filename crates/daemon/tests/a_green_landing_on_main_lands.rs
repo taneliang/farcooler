@@ -224,3 +224,23 @@ async fn a_landing_reaching_main_sends_the_collecting_landing_off_for_its_checks
     assert_ne!(behind.id, open.id);
     assert_eq!(behind.state, LandingState::Open);
 }
+
+/// The watch settles only the tickets carried by the green SHA. A ready
+/// ticket behind it cannot join while CI is finishing.
+#[tokio::test]
+async fn green_landing_membership_cannot_absorb_unrouted_tickets() {
+    let w = a_world().await;
+    let (landing, tickets) = w.landing(&w.tree.on_main, LandingState::Green, &["routed"]);
+    let behind = w.reviewed("unrouted site work");
+    let store = &w.h.service.store;
+    let collecting = store.landing_of(behind).unwrap().unwrap();
+    assert!(collecting.collecting && collecting.state == LandingState::Open);
+    let add = LandingUpdate { add_tickets: vec![behind], ..Default::default() };
+    let result = store.update_landing(landing, &add, Actor::Manager);
+    // Exercise the actual watch settlement even on the broken store.
+    assert_eq!(w.land().await, vec![landing]);
+    assert_eq!(w.stage(tickets[0]), Stage::Landed);
+    assert_eq!(w.stage(behind), Stage::Landing, "the watch certified work absent from the pushed SHA");
+    assert!(matches!(result, Err(farcooler_core::DomainError::InvalidArgument { what: "landing_moving" })), "{result:?}");
+    assert_eq!(store.landing_of(behind).unwrap().unwrap().id, collecting.id);
+}

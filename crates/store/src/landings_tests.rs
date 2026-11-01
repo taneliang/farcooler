@@ -192,3 +192,31 @@ fn the_lander_must_be_one() {
     let landing = store.start_landing(main, &NewLanding { lander: Some(lander), ..push() }, &[], Actor::Manager).unwrap();
     assert_eq!(landing.lander_id, Some(lander));
 }
+
+/// Membership freezes with the gate and stays frozen through CI, including
+/// a SHA-bearing landing reopened by hand. Refusals roll back the whole write.
+#[test]
+fn moving_landing_membership_cannot_absorb_unrouted_tickets() {
+    for state in [LandingState::Gating, LandingState::Pushed, LandingState::Green, LandingState::Red, LandingState::Open] {
+        let (store, main, t) = board(2);
+        hold(&store, main);
+        at(&store, t[0], Stage::Landing);
+        let l = store.start_landing(main, &push(), &[t[0]], Actor::Manager).unwrap();
+        at(&store, t[1], Stage::Landing);
+        let collecting = store.landing_of(t[1]).unwrap().unwrap();
+        assert!(collecting.collecting && collecting.state == LandingState::Open);
+        let sha = (state != LandingState::Gating).then(|| "abc1234".into());
+        set(&store, &l, LandingUpdate { state: Some(state), sha, ..Default::default() }).unwrap();
+        let before = store.landing(l.id).unwrap();
+        let result = set(&store, &l, LandingUpdate { title: Some("must roll back".into()), add_tickets: vec![t[1]], ..Default::default() });
+        assert_eq!(refused(result), "landing_moving", "{state:?}");
+        assert_eq!(store.landing(l.id).unwrap(), before, "{state:?}: failed mutation wasn't atomic");
+        assert_eq!(store.landing_of(t[1]).unwrap().unwrap().id, collecting.id);
+        // An idempotent add of an existing member remains harmless.
+        set(&store, &l, LandingUpdate { add_tickets: vec![t[0]], ..Default::default() }).unwrap();
+        if state == LandingState::Open {
+            assert_eq!(refused(set(&store, &l, LandingUpdate { remove_tickets: vec![t[0]], ..Default::default() })), "landing_moving");
+            assert_eq!(refused(store.start_landing(main, &push(), &[t[0]], Actor::Manager)), "landing_moving");
+        }
+    }
+}

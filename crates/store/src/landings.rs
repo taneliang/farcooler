@@ -312,19 +312,24 @@ fn check_ready(conn: &Connection, landing: &Landing, tickets: &[Uuid]) -> Result
     Ok(())
 }
 
-/// Put `tickets` on `landing`. Each must be ready (`check_ready`). One on
-/// another open landing moves here, unless that one is past open: its gate or
-/// its push carries the ticket (`landing_moving`). A ticket that shares a
+/// Put `tickets` on an open, unpushed `landing`. Each must be ready
+/// (`check_ready`). One on another open, unpushed landing moves here; a gate
+/// or pushed SHA fixes membership (`landing_moving`). A ticket that shares a
 /// branch comes with its whole group, and one stacked on a ticket that hasn't
 /// landed comes with that ticket.
 pub(crate) fn add_tickets(conn: &Connection, landing: &Landing, tickets: &[Uuid], actor: Actor) -> Result<()> {
+    if (landing.state != LandingState::Open || landing.pushed_sha.is_some())
+        && tickets.iter().any(|t| !landing.tickets.contains(t))
+    {
+        return Err(invalid("landing_moving"));
+    }
     check_tickets(conn, landing.workspace_id, tickets)?;
     check_ready(conn, landing, tickets)?;
     let joining: HashSet<Uuid> = tickets.iter().chain(landing.tickets.iter()).copied().collect();
     for task in tickets {
         let line = line_in(conn, *task)?;
         if let Some(other) = other_live_landing(conn, *task, landing.id)?
-            && other.state != LandingState::Open
+            && (other.state != LandingState::Open || other.pushed_sha.is_some())
         {
             return Err(invalid("landing_moving"));
         }
@@ -554,18 +559,35 @@ impl Store {
     /// lander, and put tickets on or take them off, in one write.
     ///
     /// A settled landing (landed or dropped) takes no more writes. A ticket
-    /// comes off only while the landing is open: from gating on, its gate or
-    /// its push carries the ticket (`landing_moving`). Landing it lands its
-    /// tickets; dropping it lets them go, to land another way. Moving it on,
+    /// joins or comes off only while the landing is open and has no pushed
+    /// SHA: from gating on, its gate or push carries exactly those tickets
+    /// (`landing_moving`). Landing it lands its tickets; dropping it lets
+    /// them go, to land another way. Moving it on,
     /// or naming a lander, stops it collecting, and the board's collecting
     /// landing then departs if it can.
     pub fn update_landing(&self, id: Uuid, update: &LandingUpdate, actor: Actor) -> Result<Landing> {
+        self.update_landing_with_membership(id, update, actor, None)
+    }
+
+    /// Record a job's pushed SHA only for the tickets it routed and gated.
+    /// Membership can change if a caller reopens an unpushed landing during
+    /// fetch or push. Check in the same transaction that exposes the SHA to
+    /// the CI watch; after this write, even reopening cannot add tickets.
+    pub fn record_landing_push(&self, id: Uuid, sha: &str, tickets: &[Uuid]) -> Result<Landing> {
+        let update = LandingUpdate { sha: Some(sha.into()), ..Default::default() };
+        self.update_landing_with_membership(id, &update, Actor::Runner, Some(tickets))
+    }
+
+    fn update_landing_with_membership(&self, id: Uuid, update: &LandingUpdate, actor: Actor, tickets: Option<&[Uuid]>) -> Result<Landing> {
         let base = update.base.as_deref().map(|v| clean(v, BASE_MAX, false, "base")).transpose()?;
         let title = update.title.as_deref().map(|v| clean(v, TITLE_MAX, false, "title")).transpose()?;
         let sha = update.sha.as_deref().map(clean_sha).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let before = landing_in(&tx, id)?;
+        if tickets.is_some_and(|tickets| tickets != before.tickets.as_slice()) {
+            return Err(invalid("landing_changed"));
+        }
         if let Some((state, sha)) = &update.expect
             && (before.state != *state || before.pushed_sha.as_deref() != Some(sha.as_str()))
         {
@@ -578,7 +600,9 @@ impl Store {
             check_lander(&tx, before.workspace_id, lander)?;
         }
         check_tickets(&tx, before.workspace_id, &update.remove_tickets)?;
-        if before.state != LandingState::Open && update.remove_tickets.iter().any(|t| before.tickets.contains(t)) {
+        if (before.state != LandingState::Open || before.pushed_sha.is_some())
+            && update.remove_tickets.iter().any(|t| before.tickets.contains(t))
+        {
             return Err(invalid("landing_moving"));
         }
         let state = match (update.state, &sha) {
