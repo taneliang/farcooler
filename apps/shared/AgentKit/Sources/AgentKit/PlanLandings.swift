@@ -64,6 +64,37 @@ public struct PlanLanding: Decodable, Equatable, Identifiable, Sendable {
     /// What the lander spent on it; nil before it has one.
     public var spend: PlanSpend?
 
+    private enum CodingKeys: String, CodingKey {
+        case id, short, number, base, pushedSha, route, state, stateSince, phase, phaseSince, collecting, actor, createdAt
+        case landedAt, tickets, ciSubject, title, summary, lander, spend
+    }
+
+    /// The runner always sends a title and a summary, but a client's canned
+    /// plan may leave either null: that reads as empty, never as an unreadable plan.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        short = try c.decode(String.self, forKey: .short)
+        number = try c.decode(Int.self, forKey: .number)
+        base = try c.decode(String.self, forKey: .base)
+        pushedSha = try c.decodeIfPresent(String.self, forKey: .pushedSha)
+        route = try c.decode(LandingRoute.self, forKey: .route)
+        state = try c.decode(LandingState.self, forKey: .state)
+        stateSince = try c.decode(Int64.self, forKey: .stateSince)
+        phase = try c.decodeIfPresent(LandingPhase.self, forKey: .phase)
+        phaseSince = try c.decodeIfPresent(Int64.self, forKey: .phaseSince)
+        collecting = try c.decode(Bool.self, forKey: .collecting)
+        actor = try c.decode(String.self, forKey: .actor)
+        createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        landedAt = try c.decodeIfPresent(Int64.self, forKey: .landedAt)
+        tickets = try c.decode([PlanCardRef].self, forKey: .tickets)
+        ciSubject = try c.decode(String.self, forKey: .ciSubject)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        lander = try c.decodeIfPresent(String.self, forKey: .lander)
+        spend = try c.decodeIfPresent(PlanSpend.self, forKey: .spend)
+    }
+
     /// "Landing 72": what every surface calls the landing, as its heading and
     /// in a sentence (ov-514, ov-522). The title is its subtitle, never its
     /// name: a title can run to a line of its own.

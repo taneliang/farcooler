@@ -10,21 +10,18 @@ struct PlanThemeTrackTests {
     static let hour = PlanModelTests.hour
     static let day = 24 * hour
 
-    /// One active theme "T" holding card c1 and c2 (one done unless `done`
-    /// says otherwise), with `lanes`, `extra` merged over the plan's keys and
-    /// `edit` applied to the theme.
+    /// One active theme "T" holding cards c1 and c2 (more with `cards`; one
+    /// done unless `done` says otherwise), with `lines`, `extra` merged over
+    /// the plan's keys and `edit` applied to the theme.
     static func plan(
-        lanes: [[String: Any]] = [], done: Int = 0, open: Int = 1, state: String = "active", storyAt: Int64 = 0,
-        extra: [String: Any] = [:], edit: (inout [String: Any]) -> Void = { _ in }
+        lines: [[String: Any]] = [], cards: [String] = ["c1", "c2"], done: Int = 0, open: Int = 1, state: String = "active",
+        storyAt: Int64 = 0, extra: [String: Any] = [:], edit: (inout [String: Any]) -> Void = { _ in }
     ) throws -> PlanModel {
-        var theme = PlanModelTests.theme("T", cards: ["c1", "c2"], ordinal: 0, state: state)
+        var theme = PlanModelTests.theme("T", cards: cards, ordinal: 0, state: state)
         theme["counts"] = Self.counts(todo: open, done: done)
         theme["story_at"] = storyAt
         edit(&theme)
-        var object: [String: Any] = [
-            "now_ms": now, "themes": [theme], "lanes": lanes, "order": lanes.compactMap { $0["id"] },
-            "cards": [],
-        ]
+        var object: [String: Any] = ["now_ms": now, "themes": [theme], "lines": lines, "cards": []]
         for (key, value) in extra { object[key] = value }
         return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
     }
@@ -34,9 +31,11 @@ struct PlanThemeTrackTests {
          "cancelled": cancelled]
     }
 
-    static func lane(_ name: String, _ state: String, rank: Int? = nil, since: Int64 = now - 10 * 60_000,
-                     fixRounds: Int = 0, stale: Bool = false, card: String = "c1") -> [String: Any] {
-        PlanModelTests.lane(name, state, cards: [card], rank: rank, since: since, fixRounds: fixRounds, stale: stale)
+    /// A ticket on `card`, called `title` (its heading, which the track line names).
+    static func line(_ title: String, _ stage: String, rank: Int? = nil, since: Int64 = now - 10 * 60_000,
+                     fixRounds: Int = 0, stale: Bool = false, fixing: Bool = false, card: String = "c1") -> [String: Any] {
+        PlanModelTests.line(
+            card, stage, rank: rank, since: since, fixRounds: fixRounds, stale: stale, fixing: fixing, title: title)
     }
 
     static func track(_ plan: PlanModel, activity: [String: Int64] = [:]) -> PlanTrack {
@@ -49,66 +48,69 @@ struct PlanThemeTrackTests {
 
     // MARK: Phrases
 
-    @Test("Moving: one lane is named with its state, several are counted")
+    @Test("Moving: one ticket is named with its stage, several are counted")
     func moving() throws {
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("skill-323", "building")])) == "skill-323 is building")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "review")])) == "a is in review")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("fix-gestures", "fixing", fixRounds: 1)]))
+        #expect(Self.words(try Self.plan(lines: [Self.line("skill-323", "building")])) == "skill-323 is building")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "reviewing")])) == "a is in review")
+        #expect(Self.words(try Self.plan(lines: [Self.line("fix-gestures", "building", fixRounds: 1, fixing: true)]))
             == "fix-gestures is fixing, round 1")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "fixing")])) == "a is fixing")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "landing")])) == "a is landing")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "building"), Self.lane("b", "review")]))
-            == "2 lanes moving")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building", fixing: true)])) == "a is fixing")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building", fixRounds: 2)])) == "a is building",
+            "rounds are said only while a fix is open")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "landing")])) == "a is landing")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "needs_you")])) == "a is waiting on you")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building"), Self.line("b", "reviewing", card: "c2")]))
+            == "2 tickets moving")
     }
 
-    @Test("Stuck: a stale lane is named with how long, as an hour or hours")
+    @Test("Stuck: a stale ticket is named with how long, as an hour or hours")
     func stuck() throws {
-        let hourAndABit = try Self.plan(lanes: [Self.lane("skill-323", "building", since: Self.now - 70 * 60_000, stale: true)])
+        let hourAndABit = try Self.plan(lines: [Self.line("skill-323", "building", since: Self.now - 70 * 60_000, stale: true)])
         #expect(Self.words(hourAndABit) == "skill-323: no move in an hour")
-        let three = try Self.plan(lanes: [Self.lane("skill-323", "building", since: Self.now - 3 * Self.hour, stale: true)])
+        let three = try Self.plan(lines: [Self.line("skill-323", "building", since: Self.now - 3 * Self.hour, stale: true)])
         #expect(Self.words(three) == "skill-323: no move in 3 h")
     }
 
-    @Test("A stale lane among moving ones is named after them, and never hides them")
+    @Test("A stale ticket among moving ones is named after them, and never hides them")
     func staleBesideMoving() throws {
-        let plan = try Self.plan(lanes: [
-            Self.lane("fine", "building"), Self.lane("slow", "review", since: Self.now - 4 * Self.hour, stale: true),
+        let plan = try Self.plan(lines: [
+            Self.line("fine", "building"), Self.line("slow", "reviewing", since: Self.now - 4 * Self.hour, stale: true, card: "c2"),
         ])
-        #expect(Self.words(plan) == "2 lanes moving · slow: no move in 4 h")
+        #expect(Self.words(plan) == "2 tickets moving · slow: no move in 4 h")
         #expect(Self.track(plan).isMoving)
     }
 
-    @Test("Queued: the best rank among its queued lanes, or none said")
+    @Test("Waiting: the best rank among its waiting tickets, or none said")
     func queued() throws {
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "queued", rank: 1)])) == "Queued, 1st up")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "queued", rank: 3), Self.lane("b", "queued", rank: 2)]))
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting", rank: 1)])) == "Queued, 1st up")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting", rank: 3), Self.line("b", "waiting", rank: 2, card: "c2")]))
             == "Queued, 2nd up")
-        #expect(Self.words(try Self.plan(lanes: [Self.lane("a", "queued")])) == "Queued")
+        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting")])) == "Queued")
     }
 
-    @Test("A working lane beats a queued one")
+    @Test("A working ticket beats a waiting one")
     func movingBeatsQueued() throws {
-        let plan = try Self.plan(lanes: [Self.lane("a", "queued", rank: 1, card: "c2"), Self.lane("b", "building")])
+        let plan = try Self.plan(lines: [Self.line("a", "waiting", rank: 1, card: "c2"), Self.line("b", "building")])
         #expect(Self.words(plan) == "b is building")
     }
 
-    @Test("Quiet: open cards, no lane, and a day with nothing, said in days")
+    @Test("Quiet: open cards, no ticket, and a day with nothing, said in days")
     func quiet() throws {
         let storyAt = Self.now - 3 * Self.day - Self.hour
-        #expect(Self.words(try Self.plan(storyAt: storyAt)) == "No lane · quiet for 3 days")
-        #expect(Self.words(try Self.plan(storyAt: Self.now - 25 * Self.hour)) == "No lane · quiet for 1 day")
+        #expect(Self.words(try Self.plan(storyAt: storyAt)) == "No ticket \u{00B7} quiet for 3 days")
+        #expect(Self.words(try Self.plan(storyAt: Self.now - 25 * Self.hour)) == "No ticket \u{00B7} quiet for 1 day")
         #expect(Self.track(try Self.plan(storyAt: Self.now - Self.day)).isQuiet, "exactly 24 h is quiet")
     }
 
-    @Test("Idle: open cards and no lane, but something moved in the last day")
+    @Test("Idle: open cards and no ticket, but something moved in the last day")
     func idle() throws {
-        #expect(Self.words(try Self.plan(storyAt: Self.now - 23 * Self.hour)) == "No lane yet")
+        #expect(Self.words(try Self.plan(storyAt: Self.now - 23 * Self.hour)) == "No ticket yet")
         #expect(!Self.track(try Self.plan(storyAt: Self.now - 23 * Self.hour)).isQuiet)
     }
 
     @Test("A theme nothing has ever touched is idle, not quiet for fifty years")
     func untouched() throws {
-        #expect(Self.words(try Self.plan(storyAt: 0)) == "No lane yet")
+        #expect(Self.words(try Self.plan(storyAt: 0)) == "No ticket yet")
     }
 
     @Test("A card the board moved lately keeps a theme from being quiet; the plan alone can't see it")
@@ -119,15 +121,15 @@ struct PlanThemeTrackTests {
         #expect(Self.track(plan, activity: ["c2": Self.now - Self.hour]) == .idle)
     }
 
-    @Test("A landed lane is not moving it, and its landing counts as a move")
+    @Test("A landed ticket is not moving it, and its landing counts as a move")
     func landedIsNotMoving() throws {
-        let plan = try Self.plan(lanes: [Self.lane("a", "landed", since: Self.now - 2 * Self.hour)], storyAt: Self.now - 9 * Self.day)
+        let plan = try Self.plan(lines: [Self.line("a", "landed", since: Self.now - 2 * Self.hour)], storyAt: Self.now - 9 * Self.day)
         #expect(Self.track(plan) == .idle)
     }
 
-    @Test("A dropped lane's time doesn't count as the theme moving")
+    @Test("A dropped ticket's time doesn't count as the theme moving")
     func droppedIsGone() throws {
-        let plan = try Self.plan(lanes: [Self.lane("a", "dropped", since: Self.now - Self.hour)], storyAt: Self.now - 9 * Self.day)
+        let plan = try Self.plan(lines: [Self.line("a", "dropped", since: Self.now - Self.hour)], storyAt: Self.now - 9 * Self.day)
         #expect(Self.track(plan).isQuiet)
     }
 
@@ -138,28 +140,28 @@ struct PlanThemeTrackTests {
             == "Every card is done")
     }
 
-    @Test("A theme with no cards says no lane yet, not that everything is done")
+    @Test("A theme with no cards says no ticket yet, not that everything is done")
     func empty() throws {
-        #expect(Self.words(try Self.plan(done: 0, open: 0)) == "No lane yet")
+        #expect(Self.words(try Self.plan(done: 0, open: 0)) == "No ticket yet")
     }
 
     @Test("Paused and done say so, whatever else is true of them")
     func pausedAndDone() throws {
-        let busy = [Self.lane("a", "building")]
-        #expect(Self.words(try Self.plan(lanes: busy, state: "paused")) == "Paused")
-        #expect(Self.words(try Self.plan(lanes: busy, state: "done")) == "Done")
+        let busy = [Self.line("a", "building")]
+        #expect(Self.words(try Self.plan(lines: busy, state: "paused")) == "Paused")
+        #expect(Self.words(try Self.plan(lines: busy, state: "done")) == "Done")
     }
 
-    @Test("Over budget is the one amber state, and wins over a moving lane")
+    @Test("Over budget is the one amber state, and wins over a moving ticket")
     func overBudget() throws {
-        let plan = try Self.plan(lanes: [Self.lane("a", "building")]) { theme in
+        let plan = try Self.plan(lines: [Self.line("a", "building")]) { theme in
             theme["budget_tokens"] = 100
             theme["spend"] = ["input_tokens": 600, "runs": 1, "unmeasured_agents": 0]
         }
         let track = Self.track(plan)
         #expect(track.needsAttention)
         #expect(PlanWords.track(track, now: Self.now) == "Over budget: 600 of 100 tokens")
-        #expect(!Self.track(try Self.plan(lanes: [Self.lane("a", "building")])).needsAttention)
+        #expect(!Self.track(try Self.plan(lines: [Self.line("a", "building")])).needsAttention)
         for other in [PlanTrack.paused, .done, .idle, .allDone, .queued(rank: 1), .quiet(since: 1)] {
             #expect(!other.needsAttention, "\(other) is never amber")
         }
@@ -168,7 +170,7 @@ struct PlanThemeTrackTests {
     @Test("Every state has its own glyph, so color never carries it alone")
     func glyphs() {
         let tracks: [PlanTrack] = [
-            .overBudget(.over(used: 2, budget: 1)), .stuck(lane: "a", since: 0), .moving(lanes: [], stalled: nil), .queued(rank: nil),
+            .overBudget(.over(used: 2, budget: 1)), .stuck(ticket: "a", since: 0), .moving(tickets: [], stalled: nil), .queued(rank: nil),
             .quiet(since: 0), .idle, .allDone, .paused,
         ]
         #expect(Set(tracks.map(\.symbol)).count == tracks.count)
@@ -177,12 +179,12 @@ struct PlanThemeTrackTests {
     @Test("Spoken, the middle dot is a comma")
     func spoken() throws {
         let quiet = PlanTrack.quiet(since: Self.now - 3 * Self.day)
-        #expect(PlanWords.trackSpoken(quiet, now: Self.now) == "No lane, quiet for 3 days")
+        #expect(PlanWords.trackSpoken(quiet, now: Self.now) == "No ticket, quiet for 3 days")
     }
 
     // MARK: Last moved
 
-    @Test("Last moved is the newest of the story, the lanes, the rulings, the cards and the runner's word")
+    @Test("Last moved is the newest of the story, the tickets, the rulings, the cards and the runner's word")
     func lastMovedCountsEverything() throws {
         let base = Self.now - 10 * Self.day
         var plan = try Self.plan(storyAt: base)
@@ -190,7 +192,7 @@ struct PlanThemeTrackTests {
         #expect(plan.lastMoved(plan.themes[0], activity: ["c2": base + 5]) == base + 5)
         #expect(plan.lastMoved(plan.themes[0], activity: ["other": base + 99]) == base, "a card in another theme isn't ours")
 
-        plan = try Self.plan(lanes: [Self.lane("a", "landed", since: base + 7)], storyAt: base)
+        plan = try Self.plan(lines: [Self.line("a", "landed", since: base + 7)], storyAt: base)
         #expect(plan.lastMoved(plan.themes[0]) == base + 7)
 
         plan = try Self.plan(storyAt: base) { $0["last_moved_at"] = base + 11 }
@@ -218,39 +220,40 @@ struct PlanThemeTrackTests {
 
     // MARK: Around the themes
 
-    @Test("Landed this week: the theme's landed lanes inside seven days, newest first")
+    @Test("Landed this week: the theme's landed tickets inside seven days, newest first")
     func landedThisWeek() throws {
-        let plan = try Self.plan(lanes: [
-            Self.lane("old", "landed", since: Self.now - 8 * Self.day), Self.lane("new", "landed", since: Self.now - Self.hour),
-            Self.lane("mid", "landed", since: Self.now - 2 * Self.day), Self.lane("live", "building"),
-        ])
-        #expect(plan.landedThisWeek(in: plan.themes[0]).map(\.name) == ["new", "mid"])
-        #expect(PlanWords.lanesLine(plan.lanes) == "old, new, mid, +1 more")
-        #expect(PlanWords.lanesLine(Array(plan.lanes.prefix(2))) == "old, new")
+        let plan = try Self.plan(lines: [
+            Self.line("old", "landed", since: Self.now - 8 * Self.day, card: "c1"),
+            Self.line("new", "landed", since: Self.now - Self.hour, card: "c2"),
+            Self.line("mid", "landed", since: Self.now - 2 * Self.day, card: "c3"), Self.line("live", "building", card: "c4"),
+        ], cards: ["c1", "c2", "c3", "c4"])
+        #expect(plan.landedThisWeek(in: plan.themes[0]).map(\.heading) == ["new", "mid"])
+        #expect(PlanWords.ticketsLine(plan.lines) == "old, new, mid, +1 more")
+        #expect(PlanWords.ticketsLine(Array(plan.lines.prefix(2))) == "old, new")
     }
 
-    @Test("Outside any theme: lanes with no card in a theme, open cards in none, and the CLI's tidy list")
+    @Test("Outside any theme: tickets with no card in a theme, open cards in none, and the CLI's tidy list")
     func outside() throws {
         let plan = try Self.plan(
-            lanes: [Self.lane("in", "building"), Self.lane("out", "building", card: "z1"),
-                    Self.lane("gone", "dropped", card: "z2"), Self.lane("oldout", "landed", since: Self.now - 9 * Self.day, card: "z3"),
-                    Self.lane("newout", "landed", since: Self.now - Self.day, card: "z4")],
-            extra: ["no_lane": [["task": "z1", "key": "ov-9", "status": "in_review"]],
+            lines: [Self.line("in", "building"), Self.line("out", "building", card: "z1"),
+                    Self.line("gone", "dropped", card: "z2"), Self.line("oldout", "landed", since: Self.now - 9 * Self.day, card: "z3"),
+                    Self.line("newout", "landed", since: Self.now - Self.day, card: "z4")],
+            extra: ["off_the_line": [["task": "z1", "key": "ov-9", "status": "in_review"]],
                     "landed_not_closed": [["task": "z4", "key": "ov-10", "status": "in_progress"]]])
         let outside = plan.outsideThemes(statuses: ["c1": .todo, "z1": .todo, "z2": .backlog, "z3": .done, "z5": .cancelled])
-        #expect(outside.lanes == ["out", "newout"])
+        #expect(outside.tickets == ["out", "newout"])
         #expect(outside.openCards == 2, "z1 and z2: c1 is in a theme, z3 is done, z5 canceled")
         #expect(outside.tidy.map(\.key) == ["ov-9", "ov-10"])
-        #expect(PlanWords.outside(outside) == "Outside any theme: 2 lanes this week · 2 open cards")
+        #expect(PlanWords.outside(outside) == "Outside any theme: 2 tickets this week \u{00B7} 2 open cards")
         #expect(PlanWords.tidy(11) == "11 cards to tidy" && PlanWords.tidy(1) == "1 card to tidy")
-        #expect(PlanWords.outside(PlanOutside(lanes: [], openCards: 0, tidy: [])) == nil)
-        #expect(PlanWords.outside(PlanOutside(lanes: ["a"], openCards: 1, tidy: [])) == "Outside any theme: 1 lane this week · 1 open card")
+        #expect(PlanWords.outside(PlanOutside(tickets: [], openCards: 0, tidy: [])) == nil)
+        #expect(PlanWords.outside(PlanOutside(tickets: ["a"], openCards: 1, tidy: [])) == "Outside any theme: 1 ticket this week \u{00B7} 1 open card")
     }
 
     @Test("An older runner sends no flags, and the plan reads with none")
     func flagsAreOptional() throws {
         let plan = try Self.plan()
-        #expect(plan.noLane.isEmpty && plan.landedNotClosed.isEmpty)
+        #expect(plan.offTheLine.isEmpty && plan.landedNotClosed.isEmpty)
     }
 
     @Test("The summary counts asks, moving themes and quiet ones, and leaves out zeros")
@@ -263,8 +266,8 @@ struct PlanThemeTrackTests {
                 t["story_at"] = Self.now - 5 * Self.day
                 return t
             }
-            let lanes = [PlanModelTests.lane("w", "building", cards: ["c0"])]
-            let object: [String: Any] = ["now_ms": Self.now, "themes": themes, "lanes": lanes, "order": [], "cards": []]
+            let lines = [PlanModelTests.line("c0", "building")]
+            let object: [String: Any] = ["now_ms": Self.now, "themes": themes, "lines": lines, "cards": []]
             return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
         }
         let plan = try themes([("A", "active", "?"), ("B", "active", ""), ("C", "active", "?"), ("D", "paused", "")])
@@ -285,18 +288,18 @@ struct PlanThemeTrackTests {
 
     // MARK: The entry's brief
 
-    @Test("The brief lists three lanes and two rulings, says how many more, and leaves empty lines out")
+    @Test("The brief lists three tickets and two rulings, says how many more, and leaves empty lines out")
     func brief() throws {
         func ruling(_ n: Int, state: String = "standing") -> [String: Any] {
             ["id": "r\(n)", "short": "R-\(n)", "number": n, "decision": "d\(n)", "why": "w", "reversal": "r", "cards": [],
              "theme_id": "theme-T", "theme": "T", "state": state, "note": "", "actor": "manager", "created_at": n]
         }
-        let lanes = (1...5).map { Self.lane("l\($0)", "building") }
+        let lines = (1...5).map { Self.line("l\($0)", "building", card: "c\($0)") }
         let plan = try Self.plan(
-            lanes: lanes, extra: ["rulings": [ruling(1), ruling(2), ruling(3), ruling(4, state: "confirmed")]]
+            lines: lines, cards: (1...5).map { "c\($0)" }, extra: ["rulings": [ruling(1), ruling(2), ruling(3), ruling(4, state: "confirmed")]]
         ) { $0["story"] = "Going well."; $0["story_at"] = Self.now - Self.hour }
         let brief = PlanThemeBrief(plan.themes[0], in: plan)
-        #expect(brief.moving.map(\.name) == ["l1", "l2", "l3"] && brief.movingMore == 2)
+        #expect(brief.moving.map(\.heading) == ["l1", "l2", "l3"] && brief.movingMore == 2)
         #expect(brief.decided.map(\.short) == ["R-1", "R-2"] && brief.decidedMore == 1, "standing only: R-4 is settled")
         #expect(brief.story == "Going well." && brief.storyAge == "Updated 1 h ago")
         #expect(brief.outcome == nil && brief.ask == nil && brief.next == nil && brief.landed == nil && brief.budget == nil)
@@ -336,7 +339,7 @@ struct PlanThemeTrackTests {
         let themes = [
             ("Zed", "active", 2), ("Beta", "paused", 0), ("Alpha", "active", 1), ("Gone", "dropped", 3), ("Fin", "done", 4),
         ].map { name, state, ordinal in PlanModelTests.theme(name, cards: [], ordinal: ordinal, state: state) }
-        let plan = try PlanModelTests.plan(themes: themes, lanes: [])
+        let plan = try PlanModelTests.plan(themes: themes, lines: [])
         let groups = plan.themeGroups
         #expect(groups.active.map(\.name) == ["Alpha", "Zed"], "the board's order, not alphabetical")
         #expect(groups.closed.map(\.name) == ["Beta", "Fin"], "paused, then done")

@@ -37,9 +37,9 @@ struct OneTreeRevealChoicesTests {
     func followsTheDefaultAfterward() throws {
         var input = try T.quietBoard()
         let (_, ids, _) = try reveal()
-        // The window revealed Mac while a lane was building there, then recorded some
+        // The window revealed Mac while a ticket was building there, then recorded some
         // unrelated action over it.
-        input.plan.lanes[1].state = .building
+        input.plan.lines[2].stage = .building
         let busy = OneTree.build(input)
         let drawn = OneTreeExpansion().revealing(ids)
         var next = drawn

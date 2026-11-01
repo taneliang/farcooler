@@ -66,7 +66,7 @@ public struct PlanAgent: Decodable, Equatable, Identifiable, Sendable {
         return "\(role.word) · \(model.isEmpty ? harness : model)"
     }
 
-    /// What it works for: the plan, its tickets by key, else "On no ticket".
+    /// What it works for: the plan, its tickets by key, else "Not on a ticket".
     public var worksFor: String {
         if role == .orchestrator { return "Plan" }
         if !tickets.isEmpty { return tickets.map(\.key).joined(separator: ", ") }
@@ -105,7 +105,7 @@ extension PlanAgent {
 }
 
 extension PlanWords {
-    public static let onNoTicket = "On no ticket"
+    public static let onNoTicket = "Not on a ticket"
 }
 
 /// The agents list as the Plan draws it: the agents that exist, working

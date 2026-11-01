@@ -54,7 +54,7 @@ struct PlanGlanceShownTests {
         for reading in [RunnerPulse.Reading.noCredential, .refused] {
             let (signedOut, forgot) = PlanGlanceMemory.shown(reading: reading, remembered: seen, at: now)
             #expect(signedOut == .signedOut)
-            #expect(forgot == nil, "a signed-out phone keeps no lane names")
+            #expect(forgot == nil, "a signed-out phone keeps no ticket keys")
         }
     }
 

@@ -22,7 +22,7 @@ struct TaskKeyCardsTests {
         TaskNoteRow(id: UUID().uuidString, kind: kind, actor: "manager", at: Date(timeIntervalSince1970: seconds), body: body)
     }
 
-    @Test("A card is the row's title and status, with the plan's theme and live lane, and its newest written note")
+    @Test("A card is the row's title and status, with the plan's theme and ticket stage, and its newest written note")
     func cardFromReads() throws {
         let plan = try PlanFixture.seeded()
         let theme = try #require(plan.themes.first { $0.name == "Mac navigation" })
@@ -38,9 +38,9 @@ struct TaskKeyCardsTests {
         #expect(card.title == "Mac: the jump bar opens anything")
         #expect(card.status == .inProgress)
         #expect(card.theme == "Mac navigation")
-        #expect(card.lane == "integ-8", "the live lane that names it")
+        #expect(card.stage == "Landing", "ov-248 is on the line, landing")
         #expect(card.excerpt == "Built the jump bar.", "the newest note a person or agent wrote, first line")
-        #expect(card.details == "In Progress · Mac navigation · integ-8")
+        #expect(card.details == "In Progress · Mac navigation · Landing")
         #expect(card.accessibilityLabel == "ov-248, Mac: the jump bar opens anything")
     }
 
@@ -52,9 +52,9 @@ struct TaskKeyCardsTests {
         let board = try TaskBoardModel.decode(Data(contentsOf: dir.appendingPathComponent("tasks.json")))
         let plan = try PlanModel.decode(Data(contentsOf: dir.appendingPathComponent("plan.json")))
         let cards = TaskKeyCards(runner: "", boards: ["w": board], plans: ["w": plan])
-        #expect(cards.card(for: "bil-1")?.details == "In Progress · Invoices · invoice-totals")
+        #expect(cards.card(for: "bil-1")?.details == "In Progress · Invoices · Waiting")
         #expect(cards.card(for: "bil-1")?.excerpt == "Invoices show the sum of their lines.")
-        #expect(cards.card(for: "bil-2")?.details == "Needs Decision · Invoices · rounding")
+        #expect(cards.card(for: "bil-2")?.details == "Needs Decision · Invoices · Waiting")
         #expect(cards.card(for: "bil-3")?.details == "Done · Invoices")
         #expect(cards.card(for: "bil-4") == nil)
     }

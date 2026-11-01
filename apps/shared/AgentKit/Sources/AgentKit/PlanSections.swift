@@ -17,7 +17,7 @@ import Foundation
 // - naming a landing that landed while it's still waiting or landing, it's in
 //   Waiting for the Next Landing (folded, and each row says which landing);
 // - in review, needing the owner, or landing with no landing, it's In Review;
-// - building (or fixing), it's Building;
+// - building, it's Building; in a fix round after a review, it's In Review;
 // - a ticket building or in review is never hidden by a landed landing: it
 //   routes by its stage and the row says it names that landing
 //   (`landedLanding`);
@@ -47,7 +47,7 @@ public struct PlanSections: Equatable, Sendable {
             switch self {
             case .landing: "Nothing is landing right now."
             case .building: "Nothing is building."
-            case .waiting: "Nothing is queued."
+            case .waiting: "Nothing is waiting."
             case .agents: PlanWords.noAgents
             case .needsYou, .inReview, .onLandedLanding, .themes: nil
             }
@@ -175,7 +175,7 @@ public struct PlanSections: Equatable, Sendable {
         let landedLandings = plan.landings.filter { $0.state == .landed }
         func landed(_ line: PlanTicketLine) -> PlanLanding? {
             landedLandings.first { landing in
-                landing.tickets.contains { $0.task == line.task } || line.landing == landing.number
+                line.landing == landing.number
             }
         }
         func row(_ line: PlanTicketLine) -> TicketRow {
@@ -212,8 +212,9 @@ public struct PlanSections: Equatable, Sendable {
         let parkedIDs = Set(parked.map(\.id))
         let loose = free.filter { !parkedIDs.contains($0.id) }
 
-        inReview = loose.filter { [.reviewing, .needsYou, .landing].contains($0.stage) }.map(row)
-        building = loose.filter { $0.stage == .building }.map(row)
+        // A fix round follows a review, so a ticket in one is In Review still.
+        inReview = loose.filter { [.reviewing, .needsYou, .landing].contains($0.stage) || $0.isFixing }.map(row)
+        building = loose.filter { $0.stage == .building && !$0.isFixing }.map(row)
         let waitingLines = loose.filter { $0.stage == .waiting }
         let blocked = waitingLines.filter { plan.waitsOnOwner($0, statuses: statuses) }
         let blockedIDs = Set(blocked.map(\.id))

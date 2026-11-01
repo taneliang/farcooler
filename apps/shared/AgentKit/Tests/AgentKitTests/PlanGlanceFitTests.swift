@@ -14,13 +14,13 @@ import Testing
 
     @MainActor
     struct PlanGlanceFitTests {
-        /// The widest a runner sends: a 48-byte board, two 60-character lanes
+        /// The widest a runner sends: a 48-byte board, two 60-character tickets
         /// and a 60-character next up, with a count.
         static let widest = PlanGlance(
             workspace: String(repeating: "W", count: 48), needsYou: 12,
             now: [
-                .init(name: String(repeating: "a", count: 60), state: .review),
-                .init(name: String(repeating: "b", count: 60), state: .landing),
+                .init(ticket: String(repeating: "a", count: 60), stage: .reviewing),
+                .init(ticket: String(repeating: "b", count: 60), stage: .landing),
             ],
             next: String(repeating: "n", count: 60), runner: "Studio", heardAgo: 0)
 
@@ -75,10 +75,10 @@ import Testing
             }
         }
 
-        @Test("A lane's name is cut with an ellipsis before its state is")
+        @Test("A ticket's key is cut with an ellipsis before its stage is")
         func names() {
             #expect(PlanGlanceView.shown(String(repeating: "a", count: 60)) == String(repeating: "a", count: 19) + "…")
-            #expect(PlanGlanceView.shown("mac-ux") == "mac-ux")
+            #expect(PlanGlanceView.shown("ov-312") == "ov-312")
             #expect(PlanGlanceView.captionPoints(.accessibility5) == 18)
         }
     }

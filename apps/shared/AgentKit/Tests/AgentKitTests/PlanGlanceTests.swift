@@ -10,8 +10,8 @@ struct PlanGlanceTests {
     /// back off a fixture.
     static let main = PlanGlance(
         workspace: "Main", needsYou: 2,
-        now: [.init(name: "mac-ux", state: .review), .init(name: "ov-310", state: .building)],
-        next: "mac-fu3")
+        now: [.init(ticket: "ov-312", stage: .reviewing), .init(ticket: "ov-310", stage: .building)],
+        next: "ov-313")
 
     @Test("The relay's pulse answer carries the board the watch draws")
     func thePulseCarriesThePlan() throws {
@@ -51,21 +51,21 @@ struct PlanGlanceTests {
         #expect(survived.status == "working")
     }
 
-    @Test("A lane of the wrong shape costs the lane, and a state from later says Unknown")
+    @Test("A ticket of the wrong shape costs the ticket, and a stage from later says Unknown")
     func lenient() throws {
-        let raw = #"{"workspace":"Main","needsYou":-3,"now":[{"name":"a","state":"soaking"},{"state":"building"}],"next":""}"#
+        let raw = #"{"workspace":"Main","needsYou":-3,"now":[{"ticket":"a","stage":"soaking"},{"stage":"building"},{"name":"old","state":"building"}],"next":""}"#
         let glance = try JSONDecoder().decode(PlanGlance.self, from: Data(raw.utf8))
-        #expect(glance == PlanGlance(workspace: "Main", needsYou: 0, now: [.init(name: "a", state: .unknown)]))
+        #expect(glance == PlanGlance(workspace: "Main", needsYou: 0, now: [.init(ticket: "a", stage: .unknown)]))
         #expect(glance.nowLine == "Now: a Unknown")
     }
 
     @Test("What a glance says, and leaves unsaid")
     func words() {
         #expect(Self.main.heading == "Main · 2 need you")
-        #expect(Self.main.nowLine == "Now: mac-ux In Review, ov-310 Building")
-        #expect(Self.main.nextLine == "Next: mac-fu3")
-        #expect(PlanGlance.words(Self.main.now[0]) == "mac-ux · In Review")
-        #expect(Self.main.spoken == "Main board, 2 need you. Now: mac-ux, in review; ov-310, building. Next up: mac-fu3.")
+        #expect(Self.main.nowLine == "Now: ov-312 In Review, ov-310 Building")
+        #expect(Self.main.nextLine == "Next: ov-313")
+        #expect(PlanGlance.words(Self.main.now[0]) == "ov-312 · In Review")
+        #expect(Self.main.spoken == "Main board, 2 need you. Now: ov-312, in review; ov-310, building. Next up: ov-313.")
 
         let quiet = PlanGlance(workspace: "Main", needsYou: 0, now: [])
         #expect(quiet.heading == "Main", "never \"0 need you\"")

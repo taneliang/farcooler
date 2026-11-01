@@ -13,26 +13,26 @@ struct OneTreeRoundOneTests {
     // MARK: H2, a build linear in the board
 
     /// A board as big as a long-lived one gets: `cards` cards in 20
-    /// themes, lanes of two cards each (one in three live), a worktree per
-    /// live lane with two panes. Through `PlanModel.decode`, the app's parser.
-    static func big(cards: Int, lanes: Int) throws -> OneTreeInput {
+    /// themes, a ticket for each of the first `tickets` (one in three live), a
+    /// worktree per live ticket with two panes. Through `PlanModel.decode`, the
+    /// app's parser.
+    static func big(cards: Int, tickets: Int) throws -> OneTreeInput {
         let ids = (0..<cards).map { "t\($0)" }
         let themes = (0..<20).map { n in
             T.theme("Theme \(n)", cards: stride(from: n, to: cards, by: 20).map { ids[$0] }, ordinal: n)
         }
-        let states = ["building", "landed", "queued"]
-        let laneRows = (0..<lanes).map { n in
-            T.lane("lane\(n)", states[n % 3], cards: [ids[(2 * n) % cards], ids[(2 * n + 1) % cards]],
-                path: ".claude/worktrees/lane\(n)")
+        let stages = ["building", "landed", "waiting"]
+        let lineRows = (0..<tickets).map { n in
+            T.line(ids[n % cards], stages[n % 3], branch: "ticket\(n)", path: ".claude/worktrees/ticket\(n)")
         }
-        let plan = try P.plan(themes: themes, lanes: laneRows)
+        let plan = try P.plan(themes: themes, lines: lineRows)
         let statuses: [TaskStatus] = [.inProgress, .done, .todo, .inReview, .backlog]
         return OneTreeInput(
             tasks: ids.enumerated().map { n, id in T.task(id, statuses[n % statuses.count], at: Int64(n)) },
             plan: plan,
-            worktrees: (0..<lanes).filter { $0 % 3 == 0 }.map { n in
+            worktrees: (0..<tickets).filter { $0 % 3 == 0 }.map { n in
                 T.worktree(
-                    "lane\(n)",
+                    "ticket\(n)",
                     terminals: [
                         OneTreeTerminal(id: "a\(n)", title: "claude", isAgent: true),
                         OneTreeTerminal(id: "s\(n)", title: "zsh", isAgent: false),
@@ -47,9 +47,9 @@ struct OneTreeRoundOneTests {
         return Double(spec.tv_sec) * 1e9 + Double(spec.tv_nsec)
     }
 
-    @Test("1,000 cards and 300 lanes build in well under a frame budget, even in a debug build on CI")
+    @Test("1,000 cards and 300 tickets build in well under a frame budget, even in a debug build on CI")
     func bigBoardBuildsFast() throws {
-        let input = try Self.big(cards: 1000, lanes: 300)
+        let input = try Self.big(cards: 1000, tickets: 300)
         var tree = OneTree.build(input)
         // The CPU time this thread spent, not the wall clock: a busy runner
         // stretches the wall clock by whole multiples and says nothing about
@@ -62,14 +62,15 @@ struct OneTreeRoundOneTests {
         #expect(took < .milliseconds(250), "took \(took) of CPU")
         print("one tree, 1,000 cards: \(took)")
         #expect(tree.tree.count == 20)
-        // Every live lane's two cards list it: the indexes join what the
-        // scans did.
-        #expect(tree.allNodes.filter { $0.target == .lane("lane-lane0") }.count == 2)
+        // Every ticket is a row under its card, with its worktree's panes: the
+        // indexes join what the scans did.
+        let first = tree.allNodes.filter { $0.target == .ticket("t0") }
+        #expect(first.count == 1 && first[0].children.map(\.title) == ["claude", "zsh"])
     }
 
     @Test("Doubling the board about doubles the build, not quadruples it")
     func buildIsLinear() throws {
-        let small = try Self.big(cards: 1000, lanes: 300), large = try Self.big(cards: 4000, lanes: 1200)
+        let small = try Self.big(cards: 1000, tickets: 300), large = try Self.big(cards: 4000, tickets: 1200)
         // The build is single-threaded, so the time this thread spent running
         // (not the wall clock) is the work done. A busy machine (the train
         // gate ran at a 1-minute load of 68) stretches the wall clock by
@@ -151,35 +152,35 @@ struct OneTreeRoundOneTests {
 
     // MARK: Defaults follow the work; only the person's own choices are kept
 
-    @Test("A node nobody touched follows the work: a theme that gains a live lane opens, one that loses its lanes closes")
+    @Test("A node nobody touched follows the work: a theme that gains a live ticket opens, one that loses its tickets closes")
     func defaultFollowsTheWork() throws {
         var input = try T.board()
-        for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
+        for index in input.plan.lines.indices { input.plan.lines[index].stage = .landed }
         let expansion = OneTreeExpansion()
         let quiet = OneTree.build(input)
         #expect(OneTree.rows(quiet.tree, expansion: expansion).filter(\.expanded).isEmpty)
-        // A lane starts building under Mac's card: Mac opens, with no one asking.
-        input.plan.lanes[1].state = .building
+        // A ticket starts building under Mac's card: Mac opens, with no one asking.
+        input.plan.lines[2].stage = .building
         let busy = OneTree.build(input)
         let open = OneTree.rows(busy.tree, expansion: expansion).filter(\.expanded).map(\.id)
         #expect(open.contains("theme:theme-Mac"))
         // It lands again: closed again.
-        input.plan.lanes[1].state = .landed
+        input.plan.lines[2].stage = .landed
         #expect(OneTree.rows(OneTree.build(input).tree, expansion: expansion).filter(\.expanded).isEmpty)
     }
 
     @Test("The person's own choice wins over the work, and is kept")
     func choiceBeatsDefault() throws {
         var input = try T.board()
-        for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
-        input.plan.lanes[1].state = .building
+        for index in input.plan.lines.indices { input.plan.lines[index].stage = .landed }
+        input.plan.lines[2].stage = .building
         var expansion = OneTreeExpansion()
         let busy = OneTree.build(input)
         let mac = try #require(busy.tree.first { $0.id == "theme:theme-Mac" })
         expansion.toggle(mac)  // closes it: it was open by default
         #expect(!expansion.isExpanded(mac))
         // More work arrives; they closed it, so it stays closed.
-        input.plan.lanes[0].state = .building
+        input.plan.lines[0].stage = .building
         let more = OneTree.build(input)
         #expect(!OneTreeExpansion(encoded: expansion.encoded).isExpanded(try #require(more.tree.first { $0.id == "theme:theme-Mac" })))
         // What's kept is the choice alone: nothing for a node nobody touched.
@@ -238,19 +239,22 @@ struct OneTreeRoundOneTests {
         #expect(group.children[0].target == nil)
     }
 
-    @Test("A card's own subagents sit on its newest live lane only, the same under each copy of that lane")
+    @Test("A card's own subagents sit under its one ticket, and a ticket lists no other card's")
     func workersOnce() throws {
         var input = try T.board()
         let worker = TaskWorker(harness: "claude", state: .running, model: "sonnet")
-        input.plan.lanes[2].agents = []
+        input.plan.agents = []
         input.tasks[0].workers = [worker]
         let tree = OneTree.build(input)
         let t1 = try #require(T.node(tree, "theme:theme-Plan/task:t1"))
-        #expect(t1.children.map { $0.children.filter { $0.kind == .subagent }.count } == [0, 1])
-        // copy works t2 and t3; t2's worker shows under both copies.
+        #expect(t1.children.map { $0.children.filter { $0.kind == .subagent }.count } == [1])
+        // t2 and t3 share a worktree; t2's worker shows under t2's ticket alone.
         input.tasks[1].workers = [worker]
-        let copies = OneTree.build(input).allNodes.filter { $0.target == .lane("lane-copy") }
-        #expect(copies.map { $0.children.filter { $0.kind == .subagent }.count } == [1, 1])
+        let rebuilt = OneTree.build(input)
+        let subagents = { (task: String) in
+            rebuilt.allNodes.first { $0.target == .ticket(task) }?.children.filter { $0.kind == .subagent }.count
+        }
+        #expect(subagents("t2") == 1 && subagents("t3") == 0)
     }
 
     @Test("A finished card's id is the same under the fold and in the All tree")
@@ -261,10 +265,10 @@ struct OneTreeRoundOneTests {
         #expect(all.allNodes.contains { $0.id == folded.id })
     }
 
-    @Test("Lanes, worktrees and terminals carry the worktree their menu acts on")
+    @Test("Tickets, worktrees and terminals carry the worktree their menu acts on")
     func worktreeIDs() throws {
         let tree = OneTree.build(try T.board())
-        let copy = try #require(T.node(tree, "theme:theme-Plan/task:t2/lane:lane-copy"))
+        let copy = try #require(T.node(tree, "theme:theme-Plan/task:t2/ticket:t2"))
         #expect(copy.worktreeID == "wt-copy")
         #expect(copy.children.map(\.worktreeID) == ["wt-copy", "wt-copy"])
         #expect(tree.below.last?.children.first?.worktreeID == "wt-spike")

@@ -47,7 +47,7 @@ struct PlanRulingsTests {
     /// none. Rulings alone don't make a board planned: they never switch its
     /// layout (review 1005a F1), and `showsNothing` is what hides the notice.
     @Test func aPlanWithoutRulingsStillReads() throws {
-        let json = #"{"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": []}"#
+        let json = #"{"now_ms": 1, "themes": [], "lines": [], "cards": []}"#
         let plan = try PlanModel.decode(Data(json.utf8))
         #expect(plan.rulings.isEmpty)
         #expect(plan.isEmpty)

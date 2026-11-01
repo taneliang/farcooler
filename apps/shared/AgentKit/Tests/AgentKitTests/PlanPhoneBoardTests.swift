@@ -4,7 +4,7 @@ import Testing
 @testable import AgentKit
 
 /// What `PlanUITests` pinned by launching the app (ov-538), over the files it
-/// launched with: the lane and theme words on `plan-seeded.json`, the cost on
+/// launched with: the ticket and theme words on `plan-seeded.json`, the cost on
 /// `plan-cost-seeded.json`, what a notice makes read again, and that Tasks is
 /// what a board draws until Plan is chosen. That a notice reaches the phone and
 /// a page opens stay in the app.
@@ -27,39 +27,39 @@ struct PlanPhoneBoardTests {
         #expect(PlanWords.tryAgain == "Try Again")
     }
 
-    @Test("each Next Up lane names its theme and reason, and each theme tile reads on its own")
-    func lanesAndTiles() throws {
+    @Test("each Next Up ticket names its theme and reason, and each theme tile reads on its own")
+    func ticketsAndTiles() throws {
         let plan = try F.plan("plan-seeded.json")
         let sections = PlanSections(plan: plan)
-        let next = try #require(sections.waiting.next.first { $0.lane.name == "plan-phones" })
-        #expect(plan.theme(of: next.lane)?.name == "Plan layer", "the lane doesn't name its theme")
-        #expect(next.lane.reason.contains("Unblocked once the store"))
-        let working = try #require(sections.building.first { $0.lane.name == "mac-vis" })
-        #expect(plan.theme(of: working.lane)?.name == "Visual language", "a lane in Building doesn't name its theme")
+        let next = try #require(sections.waiting.next.first { $0.line.key == "ov-274" })
+        #expect(plan.theme(of: next.line)?.name == "Plan layer", "the ticket doesn't name its theme")
+        #expect(next.line.reason.contains("Unblocked once the store"))
+        let working = try #require(sections.building.first { $0.line.key == "ov-220" })
+        #expect(plan.theme(of: working.line)?.name == "Visual language", "a ticket in Building doesn't name its theme")
 
         let tile = try #require(sections.themes.tiles.first { $0.name == "Visual language" })
         let said = tile.spoken()
         for part in ["Visual language", "4 of 18 done", "Needs you: Should the sidebar tint"] {
             #expect(said.contains(part), "the tile doesn't say \(part): \(said)")
         }
-        #expect(!said.contains("Next: mac-vis finishes"), "the story's next line is back on the tile: \(said)")
+        #expect(!said.contains("Next: Mac finishes"), "the story's next line is back on the tile: \(said)")
     }
 
-    @Test("work reads by what it does: the train as Train 9 with what it carries and its place, its lanes by title with no slug")
-    func landingNamesTheTrain() throws {
+    @Test("work reads by what it does: the landing as Landing 9 with what it carries and its place, its tickets by title with no branch")
+    func landingNamesTheLanding() throws {
         let plan = try F.plan("plan-seeded.json")
         let sections = PlanSections(plan: plan)
-        let card = try #require(sections.trains.first { $0.train.name == "integ-9" })
+        let card = try #require(sections.landings.first { $0.landing.number == 9 })
         let said = card.spoken(ci: nil, now: sections.now)
-        #expect(said.contains("Train 9"), "\(said)")
-        #expect(said.contains("A read-only Files browser"), "the train doesn't say what it carries: \(said)")
+        #expect(said.contains("Landing 9"), "\(said)")
+        #expect(said.contains("A read-only Files browser"), "the landing doesn't say what it carries: \(said)")
         #expect(said.contains("Checking Here \u{00B7} step 1 of 3"), "no place on the ladder: \(said)")
-        #expect(said.contains("Integrator \u{00B7} Opus"), "the train doesn't say who integrates: \(said)")
-        #expect(!said.contains("integ-9"), "the slug is in the text: \(said)")
-        let aboard = try #require(card.lanes.first { $0.name == "phones-b" })
-        #expect(aboard.lane.heading.contains("A read-only Files browser"))
-        #expect(aboard.note == nil, "a lane aboard says nothing of its state")
-        #expect(!aboard.lane.heading.contains("integ-9") && !aboard.lane.heading.contains("phones-b"), "a slug is in the text")
+        #expect(said.contains("Lander \u{00B7} Opus"), "the landing doesn't say who lands it: \(said)")
+        #expect(!said.contains("a-integ9"), "the lander's id is in the text: \(said)")
+        let aboard = try #require(card.tickets.first { $0.key == "ov-259" })
+        #expect(aboard.line.heading.contains("read-only Files browser"))
+        #expect(aboard.note == nil, "a ticket aboard says nothing of its state")
+        #expect(!aboard.line.heading.contains("Landing 9") && !aboard.line.heading.contains("phones-b"), "a slug is in the text")
     }
 
     @Test("a theme's record says what changed: the story it had before, when there was one")
@@ -95,8 +95,8 @@ struct PlanPhoneBoardTests {
         #expect(share.contains { $0.contains("3.6 finished cards") }, "\(share)")
         #expect(PlanThemeSpend.hasSomething(theme), "the theme page draws its spend")
         #expect(PlanWords.trend(theme.trendTokens) != nil, "and its trend")
-        let lane = try #require(plan.lanes.first { PlanWords.overBudget($0) != nil })
-        #expect(PlanWords.overBudget(lane) != nil, "\(lane.name) is over its budget")
+        let line = try #require(plan.lines.first { PlanWords.overBudget($0) != nil })
+        #expect(PlanWords.overBudget(line) != nil, "\(line.key) is over its budget")
     }
 
     // MARK: Which boards read again

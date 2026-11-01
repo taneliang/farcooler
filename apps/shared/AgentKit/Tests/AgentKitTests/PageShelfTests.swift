@@ -17,7 +17,7 @@ struct PageShelfTests {
             themes: [
                 PlanModelTests.theme("Visual", cards: [], ordinal: 0),
                 PlanModelTests.theme("Gone", cards: [], ordinal: 1, state: "dropped"),
-            ], lanes: [])
+            ], lines: [])
         let pages = [
             Self.page("train"), Self.page("risks", anchor: "theme-Visual"), Self.page("old", anchor: "theme-Gone"),
             Self.page("lost", anchor: "theme-Nowhere"),

@@ -39,11 +39,11 @@ enum PlanPhoneFixtures {
             agentsSupported: agents)
     }
 
-    /// The row for the lane called `name`, wherever Waiting, In Review or Building holds it.
-    static func row(_ sections: PlanSections, _ name: String) -> PlanSections.LaneRow? {
-        let all = sections.inReview + sections.building + sections.onLandedTrain + sections.waiting.next
+    /// The row for the ticket with `key`, wherever Waiting, In Review or Building holds it.
+    static func row(_ sections: PlanSections, _ key: String) -> PlanSections.TicketRow? {
+        let all = sections.inReview + sections.building + sections.onLandedLanding + sections.waiting.next
             + sections.waiting.notRanked + sections.waiting.onYou
-        return all.first { $0.lane.name == name }
+        return all.first { $0.line.key == key }
     }
 
     static let en = Locale(identifier: "en_US")

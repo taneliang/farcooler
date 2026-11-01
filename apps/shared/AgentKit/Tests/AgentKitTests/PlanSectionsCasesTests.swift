@@ -28,7 +28,6 @@ struct PlanSectionsCasesTests {
         var name: String
         var plan: PlanModel
         var needsYou: Int
-        var agentsSupported: Bool
         var statuses: [String: TaskStatus]
         var expect: [String]
 
@@ -36,13 +35,12 @@ struct PlanSectionsCasesTests {
             name = c["name"] as? String ?? ""
             plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: c["plan"] as Any))
             needsYou = c["needs_you"] as? Int ?? 0
-            agentsSupported = c["agents_supported"] as? Bool ?? true
             statuses = (c["statuses"] as? [String: String] ?? [:]).compactMapValues { TaskStatus(rawValue: $0) }
             expect = c["expect"] as? [String] ?? []
         }
 
         var sections: PlanSections {
-            PlanSections(plan: plan, needsYou: needsYou, statuses: statuses, agentsSupported: agentsSupported)
+            PlanSections(plan: plan, needsYou: needsYou, statuses: statuses)
         }
     }
 
@@ -50,37 +48,37 @@ struct PlanSectionsCasesTests {
     static func outline(_ c: Case) -> [String] {
         let s = c.sections
         var out = ["shown: " + s.shown.map { "\($0)" }.joined(separator: " ")]
-        func lane(_ label: String, _ row: PlanSections.LaneRow) {
-            var line = "  \(label) \(row.lane.name) | \(PlanWords.status(row.lane))"
+        func ticket(_ label: String, _ row: PlanSections.TicketRow) {
+            var line = "  \(label) \(row.line.key) | \(PlanWords.status(row.line))"
             if let agent = row.agent { line += " | agent: \(agent.who)" }
             if row.waitsOnOwner { line += " | owner" }
-            if let train = row.landedTrain { line += " | names landed \(train)" }
+            if let landing = row.landedLanding { line += " | names landed \(landing)" }
             out.append(line)
         }
         if s.needsYou > 0 { out.append("needs-you \(s.needsYou)") }
         out.append("landing")
-        for card in s.trains {
-            out.append("  train \(card.train.label) | \(card.train.subtitle ?? "-") | \(card.phase.sentence)")
+        for card in s.landings {
+            out.append("  landing \(card.landing.label) | \(card.landing.subtitle ?? "-") | \(card.phase.sentence)")
             out.append("    ladder: \(PlanLadder.compact(card.phase)) | \(card.phase.explanation)")
-            for l in card.lanes {
-                out.append("    lane \(l.name) | \(l.note ?? "-")" + (l.waitsOnOwner ? " | owner" : ""))
+            for t in card.tickets {
+                out.append("    ticket \(t.key) | \(t.note ?? "-")" + (t.waitsOnOwner ? " | owner" : ""))
             }
         }
         if let empty = s.emptyWords(.landing) { out.append("  empty: \(empty)") }
         for (label, rows) in [("inreview", s.inReview), ("building", s.building)] {
             if rows.isEmpty && label != "building" { continue }
             out.append(label)
-            rows.forEach { lane("lane", $0) }
+            rows.forEach { ticket("ticket", $0) }
             if let empty = s.emptyWords(label == "building" ? .building : .inReview) { out.append("  empty: \(empty)") }
         }
         out.append("waiting")
-        s.waiting.next.forEach { lane("next", $0) }
-        s.waiting.notRanked.forEach { lane("notranked", $0) }
-        s.waiting.onYou.forEach { lane("onyou", $0) }
+        s.waiting.next.forEach { ticket("next", $0) }
+        s.waiting.notRanked.forEach { ticket("notranked", $0) }
+        s.waiting.onYou.forEach { ticket("onyou", $0) }
         if let empty = s.emptyWords(.waiting) { out.append("  empty: \(empty)") }
-        if s.shown.contains(.onLandedTrain) {
-            out.append("onlandedtrain (folded: \(PlanSections.Kind.onLandedTrain.startsFolded))")
-            s.onLandedTrain.forEach { lane("lane", $0) }
+        if s.shown.contains(.onLandedLanding) {
+            out.append("onlandedlanding (folded: \(PlanSections.Kind.onLandedLanding.startsFolded))")
+            s.onLandedLanding.forEach { ticket("ticket", $0) }
         }
         if s.shown.contains(.agents) {
             out.append("agents")
@@ -108,24 +106,24 @@ struct PlanSectionsCasesTests {
             for theme in ThemeTree(plan: c.plan, filter: filter, statuses: c.statuses).themes {
                 out.append("  theme \(theme.name) | \(theme.progress)")
                 for card in theme.cards {
-                    out.append("    card \(card.glyph) \(card.key)" + (card.lane.map { " | \($0)" } ?? ""))
+                    out.append("    card \(card.glyph) \(card.key)" + (card.stage.map { " | \($0)" } ?? ""))
                 }
             }
         }
-        out.append("lanetree")
-        for g in LaneTree(plan: c.plan, sections: s, locale: en).groups {
+        out.append("tickettree")
+        for g in TicketTree(plan: c.plan, sections: s, locale: en).groups {
             out.append("  group \(g.title) | \(g.detail ?? "-") | \(g.folded ? "folded" : "open")")
-            for t in g.trains {
-                out.append("    train \(t.label) | \(t.subtitle ?? "-") | \(t.phase)")
-                for l in t.lanes {
-                    out.append("      lane \(l.name) | \(l.state.isEmpty ? "-" : l.state) | \(l.cards.map(\.key).joined(separator: ","))")
-                    for a in l.agents { out.append("        agent \(a.who) | \(a.working ? "working" : "done") | \(a.tokens ?? "-")") }
+            func ticketLines(_ tickets: [TicketTree.TicketNode], indent: String) {
+                for t in tickets {
+                    out.append("\(indent)ticket \(t.key) | \(t.state.isEmpty ? "-" : t.state)")
+                    for a in t.agents { out.append("\(indent)  agent \(a.who) | \(a.working ? "working" : "done") | \(a.tokens ?? "-")") }
                 }
             }
-            for l in g.lanes {
-                out.append("    lane \(l.name) | \(l.state) | \(l.cards.map(\.key).joined(separator: ","))")
-                for a in l.agents { out.append("      agent \(a.who) | \(a.working ? "working" : "done") | \(a.tokens ?? "-")") }
+            for l in g.landings {
+                out.append("    landing \(l.label) | \(l.subtitle ?? "-") | \(l.phase)")
+                ticketLines(l.tickets, indent: "      ")
             }
+            ticketLines(g.tickets, indent: "    ")
         }
         // Lowercased, and without trailing spaces, which a row with an empty last column leaves.
         return out.map { line in

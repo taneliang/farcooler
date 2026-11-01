@@ -9,13 +9,13 @@ import Testing
 /// dates are the runner's own clock in the fixture, so nothing here reads
 /// "today" (it holds with `TZ=UTC` and without).
 struct PlanCostTests {
-    @Test("plan --json carries a theme's budget and trend, a lane's budget, the week and the comparison")
+    @Test("plan --json carries a theme's budget and trend, a ticket's budget, the week and the comparison")
     func decodesTheFixture() throws {
         let plan = try PlanModelTests.fixture()
         #expect(plan.themes[0].budgetTokens == 250_000)
         #expect(plan.themes[0].trendTokens == [0, 0, 0, 40_000, 120_000, 0, 160_000])
-        #expect(plan.lanes[1].budgetTokens == 500_000)
-        #expect(plan.lanes[0].budgetTokens == nil)
+        #expect(plan.lines[1].budgetTokens == 500_000)
+        #expect(plan.lines[0].budgetTokens == nil)
         let cost = try #require(plan.cost)
         #expect(cost.weekTokens == 34_200_000 && cost.compareHeldBack == 2)
         #expect(cost.compare.map(\.cardShareMilli) == [5000, 3400])
@@ -27,10 +27,10 @@ struct PlanCostTests {
     func anOlderAnswerReads() throws {
         let plan = try PlanModelTests.plan(
             themes: [PlanModelTests.theme("Visual", cards: ["t1"], ordinal: 1)],
-            lanes: [PlanModelTests.lane("a", "building", cards: ["t1"])])
+            lines: [PlanModelTests.line("t1", "building")])
         #expect(plan.cost == nil && plan.themes[0].budgetTokens == nil && plan.themes[0].trendTokens == nil)
         #expect(!PlanThemeSpend.hasSomething(plan.themes[0]))
-        #expect(PlanWords.overBudget(plan.lanes[0]) == nil && PlanWords.trend(plan.themes[0].trendTokens) == nil)
+        #expect(PlanWords.overBudget(plan.lines[0]) == nil && PlanWords.trend(plan.themes[0].trendTokens) == nil)
     }
 
     @Test("over budget is past it, and equal is within")
@@ -40,8 +40,8 @@ struct PlanCostTests {
         let over = try #require(PlanWords.overBudget(theme))
         #expect(over == .over(used: 320_000, budget: 250_000))
         #expect(PlanWords.budgetLine(over, locale: Locale(identifier: "en_US")) == "Over budget: 320K of 250K tokens")
-        #expect(PlanWords.overBudget(plan.lanes[1]) == nil, "470K of 500K is within")
-        let within = try #require(PlanWords.budget(plan.lanes[1].spend, against: plan.lanes[1].budgetTokens))
+        #expect(PlanWords.overBudget(plan.lines[1]) == nil, "470K of 500K is within")
+        let within = try #require(PlanWords.budget(plan.lines[1].spend, against: plan.lines[1].budgetTokens))
         #expect(PlanWords.budgetLine(within, locale: Locale(identifier: "en_US")) == "470K of 500K tokens budgeted")
         var spend = PlanSpend()
         spend.inputTokens = 500
@@ -51,14 +51,14 @@ struct PlanCostTests {
         #expect(PlanWords.budget(spend, against: nil) == nil, "no budget, nothing to flag")
     }
 
-    @Test("a lane over its budget is the warning its row draws in amber")
-    func aLaneWarning() throws {
-        var lane = try PlanModelTests.fixture().lanes[1]
-        #expect(PlanWords.overBudget(lane) == nil)
-        lane.budgetTokens = 100_000
-        #expect(PlanWords.overBudget(lane, locale: Locale(identifier: "en_US")) == "Over budget: 470K of 100K tokens")
+    @Test("a ticket over its budget is the warning its row draws in amber")
+    func aTicketWarning() throws {
+        var line = try PlanModelTests.fixture().lines[1]
+        #expect(PlanWords.overBudget(line) == nil)
+        line.budgetTokens = 100_000
+        #expect(PlanWords.overBudget(line, locale: Locale(identifier: "en_US")) == "Over budget: 470K of 100K tokens")
         #expect(
-            PlanWords.overBudgetSpoken(lane, locale: Locale(identifier: "en_US"))
+            PlanWords.overBudgetSpoken(line, locale: Locale(identifier: "en_US"))
                 == "Over budget. 470 thousand of 100 thousand tokens used.", "VoiceOver hears words, not a suffix letter")
     }
 

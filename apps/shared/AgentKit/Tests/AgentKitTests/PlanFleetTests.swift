@@ -13,23 +13,24 @@ struct PlanFleetTests {
     private static let en = Locale(identifier: "en_US")
 
     private static func agent(
-        _ id: String, role: String = "subagent", working: Bool, startedAgo: Int64, lastAgo: Int64, tokens: UInt64
-    ) throws -> PlanFleetAgent {
+        _ id: String, role: String = "builder", working: Bool, startedAgo: Int64, lastAgo: Int64, tokens: UInt64
+    ) throws -> PlanAgent {
         let json = """
-            {"id":"\(id)","role":"\(role)","harness":"claude","model":"sonnet","label":"","lane":null,"train":null,
-             "card":null,"terminal":null,"working":\(working),"started_at":\(now - startedAgo),"last_at":\(now - lastAgo),
+            {"id":"\(id)","short":"\(id.suffix(4))","role":"\(role)","harness":"claude","model":"sonnet","title":"",
+             "terminal":null,"subagent_id":"","parent_terminal":null,"stop_asked_at":null,"tickets":[],
+             "doing_now":"","working":\(working),"started_at":\(now - startedAgo),"last_at":\(now - lastAgo),
              "spend":{"input_tokens":\(tokens),"cost_micros":null}}
             """
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(PlanFleetAgent.self, from: Data(json.utf8))
+        return try decoder.decode(PlanAgent.self, from: Data(json.utf8))
     }
 
     @Test("a subagent resumed for another round reads Working with how long it has run, an idle pane reads Idle")
     func states() throws {
         let hour: Int64 = 3_600_000
         let resumed = try Self.agent("agent:a", working: true, startedAgo: 3 * hour, lastAgo: 60_000, tokens: 10)
-        let idle = try Self.agent("pane:p", role: "agent", working: false, startedAgo: 5 * hour, lastAgo: 3 * hour, tokens: 10)
+        let idle = try Self.agent("pane:p", role: "reviewer", working: false, startedAgo: 5 * hour, lastAgo: 3 * hour, tokens: 10)
         #expect(resumed.state(now: Self.now) == "Working \u{00B7} 3 h")
         #expect(idle.state(now: Self.now) == "Idle \u{00B7} active 3 h ago")
         #expect(!idle.state(now: Self.now).contains("Done"))
@@ -39,7 +40,7 @@ struct PlanFleetTests {
 
     @Test("the list is exactly the agents the runner sent, working ones first however little they spent")
     func listsWhatExists() throws {
-        let idle = try Self.agent("pane:big", role: "agent", working: false, startedAgo: 9_000_000, lastAgo: 7_000_000, tokens: 5_000_000)
+        let idle = try Self.agent("pane:big", role: "reviewer", working: false, startedAgo: 9_000_000, lastAgo: 7_000_000, tokens: 5_000_000)
         let small = try Self.agent("agent:small", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 1_000)
         let fleet = PlanFleet([idle, small])
         #expect(fleet.agents.map(\.id) == ["agent:small", "pane:big"])
@@ -77,7 +78,7 @@ struct PlanFleetTests {
             Self.agent("pane:orch", role: "orchestrator", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
             Self.agent("agent:s1", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
             Self.agent("agent:s2", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
-            Self.agent("pane:builder", role: "build", working: false, startedAgo: 600_000, lastAgo: 100_000, tokens: 10),
+            Self.agent("pane:builder", role: "builder", working: false, startedAgo: 600_000, lastAgo: 100_000, tokens: 10),
             Self.agent("agent:s3", working: false, startedAgo: 600_000, lastAgo: 100_000, tokens: 10),
         ])
         #expect(listed.includesOrchestrator)
@@ -96,7 +97,7 @@ struct PlanFleetTests {
     @Test("agents_spend decodes, and a runner without it leaves nil")
     func decodesTheTotal() throws {
         let base = """
-            {"now_ms":1,"themes":[],"lanes":[],"order":[],"cards":[]
+            {"now_ms":1,"themes":[],"lines":[],"cards":[]
             """
         let with = base + #","agents_spend":{"input_tokens":7,"cost_micros":9}}"#
         #expect(try PlanModel.decode(Data(with.utf8)).agentsSpend?.totalTokens == 7)

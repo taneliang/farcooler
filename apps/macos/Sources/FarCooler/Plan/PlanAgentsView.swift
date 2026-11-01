@@ -98,7 +98,7 @@ struct PlanAgentRow: View {
             .frame(width: width, alignment: .trailing)
     }
 
-    /// "“Design ov-503” · On no ticket · Working · 22 min": what it was told, what
+    /// "“Design ov-503” · Not on a ticket · Working · 22 min": what it was told, what
     /// it works for, and its state.
     static func second(_ agent: PlanAgent, now: Int64) -> String { agent.second(now: now) }
 

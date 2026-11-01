@@ -21,14 +21,14 @@ struct PageLayoutTests {
     @Test("a row reads with its column titles, live values included, empty cells left out")
     func spokenRow() throws {
         let world = try PageLiveTests.world()
-        let columns = ["Lane", "Cards", "Gate", "State"].map { PageColumn(title: $0, align: .start, grow: false) }
+        let columns = ["Ticket", "Cards", "Gate", "State"].map { PageColumn(title: $0, align: .start, grow: false) }
         let row = [
             PageCell(ref: PageRef(.lane("ov-274-phones"))), PageCell(ref: PageRef(.task("ov-274"))), PageCell(text: ""),
             PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state),
         ]
         #expect(
             PageLayout.spokenRow(columns: columns, cells: row, world: world)
-                == "Lane, ov-274-phones. Cards, ov-274. State, In Review · in integ-10.")
+                == "Ticket, ov-274. Cards, ov-274. State, In Review · in Landing 10.")
     }
 
     @Test("a text block draws paragraphs and lists two deep; headings, fences and quotes are plain words")

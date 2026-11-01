@@ -14,12 +14,15 @@ struct PageLiveTests {
     }
 
     static func world(plan: Bool = true) throws -> PageWorld {
-        var fixing = PlanModelTests.lane("ov-181-review", "fixing", cards: ["t181"], fixRounds: 1)
+        var fixing = PlanModelTests.line("t181", "building", fixRounds: 1, fixing: true)
+        fixing["branch"] = "ov-181-review"
         fixing["spend"] = ["input_tokens": 300_000, "output_tokens": 170_000, "runs": 2, "unmeasured_agents": 0]
+        var reviewing = PlanModelTests.line("t274", "reviewing", landing: 10)
+        reviewing["branch"] = "ov-274-phones"
         var theme = PlanModelTests.theme("Visual language", cards: ["t1"], ordinal: 0)
         theme["counts"] = ["backlog": 2, "todo": 0, "needs_decision": 0, "in_progress": 0, "in_review": 0, "done": 3, "cancelled": 0]
         let model = try PlanModelTests.plan(
-            themes: [theme], lanes: [PlanModelTests.lane("ov-274-phones", "review", cards: ["t274"], train: "integ-10"), fixing])
+            themes: [theme], lines: [reviewing, fixing])
         return PageWorld(
             tasks: [row("ov-274", .needsDecision, title: "Plan on phones"), row("ov-222", .inProgress), row("ov-113", .inReview)],
             plan: plan ? model : nil,
@@ -45,12 +48,14 @@ struct PageLiveTests {
         #expect(answered.status == "Answered" && answered.statusTone == .neutral && answered.destination == .task("id-ov-274"))
     }
 
-    @Test("a lane draws its current state words, a theme its progress; a label renames either")
-    func lanesAndThemesAreLive() throws {
+    @Test("a ticket draws its current stage words, a theme its progress; a label renames either; the page format's lane names a ticket by branch")
+    func ticketsAndThemesAreLive() throws {
         let world = try Self.world()
-        let lane = world.resolve(PageRef(.lane("ov-181-review")))
-        #expect(lane.name == "ov-181-review" && lane.status == "Fixing · round 1" && lane.destination == .lane("lane-ov-181-review"))
-        #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state)) == "In Review · in integ-10")
+        let ticket = world.resolve(PageRef(.lane("ov-181-review")))
+        #expect(ticket.name == "ov-181" && ticket.status == "Fixing · round 1" && ticket.destination == .ticket("t181"))
+        #expect(world.resolve(PageRef(.lane("OV-181"))).destination == .ticket("t181"), "or by key, in any case")
+        #expect(world.resolve(PageRef(.lane("ov-181-review"), label: "Relay")).name == "Relay")
+        #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state)) == "In Review · in Landing 10")
         #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-181-review")), show: .spend)) == "470K")
         let theme = world.resolve(PageRef(.theme("Visual language"), label: "Theme"))
         #expect(theme.name == "Theme" && theme.status == "3 of 5 done" && theme.destination == .theme("theme-Visual language"))
@@ -82,11 +87,11 @@ struct PageLiveTests {
             let r = world.resolve(ref)
             #expect(r.name == name && r.destination == nil && r.status == nil, "\(ref)")
         }
-        // A cell showing a gone lane's state draws its name instead.
+        // A cell showing a gone ticket's stage draws its name instead.
         #expect(world.cellText(PageCell(ref: PageRef(.lane("dropped-lane")), show: .state)) == "dropped-lane")
     }
 
-    @Test("without the plan layer, lane and theme references are plain text; cards still resolve")
+    @Test("without the plan layer, ticket and theme references are plain text; cards still resolve")
     func withoutThePlanLayer() throws {
         let world = try Self.world(plan: false)
         #expect(world.resolve(PageRef(.lane("ov-181-review"))).destination == nil)
@@ -145,9 +150,9 @@ struct PageLiveTests {
     func rowActions() throws {
         let world = try Self.world()
         let row = [
-            PageCell(ref: PageRef(.lane("ov-274-phones"))), PageCell(ref: PageRef(.task("ov-274"))), PageCell(text: "gate"),
+            PageCell(ref: PageRef(.lane("ov-274-phones"))), PageCell(ref: PageRef(.task("ov-113"))), PageCell(text: "gate"),
             PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state), PageCell(ref: PageRef(.lane("gone"))),
         ]
-        #expect(world.actions(row).map(\.name) == ["Open ov-274-phones", "Open ov-274"])
+        #expect(world.actions(row).map(\.name) == ["Open ov-274", "Open ov-113"])
     }
 }

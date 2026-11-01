@@ -18,7 +18,7 @@ struct PlanReadingTests {
         let state = await PlanReadState.read(runnerCan: true) { data }
         let plan = try #require(state.plan)
         #expect(plan.themes.map(\.name) == ["Visual language"])
-        #expect(plan.nextUp.map(\.name) == ["mac-fu3"])
+        #expect(plan.nextUp.map(\.key) == ["ov-2"])
     }
 
     @Test("A runner that lacks board_plan needs an update, and is never asked")
@@ -61,17 +61,17 @@ struct PlanReadingTests {
     @Test("A malformed plan names the field that failed, never what it held (ov-631)")
     func malformedNamesTheField() async throws {
         var root = try #require(JSONSerialization.jsonObject(with: Self.fixtureData()) as? [String: Any])
-        var lanes = try #require(root["lanes"] as? [[String: Any]])
-        lanes[0]["name"] = 12345
-        lanes[0]["reason"] = ["secret-value-do-not-log"]
-        root["lanes"] = lanes
+        var lines = try #require(root["lines"] as? [[String: Any]])
+        lines[0]["key"] = 12345
+        lines[0]["reason"] = ["secret-value-do-not-log"]
+        root["lines"] = lines
         let data = try JSONSerialization.data(withJSONObject: root)
         let error = try #require({ () -> Error? in
             do { _ = try PlanModel.decode(data) } catch { return error }
             return nil
         }())
         let path = PlanDecodeLog.fieldPath(error)
-        #expect(path.hasPrefix("lanes[0]."), "got \(path)")
+        #expect(path.hasPrefix("lines[0]."), "got \(path)")
         #expect(!path.contains("secret"))
         #expect(!path.contains("12345"))
         let state = await PlanReadState.read(runnerCan: true) { data }
@@ -161,7 +161,7 @@ struct PlanNewsTests {
         #expect(PlanNews(notice: ["event": "plan", "workspace": ""]) == nil)
     }
 
-    @Test("The seeded board the phone captures read is a plan, with a record for every theme and lane")
+    @Test("The seeded board the phone captures read is a plan, with a record for every theme, and every record decodes")
     func theSeededBoardDecodes() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<6 { root.deleteLastPathComponent() }
@@ -170,9 +170,11 @@ struct PlanNewsTests {
         let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(object["plan"])))
         let records = try #require(object["records"] as? [String: Any])
         #expect(plan.shownThemes.count == 5)
-        #expect(plan.nextUp.count == 4)
-        for id in plan.themes.map(\.id) + plan.lanes.map(\.id) {
-            let record = try #require(records[id], "no record for \(id)")
+        #expect(plan.nextUp.count == 5, "one ticket for each waiting card the plan ranks")
+        for id in plan.themes.map(\.id) {
+            #expect(records[id] != nil, "no record for \(id)")
+        }
+        for record in records.values {
             _ = try PlanRecord.decode(JSONSerialization.data(withJSONObject: record))
         }
     }

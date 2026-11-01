@@ -59,7 +59,7 @@ public struct ThemeTree: Equatable, Sendable {
                 let line = plan.liveLine(ofTask: ref.task)
                 return CardNode(
                     task: ref.task, key: ref.key, title: known?.title ?? "", status: status,
-                    stage: line.map { PlanWords.stage($0.stage) }, ticketID: line?.task)
+                    stage: line.map { $0.isFixing ? "Fixing" : PlanWords.stage($0.stage) }, ticketID: line?.task)
             }
             if cards.isEmpty {
                 guard theme.cards.isEmpty, filter != .inReview, theme.state == "active" else { return nil }

@@ -62,12 +62,12 @@ struct MemberOwnLoginsTests {
         #expect(shared.sharedClaudeAccount == "owner@example.com")
         #expect(
             ClaudeSignIn.notSignedInBody(sharedAccount: shared.sharedClaudeAccount)
-                == "Until you sign in, your rep and the lanes you start use this runner’s own Claude account, "
+                == "Until you sign in, your rep and the agents you start use this runner’s own Claude account, "
                 + "owner@example.com. Sign in to use your own account and its connectors.")
         #expect(ClaudeSignIn.notSignedInBody(sharedAccount: "").contains("use this runner’s own Claude account. Sign in"))
         #expect(
             ClaudeSignIn.signOutMessage(shared: true)
-                == "Your rep and lanes there use this runner’s own Claude account from the next time each starts.")
+                == "Your rep and agents there use this runner’s own Claude account from the next time each starts.")
         let separate = try #require(
             RunnerPeople(json: Self.listed(#"{"claude":true,"codex":false,"cursor":false,"may_change":false}"#, you: "bob")))
         #expect(separate.sharedClaudeAccount == nil)

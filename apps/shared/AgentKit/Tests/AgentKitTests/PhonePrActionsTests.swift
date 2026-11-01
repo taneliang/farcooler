@@ -3,7 +3,7 @@ import Testing
 
 @testable import AgentKit
 
-/// A phone marks a lane's pull request ready and replies to a review thread
+/// A phone marks a ticket's pull request ready and replies to a review thread
 /// (ov-317). The plan is `test/fixtures/plan-phones-ov317.json`, which the
 /// phones' UI test shares; the runner's answers are `test/fixtures/pr-actions/`,
 /// written by `the_answers_are_the_bytes_the_phones_read` in `crates/client`
@@ -21,8 +21,8 @@ struct PhonePrActionsTests {
         return try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(object["plan"])))
     }
 
-    static func lane(_ plan: PlanModel, _ name: String) throws -> PlanLane {
-        try #require(plan.lanes.first { $0.name == name }, "\(name)")
+    static func line(_ plan: PlanModel, _ key: String) throws -> PlanTicketLine {
+        try #require(plan.line(key: key), "\(key)")
     }
 
     static func bytes(_ name: String) throws -> Data {
@@ -42,8 +42,8 @@ struct PhonePrActionsTests {
     @Test("A row says the problem alone when a person has to act, else one phrase")
     func rowWords() throws {
         let plan = try Self.plan()
-        let words = try ["lane-1", "lane-2", "lane-3", "lane-5", "lane-6", "lane-8", "lane-14", "lane-silent"].map {
-            try Self.lane(plan, $0).stage?.rowWords
+        let words = try ["ov-1", "ov-2", "ov-3", "ov-5", "ov-6", "ov-8", "ov-14", "00001100"].map {
+            try Self.line(plan, $0).prStage?.rowWords
         }
         #expect(
             words == [
@@ -51,28 +51,29 @@ struct PhonePrActionsTests {
                 "Changes Requested", "Checks Failing", "PR State Unknown", nil,
             ])
         // The gray line keeps what the stage leaves to the state.
-        #expect(try PlanWords.status(Self.lane(plan, "lane-8"), stage: false) == "Approved")
+        #expect(try PlanWords.status(Self.line(plan, "ov-8"), stage: false) == "Approved")
     }
 
     @Test("Mark Ready is offered for a draft the runner named, and for nothing else")
     func onlyADraftCanBeMarkedReady() throws {
         let plan = try Self.plan()
-        let offered = try plan.lanes.filter { $0.stage?.canMarkReady == true }.map(\.name)
-        #expect(offered == ["lane-2", "lane-3"], "agent review and fixing, both with a pull request")
-        #expect(try Self.lane(plan, "lane-1").stage?.canMarkReady == false, "building has no pull request")
-        #expect(try Self.lane(plan, "lane-14").stage?.canMarkReady == false, "a pull request that couldn't be read")
-        var draft = try #require(Self.lane(plan, "lane-2").stage)
+        let offered = try plan.lines.filter { $0.prStage?.canMarkReady == true }.map(\.key)
+        #expect(offered == ["ov-2", "ov-3"], "agent review and fixing, both with a pull request")
+        #expect(try Self.line(plan, "ov-1").prStage?.canMarkReady == false, "building has no pull request")
+        #expect(try Self.line(plan, "ov-14").prStage?.canMarkReady == false, "a pull request that couldn't be read")
+        var draft = try #require(Self.line(plan, "ov-2").prStage)
         draft.prNumber = 0
         #expect(!draft.canMarkReady, "a draft with no number to name has nothing to ready")
         #expect(PlanPrStageKind.allCases.filter { PlanPrStage(kind: $0, prNumber: 7).isDraft } == [.agentReview, .fixing])
     }
 
-    @Test("Mark Ready names the number the row showed, and the lane; a reply names the card")
+    @Test("Mark Ready names the number the row showed, and the ticket; a reply names the card")
     func requests() throws {
-        let draft = try #require(try Self.lane(try Self.plan(), "lane-2").stage)
-        let ready = PhonePrActions.readyRequest(lane: "lane-id", number: draft.prNumber)
-        #expect(ready["lane"] as? String == "lane-id" && ready["pr_number"] as? Int == 41)
-        #expect(ready.keys.sorted() == ["lane", "pr_number"], "never a URL or a repository")
+        let ticket = try Self.line(try Self.plan(), "ov-2")
+        let draft = try #require(ticket.prStage)
+        let ready = PhonePrActions.readyRequest(task: ticket.task, number: draft.prNumber)
+        #expect(ready["task"] as? String == "00000000-0000-0000-0000-000000001002" && ready["pr_number"] as? Int == 41)
+        #expect(ready.keys.sorted() == ["pr_number", "task"], "never a URL or a repository")
         let reply = PhonePrActions.replyRequest(task: "task-id", body: "Done.", send: false)
         #expect(reply["task"] as? String == "task-id" && reply["send"] as? Bool == false)
         #expect(reply.keys.sorted() == ["body", "send", "task"])
@@ -122,7 +123,7 @@ struct PhonePrActionsTests {
 
     @Test("A refusal says what happened in words, never the runner's")
     func refusals() {
-        #expect(PhonePrActions.refusal(word: "invalid-argument", what: "lane_pr", action: "mark it ready").contains("no draft pull request"))
+        #expect(PhonePrActions.refusal(word: "invalid-argument", what: "ticket_pr", action: "mark it ready").contains("no draft pull request"))
         #expect(PhonePrActions.refusal(word: "invalid-argument", what: "thread_link", action: "reply").contains("Open it there"))
         #expect(PhonePrActions.refusal(word: "invalid-argument", what: "reply_body", action: "reply").contains("2000"))
         #expect(PhonePrActions.refusal(word: "invalid-argument", what: "already_answered", action: "reply") == "This thread was already answered.")

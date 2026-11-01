@@ -165,7 +165,7 @@ struct PlanSectionViewTests {
         let subagent = try #require(fleet.agents.first { $0.title == "Design ov-503" })
         #expect(subagent.working, "a subagent resumed for another round reads Working")
         #expect(drawn["plan-agent-\(subagent.id)"] != nil && drawn["plan-agent-pane:idle"] != nil)
-        #expect(PlanAgentRow.second(subagent, now: PlanScenario.now).hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} On no ticket \u{00B7} Working"))
+        #expect(PlanAgentRow.second(subagent, now: PlanScenario.now).hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} Not on a ticket \u{00B7} Working"))
     }
 
     @Test("Themes: a tile each with its progress, cards and ask, finished ones in one tile, over-budget in amber")

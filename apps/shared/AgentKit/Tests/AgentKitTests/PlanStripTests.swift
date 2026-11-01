@@ -12,52 +12,50 @@ struct PlanStripTests {
     static func plan() throws -> PlanModel {
         try P.plan(
             themes: [],
-            lanes: [
-                P.lane("mac-vis", "building", cards: ["t1"]),
-                P.lane("phones-b", "review", cards: ["t2"]),
-                P.lane("mac-rel", "fixing", cards: ["t3"]),
-                P.lane("plan-phones", "queued", cards: ["t4"], rank: 1),
-                P.lane("vis-lint", "queued", cards: ["t5"], rank: 2),
-                P.lane("land-129", "landed", cards: ["t6"]),
-            ],
-            order: ["plan-phones", "vis-lint"])
+            lines: [
+                P.line("t1", "building", title: "Visual polish"),
+                P.line("t2", "reviewing", title: "Phone strip"),
+                P.line("t3", "building", fixing: true, title: "Release notes"),
+                P.line("t4", "waiting", rank: 1, title: "Plan phones"),
+                P.line("t5", "waiting", rank: 2, title: "Lint rules"),
+                P.line("t6", "landed", title: "Landing report"),
+            ])
     }
 
-    @Test("it says what needs you, two lanes in Now, how many more, and the next lane")
+    @Test("it says what needs you, two tickets in Now, how many more, and the next ticket")
     func wordsInOrder() throws {
         let strip = PlanStrip(plan: try Self.plan(), needsYou: 2, orchestrator: .working)
-        #expect(strip.parts == ["2 need you", "mac-vis Building", "phones-b In Review", "+1", "next: plan-phones"])
-        #expect(strip.text == "2 need you · mac-vis Building · phones-b In Review · +1 · next: plan-phones")
+        #expect(strip.parts == ["2 need you", "Visual polish Building", "Phone strip In Review", "+1", "next: Plan phones"])
+        #expect(strip.text == "2 need you · Visual polish Building · Phone strip In Review · +1 · next: Plan phones")
     }
 
     @Test("one ask is singular, and none says nothing rather than zero")
     func needsYouWords() throws {
         let plan = try Self.plan()
         #expect(PlanStrip(plan: plan, needsYou: 1, orchestrator: .idle).parts.first == "1 needs you")
-        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts.first == "mac-vis Building")
+        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts.first == "Visual polish Building")
     }
 
-    @Test("with no plan, no asks and no lanes there's nothing to draw")
+    @Test("with no plan, no asks and no tickets there's nothing to draw")
     func emptyIsNotDrawn() throws {
         let strip = PlanStrip(plan: .empty, needsYou: 0, orchestrator: .working)
         #expect(strip.isEmpty)
         #expect(!PlanStrip(plan: .empty, needsYou: 1, orchestrator: .working).isEmpty)
     }
 
-    @Test("a queued-only plan says only what's next")
-    func queuedOnly() throws {
-        let plan = try P.plan(themes: [], lanes: [P.lane("a", "queued", cards: ["t1"], rank: 1)], order: ["a"])
-        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts == ["next: a"])
+    @Test("a waiting-only plan says only what's next")
+    func waitingOnly() throws {
+        let plan = try P.plan(themes: [], lines: [P.line("t1", "waiting", rank: 1, title: "Alpha")])
+        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts == ["next: Alpha"])
     }
 
-    @Test("a lane waiting on a decision is never next: not in the strip's next, and not in the band's")
+    @Test("a ticket waiting on a decision is never next: not in the strip's next, and not in the band's")
     func decisionIsNotNext() throws {
         let plan = try P.plan(
             themes: [],
-            lanes: [
-                P.lane("blocked", "queued", cards: ["t1"], rank: 1), P.lane("clear", "queued", cards: ["t2"], rank: 2),
-            ],
-            order: ["blocked", "clear"])
+            lines: [
+                P.line("t1", "waiting", rank: 1, title: "blocked"), P.line("t2", "waiting", rank: 2, title: "clear"),
+            ])
         let without = PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle)
         #expect(without.next == "blocked" && without.band?.next == "blocked, then clear", "blind to the board, as before")
         let strip = PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle, statuses: ["t1": .needsDecision])
@@ -67,11 +65,11 @@ struct PlanStripTests {
 
     @Test("the band's Next names titles only, once each, cut at a word")
     func nextNamesTitles() throws {
-        var first = PlanModelTests.lane("reps", "queued", cards: ["t1"], rank: 1)
+        var first = PlanModelTests.line("t1", "waiting", rank: 1)
         first["title"] = "Reps: each person's asks reach the orchestrator, then skill-init writes the manager skill"
-        var second = PlanModelTests.lane("skill-init", "queued", cards: ["t2"], rank: 2)
+        var second = PlanModelTests.line("t2", "waiting", rank: 2)
         second["title"] = "Onboarding: skill-init explains what the manager skill is for, in the owner's words"
-        let plan = try P.plan(themes: [], lanes: [first, second], order: ["reps", "skill-init"])
+        let plan = try P.plan(themes: [], lines: [first, second])
         let next = try #require(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).band?.next)
         #expect(next == "Reps: each person's asks reach the orchestrator, then skill-init\u{2026}, then Onboarding: skill-init explains what the manager skill is for, in the\u{2026}")
         #expect(!next.contains("\u{2014}") && next.components(separatedBy: "Reps").count == 2)
@@ -80,7 +78,7 @@ struct PlanStripTests {
     @Test("VoiceOver hears the orchestrator's state first, since the mark draws it, and each thing once")
     func accessibilityLabel() throws {
         let strip = PlanStrip(plan: try Self.plan(), needsYou: 2, orchestrator: .needsYou)
-        #expect(strip.accessibilityLabel.hasPrefix("Orchestrator, waiting on you. 2 need you, mac-vis Building"))
+        #expect(strip.accessibilityLabel.hasPrefix("Orchestrator, waiting on you. 2 need you, Visual polish Building"))
         #expect(PlanStrip(plan: .empty, needsYou: 1, orchestrator: .none).accessibilityLabel == "No orchestrator. 1 needs you.")
         #expect(PlanStrip(plan: .empty, needsYou: 0, orchestrator: .working).accessibilityLabel == "Orchestrator, working.")
     }

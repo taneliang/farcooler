@@ -675,15 +675,15 @@ struct OneTreeBuilder {
         return finish(node)
     }
 
-    /// A ticket's row: its branch when it has one (ov-466), else its key, and
-    /// its stage beside it.
+    /// A ticket's row: its key, and its stage beside it. (The branch is the
+    /// ticket's own and is not said: the card above it has the words.)
     func ticketNode(_ line: PlanTicketLine, for task: OneTreeTask, under parent: String) -> OneTreeNode {
         let id = "\(parent)/ticket:\(line.task)"
         var children: [OneTreeNode] = []
         if let worktree = lineWorktrees[line.task] { children += terminalNodes(worktree, under: id) }
         children += subagents(line: line, task: task, under: id)
         var node = OneTreeNode(
-            id: id, kind: .ticket, title: line.branch.isEmpty ? line.key : line.branch, slug: line.key,
+            id: id, kind: .ticket, title: line.key, slug: line.key,
             detail: line.isFixing ? "Fixing" : PlanWords.stage(line.stage), glyph: OneTreeGlyph.ticket(line.stage),
             target: .ticket(line.task), children: children, quiet: !line.stage.isLive)
         node.ticketStage = line.stage

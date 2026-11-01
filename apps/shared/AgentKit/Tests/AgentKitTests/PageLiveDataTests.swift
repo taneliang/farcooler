@@ -4,18 +4,19 @@ import Testing
 @testable import AgentKit
 
 /// Live data on a page (ov-306): CI by main, SHA or run, the board's card
-/// counts, and a lane's or a theme's spend, drawn from the plan the app holds,
+/// counts, and a ticket's or a theme's spend, drawn from the plan the app holds,
 /// so a figure the board or the runner knows is never typed in. Read from
 /// `test/fixtures/pages/normalized/live.json`, what the runner stores.
 struct PageLiveDataTests {
     static func world(plan: Bool = true) throws -> PageWorld {
-        var mac = PlanModelTests.lane("mac-ux", "review", cards: ["t1"], train: "integ-13b")
+        var mac = PlanModelTests.line("t1", "reviewing", landing: 13)
+        mac["branch"] = "mac-ux"
         mac["spend"] = ["input_tokens": 400_000, "output_tokens": 70_000, "runs": 2]
         var theme = PlanModelTests.theme("Visual language", cards: ["t1"], ordinal: 0)
         theme["counts"] = ["backlog": 7, "todo": 0, "needs_decision": 0, "in_progress": 0, "in_review": 0, "done": 3, "cancelled": 0]
         theme["spend"] = ["input_tokens": 1_200_000, "runs": 5]
         let object: [String: Any] = [
-            "now_ms": PlanModelTests.now, "themes": [theme], "lanes": [mac], "order": [], "cards": [],
+            "now_ms": PlanModelTests.now, "themes": [theme], "lines": [mac], "cards": [],
             "ci": [
                 [
                     "subject": "main", "sha": "898ae57d485040fbd9872379c3c12ca95202698a", "status": "running",
@@ -55,7 +56,7 @@ struct PageLiveDataTests {
         #expect(items[4].ref == PageRef(.theme("Visual language")) && items[4].show == .spend)
     }
 
-    @Test("figures draw live: CI's status with its jobs, failed in amber; a count; a theme's and a lane's spend")
+    @Test("figures draw live: CI's status with its jobs, failed in amber; a count; a theme's and a ticket's spend")
     func figuresAreLive() throws {
         let world = try Self.world()
         guard case .stats(let items) = try Self.live().blocks[1] else { return }

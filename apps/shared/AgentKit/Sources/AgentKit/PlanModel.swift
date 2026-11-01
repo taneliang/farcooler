@@ -489,7 +489,7 @@ public enum PlanWords {
     public static let nothingPlannedRunning =
         "Tell the orchestrator what you want built, and it writes the plan here. "
         + "Themes say why a group of cards exists, and agents work the tickets that make them up."
-    /// Under "Nothing is queued.": what moves work in, with an orchestrator, and
+    /// Under "Nothing is waiting.": what moves work in, with an orchestrator, and
     /// without one.
     public static let nothingQueuedNext = "Tell the orchestrator which theme to move forward."
     public static let nothingQueuedStart = "Start the orchestrator, then tell it which theme to move forward."

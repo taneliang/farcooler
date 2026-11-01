@@ -109,8 +109,8 @@ struct ClaudeSignInTests {
         #expect(
             ClaudeSignIn.trustCopy(runner: "Studio")
                 == "Your Claude login is kept on Studio. Its owner, and anyone with Control of it, could use it. "
-                + "Far Cooler uses it only for your rep and the lanes you start. "
-                + "Lanes the orchestrator starts for your asks use the workspace lead’s login.")
+                + "Far Cooler uses it only for your rep and the agents you start. "
+                + "Agents the orchestrator starts for your asks use the workspace lead’s login.")
         #expect(ClaudeSignIn.ownerTrustLine == "Each member’s agents use that member’s own Claude login.")
     }
 
@@ -120,10 +120,10 @@ struct ClaudeSignInTests {
         #expect(ClaudeSignIn.signedInAs("alex@example.com") == "Signed in as alex@example.com.")
         #expect(ClaudeSignIn.starting(runner: "Studio") == "Getting a sign-in link from Studio…")
         #expect(ClaudeSignIn.signOutTitle(runner: "Studio") == "Sign out of Claude on Studio?")
-        #expect(ClaudeSignIn.signOutMessage == "Your rep and lanes there stop until you sign in again.")
+        #expect(ClaudeSignIn.signOutMessage == "Your rep and agents there stop until you sign in again.")
         #expect(
             ClaudeSignIn.notSignedInBody
-                == "Sign in so your rep and the lanes you start use your own Claude account and its connectors.")
+                == "Sign in so your rep and the agents you start use your own Claude account and its connectors.")
     }
 
     // MARK: - The wire

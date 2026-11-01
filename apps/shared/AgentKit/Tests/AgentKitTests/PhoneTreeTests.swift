@@ -61,7 +61,7 @@ struct PhoneTreeTests {
         })
     }
 
-    /// Two themes, a lane in a worktree with an agent, a shell and a changes
+    /// Two themes, two tickets in a worktree with an agent, a shell and a changes
     /// pane; another workspace's worktree; another workspace's worktree that
     /// holds one of these cards; the repository's checkout with a project
     /// shell, the orchestrator, a task's agent and a changes pane; and a
@@ -69,7 +69,10 @@ struct PhoneTreeTests {
     static func fixture() throws -> (plan: PlanModel, board: TaskBoardModel, worktrees: [Worktree]) {
         let plan = try P.plan(
             themes: [T.theme("Plan", cards: ["t1", "t2"], ordinal: 0, ask: "Which one?"), T.theme("Mac", cards: ["t3"], ordinal: 1)],
-            lanes: [T.lane("copy", "building", cards: ["t1", "t3"], path: ".claude/worktrees/copy")])
+            lines: [
+                T.line("t1", "building", branch: "copy", path: ".claude/worktrees/copy"),
+                T.line("t3", "building", branch: "copy", path: ".claude/worktrees/copy"),
+            ])
         let worktrees = try decode([
             worktree("copy", terminals: [
                 terminal("c1", preset: "claude", role: "agent", task: "t1", activity: "working"),
@@ -99,14 +102,14 @@ struct PhoneTreeTests {
 
     // MARK: The input
 
-    @Test("a lane's terminals are its worktree's panes, a changes pane left out")
-    func laneTerminals() throws {
+    @Test("a ticket's terminals are its worktree's panes, a changes pane left out")
+    func ticketTerminals() throws {
         let tree = try Self.tree()
-        let lane = try #require(tree.allNodes.first { $0.target == .lane("lane-copy") })
-        #expect(lane.children.map(\.target) == [
+        let ticket = try #require(tree.allNodes.first { $0.target == .ticket("t1") })
+        #expect(ticket.children.map(\.target) == [
             .terminal(worktree: "wt-copy", terminal: "c1"), .terminal(worktree: "wt-copy", terminal: "c2"),
         ])
-        #expect(lane.children.first?.detail == "Agent")
+        #expect(ticket.children.first?.detail == "Agent")
     }
 
     @Test("the workspace's worktrees, and another's only when it holds one of these cards")
@@ -196,7 +199,7 @@ struct PhoneTreeTests {
         let tree = try Self.tree()
         #expect(PhoneTree.ownRow(tree.tree[0]) == "Theme Page")
         #expect(PhoneTree.ownRow(try #require(tree.allNodes.first { $0.target == .task("t1") })) == "Task Details")
-        #expect(PhoneTree.ownRow(try #require(tree.allNodes.first { $0.target == .lane("lane-copy") })) == "Lane Page")
+        #expect(PhoneTree.ownRow(try #require(tree.allNodes.first { $0.target == .ticket("t1") })) == "Ticket Page")
         #expect(PhoneTree.ownRow(try #require(tree.below.first)) == "Open Worktree")
         #expect(PhoneTree.ownRow(try #require(tree.tree.last)) == nil)  // No Theme
     }
@@ -205,8 +208,8 @@ struct PhoneTreeTests {
     func routes() {
         let place = PhoneWorkspace(runner: "r1", workspace: Self.billing)
         #expect(PhoneTree.route(.theme("th"), in: place) == .plan(place, page: .theme("th")))
-        #expect(PhoneTree.route(.lane("l"), in: place) == .plan(place, page: .lane("l")))
-        #expect(PhoneTree.route(.page("train"), in: place) == .plan(place, page: .page("train")))
+        #expect(PhoneTree.route(.ticket("t"), in: place) == .plan(place, page: .ticket("t")))
+        #expect(PhoneTree.route(.page("landing"), in: place) == .plan(place, page: .page("landing")))
         #expect(PhoneTree.route(.task("t1"), in: place) == .task(place, task: "t1"))
         #expect(PhoneTree.route(.worktree("w"), in: place) == .worktree(runner: "r1", worktree: "w", landing: .resume))
         #expect(
@@ -220,8 +223,8 @@ struct PhoneTreeTests {
     @Test("a level is found by its node's id, and a gone node is nil")
     func findNode() throws {
         let tree = try Self.tree()
-        let lane = try #require(tree.allNodes.first { $0.target == .lane("lane-copy") })
-        #expect(PhoneTree.node(lane.id, in: tree) == lane)
+        let ticket = try #require(tree.allNodes.first { $0.target == .ticket("t1") })
+        #expect(PhoneTree.node(ticket.id, in: tree) == ticket)
         #expect(PhoneTree.node("theme:gone", in: tree) == nil)
     }
 

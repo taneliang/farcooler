@@ -19,7 +19,7 @@ struct OneTreePlacesTests {
     @Test("A page under Plan has its tooltip text; it says what a page is")
     func pageHelp() {
         #expect(OneTreeWords.pageHelp == "A page the orchestrator wrote to explain where things stand. It updates as the work does.")
-        let tree = OneTree.build(OneTreeInput(tasks: [], pages: [OneTreePage(slot: "train", title: "Train")]))
+        let tree = OneTree.build(OneTreeInput(tasks: [], pages: [OneTreePage(slot: "landing", title: "Landing")]))
         let page = tree.places[1].children.first
         #expect(page?.kind == .page)
     }
@@ -43,7 +43,7 @@ struct OneTreeFoldTests {
         #expect(!OneTreeExpansion(encoded: expansion.encoded).anyExpanded(in: tree.roots))
     }
 
-    @Test("Expand All opens the themes, cards and lanes to the terminals, and leaves done folds and Hidden shut")
+    @Test("Expand All opens the themes, cards and tickets to the terminals, and leaves done folds and Hidden shut")
     func expandAll() throws {
         let tree = try Self.tree()
         var expansion = OneTreeExpansion()
@@ -52,7 +52,7 @@ struct OneTreeFoldTests {
         let rows = OneTree.rows(tree.roots, expansion: expansion)
         for row in rows where row.node.hasChildren {
             switch row.node.kind {
-            case .theme, .task, .lane: #expect(row.expanded, "\(row.node.kind) \(row.node.id)")
+            case .theme, .task, .ticket: #expect(row.expanded, "\(row.node.kind) \(row.node.id)")
             case .doneFold: #expect(!row.expanded, "a done fold stays shut: \(row.node.id)")
             default: break
             }
