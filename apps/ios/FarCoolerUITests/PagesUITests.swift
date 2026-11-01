@@ -90,7 +90,7 @@ final class PagesUITests: XCTestCase {
         reach(app, spend)
         XCTAssertTrue(train.exists && spend.exists, "a page of its own isn't listed")
         XCTAssertTrue(
-            train.label.hasPrefix("Page, Train integ-10, In review · 3 of 4 lanes green, Updated"), "the row says: \(train.label)")
+            train.label.hasPrefix("Page, Landing 10, In review · 3 of 4 tickets green, Updated"), "the row says: \(train.label)")
         XCTAssertFalse(element(app, "plan-page-risks").exists, "a page anchored to a live theme is listed as well")
         keep(app, "pages-overview", expecting: .reads(train, "In review"))
     }
@@ -101,7 +101,7 @@ final class PagesUITests: XCTestCase {
     func testATrainPageDrawsItsBlocksLive() {
         let app = openPlan()
         openTrain(app)
-        XCTAssertEqual(app.navigationBars.firstMatch.identifier, "Train integ-10")
+        XCTAssertEqual(app.navigationBars.firstMatch.identifier, "Landing 10")
         XCTAssertTrue(app.staticTexts["Phones' Plan view and the LFS record, one build, one review."].exists)
         for step in ["Pick, Done", "Build, Done", "Review, Active", "Land, To Do"] {
             XCTAssertTrue(app.descendants(matching: .any)[step].exists, "no step \(step): \(app.debugDescription)")
@@ -116,8 +116,8 @@ final class PagesUITests: XCTestCase {
         XCTAssertTrue(ci.label.hasSuffix("Link to github.com"), "the link hides its domain: \(ci.label)")
         // A four-column table on a phone stacks: each row a ticket, each value
         // under its column's title, the ticket's state live. The page's `lane`
-        // reference names the ticket by its branch, and the row says its key.
-        let ticket = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274.'")).firstMatch
+        // reference names the ticket by its key, under the Ticket column.
+        let ticket = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Ticket, ov-274.'")).firstMatch
         reach(app, ticket, down: false)
         XCTAssertTrue(ticket.label.contains("State, In Review."), "the state isn't live: \(ticket.label)")
         keep(app, "pages-train", expecting: .reads(ticket, "In Review"))
@@ -213,7 +213,7 @@ final class PagesUITests: XCTestCase {
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("com.farcooler.harness.pages-news" as CFString),
             nil, nil, true)
-        let moved = NSPredicate(format: "label BEGINSWITH 'Page, Train integ-10 v2,'")
+        let moved = NSPredicate(format: "label BEGINSWITH 'Page, Landing 10 v2,'")
         expectation(for: moved, evaluatedWith: train)
         waitForExpectations(timeout: 15)
     }

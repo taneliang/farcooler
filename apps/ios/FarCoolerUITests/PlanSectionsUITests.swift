@@ -64,7 +64,7 @@ final class PlanSectionsUITests: XCTestCase {
         // One element, read as the sentence: Now, Next, then what needs the owner.
         XCTAssertTrue(band.label.contains("Landing 86 checking on CI"), band.label)
         XCTAssertTrue(band.label.contains(" building") && band.label.contains(" in review"), band.label)
-        XCTAssertTrue(band.label.contains("Next: Hero shot: a real window capture on the front page, then Onboarding"), band.label)
+        XCTAssertTrue(band.label.contains("Next: A real window capture on the front page, then Onboarding"), band.label)
         XCTAssertTrue(band.label.hasSuffix(" needs you."), "the band doesn't say what needs you: \(band.label)")
     }
 

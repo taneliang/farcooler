@@ -206,14 +206,15 @@ final class PhoneTreeUITests: XCTestCase {
         tap(app, "tree-row-ov-259", "the theme's level")
         XCTAssertTrue(app.buttons["tree-own"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.buttons["tree-own"].label, "Task Details")
-        // The ticket's row says its branch (ov-259 works on `phones-b`) and keeps
-        // the key for its identifier, which is how the row is found.
+        // The ticket's row says its key (ov-466, ov-872), not its branch
+        // (`phones-b`): the card above it has the words.
         let ticketRow = app.buttons["tree-row-ov-259"]
         XCTAssertTrue(ticketRow.waitForExistence(timeout: 10), "no ticket row")
-        XCTAssertTrue(ticketRow.label.contains("phones-b"), "the ticket's row doesn't say its branch: \(ticketRow.label)")
+        XCTAssertTrue(ticketRow.label.hasPrefix("ov-259"), "the ticket's row doesn't say its key: \(ticketRow.label)")
+        XCTAssertFalse(ticketRow.label.contains("phones-b"), "the ticket's row says its branch: \(ticketRow.label)")
         tap(app, "tree-row-ov-259", "the task's level")
-        XCTAssertTrue(app.navigationBars["phones-b"].waitForExistence(timeout: 10), "the ticket wasn't pushed, or is named by its key")
-        XCTAssertFalse(app.navigationBars["ov-259"].exists, "the ticket's level is headed by its key")
+        XCTAssertTrue(app.navigationBars["ov-259"].waitForExistence(timeout: 10), "the ticket wasn't pushed, or isn't headed by its key")
+        XCTAssertFalse(app.navigationBars["phones-b"].exists, "the ticket's level is headed by its branch")
         XCTAssertEqual(app.buttons["tree-own"].label, "Ticket Page")
         // Its lander runs inside the orchestrator: a row, and no button.
         let subagent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No terminal; runs inside the orchestrator")).firstMatch
