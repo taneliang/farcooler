@@ -246,17 +246,17 @@ macro_rules! actor_field {
             P::BoardThemeUpdate(p) => &$($m)* p.actor,
             P::BoardThemeCards(p) => &$($m)* p.actor,
             P::BoardThemeMove(p) => &$($m)* p.actor,
-            P::LaneCreate(p) => &$($m)* p.actor,
-            P::LaneUpdate(p) => &$($m)* p.actor,
-            P::LaneCards(p) => &$($m)* p.actor,
-            P::LaneAgentSet(p) => &$($m)* p.actor,
-            P::PlanSet(p) => &$($m)* p.actor,
+            P::LineSet(p) => &$($m)* p.actor,
+            P::LineOrder(p) => &$($m)* p.actor,
+            P::AgentRecord(p) => &$($m)* p.actor,
+            P::AgentWork(p) => &$($m)* p.actor,
+            P::AgentEnd(p) => &$($m)* p.actor,
             P::RulingAdd(p) => &$($m)* p.actor,
             P::RulingSet(p) => &$($m)* p.actor,
             P::RulingKeepAll(p) => &$($m)* p.actor,
             P::MessageSend(p) => &$($m)* p.actor,
-            P::TrainStart(p) => &$($m)* p.actor,
-            P::TrainSet(p) => &$($m)* p.actor,
+            P::LandingStart(p) => &$($m)* p.actor,
+            P::LandingSet(p) => &$($m)* p.actor,
             P::PageSet(p) => &$($m)* p.actor,
             P::PageRemove(p) => &$($m)* p.actor,
             _ => return None,
@@ -463,7 +463,7 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     if peer.client_id.is_some()
-        && (records_the_orchestrators(req) || moves_a_landing_lane(store, req)?)
+        && (records_the_orchestrators(req) || moves_a_landing_ticket(store, req)?)
         && person_of(store, peer)?.is_someone_else()
     {
         tracing::info!(method = %req.method, "refused: a member's device writing the orchestrator's record");
@@ -473,10 +473,10 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         refuse_rep_plan_reach(store, rep, req)?;
     }
     // A rep's member is refused that from their own device, so the rep is
-    // too: its `--state dropped` would take a landing lane off its train
+    // too: its `--stage dropped` would take a landing ticket off its landing
     // (rereview N1). `rep_plan_change` holds the rest of the record.
-    if caller_rep.is_some() && moves_a_landing_lane(store, req)? {
-        tracing::info!(method = %req.method, "refused: a rep moving a lane that reached landing");
+    if caller_rep.is_some() && moves_a_landing_ticket(store, req)? {
+        tracing::info!(method = %req.method, "refused: a rep moving a ticket that reached landing");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     if peer.client_id.is_some() && touches_the_owners_device(store, req)? && person_of(store, peer)?.is_someone_else() {
@@ -539,7 +539,8 @@ fn ruling_of(req: &Request) -> Option<Ruling> {
 }
 
 /// Whether `req` changes the plan layer (`Ruling::Plan`): the ranking, a
-/// theme, a lane, a ruling, a train or an orchestrator's page. Every
+/// theme, a ticket on the line, an agent, a ruling, a landing or an
+/// orchestrator's page. Every
 /// member's to change, under their own name, as the task layer is (the
 /// owner, 24 Oct, ov-736, reversing ov-637), and a rep's for its member
 /// (`stamp_rep`).
@@ -565,80 +566,74 @@ fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
 }
 
 /// Whether `req` writes integration or its record, not the team's plan for
-/// the work (ov-736, the owner's rulings on review M2 and fix round 2): a
-/// lane moved to landing or landed, which puts it on a train and reads as
-/// finished; a lane's landed commit or train; a lane's branch or checkout,
-/// made or set, which the integrating agent rebases and pushes and `pr.ready`
-/// reads as the lane's own (rereview N2); a lane's agent, made, set or
-/// recorded, which files a worker on its card; a train started, or any
-/// change to one but its title (its lanes, base, state, commit, agent or
-/// card), which CI and the landing read; and a ruling's reversal marked done
-/// with its commit. The owner's and the orchestrator's. Everything else in
-/// the plan is every member's: themes, the ranking, cards, titles, reasons,
-/// rulings, a train's name, and a lane queued, dropped, building, in review
-/// or fixing until it reaches landing (`moves_a_landing_lane`).
+/// the work (ov-736, the owner's rulings on review M2 and fix round 2; ov-872):
+/// a ticket moved to landing or landed, which puts it on a landing and reads
+/// as finished; a ticket's landed commit; a ticket's branch, checkout or
+/// stack, which the lander rebases and pushes and `pr.ready` reads as the
+/// ticket's own (rereview N2); an agent recorded, set to work or ended, which
+/// files a worker on its card; a landing started, or any change to one but its
+/// title (its tickets, base, state, commit or lander), which CI and the landing
+/// read; and a ruling's reversal marked done with its commit. The owner's and
+/// the orchestrator's. Everything else in the plan is every member's: themes,
+/// the ranking, cards, reasons, rulings, a landing's title, and a ticket
+/// waiting, dropped, building, in review or needing you until it reaches
+/// landing (`moves_a_landing_ticket`).
 fn records_the_orchestrators(req: &Request) -> bool {
-    use farcooler_protocol::v1::{BoardTrainState, LaneState};
+    use farcooler_protocol::v1::{LandingState, TicketStage};
     use request::Payload as P;
     match req.payload.as_ref() {
-        Some(P::LaneUpdate(p)) => {
-            p.state.is_some_and(|s| s == LaneState::Landing as i32 || s == LaneState::Landed as i32)
+        Some(P::LineSet(p)) => {
+            p.stage.is_some_and(|s| s == TicketStage::Landing as i32 || s == TicketStage::Landed as i32)
                 || p.landed_sha.is_some()
-                || p.agent.is_some()
-                || p.train.is_some()
                 || p.branch.is_some()
                 || p.worktree_path.is_some()
                 || p.worktree_id.is_some()
+                || p.stack_parent.is_some()
         }
-        Some(P::LaneCreate(p)) => {
-            p.agent.is_some() || !p.branch.is_empty() || !p.worktree_path.is_empty() || p.worktree_id.is_some()
-        }
-        Some(P::LaneAgentSet(_)) => true,
-        Some(P::TrainStart(_)) => true,
-        Some(P::TrainSet(p)) => {
-            let farcooler_protocol::v1::TrainSet {
-                train_id: _,
+        Some(P::AgentRecord(_) | P::AgentWork(_) | P::AgentEnd(_)) => true,
+        Some(P::LandingStart(_)) => true,
+        Some(P::LandingSet(p)) => {
+            let farcooler_protocol::v1::LandingSet {
+                landing_id: _,
                 state,
                 base,
                 sha,
-                add_lane_ids,
-                remove_lane_ids,
-                actor: _,
+                add_task_ids,
+                remove_task_ids,
                 title: _,
-                agent,
-                card_id,
+                lander_id,
+                actor: _,
             } = p;
-            *state != BoardTrainState::Unspecified as i32
+            *state != LandingState::Unspecified as i32
                 || base.is_some()
                 || sha.is_some()
-                || !add_lane_ids.is_empty()
-                || !remove_lane_ids.is_empty()
-                || agent.is_some()
-                || card_id.is_some()
+                || !add_task_ids.is_empty()
+                || !remove_task_ids.is_empty()
+                || lander_id.is_some()
         }
         Some(P::RulingSet(p)) => p.sha.is_some(),
         _ => false,
     }
 }
 
-/// Whether `req` moves a lane that has reached landing or landed to another
-/// state, dropping included (ov-736, fix round 2): a landing lane is on a
-/// train, and taking it off can empty that train, which sends the one
+/// Whether `req` moves a ticket that has reached landing or landed to another
+/// stage, dropping included (ov-736, fix round 2): a landing ticket is on a
+/// landing, and taking it off can empty that landing, which sends the one
 /// behind it off and tells the orchestrator. Integration's, so the owner's
-/// and the orchestrator's. A lane that isn't there is its handler's.
-fn moves_a_landing_lane(store: &Store, req: &Request) -> Result<bool> {
-    use farcooler_protocol::v1::LaneState as Wire;
-    use farcooler_store::plan::LaneState;
-    let Some(request::Payload::LaneUpdate(p)) = req.payload.as_ref() else { return Ok(false) };
-    let (Some(to), Some(lane)) = (p.state, crate::wire::parse_id(&p.lane_id)) else { return Ok(false) };
-    let now = match store.lane(lane) {
-        Ok(lane) => lane.state,
+/// and the orchestrator's. A ticket that isn't on the line is its handler's.
+fn moves_a_landing_ticket(store: &Store, req: &Request) -> Result<bool> {
+    use farcooler_protocol::v1::TicketStage as Wire;
+    use farcooler_store::ticket_lines::Stage;
+    let Some(request::Payload::LineSet(p)) = req.payload.as_ref() else { return Ok(false) };
+    let (Some(to), Some(task)) = (p.stage, crate::wire::parse_id(&p.task_id)) else { return Ok(false) };
+    let now = match store.ticket_line(task) {
+        Ok(line) => line.stage,
         Err(DomainError::NotFound) => return Ok(false),
         Err(e) => return Err(e),
     };
     Ok(match now {
-        LaneState::Landing => to != Wire::Landing as i32,
-        LaneState::Landed => to != Wire::Landed as i32,
+        Stage::Landing => to != Wire::Landing as i32,
+        Stage::Landed => to != Wire::Landed as i32,
         _ => false,
     })
 }
@@ -850,13 +845,12 @@ pub fn rep_may(req: &Request) -> bool {
             Some(request::Payload::TaskNoteAppend(p)) if p.kind == farcooler_protocol::v1::TaskNoteKind::Comment as i32
         ),
         M::MessageSend => true,
-        M::PlanSet
+        M::LineOrder
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
         | M::BoardThemeCards
         | M::BoardThemeMove
-        | M::LaneUpdate
-        | M::LaneCards
+        | M::LineSet
         | M::RulingAdd
         | M::RulingSet => rep_plan_change(method, req),
         _ => matches!(
@@ -895,18 +889,17 @@ pub fn rep_may(req: &Request) -> bool {
 /// its gate's grammar reaches (`rep_gate::PLAN_VERBS`), and no more
 /// (ov-736). The ranking, never emptied; a theme made, its words, state and
 /// cards, and its place in the ranking (`plan theme move`, ov-755), never its
-/// budget; a lane's title, reason and cards, and
-/// its state only to queued or dropped, never its train, commit, checkout,
-/// branch, agent or budget; a ruling recorded, or reversed with no commit.
-/// Never a ruling kept, which is its person's own mark, a train, a page, a
-/// lane made, or a lane's agent: those start work or are the orchestrator's
-/// record.
+/// budget; a ticket's reason, and its stage only to waiting or dropped, never
+/// its commit, checkout, branch, stack, pull request or budget; a ruling
+/// recorded, or reversed with no commit. Never a ruling kept, which is its
+/// person's own mark, a landing, a page, or an agent: those start work or are
+/// the orchestrator's record.
 fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) -> bool {
     use farcooler_protocol::method::Method as M;
-    use farcooler_protocol::v1::{BoardRulingState, LaneState};
+    use farcooler_protocol::v1::{BoardRulingState, TicketStage};
     use request::Payload as P;
     match (method, req.payload.as_ref()) {
-        (M::PlanSet, Some(P::PlanSet(p))) => !p.lane_ids.is_empty(),
+        (M::LineOrder, Some(P::LineOrder(p))) => !p.task_ids.is_empty(),
         (M::BoardThemeCreate, Some(P::BoardThemeCreate(_))) => true,
         (M::BoardThemeUpdate, Some(P::BoardThemeUpdate(p))) => {
             let farcooler_protocol::v1::BoardThemeUpdate {
@@ -926,31 +919,29 @@ fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) ->
         }
         (M::BoardThemeMove, Some(P::BoardThemeMove(_))) => true,
         (M::BoardThemeCards, Some(P::BoardThemeCards(_))) => true,
-        (M::LaneUpdate, Some(P::LaneUpdate(p))) => {
-            let farcooler_protocol::v1::LaneUpdate {
-                lane_id: _,
-                state,
+        (M::LineSet, Some(P::LineSet(p))) => {
+            let farcooler_protocol::v1::TicketLineSet {
+                task_id: _,
+                stage,
                 reason: _,
-                train,
-                landed_sha,
-                worktree_path,
                 branch,
                 worktree_id,
-                agent,
-                actor: _,
+                worktree_path,
+                stack_parent,
+                pr_number,
+                landed_sha,
                 budget_tokens,
-                title: _,
+                actor: _,
             } = p;
-            state.is_none_or(|s| s == LaneState::Queued as i32 || s == LaneState::Dropped as i32)
-                && train.is_none()
-                && landed_sha.is_none()
-                && worktree_path.is_none()
+            stage.is_none_or(|s| s == TicketStage::Waiting as i32 || s == TicketStage::Dropped as i32)
                 && branch.is_none()
                 && worktree_id.is_none()
-                && agent.is_none()
+                && worktree_path.is_none()
+                && stack_parent.is_none()
+                && pr_number.is_none()
+                && landed_sha.is_none()
                 && budget_tokens.is_none()
         }
-        (M::LaneCards, Some(P::LaneCards(_))) => true,
         (M::RulingAdd, Some(P::RulingAdd(_))) => true,
         (M::RulingSet, Some(P::RulingSet(p))) => p.state == BoardRulingState::Reversed as i32 && p.sha.is_none(),
         _ => false,
@@ -1060,7 +1051,7 @@ pub fn refuse_rep_answer(store: &Store, actor: Actor, kind: Option<NoteKind>) ->
 /// Refuse a rep's plan write on a board other than its own workspace's
 /// (rereview N3), as `rep_messenger`, as `refuse_rep_reach` holds its
 /// comments: the ranking, theme or ruling named by workspace, and the
-/// theme, lane or ruling named by id, must be its workspace's. One that
+/// theme, ticket or ruling named by id, must be its workspace's. One that
 /// isn't there is its handler's to refuse; a rep unbound since the gate's
 /// walk is refused.
 fn refuse_rep_plan_reach(store: &Store, rep: Uuid, req: &Request) -> Result<()> {
@@ -1074,7 +1065,7 @@ fn refuse_rep_plan_reach(store: &Store, rep: Uuid, req: &Request) -> Result<()> 
         Err(e) => Err(e),
     };
     let target = match req.payload.as_ref() {
-        Some(P::PlanSet(p)) => named(&p.workspace_id),
+        Some(P::LineOrder(p)) => named(&p.workspace_id),
         Some(P::BoardThemeCreate(p)) => named(&p.workspace_id),
         Some(P::RulingAdd(p)) => named(&p.workspace_id),
         Some(P::BoardThemeUpdate(p)) => match named(&p.theme_id) {
@@ -1089,12 +1080,8 @@ fn refuse_rep_plan_reach(store: &Store, rep: Uuid, req: &Request) -> Result<()> 
             Some(theme) => found(store.board_theme(theme).map(|t| t.workspace_id))?,
             None => None,
         },
-        Some(P::LaneUpdate(p)) => match named(&p.lane_id) {
-            Some(lane) => found(store.lane(lane).map(|l| l.workspace_id))?,
-            None => None,
-        },
-        Some(P::LaneCards(p)) => match named(&p.lane_id) {
-            Some(lane) => found(store.lane(lane).map(|l| l.workspace_id))?,
+        Some(P::LineSet(p)) => match named(&p.task_id) {
+            Some(task) => found(store.get_task(task).map(|t| t.workspace_id))?,
             None => None,
         },
         Some(P::RulingSet(p)) => match named(&p.ruling_id) {

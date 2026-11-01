@@ -548,9 +548,9 @@ pub mod capability {
     /// refuses rather than answering from no worktree.
     pub const READ_ONLY_FOLDERS: &str = "read_only_folders";
     /// The plan layer (ov-268): `plan.get`, `plan.set`, `plan.events`,
-    /// `board_theme.*`, `lane.*` and the `plan_changed` event.
+    /// `board_theme.*` and the `plan_changed` event.
     ///
-    /// **Experimental, and it may be withdrawn.** Themes, lanes and the plan
+    /// **Experimental, and it may be withdrawn.** Themes and the plan
     /// sit beside the board, never in it: no task carries a field of the layer,
     /// so removing it changes nothing a task says. Its own capability because
     /// no runner before this one has any of the methods: a client that reads it
@@ -597,19 +597,20 @@ pub mod capability {
     /// Reverse, and a CLI refuses the verbs before sending. Needs
     /// `board_rulings`.
     pub const BOARD_RULING_ACTIONS: &str = "board_ruling_actions";
-    /// Trains (ov-309): `train.start`, `train.set`, and `Plan.trains` and
-    /// `Plan.ci` on `plan.get`, with the runner reading each pushed SHA's CI
-    /// through `gh`.
+    /// The line, agents and landings (ov-872): `line.set`, `line.order`,
+    /// `agent.record`, `agent.work`, `agent.end`, `landing.start` and
+    /// `landing.set`, `TerminalCreate.agent`, and `Plan.lines`,
+    /// `Plan.landings`, `Plan.agents` and `Plan.agents_spend` on `plan.get`.
     ///
-    /// **Experimental, with the plan layer it is part of.** Its own capability
-    /// because a runner with `board_plan` alone keeps no trains: a client that
-    /// reads it absent draws Now without train groups and a page's CI
-    /// references as plain text, and a CLI refuses a train verb before
-    /// sending, saying the runner needs an update to keep trains. Needs
-    /// `board_plan`, since trains are read through the plan.
-    pub const BOARD_TRAINS: &str = "board_trains";
+    /// Replaces lanes, trains, a train's phase and the derived agents list
+    /// (`board_trains`, `board_train_phase`, `board_agents`, `terminal_lane`),
+    /// by a one-way move the owner chose: a client from before reads none of
+    /// it. A client that reads it absent draws no line, landings or agents,
+    /// and a CLI refuses `agent` and `landing` before sending, saying the
+    /// runner needs an update. Needs `board_plan`.
+    pub const BOARD_LINE: &str = "board_line";
     /// Cost on the plan (ov-307): `budget_tokens` on `board_theme.update` and
-    /// `lane.update` and on the theme and lane in `plan.get`, a theme's
+    /// `line.set` and on the theme and ticket in `plan.get`, a theme's
     /// seven-day trend, and `Plan.cost` with the week's tokens and cost per
     /// finished card by harness and model.
     ///
@@ -675,14 +676,9 @@ pub mod capability {
     /// `terminal.compose`'s `staged_file` (ov-454): any file, written on the
     /// runner, its path typed before the text. An older runner drops the block.
     pub const COMPOSE_FILES: &str = "compose_files";
-    /// A pane opened for a plan lane (ov-457): `TerminalCreate.lane`. A field
-    /// on an existing payload, so a client that sets it names this in the
-    /// request: an older runner drops the lane and opens a pane that knows
-    /// only its first card.
-    pub const TERMINAL_LANE: &str = "terminal_lane";
     /// `message.send` (ov-455): a message between a workspace's orchestrator
-    /// and its lanes, queued and typed past the answer wake's gate, and the
-    /// runner's own notice to the orchestrator when a lane stops without
+    /// and its agents, queued and typed past the answer wake's gate, and the
+    /// runner's own notice to the orchestrator when an agent stops without
     /// reporting.
     pub const AGENT_MESSAGES: &str = "agent_messages";
     /// A subagent's own conversation (ov-453): `agent_id` on `agent.rows`
@@ -696,18 +692,6 @@ pub mod capability {
     /// `WorkspaceSetSettings.lead`, which a client that sets it names in the
     /// request: an older runner drops the field.
     pub const REPRESENTATIVES: &str = "representatives";
-    /// The agents on the plan (ov-503): `Plan.agents` on `plan.get`, every
-    /// agent with turns in the last 24 hours joined to its lane, train or
-    /// card. No method of its own. A client that reads it absent draws no
-    /// agents list, and a CLI refuses `plan agents` before sending, saying
-    /// the runner needs an update. Needs `board_plan`.
-    pub const BOARD_AGENTS_LIST: &str = "board_agents";
-    /// A train's phase (ov-503): `BoardTrain.phase`, `held_by` and
-    /// `phase_since` on `plan.get` and the train writes' answers. No method of
-    /// its own: a lane moves off a held train with `train.set`. A client that
-    /// reads it absent draws the train's `state`, and a CLI draws no phase.
-    /// Needs `board_trains`.
-    pub const BOARD_TRAIN_PHASE: &str = "board_train_phase";
     /// The first run's survey (ov-519): `repository.survey`, a local read of
     /// a repository with the charter it suggests, and
     /// `workspace.write_charter`, which writes that charter or its draft.
@@ -733,7 +717,7 @@ pub mod capability {
     /// that runner and says the runner needs an update.
     pub const REKEY: &str = "rekey";
     /// A phone acting on a pull request as the runner's `gh` login (ov-317,
-    /// team mode T6): `pr.ready` marks a lane's draft pull request ready for
+    /// team mode T6): `pr.ready` marks a ticket's draft pull request ready for
     /// review, and `pr.thread_reply` replies to a review thread an agent
     /// escalated. An older runner has neither, so the phone hides the buttons.
     pub const PR_ACTIONS: &str = "pr_actions";
@@ -827,12 +811,12 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
-            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
+            BOARD_LINE, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
-            AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
+            AGENT_IMAGES, COMPOSE_FILES,
             AGENT_MESSAGES,
-            SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
+            SUBAGENT_ROWS, REPRESENTATIVES,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
@@ -844,12 +828,15 @@ pub mod capability {
     /// given to something new: a client in the field that reads one would
     /// believe a runner has the old feature. `adapters` was adapter
     /// configuration and `agent_queue` chat mode's queue, both retired with
-    /// chat mode (ov-377).
-    pub const RETIRED: &[&str] = &["adapters", "agent_queue"];
+    /// chat mode (ov-377); `board_trains`, `board_train_phase`, `board_agents`
+    /// and `terminal_lane` were lanes and trains, retired by the line (ov-872).
+    pub const RETIRED: &[&str] =
+        &["adapters", "agent_queue", "board_trains", "board_train_phase", "board_agents", "terminal_lane"];
 
-    /// Methods retired with chat mode (ov-377). A runner refuses each as
-    /// `MethodRetired` rather than as a feature it predates, so an app from
-    /// before then is told chat mode is gone, not to update the runner.
+    /// Methods retired with chat mode (ov-377), and lanes and trains (ov-872).
+    /// A runner refuses each as `MethodRetired` rather than as a feature it
+    /// predates, so an app from before then is told the feature is gone, not
+    /// to update the runner.
     pub const RETIRED_METHODS: &[&str] = &[
         "terminal.set_pane_mode",
         "terminal.agent_prompt",
@@ -864,6 +851,13 @@ pub mod capability {
         "adapter.upsert",
         "adapter.delete",
         "adapter.test",
+        "lane.create",
+        "lane.update",
+        "lane.cards",
+        "lane.agent",
+        "plan.set",
+        "train.start",
+        "train.set",
     ];
 
     /// Capabilities no process offers until something in it says it may.
@@ -1071,16 +1065,16 @@ pub mod method {
         WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
         TerminalRename = "terminal.rename" => TERMINAL_NAMES,
         PlanGet = "plan.get" => BOARD_PLAN,
-        PlanSet = "plan.set" => BOARD_PLAN,
         PlanEvents = "plan.events" => BOARD_PLAN,
         BoardThemeCreate = "board_theme.create" => BOARD_PLAN,
         BoardThemeUpdate = "board_theme.update" => BOARD_PLAN,
         BoardThemeCards = "board_theme.cards" => BOARD_PLAN,
         BoardThemeMove = "board_theme.move" => BOARD_THEME_MOVE,
-        LaneCreate = "lane.create" => BOARD_PLAN,
-        LaneUpdate = "lane.update" => BOARD_PLAN,
-        LaneCards = "lane.cards" => BOARD_PLAN,
-        LaneAgent = "lane.agent" => BOARD_PLAN,
+        LineSet = "line.set" => BOARD_LINE,
+        LineOrder = "line.order" => BOARD_LINE,
+        AgentRecord = "agent.record" => BOARD_LINE,
+        AgentWork = "agent.work" => BOARD_LINE,
+        AgentEnd = "agent.end" => BOARD_LINE,
         PageList = "page.list" => BOARD_PAGES,
         PageGet = "page.get" => BOARD_PAGES,
         PageSet = "page.set" => BOARD_PAGES,
@@ -1089,8 +1083,8 @@ pub mod method {
         RulingAdd = "ruling.add" => BOARD_RULINGS,
         RulingSet = "ruling.set" => BOARD_RULINGS,
         RulingKeepAll = "ruling.keep_all" => BOARD_RULING_ACTIONS,
-        TrainStart = "train.start" => BOARD_TRAINS,
-        TrainSet = "train.set" => BOARD_TRAINS,
+        LandingStart = "landing.start" => BOARD_LINE,
+        LandingSet = "landing.set" => BOARD_LINE,
         RepositoryLanding = "repository.landing" => LANDING,
         AgentRows = "agent.rows" => AGENT_ROWS,
         AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,
@@ -1214,11 +1208,7 @@ mod ruling_wire_tests;
 #[cfg(test)]
 mod capability_tests;
 #[cfg(test)]
-mod train_wire_tests;
-#[cfg(test)]
-mod agents_wire_tests;
-#[cfg(test)]
-mod train_phase_wire_tests;
+mod line_wire_tests;
 #[cfg(test)]
 mod cost_wire_tests;
 #[cfg(test)]

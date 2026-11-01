@@ -1,35 +1,36 @@
-//! Messages between a workspace's orchestrator and its lanes (ov-455).
+//! Messages between a workspace's orchestrator and its agents (ov-455,
+//! ov-872).
 //!
 //! Delegated work must never stall: an agent that finishes, gets stuck or has
 //! a question tells its orchestrator, and the orchestrator can steer any of
-//! its lanes, across Claude Code, Codex, Cursor and anything else, with no
+//! its agents, across Claude Code, Codex, Cursor and anything else, with no
 //! person in between. A message is the answer wake's third kind
 //! (`WakeKind::Message`): filed as a note on a card and queued in one write
 //! (`Store::send_message`), then typed into the recipient's box by the same
 //! pump, under the same gate and the same rules, as an answer. So it reaches
 //! a claude pane idle or working (claude queues it), a codex pane between
 //! turns; it is told once, in order, and survives a
-//! restart. What is typed is one line, attributed to the lane and its card:
-//! `[from mac-ux on ov-505] PR is up`.
+//! restart. What is typed is one line, attributed to the agent and its
+//! ticket: `[from the builder on ov-505] PR is up`.
 //!
 //! **Addressing** (`message_send`). Hub and spoke (R-46): an agent messages
 //! its orchestrator and nobody else; the orchestrator, or the owner, messages
-//! a lane by its name or by any card on it, or a card on no lane through the
-//! card's own agent. One runner (R-45): the board, its lanes and its
+//! an agent by a ticket it works: the pane working the ticket, or for one no
+//! pane works, the card's own agent. One runner (R-45): the board, its agents and its
 //! orchestrator are all this runner's. A message to the orchestrator names no
 //! terminal, and the workspace's live orchestrator is found when it's told,
 //! so one restarted meanwhile still gets it.
 //!
-//! **The runner's own notice** (`lane_stopped`). When a lane's agent ends a
-//! turn without having reported (no note, move or message of its own since
-//! the turn began), its turn fails, or it stops on a question, the runner
-//! messages the orchestrator for it: `[Far Cooler] The lane mac-ux's agent
+//! **The runner's own notice** (`agent_stopped`). When an agent ends a turn
+//! without having reported (no note, move or message of its own since the
+//! turn began), its turn fails, or it stops on a question, the runner
+//! messages the orchestrator for it: `[Far Cooler] The builder on ov-505
 //! ended its turn without reporting. It last said: "…"`. Only an agent's
 //! transitions do this, never the orchestrator's (`task_link::task_of`), so a
 //! notice never causes another; and one waits untold at most once per card.
 //!
 //! **People and reps** (ov-494, `crate::people`). A member's rep is an agent
-//! like a lane's: it messages its orchestrator and nobody else, about its
+//! like any other: it messages its orchestrator and nobody else, about its
 //! person's desk card unless it names another, tagged `[from Alice's rep]`.
 //! The orchestrator, or the lead, reaches it as `rep:<handle>`. A person's own
 //! message (actor `user`) comes only from the workspace's lead, except to
@@ -222,7 +223,7 @@ impl Watcher {
             if matches!(actor, Actor::Agent { .. }) {
                 return Err(DomainError::Conflict { what: "hub" });
             }
-            self.lane_or_card(&board, to).await?
+            self.ticket_recipient(&board, to).await?
         };
         if task.workspace_id != workspace {
             return Err(DomainError::InvalidArgument { what: "to" });
@@ -334,33 +335,22 @@ impl Watcher {
         Ok((task, Recipient { terminal: Some(rep.terminal), said: format!("{}'s rep", member.name) }))
     }
 
-    /// `to` as a live lane's name, or as a card: its lane's pane, or for a
-    /// card on no lane its own agent. Refused as `nobody` when no agent is
+    /// `to` as a ticket's key: the pane working it, or for a ticket no pane
+    /// works its card's own agent. Refused as `nobody` when no agent is
     /// working it, and `to` when it names nothing on the board.
-    async fn lane_or_card(&self, board: &farcooler_store::models::Workspace, to: &str) -> Result<(Task, Recipient)> {
+    async fn ticket_recipient(&self, board: &farcooler_store::models::Workspace, to: &str) -> Result<(Task, Recipient)> {
         let store = &self.service.store;
         let nobody = DomainError::Conflict { what: "nobody" };
-        let (lane, card) = match store.live_lane_named(board.id, to) {
-            Ok(lane) => (Some(lane), None),
-            Err(_) => {
-                let card = self.card_named(board, to)?.ok_or(DomainError::InvalidArgument { what: "to" })?;
-                (store.live_lane_of_card(card.id)?, Some(card))
-            }
-        };
-        if let Some(lane) = lane {
-            let pane = store.lane_pane(lane.id)?.ok_or(nobody.clone())?;
+        let card = self.card_named(board, to)?.ok_or(DomainError::InvalidArgument { what: "to" })?;
+        if let Some(pane) = store.pane_of_ticket(card.id)? {
             let row = store.get_terminal(pane).map_err(|_| nobody.clone())?;
-            // A lane's pane since made the orchestrator is the sender itself.
+            // A pane since made the orchestrator is the sender itself.
             if row.role == TerminalRole::Orchestrator {
                 return Err(DomainError::Conflict { what: "self" });
             }
-            let task = match card {
-                Some(card) => card,
-                None => row.task_id.and_then(|t| store.get_task(t).ok()).ok_or(nobody)?,
-            };
-            return Ok((task, Recipient { terminal: Some(pane), said: format!("the lane {}", lane.name) }));
+            let said = format!("the {} on {}", role_of_pane(store, pane), card.key);
+            return Ok((card, Recipient { terminal: Some(pane), said }));
         }
-        let card = card.ok_or(nobody.clone())?;
         let agent = self.recipient(&card).await.filter(|t| t.role != TerminalRole::Orchestrator).ok_or(nobody)?;
         let said = format!("{}'s agent", card.key);
         Ok((card, Recipient { terminal: Some(agent.id), said }))
@@ -396,7 +386,7 @@ impl Watcher {
             return format!("[from {from}] {}", one_line(&wake.body, LONGEST_TEXT));
         }
         let tag = match wake.actor {
-            Actor::Agent { terminal } => format!("[from {}]", self.lane_or_key(terminal, task)),
+            Actor::Agent { terminal } => format!("[from {}]", self.agent_tag(terminal, task)),
             Actor::Manager => "[from the orchestrator]".to_string(),
             // `user` is the CLI's default: the person at a terminal, or a
             // claude in a shell pane, which has no `FARCOOLER_ACTOR` (one said
@@ -415,12 +405,12 @@ impl Watcher {
     }
 
     /// The sender a mailbox file records (ov-575, R-78), so the waiter may
-    /// hand the message to claude as a peer's: only a lane's agent writing to
+    /// hand the message to claude as a peer's: only a dispatched agent writing to
     /// its orchestrator. Never:
     ///
     /// - a person (`Actor::User`, a member's own device), or a rep, which
     ///   speaks for one (checked on the pane itself, and on `message_from`);
-    /// - the orchestrator, whose words to a lane the lane must act on, where
+    /// - the orchestrator, whose words to an agent it must act on, where
     ///   claude says a peer's text is "input, not authority";
     /// - the runner's notices or an unknown sender.
     ///
@@ -436,28 +426,24 @@ impl Watcher {
         if store.message_from(wake.note).ok().flatten().is_some() || !matches!(store.rep_of_terminal(terminal), Ok(None)) {
             return None;
         }
-        let reply_to = match store.lane_of_pane(terminal) {
-            Ok(Some(lane)) => lane.name,
-            _ => task.key.clone(),
-        };
-        Some(farcooler_agent_hooks::mailbox::Sender { name: self.lane_or_key(terminal, task), reply_to })
+        Some(farcooler_agent_hooks::mailbox::Sender { name: self.agent_tag(terminal, task), reply_to: task.key.clone() })
     }
 
-    /// Who a pane's agent is, in a message's tag: its lane and the card it
-    /// works (`mac-ux on ov-505`), so a person reading the line, or the
+    /// Who a pane's agent is, in a message's tag: its role and the ticket it
+    /// works (`the builder on ov-505`), so a person reading the line, or the
     /// agent answering it, knows which ticket it came from; the card alone
-    /// for an agent on no lane.
-    fn lane_or_key(&self, terminal: Uuid, task: &Task) -> String {
-        match self.service.store.lane_of_pane(terminal) {
-            Ok(Some(lane)) => format!("{} on {}", lane.name, task.key),
+    /// for a pane recorded as no agent.
+    fn agent_tag(&self, terminal: Uuid, task: &Task) -> String {
+        match self.service.store.pane_agent(terminal) {
+            Ok(Some(agent)) => format!("the {} on {}", agent.role.as_str(), task.key),
             _ => task.key.clone(),
         }
     }
 
     /// An agent's activity moved to `next` on a sample: when it stopped
-    /// working a card (`task_link::notice_task`), `lane_stopped`. Whether a
+    /// working a card (`task_link::notice_task`), `agent_stopped`. Whether a
     /// person is watching the pane doesn't matter: the orchestrator isn't.
-    pub(crate) fn lane_moved(
+    pub(crate) fn agent_moved(
         &self,
         terminal: Uuid,
         next: AgentActivity,
@@ -478,12 +464,12 @@ impl Watcher {
             AgentActivity::Done => AgentNews::Finished { label: String::new(), said: said.map(str::to_string) },
             _ => return,
         };
-        self.lane_stopped(terminal, &task, &news, started_at);
+        self.agent_stopped(terminal, &task, &news, started_at);
     }
 
-    /// A lane's agent stopped (`lane_moved`): tell its orchestrator when it
-    /// didn't report. See this module's docs.
-    pub(crate) fn lane_stopped(&self, terminal: Uuid, task: &Task, news: &AgentNews, started_at: Option<i64>) {
+    /// An agent stopped (`agent_moved`): tell its orchestrator when it didn't
+    /// report. See this module's docs.
+    pub(crate) fn agent_stopped(&self, terminal: Uuid, task: &Task, news: &AgentNews, started_at: Option<i64>) {
         let store = &self.service.store;
         if !self.may_tell_orchestrator(terminal, task) {
             return;
@@ -494,7 +480,7 @@ impl Watcher {
         // card this turn has reported, unless it is stuck now.
         let waiting = self.notice_waiting(task);
         let reported = store.reported_since(task.id, me, since).unwrap_or(true);
-        let who = self.lane_agent(terminal, task);
+        let who = self.agent_named(terminal, task);
         let quoted = |text: &str| one_line(text, QUOTED);
         let body = match news {
             AgentNews::Finished { said, .. } if !waiting && !reported => match said.as_deref().map(quoted) {
@@ -525,11 +511,11 @@ impl Watcher {
         self.service.store.reported_since(task.id, Actor::Runner, i64::MAX).unwrap_or(true)
     }
 
-    /// How a notice names `terminal`'s agent: by its lane and card, or by
+    /// How a notice names `terminal`'s agent: by its role and ticket, or by
     /// its card.
-    pub(crate) fn lane_agent(&self, terminal: Uuid, task: &Task) -> String {
-        match self.service.store.lane_of_pane(terminal) {
-            Ok(Some(lane)) => format!("The lane {}'s agent, on {},", lane.name, task.key),
+    pub(crate) fn agent_named(&self, terminal: Uuid, task: &Task) -> String {
+        match self.service.store.pane_agent(terminal) {
+            Ok(Some(agent)) => format!("The {} on {}", agent.role.as_str(), task.key),
             _ => format!("{}'s agent", task.key),
         }
     }
@@ -544,7 +530,16 @@ impl Watcher {
                 self.message_queued();
             }
             Err(DomainError::Conflict { what: "typing_off" }) => {}
-            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator about a lane"),
+            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator about an agent"),
         }
+    }
+}
+
+/// The role word of the agent in pane `terminal`, or `agent` for a pane
+/// recorded as none.
+fn role_of_pane(store: &farcooler_store::Store, terminal: Uuid) -> &'static str {
+    match store.pane_agent(terminal) {
+        Ok(Some(agent)) => agent.role.as_str(),
+        _ => "agent",
     }
 }

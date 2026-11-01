@@ -37,7 +37,7 @@ pub enum Ruling {
     /// reads its member's and writes none, these four being no messenger's
     /// (`rep_may`).
     PerPerson,
-    /// The plan layer: the ranking, a theme, a lane, a ruling, a train or an
+    /// The plan layer: the ranking, a theme, a ticket, an agent, a ruling, a landing or an
     /// orchestrator's page. Every member's to change, written under their
     /// name (ov-707), and a rep's on its member's behalf, written under the
     /// member's (`stamp_rep`). The owner, 24 Oct (ov-736), reversing ov-637:
@@ -233,20 +233,20 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::WorkspaceRename | M::WorkspaceSetPrefix => Maintains,
 
-        M::PlanSet
+        M::LineOrder
         | M::BoardThemeCreate
         | M::BoardThemeUpdate
         | M::BoardThemeCards
         | M::BoardThemeMove
-        | M::LaneCreate
-        | M::LaneUpdate
-        | M::LaneCards
-        | M::LaneAgent
+        | M::LineSet
+        | M::AgentRecord
+        | M::AgentWork
+        | M::AgentEnd
         | M::RulingAdd
         | M::RulingSet
         | M::RulingKeepAll
-        | M::TrainStart
-        | M::TrainSet
+        | M::LandingStart
+        | M::LandingSet
         | M::PageSet
         | M::PageRemove => Plan,
 

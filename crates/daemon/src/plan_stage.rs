@@ -1,12 +1,12 @@
-//! A lane's pull requests, found and staged (ov-312): which of the repository's
-//! PRs belong to which card of which lane, the stage of each (`pr_stage`), and
-//! the lane's rolled-up stage, laid onto the plan as it is read.
+//! A ticket's pull request, found and staged (ov-312, ov-872): which of the
+//! repository's PRs belongs to which ticket on the line, and the stage of each
+//! (`pr_stage`), laid onto the plan as it is read.
 //!
-//! The owner's ruling is one PR per card, not per lane: a lane that carries
-//! three cards carries up to three PRs. A card's PR is the one whose head branch
-//! names the card's key (`ov-312/pr-stage`), or whose title opens with it
-//! ("ov-312: lanes show their PR stage"); a card nothing names takes the PR on
-//! the lane's own branch only when it is the lane's one card.
+//! One PR per ticket: the one whose head branch names the ticket's key
+//! (`ov-312/pr-stage`), or whose title opens with it ("ov-312: tickets show
+//! their PR stage"), else the PR on the ticket's own branch. A ticket carried
+//! over from a lane of several cards shares that branch, so the branch says
+//! nothing of it alone.
 //!
 //! Part of the plan layer: only `rpc_plan` and `pr_watch` call it.
 
@@ -14,8 +14,9 @@ use std::collections::HashMap;
 
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::TaskStatus;
-use farcooler_store::plan::LaneState;
-use farcooler_store::plan_read::{CardRef, LaneView, Plan};
+use farcooler_store::plan_read::{CardRef, LineView, Plan};
+use farcooler_store::ticket_lines::Stage as LineStage;
+use farcooler_store::ticket_work::WorkRole;
 use uuid::Uuid;
 
 use crate::pr_stage::{self, Kind, Phase, Stage};
@@ -37,29 +38,30 @@ impl Reads {
     }
 }
 
-/// A lane's stages: its own, and each card's.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LaneStages {
-    pub lane: Option<Stage>,
-    pub cards: HashMap<Uuid, Stage>,
+/// Whether a ticket's move takes it into review, a fix round or landing: its
+/// new stage is one of those and is not the stage it was already in.
+pub fn enters_active(was: LineStage, to: Option<LineStage>) -> bool {
+    to.is_some_and(|to| to != was && phase_of(to, false).is_active())
 }
 
-/// Whether a lane's update moves it into review, fixing or landing: its new
-/// state is one of those and is not the state it was already in.
-pub fn enters_active(was: LaneState, to: Option<LaneState>) -> bool {
-    to.is_some_and(|to| to != was && phase_of(to).is_active())
-}
-
-pub fn phase_of(state: LaneState) -> Phase {
-    match state {
-        LaneState::Queued => Phase::Queued,
-        LaneState::Building => Phase::Building,
-        LaneState::Review => Phase::Review,
-        LaneState::Fixing => Phase::Fixing,
-        LaneState::Landing => Phase::Landing,
-        LaneState::Landed => Phase::Landed,
-        LaneState::Dropped => Phase::Dropped,
+/// Where a ticket is, as the stage reads it: building is a fix round while a
+/// fix is open on it.
+pub fn phase_of(stage: LineStage, fixing: bool) -> Phase {
+    match stage {
+        LineStage::Waiting => Phase::Queued,
+        LineStage::Building if fixing => Phase::Fixing,
+        LineStage::Building => Phase::Building,
+        LineStage::Reviewing | LineStage::NeedsYou => Phase::Review,
+        LineStage::Landing => Phase::Landing,
+        LineStage::Landed => Phase::Landed,
+        LineStage::Dropped => Phase::Dropped,
     }
+}
+
+/// A ticket on the line, as the stage reads it.
+pub fn line_phase(line: &LineView) -> Phase {
+    let fixing = line.work.iter().any(|w| w.role == WorkRole::Fix && w.ended_at.is_none());
+    phase_of(line.line.stage, fixing)
 }
 
 /// Whether `text` names `key` as a word of its own: `ov-31` is not in
@@ -108,68 +110,41 @@ fn best<'a>(candidates: impl Iterator<Item = &'a PrInfo>) -> Option<&'a PrInfo> 
     candidates.max_by_key(|p| (rank(p), p.status.number))
 }
 
-/// The PR of a card: the one whose head branch names its key, or whose title
-/// opens with it. `only_card` says the lane works nothing else, so the PR on the
-/// lane's own branch is its too; with several cards on a lane that branch
-/// holds all of their work, and so says nothing of any one.
-fn pr_of<'a>(prs: &'a [PrInfo], key: &str, branch: &str, only_card: bool) -> Option<&'a PrInfo> {
+/// The PR of a ticket: the one whose head branch names its key, or whose title
+/// opens with it, else the one on its own branch when it has a branch of its
+/// own (`alone`).
+fn pr_of<'a>(prs: &'a [PrInfo], key: &str, branch: &str, alone: bool) -> Option<&'a PrInfo> {
     let mine = || prs.iter().filter(|p| !is_noise(p));
     best(mine().filter(|p| mentions(&p.head_ref, key) || title_starts_with(&p.title, key))).or_else(|| {
-        if only_card && !branch.is_empty() { best(mine().filter(|p| p.head_ref == branch)) } else { None }
+        if alone && !branch.is_empty() { best(mine().filter(|p| p.head_ref == branch)) } else { None }
     })
 }
 
-/// One lane's stages against one repository's reads.
-pub fn lane_stages(lane: &LaneView, cards: &[CardRef], reads: &Reads) -> LaneStages {
-    let phase = phase_of(lane.lane.state);
-    if phase == Phase::Queued {
-        return LaneStages::default();
-    }
-    let finished = |status: TaskStatus| matches!(status, TaskStatus::Done | TaskStatus::Cancelled);
-    let mut out = LaneStages::default();
-    let mut matched: Vec<(Uuid, Option<&PrInfo>)> = Vec::new();
-    for c in &lane.cards {
-        let Some(card) = cards.iter().find(|r| r.task_id == c.task_id) else { continue };
-        let pr = if reads.known { pr_of(&reads.prs, &card.key, &lane.lane.branch, lane.cards.len() == 1) } else { None };
-        if pr.is_none() && finished(card.status) {
-            continue;
-        }
-        matched.push((card.task_id, pr));
-    }
-    let any_pr = matched.iter().any(|(_, pr)| pr.is_some());
-    for (task, pr) in matched {
-        let stage = if !reads.known {
-            // Could not ask. Said where a pull request is expected, and
-            // silent while the lane is still building one.
-            phase.is_active().then(Stage::unknown)
-        } else if pr.is_none() && any_pr {
-            // A sibling card has a PR and this one has none yet: it is the
-            // least advanced of the lane.
-            pr_stage::derive(None, Phase::Building)
-        } else {
-            pr_stage::derive(pr, phase)
-        };
-        if let Some(stage) = stage {
-            out.cards.insert(task, stage);
-        }
-    }
-    let ordered: Vec<Stage> = lane.cards.iter().filter_map(|c| out.cards.get(&c.task_id).cloned()).collect();
-    out.lane = pr_stage::rollup(&ordered);
-    out
+/// The pull request a ticket works, when the runner has read one.
+pub fn pr_of_line<'a>(line: &LineView, cards: &[CardRef], reads: &'a Reads) -> Option<&'a PrInfo> {
+    let card = cards.iter().find(|c| c.task_id == line.line.task_id)?;
+    pr_of(&reads.prs, &card.key, &line.line.branch, line.line.same_branch.is_none())
 }
 
-/// The numbers of the pull requests a lane's cards work.
-pub fn prs_of(lane: &LaneView, cards: &[CardRef], reads: &Reads) -> Vec<u32> {
-    let mut found: Vec<u32> = lane
-        .cards
-        .iter()
-        .filter_map(|c| cards.iter().find(|r| r.task_id == c.task_id))
-        .filter_map(|card| pr_of(&reads.prs, &card.key, &lane.lane.branch, lane.cards.len() == 1))
-        .map(|p| p.status.number)
-        .collect();
-    found.sort_unstable();
-    found.dedup();
-    found
+/// One ticket's stage against one repository's reads. `None` for a ticket
+/// not yet started, and one finished with no pull request.
+pub fn line_stage(line: &LineView, cards: &[CardRef], reads: &Reads) -> Option<Stage> {
+    let phase = line_phase(line);
+    if phase == Phase::Queued {
+        return None;
+    }
+    let card = cards.iter().find(|c| c.task_id == line.line.task_id)?;
+    let pr = if reads.known { pr_of_line(line, cards, reads) } else { None };
+    let finished = matches!(card.status, TaskStatus::Done | TaskStatus::Cancelled);
+    if pr.is_none() && finished {
+        return None;
+    }
+    if !reads.known {
+        // Could not ask. Said where a pull request is expected, and silent
+        // while the ticket is still building one.
+        return phase.is_active().then(Stage::unknown);
+    }
+    pr_stage::derive(pr, phase)
 }
 
 pub fn pb_stage(s: &Stage) -> pb::PrStage {
@@ -205,69 +180,42 @@ pub fn pb_stage(s: &Stage) -> pb::PrStage {
     }
 }
 
-/// Lay each lane's stage, and each of its cards', onto the wire plan built
-/// from `plan`. Reads only what the runner has cached; never waits on `gh`.
+/// Lay each ticket's stage onto the wire plan built from `plan`, in step with
+/// `plan.lines`. Reads only what the runner has cached; never waits on `gh`.
 pub fn annotate(svc: &Service, plan: &Plan, wire: &mut pb::Plan) {
     let mut reads: HashMap<Uuid, Reads> = HashMap::new();
-    for (view, lane) in plan.lanes.iter().zip(wire.lanes.iter_mut()) {
-        let workspace = view.lane.workspace_id;
-        let read = match reads.entry(workspace) {
+    for (view, line) in plan.lines.iter().zip(wire.lines.iter_mut()) {
+        let Ok(task) = svc.store.get_task(view.line.task_id) else { continue };
+        let read = match reads.entry(task.workspace_id) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                let Ok(ws) = svc.store.get_workspace(workspace) else { continue };
+                let Ok(ws) = svc.store.get_workspace(task.workspace_id) else { continue };
                 e.insert(Reads::of(svc, ws.repository_id))
             }
         };
-        let stages = lane_stages(view, &plan.cards, read);
-        lane.stage = stages.lane.as_ref().map(pb_stage);
-        for card in lane.cards.iter_mut() {
-            let task = Uuid::from_slice(&card.task_id).ok();
-            card.stage = task.and_then(|t| stages.cards.get(&t)).map(pb_stage);
-        }
+        line.pr_stage = line_stage(view, &plan.cards, read).as_ref().map(pb_stage);
     }
 }
 
-/// Who the live lanes' ready pull requests wait on, and how long each usually
-/// takes (`pr_timing`), laid onto `wire.review_waits`. The history is every PR
-/// the runner has read of the same repositories, not only the lanes' own.
-pub fn annotate_waits(svc: &Service, plan: &Plan, wire: &mut pb::Plan) {
-    let mut seen: Vec<Uuid> = Vec::new();
-    let mut found: HashMap<String, crate::pr_timing::Wait> = HashMap::new();
-    for view in plan.lanes.iter().filter(|v| phase_of(v.lane.state).is_active()) {
-        let Ok(ws) = svc.store.get_workspace(view.lane.workspace_id) else { continue };
-        if seen.contains(&ws.repository_id) {
-            continue;
-        }
-        seen.push(ws.repository_id);
-        let reads = Reads::of(svc, ws.repository_id);
-        if !reads.known {
-            continue;
-        }
-        let numbers: Vec<u32> = plan
-            .lanes
-            .iter()
-            .filter(|v| phase_of(v.lane.state).is_active())
-            .filter(|v| svc.store.get_workspace(v.lane.workspace_id).is_ok_and(|w| w.repository_id == ws.repository_id))
-            .flat_map(|v| prs_of(v, &plan.cards, &reads))
-            .collect();
-        let waiting: Vec<&PrInfo> = reads.prs.iter().filter(|p| numbers.contains(&p.status.number)).collect();
-        for w in crate::pr_timing::waits(&waiting, &reads.prs) {
-            // One reviewer across two repositories: counts add, and the
-            // history of the repository with more of it speaks.
-            match found.get_mut(&w.reviewer.to_lowercase()) {
-                Some(have) => {
-                    have.prs += w.prs;
-                    if w.samples > have.samples {
-                        (have.median_ms, have.samples) = (w.median_ms, w.samples);
-                    }
-                }
-                None => {
-                    found.insert(w.reviewer.to_lowercase(), w);
-                }
-            }
-        }
+/// Who the live tickets' ready pull requests wait on, and how long each
+/// usually takes (`pr_timing`), laid onto `wire.review_waits`. The history is
+/// every PR the runner has read of the board's repository, not only the
+/// tickets' own.
+pub fn annotate_waits(svc: &Service, workspace: Uuid, plan: &Plan, wire: &mut pb::Plan) {
+    let Ok(ws) = svc.store.get_workspace(workspace) else { return };
+    let reads = Reads::of(svc, ws.repository_id);
+    if !reads.known {
+        return;
     }
-    let mut all: Vec<crate::pr_timing::Wait> = found.into_values().collect();
+    let numbers: Vec<u32> = plan
+        .lines
+        .iter()
+        .filter(|v| line_phase(v).is_active())
+        .filter_map(|v| pr_of_line(v, &plan.cards, &reads))
+        .map(|p| p.status.number)
+        .collect();
+    let waiting: Vec<&PrInfo> = reads.prs.iter().filter(|p| numbers.contains(&p.status.number)).collect();
+    let mut all = crate::pr_timing::waits(&waiting, &reads.prs);
     all.sort_by(|a, b| b.prs.cmp(&a.prs).then_with(|| a.reviewer.to_lowercase().cmp(&b.reviewer.to_lowercase())));
     wire.review_waits = all
         .into_iter()

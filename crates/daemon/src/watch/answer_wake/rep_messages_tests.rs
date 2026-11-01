@@ -72,16 +72,16 @@ async fn the_orchestrator_asks_a_person_through_their_rep() {
 }
 
 /// Hub and spoke holds for reps: a rep messages its orchestrator only, and
-/// no lane messages a rep.
+/// no other agent messages a rep.
 #[tokio::test]
 async fn a_rep_messages_nobody_but_its_orchestrator() {
     let b = board().await;
     let (rep, _) = b.alices_rep().await;
-    let lane = b.lane_pane("mac-ux").await;
+    let builder = b.builder_pane().await;
     // From a rep, refused as no messenger's (ov-527), whatever the connection's scope.
     assert_eq!(refused(b.send_as(Person::Owner, &agent_actor(&rep), "rep:alice", "me", "").await), "rep_messenger");
-    assert_eq!(refused(b.send_as(Person::Owner, &agent_actor(&rep), "mac-ux", "psst", "").await), "rep_messenger");
-    assert_eq!(refused(b.send_as(Person::Owner, &agent_actor(&lane), "rep:alice", "psst", "").await), "hub");
+    assert_eq!(refused(b.send_as(Person::Owner, &agent_actor(&rep), &b.task.key, "psst", "").await), "rep_messenger");
+    assert_eq!(refused(b.send_as(Person::Owner, &agent_actor(&builder), "rep:alice", "psst", "").await), "hub");
     assert!(b.messages().is_empty());
 }
 

@@ -5,9 +5,9 @@
 //! What only a running daemon shows: that every time is GitHub's (the median
 //! is an exact figure), that the median is drawn from the reviewer's own
 //! reviews, that a reviewer with no history is absent and not zero, and that a
-//! timing read that fails changes nothing, the lane's stage included.
+//! timing read that fails changes nothing, the ticket's stage included.
 
-use farcooler_protocol::v1::{self as pb, LaneState as L};
+use farcooler_protocol::v1::{self as pb, TicketStage as S};
 
 mod common;
 #[path = "support/gh_pr.rs"]
@@ -69,9 +69,9 @@ fn timing_calls(dir: &std::path::Path) -> usize {
     calls(dir).iter().filter(|l| *l == "timing").count()
 }
 
-/// A lane of four cards in review: card 1's PR waits on alice, bob and a team; cards 2 to 4 merged,
+/// Four tickets in review: card 1's PR waits on alice, bob and a team; cards 2 to 4 merged,
 /// each first reviewed by alice 30, 40 and 50 minutes after it was ready.
-async fn a_board_with_history() -> (tempfile::TempDir, common::DaemonChild, SocketClient, pb::Workspace, pb::Lane) {
+async fn a_board_with_history() -> (tempfile::TempDir, common::DaemonChild, SocketClient, pb::Workspace, pb::Task) {
     let (dir, daemon, mut client, workspace) =
         a_runner_with(&[("FARCOOLER_TEST_KICK_FLOOR_MS", "500"), ("FARCOOLER_TEST_TIMING_EVERY_MS", "500")]).await;
     let mut cards = Vec::new();
@@ -87,14 +87,16 @@ async fn a_board_with_history() -> (tempfile::TempDir, common::DaemonChild, Sock
         dir.path(),
         &[(101, timed(None)), (102, timed(Some(("alice", 30)))), (103, timed(Some(("alice", 40)))), (104, timed(Some(("alice", 50))))],
     );
-    let refs: Vec<&pb::Task> = cards.iter().collect();
-    let lane = a_lane(&mut client, &workspace, "review", &refs, &[L::Review]).await;
-    (dir, daemon, client, workspace, lane)
+    for card in &cards {
+        a_ticket(&mut client, card, &format!("ticket/{}", card.key), &[S::Building, S::Reviewing]).await;
+    }
+    let first = cards.swap_remove(0);
+    (dir, daemon, client, workspace, first)
 }
 
 #[tokio::test]
 async fn a_reviewers_usual_wait_is_githubs_exact_median_of_their_reviews() {
-    let (_dir, _daemon, mut client, workspace, _lane) = a_board_with_history().await;
+    let (_dir, _daemon, mut client, workspace, _first) = a_board_with_history().await;
     let read = until(&mut client, &workspace, "alice's wait never reached the plan", |p| {
         wait_of(p, "alice").is_some_and(|w| w.samples == 3)
     })
@@ -109,9 +111,10 @@ async fn a_reviewers_usual_wait_is_githubs_exact_median_of_their_reviews() {
 
 #[tokio::test]
 async fn a_failed_timing_read_keeps_the_last_timing_and_the_stage() {
-    let (dir, _daemon, mut client, workspace, lane) = a_board_with_history().await;
+    let (dir, _daemon, mut client, workspace, first) = a_board_with_history().await;
     let before = until(&mut client, &workspace, "alice's wait never reached the plan", |p| wait_of(p, "alice").is_some_and(|w| w.samples == 3)).await;
-    let stage = before.lanes.iter().find(|l| l.name == "review").and_then(|l| l.stage.clone()).expect("a stage").label;
+    let stage_of = |p: &pb::Plan| p.lines.iter().find(|l| l.task_id == first.id).and_then(|l| l.pr_stage.clone()).expect("a stage").label;
+    let stage = stage_of(&before);
 
     // GitHub's timing now fails, and would say something else if it did not.
     std::fs::write(dir.path().join("timing-fails"), "").unwrap();
@@ -120,8 +123,8 @@ async fn a_failed_timing_read_keeps_the_last_timing_and_the_stage() {
     let lists = lists(dir.path());
     // Past the timing cadence set above, so the next turn reads it.
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-    move_lane(&mut client, &lane, L::Fixing).await;
-    move_lane(&mut client, &lane, L::Review).await;
+    move_ticket(&mut client, &first, S::Building).await;
+    move_ticket(&mut client, &first, S::Reviewing).await;
     let deadline = std::time::Instant::now() + BUDGET;
     while timing_calls(dir.path()) <= asked || self::lists(dir.path()) <= lists {
         assert!(std::time::Instant::now() < deadline, "the watch never asked for the timing again");
@@ -131,6 +134,6 @@ async fn a_failed_timing_read_keeps_the_last_timing_and_the_stage() {
 
     let after = plan(&mut client, &workspace).await;
     assert_eq!(wait_of(&after, "alice"), wait_of(&before, "alice"), "the last timing stands");
-    let now = after.lanes.iter().find(|l| l.name == "review").and_then(|l| l.stage.clone()).expect("a stage").label;
+    let now = stage_of(&after);
     assert_eq!(now, stage, "and the stage never depended on it");
 }

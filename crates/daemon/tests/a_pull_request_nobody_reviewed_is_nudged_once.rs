@@ -15,7 +15,7 @@ use farcooler_daemon::stack::{CheckState, PrInfo, PrReview, PrState, PrStatus, R
 use farcooler_protocol::v1::Scope;
 use farcooler_store::landing::LandingPatch;
 use farcooler_store::models::Actor;
-use farcooler_store::plan::{LaneCard, LaneState, LaneUpdate, NewLane};
+use farcooler_store::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 use in_process::*;
 use uuid::Uuid;
 
@@ -78,7 +78,7 @@ struct World {
     boards: BTreeSet<Uuid>,
 }
 
-/// A runner with a lane in review whose pull request is ready at `ready()`,
+/// A runner with a ticket in review whose pull request is ready at `ready()`,
 /// asks `asks` (users), was opened by `author`, and no one has reviewed; its
 /// timing read counts as fresh at whatever moment a test asks. Not opted in.
 async fn world(asks: &[&str], author: &str) -> World {
@@ -87,10 +87,10 @@ async fn world(asks: &[&str], author: &str) -> World {
     let store = &h.service.store;
     let task = store.create_task(repo.workspace, "Waits for a review", Actor::User).unwrap();
     let key = store.get_task(task.id).unwrap().key;
-    let new = NewLane { name: "review".into(), reason: "Because".into(), branch: "lane/review".into(), ..Default::default() };
-    let lane = store.create_lane(repo.workspace, &new, &[LaneCard { task_id: task.id, slice: String::new() }], None, Actor::Manager).unwrap();
-    for state in [LaneState::Building, LaneState::Review] {
-        store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
+    let new = NewTicketLine { reason: "Because".into(), branch: "ticket/review".into(), ..Default::default() };
+    store.put_on_line(task.id, &new, Actor::Manager).unwrap();
+    for stage in [Stage::Building, Stage::Reviewing] {
+        store.update_line(task.id, &LineUpdate { stage: Some(stage), ..Default::default() }, Actor::Manager).unwrap();
     }
     let pr = PrInfo {
         head_ref: format!("{key}/work"),
@@ -253,7 +253,7 @@ async fn the_owner_who_is_the_author_is_not_nudged_and_a_teammate_beside_them_is
 
 #[tokio::test]
 async fn a_teammate_s_pull_request_that_a_card_key_matched_is_never_nudged_in_the_owner_s_name() {
-    // The card key names the PR's branch, so the lane finds it; its author is dave.
+    // The card key names the PR's branch, so the ticket finds it; its author is dave.
     let w = world(&["alice"], "dave").await;
     w.opt_in(on());
     let rec = Recorder::new(Posted::Yes);

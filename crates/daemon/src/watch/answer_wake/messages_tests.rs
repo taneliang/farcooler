@@ -1,9 +1,8 @@
-//! Messages between an orchestrator and its lanes (ov-455), typed into
+//! Messages between an orchestrator and its agents (ov-455), typed into
 //! stand-ins on the real tmux server of `tests`, whose helpers these use.
 
 use super::*;
 use crate::watch::task_notice::AgentNews;
-use farcooler_store::plan::{LaneCard, NewLane};
 
 impl Board {
     /// Pump until `si` has logged `n` submissions, a pass at a time as the
@@ -63,13 +62,14 @@ impl Board {
         self.svc.store.pending_message_wakes().unwrap()
     }
 
-    /// A lane named `name` holding the task, worked by a claude pane opened
-    /// for it as a lane dispatch opens one.
-    pub(super) async fn lane_pane(&self, name: &str) -> Terminal {
-        let cards = [LaneCard { task_id: self.task.id, slice: String::new() }];
-        let new = NewLane { name: name.into(), ..Default::default() };
-        self.svc.store.create_lane(self.task.workspace_id, &new, &cards, None, Actor::Manager).unwrap();
-        self.svc.create_terminal_in_lane(self.lane.id, "Lane", "claude", None, Some(self.task.id), Some(name)).await.unwrap()
+    /// A claude pane opened as a builder on the task, as an agent dispatch
+    /// opens one.
+    pub(super) async fn builder_pane(&self) -> Terminal {
+        let dispatch = pb::AgentDispatch { role: pb::AgentRole::Builder as i32, ..Default::default() };
+        self.svc
+            .create_terminal_as_agent(self.lane.id, "Builder", "claude", None, Some(self.task.id), Some(&dispatch))
+            .await
+            .unwrap()
     }
 }
 
@@ -118,17 +118,19 @@ async fn the_orchestrator_reaches_a_cards_agent() {
     assert_eq!(si.submitted(), ["[from the orchestrator] Rebase on main first"], "{}", si.log());
 }
 
-/// A lane is reached by its name or by any card on it, and what its agent
-/// sends is tagged with the lane.
+/// A ticket's builder is reached by the ticket's key, and what it sends is
+/// tagged with its role and its ticket.
 #[tokio::test]
-async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
+async fn a_builder_is_addressed_by_its_ticket_and_tags_its_own() {
     let b = board().await;
     b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
-    let pane = b.lane_pane("mac-ux").await;
+    let pane = b.builder_pane().await;
     let si = b.stand_in(&pane, "claude", "claude").await;
     b.doing(pane.id, AgentActivity::Idle).await;
-    assert_eq!(b.send("manager", "MAC-UX", "Ship it").await.unwrap().recipient, "the lane mac-ux");
-    assert_eq!(b.send("manager", &b.task.key, "Then stop").await.unwrap().recipient, "the lane mac-ux");
+    let key = b.task.key.clone();
+    let builder = format!("the builder on {key}");
+    assert_eq!(b.send("manager", &key.to_uppercase(), "Ship it").await.unwrap().recipient, builder);
+    assert_eq!(b.send("manager", &key, "Then stop").await.unwrap().recipient, builder);
     assert!(b.messages().iter().all(|w| w.to == Some(pane.id)));
     b.pump_until_submits(&si, 1).await;
     b.doing(pane.id, AgentActivity::Idle).await;
@@ -141,10 +143,10 @@ async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
     b.send(&agent_actor(&pane), "orchestrator", "Done").await.unwrap();
     b.pump().await;
     osi.submits(1).await;
-    assert_eq!(osi.submitted(), [format!("[from mac-ux on {}] Done", b.task.key)], "{}", osi.log());
+    assert_eq!(osi.submitted(), [format!("[from the builder on {key}] Done")], "{}", osi.log());
 }
 
-/// Hub and spoke: an agent can't message another lane or card; nobody
+/// Hub and spoke: an agent can't message another agent or card; nobody
 /// messages themselves; a message is one bounded line; and a recipient can't
 /// be flooded. Nothing is filed for a refusal.
 #[tokio::test]
@@ -168,7 +170,7 @@ async fn refusals_file_nothing() {
 
 const LONGEST_TEXT_FOR_TESTS: usize = messages::LONGEST_TEXT;
 
-/// A lane's agent that ends its turn without reporting has its orchestrator
+/// A builder that ends its turn without reporting has its orchestrator
 /// told, once; one that reported isn't told about.
 #[tokio::test]
 async fn a_silent_stop_tells_the_orchestrator_once() {
@@ -176,37 +178,37 @@ async fn a_silent_stop_tells_the_orchestrator_once() {
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let pane = b.lane_pane("phones").await;
-    let finished = AgentNews::Finished { label: "Lane".into(), said: Some("All green.".into()) };
+    let pane = b.builder_pane().await;
+    let finished = AgentNews::Finished { label: "Builder".into(), said: Some("All green.".into()) };
     let began = now_millis() - 1_000;
-    b.watcher.lane_stopped(pane.id, &b.task, &finished, Some(began));
-    b.watcher.lane_stopped(pane.id, &b.task, &finished, Some(began));
+    b.watcher.agent_stopped(pane.id, &b.task, &finished, Some(began));
+    b.watcher.agent_stopped(pane.id, &b.task, &finished, Some(began));
     assert_eq!(b.messages().len(), 1, "one notice waits at a time");
     b.pump().await;
     si.submits(1).await;
     let key = &b.task.key;
-    let said = format!("[Far Cooler] The lane phones's agent, on {key}, ended its turn without reporting. It last said: “All green.”");
+    let said = format!("[Far Cooler] The builder on {key} ended its turn without reporting. It last said: “All green.”");
     assert_eq!(si.submitted(), [said], "{}", si.log());
 
     b.svc.store.add_note(b.task.id, NoteKind::Decision, Actor::Agent { terminal: pane.id }, "Chose B", serde_json::json!({})).unwrap();
-    b.watcher.lane_stopped(pane.id, &b.task, &finished, Some(began));
+    b.watcher.agent_stopped(pane.id, &b.task, &finished, Some(began));
     assert!(b.messages().is_empty(), "it reported this turn");
-    b.watcher.lane_stopped(pane.id, &b.task, &AgentNews::Failed { label: "Lane".into() }, Some(began));
+    b.watcher.agent_stopped(pane.id, &b.task, &AgentNews::Failed { label: "Builder".into() }, Some(began));
     assert_eq!(b.messages().len(), 1, "a failed turn is told whatever it wrote");
 }
 
-/// The watcher's own transition is what tells: a lane agent read Done after
+/// The watcher's own transition is what tells: a builder read Done after
 /// working, with an orchestrator running, queues the runner's notice.
 #[tokio::test]
 async fn a_done_transition_queues_the_notice() {
     let b = board().await;
     let orchestrator = b.orchestrator().await;
     let _si = b.stand_in(&orchestrator, "claude", "claude").await;
-    let pane = b.lane_pane("phones").await;
-    let lane = b.stand_in(&pane, "claude", "claude").await;
-    lane.show("working").await;
+    let pane = b.builder_pane().await;
+    let builder = b.stand_in(&pane, "claude", "claude").await;
+    builder.show("working").await;
     b.doing(pane.id, AgentActivity::Working).await;
-    lane.show("idle").await;
+    builder.show("idle").await;
     for _ in 0..50 {
         b.watcher.sample().await;
         if !b.messages().is_empty() {
@@ -225,9 +227,9 @@ async fn a_done_transition_queues_the_notice() {
 #[tokio::test]
 async fn with_no_orchestrator_no_notice_is_queued() {
     let b = board().await;
-    let pane = b.lane_pane("phones").await;
-    let finished = AgentNews::Finished { label: "Lane".into(), said: None };
-    b.watcher.lane_stopped(pane.id, &b.task, &finished, None);
+    let pane = b.builder_pane().await;
+    let finished = AgentNews::Finished { label: "Builder".into(), said: None };
+    b.watcher.agent_stopped(pane.id, &b.task, &finished, None);
     assert!(b.messages().is_empty());
 }
 
@@ -313,14 +315,14 @@ async fn a_waiting_message_holds_back_later_ones_for_its_pane() {
     assert_eq!(si.submitted(), [format!("{tag} First"), format!("{tag} Second")], "{}", si.log());
 }
 
-/// A lane's pane that has since been made the orchestrator is the sender
-/// itself: the orchestrator messaging that lane is refused as `self`.
+/// A builder's pane that has since been made the orchestrator is the sender
+/// itself: the orchestrator messaging that ticket is refused as `self`.
 #[tokio::test]
-async fn the_orchestrator_cant_message_itself_through_a_lane() {
+async fn the_orchestrator_cant_message_itself_through_a_ticket() {
     let b = board().await;
-    let pane = b.lane_pane("phones").await;
+    let pane = b.builder_pane().await;
     b.svc.set_terminal_role(pane.id, farcooler_store::models::TerminalRole::Orchestrator).await.unwrap();
-    assert_eq!(refused(b.send("manager", "phones", "hello me").await), "self");
+    assert_eq!(refused(b.send("manager", &b.task.key, "hello me").await), "self");
     assert!(b.messages().is_empty());
 }
 

@@ -9,10 +9,10 @@ use farcooler_daemon::pr_timing::{Moment, PrTiming};
 use farcooler_daemon::stack::{CheckState, PrInfo, PrReview, PrState, PrStatus, ReviewDecision};
 use farcooler_protocol::v1::{self as pb, Scope};
 use farcooler_store::models::Actor;
-use farcooler_store::plan::{LaneCard, LaneState, LaneUpdate, NewLane};
+use farcooler_store::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 use in_process::*;
 
-/// A runner with one lane in review whose ready PR asks alice, and alice's one
+/// A runner with one ticket in review whose ready PR asks alice, and alice's one
 /// finished review in the cache: the plan then has a wait for her.
 async fn a_runner_waiting_on_alice(scope: Scope) -> (Harness, Repo) {
     let h = start(scope).await;
@@ -20,10 +20,10 @@ async fn a_runner_waiting_on_alice(scope: Scope) -> (Harness, Repo) {
     let store = &h.service.store;
     let task = store.create_task(repo.workspace, "Waits on alice", Actor::User).unwrap();
     let key = store.get_task(task.id).unwrap().key;
-    let new = NewLane { name: "review".into(), reason: "Because".into(), branch: "lane/review".into(), ..Default::default() };
-    let lane = store.create_lane(repo.workspace, &new, &[LaneCard { task_id: task.id, slice: String::new() }], None, Actor::Manager).unwrap();
-    for state in [LaneState::Building, LaneState::Review] {
-        store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
+    let new = NewTicketLine { reason: "Because".into(), branch: format!("{key}/work"), ..Default::default() };
+    store.put_on_line(task.id, &new, Actor::Manager).unwrap();
+    for stage in [Stage::Building, Stage::Reviewing] {
+        store.update_line(task.id, &LineUpdate { stage: Some(stage), ..Default::default() }, Actor::Manager).unwrap();
     }
     let pr = |number: u32, asked: &[&str], first: Option<i64>| PrInfo {
         head_ref: format!("{key}/work"),

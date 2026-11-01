@@ -72,31 +72,6 @@ pub enum Kind {
     Unknown,
 }
 
-impl Kind {
-    /// How far along: what a lane's rolled-up stage takes the least of. Unknown
-    /// is below everything, because a runner that cannot see one of a lane's
-    /// pull requests cannot claim the lane is further along than that.
-    fn progress(self) -> u8 {
-        match self {
-            Kind::Unknown => 0,
-            Kind::Building => 1,
-            Kind::AgentReview => 2,
-            Kind::Fixing => 3,
-            Kind::ChangesRequested => 4,
-            Kind::WaitingOnReviewer => 5,
-            Kind::ApprovedChecksFailing => 6,
-            Kind::ApprovedChecksRunning => 7,
-            Kind::ApprovedConflicts => 6,
-            Kind::Approved => 8,
-            Kind::Queued => 9,
-            Kind::Merged => 10,
-            // Finished without landing: it holds nothing back, and a lane
-            // whose only pull requests were closed says so (`rollup`).
-            Kind::Closed => 11,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stage {
     pub kind: Kind,
@@ -210,15 +185,6 @@ fn names(requested: &[String]) -> String {
         [a, b] => format!("{a} and {b}"),
         [a, rest @ ..] => format!("{a} and {} others", rest.len()),
     }
-}
-
-/// A lane's stage: the least advanced of its cards' (ov-312, the owner's
-/// ruling: one PR per card, so a lane with three cards has three PRs and is
-/// only as far along as the slowest). A pull request closed without merging
-/// holds nothing back unless every one of them was.
-pub fn rollup(stages: &[Stage]) -> Option<Stage> {
-    let live = stages.iter().filter(|s| s.kind != Kind::Closed);
-    live.min_by_key(|s| s.kind.progress()).or_else(|| stages.first()).cloned()
 }
 
 /// The fixture's pull requests, the card of PR `100 + n` called `ov-n`.

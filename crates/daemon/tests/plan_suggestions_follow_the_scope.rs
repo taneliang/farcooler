@@ -11,10 +11,10 @@ use farcooler_daemon::pr_timing::{Moment, PrTiming};
 use farcooler_daemon::stack::{CheckState, PrInfo, PrReview, PrState, PrStatus, ReviewDecision};
 use farcooler_protocol::v1::{self as pb, Scope};
 use farcooler_store::models::Actor;
-use farcooler_store::plan::{LaneCard, LaneState, LaneUpdate, NewLane};
+use farcooler_store::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 use in_process::*;
 
-/// A runner with one lane in review whose open PR (number 31, head `abc`) asks
+/// A runner with one ticket in review whose open PR (number 31, head `abc`) asks
 /// `asks`, with alice and bob suggested for it.
 async fn a_runner_with_suggestions(scope: Scope, asks: &[&str], first_review: Moment) -> (Harness, Repo, Vec<u8>) {
     let h = start(scope).await;
@@ -22,10 +22,10 @@ async fn a_runner_with_suggestions(scope: Scope, asks: &[&str], first_review: Mo
     let store = &h.service.store;
     let task = store.create_task(repo.workspace, "Needs a reviewer", Actor::User).unwrap();
     let key = store.get_task(task.id).unwrap().key;
-    let new = NewLane { name: "review".into(), reason: "Because".into(), branch: "lane/review".into(), ..Default::default() };
-    let lane = store.create_lane(repo.workspace, &new, &[LaneCard { task_id: task.id, slice: String::new() }], None, Actor::Manager).unwrap();
-    for state in [LaneState::Building, LaneState::Review] {
-        store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
+    let new = NewTicketLine { reason: "Because".into(), branch: format!("{key}/work"), ..Default::default() };
+    store.put_on_line(task.id, &new, Actor::Manager).unwrap();
+    for stage in [Stage::Building, Stage::Reviewing] {
+        store.update_line(task.id, &LineUpdate { stage: Some(stage), ..Default::default() }, Actor::Manager).unwrap();
     }
     let pr = PrInfo {
         head_ref: format!("{key}/work"),
@@ -49,10 +49,10 @@ async fn a_runner_with_suggestions(scope: Scope, asks: &[&str], first_review: Mo
     h.service.pr_cache_put(repo.id, Some(vec![pr]));
     let some = |reviewer: &str, source| Suggestion { reviewer: reviewer.into(), source };
     farcooler_daemon::pr_suggest::put(repo.id, 31, "abc", vec![some("alice", Source::Codeowners), some("bob", Source::History)]);
-    (h, repo, lane.id.as_bytes().to_vec())
+    (h, repo, task.id.as_bytes().to_vec())
 }
 
-async fn suggested(h: &Harness, repo: &Repo) -> Vec<pb::LaneReviewers> {
+async fn suggested(h: &Harness, repo: &Repo) -> Vec<pb::TicketReviewers> {
     let mut link = connect(h).await;
     let p = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: repo.workspace.as_bytes().to_vec().into(), include_closed: false });
     let mut req = farcooler_transport::request("plan.get");
@@ -66,10 +66,10 @@ async fn suggested(h: &Harness, repo: &Repo) -> Vec<pb::LaneReviewers> {
 
 #[tokio::test]
 async fn a_control_peer_sees_whom_to_ask_and_where_from_and_a_read_peer_sees_none() {
-    let (control, repo, lane) = a_runner_with_suggestions(Scope::Control, &[], Moment::NotYet).await;
+    let (control, repo, ticket) = a_runner_with_suggestions(Scope::Control, &[], Moment::NotYet).await;
     let seen = suggested(&control, &repo).await;
     assert_eq!(seen.len(), 1, "{seen:?}");
-    assert_eq!((seen[0].lane_id.to_vec(), seen[0].pr), (lane, 31));
+    assert_eq!((seen[0].task_id.to_vec(), seen[0].pr), (ticket, 31));
     assert_eq!(seen[0].reviewers, ["alice", "bob"]);
     assert_eq!(seen[0].sources, ["CODEOWNERS", "recent commits"]);
 

@@ -4,27 +4,28 @@
 /// The watch has no sockets, so the relay is its only way to hear this. Each
 /// runner decides its glance (`crates/daemon/src/plan_glance.rs`) and sends it
 /// on a count notice as `plan`: per board with a plan, the board's name, its
-/// Needs You count, up to two Now lanes by name and state word, and the lane
-/// next up. This file keeps the newest per runner (migration 0020), picks the
+/// Needs You count, up to two tickets in Now by key and stage word, and the
+/// ticket next up (ov-872). This file keeps the newest per runner (migration 0020), picks the
 /// one board the glance draws (`leadPlan`), and hands it to the card
 /// (`withFleet`) and to `/v1/pulse`.
 ///
-/// **Additive.** A runner older than it sends no `plan`; an app older than it
-/// ignores the key on the card and in the pulse. Nothing that was sent before
-/// changes.
+/// **Not additive since ov-872.** A Now entry is `{ticket, stage}`, where it
+/// was a lane's `{name, state}`: the owner chose to break older runners and
+/// apps. An entry in the old shape is dropped, so an older runner's glance
+/// reads as boards with nothing in Now until it updates.
 ///
-/// **Lane names and a board's name, never card text.** The runner sends no
+/// **Ticket keys and a board's name, never card text.** The runner sends no
 /// more than that, and this file keeps no more than it can bound: anything
 /// else on an entry is dropped, and a value of the wrong shape costs its
 /// board, never the notice.
 
 import { cut, quietAfterMs, WORKSPACE_BUDGET } from './bounds'
 
-/// A lane in Now: its name, and its state as the runner's store spells it
-/// (`building`, `review`, `fixing`, `landing`). The apps say the word.
-export interface PlanLane {
-  name: string
-  state: string
+/// A ticket in Now: its key, and its stage as the runner's store spells it
+/// (`building`, `reviewing`, `needs_you`, `landing`). The apps say the word.
+export interface PlanTicket {
+  ticket: string
+  stage: string
 }
 
 /// One board's glance.
@@ -33,31 +34,31 @@ export interface PlanBoard {
   /// The board's Needs You count: its needs-you items plus its themes asking
   /// the owner, the number the Mac says for the board (`WorkspaceNeedsYou`).
   needsYou: number
-  now: PlanLane[]
+  now: PlanTicket[]
   /// Absent when nothing is queued in the plan.
   next?: string
 }
 
-/// How many boards a runner's glance keeps, and Now lanes a board keeps: the
-/// runner's own `BOARDS_SENT` and `NOW_SENT`.
+/// How many boards a runner's glance keeps, and Now tickets a board keeps:
+/// the runner's own `BOARDS_SENT` and `NOW_SENT`.
 export const PLAN_BOARDS_KEPT = 3
 export const PLAN_NOW_KEPT = 2
 
-/// The most of a lane's name kept, in bytes. The runner's store bounds a name
-/// at 60 characters, and a lane name is a branch-like slug, so this cuts only
-/// a name in a wide script.
+/// The most of a ticket's key kept, in bytes. A key is a short prefix and a
+/// number, so this cuts only a key gone wrong.
 ///
 /// Payload arithmetic, beside `ROWS_SHOWN`'s in `index.ts`: the card's `plan`
 /// is at most `,"plan":` and a board of a 48-byte workspace, a ten-digit
-/// count, two lanes of 60 + 16 bytes and a 60-byte next up, under 360 bytes
+/// count, two tickets of 60 + 16 bytes and a 60-byte next up, under 360 bytes
 /// with its keys. That moves `ROWS_SHOWN`'s fixed part from 774 to about
 /// 1,130, and `(4096 - 1130) / 484` is still 6, over the 4 rows a card draws.
 /// It is set before the rows, so `STATE_BUDGET` prices it either way.
 export const PLAN_NAME_BUDGET = 60
 
-/// A state word: lowercase letters, as the store spells one. A word invented
-/// later is kept; the apps say "Unknown" for a word they don't know.
-const STATE = /^[a-z]{1,16}$/
+/// A stage word: lowercase letters and underscores, as the store spells one
+/// (`needs_you`). A word invented later is kept; the apps say "Unknown" for a
+/// word they don't know.
+const STAGE = /^[a-z_]{1,16}$/
 
 /// `raw` as a glance worth keeping: each board that has a name and a count,
 /// cut to the bounds above. `null` when it isn't a list at all, which keeps
@@ -71,19 +72,19 @@ export function planGlanceOf(raw: unknown): PlanBoard[] | null {
     const { workspace, needsYou, now, next } = entry as Record<string, unknown>
     if (typeof workspace !== 'string' || workspace.trim() === '') continue
     if (typeof needsYou !== 'number' || !Number.isInteger(needsYou) || needsYou < 0) continue
-    const lanes: PlanLane[] = []
-    for (const lane of Array.isArray(now) ? now : []) {
-      if (lanes.length === PLAN_NOW_KEPT) break
-      const { name, state } = (typeof lane === 'object' && lane !== null ? lane : {}) as Record<string, unknown>
-      if (typeof name !== 'string' || name === '' || typeof state !== 'string' || !STATE.test(state)) continue
-      lanes.push({ name: cut(name, PLAN_NAME_BUDGET), state })
+    const tickets: PlanTicket[] = []
+    for (const entry of Array.isArray(now) ? now : []) {
+      if (tickets.length === PLAN_NOW_KEPT) break
+      const { ticket, stage } = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>
+      if (typeof ticket !== 'string' || ticket === '' || typeof stage !== 'string' || !STAGE.test(stage)) continue
+      tickets.push({ ticket: cut(ticket, PLAN_NAME_BUDGET), stage })
     }
     boards.push({
       workspace: cut(workspace.trim(), WORKSPACE_BUDGET),
       // `Int` is 32 bits on an arm64_32 watch, so a count past it would fail
       // to decode there and read as none.
       needsYou: Math.min(needsYou, 0x7fffffff),
-      now: lanes,
+      now: tickets,
       ...(typeof next === 'string' && next !== '' ? { next: cut(next, PLAN_NAME_BUDGET) } : {}),
     })
   }

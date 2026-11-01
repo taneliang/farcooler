@@ -14,7 +14,7 @@ use in_process::*;
 fn the_two() -> Vec<pb::Request> {
     let nobody = bytes::Bytes::copy_from_slice(uuid::Uuid::from_u128(7).as_bytes());
     let mut ready = request_for("pr.ready");
-    ready.payload = Some(request::Payload::PrReady(pb::PrReady { lane_id: nobody.clone(), pr_number: 12 }));
+    ready.payload = Some(request::Payload::PrReady(pb::PrReady { task_id: nobody.clone(), pr_number: 12 }));
     let mut reply = request_for("pr.thread_reply");
     reply.payload =
         Some(request::Payload::PrThreadReply(pb::PrThreadReply { task_id: nobody, body: "Hello".into(), send: true, note_id: Default::default(), digest: String::new() }));

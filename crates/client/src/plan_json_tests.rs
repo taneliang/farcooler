@@ -9,36 +9,36 @@ fn id(n: u128) -> bytes::Bytes {
     bytes::Bytes::copy_from_slice(Uuid::from_u128(n).as_bytes())
 }
 
-fn lane(n: u128, name: &str, state: pb::LaneState, cards: &[u128]) -> pb::Lane {
-    pb::Lane {
-        id: id(0x2000 + n),
-        name: name.into(),
-        state: state as i32,
-        state_since: NOW - 10 * 60_000,
-        cards: cards.iter().map(|c| pb::LaneCard { task_id: id(0x1000 + c), slice: String::new(), stage: None }).collect(),
+fn line(n: u128, stage: pb::TicketStage) -> pb::TicketLine {
+    pb::TicketLine {
+        task_id: id(0x1000 + n),
+        stage: stage as i32,
+        stage_since: NOW - 10 * 60_000,
+        created_at: NOW - 5 * HOUR,
+        resource_version: 1,
         spend: Some(Default::default()),
         ..Default::default()
     }
 }
 
-/// The plan the CLI's own fixture test builds (`plan_json_is_the_shape_the_mac_reads`),
-/// so the same file holds both.
+fn work(agent: u128, task: u128, role: pb::WorkRole, started_at: i64) -> pb::TicketWork {
+    pb::TicketWork { agent_id: id(0x7000 + agent), task_id: id(0x1000 + task), role: role as i32, started_at, ..Default::default() }
+}
+
+/// The plan the CLI's own fixture test builds, so the same file holds both: a
+/// ticket waiting next up, one in review after a fix round, one landing on
+/// Landing 9 (its CI red), and one landed; an orchestrator, a builder working
+/// two tickets and a reviewer.
 fn the_plan() -> pb::Plan {
-    let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
-    queued.plan_rank = Some(1);
-    queued.reason = "Frees the Mac slot".into();
-    queued.title = "Mac follow-ups".into();
-    let mut review = lane(2, "mac-ux", pb::LaneState::Review, &[1]);
-    review.title = "Mac interface polish".into();
-    review.train = Some("integ-9".into());
+    let mut waiting = line(2, pb::TicketStage::Waiting);
+    waiting.plan_rank = Some(1);
+    waiting.reason = "Frees the Mac slot".into();
+    let mut review = line(1, pb::TicketStage::Reviewing);
     review.reason = "Five small Mac fixes, batched".into();
-    review.worktree_path = ".claude/worktrees/mac-ux".into();
-    review.branch = "mac-ux".into();
-    review.harness = "claude".into();
-    review.model = "opus".into();
+    review.worktree_path = ".claude/worktrees/ov-1".into();
+    review.branch = "ov-1-mac-polish".into();
     review.fix_rounds = 1;
-    review.cards[0].slice = "Mac".into();
-    review.spend = Some(pb::LaneSpend {
+    review.spend = Some(pb::Spend {
         input_tokens: 300_000,
         output_tokens: 170_000,
         cost_micros: Some(31_000_000),
@@ -48,32 +48,31 @@ fn the_plan() -> pb::Plan {
         ..Default::default()
     });
     review.budget_tokens = Some(500_000);
-    review.agents = vec![
-        pb::LaneAgent {
-            harness: "claude".into(),
-            agent_id: "a1".into(),
-            role: pb::LaneAgentRole::Build as i32,
-            model: "opus".into(),
-            started_at: NOW - 3 * HOUR,
-            ended_at: Some(NOW - HOUR),
-        },
-        pb::LaneAgent {
-            harness: "claude".into(),
-            agent_id: "a2".into(),
-            role: pb::LaneAgentRole::Review as i32,
-            model: "sonnet".into(),
-            started_at: NOW - 25 * 60_000,
-            ended_at: None,
-        },
+    review.work = vec![
+        pb::TicketWork { ended_at: Some(NOW - HOUR), verdict: "finished".into(), ..work(2, 1, pb::WorkRole::Build, NOW - 3 * HOUR) },
+        work(3, 1, pb::WorkRole::Review, NOW - 25 * 60_000),
     ];
-    let mut landed = lane(3, "fix-ac84", pb::LaneState::Landed, &[3]);
-    landed.state_since = NOW - HOUR;
+    let mut landing = line(4, pb::TicketStage::Landing);
+    landing.branch = "ov-4-glance".into();
+    landing.stack_parent = Some(id(0x1001));
+    landing.landing = Some(9);
+    landing.pr_number = Some(31);
+    landing.work = vec![work(2, 4, pb::WorkRole::Build, NOW - 2 * HOUR)];
+    let mut landed = line(3, pb::TicketStage::Landed);
+    landed.stage_since = NOW - HOUR;
     landed.landed_sha = Some("4d3c8cb1e2".into());
     let task = |n: u128, key: &str, status: pb::TaskStatus| pb::PlanCard {
         task_id: id(0x1000 + n),
         key: key.into(),
         title: format!("Title of {key}"),
         status: status as i32,
+    };
+    let agent = |n: u128, role: pb::AgentRole| pb::Agent {
+        id: id(0x7000 + n),
+        role: role as i32,
+        harness: "claude".into(),
+        started_at: NOW - 4 * HOUR,
+        ..Default::default()
     };
     pb::Plan {
         now_ms: NOW,
@@ -91,7 +90,7 @@ fn the_plan() -> pb::Plan {
             }),
             task_ids: vec![id(0x1001), id(0x1002), id(0x1003)],
             counts: Some(pb::PlanStatusCounts { done: 1, backlog: 2, ..Default::default() }),
-            spend: Some(pb::LaneSpend {
+            spend: Some(pb::Spend {
                 input_tokens: 235_000,
                 output_tokens: 85_000,
                 cost_micros: Some(15_500_000),
@@ -102,17 +101,13 @@ fn the_plan() -> pb::Plan {
             trend_tokens: vec![0, 0, 0, 40_000, 120_000, 0, 160_000],
             last_moved_at: Some(NOW - HOUR),
         }],
-        order: vec![queued.id.clone()],
-        lanes: vec![queued, review, landed],
+        lines: vec![waiting, review, landing, landed],
         cards: vec![
-            task(1, "ov-1", pb::TaskStatus::InProgress),
+            task(1, "ov-1", pb::TaskStatus::InReview),
             task(2, "ov-2", pb::TaskStatus::Backlog),
-            task(3, "ov-3", pb::TaskStatus::Done),
-        ],
-        coverage: vec![
-            pb::PlanCoverage { task_id: id(0x1001), live: 1, landed: 0 },
-            pb::PlanCoverage { task_id: id(0x1002), live: 1, landed: 0 },
-            pb::PlanCoverage { task_id: id(0x1003), live: 0, landed: 1 },
+            task(3, "ov-3", pb::TaskStatus::InProgress),
+            task(4, "ov-4", pb::TaskStatus::InProgress),
+            task(5, "ov-5", pb::TaskStatus::InProgress),
         ],
         // The CLI test's two rulings (ov-304): R-2 standing, R-1 confirmed.
         rulings: vec![
@@ -149,8 +144,8 @@ fn the_plan() -> pb::Plan {
                 ..Default::default()
             },
         ],
-        trains: trains().0,
-        ci: trains().1,
+        landings: landings().0,
+        ci: landings().1,
         board_counts: Some(pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }),
         cost: Some(pb::PlanCost {
             week_tokens: 34_200_000,
@@ -181,30 +176,45 @@ fn the_plan() -> pb::Plan {
             week_unsplit_cache_write_tokens: 0,
         }),
         agents: vec![
-        pb::PlanAgent {
-            id: "pane:orchestrator".into(), role: pb::PlanAgentRole::Orchestrator as i32, harness: "claude".into(),
-            model: "opus".into(), working: true, started_at: NOW - 4 * HOUR, last_at: NOW,
-            spend: Some(pb::LaneSpend {
-                input_tokens: 2_000_000, output_tokens: 100_000, cost_micros: Some(14_200_000), runs: 4, ..Default::default()
-            }),
-            ..Default::default()
-        },
-        pb::PlanAgent {
-            id: "agent:a2".into(), role: pb::PlanAgentRole::Review as i32, harness: "claude".into(), model: "sonnet".into(),
-            lane_id: Some(id(0x2002)), lane_name: "mac-ux".into(), working: true, started_at: NOW - 25 * 60_000,
-            last_at: NOW - 5 * 60_000,
-            spend: Some(pb::LaneSpend { input_tokens: 200_000, runs: 1, ..Default::default() }),
-            ..Default::default()
-        },
-        pb::PlanAgent {
-            id: "agent:s1".into(), role: pb::PlanAgentRole::Subagent as i32, harness: "claude".into(), model: "sonnet".into(),
-            label: "Design ov-503".into(), working: true, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * 60_000,
-            spend: Some(pb::LaneSpend { input_tokens: 90_000, cost_micros: Some(600_000), runs: 1, ..Default::default() }),
-            ..Default::default()
-        },
-    ],
+            pb::Agent {
+                model: "opus".into(),
+                terminal_id: Some(id(0x8001)),
+                working: true,
+                doing_now: "2/5 · Reviewing the plan".into(),
+                last_at: NOW,
+                spend: Some(pb::Spend {
+                    input_tokens: 2_000_000, output_tokens: 100_000, cost_micros: Some(14_200_000), runs: 4, ..Default::default()
+                }),
+                ..agent(1, pb::AgentRole::Orchestrator)
+            },
+            pb::Agent {
+                model: "sonnet".into(),
+                title: "Review ov-1".into(),
+                subagent_id: "a3".into(),
+                parent_terminal_id: Some(id(0x8001)),
+                started_at: NOW - 25 * 60_000,
+                tickets: vec![pb::AgentTicket { task_id: id(0x1001), role: pb::WorkRole::Review as i32, started_at: NOW - 25 * 60_000 }],
+                working: true,
+                doing_now: "Reading PlanColumn.swift".into(),
+                last_at: NOW - 5 * 60_000,
+                spend: Some(pb::Spend { input_tokens: 200_000, runs: 1, ..Default::default() }),
+                ..agent(3, pb::AgentRole::Reviewer)
+            },
+            pb::Agent {
+                harness: "codex".into(),
+                model: "gpt-5.6".into(),
+                title: "Build the glance".into(),
+                terminal_id: Some(id(0x8002)),
+                stop_asked_at: Some(NOW - 60_000),
+                tickets: vec![pb::AgentTicket { task_id: id(0x1004), role: pb::WorkRole::Build as i32, started_at: NOW - 2 * HOUR }],
+                working: false,
+                last_at: NOW - 2 * 60_000,
+                spend: Some(pb::Spend { unmeasured_agents: 1, ..Default::default() }),
+                ..agent(2, pb::AgentRole::Builder)
+            },
+        ],
         // What the day cost, three agents that are gone included.
-        agents_spend: Some(pb::LaneSpend {
+        agents_spend: Some(pb::Spend {
             input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
         }),
         review_waits: vec![],
@@ -212,39 +222,49 @@ fn the_plan() -> pb::Plan {
     }
 }
 
-/// A train (ov-309): integ-9, red, carrying mac-ux, and the runner's CI read
-/// of its SHA. The client's `plan_json` test builds the same, so one fixture
-/// holds both.
-fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
+/// Landing 9 (ov-309, ov-872): red, carrying ov-4, with a lander, and the
+/// runner's CI read of its SHA; and Landing 8, landed with ov-3.
+fn landings() -> (Vec<pb::Landing>, Vec<pb::BoardCiRead>) {
     let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
-    let train = pb::BoardTrain {
+    let red = pb::Landing {
         id: id(0x6001),
         workspace_id: id(0x0202),
-        name: "integ-9".into(),
+        number: 9,
+        route: pb::LandingRoute::Push as i32,
         base: "origin/main".into(),
         pushed_sha: Some("c85bf83d".into()),
-        state: pb::BoardTrainState::Red as i32,
+        state: pb::LandingState::Red as i32,
         state_since: NOW - 20 * 60_000,
-        actor: "manager".into(),
+        lander_id: Some(id(0x7004)),
+        collecting: false,
+        actor: "runner".into(),
         created_at: NOW - 2 * HOUR,
         landed_at: None,
-        lane_ids: vec![id(0x2002)],
-        ci_subject: "sha:c85bf83d".into(),
         resource_version: 3,
-        title: "Train 9".into(),
-        summary: "Mac interface polish".into(),
-        agent: Some(pb::TrainAgent {
-            harness: "claude".into(),
-            agent_id: "i1".into(),
-            model: "sonnet".into(),
-            started_at: NOW - HOUR,
-            ended_at: None,
-            spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
-        }),
-        card_id: Some(id(0x1002)),
-        phase: pb::BoardTrainPhase::CiFailed as i32,
-        held_by: Vec::new(),
+        task_ids: vec![id(0x1004)],
+        ci_subject: "sha:c85bf83d".into(),
+        title: "Landing 9".into(),
+        summary: "Title of ov-4".into(),
+        phase: pb::LandingPhase::CiFailed as i32,
         phase_since: NOW - 20 * 60_000,
+        spend: Some(pb::Spend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
+    };
+    let landed = pb::Landing {
+        id: id(0x6002),
+        number: 8,
+        route: pb::LandingRoute::Push as i32,
+        pushed_sha: Some("4d3c8cb1e2".into()),
+        state: pb::LandingState::Landed as i32,
+        state_since: NOW - HOUR,
+        landed_at: Some(NOW - HOUR),
+        actor: "runner".into(),
+        task_ids: vec![id(0x1003)],
+        ci_subject: "sha:4d3c8cb1e2".into(),
+        title: "Agents message the plan".into(),
+        summary: "Title of ov-3".into(),
+        phase: pb::LandingPhase::Landed as i32,
+        phase_since: NOW - HOUR,
+        ..Default::default()
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),
@@ -256,7 +276,7 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         changed_at: NOW - 20 * 60_000,
         asked_at: NOW - 60_000,
     };
-    (vec![train], vec![read])
+    (vec![red, landed], vec![read])
 }
 
 fn fixture() -> Value {
@@ -269,11 +289,29 @@ fn fixture() -> Value {
 /// client, and what `plan_json` makes of it is `test/fixtures/plan.json`: the
 /// file the CLI's test holds `farcooler plan --json` to, and that AgentKit's and
 /// Android's decoders read. A key renamed here, or a field dropped, goes red.
+///
+/// `FARCOOLER_WRITE_FIXTURES=1` writes the file from the plan first, for a
+/// change to the shape that is meant.
 #[test]
 fn the_wire_reads_into_the_fixture_the_apps_decode() {
     let bytes = the_plan().encode_to_vec();
     let over_the_wire = pb::Plan::decode(bytes.as_slice()).unwrap();
-    assert_eq!(plan_json(&over_the_wire), fixture());
+    let json = plan_json(&over_the_wire);
+    if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/plan.json");
+        std::fs::write(path, serde_json::to_string_pretty(&json).unwrap() + "\n").unwrap();
+    }
+    assert_eq!(json, fixture());
+}
+
+/// The reconciliation's flags: an open card whose ticket landed, and a card in
+/// progress that isn't on the line.
+#[test]
+fn the_flags_name_a_landed_open_card_and_one_off_the_line() {
+    let json = plan_json(&the_plan());
+    let keys = |flag: &str| json[flag].as_array().unwrap().iter().map(|c| c["key"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(keys("landed_not_closed"), ["ov-3"]);
+    assert_eq!(keys("off_the_line"), ["ov-5"]);
 }
 
 /// A day with no spend still arrives as an object: clients tell a runner that lists only the agents that
@@ -281,7 +319,7 @@ fn the_wire_reads_into_the_fixture_the_apps_decode() {
 #[test]
 fn a_day_with_no_spend_still_sends_the_object() {
     let mut plan = the_plan();
-    plan.agents_spend = Some(pb::LaneSpend::default());
+    plan.agents_spend = Some(pb::Spend::default());
     let over_the_wire = pb::Plan::decode(plan.encode_to_vec().as_slice()).unwrap();
     assert!(over_the_wire.agents_spend.is_some(), "prost dropped an empty submessage");
     assert!(plan_json(&over_the_wire)["agents_spend"].is_object());
@@ -323,26 +361,24 @@ fn an_unlisted_card_is_named_by_its_short_id() {
     assert_eq!(json["themes"][0]["cards"][0]["key"], "00001001");
 }
 
-/// A lane's pull request stage (ov-312) reaches the phones' JSON, and a lane the
-/// runner said nothing of keeps the shape the fixture holds, with no `stage`.
+/// A ticket's pull request stage (ov-312) reaches the phones' JSON, and a
+/// ticket the runner said nothing of keeps the shape the fixture holds, with no
+/// `pr_stage`.
 #[test]
-fn a_lane_s_pr_stage_reaches_the_json_and_is_left_out_when_unsaid() {
+fn a_ticket_s_pr_stage_reaches_the_json_and_is_left_out_when_unsaid() {
     let mut plan = the_plan();
-    let at = plan.lanes.iter().position(|l| l.name == "mac-ux").unwrap();
-    let stage = pb::PrStage {
+    let at = plan.lines.iter().position(|l| l.task_id == id(0x1004)).unwrap();
+    plan.lines[at].pr_stage = Some(pb::PrStage {
         kind: pb::PrStageKind::Queued as i32,
         label: "Queued, Position 2".into(),
         queue_position: 2,
         pr_number: 31,
         ..Default::default()
-    };
-    plan.lanes[at].stage = Some(stage.clone());
-    plan.lanes[at].cards[0].stage = Some(stage);
+    });
     let json = plan_json(&plan);
-    assert_eq!(json["lanes"][at]["stage"]["label"], "Queued, Position 2");
-    assert_eq!(json["lanes"][at]["stage"]["kind"], "queued");
-    assert_eq!(json["lanes"][at]["cards"][0]["stage"]["queue_position"], 2);
-    assert!(json["lanes"][(at + 1) % plan.lanes.len()].get("stage").is_none());
+    assert_eq!(json["lines"][at]["pr_stage"]["label"], "Queued, Position 2");
+    assert_eq!(json["lines"][at]["pr_stage"]["kind"], "queued");
+    assert!(json["lines"][(at + 1) % plan.lines.len()].get("pr_stage").is_none());
 }
 
 /// The waits appear in the JSON only when the runner sent some (ov-579), so the
@@ -361,7 +397,7 @@ fn review_waits_appear_only_when_sent_and_an_absent_median_is_null() {
 fn suggested_reviewers_appear_only_when_sent() {
     let mut plan = pb::Plan::default();
     assert!(plan_json(&plan).get("suggested_reviewers").is_none());
-    plan.suggested_reviewers = vec![pb::LaneReviewers { lane_id: vec![1].into(), pr: 31, reviewers: vec!["alice".into()], sources: vec!["CODEOWNERS".into()] }];
+    plan.suggested_reviewers = vec![pb::TicketReviewers { task_id: id(0x1001), pr: 31, reviewers: vec!["alice".into()], sources: vec!["CODEOWNERS".into()] }];
     let json = plan_json(&plan);
     assert_eq!((json["suggested_reviewers"][0]["pr"].as_u64(), json["suggested_reviewers"][0]["reviewers"][0].as_str()), (Some(31), Some("alice")));
 }

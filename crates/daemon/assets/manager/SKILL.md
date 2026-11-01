@@ -20,7 +20,7 @@ isn't a note didn't happen, so write the note before you reply.
 
 Every command below is `{{cli}}`. Every write (`task create`, `task set`,
 `task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
-`task dispatch`, `task move`, `plan`, `page set`, `message`) carries `--actor manager`,
+`task dispatch`, `task move`, `plan`, `agent`, `landing`, `page set`, `message`) carries `--actor manager`,
 since this pane may be named as an agent. No other command takes it.
 
 ## 1. Read the charter
@@ -60,7 +60,8 @@ in `worktree list --json` whose `worktree` is `git rev-parse --show-toplevel`.
 ```
 
 The plan is what the owner reads first: themes (why a group of cards exists),
-lanes (an agent in a worktree on a branch) and Next Up. `task list
+the line (each ticket's stage and who works it), the agents at work, landings
+and Next Up. `task list
 --stale-for <age>` finds the stale, `task search "<phrase>"` the notes. Read a
 whole card only to act on it.
 
@@ -89,87 +90,88 @@ lesson on its card as a decision, ask next time. Never keep one for them.
 (`ov-123: polish the sidebar`). It's how the plan shows which agent works on
 which ticket; without the key the agent shows on none.
 
-To put an agent to work, dispatch a lane (one agent, one worktree and branch,
-its cards in order): `plan lane dispatch` opens a pane on its first open card,
-briefs it on them all, and records the lane's agent and state itself; then
-give the lane its title (`plan lane set <lane> --title`). `task dispatch` does
-one card with no lane. A worktree is free only when no agent works in it
+To put an agent to work, dispatch it in a role on its tickets: `agent dispatch
+--role builder --ticket <key>…` opens a pane on the first, briefs it on them
+all, puts them on the line and records the agent itself. A builder gives each
+ticket a branch of its own, stacked on the one before when it builds on it. A
+reviewer may take tickets from any builder; one lander lands. `task dispatch`
+does one card with no role. A worktree is free only when no agent works in it
 (`terminals` in `worktree list --json`, your own pane included),
 unless `## Lanes` says otherwise: two writers in one tree commit over each other.
 A busy one is warned about, not refused: tell the owner. If a dispatch seems not
 to have taken, read `task show <key>` and `worktree list --json` before
 dispatching again, and pass `--again` only if the owner asked for a second agent.
-Confirm each dispatched lane started: dispatch says whether its agent began.
+Confirm each dispatched agent started: dispatch says whether it began.
 On "not yet", wait for the runner's message; a prompt, or `[Far Cooler] … hasn't
 started`, goes to the owner at once with the reason. Claude Code asking whether
 to trust a folder is theirs to answer, in Needs You: never answer it for them.
-A lane reports to you in this pane as "Message from @<lane> on <card>" (ctrl+o
-reads it all; never answer it with SendMessage) or `[from <lane> on <card>] …` when
+An agent reports to you in this pane as "Message from @<key>" (ctrl+o reads it
+all; never answer it with SendMessage) or `[from the builder on <key>] …` when
 it finishes, is stuck or needs a decision, `[Far Cooler] …` when it stops. So end your
-turn rather than poll, and tell the owner the lane reports to you. A report is the
-agent's claim: check the board, then act. Steer a lane with `message <lane>`.
+turn rather than poll, and tell the owner the agents report to you. A report is the
+agent's claim: check the board, then act. Steer an agent with `message <key>`.
 
 Say how each task is being worked, or why it isn't. A subagent in your own
 session: start its description with the key (`fc-12: polish the sidebar`) and
-run `task worker` with the id from its launch result, at once. The runner sees a
-Claude subagent end; for codex, or one you stop using, run `--done` (it ends
-every subagent open on the task, or only the one `--subagent` names). A task you
-won't start now says why: `task line <key>…` for the order (the whole line each
-time), `task line --build` for the build slot, `task block` for another task,
-`task wait --until "2026-10-05 09:00"` or `--after
+record it with `agent record --subagent <agentId> --role … --ticket <key>`, the
+id from its launch result, at once (never a model). The runner sees a Claude
+subagent end; for codex, or one you stop using, run `agent end <agent>
+--verdict …`. A task you won't start now says why: `task line <key>…` for the
+order (the whole line each time), `task line --build` for the build slot, `task
+block` for another task, `task wait --until "2026-10-05 09:00"` or `--after
 release|recurrence|clear-board` for a time or an event, `task wait --park` for
-work nobody plans to do. A lane dispatch puts the lane on the plan; start a
-subagent's with `plan lane start --agent <agentId>` (never a model), and move it as each thing happens.
+work nobody plans to do. Move each ticket on the line as each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
-{{cli}} plan lane dispatch <lane> --repo <repo> --card <key> --card <key> --new <name> --branch <branch> --actor manager
-{{cli}} plan lane set <lane> --repo <repo> --title "<what it does, for people>" --actor manager
+{{cli}} agent dispatch --role builder --ticket <key> --ticket <key> --repo <repo> --new <name> --branch <branch> --title "<what it does>" --actor manager
 {{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
-{{cli}} message <lane> "<one line>" --repo <repo> --actor manager
-{{cli}} plan lane start <name> --repo <repo> --title "<what it does>" --card <key> --branch <branch> --model <model> --agent <id> --actor manager
-{{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
-{{cli}} plan lane set <name> --repo <repo> --state review --reason "<why it's there now>" --actor manager
+{{cli}} message <key> "<one line>" --repo <repo> --actor manager
+{{cli}} agent record --role reviewer --subagent <agentId> --ticket <key> --title "<what it does>" --repo <repo> --actor manager
+{{cli}} plan ticket set <key> --repo <repo> --stage reviewing --reason "<why it's there now>" --actor manager
+{{cli}} agent work <agent> --ticket <key> --role review --verdict approved --repo <repo> --actor manager
 ```
 
 A brief names the gates to run in the foreground, says "commit as you go", wants
 each new test seen failing, and each parser of CLI or wire output fed real bytes
-from the real producer once. Layout and product questions go to a research lane
+from the real producer once. Layout and product questions go to a research ticket
 that shows options first. Opus for designs, first reviews and unknown bugs,
-Sonnet for well-defined work. Log each lane's tokens, model and fix rounds; route by that record.
+Sonnet for well-defined work. Log each ticket's tokens, model and fix rounds; route by that record.
 
 ## 4. Land
 
-Every non-trivial change gets an agent's review first. A train starts when a
-lane is ready and takes every lane ready then (`landing`; `--force` takes one in
-review): one integrating agent rebases them, applies the reviews' fixes and runs
-every gate once. Never queue trains: fold every lane ready while one waits to
-land into it (one branch off main, one push, one CI watch),
-and split only for a conflict or a risky lane. Record that agent on the train
-(`--agent`, `--card`), never as a lane. Local gates mirror CI: every step, in its environment (display scale,
+Every non-trivial change gets an agent's review first. A ticket that passes
+review moves to landing (`plan ticket set <key> --stage landing`) and joins the
+board's collecting landing, which leaves for its gate by itself when nothing is
+ahead and main is green; the runner tells you when it does. One lander rebases
+what it carries, applies the reviews' fixes and runs every gate once. Never
+queue landings: fold every ticket ready while one waits to land into it (one
+branch off main, one push, one CI watch), and split only for a conflict or a
+risky ticket. Name its lander (`--lander`). Local gates mirror CI: every step, in its environment (display scale,
 `CI=true`, shard timeouts), and a failure only CI caught earns a local gate. A
 red main comes first; when a known-flaky test did it, rerun the failed job
 once, file a flaky card, and keep landing on the rerun's result.
 
-Keep trains on the plan, never on a hand-kept page: start one with its lanes,
-move it (`--state gating`), and give it the SHA it pushed. The runner reads
-that SHA's CI and turns the train green or red; Now shows it above its lanes.
+Keep landings on the plan, never on a hand-kept page: start one with its
+tickets when you mean to gate now, move it (`--state gating`), and give it the
+SHA it pushed. The runner reads that SHA's CI and turns the landing green or
+red; Now shows it above its tickets.
 
 ```
-{{cli}} plan train start train-<N> --repo <repo> --title "<what it carries>" --lane <lane> --lane <lane> --base origin/main --agent <id> --card <key> --actor manager
-{{cli}} plan train set train-<N> --repo <repo> --sha <pushed sha> --actor manager
+{{cli}} landing start --repo <repo> --ticket <key> --ticket <key> --base origin/main --title "<what it carries>" --lander <agent> --actor manager
+{{cli}} landing set <N> --repo <repo> --sha <pushed sha> --actor manager
 ```
 
-- **Direct.** Rebase the train onto main (no merge commits unless the charter
+- **Direct.** Rebase the landing onto main (no merge commits unless the charter
   wants them), check what's unpushed, push, start the watch (below), and close
   cards on green CI.
 - **PR.** Never push main and never merge without the required approvals: no
   admin bypass, no dismissed reviews, no resolving another's thread, and never
   approve. One PR per card, under the owner's own `gh` login, so teammates
   approve; stack only a card too big to review. A card's review fixes go on
-  its PR. The train becomes a rehearsal: a local branch merging every ready
-  PR, never pushed; when it fails, the lane that broke it gets a fix round.
+  its PR. The landing becomes a rehearsal: a local branch merging every ready
+  PR, never pushed; when it fails, the ticket that broke it gets a fix round.
   Mark a PR ready when its review is clean and CI and the rehearsal are green.
   Never slow dispatch for busy reviewers: make review faster, with a
   description that says what to look at first, the agent review's summary,
@@ -181,29 +183,29 @@ that SHA's CI and turns the train green or red; Now shows it above its lanes.
 After every push or CI rerun, take its run from `gh run list` (never decide
 there is no CI from the remote's URL; if none is listed, say so) and start `gh
 run watch <id> --exit-status` as a background command, so a red run reaches you
-and a green one frees the next train. Without one, check it before you stop.
+and a green one frees the next landing. Without one, check it before you stop.
 
 On landing, tick each verified `--met` line, close the card (`task set --status
 done`), copy out its reports, delete its build output, and `worktree remove` it.
-Direct: a green train on main lands, lanes too. PR: `lane set <lane> --state
-landed --sha <sha>` per merged PR; `plan train set train-<N> --state dropped`.
+Direct: a green landing on main lands, its tickets too. PR: `plan ticket set
+<key> --stage landed --sha <sha>` per merged PR; `landing set <N> --state dropped`.
 
 A page names what the runner knows, never types it: `{"ci":"main"}`,
-`{"ci":"<sha>"}`, `{"cards":"in_review"}`, a lane or theme `"show":"spend"`.
+`{"ci":"<sha>"}`, `{"cards":"in_review"}`, a theme `"show":"spend"`.
 
 ## 5. Check in
 
 At each check-in, and when the owner returns, re-evaluate rather than replay:
 - the plan: rewrite each theme's story (`plan theme set <name> --story …
-  --next …`), correct lane states, and reset Next Up (`plan set <lane>…`);
-- the structure: do the themes still fit the work? Should a lane split, or a
+  --next …`), correct ticket stages, and reset Next Up (`plan set <key>…`);
+- the structure: do the themes still fit the work? Should a ticket split, or a
   workstream move off?
 - the order: read the plan's history since your last turn (`plan theme show
   <name>` lists a theme's events). Respect any move a person made; see Theme
   order in Defaults;
 - initiative: unless the charter says `Initiative: off`; see Defaults;
 - what went wrong: one line in a lessons file, and a repeat becomes a brief
-  rule or a gate. Name each permission prompt that blocked you or a lane.
+  rule or a gate. Name each permission prompt that blocked you or an agent.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<the gap>" --accept "<checkable>" --label initiative --actor manager
@@ -213,7 +215,7 @@ Report from the board, not memory: what moved, what's stale, what waits on the o
 
 **Suggesting themes**, when asked: propose 3 to 5 from the last 90 days of
 commits, merged PRs and open issues (titles, not bodies), each an outcome with
-its evidence. Ask which to keep, `plan theme create` those, offer one lane.
+its evidence. Ask which to keep, `plan theme create` those, offer one ticket.
 
 ## 6. Wait
 
@@ -238,10 +240,9 @@ How the owner's own orchestrators run work. Each holds until the charter says
 otherwise: a line under the heading it concerns, or under `## Anything else`,
 wins. When the owner overrules one in chat, ask to put it in the charter.
 
-- **Names.** A train is `train-<N>`, numbered on from the last train whatever
-  it was called, and "Train N" when you speak of it; never `integ-N`. Every lane
-  and train gets a title that says what it does ("Agents message the
-  orchestrator"); the slug stays its branch and worktree.
+- **Names.** A landing is numbered by the runner, and "Landing N" when you
+  speak of it. Every agent and landing gets a title that says what it does
+  ("Agents message the orchestrator"); a ticket's branch starts with its key.
 - **Titles.** Cards are `<Area>: <outcome>`, sentence case, 45 characters or
   fewer (never over 60): Area a part of the product (Mac, CLI, Docs; the
   charter may list them), Spike for a question, Review for an audit. A feature
@@ -251,14 +252,14 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   backticks, under ~120 words, a report linked, not pasted; `--body "$(cat f)"`.
 - **Asks.** One sentence naming one decision; detail goes in the intent or a note.
   Each `--option` of an ask is a short name (30 characters max), recommended first.
-- **Trains.** Ready work never waits for a lane still building or fixing: a
-  lane that would conflict rebases onto the train and rides the next. Lanes
-  already gated alone push folded without a combined gate when they can't
+- **Landings.** Ready work never waits for a ticket still building or in a
+  fix: a ticket that would conflict rebases onto the landing and rides the next.
+  Tickets already gated alone push folded without a combined gate when they can't
   plausibly interact (shared files, wire tags, migrations, capability lists,
   generated files, test floors); gate the combined tree where they might. Two
-  lanes in one module are sequenced, or reserve shared numbers (migrations,
-  wire tags) up front. The runner tells you once of a train held 45 minutes by
-  a lane not ready: wait, or `{{cli}} plan train move <lane> --repo <repo> --actor manager`.
+  tickets in one module are sequenced or stacked, or reserve shared numbers
+  (migrations, wire tags) up front. To let a landing go without a ticket that
+  isn't ready: `{{cli}} landing move <key> --repo <repo> --actor manager`.
 - **Gates.** Every CI step (read from the remote's main), built for every
   platform the change touches, judged by exit codes, never by grepping output.
   Chain them and the push with `&&`, never `;`: `lint && test && git push`.
@@ -288,7 +289,7 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
 - **Briefs.** Check the premise against the tree first (a grep, `git log -S`).
   Ask for the full test suite, not just what was touched. About 150 words;
   agents reply in about 80, the detail in a report. A failure that repeats
-  gets a root-cause lane, not another patch. Never cut quality to save cost.
+  gets a root-cause ticket, not another patch. Never cut quality to save cost.
 
 ## Splitting a workstream off
 

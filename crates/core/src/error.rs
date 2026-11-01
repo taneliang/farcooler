@@ -108,10 +108,11 @@ pub enum DomainError {
     #[error("this runner is running an older Far Cooler that can't do this yet")]
     CapabilityUnsupported { needed: &'static str },
 
-    /// A method this runner retired on purpose, which no update brings back.
-    /// Only chat mode's so far (ov-377); an app from before then still asks.
-    #[error("Chat mode was retired. Open the agent's pane and use the conversation view instead.")]
-    MethodRetired,
+    /// A method this runner retired on purpose, which no update brings back:
+    /// chat mode's (ov-377), and lanes' and trains' (ov-872). An app from
+    /// before then still asks; `said` tells its person what took its place.
+    #[error("{said}")]
+    MethodRetired { said: &'static str },
 
     /// Someone else's to do on a shared runner (ov-494), naming which in
     /// `what`: `not_lead` (only the workspace's lead talks to its
@@ -176,6 +177,21 @@ pub enum DomainError {
 }
 
 impl DomainError {
+    /// A retired method's refusal, saying what took its place: lanes' and
+    /// trains' (ov-872), or chat mode's (ov-377).
+    pub fn retired(method: &str) -> DomainError {
+        let replaced = method.starts_with("lane.") || method.starts_with("train.") || method == "plan.set";
+        DomainError::MethodRetired {
+            said: if replaced {
+                "Lanes and trains were replaced by agents and landings. Update Far Cooler to see them."
+            } else {
+                "Chat mode was retired. Open the agent's pane and use the conversation view instead."
+            },
+        }
+    }
+}
+
+impl DomainError {
     /// Exhaustive. Adding a variant without a match arm is a compile error.
     pub fn wire(&self) -> (ErrorCode, bool) {
         match self {
@@ -213,7 +229,7 @@ impl DomainError {
             DomainError::DispatchUnknown => (ErrorCode::DispatchUnknown, true),
             // Never retryable: no amount of retrying updates the other side.
             DomainError::CapabilityUnsupported { .. } => (ErrorCode::CapabilityUnsupported, false),
-            DomainError::MethodRetired => (ErrorCode::MethodRetired, false),
+            DomainError::MethodRetired { .. } => (ErrorCode::MethodRetired, false),
             DomainError::NotYours { .. } => (ErrorCode::NotYours, false),
             // The handshake's own code, naming which in `what`, the way
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
@@ -275,7 +291,7 @@ impl DomainError {
             | DomainError::AttachmentLimit
             | DomainError::DispatchUnknown
             | DomainError::CapabilityUnsupported { .. }
-            | DomainError::MethodRetired => "",
+            | DomainError::MethodRetired { .. } => "",
         }
     }
 

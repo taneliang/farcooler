@@ -20,8 +20,6 @@
 //! pages an hour, whatever the slots are called, so the events are bounded at
 //! 120 an hour a board without a debounce.
 
-use std::collections::HashSet;
-
 use farcooler_core::page_doc::{self, Caps, Page, Target};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
@@ -103,14 +101,12 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> 
 /// What the plan layer knows about a board's names, or `None` when there is no
 /// plan layer to ask. The one place pages read it.
 struct PlanNames {
-    lanes: HashSet<String>,
     themes: Vec<(Uuid, String)>,
 }
 
 fn plan_names(svc: &Service, workspace: Uuid) -> Option<PlanNames> {
     let plan = svc.store.plan(workspace, i64::MIN).ok()?;
     Some(PlanNames {
-        lanes: plan.lanes.iter().map(|l| l.lane.name.to_lowercase()).collect(),
         themes: plan
             .themes
             .iter()
@@ -139,11 +135,12 @@ fn shown(name: &str) -> String {
     if chars.next().is_some() { format!("{head}...") } else { head }
 }
 
-/// Every card, lane and theme a page names is on this board.
+/// Every card and theme a page names is on this board.
 ///
-/// Page, worktree, terminal and link references aren't checked: a page may
-/// name another that isn't published yet, and a worktree or a terminal comes
-/// and goes with the work. An app draws one it can't find as plain text.
+/// Page, worktree, terminal, lane and link references aren't checked: a page
+/// may name another that isn't published yet, a worktree or a terminal comes
+/// and goes with the work, and lanes are gone since ov-872. An app draws one
+/// it can't find as plain text.
 fn check_references(svc: &Service, workspace: Uuid, page: &Page) -> Result<()> {
     let references = page.references();
     if references.is_empty() {
@@ -156,9 +153,6 @@ fn check_references(svc: &Service, workspace: Uuid, page: &Page) -> Result<()> {
         match &at.reference.target {
             Target::Task(key) | Target::Ask(key) if !cards.contains(&key.to_ascii_lowercase()) => {
                 return Err(missing("card", key));
-            }
-            Target::Lane(name) if plan.as_ref().is_some_and(|p| !p.lanes.contains(&name.to_lowercase())) => {
-                return Err(missing("lane", name));
             }
             Target::Theme(name) if plan.as_ref().is_some_and(|p| !p.themes.iter().any(|(_, n)| *n == name.to_lowercase())) => {
                 return Err(missing("theme", name));

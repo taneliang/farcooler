@@ -209,15 +209,15 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The plan layer's writes (ov-268): the CLI makes them, the
         // orchestrator being the layer's one writer. A phone reads `plan.get`
         // and `plan.events`, routed above, and never routes a write.
-        Method::PlanSet
+        Method::LineOrder
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
         | Method::BoardThemeCards
         | Method::BoardThemeMove
-        | Method::LaneCreate
-        | Method::LaneUpdate
-        | Method::LaneCards
-        | Method::LaneAgent
+        | Method::LineSet
+        | Method::AgentRecord
+        | Method::AgentWork
+        | Method::AgentEnd
         // A phone neither writes a page nor reads how often one is published.
         | Method::PageSet
         | Method::PageRemove
@@ -225,10 +225,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Rulings (ov-304) are read in `plan.get`'s answer. Only the
         // orchestrator records one: the owner asks it, citing the short id.
         | Method::RulingAdd
-        // Trains (ov-309) are read in `plan.get`'s answer too, and only the
-        // orchestrator writes them.
-        | Method::TrainStart
-        | Method::TrainSet
+        // Landings (ov-309, ov-872) are read in `plan.get`'s answer too, and
+        // only the orchestrator writes them.
+        | Method::LandingStart
+        | Method::LandingSet
         // Landing detection (ov-313) is the CLI's, run with the owner's `gh`.
         | Method::RepositoryLanding => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will

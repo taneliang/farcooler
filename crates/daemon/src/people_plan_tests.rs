@@ -73,18 +73,20 @@ async fn written(r: &Runner, method: &str, payload: impl Fn(&str) -> request::Pa
     }
 }
 
+
 /// What `write_the_plan` made.
 struct Written {
     theme: Uuid,
-    lane: Uuid,
+    task: Uuid,
 }
 
 /// Every plan-layer write, each refused to a released phone first: a theme
-/// with its story, Next line and ask of the owner; a lane with cards and an
-/// agent, ranked in the plan; a ruling kept and one kept with the rest; a
-/// train started and moved on; a page set and removed. Bob makes most of
+/// with its story, Next line and ask of the owner; a ticket on the line with
+/// its branch and reason, ranked in the plan; an agent recorded on it, its
+/// work ended and the agent ended; a ruling kept and one kept with the rest; a
+/// landing started and moved on; a page set and removed. Bob makes most of
 /// them; the owner's phone and the orchestrator make the rest, as before,
-/// and the orchestrator's record (a lane's agent, a train's state) is theirs
+/// and the orchestrator's record (an agent, a landing's state) is theirs
 /// alone (`a_member_writes_none_of_the_orchestrators_record`).
 async fn write_the_plan(r: &Runner) -> Written {
     use request::Payload as P;
@@ -110,22 +112,31 @@ async fn write_the_plan(r: &Runner) -> Written {
         P::BoardThemeCards(pb::BoardThemeCards { theme_id: id_bytes(theme), add: vec![id_bytes(task)], actor: actor.into(), ..Default::default() })
     }, BOB).await;
 
-    let created = written(r, "lane.create", |actor| {
-        P::LaneCreate(pb::LaneCreate { workspace_id: ws(), name: "exports-pdf".into(), reason: "Invoices first: they're most of the paper.".into(), branch: "exports-pdf".into(), actor: actor.into(), ..Default::default() })
+    let put = written(r, "line.set", |actor| {
+        P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), reason: Some("Invoices first: they're most of the paper.".into()), branch: Some("exports-pdf".into()), actor: actor.into(), ..Default::default() })
     }, LOCAL).await;
-    let result::Value::Lane(lane) = created else { panic!("{created:?}") };
-    let lane = parse_id(&lane.id).unwrap();
-    written(r, "lane.update", |actor| {
-        P::LaneUpdate(pb::LaneUpdate { lane_id: id_bytes(lane), reason: Some("Invoices first, then receipts.".into()), actor: actor.into(), ..Default::default() })
+    let result::Value::TicketLine(line) = put else { panic!("{put:?}") };
+    assert_eq!(parse_id(&line.task_id), Some(task));
+    written(r, "line.set", |actor| {
+        P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), reason: Some("Invoices first, then receipts.".into()), actor: actor.into(), ..Default::default() })
     }, BOB).await;
-    written(r, "lane.cards", |actor| {
-        P::LaneCards(pb::LaneCards { lane_id: id_bytes(lane), add: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }], actor: actor.into(), ..Default::default() })
+    written(r, "line.order", |actor| P::LineOrder(pb::LineOrder { workspace_id: ws(), task_ids: vec![id_bytes(task)], actor: actor.into() }), BOB).await;
+    let recorded = written(r, "agent.record", |actor| {
+        P::AgentRecord(pb::AgentRecord {
+            workspace_id: ws(),
+            role: pb::AgentRole::Builder as i32,
+            harness: "claude".into(),
+            subagent_id: "a-1".into(),
+            task_ids: vec![id_bytes(task)],
+            actor: actor.into(),
+            ..Default::default()
+        })
     }, LOCAL).await;
-    written(r, "lane.agent", |actor| {
-        let agent = pb::LaneAgentRecord { harness: "claude".into(), agent_id: "a-1".into(), role: pb::LaneAgentRole::Build as i32, ..Default::default() };
-        P::LaneAgentSet(pb::LaneAgentSet { lane_id: id_bytes(lane), agent: Some(agent), actor: actor.into() })
+    let result::Value::Agent(agent) = recorded else { panic!("{recorded:?}") };
+    written(r, "agent.work", |actor| {
+        P::AgentWork(pb::AgentWork { agent_id: agent.id.clone(), task_id: id_bytes(task), role: pb::WorkRole::Build as i32, verdict: Some("finished".into()), actor: actor.into() })
     }, OWNERS_PHONE).await;
-    written(r, "plan.set", |actor| P::PlanSet(pb::PlanSet { workspace_id: ws(), lane_ids: vec![id_bytes(lane)], actor: actor.into() }), BOB).await;
+    written(r, "agent.end", |actor| P::AgentEnd(pb::AgentEnd { agent_id: agent.id.clone(), verdict: "finished".into(), actor: actor.into() }), LOCAL).await;
 
     let add = |decision: &'static str| {
         move |actor: &str| {
@@ -141,12 +152,12 @@ async fn write_the_plan(r: &Runner) -> Written {
     written(r, "ruling.keep_all", |actor| P::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: actor.into() }), BOB).await;
     written(r, "ruling.add", add("Keep the paper invoice for a release"), LOCAL).await;
 
-    let started = written(r, "train.start", |actor| {
-        P::TrainStart(pb::TrainStart { workspace_id: ws(), name: "train-1".into(), base: "origin/main".into(), actor: actor.into(), ..Default::default() })
+    let started = written(r, "landing.start", |actor| {
+        P::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: actor.into(), ..Default::default() })
     }, LOCAL).await;
-    let result::Value::BoardTrain(train) = started else { panic!("{started:?}") };
-    written(r, "train.set", |actor| {
-        P::TrainSet(pb::TrainSet { train_id: train.id.clone(), state: pb::BoardTrainState::Gating as i32, actor: actor.into(), ..Default::default() })
+    let result::Value::Landing(landing) = started else { panic!("{started:?}") };
+    written(r, "landing.set", |actor| {
+        P::LandingSet(pb::LandingSet { landing_id: landing.id.clone(), state: pb::LandingState::Gating as i32, actor: actor.into(), ..Default::default() })
     }, OWNERS_PHONE).await;
 
     // The orchestrator's pages are the plan's too.
@@ -163,11 +174,11 @@ async fn write_the_plan(r: &Runner) -> Written {
     written(r, "page.set", page, BOB).await;
     written(r, "page.remove", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: "exports".into(), actor: actor.into() }), BOB).await;
     written(r, "page.set", page, LOCAL).await;
-    Written { theme, lane }
+    Written { theme, task }
 }
 
 /// Every plan-layer write is a member's to make (ov-736), and filed under
-/// them: the theme, the lane and the first ruling Bob made say
+/// them: the theme, the ticket and the first ruling Bob made say
 /// `member:bob`, saying `user` or nothing, never the owner's `user`. A
 /// released phone makes none, and the owner's phone and the orchestrator's
 /// CLI write as before.
@@ -177,30 +188,31 @@ async fn a_member_changes_the_plan_under_their_name() {
     let r = runner().await;
     let written = write_the_plan(&r).await;
     let bob = factory(&r.svc, BOB, Scope::Control);
-    let quiet = request::Payload::LaneUpdate(pb::LaneUpdate { lane_id: id_bytes(written.lane), reason: Some("Receipts next.".into()), ..Default::default() });
-    call(&bob, "lane.update", quiet).await.expect("Bob saying nothing");
+    let quiet = request::Payload::LineSet(pb::TicketLineSet { task_id: id_bytes(written.task), stage: Some(pb::TicketStage::Building as i32), ..Default::default() });
+    call(&bob, "line.set", quiet).await.expect("Bob saying nothing");
 
-    for subject in [Subject::ThemeId(id_bytes(written.theme)), Subject::LaneId(id_bytes(written.lane))] {
+    for subject in [Subject::ThemeId(id_bytes(written.theme)), Subject::TaskId(id_bytes(written.task))] {
         let events = events_as(&r, OWNERS_PHONE, Scope::Control, subject.clone()).await;
         assert!(events.iter().any(|e| e.actor == "member:bob"), "{subject:?}: {events:?}");
-        // The owner's phone recorded the lane's agent, the orchestrator's
-        // record; the theme's are Bob's and the orchestrator's alone.
+        // The owner's phone ended the agent's work on the ticket, the
+        // orchestrator's record; the theme's are Bob's and the orchestrator's
+        // alone.
         if matches!(subject, Subject::ThemeId(_)) {
             assert!(events.iter().all(|e| e.actor != "user"), "{subject:?}: nothing of Bob's is the owner's: {events:?}");
         }
     }
-    let lane = events_as(&r, OWNERS_PHONE, Scope::Control, Subject::LaneId(id_bytes(written.lane))).await;
-    assert_eq!(lane.last().map(|e| e.actor.as_str()), Some("member:bob"), "saying nothing is Bob too: {lane:?}");
+    let ticket = events_as(&r, OWNERS_PHONE, Scope::Control, Subject::TaskId(id_bytes(written.task))).await;
+    assert_eq!(ticket.last().map(|e| e.actor.as_str()), Some("member:bob"), "saying nothing is Bob too: {ticket:?}");
     let plan = plan_as(&r, OWNERS_PHONE, Scope::Control).await;
     let ruling = plan.rulings.iter().find(|ruling| ruling.decision == "Round totals half to even").expect("Bob's ruling");
     assert_eq!(ruling.actor, "member:bob");
     assert_eq!(ruling.state, pb::BoardRulingState::Confirmed as i32, "Bob kept it");
 }
 
-/// The capabilities the plan rides on (ov-268, ov-269, ov-304, ov-309, ov-333).
+/// The capabilities the plan rides on (ov-268, ov-269, ov-304, ov-333, ov-872).
 const PLAN_CAPABILITIES: [&str; 5] = {
     use farcooler_protocol::capability::*;
-    [BOARD_PLAN, BOARD_PAGES, BOARD_RULINGS, BOARD_RULING_ACTIONS, BOARD_TRAINS]
+    [BOARD_PLAN, BOARD_PAGES, BOARD_RULINGS, BOARD_RULING_ACTIONS, BOARD_LINE]
 };
 
 /// Of `methods` (name, capability, scope), the plan's writes the gate lets a
@@ -231,8 +243,9 @@ fn every_plan_write_is_covered() {
         .collect();
     writes.sort_unstable();
     let mut made = vec![
-        "plan.set", "board_theme.create", "board_theme.update", "board_theme.cards", "lane.create", "lane.update", "lane.cards",
-        "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set", "page.set", "page.remove",
+        "board_theme.create", "board_theme.update", "board_theme.cards", "line.set", "line.order", "agent.record",
+        "agent.work", "agent.end", "ruling.add", "ruling.set", "ruling.keep_all", "landing.start", "landing.set",
+        "page.set", "page.remove",
     ];
     made.sort_unstable();
     assert_eq!(writes, made, "write_the_plan makes every plan write");
@@ -242,12 +255,12 @@ fn every_plan_write_is_covered() {
 /// and not on a read behind the same capability.
 #[test]
 fn a_plan_write_under_a_new_name_is_caught() {
-    use farcooler_protocol::capability::{BOARD_PLAN, BOARD_TRAINS};
+    use farcooler_protocol::capability::{BOARD_LINE, BOARD_PLAN};
     let planted = [
         ("roadmap.reorder", BOARD_PLAN, Some(Scope::Control)),
         ("roadmap.get", BOARD_PLAN, Some(Scope::Read)),
-        ("integrate.now", BOARD_TRAINS, Some(Scope::HostAdmin)),
-        ("plan.set", BOARD_PLAN, Some(Scope::Control)),
+        ("integrate.now", BOARD_LINE, Some(Scope::HostAdmin)),
+        ("line.order", BOARD_LINE, Some(Scope::Control)),
     ];
     assert_eq!(unrefused(planted), ["roadmap.reorder", "integrate.now"]);
 }
@@ -270,8 +283,8 @@ async fn events_as(r: &Runner, device: Option<&str>, scope: Scope, subject: pb::
 }
 
 /// A member's device reads the whole plan, at Read and at Control: the
-/// themes with their stories, Next lines and asks of the owner, the ranking,
-/// the lanes, the rulings and the trains, and each theme's and lane's
+/// themes with their stories, Next lines and asks of the owner, the line with
+/// its order, the rulings and the landings, and each theme's and ticket's
 /// history. The same plan the owner's phone reads at that scope.
 #[tokio::test]
 async fn a_member_reads_the_plan_the_owner_does() {
@@ -284,15 +297,16 @@ async fn a_member_reads_the_plan_the_owner_does() {
         assert_eq!(theme.owner_ask, "Should credit notes carry the original invoice number?", "at {scope:?}");
         assert!(theme.story.starts_with("Invoices export;"), "at {scope:?}");
         assert_eq!(theme.next, "Receipts, once the rounding is settled.", "at {scope:?}");
-        assert_eq!(bob.order, vec![id_bytes(written.lane)], "at {scope:?}");
-        assert_eq!(bob.lanes.len(), 1, "at {scope:?}");
-        assert_eq!(bob.lanes[0].cards.len(), 1, "at {scope:?}");
+        assert_eq!(bob.lines.len(), 1, "at {scope:?}");
+        assert_eq!(bob.lines[0].task_id, id_bytes(written.task), "at {scope:?}");
+        assert_eq!(bob.lines[0].plan_rank, Some(1), "at {scope:?}");
+        assert_eq!(bob.lines[0].work.len(), 1, "at {scope:?}");
         assert_eq!(bob.rulings.len(), 3, "at {scope:?}");
-        assert_eq!(bob.trains.len(), 1, "at {scope:?}");
+        assert_eq!(bob.landings.len(), 1, "at {scope:?}");
         assert_eq!(bob.cards.len(), 1, "at {scope:?}");
 
         use pb::plan_events_request::Subject;
-        for subject in [Subject::ThemeId(id_bytes(written.theme)), Subject::LaneId(id_bytes(written.lane))] {
+        for subject in [Subject::ThemeId(id_bytes(written.theme)), Subject::TaskId(id_bytes(written.task))] {
             let seen = events_as(&r, BOB, scope, subject.clone()).await;
             assert!(!seen.is_empty(), "{subject:?} at {scope:?}");
             assert_eq!(seen, events_as(&r, OWNERS_PHONE, scope, subject).await, "at {scope:?}");
@@ -301,7 +315,7 @@ async fn a_member_reads_the_plan_the_owner_does() {
 }
 
 /// What posts to GitHub with the runner's own `gh` login, which is the
-/// owner's: marking a lane's draft pull request ready, replying to a review
+/// owner's: marking a ticket's draft pull request ready, replying to a review
 /// thread (sent or only previewed), and turning on the nudge that comments on
 /// a waiting pull request. A member's device and a released one are refused
 /// `not_yours`; the owner's phone and the local socket pass the gate, to be
@@ -313,7 +327,7 @@ async fn a_member_posts_nothing_as_the_owner() {
     let req = |method: &str, payload: P| Request { method: method.into(), payload: Some(payload), ..Default::default() };
     let nudge = |on: bool| P::WorkspaceSetSettings(pb::WorkspaceSetSettings { pr_nudge: Some(on), ..Default::default() });
     let posts = [
-        req("pr.ready", P::PrReady(pb::PrReady { lane_id: id_bytes(Uuid::now_v7()), pr_number: 12 })),
+        req("pr.ready", P::PrReady(pb::PrReady { task_id: id_bytes(Uuid::now_v7()), pr_number: 12 })),
         req("pr.thread_reply", P::PrThreadReply(pb::PrThreadReply { send: true, ..Default::default() })),
         req("pr.thread_reply", P::PrThreadReply(pb::PrThreadReply { send: false, ..Default::default() })),
         req("workspace.set_settings", nudge(true)),
@@ -332,89 +346,73 @@ async fn a_member_posts_nothing_as_the_owner() {
 }
 
 /// The plan's record of the work stays the orchestrator's and the owner's
-/// (ov-736, review M2): Bob's phone moving a lane to landing or landed,
-/// giving it a landed commit or an agent, making one with an agent,
-/// recording one's agent, setting a train's state or commit, and (fix round
-/// 2) starting a train, changing its lanes, base, agent or card, putting a
-/// lane on a train or taking it off, or marking a reversal done with its
-/// commit, or (rereview N2) a lane's branch or checkout, made or set, is
-/// refused `not_yours`; the owner's phone and the local socket
-/// pass the gate. Bob still queues, drops, builds, reviews and fixes a lane,
-/// asks for a reversal, and renames a train, which only say what the plan
-/// is.
+/// (ov-736, review M2; ov-872): Bob's phone moving a ticket to landing or
+/// landed, giving it a landed commit, a branch, a checkout or a stack;
+/// recording an agent, setting one to work or ending one; starting a
+/// landing, changing its state, commit, base, tickets or lander; or marking a
+/// reversal done with its commit, is refused `not_yours`; the owner's phone
+/// and the local socket pass the gate. Bob still moves a ticket to waiting,
+/// dropped, building, reviewing or needs you, gives it a reason, asks for a
+/// reversal, and renames a landing, which only say what the plan is.
 #[tokio::test]
 async fn a_member_writes_none_of_the_orchestrators_record() {
-    use pb::{BoardTrainState, LaneState};
+    use pb::{LandingState, TicketStage};
     use request::Payload as P;
     let r = runner().await;
-    let lane = |edit: &dyn Fn(&mut pb::LaneUpdate)| {
-        let mut p = pb::LaneUpdate { lane_id: id_bytes(Uuid::now_v7()), actor: "user".into(), ..Default::default() };
+    let ticket = |edit: &dyn Fn(&mut pb::TicketLineSet)| {
+        let mut p = pb::TicketLineSet { task_id: id_bytes(Uuid::now_v7()), actor: "user".into(), ..Default::default() };
         edit(&mut p);
-        Request { method: "lane.update".into(), payload: Some(P::LaneUpdate(p)), ..Default::default() }
+        Request { method: "line.set".into(), payload: Some(P::LineSet(p)), ..Default::default() }
     };
-    let train = |state: BoardTrainState, sha: Option<&str>| Request {
-        method: "train.set".into(),
-        payload: Some(P::TrainSet(pb::TrainSet { state: state as i32, sha: sha.map(str::to_string), actor: "user".into(), ..Default::default() })),
+    let landing = |state: LandingState, sha: Option<&str>| Request {
+        method: "landing.set".into(),
+        payload: Some(P::LandingSet(pb::LandingSet { state: state as i32, sha: sha.map(str::to_string), actor: "user".into(), ..Default::default() })),
         ..Default::default()
     };
-    let train_with = |edit: &dyn Fn(&mut pb::TrainSet)| {
-        let mut p = pb::TrainSet { actor: "user".into(), ..Default::default() };
+    let landing_with = |edit: &dyn Fn(&mut pb::LandingSet)| {
+        let mut p = pb::LandingSet { actor: "user".into(), ..Default::default() };
         edit(&mut p);
-        Request { method: "train.set".into(), payload: Some(P::TrainSet(p)), ..Default::default() }
+        Request { method: "landing.set".into(), payload: Some(P::LandingSet(p)), ..Default::default() }
     };
-    let agent = || Some(pb::LaneAgentRecord { harness: "claude".into(), agent_id: "a-1".into(), ..Default::default() });
     let records = [
-        ("landing", lane(&|p| p.state = Some(LaneState::Landing as i32))),
-        ("landed", lane(&|p| p.state = Some(LaneState::Landed as i32))),
-        ("a landed commit", lane(&|p| p.landed_sha = Some("abc123".into()))),
-        ("a lane's agent", lane(&|p| p.agent = agent())),
-        ("a lane made with an agent", Request {
-            method: "lane.create".into(),
-            payload: Some(P::LaneCreate(pb::LaneCreate { agent: agent(), actor: "user".into(), ..Default::default() })),
+        ("landing", ticket(&|p| p.stage = Some(TicketStage::Landing as i32))),
+        ("landed", ticket(&|p| p.stage = Some(TicketStage::Landed as i32))),
+        ("a landed commit", ticket(&|p| p.landed_sha = Some("abc123".into()))),
+        ("a ticket's branch", ticket(&|p| p.branch = Some("elsewhere".into()))),
+        ("a ticket's checkout", ticket(&|p| p.worktree_path = Some("/elsewhere".into()))),
+        ("a ticket's checkout by id", ticket(&|p| p.worktree_id = Some(id_bytes(Uuid::now_v7())))),
+        ("a ticket's stack", ticket(&|p| p.stack_parent = Some(id_bytes(Uuid::now_v7())))),
+        ("an agent recorded", Request {
+            method: "agent.record".into(),
+            payload: Some(P::AgentRecord(pb::AgentRecord { harness: "claude".into(), subagent_id: "a-1".into(), actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a lane's agent recorded", Request {
-            method: "lane.agent".into(),
-            payload: Some(P::LaneAgentSet(pb::LaneAgentSet { agent: agent(), actor: "user".into(), ..Default::default() })),
+        ("an agent set to work", Request {
+            method: "agent.work".into(),
+            payload: Some(P::AgentWork(pb::AgentWork { actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a train green", train(BoardTrainState::Green, None)),
-        ("a train landed", train(BoardTrainState::Landed, None)),
-        ("a train pushed", train(BoardTrainState::Pushed, None)),
-        ("a train gating", train(BoardTrainState::Gating, None)),
-        ("a train's commit", train(BoardTrainState::Unspecified, Some("abc123"))),
-        // Integration itself (fix round 2): a train started, its lanes, base,
-        // agent or card, a lane's train, and a reversal marked done.
-        ("a train started", Request {
-            method: "train.start".into(),
-            payload: Some(P::TrainStart(pb::TrainStart { name: "train-2".into(), actor: "user".into(), ..Default::default() })),
+        ("an agent ended", Request {
+            method: "agent.end".into(),
+            payload: Some(P::AgentEnd(pb::AgentEnd { verdict: "finished".into(), actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a train's base", train_with(&|p| p.base = Some("origin/release".into()))),
-        ("a lane added to a train", train_with(&|p| p.add_lane_ids = vec![id_bytes(Uuid::now_v7())])),
-        ("a lane taken off a train", train_with(&|p| p.remove_lane_ids = vec![id_bytes(Uuid::now_v7())])),
-        ("a train's agent", train_with(&|p| p.agent = Some(pb::TrainAgentRecord::default()))),
-        ("a train's card", train_with(&|p| p.card_id = Some(id_bytes(Uuid::now_v7())))),
-        ("a lane's train", lane(&|p| p.train = Some("train-1".into()))),
-        ("a lane taken off its train", lane(&|p| p.train = Some(String::new()))),
-        ("a lane's branch", lane(&|p| p.branch = Some("elsewhere".into()))),
-        ("a lane's checkout", lane(&|p| p.worktree_path = Some("/elsewhere".into()))),
-        ("a lane's checkout by id", lane(&|p| p.worktree_id = Some(id_bytes(Uuid::now_v7())))),
-        ("a lane made on a branch", Request {
-            method: "lane.create".into(),
-            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), branch: "x".into(), actor: "user".into(), ..Default::default() })),
+        ("a landing green", landing(LandingState::Green, None)),
+        ("a landing landed", landing(LandingState::Landed, None)),
+        ("a landing pushed", landing(LandingState::Pushed, None)),
+        ("a landing gating", landing(LandingState::Gating, None)),
+        ("a landing's commit", landing(LandingState::Unspecified, Some("abc123"))),
+        // Integration itself (fix round 2): a landing started, its tickets,
+        // base or lander, and a reversal marked done.
+        ("a landing started", Request {
+            method: "landing.start".into(),
+            payload: Some(P::LandingStart(pb::LandingStart { title: "Exports".into(), actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a lane made in a checkout", Request {
-            method: "lane.create".into(),
-            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), worktree_path: "/elsewhere".into(), actor: "user".into(), ..Default::default() })),
-            ..Default::default()
-        }),
-        ("a lane made in a checkout by id", Request {
-            method: "lane.create".into(),
-            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), worktree_id: Some(id_bytes(Uuid::now_v7())), actor: "user".into(), ..Default::default() })),
-            ..Default::default()
-        }),
+        ("a landing's base", landing_with(&|p| p.base = Some("origin/release".into()))),
+        ("a ticket put on a landing", landing_with(&|p| p.add_task_ids = vec![id_bytes(Uuid::now_v7())])),
+        ("a ticket taken off a landing", landing_with(&|p| p.remove_task_ids = vec![id_bytes(Uuid::now_v7())])),
+        ("a landing's lander", landing_with(&|p| p.lander_id = Some(id_bytes(Uuid::now_v7())))),
         ("a reversal marked done", Request {
             method: "ruling.set".into(),
             payload: Some(P::RulingSet(pb::RulingSet {
@@ -435,27 +433,18 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         }
     }
     let plans = [
-        ("queued", lane(&|p| p.state = Some(LaneState::Queued as i32))),
-        ("dropped", lane(&|p| p.state = Some(LaneState::Dropped as i32))),
-        ("building", lane(&|p| p.state = Some(LaneState::Building as i32))),
-        ("review", lane(&|p| p.state = Some(LaneState::Review as i32))),
-        ("fixing", lane(&|p| p.state = Some(LaneState::Fixing as i32))),
-        ("a title", lane(&|p| p.title = Some("PDF invoices".into()))),
-        ("a lane made", Request {
-            method: "lane.create".into(),
-            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), actor: "user".into(), ..Default::default() })),
-            ..Default::default()
-        }),
+        ("waiting", ticket(&|p| p.stage = Some(TicketStage::Waiting as i32))),
+        ("dropped", ticket(&|p| p.stage = Some(TicketStage::Dropped as i32))),
+        ("building", ticket(&|p| p.stage = Some(TicketStage::Building as i32))),
+        ("reviewing", ticket(&|p| p.stage = Some(TicketStage::Reviewing as i32))),
+        ("needs you", ticket(&|p| p.stage = Some(TicketStage::NeedsYou as i32))),
+        ("a reason", ticket(&|p| p.reason = Some("Invoices first.".into()))),
         ("a reversal asked for", Request {
             method: "ruling.set".into(),
             payload: Some(P::RulingSet(pb::RulingSet { state: pb::BoardRulingState::Reversed as i32, actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a train renamed", Request {
-            method: "train.set".into(),
-            payload: Some(P::TrainSet(pb::TrainSet { title: Some("Exports".into()), actor: "user".into(), ..Default::default() })),
-            ..Default::default()
-        }),
+        ("a landing renamed", landing_with(&|p| p.title = Some("Exports".into()))),
     ];
     for (what, req) in &plans {
         let passed = gate(&r.svc, &peer(BOB), None, req);
@@ -463,79 +452,62 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
     }
 }
 
-/// A member moving a lane to review starts no train and wakes nobody to
-/// integrate (ov-736, review M2): only landing joins the collecting train,
-/// and the departure the orchestrator is told of comes from that. The
-/// owner moves the lane to building; Bob moves it to review, and the board
-/// has no train, nothing departed, and no notice queued for anyone.
+/// A member moving a ticket to review starts no landing and wakes nobody to
+/// land it (ov-736, review M2): only the landing stage joins the collecting
+/// landing, and the departure the orchestrator is told of comes from that.
+/// The owner moves the ticket to building; Bob moves it to review, and the
+/// board has no landing, nothing departed, and no notice queued for anyone.
 #[tokio::test]
-async fn a_member_moving_a_lane_to_review_wakes_nobody() {
+async fn a_member_moving_a_ticket_to_review_wakes_nobody() {
     use request::Payload as P;
     let r = runner().await;
     let task = r.svc.store.create_task(r.workspace, "Export: invoices as PDF", farcooler_store::models::Actor::Manager).unwrap().id;
-    let make = P::LaneCreate(pb::LaneCreate {
-        workspace_id: id_bytes(r.workspace),
-        name: "exports-pdf".into(),
-        branch: "exports-pdf".into(),
-        cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
-        actor: "manager".into(),
-        ..Default::default()
-    });
-    let Ok(Some(result::Value::Lane(lane))) = call(&factory(&r.svc, LOCAL, Scope::Control), "lane.create", make).await else { panic!("a lane") };
-    let to = |state: pb::LaneState| {
-        P::LaneUpdate(pb::LaneUpdate { lane_id: lane.id.clone(), state: Some(state as i32), actor: "user".into(), ..Default::default() })
+    let put = P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), branch: Some("exports-pdf".into()), actor: "manager".into(), ..Default::default() });
+    call(&factory(&r.svc, LOCAL, Scope::Control), "line.set", put).await.expect("on the line");
+    let to = |stage: pb::TicketStage| {
+        P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), stage: Some(stage as i32), actor: "user".into(), ..Default::default() })
     };
-    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), "lane.update", to(pb::LaneState::Building)).await.expect("building");
+    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), "line.set", to(pb::TicketStage::Building)).await.expect("building");
     let notes_before = r.svc.store.notes_for(task, None).unwrap().len();
-    call(&factory(&r.svc, BOB, Scope::Control), "lane.update", to(pb::LaneState::Review)).await.expect("Bob moves it to review");
+    call(&factory(&r.svc, BOB, Scope::Control), "line.set", to(pb::TicketStage::Reviewing)).await.expect("Bob moves it to review");
     let plan = plan_as(&r, OWNERS_PHONE, Scope::Control).await;
-    assert_eq!(plan.lanes[0].state, pb::LaneState::Review as i32);
-    assert!(plan.trains.is_empty(), "no train: {:?}", plan.trains);
+    assert_eq!(plan.lines[0].stage, pb::TicketStage::Reviewing as i32);
+    assert!(plan.landings.is_empty(), "no landing: {:?}", plan.landings);
     assert!(r.svc.store.departures_untold(r.workspace).unwrap().is_empty(), "nothing departed");
     let notes: Vec<String> = r.svc.store.notes_for(task, None).unwrap().iter().map(|n| n.actor.to_string()).collect();
     assert_eq!(notes.len(), notes_before, "no notice on the card: {notes:?}");
-    let refused = call(&factory(&r.svc, BOB, Scope::Control), "lane.update", to(pb::LaneState::Landing)).await;
+    let refused = call(&factory(&r.svc, BOB, Scope::Control), "line.set", to(pb::TicketStage::Landing)).await;
     assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "landing is the orchestrator's");
 }
 
-/// A lane that has reached landing is integration's (ov-736, fix round 2):
+/// A ticket that has reached landing is integration's (ov-736, fix round 2):
 /// once the orchestrator moves it to landing, Bob's phone can't move it
-/// anywhere, dropping included, since taking it off its train can send the
-/// next train off; nor once it's landed. He still renames it. A lane that
-/// hasn't reached landing he drops, and the owner moves the landing one.
+/// anywhere, dropping included, since taking it off its landing can send the
+/// next one off; nor once it's landed. He still gives it a reason. A ticket
+/// that hasn't reached landing he drops, and the owner moves the landing one.
 #[tokio::test]
-async fn a_member_moves_no_lane_that_reached_landing() {
-    use pb::LaneState as S;
+async fn a_member_moves_no_ticket_that_reached_landing() {
+    use pb::TicketStage as S;
     use request::Payload as P;
     let r = runner().await;
     let local = factory(&r.svc, LOCAL, Scope::Control);
     let bob = factory(&r.svc, BOB, Scope::Control);
-    let lane = |name: &str| {
-        let task = r.svc.store.create_task(r.workspace, &format!("Export: {name}"), farcooler_store::models::Actor::Manager).unwrap().id;
-        P::LaneCreate(pb::LaneCreate {
-            workspace_id: id_bytes(r.workspace),
-            name: name.into(),
-            branch: name.into(),
-            cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
-            actor: "manager".into(),
-            ..Default::default()
-        })
+    let ticket = |name: &str| r.svc.store.create_task(r.workspace, &format!("Export: {name}"), farcooler_store::models::Actor::Manager).unwrap().id;
+    let to = |task: Uuid, stage: S| {
+        P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), stage: Some(stage as i32), actor: "user".into(), ..Default::default() })
     };
-    let to = |id: &[u8], state: S| {
-        P::LaneUpdate(pb::LaneUpdate { lane_id: id.to_vec().into(), state: Some(state as i32), actor: "user".into(), ..Default::default() })
-    };
-    let Ok(Some(result::Value::Lane(landing))) = call(&local, "lane.create", lane("invoices")).await else { panic!("a lane") };
-    let Ok(Some(result::Value::Lane(other))) = call(&local, "lane.create", lane("receipts")).await else { panic!("a lane") };
-    for state in [S::Building, S::Review, S::Landing] {
-        call(&local, "lane.update", to(&landing.id, state)).await.unwrap_or_else(|e| panic!("{state:?}: {e}"));
+    let landing = ticket("invoices");
+    let other = ticket("receipts");
+    for stage in [S::Building, S::Reviewing, S::Landing] {
+        call(&local, "line.set", to(landing, stage)).await.unwrap_or_else(|e| panic!("{stage:?}: {e}"));
     }
-    for state in [S::Dropped, S::Fixing, S::Review, S::Queued, S::Landed] {
-        assert_eq!(call(&bob, "lane.update", to(&landing.id, state)).await.err().as_deref(), Some(NOT_YOURS), "Bob: landing to {state:?}");
+    for stage in [S::Dropped, S::Building, S::Reviewing, S::Waiting, S::NeedsYou, S::Landed] {
+        assert_eq!(call(&bob, "line.set", to(landing, stage)).await.err().as_deref(), Some(NOT_YOURS), "Bob: landing to {stage:?}");
     }
-    let renamed = P::LaneUpdate(pb::LaneUpdate { lane_id: landing.id.clone(), title: Some("PDF invoices".into()), actor: "user".into(), ..Default::default() });
-    call(&bob, "lane.update", renamed).await.expect("Bob renames a landing lane");
-    call(&local, "lane.update", to(&landing.id, S::Landed)).await.expect("the orchestrator lands it");
-    assert_eq!(call(&bob, "lane.update", to(&landing.id, S::Dropped)).await.err().as_deref(), Some(NOT_YOURS), "Bob: a landed lane");
-    call(&bob, "lane.update", to(&other.id, S::Building)).await.expect("Bob builds a queued lane");
-    call(&bob, "lane.update", to(&other.id, S::Dropped)).await.expect("Bob drops a lane short of landing");
+    let reason = P::LineSet(pb::TicketLineSet { task_id: id_bytes(landing), reason: Some("PDF invoices".into()), actor: "user".into(), ..Default::default() });
+    call(&bob, "line.set", reason).await.expect("Bob gives a landing ticket a reason");
+    call(&local, "line.set", to(landing, S::Landed)).await.expect("the orchestrator lands it");
+    assert_eq!(call(&bob, "line.set", to(landing, S::Dropped)).await.err().as_deref(), Some(NOT_YOURS), "Bob: a landed ticket");
+    call(&bob, "line.set", to(other, S::Building)).await.expect("Bob builds a waiting ticket");
+    call(&bob, "line.set", to(other, S::Dropped)).await.expect("Bob drops a ticket short of landing");
 }

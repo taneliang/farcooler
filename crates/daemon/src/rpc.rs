@@ -507,25 +507,25 @@ fn scope_of(method: Method) -> Scope {
         | Method::TaskSetLine
         | Method::TaskWorker => Scope::Control,
         // The plan layer (ov-268). Reading it is metadata about work, as the
-        // board reads are; a lane's worktree path is withheld below
-        // `host_admin` (`rpc_plan::pb_lane`). Its writes sit with the board
+        // board reads are; a ticket's worktree path is withheld below
+        // `host_admin` (`rpc_plan::pb_line`). Its writes sit with the board
         // writes, for the same reason: an orchestrator has to be able to write
         // its own plan, and they touch no git data.
         Method::PlanGet | Method::PlanEvents => Scope::Read,
-        Method::PlanSet
+        Method::LineOrder
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
         | Method::BoardThemeCards
         | Method::BoardThemeMove
-        | Method::LaneCreate
-        | Method::LaneUpdate
-        | Method::LaneCards
-        | Method::LaneAgent
+        | Method::LineSet
+        | Method::AgentRecord
+        | Method::AgentWork
+        | Method::AgentEnd
         | Method::RulingAdd
         | Method::RulingSet
         | Method::RulingKeepAll
-        | Method::TrainStart
-        | Method::TrainSet => Scope::Control,
+        | Method::LandingStart
+        | Method::LandingSet => Scope::Control,
         // Orchestrator pages (ov-269): free text the runner can't redact, so
         // everyone who can read the board reads them, as with a task note. The
         // orchestrator writes its own pages, and they touch no git data.
@@ -690,7 +690,7 @@ impl Handler for Rpc {
             // worktree" were the same code, so it could neither dim the
             // control nor say anything a person could act on.
             None if farcooler_protocol::capability::RETIRED_METHODS.contains(&req.method.as_str()) => {
-                Err(DomainError::MethodRetired)
+                Err(DomainError::retired(&req.method))
             }
             None => Err(DomainError::CapabilityUnsupported {
                 needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
@@ -1399,7 +1399,7 @@ impl Rpc {
                 //
                 // A no-op when there is no layout to join, which is what makes
                 // it safe to pass unconditionally from a `%` binding.
-                if p.join_active_group && p.lane.is_none() {
+                if p.join_active_group && p.agent.is_none() {
                     // The active layout among the worktree's own, so a new
                     // pane never joins an orchestrator's window.
                     let anchor = svc.active_layout(worktree).await.ok().flatten().and_then(|view| {
@@ -1423,7 +1423,7 @@ impl Rpc {
                     }
                 }
                 let term = svc
-                    .create_terminal_in_lane(worktree, &p.title, &p.command_preset, p.prompt.as_deref(), task, p.lane.as_deref())
+                    .create_terminal_as_agent(worktree, &p.title, &p.command_preset, p.prompt.as_deref(), task, p.agent.as_ref())
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —
                 // so the worktree's set of layouts just changed and every
@@ -1987,9 +1987,9 @@ impl Rpc {
             | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await,
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
-            "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"
-            | "board_theme.move" | "board_theme.cards" | "lane.create" | "lane.update" | "lane.cards" | "lane.agent"
-            | "ruling.add" | "ruling.set" | "ruling.keep_all" | "train.start" | "train.set" => {
+            "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"
+            | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"
+            | "ruling.add" | "ruling.set" | "ruling.keep_all" | "landing.start" | "landing.set" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 

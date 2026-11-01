@@ -122,11 +122,12 @@ fn each_class_of_escape_is_refused() {
 }
 
 /// A rep changes the plan for its member (ov-736), in the CLI's own words:
-/// the ranking, a theme, a lane's title, state, reason and cards, and a
-/// ruling recorded or reversed. Not on another board, runner or actor, not
-/// with a flag its verb doesn't take or a `--flag=value`, and not what
-/// starts work or records the orchestrator's: a lane or train started, a
-/// dispatch, a lane's agent or commit, a reversal's commit, a page. Nor
+/// the ranking, a theme, a ticket's reason and its stage to waiting or
+/// dropped, and a ruling recorded or reversed. Not on another board, runner
+/// or actor, not with a flag its verb doesn't take or a `--flag=value`, and
+/// not what starts work or records the orchestrator's: a landing started, a
+/// dispatch, an agent, a ticket's branch, commit or budget, a reversal's
+/// commit, a page. Nor
 /// keeping a ruling, its person's own mark.
 #[test]
 fn a_rep_changes_the_plan_for_its_member() {
@@ -140,9 +141,8 @@ fn a_rep_changes_the_plan_for_its_member() {
         "/opt/fc/farcooler plan theme move Exports --to 2",
         "/opt/fc/farcooler workspace charter Main",
         "/opt/fc/farcooler workspace charter Main --json",
-        "/opt/fc/farcooler plan lane set exports-pdf --reason 'Invoices first' --title 'PDF invoices' --state dropped",
-        "/opt/fc/farcooler plan lane set exports-pdf --state queued",
-        "/opt/fc/farcooler plan lane cards exports-pdf --add ov-3:totals",
+        "/opt/fc/farcooler plan ticket set ov-3 --reason 'Invoices first' --stage dropped",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage waiting",
         r#"/opt/fc/farcooler plan ruling add "Round half to even" --why "The totals match" --reversal "Round half up" --theme Exports --card ov-3"#,
         "/opt/fc/farcooler plan ruling reverse 0f3a --note 'Alice says no'",
     ] {
@@ -167,19 +167,23 @@ fn a_rep_changes_the_plan_for_its_member() {
         "/opt/fc/farcooler plan theme set Exports --next",
         "/opt/fc/farcooler plan theme set Exports --next --no-ask",
         "/opt/fc/farcooler plan theme create Exports --outcome ''",
-        "/opt/fc/farcooler plan lane set exports-pdf --sha abc123",
-        "/opt/fc/farcooler plan lane set exports-pdf --state landing",
-        "/opt/fc/farcooler plan lane set exports-pdf --state landed",
-        "/opt/fc/farcooler plan lane set exports-pdf --state review",
-        "/opt/fc/farcooler plan lane set exports-pdf --state Dropped",
-        "/opt/fc/farcooler plan lane set exports-pdf --agent a-1",
-        "/opt/fc/farcooler plan lane set exports-pdf --train train-1",
-        "/opt/fc/farcooler plan lane set exports-pdf --branch other",
-        "/opt/fc/farcooler plan lane start exports-pdf",
-        "/opt/fc/farcooler plan lane dispatch exports-pdf",
-        "/opt/fc/farcooler plan lane pr-body exports-pdf",
-        "/opt/fc/farcooler plan train start train-1 --lane exports-pdf",
-        "/opt/fc/farcooler plan train set train-1 --state gating",
+        "/opt/fc/farcooler plan ticket set ov-3 --sha abc123",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage landing",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage landed",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage reviewing",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage building",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage Dropped",
+        "/opt/fc/farcooler plan ticket set ov-3 --stage=dropped",
+        "/opt/fc/farcooler plan ticket set ov-3 --branch other",
+        "/opt/fc/farcooler plan ticket set ov-3 --budget 5M",
+        "/opt/fc/farcooler plan ticket set ov-3 --pr 12",
+        "/opt/fc/farcooler plan ticket set ov-3 ov-4 --stage dropped",
+        "/opt/fc/farcooler plan order ov-3",
+        "/opt/fc/farcooler agent dispatch ov-3",
+        "/opt/fc/farcooler agent record ov-3",
+        "/opt/fc/farcooler agent end 0f3a",
+        "/opt/fc/farcooler landing start ov-3",
+        "/opt/fc/farcooler landing set 12 --state gating",
         "/opt/fc/farcooler plan ruling reverse 0f3a --sha abc123",
         "/opt/fc/farcooler plan ruling keep 0f3a",
         "/opt/fc/farcooler plan ruling keep --all",

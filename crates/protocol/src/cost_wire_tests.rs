@@ -24,15 +24,15 @@ fn number(m: &str, f: &str) -> i32 {
 /// The new fields take the next free tags and never move.
 #[test]
 fn cost_holds_its_tags() {
-    assert_eq!(number("BoardThemeView", "spend"), 4, "the field before them");
     assert_eq!(number("BoardThemeView", "budget_tokens"), 5);
     assert_eq!(number("BoardThemeView", "trend_tokens"), 6);
-    assert_eq!(number("Lane", "stale"), 21);
-    assert_eq!(number("Lane", "budget_tokens"), 22);
+    assert_eq!(number("BoardThemeView", "spend"), 8, "counted by ticket since ov-872");
+    assert_eq!(number("TicketLine", "stale"), 19);
+    assert_eq!(number("TicketLine", "budget_tokens"), 20);
     assert_eq!(number("Plan", "board_counts"), 10);
     assert_eq!(number("Plan", "cost"), 11);
     assert_eq!(number("BoardThemeUpdate", "budget_tokens"), 10);
-    assert_eq!(number("LaneUpdate", "budget_tokens"), 11);
+    assert_eq!(number("TicketLineSet", "budget_tokens"), 10);
 }
 
 /// Advertised, and owning no method: nothing but the two updates carries it.

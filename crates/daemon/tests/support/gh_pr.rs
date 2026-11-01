@@ -1,6 +1,6 @@
 //! A real `farcoolerd` on its socket with a `gh` of the test's own ahead on
 //! `PATH`, answering `pr list` and the GraphQL read with what a real `gh`
-//! printed in shape (`test/fixtures/pr-stage/`), for the lane PR stage tests
+//! printed in shape (`test/fixtures/pr-stage/`), for the ticket PR stage tests
 //! (ov-312).
 
 #![allow(dead_code)]
@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use farcooler_protocol::capability::{BOARD_PLAN, WORKSTREAMS};
+use farcooler_protocol::capability::{BOARD_LINE, BOARD_PLAN, WORKSTREAMS};
 use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::{Client, request as request_for};
 
@@ -83,7 +83,7 @@ case "$1 $2" in
     if [ -e "{dir}/offline" ]; then echo 'gh: To get started with GitHub CLI, please run: gh auth login' >&2; exit 4; fi
     st=OPEN; [ -e "{dir}/closed" ] && st=CLOSED
     dr=true; [ -e "{dir}/readied" ] && dr=false
-    hr=lane/drafts; [ -e "{dir}/head-ref" ] && hr=$(cat "{dir}/head-ref")
+    hr=ticket/drafts; [ -e "{dir}/head-ref" ] && hr=$(cat "{dir}/head-ref")
     au=octo-owner; [ -e "{dir}/author" ] && au=$(cat "{dir}/author")
     cr=false; [ -e "{dir}/cross" ] && cr=true
     echo "{{\"isDraft\":$dr,\"state\":\"$st\",\"url\":\"https://github.com/acme/billing/pull/$3\",\"headRefName\":\"$hr\",\"author\":{{\"login\":\"$au\"}},\"isCrossRepository\":$cr}}" ;;
@@ -220,50 +220,60 @@ pub async fn a_card(client: &mut SocketClient, workspace: &pb::Workspace, title:
     task
 }
 
-/// A lane on `workspace` working `cards`, moved to `state` along the arrows.
-pub async fn a_lane(
-    client: &mut SocketClient,
-    workspace: &pb::Workspace,
-    name: &str,
-    cards: &[&pb::Task],
-    path: &[pb::LaneState],
-) -> pb::Lane {
-    let mut req = request_for("lane.create");
-    req.payload = Some(request::Payload::LaneCreate(pb::LaneCreate {
-        workspace_id: workspace.id.clone(),
-        name: name.into(),
-        reason: "Because.".into(),
-        cards: cards.iter().map(|t| pb::LaneCard { task_id: t.id.clone(), slice: String::new(), stage: None }).collect(),
-        branch: format!("lane/{name}"),
-        harness: "claude".into(),
-        model: "sonnet".into(),
-        agent: Some(pb::LaneAgentRecord {
-            harness: "claude".into(),
-            agent_id: format!("agent-{name}"),
-            role: pb::LaneAgentRole::Build as i32,
-            model: None,
-            ended: false,
-        }),
-        actor: "manager".into(),
+/// `card` on the line on its own branch, moved through `path` along the
+/// line's arrows.
+pub async fn a_ticket(client: &mut SocketClient, card: &pb::Task, branch: &str, path: &[pb::TicketStage]) -> pb::TicketLine {
+    let mut line = set_line(client, pb::TicketLineSet {
+        task_id: card.id.clone(),
+        reason: Some("Because.".into()),
+        branch: Some(branch.into()),
         ..Default::default()
-    }));
-    let result::Value::Lane(mut lane) = call(client, req, BOARD_PLAN).await else { panic!("wrong result") };
-    for state in path {
-        lane = move_lane(client, &lane, *state).await;
+    })
+    .await;
+    for stage in path {
+        line = move_ticket(client, card, *stage).await;
     }
-    lane
+    line
 }
 
-pub async fn move_lane(client: &mut SocketClient, lane: &pb::Lane, state: pb::LaneState) -> pb::Lane {
-    let mut req = request_for("lane.update");
-    req.payload = Some(request::Payload::LaneUpdate(pb::LaneUpdate {
-        lane_id: lane.id.clone(),
-        state: Some(state as i32),
+/// `card` moved to `stage`.
+pub async fn move_ticket(client: &mut SocketClient, card: &pb::Task, stage: pb::TicketStage) -> pb::TicketLine {
+    set_line(client, pb::TicketLineSet { task_id: card.id.clone(), stage: Some(stage as i32), ..Default::default() }).await
+}
+
+/// `line.set` as the manager.
+pub async fn set_line(client: &mut SocketClient, mut set: pb::TicketLineSet) -> pb::TicketLine {
+    set.actor = "manager".into();
+    let mut req = request_for("line.set");
+    req.payload = Some(request::Payload::LineSet(set));
+    let result::Value::TicketLine(line) = call(client, req, BOARD_LINE).await else { panic!("wrong result") };
+    line
+}
+
+/// A builder subagent on `workspace` working `card` on a fix round, and the
+/// ticket moved back to building: what a review that asked for changes leads
+/// to.
+pub async fn a_fix(client: &mut SocketClient, workspace: &pb::Workspace, card: &pb::Task) -> pb::TicketLine {
+    let mut record = request_for("agent.record");
+    record.payload = Some(request::Payload::AgentRecord(pb::AgentRecord {
+        workspace_id: workspace.id.clone(),
+        role: pb::AgentRole::Builder as i32,
+        harness: "claude".into(),
+        subagent_id: format!("fixer-{}", card.key),
         actor: "manager".into(),
         ..Default::default()
     }));
-    let result::Value::Lane(lane) = call(client, req, BOARD_PLAN).await else { panic!("wrong result") };
-    lane
+    let result::Value::Agent(agent) = call(client, record, BOARD_LINE).await else { panic!("wrong result") };
+    let mut work = request_for("agent.work");
+    work.payload = Some(request::Payload::AgentWork(pb::AgentWork {
+        agent_id: agent.id.clone(),
+        task_id: card.id.clone(),
+        role: pb::WorkRole::Fix as i32,
+        verdict: None,
+        actor: "manager".into(),
+    }));
+    call(client, work, BOARD_LINE).await;
+    move_ticket(client, card, pb::TicketStage::Building).await
 }
 
 pub async fn plan(client: &mut SocketClient, workspace: &pb::Workspace) -> pb::Plan {

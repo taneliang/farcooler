@@ -1,4 +1,4 @@
-//! Whom to ask to review each live lane's pull request (ov-580): read once
+//! Whom to ask to review each live ticket's pull request (ov-580): read once
 //! per head commit, kept in memory beside the PR cache, laid onto
 //! `Plan.suggested_reviewers` for a Control peer.
 //!
@@ -138,15 +138,15 @@ pub async fn suggest_for(worktree: &Path, pr: &PrInfo, files: Vec<String>) -> Ve
     })
 }
 
-/// One turn: read what is missing or moved, for the live lanes' pull requests
-/// of `repository`.
+/// One turn: read what is missing or moved, for the live tickets' pull
+/// requests of `repository`.
 pub async fn refresh(svc: &Service, repository: Uuid, boards: &BTreeSet<Uuid>, worktree: &Path) {
     let reads = crate::plan_stage::Reads::of(svc, repository);
     let mut numbers: BTreeSet<u32> = BTreeSet::new();
     for board in boards {
         let Ok(plan) = svc.store.plan(*board, i64::MIN) else { continue };
-        for lane in plan.lanes.iter().filter(|l| crate::plan_stage::phase_of(l.lane.state).is_active()) {
-            numbers.extend(crate::plan_stage::prs_of(lane, &plan.cards, &reads));
+        for line in plan.lines.iter().filter(|l| crate::plan_stage::line_phase(l).is_active()) {
+            numbers.extend(crate::plan_stage::pr_of_line(line, &plan.cards, &reads).map(|p| p.status.number));
         }
     }
     let todo: Vec<&PrInfo> = reads.prs.iter().filter(|p| numbers.contains(&p.status.number) && wanted(p) && stale(repository, p)).take(PER_TURN).collect();
@@ -157,26 +157,25 @@ pub async fn refresh(svc: &Service, repository: Uuid, boards: &BTreeSet<Uuid>, w
     }
 }
 
-/// `wire.suggested_reviewers`: for each live lane, each of its pull requests
-/// that still wants a suggestion and has one. Control peers only (the caller
+/// `wire.suggested_reviewers`: for each live ticket, its pull request when it
+/// still wants a suggestion and has one. Control peers only (the caller
 /// decides): these are GitHub logins.
 pub fn annotate(svc: &Service, plan: &farcooler_store::plan_read::Plan, wire: &mut pb::Plan) {
-    for view in plan.lanes.iter().filter(|v| crate::plan_stage::phase_of(v.lane.state).is_active()) {
-        let Ok(ws) = svc.store.get_workspace(view.lane.workspace_id) else { continue };
+    for view in plan.lines.iter().filter(|v| crate::plan_stage::line_phase(v).is_active()) {
+        let Ok(task) = svc.store.get_task(view.line.task_id) else { continue };
+        let Ok(ws) = svc.store.get_workspace(task.workspace_id) else { continue };
         let reads = crate::plan_stage::Reads::of(svc, ws.repository_id);
-        for number in crate::plan_stage::prs_of(view, &plan.cards, &reads) {
-            let Some(pr) = reads.prs.iter().find(|p| p.status.number == number).filter(|p| wanted(p)) else { continue };
-            let found = get(ws.repository_id, pr.status.number);
-            if found.is_empty() {
-                continue;
-            }
-            wire.suggested_reviewers.push(pb::LaneReviewers {
-                lane_id: view.lane.id.as_bytes().to_vec().into(),
-                pr: number,
-                reviewers: found.iter().map(|s| s.reviewer.clone()).collect(),
-                sources: found.iter().map(|s| Source::words(s.source).to_string()).collect(),
-            });
+        let Some(pr) = crate::plan_stage::pr_of_line(view, &plan.cards, &reads).filter(|p| wanted(p)) else { continue };
+        let found = get(ws.repository_id, pr.status.number);
+        if found.is_empty() {
+            continue;
         }
+        wire.suggested_reviewers.push(pb::TicketReviewers {
+            task_id: view.line.task_id.as_bytes().to_vec().into(),
+            pr: pr.status.number,
+            reviewers: found.iter().map(|s| s.reviewer.clone()).collect(),
+            sources: found.iter().map(|s| Source::words(s.source).to_string()).collect(),
+        });
     }
 }
 

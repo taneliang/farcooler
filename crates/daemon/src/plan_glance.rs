@@ -13,27 +13,26 @@
 //!   for it (`WorkspaceNeedsYou.count` in AgentKit): the items of
 //!   `needs_you.list` on that workspace, plus its themes asking the owner
 //!   (`needs_you`, the runner's one rule);
-//! - up to two lanes in Now, by name and state word;
-//! - the lane next up, by name.
+//! - up to two tickets in Now, by key and stage word;
+//! - the ticket next up, by key.
 //!
-//! **Lane names only.** No card text, no theme's story or ask, no reason, no
+//! **Ticket keys only.** No card text, no theme's story or ask, no reason, no
 //! path or branch: a theme's ask counts, and is never said.
 
 use farcooler_protocol::v1 as pb;
 use farcooler_store::Store;
-use farcooler_store::plan::LaneState;
+use farcooler_store::plan_read::{LineView, Plan};
+use farcooler_store::ticket_lines::Stage;
 use std::collections::HashMap;
-use farcooler_store::plan_read::Plan;
 use uuid::Uuid;
 
 /// How many boards one runner sends. The surfaces draw one.
 pub const BOARDS_SENT: usize = 3;
-/// How many Now lanes a board carries.
+/// How many Now tickets a board carries.
 pub const NOW_SENT: usize = 2;
-/// The longest name sent, in characters: the store's own bound on a lane's
-/// name, so nothing it keeps is cut.
+/// The longest name sent, in characters: a workspace's name, or a ticket's key.
 pub const NAME_MAX: usize = 60;
-/// Finished lanes a plan read keeps, as `plan.get` does: a board whose plan
+/// Finished tickets a plan read keeps, as `plan.get` does: a board whose plan
 /// only landed things this week still has a plan.
 const CLOSED_FOR_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
@@ -43,18 +42,18 @@ pub struct BoardGlance {
     pub workspace: String,
     #[serde(rename = "needsYou")]
     pub needs_you: u32,
-    pub now: Vec<LaneGlance>,
+    pub now: Vec<TicketGlance>,
     /// Absent when nothing is queued in the plan.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
 }
 
-/// A lane in Now: its name, and its state as the store spells it
-/// (`building`, `review`, `fixing`, `landing`). The apps say the word.
+/// A ticket in Now: its key, and its stage as the store spells it
+/// (`building`, `reviewing`, `needs_you`, `landing`). The apps say the word.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct LaneGlance {
-    pub name: String,
-    pub state: &'static str,
+pub struct TicketGlance {
+    pub ticket: String,
+    pub stage: &'static str,
 }
 
 /// A board with a plan, read: its id, its name and the plan.
@@ -85,54 +84,50 @@ pub fn boards(planned: Vec<Planned>, items: &[pb::NeedsYouItem], asks: &HashMap<
     sent
 }
 
-/// Every board on this runner with a plan, the busiest first: one with lanes
-/// in Now first, then the one whose plan moved last, then the board's own
-/// order.
+/// Every board on this runner with a plan, the busiest first: one with
+/// tickets in Now first, then the one whose plan moved last, then the board's
+/// own order.
 pub fn planned(store: &Store, now_ms: i64) -> farcooler_core::Result<Vec<Planned>> {
     let mut found = Vec::new();
     for ws in store.list_workspaces(None)? {
         let plan = store.plan(ws.id, now_ms - CLOSED_FOR_MS)?;
-        // `PlanModel.isEmpty`: no theme and no lane.
-        if plan.themes.is_empty() && plan.lanes.is_empty() {
+        // `PlanModel.isEmpty`: no theme and no ticket on the line.
+        if plan.themes.is_empty() && plan.lines.is_empty() {
             continue;
         }
         found.push((ws.id, ws.name, plan));
     }
-    found.sort_by_key(|(_, _, plan)| (now_lanes(plan).next().is_none(), std::cmp::Reverse(moved_at(plan))));
+    found.sort_by_key(|(_, _, plan)| (now_tickets(plan).next().is_none(), std::cmp::Reverse(moved_at(plan))));
     Ok(found)
 }
 
 fn glance(workspace: Uuid, name: String, plan: &Plan, items: &[pb::NeedsYouItem], asks: u32) -> BoardGlance {
     let on_board = crate::wire::id_bytes(workspace);
     let items = items.iter().filter(|item| item.workspace_id == on_board).count();
-    let next = plan
-        .order
-        .iter()
-        .find_map(|id| plan.lanes.iter().find(|l| l.lane.id == *id && l.lane.state == LaneState::Queued))
-        .map(|l| cut(&l.lane.name));
+    let key = |l: &LineView| plan.cards.iter().find(|c| c.task_id == l.line.task_id).map(|c| cut(&c.key));
+    // The lines come the plan's order first, so the first ranked waiting one is next up.
+    let next = plan.lines.iter().find(|l| l.line.stage == Stage::Waiting && l.line.plan_rank.is_some()).and_then(key);
     BoardGlance {
         workspace: cut(&name),
         needs_you: needs_you(items, asks),
-        now: now_lanes(plan)
+        now: now_tickets(plan)
+            .filter_map(|l| Some(TicketGlance { ticket: key(l)?, stage: l.line.stage.as_str() }))
             .take(NOW_SENT)
-            .map(|l| LaneGlance { name: cut(&l.lane.name), state: l.lane.state.as_str() })
             .collect(),
         next,
     }
 }
 
-/// Now: `PlanModel.working`, the live lanes past queued, in the plan's order.
-fn now_lanes(plan: &Plan) -> impl Iterator<Item = &farcooler_store::plan_read::LaneView> {
-    plan.lanes
-        .iter()
-        .filter(|l| !matches!(l.lane.state, LaneState::Queued | LaneState::Landed | LaneState::Dropped))
+/// Now: the live tickets past waiting, in the line's order.
+fn now_tickets(plan: &Plan) -> impl Iterator<Item = &LineView> {
+    plan.lines.iter().filter(|l| !matches!(l.line.stage, Stage::Waiting | Stage::Landed | Stage::Dropped))
 }
 
-/// When anything on the plan last moved: a lane's state, or a theme's story.
+/// When anything on the plan last moved: a ticket's stage, or a theme's story.
 fn moved_at(plan: &Plan) -> i64 {
-    let lanes = plan.lanes.iter().map(|l| l.lane.state_since);
+    let lines = plan.lines.iter().map(|l| l.line.stage_since);
     let themes = plan.themes.iter().map(|t| t.theme.story_at.max(t.theme.created_at));
-    lanes.chain(themes).max().unwrap_or(0)
+    lines.chain(themes).max().unwrap_or(0)
 }
 
 fn cut(name: &str) -> String {

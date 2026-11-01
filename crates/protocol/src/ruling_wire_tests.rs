@@ -29,7 +29,7 @@ fn rulings_hold_their_tags() {
     assert_eq!(number("Request", "ruling_set"), 181);
     assert_eq!(number("Result", "page_stats_list"), 173, "the highest result tag before them");
     assert_eq!(number("Result", "board_ruling"), 180);
-    assert_eq!(number("Plan", "coverage"), 6, "the plan's last field before them");
+    assert_eq!(number("Plan", "cards"), 5, "the plan's last field before them still carried");
     assert_eq!(number("Plan", "rulings"), 7);
 }
 
@@ -49,17 +49,15 @@ fn rulings_are_one_advertised_capability() {
 /// always read: the new field is skipped, and nothing else moves.
 #[test]
 fn a_plan_with_rulings_reads_the_same_to_an_older_app() {
-    /// `Plan` as it was at `coverage = 6`, the fields an older app reads.
+    /// `Plan` as it was at `coverage = 6`, the fields an older app reads that
+    /// it still carries.
     #[derive(Clone, PartialEq, prost::Message)]
     struct OldPlan {
         #[prost(int64, tag = "1")]
         now_ms: i64,
-        #[prost(bytes = "bytes", repeated, tag = "4")]
-        order: Vec<bytes::Bytes>,
     }
     let plan = v1::Plan {
         now_ms: 42,
-        order: vec![bytes::Bytes::from_static(&[7; 16])],
         rulings: vec![v1::BoardRuling {
             number: 12,
             decision: "The inbox is amber.".into(),
@@ -69,7 +67,7 @@ fn a_plan_with_rulings_reads_the_same_to_an_older_app() {
         ..Default::default()
     };
     let old = OldPlan::decode(plan.encode_to_vec().as_slice()).expect("an older app decodes it");
-    assert_eq!(old, OldPlan { now_ms: 42, order: vec![bytes::Bytes::from_static(&[7; 16])] });
+    assert_eq!(old, OldPlan { now_ms: 42 });
     let back = v1::Plan::decode(plan.encode_to_vec().as_slice()).unwrap();
     assert_eq!(back.rulings[0].number, 12, "and this build reads the ruling");
 }

@@ -56,14 +56,14 @@
 //! Unknown is never a person, and never quietly sent another way: its Prompt
 //! and its `message.send` and its answer are refused `in_pane`, its trust Enter
 //! `not_a_person`. A Draft and the box's keys stay open to anyone, as on main.
-//! - `Kind::AgentMessage`: a lane's, a rep's, the orchestrator's, the
+//! - `Kind::AgentMessage`: an agent's, a rep's, the orchestrator's, the
 //!   runner's notices, a hold's end. Queued, and told by the pump: the
 //!   mailbox when the pane has a live waiter (a lane's to its orchestrator by
 //!   the inbox socket, the rest by the wake), the codex queue when opted
 //!   into, else typed (`deliver`).
 //! - `Kind::Key`: Stop (Esc), Send Now, the folder-trust prompt's Enter and
 //!   Bring Here's clear and put-back, each one key past its own gate
-//!   (`interrupt`, `lane_start`, `bring`).
+//!   (`interrupt`, `agent_start`, `bring`).
 //! - `Kind::Draft`: Ask the Orchestrator, Reverse and Discuss, pasted with
 //!   no Enter (`draft_hold`).
 //!
@@ -377,8 +377,8 @@ impl Watcher {
         let who = match sender {
             None => "an agent".to_string(),
             Some(s) if s.role == TerminalRole::Orchestrator => "the orchestrator".to_string(),
-            Some(s) => match store.lane_of_pane(s.id) {
-                Ok(Some(lane)) => lane.name,
+            Some(s) => match store.pane_agent(s.id) {
+                Ok(Some(agent)) => format!("the {}", agent.role.as_str()),
                 _ => super::one_line(&s.title, 80),
             },
         };

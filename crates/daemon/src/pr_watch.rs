@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 use farcooler_store::models::Actor;
 use uuid::Uuid;
 
-use crate::plan_stage::{self, LaneStages, Reads};
+use crate::plan_stage::{self, Reads};
 use crate::service::Service;
 use crate::stack::{self, PrInfo, PrState};
 use crate::watch::Watcher;
@@ -150,15 +150,15 @@ impl KickFloor {
     }
 }
 
-/// A lane moved into review, fixing or landing: read its repository now, past
-/// that repository's backoff, unless this lane kicked within `KICK_FLOOR`.
-pub fn kick_lane(lane: Uuid, repository: Uuid) {
+/// A ticket moved into review, a fix or landing: read its repository now, past
+/// that repository's backoff, unless this ticket kicked within `KICK_FLOOR`.
+pub fn kick_ticket(ticket: Uuid, repository: Uuid) {
     static FLOOR: Mutex<Option<KickFloor>> = Mutex::new(None);
     let allowed = FLOOR
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_with(|| KickFloor::new(kick_floor()))
-        .allows(lane, Instant::now());
+        .allows(ticket, Instant::now());
     if allowed {
         FORCED.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashSet::new).insert(repository);
         kicked().notify_one();
@@ -275,43 +275,56 @@ fn parse_extras(stdout: &[u8]) -> Option<Extras> {
     })
 }
 
-/// The live lanes of every board, by repository: what each is waiting on.
+/// The live tickets of every board, by repository: what each is waiting on.
 struct Live {
-    /// Per repository: its boards' ids and the pull requests its live lanes work.
+    /// Per repository: its boards' ids.
     boards: BTreeMap<Uuid, BTreeSet<Uuid>>,
 }
 
-fn live_lanes(svc: &Service) -> Live {
+fn live_tickets(svc: &Service) -> Live {
     let mut boards: BTreeMap<Uuid, BTreeSet<Uuid>> = BTreeMap::new();
     for ws in svc.store.list_workspaces(None).unwrap_or_default() {
         let Ok(plan) = svc.store.plan(ws.id, i64::MAX) else { continue };
-        if plan.lanes.iter().any(|l| plan_stage::phase_of(l.lane.state).is_active()) {
+        if plan.lines.iter().any(|l| plan_stage::line_phase(l).is_active()) {
             boards.entry(ws.repository_id).or_default().insert(ws.id);
         }
     }
     Live { boards }
 }
 
-/// The stages of every lane of `workspace` against `reads`, ignoring when they
-/// were read: two reads that say the same thing are not a change.
-fn stages_of(svc: &Service, workspace: Uuid, reads: &Reads) -> HashMap<Uuid, LaneStages> {
+/// The stage of every ticket of `workspace` against `reads`, ignoring when
+/// they were read: two reads that say the same thing are not a change.
+fn stages_of(svc: &Service, workspace: Uuid, reads: &Reads) -> HashMap<Uuid, Option<crate::pr_stage::Stage>> {
     let Ok(plan) = svc.store.plan(workspace, i64::MAX) else { return HashMap::new() };
-    plan.lanes
+    plan.lines
         .iter()
         .map(|l| {
-            let mut s = plan_stage::lane_stages(l, &plan.cards, reads);
-            for stage in s.lane.iter_mut().chain(s.cards.values_mut()) {
+            let mut s = plan_stage::line_stage(l, &plan.cards, reads);
+            if let Some(stage) = s.as_mut() {
                 stage.read_at = 0;
             }
-            (l.lane.id, s)
+            (l.line.task_id, s)
         })
         .collect()
 }
 
-/// One turn: re-read each repository that has a lane waiting on its pull
-/// requests, and say so when a stage moved. Returns how long to wait.
+/// The pull requests the tickets of `boards` work: every ticket, or only the
+/// live ones.
+fn prs_of_boards(svc: &Service, boards: &BTreeSet<Uuid>, reads: &Reads, live_only: bool) -> BTreeSet<u32> {
+    let mut wanted: BTreeSet<u32> = BTreeSet::new();
+    for board in boards {
+        let Ok(plan) = svc.store.plan(*board, if live_only { i64::MAX } else { i64::MIN }) else { continue };
+        for line in plan.lines.iter().filter(|l| !live_only || plan_stage::line_phase(l).is_active()) {
+            wanted.extend(plan_stage::pr_of_line(line, &plan.cards, reads).map(|p| p.status.number));
+        }
+    }
+    wanted
+}
+
+/// One turn: re-read each repository that has a ticket waiting on its pull
+/// request, and say so when a stage moved. Returns how long to wait.
 pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &HashSet<Uuid>) -> Duration {
-    let live = live_lanes(svc);
+    let live = live_tickets(svc);
     for (repository, boards) in &live.boards {
         if !memo.due(*repository, Instant::now(), forced) {
             continue;
@@ -345,7 +358,7 @@ pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &Ha
     cadence(!live.boards.is_empty())
 }
 
-/// The timing of the lanes' PRs of `repository` (`pr_timing_read`), when it is
+/// The timing of the tickets' PRs of `repository` (`pr_timing_read`), when it is
 /// due. After the stage's own read is in the cache, and touching nothing but
 /// the timing: a read that fails leaves the last one.
 async fn read_timing(svc: &Service, memo: &mut Memo, repository: Uuid, boards: &BTreeSet<Uuid>, worktree: &Path) {
@@ -353,13 +366,7 @@ async fn read_timing(svc: &Service, memo: &mut Memo, repository: Uuid, boards: &
         return;
     }
     let reads = Reads::of(svc, repository);
-    let mut wanted: BTreeSet<u32> = BTreeSet::new();
-    for board in boards {
-        let Ok(plan) = svc.store.plan(*board, i64::MIN) else { continue };
-        for lane in &plan.lanes {
-            wanted.extend(plan_stage::prs_of(lane, &plan.cards, &reads));
-        }
-    }
+    let wanted = prs_of_boards(svc, boards, &reads, false);
     // Open, and the recently merged: a closed PR nobody merged says nothing of a wait.
     let mut numbers: Vec<u32> = reads
         .prs
@@ -379,18 +386,12 @@ async fn read_timing(svc: &Service, memo: &mut Memo, repository: Uuid, boards: &
     }
 }
 
-/// Count unresolved threads, and find the queue position, of each open pull request a live lane works, and
+/// Count unresolved threads, and find the queue position, of each open pull request a live ticket works, and
 /// no others: a merged PR's threads are history, and a repository's other PRs
 /// are not this runner's business.
 async fn count_threads(svc: &Service, boards: &BTreeSet<Uuid>, worktree: &Path, prs: &mut [PrInfo]) {
     let reads = Reads { known: true, prs: prs.to_vec() };
-    let mut wanted: BTreeSet<u32> = BTreeSet::new();
-    for board in boards {
-        let Ok(plan) = svc.store.plan(*board, i64::MAX) else { continue };
-        for lane in plan.lanes.iter().filter(|l| plan_stage::phase_of(l.lane.state).is_active()) {
-            wanted.extend(plan_stage::prs_of(lane, &plan.cards, &reads));
-        }
-    }
+    let wanted = prs_of_boards(svc, boards, &reads, true);
     for pr in prs.iter_mut() {
         if !wanted.contains(&pr.status.number) || !matches!(pr.status.state, PrState::Open | PrState::Draft) {
             continue;

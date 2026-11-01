@@ -1,6 +1,6 @@
-//! The plan layer as JSON (ov-274): `plan.get` and `plan.events` in the shape
-//! the apps decode, which is the shape `farcooler plan --json` prints, so the
-//! Mac and the phones read one fixture, `test/fixtures/plan.json`.
+//! The plan layer as JSON (ov-274, ov-872): `plan.get` and `plan.events` in
+//! the shape the apps decode, which is the shape `farcooler plan --json`
+//! prints, so the Mac and the phones read one fixture, `test/fixtures/plan.json`.
 //!
 //! EXPERIMENTAL, behind `board_plan`, and removable with the rest of the layer
 //! (design 8). The phones read these two answers and never write the plan: the
@@ -43,15 +43,38 @@ fn theme_state_word(state: i32) -> &'static str {
     }
 }
 
-fn lane_state_word(state: i32) -> &'static str {
-    match pb::LaneState::try_from(state) {
-        Ok(pb::LaneState::Queued) => "queued",
-        Ok(pb::LaneState::Building) => "building",
-        Ok(pb::LaneState::Review) => "review",
-        Ok(pb::LaneState::Fixing) => "fixing",
-        Ok(pb::LaneState::Landing) => "landing",
-        Ok(pb::LaneState::Landed) => "landed",
-        Ok(pb::LaneState::Dropped) => "dropped",
+/// A ticket's stage as the JSON spells it: the store's word.
+pub fn stage_word(stage: i32) -> &'static str {
+    match pb::TicketStage::try_from(stage) {
+        Ok(pb::TicketStage::Waiting) => "waiting",
+        Ok(pb::TicketStage::Building) => "building",
+        Ok(pb::TicketStage::Reviewing) => "reviewing",
+        Ok(pb::TicketStage::NeedsYou) => "needs_you",
+        Ok(pb::TicketStage::Landing) => "landing",
+        Ok(pb::TicketStage::Landed) => "landed",
+        Ok(pb::TicketStage::Dropped) => "dropped",
+        _ => "unknown",
+    }
+}
+
+/// An agent's role as the JSON spells it.
+pub fn role_word(role: i32) -> &'static str {
+    match pb::AgentRole::try_from(role) {
+        Ok(pb::AgentRole::Orchestrator) => "orchestrator",
+        Ok(pb::AgentRole::Builder) => "builder",
+        Ok(pb::AgentRole::Reviewer) => "reviewer",
+        Ok(pb::AgentRole::Lander) => "lander",
+        _ => "unknown",
+    }
+}
+
+/// What an agent does for a ticket, as the JSON spells it.
+pub fn work_word(role: i32) -> &'static str {
+    match pb::WorkRole::try_from(role) {
+        Ok(pb::WorkRole::Build) => "build",
+        Ok(pb::WorkRole::Fix) => "fix",
+        Ok(pb::WorkRole::Review) => "review",
+        Ok(pb::WorkRole::Land) => "land",
         _ => "unknown",
     }
 }
@@ -62,8 +85,9 @@ fn key_of(plan: &pb::Plan, task: &[u8]) -> String {
     plan.cards.iter().find(|c| c.task_id == task).map_or_else(|| short(task), |c| c.key.clone())
 }
 
-/// A spend as the JSON carries it: a lane's, or a theme's share (ov-306).
-fn spend_json(s: &pb::LaneSpend) -> Value {
+/// A spend as the JSON carries it: a ticket's, an agent's, a landing's
+/// lander's, or a theme's sum (ov-306).
+fn spend_json(s: &pb::Spend) -> Value {
     json!({
         "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,
         "cache_read_tokens": s.cache_read_tokens, "cache_write_tokens": s.cache_write_tokens,
@@ -158,50 +182,46 @@ pub fn stage_json(s: &pb::PrStage) -> Value {
 
 pub fn with_stage(mut record: Value, stage: &Option<pb::PrStage>) -> Value {
     if let (Some(stage), Some(map)) = (stage, record.as_object_mut()) {
-        map.insert("stage".into(), stage_json(stage));
+        map.insert("pr_stage".into(), stage_json(stage));
     }
     record
 }
 
-fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
-    let spend = l.spend.unwrap_or_default();
+/// A card named by a ticket, a landing or an agent: its id and its key.
+fn card_ref(plan: &pb::Plan, task: &[u8]) -> Value {
+    json!({ "task": id_text(task), "key": key_of(plan, task) })
+}
+
+/// A ticket on the line (ov-872), with its card's key, title and status, who
+/// worked it, and its pull request stage when the runner had one to say.
+fn line_json(plan: &pb::Plan, l: &pb::TicketLine) -> Value {
+    let card = plan.cards.iter().find(|c| c.task_id == l.task_id);
     with_stage(json!({
-        "id": id_text(&l.id),
-        "short": short(&l.id),
-        "name": l.name,
-        "title": l.title,
-        "state": lane_state_word(l.state),
+        "task": id_text(&l.task_id),
+        "key": key_of(plan, &l.task_id),
+        "title": card.map(|c| c.title.clone()).unwrap_or_default(),
+        "status": card.map_or("Unknown", |c| status_word(c.status)),
+        "stage": stage_word(l.stage),
         "reason": l.reason,
         "plan_rank": l.plan_rank,
-        "worktree_path": l.worktree_path,
         "branch": l.branch,
-        "harness": l.harness,
-        "model": l.model,
-        "train": l.train,
+        "worktree_path": l.worktree_path,
+        "stack_parent": l.stack_parent.as_deref().map(|p| card_ref(plan, p)),
+        "same_branch": l.same_branch.as_deref().map(id_text),
+        "pr_number": l.pr_number,
         "landed_sha": l.landed_sha,
-        "state_since": l.state_since,
+        "stage_since": l.stage_since,
+        "held_off": l.held_off,
         "stale": l.stale,
         "budget_tokens": l.budget_tokens,
         "fix_rounds": l.fix_rounds,
-        "cards": l.cards.iter().map(|c| with_stage(json!({
-            "task": id_text(&c.task_id), "key": key_of(plan, &c.task_id), "slice": c.slice,
-        }), &c.stage)).collect::<Vec<_>>(),
-        "agents": l.agents.iter().map(|a| json!({
-            "harness": a.harness, "agent_id": a.agent_id,
-            "role": match pb::LaneAgentRole::try_from(a.role) {
-                Ok(pb::LaneAgentRole::Review) => "review",
-                Ok(pb::LaneAgentRole::Fix) => "fix",
-                _ => "build",
-            },
-            "model": a.model, "started_at": a.started_at, "ended_at": a.ended_at,
+        "landing": l.landing,
+        "work": l.work.iter().map(|w| json!({
+            "agent": id_text(&w.agent_id), "role": work_word(w.role), "started_at": w.started_at,
+            "ended_at": w.ended_at, "verdict": w.verdict, "linked_by_description": w.linked_by_description,
         })).collect::<Vec<_>>(),
-        "spend": {
-            "input_tokens": spend.input_tokens, "output_tokens": spend.output_tokens,
-            "cache_read_tokens": spend.cache_read_tokens, "cache_write_tokens": spend.cache_write_tokens,
-            "cost_micros": spend.cost_micros, "runs": spend.runs, "unmeasured_agents": spend.unmeasured_agents,
-            "shared_agents": spend.shared_agents,
-        },
-    }), &l.stage)
+        "spend": spend_json(&l.spend.unwrap_or_default()),
+    }), &l.pr_stage)
 }
 
 fn ruling_state_word(state: i32) -> &'static str {
@@ -241,15 +261,24 @@ fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling) -> Value {
     })
 }
 
-fn train_state_word(state: i32) -> &'static str {
-    match pb::BoardTrainState::try_from(state) {
-        Ok(pb::BoardTrainState::Integrating) => "integrating",
-        Ok(pb::BoardTrainState::Gating) => "gating",
-        Ok(pb::BoardTrainState::Pushed) => "pushed",
-        Ok(pb::BoardTrainState::Green) => "green",
-        Ok(pb::BoardTrainState::Red) => "red",
-        Ok(pb::BoardTrainState::Landed) => "landed",
-        Ok(pb::BoardTrainState::Dropped) => "dropped",
+fn landing_state_word(state: i32) -> &'static str {
+    match pb::LandingState::try_from(state) {
+        Ok(pb::LandingState::Open) => "open",
+        Ok(pb::LandingState::Gating) => "gating",
+        Ok(pb::LandingState::Pushed) => "pushed",
+        Ok(pb::LandingState::Green) => "green",
+        Ok(pb::LandingState::Red) => "red",
+        Ok(pb::LandingState::Landed) => "landed",
+        Ok(pb::LandingState::Dropped) => "dropped",
+        _ => "unknown",
+    }
+}
+
+fn route_word(route: i32) -> &'static str {
+    match pb::LandingRoute::try_from(route) {
+        Ok(pb::LandingRoute::Push) => "push",
+        Ok(pb::LandingRoute::PullRequest) => "pull_request",
+        Ok(pb::LandingRoute::Ask) => "ask",
         _ => "unknown",
     }
 }
@@ -266,79 +295,72 @@ fn ci_status_word(status: i32) -> &'static str {
     }
 }
 
-/// A train's phase as the JSON spells it (ov-503): `null` from a runner that
-/// doesn't derive one, where `state` is all there is.
-fn train_phase_word(phase: i32) -> Option<&'static str> {
-    Some(match pb::BoardTrainPhase::try_from(phase) {
-        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "waiting_for_previous_train",
-        Ok(pb::BoardTrainPhase::WaitingForMain) => "waiting_for_main",
-        Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
-        Ok(pb::BoardTrainPhase::Integrating) => "integrating",
-        Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
-        Ok(pb::BoardTrainPhase::WaitingForCi) => "waiting_for_ci",
-        Ok(pb::BoardTrainPhase::CiFailed) => "ci_failed",
-        Ok(pb::BoardTrainPhase::ReadyToLand) => "ready_to_land",
-        Ok(pb::BoardTrainPhase::Landed) => "landed",
-        Ok(pb::BoardTrainPhase::Stalled) => "stalled",
-        Ok(pb::BoardTrainPhase::Dropped) => "dropped",
+/// A landing's phase as the JSON spells it (ov-503): `null` when the runner
+/// derived none, where `state` is all there is.
+fn landing_phase_word(phase: i32) -> Option<&'static str> {
+    Some(match pb::LandingPhase::try_from(phase) {
+        Ok(pb::LandingPhase::WaitingForPreviousLanding) => "waiting_for_previous_landing",
+        Ok(pb::LandingPhase::WaitingForMain) => "waiting_for_main",
+        Ok(pb::LandingPhase::WaitingForTickets) => "waiting_for_tickets",
+        Ok(pb::LandingPhase::Integrating) => "integrating",
+        Ok(pb::LandingPhase::GatingLocally) => "gating_locally",
+        Ok(pb::LandingPhase::WaitingForCi) => "waiting_for_ci",
+        Ok(pb::LandingPhase::CiFailed) => "ci_failed",
+        Ok(pb::LandingPhase::ReadyToLand) => "ready_to_land",
+        Ok(pb::LandingPhase::Landed) => "landed",
+        Ok(pb::LandingPhase::Stalled) => "stalled",
+        Ok(pb::LandingPhase::Dropped) => "dropped",
         _ => return None,
     })
 }
 
-/// A train (ov-309), with its lanes named ("" never: a lane the plan no longer
-/// lists is named by its short id).
-fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
-    let lane_name = |id: &[u8]| plan.lanes.iter().find(|l| l.id == id).map_or_else(|| short(id), |l| l.name.clone());
+/// A landing (ov-309, ov-872), with its tickets named by key.
+pub fn landing_json(plan: &pb::Plan, l: &pb::Landing) -> Value {
     json!({
-        "id": id_text(&t.id),
-        "short": short(&t.id),
-        "name": t.name,
-        "base": t.base,
-        "pushed_sha": t.pushed_sha,
-        "state": train_state_word(t.state),
-        "state_since": t.state_since,
-        "phase": train_phase_word(t.phase),
-        "phase_since": (t.phase != 0).then_some(t.phase_since),
-        "actor": t.actor,
-        "created_at": t.created_at,
-        "landed_at": t.landed_at,
-        "lanes": t.lane_ids.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(id) })).collect::<Vec<_>>(),
-        "ci_subject": t.ci_subject,
-        "title": t.title,
-        "summary": t.summary,
-        "card": t.card_id.as_ref().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })),
-        "agent": t.agent.as_ref().map(|a| json!({
-            "harness": a.harness, "agent_id": a.agent_id, "model": a.model,
-            "started_at": a.started_at, "ended_at": a.ended_at,
-            "spend": spend_json(&a.spend.unwrap_or_default()),
-        })),
+        "id": id_text(&l.id),
+        "short": short(&l.id),
+        "number": l.number,
+        "title": l.title,
+        "summary": l.summary,
+        "route": route_word(l.route),
+        "base": l.base,
+        "pushed_sha": l.pushed_sha,
+        "state": landing_state_word(l.state),
+        "state_since": l.state_since,
+        "phase": landing_phase_word(l.phase),
+        "phase_since": (l.phase != 0).then_some(l.phase_since),
+        "collecting": l.collecting,
+        "actor": l.actor,
+        "created_at": l.created_at,
+        "landed_at": l.landed_at,
+        "tickets": l.task_ids.iter().map(|id| card_ref(plan, id)).collect::<Vec<_>>(),
+        "ci_subject": l.ci_subject,
+        "lander": l.lander_id.as_deref().map(id_text),
+        "spend": l.spend.as_ref().map(spend_json),
     })
 }
 
-/// One agent that worked for the board in the last 24 hours (ov-503, behind
-/// `board_agents`), as `farcooler plan agents --json` prints it.
-fn agent_json(a: &pb::PlanAgent) -> Value {
-    let role = match pb::PlanAgentRole::try_from(a.role) {
-        Ok(pb::PlanAgentRole::Orchestrator) => "orchestrator",
-        Ok(pb::PlanAgentRole::Build) => "build",
-        Ok(pb::PlanAgentRole::Review) => "review",
-        Ok(pb::PlanAgentRole::Fix) => "fix",
-        Ok(pb::PlanAgentRole::Integrator) => "integrator",
-        Ok(pb::PlanAgentRole::Subagent) => "subagent",
-        _ => "agent",
-    };
+/// An agent at work (ov-872): its role, where it runs, the tickets it works
+/// now by key, and what it is doing now.
+pub fn agent_json(plan: &pb::Plan, a: &pb::Agent) -> Value {
     json!({
-        "id": a.id,
-        "role": role,
+        "id": id_text(&a.id),
+        "short": short(&a.id),
+        "role": role_word(a.role),
         "harness": a.harness,
         "model": a.model,
-        "label": a.label,
-        "lane": a.lane_id.as_ref().map(|id| json!({ "id": id_text(id), "name": a.lane_name })),
-        "train": a.train_id.as_ref().map(|id| json!({ "id": id_text(id), "title": a.train_title })),
-        "card": a.task_id.as_ref().map(|id| json!({ "task": id_text(id), "key": a.task_key })),
-        "terminal": a.terminal_id.as_ref().map(|id| id_text(id)),
-        "working": a.working,
+        "title": a.title,
+        "terminal": a.terminal_id.as_deref().map(id_text),
+        "subagent_id": a.subagent_id,
+        "parent_terminal": a.parent_terminal_id.as_deref().map(id_text),
         "started_at": a.started_at,
+        "stop_asked_at": a.stop_asked_at,
+        "tickets": a.tickets.iter().map(|t| json!({
+            "task": id_text(&t.task_id), "key": key_of(plan, &t.task_id), "role": work_word(t.role),
+            "started_at": t.started_at,
+        })).collect::<Vec<_>>(),
+        "working": a.working,
+        "doing_now": a.doing_now,
         "last_at": a.last_at,
         "spend": spend_json(&a.spend.unwrap_or_default()),
     })
@@ -358,56 +380,43 @@ fn ci_json(r: &pb::BoardCiRead) -> Value {
     })
 }
 
-/// A live lane named like a live train (ov-461): the integrating agent modeled
-/// as a lane of the train's own name. The CLI's "Worth a look" flags it too.
-fn shadows_a_train(plan: &pb::Plan, l: &pb::Lane) -> bool {
-    let live = |state: i32| state != pb::LaneState::Landed as i32 && state != pb::LaneState::Dropped as i32;
-    let live_train = |state: i32| state != pb::BoardTrainState::Landed as i32 && state != pb::BoardTrainState::Dropped as i32;
-    live(l.state) && plan.trains.iter().any(|t| live_train(t.state) && t.name.eq_ignore_ascii_case(&l.name))
-}
-
 /// Cards that are neither done nor canceled.
 fn is_open(status: i32) -> bool {
     status != pb::TaskStatus::Done as i32 && status != pb::TaskStatus::Cancelled as i32
 }
 
 /// `plan.get`'s answer: the whole plan, with the two flags the CLI's
-/// reconciliation derives, `landed_not_closed` and `no_lane`, and the
-/// rulings (ov-304) in the runner's order: standing first, newest first.
+/// reconciliation derives, `landed_not_closed` (a card still open whose
+/// ticket landed) and `off_the_line` (a card in progress or in review that
+/// isn't on the line), and the rulings (ov-304) in the runner's order:
+/// standing first, newest first.
 pub fn plan_json(plan: &pb::Plan) -> Value {
-    let flagged = |wanted: fn(&pb::PlanCard, u32, u32) -> bool| -> Vec<Value> {
+    let stage_of = |task: &[u8]| plan.lines.iter().find(|l| l.task_id == task).map(|l| l.stage);
+    let flagged = |wanted: &dyn Fn(&pb::PlanCard, Option<i32>) -> bool| -> Vec<Value> {
         plan.cards
             .iter()
-            .filter(|c| {
-                let (live, landed) =
-                    plan.coverage.iter().find(|v| v.task_id == c.task_id).map_or((0, 0), |v| (v.live, v.landed));
-                is_open(c.status) && wanted(c, live, landed)
-            })
+            .filter(|c| is_open(c.status) && wanted(c, stage_of(&c.task_id)))
             .map(|c| json!({ "task": id_text(&c.task_id), "key": c.key, "status": status_word(c.status) }))
             .collect()
     };
     let mut out = json!({
         "now_ms": plan.now_ms,
         "themes": plan.themes.iter().map(|v| theme_json(plan, v)).collect::<Vec<_>>(),
-        "lanes": plan.lanes.iter().map(|l| lane_json(plan, l)).collect::<Vec<_>>(),
-        "order": plan.order.iter().map(|id| id_text(id)).collect::<Vec<_>>(),
+        "lines": plan.lines.iter().map(|l| line_json(plan, l)).collect::<Vec<_>>(),
         "cards": plan.cards.iter().map(|c| json!({
             "task": id_text(&c.task_id), "key": c.key, "title": c.title, "status": status_word(c.status),
         })).collect::<Vec<_>>(),
-        "landed_not_closed": flagged(|_, live, landed| live == 0 && landed > 0),
-        "no_lane": flagged(|c, live, landed| {
-            live == 0
-                && landed == 0
+        "landed_not_closed": flagged(&|_, stage| stage == Some(pb::TicketStage::Landed as i32)),
+        "off_the_line": flagged(&|c, stage| {
+            stage.is_none()
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
-        "lane_is_train": plan.lanes.iter().filter(|l| shadows_a_train(plan, l))
-            .map(|l| json!({ "lane": id_text(&l.id), "name": l.name })).collect::<Vec<_>>(),
         "rulings": plan.rulings.iter().map(|r| ruling_json(plan, r)).collect::<Vec<_>>(),
-        "trains": plan.trains.iter().map(|t| train_json(plan, t)).collect::<Vec<_>>(),
+        "landings": plan.landings.iter().map(|l| landing_json(plan, l)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
         "cost": plan.cost.as_ref().map(cost_json),
-        "agents": plan.agents.iter().map(agent_json).collect::<Vec<_>>(),
+        "agents": plan.agents.iter().map(|a| agent_json(plan, a)).collect::<Vec<_>>(),
         "agents_spend": plan.agents_spend.as_ref().map(spend_json),
     });
     // Only a runner that sent waits (ov-579): the fixture the Mac decodes keeps its shape.
@@ -419,7 +428,8 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
     // Only a runner that sent suggestions (ov-580), for the same reason.
     if !plan.suggested_reviewers.is_empty() {
         out["suggested_reviewers"] = plan.suggested_reviewers.iter().map(|s| json!({
-            "lane": id_text(&s.lane_id), "pr": s.pr, "reviewers": s.reviewers, "sources": s.sources,
+            "task": id_text(&s.task_id), "key": key_of(plan, &s.task_id), "pr": s.pr, "reviewers": s.reviewers,
+            "sources": s.sources,
         })).collect();
     }
     out

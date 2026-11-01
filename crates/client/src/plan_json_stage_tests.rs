@@ -15,8 +15,8 @@ fn stage(kind: pb::PrStageKind, label: &str) -> pb::PrStage {
     pb::PrStage { kind: kind as i32, label: label.into(), checks: pb::CheckState::Unknown as i32, ..Default::default() }
 }
 
-/// One live lane per stage kind (the card of `ov-N` is on lane `lane-N`), with
-/// the facts each kind carries, and one that was never told a stage.
+/// One ticket in review per stage kind (`ov-N`), with the facts each kind
+/// carries, and one that was never told a stage.
 fn the_plan() -> pb::Plan {
     use pb::PrStageKind as K;
     let mut waiting = stage(K::WaitingOnReviewer, "Waiting on alice and 2 others");
@@ -52,24 +52,21 @@ fn the_plan() -> pb::Plan {
     for (i, s) in stages.into_iter().enumerate() {
         let n = i as u128 + 1;
         plan.cards.push(pb::PlanCard { task_id: id(0x1000 + n), key: format!("ov-{n}"), title: format!("Card {n}"), ..Default::default() });
-        plan.lanes.push(pb::Lane {
-            id: id(0x2000 + n),
-            name: format!("lane-{n}"),
-            state: pb::LaneState::Review as i32,
-            state_since: NOW - 600_000,
-            cards: vec![pb::LaneCard { task_id: id(0x1000 + n), slice: String::new(), stage: Some(s.clone()) }],
-            stage: Some(s),
+        plan.lines.push(pb::TicketLine {
+            task_id: id(0x1000 + n),
+            stage: pb::TicketStage::Reviewing as i32,
+            stage_since: NOW - 600_000,
+            pr_stage: Some(s),
             spend: Some(Default::default()),
             ..Default::default()
         });
     }
-    // A runner that said nothing: no `stage` key at all.
-    plan.lanes.push(pb::Lane {
-        id: id(0x2100),
-        name: "lane-silent".into(),
-        state: pb::LaneState::Review as i32,
-        state_since: NOW - 600_000,
-        cards: vec![pb::LaneCard { task_id: id(0x1100), slice: String::new(), stage: None }],
+    // A runner that said nothing: no `pr_stage` key at all.
+    plan.cards.push(pb::PlanCard { task_id: id(0x1100), key: "ov-256".into(), title: "Silent".into(), ..Default::default() });
+    plan.lines.push(pb::TicketLine {
+        task_id: id(0x1100),
+        stage: pb::TicketStage::Reviewing as i32,
+        stage_since: NOW - 600_000,
         spend: Some(Default::default()),
         ..Default::default()
     });

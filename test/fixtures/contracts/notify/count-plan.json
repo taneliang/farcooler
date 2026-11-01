@@ -5,15 +5,15 @@
   "plan": [
     {
       "needsYou": 2,
-      "next": "mac-fu3",
+      "next": "ov-313",
       "now": [
         {
-          "name": "mac-ux",
-          "state": "review"
+          "ticket": "ov-312",
+          "stage": "reviewing"
         },
         {
-          "name": "ov-310",
-          "state": "building"
+          "ticket": "ov-310",
+          "stage": "building"
         }
       ],
       "workspace": "Main"

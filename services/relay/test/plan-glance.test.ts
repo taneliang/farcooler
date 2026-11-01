@@ -95,8 +95,8 @@ describe('the plan on the glance', () => {
     expect(pulseFixture.plan).toEqual({
       workspace: 'Main',
       needsYou: 2,
-      now: [{ name: 'mac-ux', state: 'review' }, { name: 'ov-310', state: 'building' }],
-      next: 'mac-fu3',
+      now: [{ ticket: 'ov-312', stage: 'reviewing' }, { ticket: 'ov-310', stage: 'building' }],
+      next: 'ov-313',
       runner: 'Studio',
       heardAgo: 90_000,
     })
@@ -203,14 +203,14 @@ describe('the plan on the glance', () => {
     expect(await env.DB.prepare(`SELECT plan, plan_at FROM daemons`).first()).toEqual({ plan: null, plan_at: null })
   })
 
-  it('keeps lane and board names and nothing else, within its bounds', () => {
-    const lane = (name: string, state = 'building') => ({ name, state, reason: 'Card text' })
+  it('keeps ticket keys and board names and nothing else, within its bounds', () => {
+    const ticket = (key: string, stage = 'building') => ({ ticket: key, stage, reason: 'Card text' })
     const kept = planGlanceOf([
       {
         workspace: '  Main  ',
         needsYou: 1,
-        now: [lane('a'), { name: 'b', state: 'Building!' }, lane('c'), lane('d')],
-        next: 'e',
+        now: [ticket('ov-1'), { ticket: 'ov-2', stage: 'Building!' }, ticket('ov-3', 'needs_you'), ticket('ov-4')],
+        next: 'ov-5',
         story: 'A theme’s story',
         ask: 'Pick the accent',
       },
@@ -220,13 +220,20 @@ describe('the plan on the glance', () => {
       { workspace: 'Fourth', needsYou: 0, now: [] },
     ])
     expect(kept).toEqual([
-      { workspace: 'Main', needsYou: 1, now: [{ name: 'a', state: 'building' }, { name: 'c', state: 'building' }], next: 'e' },
+      {
+        workspace: 'Main',
+        needsYou: 1,
+        now: [{ ticket: 'ov-1', stage: 'building' }, { ticket: 'ov-3', stage: 'needs_you' }],
+        next: 'ov-5',
+      },
       { workspace: 'Second', needsYou: 0, now: [] },
       { workspace: 'Third', needsYou: 0, now: [] },
     ])
     expect(planGlanceOf({ not: 'a list' })).toBeNull()
-    expect(planGlanceOf([{ workspace: 'W', needsYou: 0, now: [lane('x'.repeat(200))] }])![0].now[0].name)
+    expect(planGlanceOf([{ workspace: 'W', needsYou: 0, now: [ticket('x'.repeat(200))] }])![0].now[0].ticket)
       .toBe('x'.repeat(60))
+    // A lane in the shape a runner from before ov-872 sends is dropped.
+    expect(planGlanceOf([{ workspace: 'W', needsYou: 0, now: [{ name: 'mac-ux', state: 'review' }] }])![0].now).toEqual([])
     // A count past 32 bits would fail to decode on an arm64_32 watch.
     expect(planGlanceOf([{ workspace: 'W', needsYou: 2 ** 40, now: [] }])![0].needsYou).toBe(0x7fffffff)
   })

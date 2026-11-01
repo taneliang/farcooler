@@ -2,14 +2,14 @@
 //! read only, for every CI subject a board names, and keeps what it heard in
 //! the store's `board_ci` (`farcooler_store::board_ci`).
 //!
-//! A board names a subject by pushing a train (`sha:<pushed sha>`) or by a
+//! A board names a subject by pushing a landing (`sha:<pushed sha>`) or by a
 //! page's CI reference (a SHA, a run, or `main`); publishing a page kicks the
 //! watch as a pushed SHA does. The watch reads each one
 //! while it's named: every minute while any run is still going, and every ten
 //! minutes once everything it watches has finished, so a re-run is still seen.
-//! A write that gives a train a SHA kicks it to read at once. A read that
+//! A write that gives a landing a SHA kicks it to read at once. A read that
 //! changed what a board shows announces `plan_changed`, and the store moves a
-//! pushed train to green or red on the way.
+//! pushed landing to green or red on the way.
 //!
 //! Every `gh` call is `gh api -X GET` with a `--jq` filter, run in the
 //! repository's main checkout through the daemon's own sandboxed launch
@@ -59,7 +59,7 @@ fn kicked() -> &'static tokio::sync::Notify {
     KICK.get_or_init(tokio::sync::Notify::new)
 }
 
-/// Read now rather than at the next turn: a train was just given a SHA.
+/// Read now rather than at the next turn: a landing was just given a SHA.
 pub fn kick() {
     kicked().notify_one();
 }
@@ -389,13 +389,13 @@ pub(crate) fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)>
     Some((repo.id, svc.repository_worktree(&repo)))
 }
 
-/// Every board's CI subjects: its trains' pushed SHAs, and what its pages'
+/// Every board's CI subjects: its landings' pushed SHAs, and what its pages'
 /// CI references name (ov-306).
 pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
     let mut wanted: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
-    for train in svc.store.trains_following_ci().unwrap_or_default() {
-        if let Some(subject) = train.ci_subject() {
-            wanted.entry(train.workspace_id).or_default().insert(subject);
+    for landing in svc.store.landings_following_ci().unwrap_or_default() {
+        if let Some(subject) = landing.ci_subject() {
+            wanted.entry(landing.workspace_id).or_default().insert(subject);
         }
     }
     // The pages' own file reads them, so nothing here names pages.
@@ -444,13 +444,13 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
         }
         if changed {
             watcher.announce_plan_changed(workspace, Actor::Runner);
-            // Main turning green may have sent the collecting train off (ov-520).
+            // Main turning green may have sent the collecting landing off (ov-520).
             watcher.tell_departures();
         }
     }
-    // A train whose CI passed and whose SHA is on its base branch has landed
+    // A landing whose CI passed and whose SHA is on its base branch has landed
     // (ov-503), whether this turn read anything or not.
-    crate::train_landing::land_green_trains(svc, watcher).await;
+    crate::green_landing::land_green_landings(svc, watcher).await;
     next_wait(busy, memo.misses.values().map(|(_, due)| *due).min(), now)
 }
 

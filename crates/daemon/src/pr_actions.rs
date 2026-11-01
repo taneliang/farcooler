@@ -239,36 +239,27 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, caller_
     }
 }
 
-/// Mark one of a lane's draft pull requests ready for review.
+/// Mark a ticket's draft pull request ready for review.
 pub(crate) async fn ready(svc: &Service, p: &pb::PrReady) -> Result<pb::PrReadied> {
-    let lane = svc.store.lane(crate::task_ops::required_id(&p.lane_id)?)?;
-    let workspace = svc.store.get_workspace(lane.workspace_id)?;
+    let task = svc.store.get_task(crate::task_ops::required_id(&p.task_id)?)?;
+    let line = svc.store.ticket_line(task.id)?;
+    let workspace = svc.store.get_workspace(task.workspace_id)?;
     let repository = svc.store.get_repository(workspace.repository_id)?;
     let tree = svc.repository_worktree(&repository);
 
-    // The lane's own pull requests, from what the runner last read: a number
-    // outside them is not this lane's, whoever asks.
-    let plan = svc.store.plan(lane.workspace_id, i64::MIN)?;
-    let view = plan.lanes.iter().find(|v| v.lane.id == lane.id).ok_or(DomainError::NotFound)?;
+    // The ticket's own pull request, from what the runner last read: a number
+    // that isn't it is not this ticket's, whoever asks.
+    let plan = svc.store.plan(task.workspace_id, i64::MIN)?;
+    let view = plan.lines.iter().find(|v| v.line.task_id == task.id).ok_or(DomainError::NotFound)?;
     let reads = crate::plan_stage::Reads::of(svc, repository.id);
     if !reads.known {
         return Err(DomainError::PrStateUnavailable);
     }
-    let theirs = crate::plan_stage::prs_of(view, &plan.cards, &reads);
+    let theirs = crate::plan_stage::pr_of_line(view, &plan.cards, &reads).ok_or(DomainError::InvalidArgument { what: "ticket_pr" })?;
     let number = match p.pr_number {
-        0 => {
-            let drafts: Vec<u32> = theirs
-                .iter()
-                .copied()
-                .filter(|n| reads.prs.iter().any(|pr| pr.status.number == *n && pr.status.state == PrState::Draft))
-                .collect();
-            match drafts.as_slice() {
-                [only] => *only,
-                _ => return Err(DomainError::InvalidArgument { what: "lane_pr" }),
-            }
-        }
-        n if theirs.contains(&n) => n,
-        _ => return Err(DomainError::InvalidArgument { what: "lane_pr" }),
+        0 if theirs.status.state == PrState::Draft => theirs.status.number,
+        n if n == theirs.status.number => n,
+        _ => return Err(DomainError::InvalidArgument { what: "ticket_pr" }),
     };
 
     // Ask GitHub now rather than trust the read: a pull request someone else
@@ -280,29 +271,29 @@ pub(crate) async fn ready(svc: &Service, p: &pb::PrReady) -> Result<pb::PrReadie
         DomainError::PrStateUnavailable
     })?;
     if seen["state"] != "OPEN" {
-        return Err(DomainError::InvalidArgument { what: "lane_pr" });
+        return Err(DomainError::InvalidArgument { what: "ticket_pr" });
     }
-    // It is the lane's own: on the lane's branch, or opened by this login. The cards' keys
-    // name it in the list the runner read, which anyone who can open a PR can arrange.
-    // A branch of a fork named like the lane's is not the lane's.
-    let on_branch = !lane.branch.is_empty()
-        && seen["headRefName"].as_str() == Some(lane.branch.as_str())
+    // It is the ticket's own: on the ticket's branch, or opened by this login. The ticket's key
+    // names it in the list the runner read, which anyone who can open a PR can arrange.
+    // A branch of a fork named like the ticket's is not the ticket's.
+    let on_branch = !line.branch.is_empty()
+        && seen["headRefName"].as_str() == Some(line.branch.as_str())
         && seen["isCrossRepository"] == false;
     if !on_branch {
         let host = seen["url"].as_str().and_then(farcooler_core::thread_link::https_host).unwrap_or_else(|| farcooler_core::thread_link::GITHUB_HOST.into());
         let login = gh(svc, &tree, &["api", "--hostname", &host, "user", "--jq", ".login"], None).await?;
         let author = seen["author"]["login"].as_str().unwrap_or_default();
         if author.is_empty() || author != login.trim() {
-            return Err(DomainError::InvalidArgument { what: "lane_pr" });
+            return Err(DomainError::InvalidArgument { what: "ticket_pr" });
         }
     }
     let url = seen["url"].as_str().filter(|u| u.starts_with("https://")).unwrap_or_default().to_string();
     let already_ready = seen["isDraft"] == false;
     if !already_ready {
         gh(svc, &tree, &["pr", "ready", &number_arg], None).await?;
-        tracing::info!(number, "marked a lane's pull request ready for review");
+        tracing::info!(number, "marked a ticket's pull request ready for review");
         // Its stage moves from Agent Review to Waiting on a reviewer: read it now.
-        crate::pr_watch::kick_lane(lane.id, repository.id);
+        crate::pr_watch::kick_ticket(task.id, repository.id);
     }
     Ok(pb::PrReadied { number, url, already_ready })
 }

@@ -307,8 +307,8 @@ pub async fn nudge_repository(
             continue;
         }
         let Ok(plan) = svc.store.plan(*board, i64::MIN) else { continue };
-        for lane in plan.lanes.iter().filter(|l| crate::plan_stage::phase_of(l.lane.state).is_active()) {
-            for number in crate::plan_stage::prs_of(lane, &plan.cards, &reads) {
+        for line in plan.lines.iter().filter(|l| crate::plan_stage::line_phase(l).is_active()) {
+            for number in crate::plan_stage::pr_of_line(line, &plan.cards, &reads).map(|p| p.status.number).into_iter() {
                 let Some(pr) = reads.prs.iter().find(|p| p.status.number == number) else { continue };
                 if sent.contains(&number) {
                     continue;

@@ -1,5 +1,6 @@
 //! A theme's `last_moved_at` (ov-331) as a client meets it: filled by the
-//! runner from the newest of its story, its lanes, its rulings and its cards,
+//! runner from the newest of its story, its tickets on the line, its rulings and its
+//! cards,
 //! read back from `plan.get` through the real dispatch table.
 
 #[path = "support/in_process.rs"]
@@ -19,7 +20,7 @@ fn id(uuid: Uuid) -> bytes::Bytes {
 
 async fn call(link: &mut Link, method: &str, p: payload::Payload) -> Result<result::Value, ClientError> {
     let mut r = request(method);
-    r.required_capabilities = vec![farcooler_protocol::capability::BOARD_PLAN.into()];
+    r.required_capabilities = vec![farcooler_protocol::capability::BOARD_PLAN.into(), farcooler_protocol::capability::BOARD_LINE.into()];
     r.payload = Some(p);
     Ok(link.call(r).await?.value.expect("a value"))
 }
@@ -48,11 +49,11 @@ async fn theme(link: &mut Link, workspace: Uuid, name: &str, task: Uuid) {
     .expect("board_theme.create");
 }
 
-/// A theme with a lane on its card moved when the lane did; one with only a
-/// card moved when the card did; and a lane on another theme's card moves
+/// A theme whose card is on the line moved when the ticket did; one with only
+/// a card moved when the card did; and a ticket of another theme's moves
 /// neither.
 #[tokio::test]
-async fn a_theme_says_when_it_last_moved_by_its_lanes_and_its_cards() {
+async fn a_theme_says_when_it_last_moved_by_its_tickets_and_its_cards() {
     let h = start(Scope::HostAdmin).await;
     let repo = a_repository(&h);
     let mut a = connect(&h).await;
@@ -64,25 +65,24 @@ async fn a_theme_says_when_it_last_moved_by_its_lanes_and_its_cards() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     call(
         &mut a,
-        "lane.create",
-        payload::Payload::LaneCreate(pb::LaneCreate {
-            workspace_id: id(repo.workspace),
-            name: "busy-lane".into(),
-            cards: vec![pb::LaneCard { task_id: id(busy.id), slice: String::new(), stage: None }],
+        "line.set",
+        payload::Payload::LineSet(pb::TicketLineSet {
+            task_id: id(busy.id),
+            stage: Some(pb::TicketStage::Building as i32),
             actor: "manager".into(),
             ..Default::default()
         }),
     )
     .await
-    .expect("lane.create");
+    .expect("line.set");
 
     let read = plan(&mut connect(&h).await, repo.workspace).await;
     let by_name = |name: &str| read.themes.iter().find(|v| v.theme.as_ref().unwrap().name == name).unwrap();
     let alone = by_name("Alone").last_moved_at.expect("the runner says");
     let busy_view = by_name("Busy");
     let busy_at = busy_view.last_moved_at.expect("the runner says");
-    let lane = read.lanes.iter().find(|l| l.name == "busy-lane").unwrap();
-    assert_eq!(busy_at, lane.state_since, "the lane moved after the card, so it's the lane's time");
-    assert!(alone >= lonely.status_since, "a theme with no lane moved when its card did: {alone}");
-    assert!(alone < busy_at, "the lane on Busy's card moved Busy and not Alone: {alone} against {busy_at}");
+    let line = read.lines.iter().find(|l| l.task_id == id(busy.id)).unwrap();
+    assert_eq!(busy_at, line.stage_since, "the ticket moved on the line after the card, so it's the line's time");
+    assert!(alone >= lonely.status_since, "a theme with no ticket on the line moved when its card did: {alone}");
+    assert!(alone < busy_at, "the ticket on Busy's card moved Busy and not Alone: {alone} against {busy_at}");
 }

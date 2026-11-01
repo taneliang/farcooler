@@ -80,17 +80,17 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { actor: a(), ..Default::default() })),
         call("board_theme.cards", P::BoardThemeCards(pb::BoardThemeCards { actor: a(), ..Default::default() })),
         call("board_theme.move", P::BoardThemeMove(pb::BoardThemeMove { actor: a(), ..Default::default() })),
-        call("lane.create", P::LaneCreate(pb::LaneCreate { actor: a(), ..Default::default() })),
-        call("lane.update", P::LaneUpdate(pb::LaneUpdate { actor: a(), ..Default::default() })),
-        call("lane.cards", P::LaneCards(pb::LaneCards { actor: a(), ..Default::default() })),
-        call("lane.agent", P::LaneAgentSet(pb::LaneAgentSet { actor: a(), ..Default::default() })),
-        call("plan.set", P::PlanSet(pb::PlanSet { actor: a(), ..Default::default() })),
+        call("line.set", P::LineSet(pb::TicketLineSet { actor: a(), ..Default::default() })),
+        call("line.order", P::LineOrder(pb::LineOrder { actor: a(), ..Default::default() })),
+        call("agent.record", P::AgentRecord(pb::AgentRecord { actor: a(), ..Default::default() })),
+        call("agent.work", P::AgentWork(pb::AgentWork { actor: a(), ..Default::default() })),
+        call("agent.end", P::AgentEnd(pb::AgentEnd { actor: a(), ..Default::default() })),
         call("ruling.add", P::RulingAdd(pb::RulingAdd { actor: a(), ..Default::default() })),
         call("ruling.set", P::RulingSet(pb::RulingSet { actor: a(), ..Default::default() })),
         call("ruling.keep_all", P::RulingKeepAll(pb::RulingKeepAll { actor: a(), ..Default::default() })),
         call("message.send", P::MessageSend(pb::MessageSend { actor: a(), ..Default::default() })),
-        call("train.start", P::TrainStart(pb::TrainStart { actor: a(), ..Default::default() })),
-        call("train.set", P::TrainSet(pb::TrainSet { actor: a(), ..Default::default() })),
+        call("landing.start", P::LandingStart(pb::LandingStart { actor: a(), ..Default::default() })),
+        call("landing.set", P::LandingSet(pb::LandingSet { actor: a(), ..Default::default() })),
         call("page.set", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),
         call("page.remove", P::PageRemove(pb::PageRemove { actor: a(), ..Default::default() })),
     ]
@@ -139,10 +139,15 @@ fn carries_actor(proto: &str, name: &str, seen: &mut std::collections::HashSet<S
     body.lines().filter_map(field).any(|(ty, field_name)| field_name == "actor" || carries_actor(proto, &ty, seen))
 }
 
-/// The payload's message name, as its variant is named after it.
+/// The payload's message name, as its variant is named after it but for one.
 fn payload_name(req: &Request) -> String {
     let debug = format!("{:?}", req.payload.as_ref().expect("a payload"));
-    debug[..debug.find('(').expect("a tuple variant")].to_string()
+    match &debug[..debug.find('(').expect("a tuple variant")] {
+        // The one variant not named after its message: `line_set` carries a
+        // `TicketLineSet`.
+        "LineSet" => "TicketLineSet".to_string(),
+        name => name.to_string(),
+    }
 }
 
 #[test]
@@ -263,17 +268,17 @@ async fn a_member_keeps_a_ruling_as_himself() {
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "ruling.keep_all", keep_all("user")).await, Ok(()), "the owner keeps all");
 }
 
-/// A plan write: Bob's phone can't order the lanes as the orchestrator, and
+/// A plan write: Bob's phone can't order the plan as the orchestrator, and
 /// as himself does (ov-736); the orchestrator's local CLI and the owner's
 /// phone are as before.
 #[tokio::test]
-async fn a_member_orders_the_lanes_as_no_one() {
+async fn a_member_orders_the_plan_as_no_one() {
     let r = runner().await;
-    let plan = |actor: &str| request::Payload::PlanSet(pb::PlanSet { workspace_id: id_bytes(r.workspace), lane_ids: vec![], actor: actor.into() });
-    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("user")).await, Ok(()), "Bob as himself");
-    assert_eq!(call(&factory(&r.svc, LOCAL), "plan.set", plan("manager")).await, Ok(()), "the orchestrator");
-    assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "plan.set", plan("user")).await, Ok(()));
+    let plan = |actor: &str| request::Payload::LineOrder(pb::LineOrder { workspace_id: id_bytes(r.workspace), task_ids: vec![], actor: actor.into() });
+    assert_eq!(call(&factory(&r.svc, BOB), "line.order", plan("manager")).await, Err(ACTOR.into()));
+    assert_eq!(call(&factory(&r.svc, BOB), "line.order", plan("user")).await, Ok(()), "Bob as himself");
+    assert_eq!(call(&factory(&r.svc, LOCAL), "line.order", plan("manager")).await, Ok(()), "the orchestrator");
+    assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "line.order", plan("user")).await, Ok(()));
 }
 
 /// A task write: the same for a card made.
@@ -305,7 +310,7 @@ async fn a_member_sets_a_page_as_no_one() {
         request::Payload::PageSet(pb::PageSet {
             workspace_id: id_bytes(r.workspace),
             slot: "notes".into(),
-            doc_json: r#"{"v":1,"title":"Notes","summary":"s","blocks":[{"type":"heading","text":"Lanes"}]}"#.into(),
+            doc_json: r#"{"v":1,"title":"Notes","summary":"s","blocks":[{"type":"heading","text":"Tickets"}]}"#.into(),
             actor: actor.into(),
             ..Default::default()
         })

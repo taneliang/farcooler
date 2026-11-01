@@ -55,7 +55,7 @@ fn pr_mode_never_lands_without_approval() {
             "no admin bypass",
             "never approve",
             "One PR per card, under the owner's own `gh` login",
-            "The train becomes a rehearsal",
+            "The landing becomes a rehearsal",
             "never pushed",
             "Never slow dispatch for busy reviewers: make review faster",
         ] {
@@ -65,34 +65,34 @@ fn pr_mode_never_lands_without_approval() {
     }
 }
 
-/// The plan is the owner's first read, so a lane goes on it when it is
-/// dispatched and moves as things happen, not at the next check-in.
+/// The plan is the owner's first read, so a ticket goes on the line when its
+/// agent is dispatched and moves as things happen, not at the next check-in.
 #[test]
-fn a_lane_goes_on_the_plan_with_its_dispatch() {
+fn a_ticket_goes_on_the_line_with_its_dispatch() {
     for h in ALL {
         let third = section(&prose(h), "3. Dispatch, answer, or report");
-        // A lane dispatch puts the lane on the plan by itself (ov-457); a
-        // subagent's lane is started by hand beside its launch.
-        assert!(third.contains("A lane dispatch puts the lane on the plan"), "{h:?}: {third}");
-        assert!(third.contains("move it as each thing happens"), "{h:?}: {third}");
-        let dispatch = third.find("farcooler plan lane dispatch").expect("a lane dispatch command");
-        let start = third.find("farcooler plan lane start").expect("a plan lane start command");
-        assert!(dispatch < start, "{h:?}: the lane is started before anything is dispatched");
-        // Lanes report to the orchestrator (ov-455), and it steers them.
-        assert!(third.contains("A lane reports to you in this pane"), "{h:?}: {third}");
-        assert!(third.contains("farcooler message <lane>"), "{h:?}: {third}");
-        assert!(third.contains("farcooler plan lane set <name>"), "{h:?}: {third}");
+        // An agent dispatch puts its tickets on the line and records the agent
+        // by itself (ov-457, ov-872); a subagent is recorded by hand beside
+        // its launch.
+        assert!(third.contains("puts them on the line and records the agent itself"), "{h:?}: {third}");
+        assert!(third.contains("Move each ticket on the line as each thing happens"), "{h:?}: {third}");
+        assert!(third.contains("farcooler agent dispatch --role builder --ticket <key>"), "{h:?}: {third}");
+        assert!(third.contains("farcooler agent record --role reviewer --subagent <agentId> --ticket <key>"), "{h:?}: {third}");
+        // Agents report to the orchestrator (ov-455), and it steers them.
+        assert!(third.contains("An agent reports to you in this pane"), "{h:?}: {third}");
+        assert!(third.contains("farcooler message <key>"), "{h:?}: {third}");
+        assert!(third.contains("farcooler plan ticket set <key>"), "{h:?}: {third}");
     }
 }
 
-/// A dispatched lane is confirmed to have started (ov-493): one that
+/// A dispatched agent is confirmed to have started (ov-493): one that
 /// didn't goes to the owner, and a folder-trust prompt is never answered
 /// for them.
 #[test]
-fn a_dispatched_lane_is_confirmed_started() {
+fn a_dispatched_agent_is_confirmed_started() {
     for h in ALL {
         let third = section(&prose(h), "3. Dispatch, answer, or report");
-        assert!(third.contains("Confirm each dispatched lane started"), "{h:?}: {third}");
+        assert!(third.contains("Confirm each dispatched agent started"), "{h:?}: {third}");
         assert!(third.contains("goes to the owner at once with the reason"), "{h:?}: {third}");
         assert!(third.contains("in Needs You: never answer it for them"), "{h:?}: {third}");
     }
@@ -124,11 +124,11 @@ fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
     }
 }
 
-/// Landing ends with the card closed, the lane landed, the worktree removed
+/// Landing ends with the card closed, the ticket landed, the worktree removed
 /// and its build output gone; a push or a rerun is watched, so a run nobody
-/// looks at doesn't sit green and unlanded; and trains are kept on the plan
-/// (ov-309), with a page's figures drawn live (ov-306), never a hand-kept
-/// trains page.
+/// looks at doesn't sit green and unlanded; and landings are kept on the plan
+/// (ov-309, ov-872), with a page's figures drawn live (ov-306), never a
+/// hand-kept page.
 #[test]
 fn landing_is_watched_and_cleaned_up() {
     for h in ALL {
@@ -141,12 +141,14 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        assert!(land.contains("farcooler plan train start train-<N> --repo <repo> --title"), "{h:?}: {land}");
-        assert!(land.contains("farcooler plan train set train-<N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
+        assert!(land.contains("farcooler landing start --repo <repo> --ticket <key>"), "{h:?}: {land}");
+        assert!(land.contains("farcooler landing set <N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
+        assert!(land.contains("Keep landings on the plan, never on a hand-kept page"), "{h:?}: {land}");
         // A PR-mode rehearsal is dropped, never landed: its SHA is never on main (ov-503).
-        assert!(land.contains("plan train set train-<N> --state dropped"), "{h:?}: {land}");
-        assert!(!land.contains("--state landed`)\n") && !land.contains("train-<N> --state landed"), "{h:?}: {land}");
-        assert!(!land.contains("page set trains"), "{h:?}: the hand-kept trains page is gone: {land}");
+        assert!(land.contains("`landing set <N> --state dropped`"), "{h:?}: {land}");
+        assert!(!land.contains("landing set <N> --state landed"), "{h:?}: {land}");
+        assert!(land.contains("`plan ticket set <key> --stage landed --sha <sha>` per merged PR"), "{h:?}: {land}");
+        assert!(!land.contains("page set trains"), "{h:?}: the hand-kept page is gone: {land}");
         assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");
         assert!(land.contains("runs every gate once"), "{h:?}: {land}");
@@ -188,17 +190,25 @@ fn every_plan_and_page_write_names_the_manager() {
         .contents;
     let writes: Vec<&str> = text
         .lines()
-        .filter(|l| ["farcooler plan lane ", "farcooler plan train ", "farcooler page set "].iter().any(|w| l.starts_with(w)))
+        .filter(|l| {
+            ["farcooler plan ", "farcooler agent ", "farcooler landing ", "farcooler message ", "farcooler page set "]
+                .iter()
+                .any(|w| l.starts_with(w))
+                // `plan --repo <repo>` reads the plan; it writes nothing.
+                && !l.starts_with("farcooler plan --")
+        })
         .collect();
-    assert!(writes.len() >= 3, "too few plan writes to check: {writes:?}");
+    assert!(writes.len() >= 7, "too few plan writes to check: {writes:?}");
+    assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
     for line in writes {
         assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
     }
 }
 
 /// The owner's conventions ship as defaults a charter overrides (ov-463):
-/// trains are train-N, lanes and trains carry titles for people, the agent
-/// integrating a train is recorded on it, and a train takes every ready lane.
+/// landings are numbered "Landing N", agents and landings carry titles for
+/// people, a landing names its lander, and ready tickets join the collecting
+/// landing.
 /// S21 to S23 in `scripts/manager-skill-pressure` score the first three from
 /// what an agent ran; this holds the words.
 #[test]
@@ -210,12 +220,13 @@ fn the_owners_conventions_ship_as_defaults() {
         let defaults = section(&body, "Defaults");
         for rule in [
             "a line under the heading it concerns, or under `## Anything else`, wins",
-            "A train is `train-<N>`, numbered on from the last train",
-            "\"Train N\" when you speak of it; never `integ-N`",
-            "Every lane and train gets a title that says what it does",
+            "A landing is numbered by the runner, and \"Landing N\" when you speak of it",
+            "Every agent and landing gets a title that says what it does",
+            "a ticket's branch starts with its key",
             "Cards are `<Area>: <outcome>`",
             "Each `--option` of an ask is a short name",
-            "Ready work never waits for a lane still building or fixing",
+            "Ready work never waits for a ticket still building or in a fix",
+            "To let a landing go without a ticket that isn't ready: `farcooler landing move <key> --repo <repo> --actor manager`",
             "Chain them and the push with `&&`, never `;`",
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
@@ -233,12 +244,11 @@ fn the_owners_conventions_ship_as_defaults() {
         // The repository's own area list is not a default (ov-463).
         assert!(!body.contains("Phones, Watch, Daemon, Relay"), "{h:?}: Far Cooler's areas leaked into the skill");
         let third = section(&body, "3. Dispatch");
-        assert!(third.contains("then give the lane its title (`plan lane set <lane> --title`)"), "{h:?}: {third}");
-        assert!(third.contains("plan lane start <name> --repo <repo> --title"), "{h:?}: {third}");
+        assert!(third.contains("--branch <branch> --title \"<what it does>\" --actor manager"), "{h:?}: {third}");
         let land = section(&body, "4. Land");
-        assert!(land.contains("A train starts when a lane is ready and takes every lane ready then"), "{h:?}: {land}");
-        assert!(land.contains("Record that agent on the train (`--agent`, `--card`), never as a lane"), "{h:?}: {land}");
-        assert!(land.contains("--base origin/main --agent <id> --card <key> --actor manager"), "{h:?}: {land}");
+        assert!(land.contains("joins the board's collecting landing, which leaves for its gate by itself when nothing is ahead and main is green"), "{h:?}: {land}");
+        assert!(land.contains("Name its lander (`--lander`)"), "{h:?}: {land}");
+        assert!(land.contains("--base origin/main --title \"<what it carries>\" --lander <agent> --actor manager"), "{h:?}: {land}");
         assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
     }
 }
@@ -265,11 +275,11 @@ fn a_drafted_charter_is_gone_through_and_the_interview_stays_the_fallback() {
 /// Suggest Themes (ov-519) sends `SUGGEST_THEMES_PROMPT` as the owner's
 /// message. The skill answers it in the check-in: 3 to 5 themes from the
 /// history with their evidence, the owner keeps some, only those are created,
-/// and one lane is offered, not started.
+/// and one ticket is offered, not started.
 #[test]
 fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
     let prompt = super::SUGGEST_THEMES_PROMPT;
-    for words in ["Suggest themes", "3 to 5", "last 90 days", "merged PRs and open issues", "with its evidence", "Ask me which to keep", "offer to start one lane"] {
+    for words in ["Suggest themes", "3 to 5", "last 90 days", "merged PRs and open issues", "with its evidence", "Ask me which to keep", "offer to start one ticket"] {
         assert!(prompt.contains(words), "the prompt lacks {words:?}: {prompt}");
     }
     for h in ALL {
@@ -279,7 +289,7 @@ fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
         for words in [
             "propose 3 to 5 from the last 90 days of commits, merged PRs and open issues (titles, not bodies)",
             "each an outcome with its evidence",
-            "Ask which to keep, `plan theme create` those, offer one lane",
+            "Ask which to keep, `plan theme create` those, offer one ticket",
         ] {
             assert!(rule.contains(words), "{h:?} lacks {words:?}: {rule}");
         }
@@ -300,17 +310,17 @@ fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
 }
 
 /// The orchestrator keeps the record it routes by (review 2a, R4): the trim
-/// had turned "log each lane's tokens, model and fix rounds" into routing
+/// had turned "log each ticket's tokens, model and fix rounds" into routing
 /// by a record nothing said to keep.
 #[test]
-fn lanes_are_logged_and_routed_by_the_record() {
+fn tickets_are_logged_and_routed_by_the_record() {
     for h in ALL {
         let third = section(&prose(h), "3. Dispatch");
-        assert!(third.contains("Log each lane's tokens, model and fix rounds; route by that record"), "{h:?}: {third}");
+        assert!(third.contains("Log each ticket's tokens, model and fix rounds; route by that record"), "{h:?}: {third}");
     }
 }
 
-/// A dispatched lane reads its brief and never the charter or the Defaults,
+/// A dispatched agent reads its brief and never the charter or the Defaults,
 /// so the brief rule itself asks for each new test seen failing: the
 /// repository's defining failure mode is a check that can't fail (review 2a,
 /// M5, after a trim dropped it silently).
@@ -352,21 +362,21 @@ fn the_orchestrator_ranks_themes_and_records_overrides() {
     }
 }
 
-/// Trains fold (ov-796): ready lanes join the waiting train rather than queue
-/// behind it, with the reasons to split; a flaky red main is rerun once and a
-/// folded lane that might interact gets a combined gate.
+/// Landings fold (ov-796): ready tickets join the waiting landing rather than
+/// queue behind it, with the reasons to split; a flaky red main is rerun once
+/// and a folded ticket that might interact gets a combined gate.
 #[test]
-fn ready_lanes_fold_into_the_waiting_train() {
+fn ready_tickets_fold_into_the_waiting_landing() {
     for h in ALL {
         let body = prose(h);
         let land = section(&body, "4. Land");
         for rule in [
-            "Never queue trains: fold every lane ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky lane",
+            "Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket",
             "when a known-flaky test did it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
         }
-        let rebased = "Lanes already gated alone push folded without a combined gate when they can't plausibly interact (shared files, wire tags, migrations, capability lists, generated files, test floors); gate the combined tree where they might";
+        let rebased = "Tickets already gated alone push folded without a combined gate when they can't plausibly interact (shared files, wire tags, migrations, capability lists, generated files, test floors); gate the combined tree where they might";
         assert!(section(&body, "Defaults").contains(rebased), "{h:?} lacks {rebased:?}");
     }
 }
@@ -380,7 +390,7 @@ fn every_agent_description_and_pane_title_starts_with_its_ticket_key() {
         let body = prose(h);
         let rule = "Every subagent's description and every pane's title starts with its ticket key";
         let at = body.find(rule).unwrap_or_else(|| panic!("{h:?}: the key rule is gone"));
-        let dispatch = body.find("To put an agent to work, dispatch a lane").expect("dispatch paragraph");
+        let dispatch = body.find("To put an agent to work, dispatch it in a role").expect("dispatch paragraph");
         assert!(at < dispatch, "{h:?}: the rule must come before the dispatch text");
         let tail = &body[at..dispatch];
         assert!(tail.contains("(`ov-123: polish the sidebar`)"), "{h:?}: {tail}");

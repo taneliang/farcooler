@@ -469,6 +469,26 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
+        let after = line_in(&tx, task)?;
+        let changed: Vec<&str> = [
+            ("reason", before.reason != after.reason),
+            ("branch", before.branch != after.branch),
+            ("worktree", before.worktree_id != after.worktree_id || before.worktree_path != after.worktree_path),
+            ("stack", before.stack_parent != after.stack_parent),
+            ("pull request", before.pr_number != after.pr_number),
+        ]
+        .into_iter()
+        .filter_map(|(what, moved)| moved.then_some(what))
+        .collect();
+        if !changed.is_empty() {
+            let body = match changed.as_slice() {
+                [one] => format!("Changed its {one}."),
+                [rest @ .., last] => format!("Changed its {} and {last}.", rest.join(", ")),
+                [] => unreachable!(),
+            };
+            let extra = serde_json::json!({ "changed": changed, "reason": after.reason, "branch": after.branch });
+            line_event(&tx, LineSubject::Ticket(task), "line", actor, &body, extra)?;
+        }
         match update.stage {
             Some(to) => {
                 move_stage(&tx, task, to, sha.as_deref(), None, actor)?;

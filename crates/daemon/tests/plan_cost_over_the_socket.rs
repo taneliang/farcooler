@@ -21,7 +21,7 @@ fn id(uuid: Uuid) -> bytes::Bytes {
 
 async fn call(link: &mut Link, method: &str, p: payload::Payload) -> Result<result::Value, ClientError> {
     let mut r = request(method);
-    r.required_capabilities = vec![farcooler_protocol::capability::BOARD_PLAN.into()];
+    r.required_capabilities = vec![farcooler_protocol::capability::BOARD_PLAN.into(), farcooler_protocol::capability::BOARD_LINE.into()];
     r.payload = Some(p);
     Ok(link.call(r).await?.value.expect("a value"))
 }
@@ -38,7 +38,7 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
 }
 
-/// A budget is set, read back on the theme and the lane, flagged by the
+/// A budget is set, read back on the theme and the ticket, flagged by the
 /// numbers it carries beside the spend, announced, and taken away by zero.
 #[tokio::test]
 async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week() {
@@ -64,26 +64,21 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
         panic!("wrong result")
     };
     let theme_id = theme.theme.unwrap().id;
-    let result::Value::Lane(lane) = call(
+    let result::Value::Agent(_) = call(
         &mut a,
-        "lane.create",
-        payload::Payload::LaneCreate(pb::LaneCreate {
+        "agent.record",
+        payload::Payload::AgentRecord(pb::AgentRecord {
             workspace_id: id(repo.workspace),
-            name: "cost-lane".into(),
-            cards: vec![pb::LaneCard { task_id: id(task.id), slice: String::new(), stage: None }],
-            agent: Some(pb::LaneAgentRecord {
-                harness: "claude".into(),
-                agent_id: "a1".into(),
-                role: pb::LaneAgentRole::Build as i32,
-                model: None,
-                ended: false,
-            }),
+            role: pb::AgentRole::Builder as i32,
+            harness: "claude".into(),
+            subagent_id: "a1".into(),
+            task_ids: vec![id(task.id)],
             actor: "manager".into(),
             ..Default::default()
         }),
     )
     .await
-    .expect("lane.create") else {
+    .expect("agent.record") else {
         panic!("wrong result")
     };
     h.service
@@ -126,13 +121,13 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
         panic!("wrong result")
     };
     assert_eq!(view.budget_tokens, Some(600), "the answer carries it");
-    let lane_set = payload::Payload::LaneUpdate(pb::LaneUpdate {
-        lane_id: lane.id.clone(),
+    let line_set = payload::Payload::LineSet(pb::TicketLineSet {
+        task_id: id(task.id),
         budget_tokens: Some(5_000),
         actor: "manager".into(),
         ..Default::default()
     });
-    let result::Value::Lane(l) = call(&mut a, "lane.update", lane_set).await.unwrap() else { panic!("wrong result") };
+    let result::Value::TicketLine(l) = call(&mut a, "line.set", line_set).await.unwrap() else { panic!("wrong result") };
     assert_eq!(l.budget_tokens, Some(5_000));
 
     let read = plan(&mut connect(&h).await, repo.workspace).await;
@@ -143,7 +138,7 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
     assert_eq!(theme.trend_tokens.len(), 7);
     assert_eq!(theme.trend_tokens.iter().sum::<u64>(), 1_000, "today's turn, in the trend");
     assert_eq!(*theme.trend_tokens.last().unwrap(), 1_000, "today is last");
-    assert_eq!(read.lanes[0].budget_tokens, Some(5_000));
+    assert_eq!(read.lines[0].budget_tokens, Some(5_000));
     let cost = read.cost.expect("the runner sends cost");
     assert_eq!(cost.week_tokens, 1_000);
     assert!(cost.compare.is_empty() && cost.compare_held_back == 0, "no finished card yet");

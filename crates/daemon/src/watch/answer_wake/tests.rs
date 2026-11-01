@@ -1432,10 +1432,10 @@ mod messages_tests;
 #[path = "rep_messages_tests.rs"]
 mod rep_messages_tests;
 
-#[path = "lane_start_tests.rs"]
-mod lane_start_tests;
-#[path = "train_departure_tests.rs"]
-mod train_departure_tests;
+#[path = "agent_start_tests.rs"]
+mod agent_start_tests;
+#[path = "departure_tests.rs"]
+mod departure_tests;
 
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;

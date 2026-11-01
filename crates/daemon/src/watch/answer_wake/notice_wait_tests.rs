@@ -1,10 +1,10 @@
-//! ov-827, acceptance 2: a runner notice (a train ready, a wake) takes the
+//! ov-827, acceptance 2: a runner notice (a landing ready, a wake) takes the
 //! same path as a person's message left in the box by a turn begun after the
 //! paste. It waits in the box, marked pasted (`finish`), through a long turn
 //! and a dialog answered from the phone, and is sent once the turn ends:
 //! after two reads between turns, never into the dialog. Before ov-827 the
 //! dialog's answer, a key typed since the paste, settled it as a paste left
-//! in the box, where it stayed (the owner's train notice, Oct 26).
+//! in the box, where it stayed (the owner's departure notice, Oct 26).
 
 use super::*;
 
@@ -23,7 +23,7 @@ async fn pumping(b: &Board, long: Duration) {
 }
 
 /// The owner's orchestrator: claude no hook is heard from (ov-711), between
-/// turns, the runner's notice of a train that left about to reach it, and a
+/// turns, the runner's notice of a landing that left about to reach it, and a
 /// turn begun the moment the notice is pasted.
 #[tokio::test]
 async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
@@ -33,10 +33,10 @@ async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ready_lane("ios-overwrite");
+    b.ticket_to("", Stage::Landing);
     b.watcher.tell_departures();
     b.pump().await;
-    assert_eq!(b.departure_notices().len(), 1);
+    assert_eq!(b.departure_notices(&[&b.task]).len(), 1);
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
     let waiting = b.svc.store.pending_message_wakes().unwrap();
     assert!(waiting.len() == 1 && waiting[0].pasted_at.is_some(), "it waits in the box: {waiting:?}\n{}", si.log());
@@ -64,7 +64,7 @@ async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
     }
     let log = si.log();
     let sent = si.submitted();
-    assert!(sent.len() == 1 && sent[0].contains("Train 1 is ready for its checks: ios-overwrite."), "{log}\n{:?}", b.progress());
+    assert!(sent.len() == 1 && sent[0].contains(&format!("Landing 1 is ready for its checks: {}.", b.task.key)), "{log}\n{:?}", b.progress());
     assert_eq!(log.matches("ENTER").count(), 1, "{log}");
     assert!(log.find("ENTER").unwrap() > log.rfind("MODE idle").unwrap(), "{log}");
     assert!(b.svc.store.pending_message_wakes().unwrap().is_empty());
@@ -83,7 +83,7 @@ async fn one_stray_idle_frame_gets_a_waiting_notice_no_enter() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ready_lane("ios-overwrite");
+    b.ticket_to("", Stage::Landing);
     b.watcher.tell_departures();
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
@@ -112,7 +112,7 @@ async fn a_notice_whose_turn_was_stopped_is_taken_back(key: &str) {
     let si = b.stand_in_with(&orchestrator, "claude", "claude", "STAND_IN_DRAFT=1").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ready_lane("ios-overwrite");
+    b.ticket_to("", Stage::Landing);
     b.watcher.tell_departures();
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
@@ -158,7 +158,7 @@ async fn a_notice_whose_turn_is_stopped_mid_pass_gets_no_enter() {
     let si = b.stand_in_with(&orchestrator, "claude", "claude", "STAND_IN_DRAFT=1").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ready_lane("ios-overwrite");
+    b.ticket_to("", Stage::Landing);
     b.watcher.tell_departures();
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;

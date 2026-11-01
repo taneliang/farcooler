@@ -19,8 +19,8 @@ fn no_pr_on_a_building_lane_is_building() {
     assert_eq!((s.kind, s.label().as_str(), s.pr_number), (Kind::Building, "Building", 0));
 }
 
-/// A lane already in review with no PR contradicts "Building", so it says
-/// nothing and the app shows the lane's own state.
+/// A ticket already in review with no PR contradicts "Building", so it says
+/// nothing and the app shows the ticket's own stage.
 #[test]
 fn no_pr_on_a_lane_past_building_says_nothing() {
     for phase in [Phase::Review, Phase::Fixing, Phase::Landing] {
@@ -164,40 +164,6 @@ fn a_commit_status_counts_by_its_state() {
 fn approved_with_merge_conflicts_says_so() {
     let s = stage(19, Phase::Landing);
     assert_eq!((s.kind, s.label().as_str()), (Kind::ApprovedConflicts, "Approved \u{b7} conflicts"));
-}
-
-fn kinds(order: &[(u32, Phase)]) -> Vec<Stage> {
-    order.iter().map(|(n, phase)| stage(*n, *phase)).collect()
-}
-
-#[test]
-fn a_lane_is_as_far_along_as_its_slowest_card() {
-    let waiting_and_running = kinds(&[(6, Phase::Review), (3, Phase::Review)]);
-    assert_eq!(rollup(&waiting_and_running).unwrap().kind, Kind::WaitingOnReviewer);
-    let changes_and_approved = kinds(&[(8, Phase::Review), (5, Phase::Review)]);
-    assert_eq!(rollup(&changes_and_approved).unwrap().kind, Kind::ChangesRequested);
-    let the_first_of_equals = kinds(&[(3, Phase::Review), (12, Phase::Review)]);
-    assert_eq!(rollup(&the_first_of_equals).unwrap().pr_number, 103);
-}
-
-#[test]
-fn a_card_with_no_pr_yet_holds_its_lane_at_building() {
-    let mut stages = kinds(&[(8, Phase::Review)]);
-    stages.push(derive(None, Phase::Building).unwrap());
-    assert_eq!(rollup(&stages).unwrap().kind, Kind::Building);
-}
-
-#[test]
-fn a_closed_pr_holds_nothing_back_unless_every_one_was_closed() {
-    assert_eq!(rollup(&kinds(&[(11, Phase::Review), (8, Phase::Review)])).unwrap().kind, Kind::Approved);
-    assert_eq!(rollup(&kinds(&[(11, Phase::Review)])).unwrap().kind, Kind::Closed);
-    assert_eq!(rollup(&[]), None);
-}
-
-#[test]
-fn a_pr_we_cannot_see_holds_the_lane_below_everything() {
-    let stages = vec![stage(8, Phase::Review), Stage::unknown()];
-    assert_eq!(rollup(&stages).unwrap().kind, Kind::Unknown);
 }
 
 /// A state gh invented after this was written reads unknown, never open.

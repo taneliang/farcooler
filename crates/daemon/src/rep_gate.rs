@@ -68,7 +68,7 @@ const NOT_A_MESSENGERS: &str =
     "A rep only carries messages. It can read the board, message the orchestrator and comment on a card.";
 const ONE_PLAIN_COMMAND: &str = "A rep runs one plain Far Cooler command: plan, task show, task list, \
      message orchestrator, task note --kind comment, search, or a plan change its person asked for \
-     (plan set, plan theme create/set/cards, plan lane set/cards, plan ruling add/reverse). \
+     (plan set, plan theme create/set/cards, plan ticket set, plan ruling add/reverse). \
      No other program, flag or shell syntax.";
 const OUTSIDE: &str = "A rep reads only inside its workspace's checkout, and never `.git` or a `.env` file.";
 const CANT_CHECK: &str = "The runner couldn't check whether git tracks that file. Try again.";
@@ -296,20 +296,20 @@ pub fn plain_cli_command(command: &str, cli: &str) -> bool {
 /// `plan` that name it, how many plain words it takes, and the flags it may
 /// carry, each with a value or alone. No `--workspace`, `--repo`, `--actor`
 /// or `--runner`, so it's its own board, as the rep, on this runner; no
-/// `--flag=value` spelling. Not starting a lane or a train, dispatching, a
-/// lane's agent, branch, commit or budget, a reversal's commit, or a page:
-/// those start work or record the orchestrator's, and a rep asks for them.
-/// Nor keeping a ruling, which its person does themself: the CLI keeps only
-/// as a person, never from an agent's pane. Nor `plan set` with no lane,
-/// which empties the ranking in one word.
+/// `--flag=value` spelling. Not starting a landing, dispatching or recording
+/// an agent, a ticket's branch, commit or budget, a reversal's commit, or a
+/// page: those start work or record the orchestrator's, and a rep asks for
+/// them. Nor keeping a ruling, which its person does themself: the CLI keeps
+/// only as a person, never from an agent's pane. Nor `plan set` with no
+/// ticket, which empties the ranking in one word.
 struct PlanVerb {
     path: &'static [&'static str],
     words: std::ops::RangeInclusive<usize>,
     valued: &'static [&'static str],
     switches: &'static [&'static str],
-    /// Flags whose value is one of a few words: a lane's state only to
-    /// queued or dropped, since landing and landed are the orchestrator's
-    /// record and start a train (ov-736). `people::rep_plan_change` holds the
+    /// Flags whose value is one of a few words: a ticket's stage only to
+    /// waiting or dropped, since landing and landed are the orchestrator's
+    /// record and start a landing (ov-736). `people::rep_plan_change` holds the
     /// same line.
     choices: &'static [(&'static str, &'static [&'static str])],
 }
@@ -328,13 +328,12 @@ const PLAN_VERBS: &[PlanVerb] = &[
     PlanVerb { path: &["plan", "theme", "move"], words: 1..=1, valued: &["--to"], switches: &[], choices: &[] },
     PlanVerb { path: &["plan", "theme", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[], choices: &[] },
     PlanVerb {
-        path: &["plan", "lane", "set"],
+        path: &["plan", "ticket", "set"],
         words: 1..=1,
-        valued: &["--title", "--state", "--reason"],
+        valued: &["--stage", "--reason"],
         switches: &[],
-        choices: &[("--state", &["queued", "dropped"])],
+        choices: &[("--stage", &["waiting", "dropped"])],
     },
-    PlanVerb { path: &["plan", "lane", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[], choices: &[] },
     PlanVerb { path: &["plan", "ruling", "add"], words: 1..=1, valued: &["--why", "--reversal", "--card", "--theme"], switches: &[], choices: &[] },
     PlanVerb { path: &["plan", "ruling", "reverse"], words: 1..=1, valued: &["--note"], switches: &[], choices: &[] },
 ];

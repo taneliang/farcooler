@@ -4,15 +4,15 @@
     "needsYou": 2,
     "now": [
       {
-        "name": "mac-ux",
-        "state": "review"
+        "ticket": "ov-312",
+        "stage": "reviewing"
       },
       {
-        "name": "ov-310",
-        "state": "building"
+        "ticket": "ov-310",
+        "stage": "building"
       }
     ],
-    "next": "mac-fu3",
+    "next": "ov-313",
     "runner": "Studio",
     "heardAgo": 90000
   },

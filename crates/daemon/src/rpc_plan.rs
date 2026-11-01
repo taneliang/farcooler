@@ -1,29 +1,25 @@
-//! The plan layer's routes (ov-268): `plan.*`, `board_theme.*` and `lane.*`,
-//! behind `board_plan`.
+//! The plan layer's routes (ov-268, ov-872): `plan.*` and `board_theme.*`
+//! behind `board_plan`, and the line's (`line.*`, `agent.*`) behind
+//! `board_line`.
 //!
-//! Experimental, and beside the board: nothing here touches `task_ops`. Each
-//! write announces `plan_changed` once, and none emits `task_changed` itself.
-//! The one write that reaches a task is a lane's agent (`lane.agent`, or an
-//! `agent` on `lane.create` or `lane.update`), which writes a `worker` note,
-//! moves a backlog card to in progress and announces `task_changed` once, all
-//! through ov-213's own path. It records the agent
-//! as a worker on the lane's first open card through the existing
-//! `task.worker` (ov-213), so the runner reads the agent's spend. That is valid
-//! without the layer, and stays valid after the layer is removed.
+//! Beside the board: nothing here touches `task_ops`. Each write announces
+//! `plan_changed` once, and none emits `task_changed` itself.
 //!
 //! The arms live here; `Rpc::dispatch` names every route in one arm, so its
 //! coverage test still reads each name out of that file.
 
+use std::collections::HashSet;
+
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, Scope, request, result};
+use farcooler_store::agents::{AgentPlace, AgentRole, NewAgent};
 use farcooler_store::models::TaskStatus;
-use farcooler_store::plan::{
-    AgentRecord, AgentRole, BoardTheme, Lane, LaneCard, LaneState, LaneUpdate, NewLane, NewTheme, PlanEvent, Subject,
-    ThemeState, ThemeUpdate,
-};
-use farcooler_store::plan_agents::{PlanAgent, PlanAgentRole};
+use farcooler_store::plan::{BoardTheme, NewTheme, ThemeState, ThemeUpdate};
+use farcooler_store::plan_agents::AgentView;
 use farcooler_store::plan_cost::PlanCost;
-use farcooler_store::plan_read::{LaneSpend, LaneView, Plan, StatusCounts, ThemeView};
+use farcooler_store::plan_read::{CardRef, LineView, Plan, Spend, StatusCounts, ThemeView};
+use farcooler_store::ticket_lines::{LineEvent, LineSubject, LineUpdate, Stage};
+use farcooler_store::ticket_work::{LinkedBy, Verdict, WorkRole};
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -31,15 +27,16 @@ use crate::task_ops::{actor_from_wire, required_id};
 use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
-/// Finished lanes the plan read keeps showing, unless the request asks for all.
-const CLOSED_LANES_FOR_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// Finished tickets and landings the plan read keeps showing, unless the
+/// request asks for all.
+const CLOSED_FOR_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 fn payload_missing() -> DomainError {
     DomainError::InvalidArgument { what: "payload" }
 }
 
 /// One plan route, as `Rpc::dispatch` hands it over. `scope` is the
-/// connection's, which decides whether a lane's worktree path is shown.
+/// connection's, which decides whether a ticket's worktree path is shown.
 pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req: Request) -> Result<result::Value> {
     let admin = scope == Scope::HostAdmin;
     let control = matches!(scope, Scope::Control | Scope::HostAdmin);
@@ -47,8 +44,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
         "plan.get" => {
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
-            let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_LANES_FOR_MS };
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, closed_since, &|t| live_working(svc, t))?, admin, control)))
+            let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_FOR_MS };
+            Ok(result::Value::Plan(read_plan(svc, watcher, workspace, closed_since, admin, control).await?))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -56,26 +53,129 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 Some(pb::plan_events_request::Subject::ThemeId(id)) => {
                     let id = required_id(&id)?;
                     svc.store.board_theme(id)?;
-                    Subject::Theme(id)
+                    LineSubject::Theme(id)
                 }
-                Some(pb::plan_events_request::Subject::LaneId(id)) => {
+                Some(pb::plan_events_request::Subject::TaskId(id)) => {
                     let id = required_id(&id)?;
-                    svc.store.lane(id)?;
-                    Subject::Lane(id)
+                    svc.store.get_task(id)?;
+                    LineSubject::Ticket(id)
+                }
+                Some(pb::plan_events_request::Subject::LandingId(id)) => {
+                    let id = required_id(&id)?;
+                    svc.store.landing(id)?;
+                    LineSubject::Landing(id)
                 }
                 None => return Err(DomainError::InvalidArgument { what: "subject" }),
             };
-            let events = svc.store.plan_events(subject, p.since_ms)?;
+            let events = svc.store.line_events(subject, p.since_ms)?;
             Ok(result::Value::PlanEventList(pb::PlanEventList { events: events.iter().map(pb_event).collect() }))
         }
-        "plan.set" => {
-            let Some(request::Payload::PlanSet(p)) = req.payload else { return Err(payload_missing()) };
+        "line.order" => {
+            let Some(request::Payload::LineOrder(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let actor = actor_from_wire(&p.actor)?;
-            let lanes = p.lane_ids.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>()?;
-            svc.store.set_plan(workspace, &lanes, actor)?;
+            svc.store.set_line_order(workspace, &ids(&p.task_ids)?, actor)?;
             watcher.announce_plan_changed(workspace, actor);
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, now() - CLOSED_LANES_FOR_MS, &|t| live_working(svc, t))?, admin, control)))
+            Ok(result::Value::Plan(read_plan(svc, watcher, workspace, now() - CLOSED_FOR_MS, admin, control).await?))
+        }
+        "line.set" => {
+            let Some(request::Payload::LineSet(p)) = req.payload else { return Err(payload_missing()) };
+            let task = required_id(&p.task_id)?;
+            let actor = actor_from_wire(&p.actor)?;
+            let stage = p.stage.map(stage_of).transpose()?;
+            let was = svc.store.ensure_on_line(task, actor)?.stage;
+            let update = LineUpdate {
+                stage,
+                reason: p.reason,
+                branch: p.branch,
+                worktree_id: p.worktree_id.as_deref().map(|id| required_id(id).map(Some)).transpose()?,
+                worktree_path: p.worktree_path,
+                stack_parent: p
+                    .stack_parent
+                    .as_deref()
+                    .map(|id| if id.is_empty() { Ok(None) } else { required_id(id).map(Some) })
+                    .transpose()?,
+                pr_number: p.pr_number.map(|n| (n > 0).then_some(n)),
+                landed_sha: p.landed_sha,
+                held_off: None,
+            };
+            let line = svc.store.update_line(task, &update, actor)?;
+            if let Some(tokens) = p.budget_tokens {
+                svc.store.set_budget(LineSubject::Ticket(task), (tokens > 0).then_some(tokens), actor)?;
+            }
+            let workspace = svc.store.get_task(task)?.workspace_id;
+            watcher.announce_plan_changed(workspace, actor);
+            // A ticket passing review may have sent the collecting landing off.
+            watcher.tell_departures();
+            // A ticket that moved into review, a fix or landing wants its pull
+            // request read now; any other update does not.
+            if crate::plan_stage::enters_active(was, stage) {
+                if let Ok(ws) = svc.store.get_workspace(workspace) {
+                    crate::pr_watch::kick_ticket(line.task_id, ws.repository_id);
+                }
+            }
+            Ok(result::Value::TicketLine(line_view(svc, workspace, task, admin)?))
+        }
+        "agent.record" => {
+            let Some(request::Payload::AgentRecord(p)) = req.payload else { return Err(payload_missing()) };
+            let workspace = required_id(&p.workspace_id)?;
+            let actor = actor_from_wire(&p.actor)?;
+            let role = role_of(p.role)?;
+            let place = match (p.terminal_id.as_deref(), p.subagent_id.trim()) {
+                (Some(terminal), "") => AgentPlace::Pane { terminal: required_id(terminal)? },
+                (None, id) if !id.is_empty() => {
+                    AgentPlace::Subagent { id: id.to_string(), parent: p.parent_terminal_id.as_deref().map(required_id).transpose()? }
+                }
+                _ => return Err(DomainError::InvalidArgument { what: "place" }),
+            };
+            let new = NewAgent {
+                role,
+                place,
+                harness: p.harness,
+                session_id: p.session_id,
+                session_cwd: None,
+                model: p.model,
+                title: p.title,
+            };
+            let agent = svc.store.record_agent(workspace, &new)?;
+            let work = farcooler_store::agent_panes::dispatch_role(role);
+            for task in ids(&p.task_ids)? {
+                svc.store.ensure_on_line(task, actor)?;
+                svc.store.start_work(agent.id, task, work, LinkedBy::Orchestrator, actor)?;
+                start_card(svc, watcher, task, work, actor)?;
+            }
+            watcher.announce_plan_changed(workspace, actor);
+            Ok(result::Value::Agent(agent_view(svc, watcher, agent.id).await?))
+        }
+        "agent.work" => {
+            let Some(request::Payload::AgentWork(p)) = req.payload else { return Err(payload_missing()) };
+            let agent = required_id(&p.agent_id)?;
+            let task = required_id(&p.task_id)?;
+            let actor = actor_from_wire(&p.actor)?;
+            let role = work_role_of(p.role)?;
+            match p.verdict.as_deref() {
+                Some(word) => {
+                    let verdict = Verdict::parse(word.trim()).ok_or(DomainError::InvalidArgument { what: "verdict" })?;
+                    svc.store.end_work(agent, task, role, verdict, actor)?;
+                }
+                None => {
+                    svc.store.ensure_on_line(task, actor)?;
+                    svc.store.start_work(agent, task, role, LinkedBy::Orchestrator, actor)?;
+                    start_card(svc, watcher, task, role, actor)?;
+                }
+            }
+            let workspace = svc.store.agent(agent)?.workspace_id;
+            watcher.announce_plan_changed(workspace, actor);
+            Ok(result::Value::Agent(agent_view(svc, watcher, agent).await?))
+        }
+        "agent.end" => {
+            let Some(request::Payload::AgentEnd(p)) = req.payload else { return Err(payload_missing()) };
+            let agent = required_id(&p.agent_id)?;
+            let actor = actor_from_wire(&p.actor)?;
+            let verdict = Verdict::parse(p.verdict.trim()).ok_or(DomainError::InvalidArgument { what: "verdict" })?;
+            let ended = svc.store.end_agent(agent, verdict)?;
+            watcher.announce_plan_changed(ended.workspace_id, actor);
+            Ok(result::Value::Agent(pb_agent_row(&ended)))
         }
         "board_theme.create" => {
             let Some(request::Payload::BoardThemeCreate(p)) = req.payload else { return Err(payload_missing()) };
@@ -103,7 +203,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             };
             let theme = svc.store.update_theme(theme, &update, actor)?;
             if let Some(tokens) = p.budget_tokens {
-                svc.store.set_budget(Subject::Theme(theme.id), (tokens > 0).then_some(tokens), actor)?;
+                svc.store.set_budget(LineSubject::Theme(theme.id), (tokens > 0).then_some(tokens), actor)?;
             }
             watcher.announce_plan_changed(theme.workspace_id, actor);
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
@@ -124,86 +224,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             watcher.announce_plan_changed(theme.workspace_id, actor);
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
         }
-        "lane.create" => {
-            let Some(request::Payload::LaneCreate(p)) = req.payload else { return Err(payload_missing()) };
-            let workspace = required_id(&p.workspace_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let cards = lane_cards(&p.cards)?;
-            let agent = p.agent.as_ref().map(agent_of).transpose()?;
-            let new = NewLane {
-                name: p.name,
-                title: p.title,
-                reason: p.reason,
-                worktree_id: p.worktree_id.as_deref().map(required_id).transpose()?,
-                worktree_path: p.worktree_path,
-                branch: p.branch,
-                harness: p.harness,
-                model: p.model,
-            };
-            let lane = svc.store.create_lane(workspace, &new, &cards, agent.as_ref(), actor)?;
-            watcher.announce_plan_changed(workspace, actor);
-            if let Some(agent) = &agent {
-                record_worker(svc, watcher, &lane, agent, &p.actor);
-            }
-            Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
-        }
-        "lane.update" => {
-            let Some(request::Payload::LaneUpdate(p)) = req.payload else { return Err(payload_missing()) };
-            let lane = required_id(&p.lane_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let agent = p.agent.as_ref().map(agent_of).transpose()?;
-            let update = LaneUpdate {
-                state: p.state.map(lane_state_of).transpose()?,
-                title: p.title,
-                reason: p.reason,
-                train: p.train,
-                landed_sha: p.landed_sha,
-                worktree_id: p.worktree_id.as_deref().map(required_id).transpose()?,
-                worktree_path: p.worktree_path,
-                branch: p.branch,
-                agent: agent.clone(),
-            };
-            let was = svc.store.lane(lane)?.state;
-            let lane = svc.store.update_lane(lane, &update, actor)?;
-            if let Some(tokens) = p.budget_tokens {
-                svc.store.set_budget(Subject::Lane(lane.id), (tokens > 0).then_some(tokens), actor)?;
-            }
-            watcher.announce_plan_changed(lane.workspace_id, actor);
-            // A lane passing review may have sent the collecting train off (ov-520).
-            watcher.tell_departures();
-            // A lane that moved into review, fixing or landing wants its pull
-            // requests read now; any other update, one that leaves its state
-            // alone included, does not.
-            if crate::plan_stage::enters_active(was, update.state) {
-                if let Ok(ws) = svc.store.get_workspace(lane.workspace_id) {
-                    crate::pr_watch::kick_lane(lane.id, ws.repository_id);
-                }
-            }
-            if let Some(agent) = &agent {
-                record_worker(svc, watcher, &lane, agent, &p.actor);
-            }
-            Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
-        }
-        "lane.cards" => {
-            let Some(request::Payload::LaneCards(p)) = req.payload else { return Err(payload_missing()) };
-            let lane = required_id(&p.lane_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let lane = svc.store.lane_cards(lane, &lane_cards(&p.add)?, &lane_cards(&p.remove)?, actor)?;
-            watcher.announce_plan_changed(lane.workspace_id, actor);
-            Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
-        }
-        "lane.agent" => {
-            let Some(request::Payload::LaneAgentSet(p)) = req.payload else { return Err(payload_missing()) };
-            let lane = required_id(&p.lane_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let agent = agent_of(p.agent.as_ref().ok_or(DomainError::InvalidArgument { what: "agent" })?)?;
-            let lane = svc.store.record_lane_agent(lane, &agent, actor)?;
-            watcher.announce_plan_changed(lane.workspace_id, actor);
-            record_worker(svc, watcher, &lane, &agent, &p.actor);
-            Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
-        }
         "ruling.add" | "ruling.set" | "ruling.keep_all" => crate::rpc_rulings::dispatch(svc, watcher, req),
-        "train.start" | "train.set" => crate::rpc_trains::dispatch(svc, watcher, req),
+        "landing.start" | "landing.set" => crate::rpc_landings::dispatch(svc, watcher, req),
         other => {
             tracing::error!(method = %other, "a plan route with no handler");
             Err(DomainError::NotFound)
@@ -215,12 +237,22 @@ fn now() -> i64 {
     crate::review::now_millis()
 }
 
-fn ids(raw: &[bytes::Bytes]) -> Result<Vec<Uuid>> {
-    raw.iter().map(|id| required_id(id)).collect()
+/// An agent set to build or fix a card that hasn't started starts it: a
+/// backlog or todo card moves to in progress, with its own note and
+/// `task_changed`, as a worker recorded on it always has (ov-213).
+fn start_card(svc: &Service, watcher: &Watcher, task: Uuid, role: WorkRole, actor: farcooler_store::models::Actor) -> Result<()> {
+    if !matches!(role, WorkRole::Build | WorkRole::Fix) {
+        return Ok(());
+    }
+    if matches!(svc.store.get_task(task)?.status, TaskStatus::Backlog | TaskStatus::Todo) {
+        let moved = svc.store.set_task_status(task, TaskStatus::InProgress, actor)?;
+        watcher.announce_task_changed(&moved, None, actor);
+    }
+    Ok(())
 }
 
-fn lane_cards(raw: &[pb::LaneCard]) -> Result<Vec<LaneCard>> {
-    raw.iter().map(|c| Ok(LaneCard { task_id: required_id(&c.task_id)?, slice: c.slice.clone() })).collect()
+fn ids(raw: &[bytes::Bytes]) -> Result<Vec<Uuid>> {
+    raw.iter().map(|id| required_id(id)).collect()
 }
 
 fn theme_state_of(raw: i32) -> Result<ThemeState> {
@@ -233,60 +265,66 @@ fn theme_state_of(raw: i32) -> Result<ThemeState> {
     }
 }
 
-fn lane_state_of(raw: i32) -> Result<LaneState> {
-    match pb::LaneState::try_from(raw) {
-        Ok(pb::LaneState::Queued) => Ok(LaneState::Queued),
-        Ok(pb::LaneState::Building) => Ok(LaneState::Building),
-        Ok(pb::LaneState::Review) => Ok(LaneState::Review),
-        Ok(pb::LaneState::Fixing) => Ok(LaneState::Fixing),
-        Ok(pb::LaneState::Landing) => Ok(LaneState::Landing),
-        Ok(pb::LaneState::Landed) => Ok(LaneState::Landed),
-        Ok(pb::LaneState::Dropped) => Ok(LaneState::Dropped),
-        _ => Err(DomainError::InvalidArgument { what: "state" }),
-    }
-}
-
-fn agent_of(raw: &pb::LaneAgentRecord) -> Result<AgentRecord> {
-    let role = match pb::LaneAgentRole::try_from(raw.role) {
-        Ok(pb::LaneAgentRole::Build) => AgentRole::Build,
-        Ok(pb::LaneAgentRole::Review) => AgentRole::Review,
-        Ok(pb::LaneAgentRole::Fix) => AgentRole::Fix,
-        _ => return Err(DomainError::InvalidArgument { what: "role" }),
-    };
-    Ok(AgentRecord {
-        harness: raw.harness.clone(),
-        agent_id: raw.agent_id.clone(),
-        role,
-        model: raw.model.clone(),
-        ended: raw.ended,
+fn stage_of(raw: i32) -> Result<Stage> {
+    Ok(match pb::TicketStage::try_from(raw) {
+        Ok(pb::TicketStage::Waiting) => Stage::Waiting,
+        Ok(pb::TicketStage::Building) => Stage::Building,
+        Ok(pb::TicketStage::Reviewing) => Stage::Reviewing,
+        Ok(pb::TicketStage::NeedsYou) => Stage::NeedsYou,
+        Ok(pb::TicketStage::Landing) => Stage::Landing,
+        Ok(pb::TicketStage::Landed) => Stage::Landed,
+        Ok(pb::TicketStage::Dropped) => Stage::Dropped,
+        _ => return Err(DomainError::InvalidArgument { what: "stage" }),
     })
 }
 
-/// Record `agent` as a worker on the lane's first card that is still open, so
-/// the runner reads its turns (`task.worker`, ov-213).
-///
-/// The lane's own write has already committed, so a refusal here (every card
-/// closed, a harness the board doesn't take) is logged and not returned: the
-/// lane is right, and only the spend would go unread.
-fn record_worker(svc: &Service, watcher: &Watcher, lane: &Lane, agent: &AgentRecord, actor: &str) {
-    let open = |id: Uuid| svc.store.get_task(id).is_ok_and(|t| !matches!(t.status, TaskStatus::Done | TaskStatus::Cancelled));
-    let cards = match svc.store.plan(lane.workspace_id, i64::MIN) {
-        Ok(plan) => plan.lanes.into_iter().find(|l| l.lane.id == lane.id).map(|l| l.cards).unwrap_or_default(),
-        Err(_) => return,
-    };
-    let Some(task) = cards.iter().map(|c| c.task_id).find(|id| open(*id)) else { return };
-    let req = pb::TaskWorkerSet {
-        task_id: id_bytes(task),
-        harness: agent.harness.clone(),
-        agent_id: agent.agent_id.clone(),
-        label: Some(lane.name.clone()),
-        model: agent.model.clone(),
-        end: agent.ended,
-        actor: actor.to_string(),
-        ..Default::default()
-    };
-    if let Err(err) = crate::task_starts::worker(svc, watcher, &req, None) {
-        tracing::warn!(lane = %lane.name, error = %err, "a lane's agent was not recorded as a task worker");
+pub(crate) fn pb_stage_of(s: Stage) -> pb::TicketStage {
+    match s {
+        Stage::Waiting => pb::TicketStage::Waiting,
+        Stage::Building => pb::TicketStage::Building,
+        Stage::Reviewing => pb::TicketStage::Reviewing,
+        Stage::NeedsYou => pb::TicketStage::NeedsYou,
+        Stage::Landing => pb::TicketStage::Landing,
+        Stage::Landed => pb::TicketStage::Landed,
+        Stage::Dropped => pb::TicketStage::Dropped,
+    }
+}
+
+fn role_of(raw: i32) -> Result<AgentRole> {
+    Ok(match pb::AgentRole::try_from(raw) {
+        Ok(pb::AgentRole::Orchestrator) => AgentRole::Orchestrator,
+        Ok(pb::AgentRole::Builder) => AgentRole::Builder,
+        Ok(pb::AgentRole::Reviewer) => AgentRole::Reviewer,
+        Ok(pb::AgentRole::Lander) => AgentRole::Lander,
+        _ => return Err(DomainError::InvalidArgument { what: "role" }),
+    })
+}
+
+pub(crate) fn pb_role(r: AgentRole) -> pb::AgentRole {
+    match r {
+        AgentRole::Orchestrator => pb::AgentRole::Orchestrator,
+        AgentRole::Builder => pb::AgentRole::Builder,
+        AgentRole::Reviewer => pb::AgentRole::Reviewer,
+        AgentRole::Lander => pb::AgentRole::Lander,
+    }
+}
+
+fn work_role_of(raw: i32) -> Result<WorkRole> {
+    Ok(match pb::WorkRole::try_from(raw) {
+        Ok(pb::WorkRole::Build) => WorkRole::Build,
+        Ok(pb::WorkRole::Fix) => WorkRole::Fix,
+        Ok(pb::WorkRole::Review) => WorkRole::Review,
+        Ok(pb::WorkRole::Land) => WorkRole::Land,
+        _ => return Err(DomainError::InvalidArgument { what: "role" }),
+    })
+}
+
+fn pb_work_role(r: WorkRole) -> pb::WorkRole {
+    match r {
+        WorkRole::Build => pb::WorkRole::Build,
+        WorkRole::Fix => pb::WorkRole::Fix,
+        WorkRole::Review => pb::WorkRole::Review,
+        WorkRole::Land => pb::WorkRole::Land,
     }
 }
 
@@ -294,36 +332,92 @@ fn record_worker(svc: &Service, watcher: &Watcher, lane: &Lane, agent: &AgentRec
 // store to wire
 // ---------------------------------------------------------------------------
 
+/// The plan as the wire carries it, read with its agents, each agent's
+/// doing-now line, and each ticket's pull request stage from what the runner
+/// last read of GitHub (ov-312). Cache only: nothing here waits on `gh`.
+///
+/// `review_waits` and `suggested_reviewers` name GitHub logins, and go only
+/// to a peer at Control scope (ov-315).
+pub(crate) async fn read_plan(
+    svc: &Service,
+    watcher: &Watcher,
+    workspace: Uuid,
+    closed_since: i64,
+    admin: bool,
+    control: bool,
+) -> Result<pb::Plan> {
+    let plan = svc.store.plan_with_agents(workspace, closed_since, &|t| live_working(svc, t))?;
+    let mut wire = pb_plan(svc, &plan, admin)?;
+    for (view, agent) in plan.agents.iter().zip(wire.agents.iter_mut()) {
+        agent.doing_now = doing_now(svc, watcher, view).await;
+    }
+    crate::plan_stage::annotate(svc, &plan, &mut wire);
+    if control {
+        crate::plan_stage::annotate_waits(svc, workspace, &plan, &mut wire);
+        crate::pr_suggest::annotate(svc, &plan, &mut wire);
+    }
+    Ok(wire)
+}
+
+/// What an agent is doing now, in a line: a pane's signal line, a subagent's
+/// last tool call. Empty when the runner can't see it.
+async fn doing_now(svc: &Service, watcher: &Watcher, view: &AgentView) -> String {
+    match &view.agent.place {
+        AgentPlace::Pane { terminal } => watcher.signal(*terminal).await.unwrap_or_default(),
+        AgentPlace::Subagent { id, .. } => svc.worker_seen.get(id).map(|s| s.doing).unwrap_or_default(),
+    }
+}
+
 fn theme_view(svc: &Service, theme: BoardTheme) -> Result<pb::BoardThemeView> {
     let plan = svc.store.plan(theme.workspace_id, i64::MIN)?;
     let view = plan.themes.into_iter().find(|v| v.theme.id == theme.id);
     // A dropped theme leaves the read; answer with it, empty.
-    Ok(pb_theme_view(&view.unwrap_or(ThemeView { theme, tasks: Vec::new(), counts: StatusCounts::default(), spend: LaneSpend::default(), budget_tokens: None, trend: [0; 7], last_moved_at: 0 })))
+    Ok(pb_theme_view(&view.unwrap_or(ThemeView {
+        theme,
+        tasks: Vec::new(),
+        counts: StatusCounts::default(),
+        spend: Spend::default(),
+        budget_tokens: None,
+        trend: [0; 7],
+        last_moved_at: 0,
+    })))
 }
 
-fn lane_view(svc: &Service, lane: &Lane, admin: bool) -> Result<pb::Lane> {
-    let plan = svc.store.plan(lane.workspace_id, i64::MIN)?;
-    let mut wire = pb_plan_staged(svc, &plan, admin, false);
-    let at = plan.lanes.iter().position(|v| v.lane.id == lane.id).ok_or(DomainError::NotFound)?;
-    Ok(wire.lanes.swap_remove(at))
-}
-
-/// The plan as the wire carries it, with each lane's pull request stage laid
-/// on from what the runner last read of GitHub (ov-312). Cache only: nothing
-/// here waits on `gh`.
-///
-/// `review_waits` names GitHub logins that a PR waits on and how long each
-/// takes, and goes only to a peer at Control scope, as the review requests of
-/// Needs You do (ov-315): below it the list is empty. A lane's own view (`lane_view`)
-/// carries none.
-fn pb_plan_staged(svc: &Service, p: &Plan, admin: bool, control: bool) -> pb::Plan {
-    let mut wire = pb_plan(p, admin);
-    crate::plan_stage::annotate(svc, p, &mut wire);
-    if control {
-        crate::plan_stage::annotate_waits(svc, p, &mut wire);
-        crate::pr_suggest::annotate(svc, p, &mut wire);
+/// One ticket as the plan read says it, with its pull request stage.
+fn line_view(svc: &Service, workspace: Uuid, task: Uuid, admin: bool) -> Result<pb::TicketLine> {
+    let plan = svc.store.plan(workspace, i64::MIN)?;
+    let view = plan.lines.iter().find(|v| v.line.task_id == task).ok_or(DomainError::NotFound)?;
+    let mut wire = pb_line(view, admin);
+    if let Ok(ws) = svc.store.get_workspace(workspace) {
+        let reads = crate::plan_stage::Reads::of(svc, ws.repository_id);
+        wire.pr_stage = crate::plan_stage::line_stage(view, &plan.cards, &reads).as_ref().map(crate::plan_stage::pb_stage);
     }
-    wire
+    Ok(wire)
+}
+
+/// One agent as the plan read says it, or as it was recorded when the read
+/// leaves it out (one whose pane isn't running yet).
+async fn agent_view(svc: &Service, watcher: &Watcher, agent: Uuid) -> Result<pb::Agent> {
+    let row = svc.store.agent(agent)?;
+    let plan = svc.store.plan_with_agents(row.workspace_id, i64::MIN, &|t| live_working(svc, t))?;
+    match plan.agents.iter().find(|a| a.agent.id == agent) {
+        Some(view) => {
+            let mut wire = pb_agent(view);
+            wire.doing_now = doing_now(svc, watcher, view).await;
+            Ok(wire)
+        }
+        None => {
+            let mut wire = pb_agent_row(&row);
+            wire.tickets = svc
+                .store
+                .work_of(agent)?
+                .into_iter()
+                .filter(|w| w.ended_at.is_none())
+                .map(|w| pb::AgentTicket { task_id: id_bytes(w.task_id), role: pb_work_role(w.role) as i32, started_at: w.started_at })
+                .collect();
+            Ok(wire)
+        }
+    }
 }
 
 fn pb_theme(t: &BoardTheme) -> pb::BoardTheme {
@@ -405,8 +499,8 @@ fn pb_cost(c: &PlanCost) -> pb::PlanCost {
     }
 }
 
-pub(crate) fn pb_spend(s: &LaneSpend) -> pb::LaneSpend {
-    pb::LaneSpend {
+pub(crate) fn pb_spend(s: &Spend) -> pb::Spend {
+    pb::Spend {
         input_tokens: s.input_tokens,
         output_tokens: s.output_tokens,
         cache_read_tokens: s.cache_read_tokens,
@@ -418,62 +512,46 @@ pub(crate) fn pb_spend(s: &LaneSpend) -> pb::LaneSpend {
     }
 }
 
-/// A lane as the wire carries it. The worktree path is a runner path, so it
-/// is shown only to `host_admin`, as every other path on the wire is.
-fn pb_lane(v: &LaneView, admin: bool) -> pb::Lane {
-    let l = &v.lane;
-    pb::Lane {
-        id: id_bytes(l.id),
-        workspace_id: id_bytes(l.workspace_id),
-        name: l.name.clone(),
-        state: (match l.state {
-            LaneState::Queued => pb::LaneState::Queued,
-            LaneState::Building => pb::LaneState::Building,
-            LaneState::Review => pb::LaneState::Review,
-            LaneState::Fixing => pb::LaneState::Fixing,
-            LaneState::Landing => pb::LaneState::Landing,
-            LaneState::Landed => pb::LaneState::Landed,
-            LaneState::Dropped => pb::LaneState::Dropped,
-        }) as i32,
+/// A ticket on the line as the wire carries it. The worktree path is a runner
+/// path, so it is shown only to `host_admin`, as every other path on the wire
+/// is.
+pub(crate) fn pb_line(v: &LineView, admin: bool) -> pb::TicketLine {
+    let l = &v.line;
+    pb::TicketLine {
+        task_id: id_bytes(l.task_id),
+        stage: pb_stage_of(l.stage) as i32,
         reason: l.reason.clone(),
-        plan_rank: l.plan_rank,
+        branch: l.branch.clone(),
         worktree_id: l.worktree_id.map(id_bytes),
         worktree_path: if admin { l.worktree_path.clone() } else { String::new() },
-        branch: l.branch.clone(),
-        harness: l.harness.clone(),
-        model: l.model.clone(),
-        train: l.train.clone(),
+        stack_parent: l.stack_parent.map(id_bytes),
+        same_branch: l.same_branch.map(id_bytes),
+        pr_number: l.pr_number,
         landed_sha: l.landed_sha.clone(),
-        state_since: l.state_since,
+        plan_rank: l.plan_rank,
+        stage_since: l.stage_since,
+        held_off: l.held_off,
         created_at: l.created_at,
         resource_version: l.resource_version,
-        cards: v
-            .cards
+        work: v
+            .work
             .iter()
-            .map(|c| pb::LaneCard { task_id: id_bytes(c.task_id), slice: c.slice.clone(), stage: None })
-            .collect(),
-        agents: v
-            .agents
-            .iter()
-            .map(|a| pb::LaneAgent {
-                harness: a.harness.clone(),
-                agent_id: a.agent_id.clone(),
-                role: (match a.role {
-                    AgentRole::Build => pb::LaneAgentRole::Build,
-                    AgentRole::Review => pb::LaneAgentRole::Review,
-                    AgentRole::Fix => pb::LaneAgentRole::Fix,
-                }) as i32,
-                model: a.model.clone(),
-                started_at: a.started_at,
-                ended_at: a.ended_at,
+            .map(|w| pb::TicketWork {
+                agent_id: id_bytes(w.agent_id),
+                task_id: id_bytes(w.task_id),
+                role: pb_work_role(w.role) as i32,
+                started_at: w.started_at,
+                ended_at: w.ended_at,
+                verdict: w.verdict.map(|v| v.as_str().to_string()).unwrap_or_default(),
+                linked_by_description: w.linked_by == LinkedBy::Description,
             })
             .collect(),
         fix_rounds: v.fix_rounds,
         spend: Some(pb_spend(&v.spend)),
         stale: v.stale,
         budget_tokens: v.budget_tokens,
-        stage: None,
-        title: v.title.clone(),
+        pr_stage: None,
+        landing: v.landing,
     }
 }
 
@@ -489,44 +567,42 @@ fn pb_status(status: TaskStatus) -> i32 {
     }) as i32
 }
 
-fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
-    pb::Plan {
+fn pb_card(c: &CardRef) -> pb::PlanCard {
+    pb::PlanCard { task_id: id_bytes(c.task_id), key: c.key.clone(), title: c.title.clone(), status: pb_status(c.status) }
+}
+
+/// The plan as the wire carries it. The cards are every card a theme, ticket,
+/// landing or agent names, so a client draws an agent's tickets by key and
+/// title whether or not they are on the line.
+fn pb_plan(svc: &Service, p: &Plan, admin: bool) -> Result<pb::Plan> {
+    let mut cards: Vec<pb::PlanCard> = p.cards.iter().map(pb_card).collect();
+    let mut named: HashSet<Uuid> = p.cards.iter().map(|c| c.task_id).collect();
+    for task in p.agents.iter().flat_map(|a| a.tickets.iter().map(|w| w.task_id)) {
+        if named.insert(task)
+            && let Ok(t) = svc.store.get_task(task)
+        {
+            cards.push(pb_card(&CardRef { task_id: t.id, key: t.key, title: t.title, status: t.status }));
+        }
+    }
+    Ok(pb::Plan {
         now_ms: p.now_ms,
         themes: p.themes.iter().map(pb_theme_view).collect(),
-        lanes: p.lanes.iter().map(|l| pb_lane(l, admin)).collect(),
-        order: p.order.iter().map(|id| id_bytes(*id)).collect(),
-        cards: p
-            .cards
-            .iter()
-            .map(|c| pb::PlanCard {
-                task_id: id_bytes(c.task_id),
-                key: c.key.clone(),
-                title: c.title.clone(),
-                status: pb_status(c.status),
-            })
-            .collect(),
-        coverage: p
-            .coverage
-            .iter()
-            .map(|c| pb::PlanCoverage { task_id: id_bytes(c.task_id), live: c.live, landed: c.landed })
-            .collect(),
+        cards,
         rulings: p.rulings.iter().map(crate::rpc_rulings::pb_ruling).collect(),
-        trains: p.trains.iter().map(crate::rpc_trains::pb_train_view).collect(),
-        ci: p.ci.iter().map(crate::rpc_trains::pb_ci).collect(),
+        ci: p.ci.iter().map(crate::rpc_landings::pb_ci).collect(),
         board_counts: Some(pb_counts(&p.board_counts)),
         cost: Some(pb_cost(&p.cost)),
-        agents: p.agents.iter().map(pb_agent).collect(),
-        // Always `Some`, even on a day with no spend: clients take the field's presence to mean "this runner
-        // lists only the agents that exist" (ov-518), and an older runner's absence to mean it lists every agent
-        // of the day. Never make it conditional (on `admin`, a capability or a zero total).
-        agents_spend: Some(pb_spend(&p.agents_spend)),
         review_waits: Vec::new(),
+        lines: p.lines.iter().map(|l| pb_line(l, admin)).collect(),
+        landings: p.landings.iter().map(crate::rpc_landings::pb_landing_view).collect(),
+        agents: p.agents.iter().map(pb_agent).collect(),
+        agents_spend: Some(pb_spend(&p.agents_spend)),
         suggested_reviewers: Vec::new(),
-    }
+    })
 }
 
 /// Whether the daemon's live session for `terminal` is mid-turn: the state the
-/// fleet shows. `None` when it has no state worth trusting (a shell, a pane it
+/// agents show. `None` when it has no state worth trusting (a shell, a pane it
 /// can't read), so the store falls back to how recently the pane spoke.
 fn live_working(svc: &Service, terminal: Uuid) -> Option<bool> {
     use pb::AgentActivity as A;
@@ -537,37 +613,47 @@ fn live_working(svc: &Service, terminal: Uuid) -> Option<bool> {
     }
 }
 
-/// An agent on the plan (ov-503), as the wire names it.
-fn pb_agent(a: &PlanAgent) -> pb::PlanAgent {
-    pb::PlanAgent {
-        id: a.id.clone(),
-        role: (match a.role {
-            PlanAgentRole::Orchestrator => pb::PlanAgentRole::Orchestrator,
-            PlanAgentRole::Build => pb::PlanAgentRole::Build,
-            PlanAgentRole::Review => pb::PlanAgentRole::Review,
-            PlanAgentRole::Fix => pb::PlanAgentRole::Fix,
-            PlanAgentRole::Integrator => pb::PlanAgentRole::Integrator,
-            PlanAgentRole::Subagent => pb::PlanAgentRole::Subagent,
-            PlanAgentRole::Agent => pb::PlanAgentRole::Agent,
-        }) as i32,
+/// An agent as it was recorded, with nothing observed.
+pub(crate) fn pb_agent_row(a: &farcooler_store::agents::Agent) -> pb::Agent {
+    let (terminal, subagent, parent) = match &a.place {
+        AgentPlace::Pane { terminal } => (Some(id_bytes(*terminal)), String::new(), None),
+        AgentPlace::Subagent { id, parent } => (None, id.clone(), parent.map(id_bytes)),
+    };
+    pb::Agent {
+        id: id_bytes(a.id),
+        role: pb_role(a.role) as i32,
         harness: a.harness.clone(),
         model: a.model.clone(),
-        label: a.label.clone(),
-        lane_id: a.lane.as_ref().map(|l| id_bytes(l.0)),
-        lane_name: a.lane.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
-        train_id: a.train.as_ref().map(|t| id_bytes(t.0)),
-        train_title: a.train.as_ref().map(|t| t.1.clone()).unwrap_or_default(),
-        task_id: a.card.as_ref().map(|c| id_bytes(c.0)),
-        task_key: a.card.as_ref().map(|c| c.1.clone()).unwrap_or_default(),
-        terminal_id: a.terminal.map(id_bytes),
-        working: a.working,
+        title: a.title.clone(),
+        terminal_id: terminal,
+        subagent_id: subagent,
+        parent_terminal_id: parent,
         started_at: a.started_at,
-        last_at: a.last_at,
-        spend: Some(pb_spend(&a.spend)),
+        stop_asked_at: a.stop_asked_at,
+        tickets: Vec::new(),
+        working: false,
+        doing_now: String::new(),
+        last_at: 0,
+        spend: None,
     }
 }
 
-fn pb_event(e: &PlanEvent) -> pb::PlanEvent {
+/// An agent on the plan, as the wire names it.
+fn pb_agent(v: &AgentView) -> pb::Agent {
+    let mut wire = pb_agent_row(&v.agent);
+    wire.title = v.label.clone();
+    wire.tickets = v
+        .tickets
+        .iter()
+        .map(|w| pb::AgentTicket { task_id: id_bytes(w.task_id), role: pb_work_role(w.role) as i32, started_at: w.started_at })
+        .collect();
+    wire.working = v.working;
+    wire.last_at = v.last_at;
+    wire.spend = Some(pb_spend(&v.spend));
+    wire
+}
+
+fn pb_event(e: &LineEvent) -> pb::PlanEvent {
     pb::PlanEvent {
         id: id_bytes(e.id),
         at: e.at,

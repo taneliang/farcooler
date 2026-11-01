@@ -166,15 +166,15 @@ async fn the_cache_keeps_the_last_answer_and_the_counts_through_a_refresh() {
     assert_eq!(svc.pr_cache_get(repo).unwrap()[0].review.unresolved_threads, Some(2));
 }
 
-/// A kick reads past the backoff of the kicked lane's repository, and no
+/// A kick reads past the backoff of the kicked ticket's repository, and no
 /// other's.
 #[test]
 fn a_kick_bypasses_the_backoff_of_its_own_repository_only() {
-    let (kicked, other, lane, t0) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Instant::now());
+    let (kicked, other, ticket, t0) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Instant::now());
     let mut memo = Memo::default();
     memo.missed(kicked, t0);
     memo.missed(other, t0);
-    kick_lane(lane, kicked);
+    kick_ticket(ticket, kicked);
     let forced = take_forced();
     assert!(forced.contains(&kicked) && !forced.contains(&other));
     let soon = t0 + Duration::from_secs(30);

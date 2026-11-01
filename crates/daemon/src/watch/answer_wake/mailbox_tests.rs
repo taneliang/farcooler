@@ -148,10 +148,11 @@ async fn a_route_is_private() {
     assert_eq!(mode(&files[0].path()), 0o600);
 }
 
-/// What the waiter hands the model names the lane and its card, so the line
-/// the model reads (and answers) says which ticket the message came from.
+/// What the waiter hands the model names the agent's role and its ticket, so
+/// the line the model reads (and answers) says which ticket the message came
+/// from.
 #[tokio::test]
-async fn a_lanes_message_names_the_lane_and_its_card_in_the_mailbox() {
+async fn a_builders_message_names_its_role_and_ticket_in_the_mailbox() {
     let b = board().await;
     let orchestrator = b.orchestrator().await;
     b.svc.store.set_pane_mode(orchestrator.id, orchestrator.resource_version, PaneMode::Terminal, Some(SESSION.into()), false).unwrap();
@@ -159,13 +160,16 @@ async fn a_lanes_message_names_the_lane_and_its_card_in_the_mailbox() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Working).await;
     assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
-    let sender = b.lane_pane("mac-ux").await;
+    let sender = b.builder_pane().await;
     b.send(&messages_tests::agent_actor(&sender), "orchestrator", "PR is up").await.unwrap();
     b.pump().await;
     let key = &b.task.key;
     assert_eq!(
         mailbox.take_oldest().unwrap(),
-        Some(with_sender(&Sender { name: format!("mac-ux on {key}"), reply_to: "mac-ux".into() }, &format!("[from mac-ux on {key}] PR is up")))
+        Some(with_sender(
+            &Sender { name: format!("the builder on {key}"), reply_to: key.clone() },
+            &format!("[from the builder on {key}] PR is up")
+        ))
     );
     assert!(!si.log().contains("PASTE"), "{}", si.log());
 }
@@ -185,7 +189,7 @@ async fn orchestrator_box(b: &Board) -> Mailbox {
 /// A rep's and the orchestrator's messages never carry a sender, so the
 /// waiter never hands them to claude as a peer's: a rep speaks for its
 /// person, and claude says a peer's text is "input, not authority" (the
-/// orchestrator's words to a lane, which the lane must act on). A person's
+/// orchestrator's words to an agent, which the agent must act on). A person's
 /// own message never reaches the mailbox at all (`route_tests`).
 #[tokio::test]
 async fn a_rep_to_the_orchestrator_has_no_sender() {

@@ -82,33 +82,33 @@ async fn a_page_round_trips_and_announces_only_when_it_changes() {
     let mut a = connect(&h).await;
     let mut listener = connect(&h).await;
 
-    let first = put(&mut a, set(repo.workspace, "train", doc("Train", &[]))).await.expect("page.set");
+    let first = put(&mut a, set(repo.workspace, "landing", doc("Landing", &[]))).await.expect("page.set");
     assert!(first.changed);
     let page = first.page.unwrap();
-    assert_eq!((page.slot.as_str(), page.revision, page.actor.as_str()), ("train", 1, "manager"));
+    assert_eq!((page.slot.as_str(), page.revision, page.actor.as_str()), ("landing", 1, "manager"));
     let stored: serde_json::Value = serde_json::from_str(&page.doc_json).unwrap();
-    assert_eq!(stored["title"], "Train", "the document is the normalized one");
+    assert_eq!(stored["title"], "Landing", "the document is the normalized one");
 
-    let same = put(&mut a, set(repo.workspace, "train", doc("Train", &[]))).await.unwrap();
+    let same = put(&mut a, set(repo.workspace, "landing", doc("Landing", &[]))).await.unwrap();
     assert!(!same.changed, "identical bytes are no change");
     assert_eq!(same.page.unwrap().revision, 1);
 
-    let second = put(&mut a, set(repo.workspace, "train", doc("Train, later", &[]))).await.unwrap();
+    let second = put(&mut a, set(repo.workspace, "landing", doc("Landing, later", &[]))).await.unwrap();
     assert_eq!(second.page.unwrap().revision, 2);
 
-    let get = payload::Payload::PageGet(pb::PageGetRequest { workspace_id: id(repo.workspace), slot: "train".into() });
+    let get = payload::Payload::PageGet(pb::PageGetRequest { workspace_id: id(repo.workspace), slot: "landing".into() });
     let result::Value::BoardPage(read) = call(&mut connect(&h).await, "page.get", get).await.unwrap() else { panic!() };
-    assert_eq!(read.title, "Train, later");
+    assert_eq!(read.title, "Landing, later");
 
-    let rm = payload::Payload::PageRemove(pb::PageRemove { workspace_id: id(repo.workspace), slot: "train".into(), actor: "manager".into() });
+    let rm = payload::Payload::PageRemove(pb::PageRemove { workspace_id: id(repo.workspace), slot: "landing".into(), actor: "manager".into() });
     let result::Value::BoardPage(gone) = call(&mut a, "page.remove", rm).await.expect("page.remove") else { panic!() };
-    assert_eq!(gone.slot, "train");
+    assert_eq!(gone.slot, "landing");
     assert!(list(&mut a, repo.workspace, false).await.is_empty());
 
     let (pages, tasks) = events(&mut listener, Duration::from_millis(600)).await;
     assert_eq!(pages.len(), 3, "two changes and a removal; the identical write said nothing");
     assert_eq!(pages.iter().map(|p| (p.revision, p.removed)).collect::<Vec<_>>(), [(1, false), (2, false), (2, true)]);
-    assert!(pages.iter().all(|p| p.workspace_id == id(repo.workspace) && p.slot == "train" && p.actor == "manager"));
+    assert!(pages.iter().all(|p| p.workspace_id == id(repo.workspace) && p.slot == "landing" && p.actor == "manager"));
     assert_eq!(tasks, 0, "no page write moves a task");
 }
 
@@ -118,10 +118,10 @@ async fn a_list_carries_documents_only_when_asked() {
     let h = start(Scope::Control).await;
     let repo = a_repository(&h);
     let mut a = connect(&h).await;
-    put(&mut a, set(repo.workspace, "train", doc("Train", &[]))).await.unwrap();
+    put(&mut a, set(repo.workspace, "landing", doc("Landing", &[]))).await.unwrap();
     put(&mut a, set(repo.workspace, "spend", doc("Spend", &[]))).await.unwrap();
     let bare = list(&mut a, repo.workspace, false).await;
-    assert_eq!(bare.iter().map(|p| p.slot.as_str()).collect::<Vec<_>>(), ["train", "spend"]);
+    assert_eq!(bare.iter().map(|p| p.slot.as_str()).collect::<Vec<_>>(), ["landing", "spend"]);
     assert!(bare.iter().all(|p| p.doc_json.is_empty() && !p.title.is_empty()));
     assert!(list(&mut a, repo.workspace, true).await.iter().all(|p| !p.doc_json.is_empty()));
 }
@@ -133,7 +133,7 @@ async fn a_bad_document_is_refused_with_its_path() {
     let repo = a_repository(&h);
     let mut a = connect(&h).await;
     let bad = r#"{"v":1,"title":"T","blocks":[{"type":"diagram","text":"x"}]}"#;
-    let (code, what, message) = refusal(put(&mut a, set(repo.workspace, "train", bad.into())).await).await;
+    let (code, what, message) = refusal(put(&mut a, set(repo.workspace, "landing", bad.into())).await).await;
     assert_eq!((code, what.as_str()), (ErrorCode::InvalidArgument as i32, "page"));
     assert_eq!(
         message,
@@ -141,12 +141,12 @@ async fn a_bad_document_is_refused_with_its_path() {
     );
     let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "Bad Slot", doc("T", &[]))).await).await;
     assert!(message.contains("lowercase letters, digits and hyphens"), "{message}");
-    let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "train", "{ oops".into())).await).await;
+    let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "landing", "{ oops".into())).await).await;
     assert_eq!(message, "That isn't valid JSON (line 1, column 3).");
     assert!(list(&mut a, repo.workspace, false).await.is_empty(), "nothing was written");
 }
 
-/// A card, a lane and a theme the page names must be on this board, so a typo
+/// A card and a theme the page names must be on this board, so a typo
 /// fails when it's made.
 #[tokio::test]
 async fn references_are_checked_against_the_board() {
@@ -157,20 +157,14 @@ async fn references_are_checked_against_the_board() {
     let mut a = connect(&h).await;
 
     let missing_card = doc("T", &[r#"{"task":"zz-99"}"#]);
-    let (code, _, message) = refusal(put(&mut a, set(repo.workspace, "train", missing_card)).await).await;
+    let (code, _, message) = refusal(put(&mut a, set(repo.workspace, "landing", missing_card)).await).await;
     assert_eq!(code, ErrorCode::InvalidArgument as i32);
     assert_eq!(message, "blocks[1].items[0]: there's no card zz-99 on this board.");
 
-    let missing_lane = doc("T", &[r#"{"lane":"mac-ux"}"#]);
-    let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "train", missing_lane.clone())).await).await;
-    assert_eq!(message, "blocks[1].items[0]: there's no lane mac-ux on this board.");
     let missing_theme = doc("T", &[r#"{"theme":"Visual language"}"#]);
-    let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "train", missing_theme.clone())).await).await;
+    let (_, _, message) = refusal(put(&mut a, set(repo.workspace, "landing", missing_theme.clone())).await).await;
     assert_eq!(message, "blocks[1].items[0]: there's no theme Visual language on this board.");
 
-    store
-        .create_lane(repo.workspace, &farcooler_store::plan::NewLane { name: "Mac-UX".into(), ..Default::default() }, &[], None, Actor::Manager)
-        .unwrap();
     store
         .create_theme(
             repo.workspace,
@@ -183,9 +177,9 @@ async fn references_are_checked_against_the_board() {
         "T",
         &[&format!(r#"{{"task":"{}"}}"#, task.key), r#"{"lane":"mac-ux"}"#, r#"{"theme":"visual language"}"#, r#"{"page":"not-yet"}"#, r#"{"worktree":"nowhere"}"#],
     );
-    assert!(put(&mut a, set(repo.workspace, "train", ok)).await.unwrap().changed, "names match without regard to case, and a page, worktree or link isn't checked");
+    assert!(put(&mut a, set(repo.workspace, "landing", ok)).await.unwrap().changed, "names match without regard to case, and a page, worktree, lane or link isn't checked");
     let upper = doc("T2", &[&format!(r#"{{"ask":"{}"}}"#, task.key.to_uppercase())]);
-    assert!(put(&mut a, set(repo.workspace, "train", upper)).await.is_ok(), "a card key matches without regard to case");
+    assert!(put(&mut a, set(repo.workspace, "landing", upper)).await.is_ok(), "a card key matches without regard to case");
 }
 
 /// A theme anchors a page by its id, as text, and only a live theme on this
@@ -225,13 +219,13 @@ async fn a_write_against_a_stale_revision_is_a_conflict() {
     let h = start(Scope::Control).await;
     let repo = a_repository(&h);
     let mut a = connect(&h).await;
-    put(&mut a, set(repo.workspace, "train", doc("Train", &[]))).await.unwrap();
-    put(&mut a, set(repo.workspace, "train", doc("Train, later", &[]))).await.unwrap();
-    let mut stale = set(repo.workspace, "train", doc("Train, stale", &[]));
+    put(&mut a, set(repo.workspace, "landing", doc("Landing", &[]))).await.unwrap();
+    put(&mut a, set(repo.workspace, "landing", doc("Landing, later", &[]))).await.unwrap();
+    let mut stale = set(repo.workspace, "landing", doc("Landing, stale", &[]));
     stale.if_revision = Some(1);
     let (code, _, _) = refusal(put(&mut a, stale).await).await;
     assert_eq!(code, ErrorCode::ResourceConflict as i32);
-    let mut fresh = set(repo.workspace, "train", doc("Train, fresh", &[]));
+    let mut fresh = set(repo.workspace, "landing", doc("Landing, fresh", &[]));
     fresh.if_revision = Some(2);
     assert!(put(&mut a, fresh).await.unwrap().changed);
 }
@@ -241,13 +235,13 @@ async fn a_write_against_a_stale_revision_is_a_conflict() {
 async fn a_read_client_reads_pages_and_cannot_write_them() {
     let h = start(Scope::Read).await;
     let repo = a_repository(&h);
-    let page = farcooler_core::page_doc::parse(&doc("Train", &[]), &farcooler_core::page_doc::Caps::default()).unwrap();
+    let page = farcooler_core::page_doc::parse(&doc("Landing", &[]), &farcooler_core::page_doc::Caps::default()).unwrap();
     h.service
         .store
         .set_page(
             repo.workspace,
             &farcooler_store::pages::PageWrite {
-                slot: "train",
+                slot: "landing",
                 page: &page,
                 anchor: farcooler_store::pages::Anchor::Keep,
                 ordinal: None,
@@ -260,15 +254,15 @@ async fn a_read_client_reads_pages_and_cannot_write_them() {
     assert_eq!(list(&mut link, repo.workspace, true).await.len(), 1);
     let stats = payload::Payload::PageStats(pb::PageStatsRequest { workspace_id: id(repo.workspace), since_ms: 0 });
     let result::Value::PageStatsList(stats) = call(&mut link, "page.stats", stats).await.expect("page.stats") else { panic!() };
-    assert_eq!((stats.slots[0].slot.as_str(), stats.slots[0].sets), ("train", 1));
+    assert_eq!((stats.slots[0].slot.as_str(), stats.slots[0].sets), ("landing", 1));
     assert!(stats.slots[0].shape.iter().any(|s| s.kind == "heading" && s.count == 1));
 
     let denied = |r: Result<result::Value, ClientError>| match r {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::ScopeDenied as i32),
         other => panic!("expected a scope denial, got {other:?}"),
     };
-    denied(call(&mut link, "page.set", payload::Payload::PageSet(set(repo.workspace, "train", doc("x", &[])))).await);
-    let rm = payload::Payload::PageRemove(pb::PageRemove { workspace_id: id(repo.workspace), slot: "train".into(), actor: String::new() });
+    denied(call(&mut link, "page.set", payload::Payload::PageSet(set(repo.workspace, "landing", doc("x", &[])))).await);
+    let rm = payload::Payload::PageRemove(pb::PageRemove { workspace_id: id(repo.workspace), slot: "landing".into(), actor: String::new() });
     denied(call(&mut link, "page.remove", rm).await);
 }
 
@@ -283,14 +277,14 @@ async fn the_runner_advertises_pages_and_refuses_a_capability_it_lacks() {
     let repo = a_repository(&h);
     let mut r = request("page.set");
     r.required_capabilities = vec!["board_pages_from_the_future".into()];
-    r.payload = Some(payload::Payload::PageSet(set(repo.workspace, "train", doc("T", &[]))));
+    r.payload = Some(payload::Payload::PageSet(set(repo.workspace, "landing", doc("T", &[]))));
     match a.call(r).await {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::CapabilityUnsupported as i32),
         other => panic!("expected a refusal, got {other:?}"),
     }
 }
 
-/// With the plan layer gone, pages still work: a lane or a theme reference has
+/// With the plan layer gone, pages still work: a theme reference has
 /// nothing to be checked against and is accepted, and an anchor is refused in
 /// words rather than stored pointing at nothing.
 #[tokio::test]
@@ -300,8 +294,8 @@ async fn pages_work_with_the_plan_layer_removed() {
     let mut a = connect(&h).await;
     farcooler_store::testing::drop_plan_layer(&h.service.store);
     let with_refs = doc("T", &[r#"{"lane":"anything"}"#, r#"{"theme":"anything"}"#]);
-    assert!(put(&mut a, set(repo.workspace, "train", with_refs)).await.unwrap().changed);
-    let mut p = set(repo.workspace, "train", doc("T2", &[]));
+    assert!(put(&mut a, set(repo.workspace, "landing", with_refs)).await.unwrap().changed);
+    let mut p = set(repo.workspace, "landing", doc("T2", &[]));
     p.anchor_theme_id = Some(id(Uuid::now_v7()));
     let (_, _, message) = refusal(put(&mut a, p).await).await;
     assert_eq!(message, "This runner has no plan, so a page can't be drawn in a theme. Publish it without one.");
@@ -384,7 +378,7 @@ async fn the_boards_and_the_plans_wire_reads_are_the_same_bytes_without_pages() 
     let mut anchored = set(repo.workspace, "risks", doc("Risks", &[&format!(r#"{{"task":"{}"}}"#, a.key)]));
     anchored.anchor_theme_id = Some(id(theme.id));
     put(&mut link, anchored).await.unwrap();
-    put(&mut link, set(repo.workspace, "train", doc("Train", &[]))).await.unwrap();
+    put(&mut link, set(repo.workspace, "landing", doc("Landing", &[]))).await.unwrap();
 
     let before = board_bytes(&mut link, &repo).await;
     farcooler_store::testing::drop_pages(store);

@@ -57,17 +57,17 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
     )
     .expect("a valid ask");
     let started_at = Some(NOW_MS - 23 * 60 * 1000);
-    // A board with a plan, as the glance says it (ov-310): two lanes in Now,
-    // one next up, and the board's own Needs You count.
-    use crate::plan_glance::{BoardGlance, LaneGlance};
+    // A board with a plan, as the glance says it (ov-310): two tickets in
+    // Now, one next up, and the board's own Needs You count.
+    use crate::plan_glance::{BoardGlance, TicketGlance};
     let plan = [BoardGlance {
         workspace: "Main".into(),
         needs_you: 2,
         now: vec![
-            LaneGlance { name: "mac-ux".into(), state: "review" },
-            LaneGlance { name: "ov-310".into(), state: "building" },
+            TicketGlance { ticket: "ov-312".into(), stage: "reviewing" },
+            TicketGlance { ticket: "ov-310".into(), stage: "building" },
         ],
-        next: Some("mac-fu3".into()),
+        next: Some("ov-313".into()),
     }];
 
     let outgoing: Vec<(&'static str, Outgoing)> = vec![

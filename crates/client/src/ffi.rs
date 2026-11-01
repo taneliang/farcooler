@@ -2014,7 +2014,7 @@ async fn dispatch(
         }
 
         // The plan layer, read-only (ov-274): `{workspace}` answers as
-        // `plan_json` shapes it, `{theme}` or `{lane}` a record. Refused on a
+        // `plan_json` shapes it, `{theme}`, `{task}` or `{landing}` a record. Refused on a
         // runner without `board_plan`, so a phone's Plan view says the runner
         // can't answer rather than waiting.
         "plan.get" => {
@@ -2023,10 +2023,13 @@ async fn dispatch(
         }
         "plan.events" => {
             use farcooler_protocol::v1::plan_events_request::Subject;
-            let subject = match (optional_id(args, "theme", method)?, optional_id(args, "lane", method)?) {
-                (Some(theme), None) => Subject::ThemeId(bytes::Bytes::copy_from_slice(theme.as_bytes())),
-                (None, Some(lane)) => Subject::LaneId(bytes::Bytes::copy_from_slice(lane.as_bytes())),
-                _ => return Err(SessionError::Protocol("plan.events takes a theme or a lane".into())),
+            let bytes = |id: uuid::Uuid| bytes::Bytes::copy_from_slice(id.as_bytes());
+            let named = (optional_id(args, "theme", method)?, optional_id(args, "task", method)?, optional_id(args, "landing", method)?);
+            let subject = match named {
+                (Some(theme), None, None) => Subject::ThemeId(bytes(theme)),
+                (None, Some(task), None) => Subject::TaskId(bytes(task)),
+                (None, None, Some(landing)) => Subject::LandingId(bytes(landing)),
+                _ => return Err(SessionError::Protocol("plan.events takes a theme, a task or a landing".into())),
             };
             let list = session.plan_events(subject).await?;
             Ok(crate::plan_json::events_json(&list))

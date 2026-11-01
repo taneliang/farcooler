@@ -1,8 +1,8 @@
-//! `pr.ready` and `pr.thread_reply` (ov-317): a phone marks a lane's draft pull
-//! request ready for review, and replies to a review thread an agent escalated,
-//! both as the runner's `gh` login.
+//! `pr.ready` and `pr.thread_reply` (ov-317): a phone marks a ticket's draft
+//! pull request ready for review, and replies to a review thread an agent
+//! escalated, both as the runner's `gh` login.
 //!
-//! The phone names a lane (and which of its pull requests), or a card; never a
+//! The phone names a ticket (and its pull request's number), or a card; never a
 //! URL or a repository. The runner reads the rest from its own board. A runner
 //! without the `pr_actions` capability is refused here, before anything is sent.
 
@@ -16,7 +16,7 @@ use super::{Session, SessionError, require};
 
 impl Session {
     /// The two PR verbs, as `ffi::dispatch` passes them. `pr.ready` takes
-    /// `{lane, pr_number?}` and answers `{number, url, already_ready}`.
+    /// `{task, pr_number?}` and answers `{number, url, already_ready}`.
     /// `pr.thread_reply` takes `{task, body?, send?, note_id?, digest?}` and answers
     /// `{repository, number, login, sent, in_thread, note_id, digest}`: with `send` false it
     /// posts nothing and says where the reply would go and as whom.
@@ -31,7 +31,7 @@ impl Session {
         };
         if method == "pr.ready" {
             let pr_number = args.get("pr_number").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let payload = request::Payload::PrReady(pb::PrReady { lane_id: id("lane")?, pr_number });
+            let payload = request::Payload::PrReady(pb::PrReady { task_id: id("task")?, pr_number });
             return match self.value("pr.ready", None, Some(payload)).await? {
                 result::Value::PrReadied(r) => Ok(ready_json(&r)),
                 other => Err(wrong("pr_readied", &other)),

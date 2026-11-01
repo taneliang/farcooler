@@ -23,44 +23,23 @@ fn number(m: &str, f: &str) -> i32 {
         .number()
 }
 
-const LAYER_METHODS: [&str; 10] = [
-    "plan.get",
-    "plan.set",
-    "plan.events",
-    "board_theme.create",
-    "board_theme.update",
-    "board_theme.cards",
-    "lane.create",
-    "lane.update",
-    "lane.cards",
-    "lane.agent",
-];
+const LAYER_METHODS: [&str; 5] = ["plan.get", "plan.events", "board_theme.create", "board_theme.update", "board_theme.cards"];
 
 /// The tags the layer takes, pinned. Request 160-169 and result 160-163 are
-/// the layer's alone, and the arms before them are other lanes': a tag here
-/// that drifted would decode as another lane's method.
+/// the layer's alone: a tag here that drifted would decode as another
+/// method.
 #[test]
 fn the_layer_holds_its_tags() {
     assert_eq!(number("Request", "terminal_rename"), 140, "the last request tag before it");
     assert_eq!(number("Request", "worktree_file"), 151, "the highest request tag before it");
-    let requests = [
-        "plan_get",
-        "board_theme_create",
-        "board_theme_update",
-        "board_theme_cards",
-        "lane_create",
-        "lane_update",
-        "lane_cards",
-        "lane_agent_set",
-        "plan_set",
-        "plan_events",
-    ];
-    for (i, name) in requests.iter().enumerate() {
-        assert_eq!(number("Request", name), 160 + i as i32, "{name}");
+    // 164-168 were the lanes' and the plan's order, retired by ov-872.
+    for (name, tag) in [("plan_get", 160), ("board_theme_create", 161), ("board_theme_update", 162), ("board_theme_cards", 163), ("plan_events", 169)] {
+        assert_eq!(number("Request", name), tag, "{name}");
     }
     assert_eq!(number("Result", "worktree_file"), 151, "the highest result tag before it");
-    for (i, name) in ["board_theme_view", "lane", "plan", "plan_event_list"].iter().enumerate() {
-        assert_eq!(number("Result", name), 160 + i as i32, "{name}");
+    // 161 was the lane.
+    for (name, tag) in [("board_theme_view", 160), ("plan", 162), ("plan_event_list", 163)] {
+        assert_eq!(number("Result", name), tag, "{name}");
     }
     assert_eq!(number("Event", "board_reads_changed"), 26, "the last event tag before it");
     assert_eq!(number("Event", "plan_changed"), 27);

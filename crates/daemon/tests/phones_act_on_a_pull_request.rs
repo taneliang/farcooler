@@ -1,14 +1,14 @@
 //! `pr.ready` and `pr.thread_reply` (ov-317), end to end: a real `farcoolerd`
 //! whose `gh` is a shim that logs what it is asked and keeps what it is sent.
 //!
-//! What only a running daemon shows: that a lane's draft pull request is marked
-//! ready and no other is, that a reply lands on the comment the card's link
+//! What only a running daemon shows: that a ticket's draft pull request is
+//! marked ready and no other is, that a reply lands on the comment the card's link
 //! names or on the pull request when the link names none, as the login `gh`
 //! reports, and that a link the runner cannot read to one place posts nothing.
 //! The scope check is `pr_actions_need_control.rs`.
 
 use farcooler_protocol::capability::{PR_ACTIONS, WORKSTREAMS};
-use farcooler_protocol::v1::{self as pb, LaneState as L, request, result};
+use farcooler_protocol::v1::{self as pb, TicketStage as S, request, result};
 use farcooler_transport::{Client, request as request_for};
 use std::time::{Duration, Instant};
 
@@ -19,7 +19,7 @@ use gh_pr::*;
 
 fn stage_of<'a>(plan: &'a pb::Plan, key: &str) -> Option<&'a pb::PrStage> {
     let id = &plan.cards.iter().find(|c| c.key == key)?.task_id;
-    plan.lanes.iter().flat_map(|l| &l.cards).find(|c| c.task_id == *id)?.stage.as_ref()
+    plan.lines.iter().find(|l| l.task_id == *id)?.pr_stage.as_ref()
 }
 
 /// Cards `1..=n` and the shim serving their PRs (card N is PR 100 + N; 1 and 2
@@ -34,9 +34,9 @@ async fn cards(client: &mut SocketClient, workspace: &pb::Workspace, dir: &std::
     out
 }
 
-async fn ready(client: &mut SocketClient, lane: &pb::Lane, pr_number: u32) -> Result<pb::PrReadied, farcooler_transport::ClientError> {
+async fn ready(client: &mut SocketClient, card: &pb::Task, pr_number: u32) -> Result<pb::PrReadied, farcooler_transport::ClientError> {
     let mut req = request_for("pr.ready");
-    req.payload = Some(request::Payload::PrReady(pb::PrReady { lane_id: lane.id.clone(), pr_number }));
+    req.payload = Some(request::Payload::PrReady(pb::PrReady { task_id: card.id.clone(), pr_number }));
     req.required_capabilities = vec![PR_ACTIONS.into()];
     match client.call(req).await?.value {
         Some(result::Value::PrReadied(r)) => Ok(r),
@@ -44,64 +44,64 @@ async fn ready(client: &mut SocketClient, lane: &pb::Lane, pr_number: u32) -> Re
     }
 }
 
-/// A lane in review over cards 1 and 2 (two drafts) and one over card 3 (ready), read.
-async fn lanes(client: &mut SocketClient, workspace: &pb::Workspace, cards: &[pb::Task]) -> (pb::Lane, pb::Lane) {
-    let drafts = a_lane(client, workspace, "drafts", &[&cards[0], &cards[1]], &[L::Review]).await;
-    let one = a_lane(client, workspace, "one", &[&cards[2]], &[L::Review]).await;
+/// Cards 1 and 2 (drafts; card 1 on the branch the shim's `pr view` names) and
+/// card 3 (ready) in review, read.
+async fn tickets(client: &mut SocketClient, workspace: &pb::Workspace, cards: &[pb::Task]) {
+    a_ticket(client, &cards[0], "ticket/drafts", &[S::Building, S::Reviewing]).await;
+    a_ticket(client, &cards[1], "ticket/second", &[S::Building, S::Reviewing]).await;
+    a_ticket(client, &cards[2], "ticket/one", &[S::Building, S::Reviewing]).await;
     until(client, workspace, "the watch never read the pull requests", |p| {
         stage_of(p, &cards[0].key).is_some_and(|s| s.kind == pb::PrStageKind::AgentReview as i32)
             && stage_of(p, &cards[2].key).is_some_and(|s| s.pr_number == 103)
     })
     .await;
-    (drafts, one)
 }
 
 #[tokio::test]
-async fn a_lane_s_draft_pull_request_is_marked_ready_and_no_other_is() {
+async fn a_ticket_s_draft_pull_request_is_marked_ready_and_no_other_is() {
     let (dir, _daemon, mut client, workspace) = a_runner().await;
     let cards = cards(&mut client, &workspace, dir.path(), 3).await;
-    let (drafts, one) = lanes(&mut client, &workspace, &cards).await;
+    tickets(&mut client, &workspace, &cards).await;
+    let draft = &cards[1];
 
-    // Two drafts on one lane and no number: ambiguous, so nothing is touched.
-    let refused = ready(&mut client, &drafts, 0).await.expect_err("two drafts, no number");
-    assert!(format!("{refused:?}").contains("lane_pr"), "{refused:?}");
-    // A number that is not the lane's own: card 3's PR is on another lane.
-    let refused = ready(&mut client, &drafts, 103).await.expect_err("another lane's pull request");
-    assert!(format!("{refused:?}").contains("lane_pr"), "{refused:?}");
+    // A number that is not the ticket's own: card 3's PR is another ticket's.
+    let refused = ready(&mut client, draft, 103).await.expect_err("another ticket's pull request");
+    assert!(format!("{refused:?}").contains("ticket_pr"), "{refused:?}");
     // A number the repository has nowhere.
-    let refused = ready(&mut client, &drafts, 999).await.expect_err("no such pull request");
-    assert!(format!("{refused:?}").contains("lane_pr"), "{refused:?}");
+    let refused = ready(&mut client, draft, 999).await.expect_err("no such pull request");
+    assert!(format!("{refused:?}").contains("ticket_pr"), "{refused:?}");
     assert!(!calls(dir.path()).iter().any(|c| c.starts_with("pr ready")), "{:?}", calls(dir.path()));
 
-    // Naming one of its own does it.
-    let done = ready(&mut client, &drafts, 102).await.expect("pr.ready");
+    // Naming its own does it, and so does naming none: a ticket has one.
+    let done = ready(&mut client, draft, 0).await.expect("pr.ready");
     assert_eq!((done.number, done.already_ready), (102, false));
     assert!(done.url.ends_with("/pull/102"), "{done:?}");
     assert_eq!(calls(dir.path()).iter().filter(|c| *c == "pr ready 102").count(), 1, "{:?}", calls(dir.path()));
 
     // GitHub says it is ready now: asked again, nothing is run a second time.
-    let again = ready(&mut client, &drafts, 102).await.expect("pr.ready again");
+    let again = ready(&mut client, draft, 102).await.expect("pr.ready again");
     assert!(again.already_ready, "{again:?}");
     assert_eq!(calls(dir.path()).iter().filter(|c| c.starts_with("pr ready")).count(), 1, "{:?}", calls(dir.path()));
 
-    // A lane whose only pull request is not a draft: it is already ready.
-    let single = ready(&mut client, &one, 0).await;
-    assert!(single.is_err(), "no draft among its pull requests: {single:?}");
+    // A ticket whose pull request is not a draft, and no number: nothing to ready.
+    let single = ready(&mut client, &cards[2], 0).await;
+    assert!(single.is_err(), "its pull request is no draft: {single:?}");
 }
 
 #[tokio::test]
 async fn a_pull_request_that_is_closed_or_that_gh_will_not_ready_is_refused() {
     let (dir, _daemon, mut client, workspace) = a_runner().await;
     let cards = cards(&mut client, &workspace, dir.path(), 3).await;
-    let (drafts, _) = lanes(&mut client, &workspace, &cards).await;
+    tickets(&mut client, &workspace, &cards).await;
+    let drafts = &cards[0];
 
     std::fs::write(dir.path().join("closed"), "").unwrap();
-    ready(&mut client, &drafts, 101).await.expect_err("closed on GitHub since the last read");
+    ready(&mut client, drafts, 101).await.expect_err("closed on GitHub since the last read");
     std::fs::remove_file(dir.path().join("closed")).unwrap();
     assert!(!calls(dir.path()).iter().any(|c| c.starts_with("pr ready")), "{:?}", calls(dir.path()));
 
     std::fs::write(dir.path().join("ready-fails"), "").unwrap();
-    ready(&mut client, &drafts, 101).await.expect_err("gh refused");
+    ready(&mut client, drafts, 101).await.expect_err("gh refused");
 }
 
 // ---- replies ----
@@ -372,20 +372,21 @@ async fn a_reply_answers_the_card_and_a_second_send_is_refused() {
     assert_eq!(posts(dir.path()).len(), 1, "{:?}", calls(dir.path()));
 }
 
-/// L2: Mark Ready is for the lane's own pull request: on the lane's branch, or opened by this login.
+/// L2: Mark Ready is for the ticket's own pull request: on the ticket's branch, or opened by this login.
 #[tokio::test]
-async fn a_pull_request_that_is_neither_on_the_lane_s_branch_nor_this_login_s_is_not_readied() {
+async fn a_pull_request_that_is_neither_on_the_ticket_s_branch_nor_this_login_s_is_not_readied() {
     let (dir, _daemon, mut client, workspace) = a_runner().await;
     let cards = cards(&mut client, &workspace, dir.path(), 3).await;
-    let (drafts, _) = lanes(&mut client, &workspace, &cards).await;
+    tickets(&mut client, &workspace, &cards).await;
+    let drafts = &cards[0];
     std::fs::write(dir.path().join("head-ref"), "someone/else").unwrap();
     std::fs::write(dir.path().join("author"), "mallory").unwrap();
-    let refused = ready(&mut client, &drafts, 101).await.expect_err("a stranger's branch and author");
-    assert!(format!("{refused:?}").contains("lane_pr"), "{refused:?}");
+    let refused = ready(&mut client, drafts, 101).await.expect_err("a stranger's branch and author");
+    assert!(format!("{refused:?}").contains("ticket_pr"), "{refused:?}");
     assert!(!calls(dir.path()).iter().any(|c| c.starts_with("pr ready")), "{:?}", calls(dir.path()));
     // Opened by the runner's own login from another branch: allowed.
     std::fs::write(dir.path().join("author"), "octo-owner").unwrap();
-    ready(&mut client, &drafts, 101).await.expect("this login's own");
+    ready(&mut client, drafts, 101).await.expect("this login's own");
     assert_eq!(calls(dir.path()).iter().filter(|c| *c == "pr ready 101").count(), 1);
 }
 
@@ -424,16 +425,17 @@ async fn two_sends_of_one_preview_post_once() {
     assert_eq!(posts(dir.path()).len(), 1, "posted twice: {:?}", calls(dir.path()));
 }
 
-/// L3: a branch of a fork named like the lane's is not the lane's.
+/// L3: a branch of a fork named like the ticket's is not the ticket's.
 #[tokio::test]
-async fn a_fork_branch_named_like_the_lane_s_is_not_readied() {
+async fn a_fork_branch_named_like_the_ticket_s_is_not_readied() {
     let (dir, _daemon, mut client, workspace) = a_runner().await;
     let cards = cards(&mut client, &workspace, dir.path(), 3).await;
-    let (drafts, _) = lanes(&mut client, &workspace, &cards).await;
+    tickets(&mut client, &workspace, &cards).await;
+    let drafts = &cards[0];
     std::fs::write(dir.path().join("cross"), "").unwrap();
     std::fs::write(dir.path().join("author"), "mallory").unwrap();
-    let refused = ready(&mut client, &drafts, 101).await.expect_err("a fork's branch of that name");
-    assert!(format!("{refused:?}").contains("lane_pr"), "{refused:?}");
+    let refused = ready(&mut client, drafts, 101).await.expect_err("a fork's branch of that name");
+    assert!(format!("{refused:?}").contains("ticket_pr"), "{refused:?}");
     assert!(!calls(dir.path()).iter().any(|c| c.starts_with("pr ready")), "{:?}", calls(dir.path()));
 }
 

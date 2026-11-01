@@ -21,6 +21,11 @@ plan carries.
 So are trains (ov-309) and the CI reads the runner keeps for trains and
 pages: their tables, types and store calls are names the board must not use.
 
+So, since ov-872, are the line and its landings, which replaced lanes and
+trains. Agents and their work on tickets (`agents`, `ticket_work`) are not:
+they are the board's record of who works a task, as `task_workers` was, so
+`workers.rs` and `waits.rs` read them, and the removal drill keeps them.
+
 Guarded: the store files and daemon files that serve the board, and the
 `Task`-shaped proto messages. A match is the layer's table or module name, or
 one of its names in SQL, not the word "lane" in prose (a worktree has always
@@ -88,9 +93,12 @@ FORBIDDEN = [
         # Its agents list (ov-503).
         r"|plan_agents|PlanAgent\w*"
         # Its trains' phase and history (ov-503).
-        r"|train_events|train_phase|TrainPhase|HeldTrain)\b"
+        r"|train_events|train_phase|TrainPhase|HeldTrain"
+        # The line and its landings (ov-872), which replaced lanes and trains.
+        r"|ticket_lines|landing_tickets|line_events|TicketLine\w*|LineView|LineUpdate|LineEvent|LineSubject"
+        r"|LandingView|LandingState|LandingPhase|LandingUpdate|NewLanding|landing_phase|rpc_landings|collecting)\b"
     ),
-    re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b", re.I),
+    re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+(lanes|landings)\b", re.I),
     # Any `use` that brings the layer in, braces and all.
     re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling|trains|board_ci|rpc_trains|ci_watch|plan_cost|plan_agents|train_phase)\b[^;]*;"),
     # A path through the module: `crate::plan::..`, `farcooler_store::plan::..`, `plan::Lane`.
@@ -98,7 +106,9 @@ FORBIDDEN = [
     # The layer's reads and writes, called on a store or a service.
     re.compile(r"\.(plan|board_theme|create_theme|update_theme|theme_cards|create_lane|update_lane"
                r"|lane_cards|record_lane_agent|set_plan|plan_events|add_ruling|set_ruling|ruling"
-               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read|set_budget|train_events|lane_train_events|holds_untold|record_hold_told|workspaces_with_integrating_trains)\s*\("),
+               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read|set_budget|train_events|lane_train_events|holds_untold|record_hold_told|workspaces_with_integrating_trains"
+               r"|put_on_line|ensure_on_line|update_line|set_line_order|ticket_line|ticket_lines|start_landing|update_landing"
+               r"|landing_of|landings|landing_numbered|landings_following_ci|collect_ready_tickets)\s*\("),
 ]
 
 # Task-shaped proto messages: their fields never name the layer.

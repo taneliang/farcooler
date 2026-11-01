@@ -51,8 +51,8 @@ pub(crate) use pr_review_notice::{NOTICE_ID as PR_REVIEW_NOTICE_ID, TITLE as PR_
 mod reap;
 mod screen_cache;
 mod registry_join;
-mod lane_start;
-mod open_train_scan;
+mod agent_start;
+mod collecting_scan;
 mod timing;
 pub(crate) use timing::Timing;
 
@@ -1145,7 +1145,7 @@ struct Observed {
     trust_prompt: bool,
     trust_folder: Option<String>,
     /// Whether a pane opened for a task has begun its first turn (ov-493).
-    start: lane_start::Start,
+    start: agent_start::Start,
 }
 
 /// Agreeing samples needed before a state change is published.
@@ -2353,7 +2353,7 @@ impl Observed {
             carried_past: None,
             trust_prompt: false,
             trust_folder: None,
-            start: lane_start::Start::Unwatched,
+            start: agent_start::Start::Unwatched,
         }
     }
 
@@ -3651,7 +3651,7 @@ impl Watcher {
         observed.trust_prompt = seen.trust_prompt;
         observed.trust_folder = seen.trust_folder;
         if let Some(why) = seen.not_started {
-            observed.start = lane_start::Start::Reported { since: seen.state_since, why };
+            observed.start = agent_start::Start::Reported { since: seen.state_since, why };
         }
     }
 
@@ -4520,7 +4520,7 @@ impl Watcher {
                     // Lanes that are ready and on no train join the open one
                     // (ov-520). Off the watch task: it writes the store.
                     let me = self.clone();
-                    tokio::task::spawn_blocking(move || me.collect_ready_lanes());
+                    tokio::task::spawn_blocking(move || me.collect_ready_tickets());
                 }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number
@@ -5108,7 +5108,7 @@ impl Watcher {
             // this, a daemon restarted onto an already-dead terminal would read
             // as a Running-to-Exited transition on the very first tick.
             let just_appeared = !state.contains_key(&id);
-            let start = if just_appeared { self.start_for(id, now) } else { lane_start::Start::Unwatched };
+            let start = if just_appeared { self.start_for(id, now) } else { agent_start::Start::Unwatched };
             let entry = state.entry(id).or_insert_with(|| {
                 // A pane opened moments ago has no history to inherit: a
                 // prompt already up at its first sighting is news, as one
@@ -5120,9 +5120,9 @@ impl Watcher {
 
             let activity_moved = entry.observe_led(observed, lead, now);
             // Offered only before a first turn: the prompt never comes after one.
-            entry.trust_prompt = trust_prompt.is_some() && entry.start != lane_start::Start::Started;
+            entry.trust_prompt = trust_prompt.is_some() && entry.start != agent_start::Start::Started;
             entry.trust_folder = trust_prompt.and_then(|p| p.folder);
-            match entry.start.step(lane_start::Tick {
+            match entry.start.step(agent_start::Tick {
                 activity: entry.activity,
                 sample: observed,
                 turn_logged: log_turn.is_some(),
@@ -5131,9 +5131,9 @@ impl Watcher {
                 question: blocked_question.as_deref(),
                 now,
             }) {
-                lane_start::Step::Report(why) => starts.push((id, Some(why))),
-                lane_start::Step::Cleared => starts.push((id, None)),
-                lane_start::Step::Quiet => {}
+                agent_start::Step::Report(why) => starts.push((id, Some(why))),
+                agent_start::Step::Cleared => starts.push((id, None)),
+                agent_start::Step::Quiet => {}
             }
 
             // The one thing this loop knows that the review cache cannot: files
@@ -5277,10 +5277,10 @@ impl Watcher {
             let mut noticed: Option<Option<Uuid>> = None;
             if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
                 // Its orchestrator hears of a lane stopping, watched or not
-                // (ov-455); before its first turn, `lane_start` tells it.
+                // (ov-455); before its first turn, `agent_start` tells it.
                 let r = &record;
                 if !r.start.watching() {
-                    self.lane_moved(id, next, r.blocked_question.as_deref(), r.feed.said(), r.turn_failed, r.turn_started_at);
+                    self.agent_moved(id, next, r.blocked_question.as_deref(), r.feed.said(), r.turn_failed, r.turn_started_at);
                 }
                 // And whether the person is sitting there watching it happen.
                 //

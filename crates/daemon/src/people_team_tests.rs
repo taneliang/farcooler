@@ -264,7 +264,7 @@ async fn a_reps_plan_write_is_its_members() {
     let made_by = |value: Option<result::Value>| {
         let Some(result::Value::BoardThemeView(view)) = value else { panic!("{value:?}") };
         let id = parse_id(&view.theme.unwrap().id).unwrap();
-        let events = r.svc.store.plan_events(farcooler_store::plan::Subject::Theme(id), 0).unwrap();
+        let events = r.svc.store.line_events(farcooler_store::ticket_lines::LineSubject::Theme(id), 0).unwrap();
         events.first().map(|e| e.actor.clone()).unwrap_or_default()
     };
     assert_eq!(call(&in_rep, theme("Exports", "manager")).await.err().as_deref(), Some("invalid-argument:actor"), "not as the orchestrator");
@@ -290,10 +290,10 @@ async fn a_reps_plan_write_is_its_members() {
 }
 
 /// From a rep's pane, through `Rpc`: keeping every ruling, keeping one, and
-/// starting a train are refused `rep_messenger`, as the rep itself (ov-736).
+/// starting a landing are refused `rep_messenger`, as the rep itself (ov-736).
 /// Only what its gate's grammar reaches is a rep's (`people_rep_plan_tests`).
 #[tokio::test]
-async fn a_rep_keeps_nothing_and_starts_no_train() {
+async fn a_rep_keeps_nothing_and_starts_no_landing() {
     let r = runner().await;
     r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
     let snapshot = r.svc.inventory.refresh().await;
@@ -306,7 +306,7 @@ async fn a_rep_keeps_nothing_and_starts_no_train() {
     let calls = [
         ("ruling.keep_all", request::Payload::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: own.clone() })),
         ("ruling.set", request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(ruling), state: pb::BoardRulingState::Confirmed as i32, actor: own.clone(), ..Default::default() })),
-        ("train.start", request::Payload::TrainStart(pb::TrainStart { workspace_id: ws(), name: "train-1".into(), base: "origin/main".into(), actor: own.clone(), ..Default::default() })),
+        ("landing.start", request::Payload::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: own.clone(), ..Default::default() })),
     ];
     for (method, payload) in calls {
         let said = call(&in_rep, Request { method: method.into(), payload: Some(payload), ..Default::default() }).await;
@@ -315,13 +315,13 @@ async fn a_rep_keeps_nothing_and_starts_no_train() {
     assert_eq!(r.svc.store.ruling(ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing kept");
 }
 
-/// A rep moves no lane that has reached landing (rereview N1): its member's
-/// phone is refused that, so the rep, through `Rpc` from its pane, is
-/// refused dropping a lane the orchestrator moved to landing, which would
-/// take it off its train. A lane short of landing it still drops.
+/// A rep moves no ticket that has reached landing (rereview N1): its
+/// member's phone is refused that, so the rep, through `Rpc` from its pane,
+/// is refused dropping a ticket the orchestrator moved to landing, which
+/// would take it off its landing. A ticket short of landing it still drops.
 #[tokio::test]
-async fn a_rep_drops_no_lane_that_reached_landing() {
-    use pb::LaneState as S;
+async fn a_rep_drops_no_ticket_that_reached_landing() {
+    use pb::TicketStage as S;
     let r = runner().await;
     r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
     let snapshot = r.svc.inventory.refresh().await;
@@ -329,46 +329,32 @@ async fn a_rep_drops_no_lane_that_reached_landing() {
     let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
     let local = factory(&r.svc, None, Scope::HostAdmin);
     let own = format!("agent:{}", r.agent.id);
-    let lane = |name: &str| {
-        let task = r.svc.store.create_task(r.workspace, &format!("Export: {name}"), Actor::Manager).unwrap().id;
-        Request {
-            method: "lane.create".into(),
-            payload: Some(request::Payload::LaneCreate(pb::LaneCreate {
-                workspace_id: id_bytes(r.workspace),
-                name: name.into(),
-                branch: name.into(),
-                cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
-                actor: "manager".into(),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-    };
-    let to = |id: &[u8], state: S, actor: &str| Request {
-        method: "lane.update".into(),
-        payload: Some(request::Payload::LaneUpdate(pb::LaneUpdate {
-            lane_id: id.to_vec().into(),
-            state: Some(state as i32),
+    let ticket = |name: &str| r.svc.store.create_task(r.workspace, &format!("Export: {name}"), Actor::Manager).unwrap().id;
+    let to = |task: Uuid, stage: S, actor: &str| Request {
+        method: "line.set".into(),
+        payload: Some(request::Payload::LineSet(pb::TicketLineSet {
+            task_id: id_bytes(task),
+            stage: Some(stage as i32),
             actor: actor.into(),
             ..Default::default()
         })),
         ..Default::default()
     };
-    let Ok(Some(result::Value::Lane(landing))) = call(&local, lane("invoices")).await else { panic!("a lane") };
-    let Ok(Some(result::Value::Lane(other))) = call(&local, lane("receipts")).await else { panic!("a lane") };
-    for state in [S::Building, S::Review, S::Landing] {
-        call(&local, to(&landing.id, state, "manager")).await.unwrap_or_else(|e| panic!("{state:?}: {e}"));
+    let landing = ticket("invoices");
+    let other = ticket("receipts");
+    for stage in [S::Building, S::Reviewing, S::Landing] {
+        call(&local, to(landing, stage, "manager")).await.unwrap_or_else(|e| panic!("{stage:?}: {e}"));
     }
-    assert_eq!(call(&in_rep, to(&landing.id, S::Dropped, &own)).await.err().as_deref(), Some(NOT_YOURS), "a landing lane");
-    let still = r.svc.store.lane(Uuid::from_slice(&landing.id).unwrap()).unwrap().state;
-    assert_eq!(still, farcooler_store::plan::LaneState::Landing, "still landing");
-    call(&in_rep, to(&other.id, S::Dropped, &own)).await.expect("a queued lane it drops");
+    assert_eq!(call(&in_rep, to(landing, S::Dropped, &own)).await.err().as_deref(), Some(NOT_YOURS), "a landing ticket");
+    let still = r.svc.store.ticket_line(landing).unwrap().stage;
+    assert_eq!(still, farcooler_store::ticket_lines::Stage::Landing, "still landing");
+    call(&in_rep, to(other, S::Dropped, &own)).await.expect("a waiting ticket it drops");
 }
 
 /// A rep changes only its own workspace's plan (rereview N3), as it
 /// comments only on its own board's cards: from its pane, a theme made on
-/// Ops, a theme of Ops' changed or given cards, an Ops lane changed or given
-/// cards, Ops' ranking, a ruling recorded on Ops or one of Ops' reversed,
+/// Ops, a theme of Ops' changed or given cards, an Ops ticket changed on the
+/// line, Ops' ranking, a ruling recorded on Ops or one of Ops' reversed,
 /// are refused `rep_messenger`, and nothing on Ops moves. The same on Main,
 /// its own, passes.
 #[tokio::test]
@@ -388,17 +374,18 @@ async fn a_rep_changes_only_its_own_workspaces_plan() {
     };
     let Ok(Some(result::Value::BoardThemeView(view))) = call(&local, theme_on(ops, "Alerts", "manager")).await else { panic!("an Ops theme") };
     let ops_theme = view.theme.unwrap().id;
-    let lane = send("lane.create", P::LaneCreate(pb::LaneCreate { workspace_id: id_bytes(ops), name: "pager".into(), actor: "manager".into(), ..Default::default() }));
-    let Ok(Some(result::Value::Lane(ops_lane))) = call(&local, lane).await else { panic!("an Ops lane") };
+    let ops_ticket = id_bytes(r.svc.store.create_task(ops, "Pager: page the on-call", Actor::Manager).unwrap().id);
+    let put = send("line.set", P::LineSet(pb::TicketLineSet { task_id: ops_ticket.clone(), reason: Some("Pages first".into()), actor: "manager".into(), ..Default::default() }));
+    let Ok(Some(result::Value::TicketLine(_))) = call(&local, put).await else { panic!("an Ops ticket on the line") };
     let new = farcooler_store::rulings::NewRuling { decision: "Page at night".into(), why: "Outages".into(), reversal: "Don't".into(), theme_id: None };
     let ops_ruling = r.svc.store.add_ruling(ops, &new, &[], Actor::Manager).unwrap().id;
     let reaches = [
         theme_on(ops, "Escalation", &own),
         send("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { theme_id: ops_theme.clone(), next: Some("Mine now".into()), actor: own.clone(), ..Default::default() })),
         send("board_theme.cards", P::BoardThemeCards(pb::BoardThemeCards { theme_id: ops_theme.clone(), actor: own.clone(), ..Default::default() })),
-        send("lane.update", P::LaneUpdate(pb::LaneUpdate { lane_id: ops_lane.id.clone(), reason: Some("Mine now".into()), actor: own.clone(), ..Default::default() })),
-        send("lane.cards", P::LaneCards(pb::LaneCards { lane_id: ops_lane.id.clone(), actor: own.clone(), ..Default::default() })),
-        send("plan.set", P::PlanSet(pb::PlanSet { workspace_id: id_bytes(ops), lane_ids: vec![ops_lane.id.clone()], actor: own.clone() })),
+        send("line.set", P::LineSet(pb::TicketLineSet { task_id: ops_ticket.clone(), reason: Some("Mine now".into()), actor: own.clone(), ..Default::default() })),
+        send("line.set", P::LineSet(pb::TicketLineSet { task_id: ops_ticket.clone(), stage: Some(pb::TicketStage::Dropped as i32), actor: own.clone(), ..Default::default() })),
+        send("line.order", P::LineOrder(pb::LineOrder { workspace_id: id_bytes(ops), task_ids: vec![ops_ticket.clone()], actor: own.clone() })),
         send("ruling.add", P::RulingAdd(pb::RulingAdd { workspace_id: id_bytes(ops), decision: "Never page".into(), why: "Sleep".into(), reversal: "Page".into(), actor: own.clone(), ..Default::default() })),
         send("ruling.set", P::RulingSet(pb::RulingSet { ruling_id: id_bytes(ops_ruling), state: pb::BoardRulingState::Reversed as i32, actor: own.clone(), ..Default::default() })),
     ];
@@ -409,6 +396,9 @@ async fn a_rep_changes_only_its_own_workspaces_plan() {
     let plan = r.svc.store.plan(ops, 0).unwrap();
     assert_eq!(plan.themes.len(), 1, "no theme made on Ops");
     assert_eq!(plan.rulings.len(), 1, "no ruling recorded on Ops");
+    assert_eq!(plan.lines.len(), 1, "the Ops ticket is still on the line");
+    assert_eq!(plan.lines[0].line.reason, "Pages first", "and unchanged");
+    assert_eq!(plan.lines[0].line.plan_rank, None, "and not ranked");
     assert_eq!(r.svc.store.ruling(ops_ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing reversed");
     call(&in_rep, theme_on(r.workspace, "Exports", &own)).await.expect("its own board");
 }
@@ -472,7 +462,7 @@ async fn the_owner_a_member_and_a_rep_move_a_theme() {
         .collect();
     let places = || ids.iter().map(|id| r.svc.store.board_theme(*id).unwrap().ordinal).collect::<Vec<_>>();
     let by = |i: usize| -> Vec<String> {
-        let events = r.svc.store.plan_events(farcooler_store::plan::Subject::Theme(ids[i]), 0).unwrap();
+        let events = r.svc.store.line_events(farcooler_store::ticket_lines::LineSubject::Theme(ids[i]), 0).unwrap();
         events.into_iter().filter(|e| e.kind == "rank").map(|e| e.actor).collect()
     };
     let rep_pid = bobs_rep_pid(&r).await;

@@ -733,7 +733,7 @@ impl Session {
             join_active_group,
             prompt: None,
             task_key: None,
-            lane: None,
+            agent: None,
         });
         match self.value("terminal.create", Some(worktree), Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),

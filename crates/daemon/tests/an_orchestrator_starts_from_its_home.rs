@@ -283,6 +283,19 @@ async fn a_second_orchestrator_is_refused_unless_replacing() {
     assert_eq!(second.role, farcooler_protocol::v1::TerminalRole::Orchestrator as i32);
     // The replacement really launched, rather than only being recorded.
     records(&h, &workspace_id(&main), 2).await;
+
+    // Each is recorded as the board's orchestrator agent when it opens, so the
+    // plan lists it from the start.
+    let store = &h.service.store;
+    let pane = |t: &farcooler_protocol::v1::Terminal| uuid::Uuid::from_slice(&t.id).unwrap();
+    let agent = store.pane_agent(pane(&second)).unwrap().expect("the orchestrator's pane is an agent");
+    assert_eq!((agent.role, agent.harness.as_str()), (farcooler_store::agents::AgentRole::Orchestrator, "claude"));
+    assert_eq!(agent.workspace_id, uuid::Uuid::from_slice(&main.id).unwrap());
+    let replaced = store.agents(agent.workspace_id, true).unwrap();
+    assert!(
+        replaced.iter().any(|a| a.place == farcooler_store::agents::AgentPlace::Pane { terminal: pane(&first) }),
+        "the first was recorded too: {replaced:?}"
+    );
 }
 
 /// The pane a real claude would have been started in: the home, pointed back
@@ -520,7 +533,7 @@ async fn scene(h: &Harness, client: &mut SocketClient) -> Scene {
         join_active_group: false,
         prompt: None,
         task_key: None,
-        lane: None,
+        agent: None,
     }));
     let Some(result::Value::Terminal(shell)) = client.call(create).await.expect("terminal.create").value else {
         panic!("wrong result")
@@ -691,7 +704,7 @@ async fn another_shell_window(client: &mut SocketClient, main: &bytes::Bytes, jo
         join_active_group: join,
         prompt: None,
         task_key: None,
-        lane: None,
+        agent: None,
     }));
     let Some(result::Value::Terminal(t)) = client.call(create).await.expect("terminal.create").value else {
         panic!("wrong result")

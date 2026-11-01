@@ -1050,7 +1050,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
             join_active_group: false,
             prompt: None,
             task_key: None,
-            lane: None,
+            agent: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1149,7 +1149,7 @@ async fn a_terminal(
             join_active_group: false,
             prompt: None,
             task_key: None,
-            lane: None,
+            agent: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1576,8 +1576,8 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
     assert!(batch.events.is_empty(), "nothing has happened on this pane yet");
 }
 
-/// Chat mode's methods are gone (ov-377): a runner refuses each as one it
-/// has never heard of, and nothing about a pane changes.
+/// Chat mode's methods are gone (ov-377), and so are lanes' and trains'
+/// (ov-872): a runner refuses each as retired, saying what took its place.
 #[tokio::test]
 async fn chat_modes_methods_are_refused_over_the_socket() {
     let h = start(Scope::HostAdmin).await;
@@ -1589,7 +1589,9 @@ async fn chat_modes_methods_are_refused_over_the_socket() {
             Err(ClientError::Daemon { code, retryable, message, .. }) => {
                 assert_eq!(code, ErrorCode::MethodRetired as i32, "{method}");
                 assert!(!retryable, "{method}");
-                assert!(message.contains("conversation view"), "{method}: {message}");
+                let replaced = method.starts_with("lane.") || method.starts_with("train.") || method == "plan.set";
+                let said = if replaced { "agents and landings" } else { "conversation view" };
+                assert!(message.contains(said), "{method}: {message}");
             }
             other => panic!("{method} was not refused as retired: {other:?}"),
         }
@@ -1837,7 +1839,7 @@ async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served()
             join_active_group: false,
             prompt: Some("start here".into()),
             task_key: None,
-            lane: None,
+            agent: None,
         },
     ));
     let result = client.call(create).await.expect("a daemon with launch_prompt serves it");
@@ -1911,7 +1913,7 @@ fn a_terminal_for(worktree: &bytes::Bytes, key: &str) -> farcooler_protocol::v1:
             join_active_group: false,
             prompt: None,
             task_key: Some(key.into()),
-            lane: None,
+            agent: None,
         },
     ));
     create
@@ -4371,7 +4373,7 @@ async fn a_web_pane_refuses_anything_but_http_and_https() {
             join_active_group,
             prompt: None,
             task_key: None,
-            lane: None,
+            agent: None,
         }));
         match client.call(create).await {
             Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::InvalidArgument as i32),

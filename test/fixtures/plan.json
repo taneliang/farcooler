@@ -1,14 +1,14 @@
 {
   "agents": [
     {
-      "card": null,
+      "doing_now": "2/5 · Reviewing the plan",
       "harness": "claude",
-      "id": "pane:orchestrator",
-      "label": "",
-      "lane": null,
+      "id": "00000000-0000-0000-0000-000000007001",
       "last_at": 1800000000000,
       "model": "opus",
+      "parent_terminal": null,
       "role": "orchestrator",
+      "short": "00007001",
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
@@ -20,22 +20,22 @@
         "unmeasured_agents": 0
       },
       "started_at": 1799985600000,
-      "terminal": null,
-      "train": null,
+      "stop_asked_at": null,
+      "subagent_id": "",
+      "terminal": "00000000-0000-0000-0000-000000008001",
+      "tickets": [],
+      "title": "",
       "working": true
     },
     {
-      "card": null,
+      "doing_now": "Reading PlanColumn.swift",
       "harness": "claude",
-      "id": "agent:a2",
-      "label": "",
-      "lane": {
-        "id": "00000000-0000-0000-0000-000000002002",
-        "name": "mac-ux"
-      },
+      "id": "00000000-0000-0000-0000-000000007003",
       "last_at": 1799999700000,
       "model": "sonnet",
-      "role": "review",
+      "parent_terminal": "00000000-0000-0000-0000-000000008001",
+      "role": "reviewer",
+      "short": "00007003",
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
@@ -47,33 +47,53 @@
         "unmeasured_agents": 0
       },
       "started_at": 1799998500000,
+      "stop_asked_at": null,
+      "subagent_id": "a3",
       "terminal": null,
-      "train": null,
+      "tickets": [
+        {
+          "key": "ov-1",
+          "role": "review",
+          "started_at": 1799998500000,
+          "task": "00000000-0000-0000-0000-000000001001"
+        }
+      ],
+      "title": "Review ov-1",
       "working": true
     },
     {
-      "card": null,
-      "harness": "claude",
-      "id": "agent:s1",
-      "label": "Design ov-503",
-      "lane": null,
+      "doing_now": "",
+      "harness": "codex",
+      "id": "00000000-0000-0000-0000-000000007002",
       "last_at": 1799999880000,
-      "model": "sonnet",
-      "role": "subagent",
+      "model": "gpt-5.6",
+      "parent_terminal": null,
+      "role": "builder",
+      "short": "00007002",
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "cost_micros": 600000,
-        "input_tokens": 90000,
+        "cost_micros": null,
+        "input_tokens": 0,
         "output_tokens": 0,
-        "runs": 1,
+        "runs": 0,
         "shared_agents": 0,
-        "unmeasured_agents": 0
+        "unmeasured_agents": 1
       },
-      "started_at": 1799989200000,
-      "terminal": null,
-      "train": null,
-      "working": true
+      "started_at": 1799985600000,
+      "stop_asked_at": 1799999940000,
+      "subagent_id": "",
+      "terminal": "00000000-0000-0000-0000-000000008002",
+      "tickets": [
+        {
+          "key": "ov-4",
+          "role": "build",
+          "started_at": 1799992800000,
+          "task": "00000000-0000-0000-0000-000000001004"
+        }
+      ],
+      "title": "Build the glance",
+      "working": false
     }
   ],
   "agents_spend": {
@@ -98,7 +118,7 @@
   "cards": [
     {
       "key": "ov-1",
-      "status": "In Progress",
+      "status": "In Review",
       "task": "00000000-0000-0000-0000-000000001001",
       "title": "Title of ov-1"
     },
@@ -110,9 +130,21 @@
     },
     {
       "key": "ov-3",
-      "status": "Done",
+      "status": "In Progress",
       "task": "00000000-0000-0000-0000-000000001003",
       "title": "Title of ov-3"
+    },
+    {
+      "key": "ov-4",
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001004",
+      "title": "Title of ov-4"
+    },
+    {
+      "key": "ov-5",
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001005",
+      "title": "Title of ov-5"
     }
   ],
   "ci": [
@@ -181,29 +213,91 @@
     "week_tokens": 34200000,
     "week_unsplit_cache_write_tokens": 0
   },
-  "landed_not_closed": [],
-  "lane_is_train": [],
-  "lanes": [
+  "landed_not_closed": [
     {
-      "agents": [],
-      "branch": "",
-      "budget_tokens": null,
-      "cards": [
+      "key": "ov-3",
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001003"
+    }
+  ],
+  "landings": [
+    {
+      "actor": "runner",
+      "base": "origin/main",
+      "ci_subject": "sha:c85bf83d",
+      "collecting": false,
+      "created_at": 1799992800000,
+      "id": "00000000-0000-0000-0000-000000006001",
+      "landed_at": null,
+      "lander": "00000000-0000-0000-0000-000000007004",
+      "number": 9,
+      "phase": "ci_failed",
+      "phase_since": 1799998800000,
+      "pushed_sha": "c85bf83d",
+      "route": "push",
+      "short": "00006001",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": 4000000,
+        "input_tokens": 90000,
+        "output_tokens": 30000,
+        "runs": 1,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "state": "red",
+      "state_since": 1799998800000,
+      "summary": "Title of ov-4",
+      "tickets": [
         {
-          "key": "ov-2",
-          "slice": "",
-          "task": "00000000-0000-0000-0000-000000001002"
+          "key": "ov-4",
+          "task": "00000000-0000-0000-0000-000000001004"
         }
       ],
+      "title": "Landing 9"
+    },
+    {
+      "actor": "runner",
+      "base": "",
+      "ci_subject": "sha:4d3c8cb1e2",
+      "collecting": false,
+      "created_at": 0,
+      "id": "00000000-0000-0000-0000-000000006002",
+      "landed_at": 1799996400000,
+      "lander": null,
+      "number": 8,
+      "phase": "landed",
+      "phase_since": 1799996400000,
+      "pushed_sha": "4d3c8cb1e2",
+      "route": "push",
+      "short": "00006002",
+      "spend": null,
+      "state": "landed",
+      "state_since": 1799996400000,
+      "summary": "Title of ov-3",
+      "tickets": [
+        {
+          "key": "ov-3",
+          "task": "00000000-0000-0000-0000-000000001003"
+        }
+      ],
+      "title": "Agents message the plan"
+    }
+  ],
+  "lines": [
+    {
+      "branch": "",
+      "budget_tokens": null,
       "fix_rounds": 0,
-      "harness": "",
-      "id": "00000000-0000-0000-0000-000000002001",
+      "held_off": false,
+      "key": "ov-2",
       "landed_sha": null,
-      "model": "",
-      "name": "mac-fu3",
+      "landing": null,
       "plan_rank": 1,
+      "pr_number": null,
       "reason": "Frees the Mac slot",
-      "short": "00002001",
+      "same_branch": null,
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
@@ -214,50 +308,28 @@
         "shared_agents": 0,
         "unmeasured_agents": 0
       },
+      "stack_parent": null,
+      "stage": "waiting",
+      "stage_since": 1799999400000,
       "stale": false,
-      "state": "queued",
-      "state_since": 1799999400000,
-      "title": "Mac follow-ups",
-      "train": null,
+      "status": "Backlog",
+      "task": "00000000-0000-0000-0000-000000001002",
+      "title": "Title of ov-2",
+      "work": [],
       "worktree_path": ""
     },
     {
-      "agents": [
-        {
-          "agent_id": "a1",
-          "ended_at": 1799996400000,
-          "harness": "claude",
-          "model": "opus",
-          "role": "build",
-          "started_at": 1799989200000
-        },
-        {
-          "agent_id": "a2",
-          "ended_at": null,
-          "harness": "claude",
-          "model": "sonnet",
-          "role": "review",
-          "started_at": 1799998500000
-        }
-      ],
-      "branch": "mac-ux",
+      "branch": "ov-1-mac-polish",
       "budget_tokens": 500000,
-      "cards": [
-        {
-          "key": "ov-1",
-          "slice": "Mac",
-          "task": "00000000-0000-0000-0000-000000001001"
-        }
-      ],
       "fix_rounds": 1,
-      "harness": "claude",
-      "id": "00000000-0000-0000-0000-000000002002",
+      "held_off": false,
+      "key": "ov-1",
       "landed_sha": null,
-      "model": "opus",
-      "name": "mac-ux",
+      "landing": null,
       "plan_rank": null,
+      "pr_number": null,
       "reason": "Five small Mac fixes, batched",
-      "short": "00002002",
+      "same_branch": null,
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
@@ -268,33 +340,45 @@
         "shared_agents": 1,
         "unmeasured_agents": 1
       },
+      "stack_parent": null,
+      "stage": "reviewing",
+      "stage_since": 1799999400000,
       "stale": false,
-      "state": "review",
-      "state_since": 1799999400000,
-      "title": "Mac interface polish",
-      "train": "integ-9",
-      "worktree_path": ".claude/worktrees/mac-ux"
-    },
-    {
-      "agents": [],
-      "branch": "",
-      "budget_tokens": null,
-      "cards": [
+      "status": "In Review",
+      "task": "00000000-0000-0000-0000-000000001001",
+      "title": "Title of ov-1",
+      "work": [
         {
-          "key": "ov-3",
-          "slice": "",
-          "task": "00000000-0000-0000-0000-000000001003"
+          "agent": "00000000-0000-0000-0000-000000007002",
+          "ended_at": 1799996400000,
+          "linked_by_description": false,
+          "role": "build",
+          "started_at": 1799989200000,
+          "verdict": "finished"
+        },
+        {
+          "agent": "00000000-0000-0000-0000-000000007003",
+          "ended_at": null,
+          "linked_by_description": false,
+          "role": "review",
+          "started_at": 1799998500000,
+          "verdict": ""
         }
       ],
+      "worktree_path": ".claude/worktrees/ov-1"
+    },
+    {
+      "branch": "ov-4-glance",
+      "budget_tokens": null,
       "fix_rounds": 0,
-      "harness": "",
-      "id": "00000000-0000-0000-0000-000000002003",
-      "landed_sha": "4d3c8cb1e2",
-      "model": "",
-      "name": "fix-ac84",
+      "held_off": false,
+      "key": "ov-4",
+      "landed_sha": null,
+      "landing": 9,
       "plan_rank": null,
+      "pr_number": 31,
       "reason": "",
-      "short": "00002003",
+      "same_branch": null,
       "spend": {
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
@@ -305,18 +389,68 @@
         "shared_agents": 0,
         "unmeasured_agents": 0
       },
+      "stack_parent": {
+        "key": "ov-1",
+        "task": "00000000-0000-0000-0000-000000001001"
+      },
+      "stage": "landing",
+      "stage_since": 1799999400000,
       "stale": false,
-      "state": "landed",
-      "state_since": 1799996400000,
-      "title": "",
-      "train": null,
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001004",
+      "title": "Title of ov-4",
+      "work": [
+        {
+          "agent": "00000000-0000-0000-0000-000000007002",
+          "ended_at": null,
+          "linked_by_description": false,
+          "role": "build",
+          "started_at": 1799992800000,
+          "verdict": ""
+        }
+      ],
+      "worktree_path": ""
+    },
+    {
+      "branch": "",
+      "budget_tokens": null,
+      "fix_rounds": 0,
+      "held_off": false,
+      "key": "ov-3",
+      "landed_sha": "4d3c8cb1e2",
+      "landing": null,
+      "plan_rank": null,
+      "pr_number": null,
+      "reason": "",
+      "same_branch": null,
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stack_parent": null,
+      "stage": "landed",
+      "stage_since": 1799996400000,
+      "stale": false,
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001003",
+      "title": "Title of ov-3",
+      "work": [],
       "worktree_path": ""
     }
   ],
-  "no_lane": [],
   "now_ms": 1800000000000,
-  "order": [
-    "00000000-0000-0000-0000-000000002001"
+  "off_the_line": [
+    {
+      "key": "ov-5",
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001005"
+    }
   ],
   "rulings": [
     {
@@ -417,52 +551,6 @@
         0,
         160000
       ]
-    }
-  ],
-  "trains": [
-    {
-      "actor": "manager",
-      "agent": {
-        "agent_id": "i1",
-        "ended_at": null,
-        "harness": "claude",
-        "model": "sonnet",
-        "spend": {
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "cost_micros": 4000000,
-          "input_tokens": 90000,
-          "output_tokens": 30000,
-          "runs": 1,
-          "shared_agents": 0,
-          "unmeasured_agents": 0
-        },
-        "started_at": 1799996400000
-      },
-      "base": "origin/main",
-      "card": {
-        "key": "ov-2",
-        "task": "00000000-0000-0000-0000-000000001002"
-      },
-      "ci_subject": "sha:c85bf83d",
-      "created_at": 1799992800000,
-      "id": "00000000-0000-0000-0000-000000006001",
-      "landed_at": null,
-      "lanes": [
-        {
-          "lane": "00000000-0000-0000-0000-000000002002",
-          "name": "mac-ux"
-        }
-      ],
-      "name": "integ-9",
-      "phase": "ci_failed",
-      "phase_since": 1799998800000,
-      "pushed_sha": "c85bf83d",
-      "short": "00006001",
-      "state": "red",
-      "state_since": 1799998800000,
-      "summary": "Mac interface polish",
-      "title": "Train 9"
     }
   ]
 }

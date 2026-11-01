@@ -86,14 +86,13 @@ pub mod pane_env {
     /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
 
-    /// The plan lane this pane works (ov-457), by name: one agent in one
-    /// worktree on one branch, working one or more cards.
+    /// The role of the agent this pane is (ov-872): `orchestrator`,
+    /// `builder`, `reviewer` or `lander`.
     ///
-    /// `farcooler_daemon::lane_panes` exports it for a pane a lane dispatch
-    /// opened, on every launch while the lane is live and the pane is its
-    /// agent, read off the plan layer. `TASK` beside it names the card the
-    /// pane started on.
-    pub const LANE: &str = "FARCOOLER_LANE";
+    /// `farcooler_daemon::agent_panes` exports it for a pane `agent dispatch`
+    /// opened, on every launch while the pane's agent is open, read off the
+    /// agent's record. `TASK` beside it names the ticket the pane started on.
+    pub const ROLE: &str = "FARCOOLER_ROLE";
 
     /// The member this pane is the rep of (ov-494), by handle.
     ///

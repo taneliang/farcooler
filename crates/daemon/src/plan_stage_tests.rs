@@ -1,10 +1,11 @@
-//! Which pull request is whose, and what a lane says when it has several, and
-//! when it can't ask GitHub at all.
+//! Which pull request is whose, what a ticket says of it, and what it says when
+//! it can't ask GitHub at all.
 
 use super::*;
 use crate::pr_stage::fixture_prs;
-use farcooler_store::plan::{Lane, LaneCard};
-use farcooler_store::plan_read::LaneSpend;
+use farcooler_store::plan_read::Spend;
+use farcooler_store::ticket_lines::TicketLine;
+use farcooler_store::ticket_work::{LinkedBy, TicketWork};
 
 fn task(n: u32) -> Uuid {
     Uuid::from_u128(0x1000 + n as u128)
@@ -14,34 +15,32 @@ fn card(n: u32, status: TaskStatus) -> CardRef {
     CardRef { task_id: task(n), key: format!("ov-{n}"), title: format!("Card {n}"), status }
 }
 
-fn lane(state: LaneState, branch: &str, cards: &[u32]) -> LaneView {
-    LaneView {
-        lane: Lane {
-            id: Uuid::from_u128(0x2000),
-            workspace_id: Uuid::from_u128(0x3000),
-            name: "team".into(),
-            state,
+/// Ticket `n` on the line in `stage`, on `branch`.
+fn ticket(stage: LineStage, branch: &str, n: u32) -> LineView {
+    LineView {
+        line: TicketLine {
+            task_id: task(n),
+            stage,
             reason: String::new(),
-            plan_rank: None,
+            branch: branch.into(),
             worktree_id: None,
             worktree_path: String::new(),
-            branch: branch.into(),
-            harness: String::new(),
-            model: String::new(),
-            train: None,
+            stack_parent: None,
+            same_branch: None,
+            pr_number: None,
             landed_sha: None,
-            state_since: 0,
+            plan_rank: None,
+            stage_since: 0,
+            held_off: false,
             created_at: 0,
             resource_version: 1,
-            title: String::new(),
         },
-        cards: cards.iter().map(|n| LaneCard { task_id: task(*n), slice: String::new() }).collect(),
-        agents: Vec::new(),
+        work: Vec::new(),
         fix_rounds: 0,
-        spend: LaneSpend::default(),
+        spend: Spend::default(),
         budget_tokens: None,
         stale: false,
-        title: String::new(),
+        landing: None,
     }
 }
 
@@ -53,38 +52,49 @@ fn heard() -> Reads {
     Reads { known: true, prs: fixture_prs() }
 }
 
-fn kind_of(s: &LaneStages, n: u32) -> Option<Kind> {
-    s.cards.get(&task(n)).map(|s| s.kind)
+fn stage_of(line: &LineView, cards: &[CardRef], reads: &Reads) -> Option<Kind> {
+    line_stage(line, cards, reads).map(|s| s.kind)
 }
 
-/// The rolled-up lane stage across two card PRs: the owner's ruling (one PR per
-/// card) and the least advanced of them.
+/// Each ticket reads its own pull request: one per ticket, the owner's ruling.
 #[test]
-fn a_lane_with_two_card_prs_shows_each_and_the_least_advanced() {
-    let s = lane_stages(&lane(LaneState::Review, "team", &[3, 8]), &open_cards(&[3, 8]), &heard());
-    assert_eq!(kind_of(&s, 3), Some(Kind::WaitingOnReviewer), "ov-3's own PR");
-    assert_eq!(kind_of(&s, 8), Some(Kind::Approved), "ov-8's own PR");
-    let rolled = s.lane.expect("a lane stage");
-    assert_eq!((rolled.kind, rolled.pr_number), (Kind::WaitingOnReviewer, 103), "the slower card sets it");
-
-    let swapped = lane_stages(&lane(LaneState::Landing, "team", &[8, 6]), &open_cards(&[8, 6]), &heard());
-    assert_eq!(swapped.lane.unwrap().kind, Kind::ApprovedChecksRunning);
+fn each_ticket_shows_its_own_pr() {
+    let cards = open_cards(&[3, 8, 6]);
+    assert_eq!(stage_of(&ticket(LineStage::Reviewing, "a", 3), &cards, &heard()), Some(Kind::WaitingOnReviewer));
+    assert_eq!(stage_of(&ticket(LineStage::Reviewing, "b", 8), &cards, &heard()), Some(Kind::Approved));
+    assert_eq!(stage_of(&ticket(LineStage::Landing, "c", 6), &cards, &heard()), Some(Kind::ApprovedChecksRunning));
 }
 
 #[test]
-fn a_card_with_no_pr_yet_holds_the_lane_at_building() {
-    let s = lane_stages(&lane(LaneState::Review, "team", &[8, 30]), &open_cards(&[8, 30]), &heard());
-    assert_eq!(kind_of(&s, 30), Some(Kind::Building));
-    assert_eq!(s.lane.unwrap().kind, Kind::Building);
+fn a_building_ticket_with_no_pr_yet_reads_building() {
+    assert_eq!(stage_of(&ticket(LineStage::Building, "team", 30), &open_cards(&[30]), &heard()), Some(Kind::Building));
 }
 
 /// A finished card with no PR isn't waiting on one.
 #[test]
-fn a_finished_card_with_no_pr_does_not_hold_the_lane() {
-    let cards = vec![card(8, TaskStatus::InProgress), card(30, TaskStatus::Done)];
-    let s = lane_stages(&lane(LaneState::Review, "team", &[8, 30]), &cards, &heard());
-    assert_eq!(kind_of(&s, 30), None);
-    assert_eq!(s.lane.unwrap().kind, Kind::Approved);
+fn a_finished_card_with_no_pr_has_no_stage() {
+    let cards = vec![card(30, TaskStatus::Done)];
+    assert_eq!(stage_of(&ticket(LineStage::Reviewing, "team", 30), &cards, &heard()), None);
+}
+
+/// A draft pull request reads as a fix round while a fix is open on the ticket,
+/// and as the agent's review otherwise.
+#[test]
+fn an_open_fix_reads_as_fixing() {
+    let mut line = ticket(LineStage::Building, "team", 1);
+    assert_eq!(stage_of(&line, &open_cards(&[1]), &heard()), Some(Kind::Building));
+    line.work.push(TicketWork {
+        agent_id: Uuid::from_u128(0x4000),
+        task_id: task(1),
+        role: WorkRole::Fix,
+        started_at: 0,
+        ended_at: None,
+        verdict: None,
+        linked_by: LinkedBy::Orchestrator,
+    });
+    assert_eq!(line_phase(&line), Phase::Fixing);
+    assert_eq!(stage_of(&line, &open_cards(&[1]), &heard()), Some(Kind::Fixing));
+    assert_eq!(stage_of(&ticket(LineStage::Reviewing, "team", 1), &open_cards(&[1]), &heard()), Some(Kind::AgentReview));
 }
 
 /// `ov-1` is not in `ov-12/pr-stage`, and a key counts however the title or
@@ -94,8 +104,8 @@ fn a_key_names_a_pr_only_as_a_whole_word() {
     assert!(mentions("ov-12/pr-stage", "ov-12"));
     assert!(!mentions("ov-12/pr-stage", "ov-1"));
     assert!(!mentions("xov-1/pr-stage", "ov-1"));
-    assert!(mentions("OV-1: Lanes show their stage", "ov-1"));
-    assert!(mentions("Lanes show their stage (ov-1)", "ov-1"));
+    assert!(mentions("OV-1: Tickets show their stage", "ov-1"));
+    assert!(mentions("Tickets show their stage (ov-1)", "ov-1"));
     assert!(!mentions("anything", ""));
     // Through the fixture: card 1 gets PR 101 and card 12 PR 112, never crossed.
     let prs = fixture_prs();
@@ -103,30 +113,29 @@ fn a_key_names_a_pr_only_as_a_whole_word() {
     assert_eq!(pr_of(&prs, "ov-12", "", false).unwrap().status.number, 112);
 }
 
-/// A lane's one card takes the PR on the lane's own branch when nothing names it.
+/// A ticket takes the PR on its own branch when nothing names it.
 #[test]
-fn a_lane_s_only_card_takes_the_lane_s_branch_pr() {
+fn a_ticket_takes_its_own_branch_s_pr() {
     let mut prs = fixture_prs();
     prs[0].head_ref = "mac-ux".into();
     prs[0].title = "Mac fixes".into();
     let reads = Reads { known: true, prs };
-    let s = lane_stages(&lane(LaneState::Review, "mac-ux", &[40]), &open_cards(&[40]), &reads);
-    assert_eq!(s.lane.unwrap().pr_number, 101);
+    let s = line_stage(&ticket(LineStage::Reviewing, "mac-ux", 40), &open_cards(&[40]), &reads).unwrap();
+    assert_eq!(s.pr_number, 101);
 }
 
-/// With several cards the lane's branch holds all of their work, so it says
-/// nothing of any one: the card with no PR of its own reads no PR, and the lane
-/// is only as far along as that card.
+/// A ticket carried over from a lane of several cards shares that branch, so
+/// the branch says nothing of it alone: a sibling's PR on it is not its own.
 #[test]
-fn a_card_with_no_pr_does_not_take_a_sibling_s_through_the_lane_s_branch() {
+fn a_shared_branch_does_not_give_a_ticket_a_sibling_s_pr() {
     let mut prs = fixture_prs();
-    // Card 8's PR is on the lane's own branch; card 40 has none.
+    // Card 8's PR is on the shared branch; card 40 has none.
     prs.iter_mut().find(|p| p.status.number == 108).unwrap().head_ref = "mac-ux".into();
     let reads = Reads { known: true, prs };
-    let s = lane_stages(&lane(LaneState::Review, "mac-ux", &[8, 40]), &open_cards(&[8, 40]), &reads);
-    assert_eq!(kind_of(&s, 8), Some(Kind::Approved));
-    assert_eq!(kind_of(&s, 40), Some(Kind::Building), "its own PR is not yet open");
-    assert_eq!(s.lane.unwrap().kind, Kind::Building, "the lane is as far along as its slowest card");
+    let mut line = ticket(LineStage::Building, "mac-ux", 40);
+    line.line.same_branch = Some(Uuid::from_u128(0x2000));
+    assert_eq!(stage_of(&line, &open_cards(&[8, 40]), &reads), Some(Kind::Building), "its own PR is not yet open");
+    assert!(pr_of_line(&line, &open_cards(&[8, 40]), &reads).is_none());
 }
 
 /// A PR that cites a card is not that card's PR: only its head branch, or a
@@ -138,19 +147,19 @@ fn a_pr_that_only_mentions_a_card_does_not_claim_it() {
     assert_eq!(pr_of(&prs, "ov-10", "", false).unwrap().status.number, 110, "the merged PR keeps its card");
     assert_eq!(pr_of(&prs, "ov-3", "", false).unwrap().status.number, 103);
     assert_eq!(pr_of(&prs, "ov-20", "", false).unwrap().status.number, 123);
-    let s = lane_stages(&lane(LaneState::Landed, "x", &[10]), &open_cards(&[10]), &Reads { known: true, prs });
-    assert_eq!(s.lane.unwrap().label(), "Merged");
+    let s = line_stage(&ticket(LineStage::Landed, "x", 10), &open_cards(&[10]), &Reads { known: true, prs });
+    assert_eq!(s.unwrap().label(), "Merged");
 }
 
 #[test]
 fn a_title_claims_a_card_only_when_it_opens_with_the_key() {
-    assert!(title_starts_with("ov-312: lanes show their stage", "ov-312"));
-    assert!(title_starts_with("[ov-312] lanes", "ov-312"));
-    assert!(title_starts_with("OV-312 lanes", "ov-312"));
+    assert!(title_starts_with("ov-312: tickets show their stage", "ov-312"));
+    assert!(title_starts_with("[ov-312] tickets", "ov-312"));
+    assert!(title_starts_with("OV-312 tickets", "ov-312"));
     assert!(title_starts_with("ov-312", "ov-312"));
     assert!(!title_starts_with("ov-3120: other", "ov-312"));
     assert!(!title_starts_with("ov-31: other", "ov-312"));
-    assert!(!title_starts_with("Lanes show their stage (ov-312)", "ov-312"));
+    assert!(!title_starts_with("Tickets show their stage (ov-312)", "ov-312"));
 }
 
 /// A revert of a card's PR, and a fork's PR on a branch of the same name, are
@@ -191,21 +200,21 @@ fn unknown_is_not_no_pr() {
     let none = Reads { known: true, prs: Vec::new() };
     let cards = open_cards(&[1]);
 
-    // A lane in review: cannot ask is Unknown; asked and none is silence.
-    let review = lane(LaneState::Review, "team", &[1]);
-    assert_eq!(lane_stages(&review, &cards, &unheard).lane.unwrap().kind, Kind::Unknown);
-    assert_eq!(lane_stages(&review, &cards, &none).lane, None);
+    // A ticket in review: cannot ask is Unknown; asked and none is silence.
+    let review = ticket(LineStage::Reviewing, "team", 1);
+    assert_eq!(stage_of(&review, &cards, &unheard), Some(Kind::Unknown));
+    assert_eq!(stage_of(&review, &cards, &none), None);
 
-    // A building lane: cannot ask is silence (no PR is expected yet); asked and
-    // none is Building.
-    let building = lane(LaneState::Building, "team", &[1]);
-    assert_eq!(lane_stages(&building, &cards, &unheard).lane, None);
-    assert_eq!(lane_stages(&building, &cards, &none).lane.unwrap().kind, Kind::Building);
+    // A building ticket: cannot ask is silence (no PR is expected yet); asked
+    // and none is Building.
+    let building = ticket(LineStage::Building, "team", 1);
+    assert_eq!(stage_of(&building, &cards, &unheard), None);
+    assert_eq!(stage_of(&building, &cards, &none), Some(Kind::Building));
 
-    // The two never share an answer on a lane in landing either.
-    let landing = lane(LaneState::Landing, "team", &[1]);
-    assert_eq!(lane_stages(&landing, &cards, &unheard).cards[&task(1)].label(), "PR state unknown");
-    assert!(lane_stages(&landing, &cards, &none).cards.is_empty());
+    // The two never share an answer on a ticket in landing either.
+    let landing = ticket(LineStage::Landing, "team", 1);
+    assert_eq!(line_stage(&landing, &cards, &unheard).unwrap().label(), "PR state unknown");
+    assert_eq!(line_stage(&landing, &cards, &none), None);
 }
 
 #[test]
@@ -216,23 +225,21 @@ fn a_cache_that_never_answered_is_not_an_empty_list() {
 }
 
 #[test]
-fn a_lane_not_started_has_no_stage() {
-    let s = lane_stages(&lane(LaneState::Queued, "team", &[8]), &open_cards(&[8]), &heard());
-    assert_eq!(s, LaneStages::default());
+fn a_ticket_not_started_has_no_stage() {
+    assert_eq!(line_stage(&ticket(LineStage::Waiting, "team", 8), &open_cards(&[8]), &heard()), None);
 }
 
 #[test]
-fn a_landed_lane_shows_its_merged_pr() {
-    let s = lane_stages(&lane(LaneState::Landed, "team", &[10]), &open_cards(&[10]), &heard());
-    assert_eq!(s.lane.unwrap().label(), "Merged");
+fn a_landed_ticket_shows_its_merged_pr() {
+    let s = line_stage(&ticket(LineStage::Landed, "team", 10), &open_cards(&[10]), &heard());
+    assert_eq!(s.unwrap().label(), "Merged");
     // And with nothing known it says nothing rather than Unknown.
-    let s = lane_stages(&lane(LaneState::Landed, "team", &[10]), &open_cards(&[10]), &Reads::default());
-    assert_eq!(s.lane, None);
+    assert_eq!(line_stage(&ticket(LineStage::Landed, "team", 10), &open_cards(&[10]), &Reads::default()), None);
 }
 
 #[test]
 fn the_wire_carries_the_words_and_the_facts() {
-    let s = lane_stages(&lane(LaneState::Review, "team", &[3]), &open_cards(&[3]), &heard()).lane.unwrap();
+    let s = line_stage(&ticket(LineStage::Reviewing, "team", 3), &open_cards(&[3]), &heard()).unwrap();
     let wire = pb_stage(&s);
     assert_eq!(wire.kind, pb::PrStageKind::WaitingOnReviewer as i32);
     assert_eq!((wire.label.as_str(), wire.reviewers.as_slice(), wire.pr_number), ("Waiting on alice", &["alice".to_string()][..], 103));
@@ -262,16 +269,16 @@ fn only_githubs_revert_form_is_a_revert() {
     assert!(!is_noise(&revert), "a branch that only starts with the word");
 }
 
-/// An update that leaves a lane's state alone, or moves it out of the live
-/// states, does not enter one.
+/// An update that leaves a ticket's stage alone, or moves it out of the live
+/// stages, does not enter one.
 #[test]
-fn only_a_move_into_review_fixing_or_landing_enters() {
-    use LaneState::*;
-    assert!(enters_active(Building, Some(Review)));
-    assert!(enters_active(Fixing, Some(Review)));
-    assert!(enters_active(Review, Some(Landing)));
-    assert!(!enters_active(Review, Some(Review)), "the state it already had");
-    assert!(!enters_active(Review, None), "no state at all");
-    assert!(!enters_active(Review, Some(Landed)));
-    assert!(!enters_active(Queued, Some(Building)));
+fn only_a_move_into_review_or_landing_enters() {
+    use LineStage::*;
+    assert!(enters_active(Building, Some(Reviewing)));
+    assert!(enters_active(NeedsYou, Some(Reviewing)));
+    assert!(enters_active(Reviewing, Some(Landing)));
+    assert!(!enters_active(Reviewing, Some(Reviewing)), "the stage it already had");
+    assert!(!enters_active(Reviewing, None), "no stage at all");
+    assert!(!enters_active(Reviewing, Some(Landed)));
+    assert!(!enters_active(Waiting, Some(Building)));
 }

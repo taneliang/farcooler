@@ -5,14 +5,16 @@
 use farcooler_protocol::method::Method;
 use farcooler_protocol::v1::Scope;
 use farcooler_store::models::Actor;
-use farcooler_store::plan::{LaneCard, NewLane, NewTheme, ThemeUpdate};
+use farcooler_store::plan::{NewTheme, ThemeUpdate};
+use farcooler_store::ticket_lines::NewTicketLine;
 use serde_json::json;
 
 use super::phone_path_tests::a_runner;
 use super::{dispatch, route::route};
 use crate::session::{Session, SessionError};
 
-/// A board with one theme holding one card, and a queued lane working it.
+/// A board with one theme holding one card, and that card waiting on the line,
+/// next up.
 fn a_plan(runner: &super::phone_path_tests::Runner) -> (uuid::Uuid, uuid::Uuid, uuid::Uuid) {
     let store = &runner.service.store;
     let repo = store.list_all_worktrees().unwrap().remove(0).repository_id;
@@ -28,26 +30,18 @@ fn a_plan(runner: &super::phone_path_tests::Runner) -> (uuid::Uuid, uuid::Uuid, 
             Actor::Manager,
         )
         .unwrap();
-    let lane = store
-        .create_lane(
-            main,
-            &NewLane { name: "plan-phones".into(), reason: "Unblocked".into(), ..Default::default() },
-            &[LaneCard { task_id: task.id, slice: String::new() }],
-            None,
-            Actor::Manager,
-        )
-        .unwrap();
-    store.set_plan(main, &[lane.id], Actor::Manager).unwrap();
-    (main, theme.id, lane.id)
+    store.put_on_line(task.id, &NewTicketLine { reason: "Unblocked".into(), ..Default::default() }, Actor::Manager).unwrap();
+    store.set_line_order(main, &[task.id], Actor::Manager).unwrap();
+    (main, theme.id, task.id)
 }
 
 /// `plan.get` answers, over the real daemon, in the shape the apps decode: the
-/// theme with its ask and counts, the queued lane first in `order`, and the
-/// card's key. Goes red when the arm is missing or `plan_json` drops a field.
+/// theme with its ask and counts, the waiting ticket next up, and the card's
+/// key. Goes red when the arm is missing or `plan_json` drops a field.
 #[tokio::test]
 async fn a_phone_reads_the_plan() {
     let runner = a_runner(Scope::Read).await;
-    let (main, theme, lane) = a_plan(&runner);
+    let (main, theme, ticket) = a_plan(&runner);
     let session = Session::connect_local(&runner.socket).await.expect("connect");
 
     let plan = dispatch(&session, "plan.get", &json!({ "workspace": main.to_string() })).await.expect("plan.get");
@@ -55,14 +49,15 @@ async fn a_phone_reads_the_plan() {
     assert_eq!(plan["themes"][0]["owner_ask"], "Read the copy.");
     assert_eq!(plan["themes"][0]["counts"]["backlog"], 1);
     assert_eq!(plan["themes"][0]["cards"][0]["key"], plan["cards"][0]["key"]);
-    assert_eq!(plan["lanes"][0]["state"], "queued");
-    assert_eq!(plan["order"], json!([lane.to_string()]));
+    assert_eq!(plan["lines"][0]["stage"], "waiting");
+    assert_eq!(plan["lines"][0]["task"], ticket.to_string());
+    assert_eq!(plan["lines"][0]["plan_rank"], 1);
 
     let record = dispatch(&session, "plan.events", &json!({ "theme": theme.to_string() })).await.expect("plan.events");
     assert!(record["events"].as_array().is_some_and(|e| !e.is_empty()), "{record}");
     assert!(record["events"].as_array().unwrap().iter().any(|e| e["kind"] == "story"), "{record}");
-    let lane_record = dispatch(&session, "plan.events", &json!({ "lane": lane.to_string() })).await.expect("lane events");
-    assert!(lane_record["events"].is_array(), "{lane_record}");
+    let ticket_record = dispatch(&session, "plan.events", &json!({ "task": ticket.to_string() })).await.expect("ticket events");
+    assert!(ticket_record["events"].as_array().is_some_and(|e| !e.is_empty()), "{ticket_record}");
 }
 
 /// A record needs one subject, and a plan needs its board; neither is guessed.
@@ -70,7 +65,7 @@ async fn a_phone_reads_the_plan() {
 async fn a_plan_read_names_its_subject() {
     let runner = a_runner(Scope::Read).await;
     let session = Session::connect_local(&runner.socket).await.expect("connect");
-    for args in [json!({}), json!({ "theme": uuid::Uuid::nil().to_string(), "lane": uuid::Uuid::nil().to_string() })] {
+    for args in [json!({}), json!({ "theme": uuid::Uuid::nil().to_string(), "task": uuid::Uuid::nil().to_string() })] {
         assert!(matches!(dispatch(&session, "plan.events", &args).await, Err(SessionError::Protocol(_))), "{args}");
     }
     assert!(matches!(dispatch(&session, "plan.get", &json!({})).await, Err(SessionError::Protocol(_))));
@@ -86,14 +81,16 @@ async fn a_phone_reads_the_plan_and_never_writes_it() {
         assert_eq!(route(method), Some(method.name()));
     }
     for method in [
-        Method::PlanSet,
+        Method::LineOrder,
         Method::BoardThemeCreate,
         Method::BoardThemeUpdate,
         Method::BoardThemeCards,
-        Method::LaneCreate,
-        Method::LaneUpdate,
-        Method::LaneCards,
-        Method::LaneAgent,
+        Method::LineSet,
+        Method::AgentRecord,
+        Method::AgentWork,
+        Method::AgentEnd,
+        Method::LandingStart,
+        Method::LandingSet,
     ] {
         assert_eq!(route(method), None, "{} has a phone route", method.name());
         let answer = dispatch(&session, method.name(), &json!({})).await;
@@ -165,7 +162,7 @@ async fn a_phone_s_pull_request_verbs_are_routed_and_refused_below_control() {
     let read = a_runner(Scope::Read).await;
     let session = Session::connect_local(&read.socket).await.expect("connect");
     for (method, args) in [
-        ("pr.ready", json!({ "lane": nobody, "pr_number": 12 })),
+        ("pr.ready", json!({ "task": nobody, "pr_number": 12 })),
         ("pr.thread_reply", json!({ "task": nobody, "body": "Done.", "send": true })),
     ] {
         match dispatch(&session, method, &args).await {
@@ -176,14 +173,14 @@ async fn a_phone_s_pull_request_verbs_are_routed_and_refused_below_control() {
 
     let control = a_runner(Scope::Control).await;
     let session = Session::connect_local(&control.socket).await.expect("connect");
-    // Past the scope check: the lane and the card are not there.
-    for (method, args) in [("pr.ready", json!({ "lane": nobody })), ("pr.thread_reply", json!({ "task": nobody }))] {
+    // Past the scope check: the card is not there.
+    for (method, args) in [("pr.ready", json!({ "task": nobody })), ("pr.thread_reply", json!({ "task": nobody }))] {
         match dispatch(&session, method, &args).await {
             Err(SessionError::Refused { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32, "{method}"),
             other => panic!("{method}: {other:?}"),
         }
     }
     // The arguments are named: a call without them never leaves the phone.
-    assert!(matches!(dispatch(&session, "pr.ready", &json!({})).await, Err(SessionError::Protocol(m)) if m.contains("lane")));
+    assert!(matches!(dispatch(&session, "pr.ready", &json!({})).await, Err(SessionError::Protocol(m)) if m.contains("task")));
     assert!(matches!(dispatch(&session, "pr.thread_reply", &json!({})).await, Err(SessionError::Protocol(m)) if m.contains("task")));
 }

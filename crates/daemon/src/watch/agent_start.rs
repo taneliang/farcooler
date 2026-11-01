@@ -1,9 +1,9 @@
 //! A dispatched agent is seen to start (ov-493).
 //!
-//! Three lanes once sat for two hours on claude's "trust this folder?"
+//! Three agents once sat for two hours on claude's "trust this folder?"
 //! prompt in their new worktrees, and nothing said so. A worktree Far Cooler
 //! makes lives under its own runtime directory, which no person opened
-//! claude in, so a lane's agent can open on that prompt, and on any other
+//! claude in, so a dispatched agent can open on that prompt, and on any other
 //! prompt or failure that comes before its first turn.
 //!
 //! **Watched.** Every agent pane opened in the last `START_WINDOW_MS`, as the
@@ -214,7 +214,7 @@ impl Watcher {
         if !self.may_tell_orchestrator(terminal, &task) {
             return;
         }
-        let body = notice(&self.lane_agent(terminal, &task), terminal, why);
+        let body = notice(&self.agent_named(terminal, &task), terminal, why);
         let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": terminal.to_string() } });
         match store.send_runner_notice(task.id, &body, extra) {
             Ok(_) => {
@@ -222,7 +222,7 @@ impl Watcher {
                 self.message_queued();
             }
             Err(DomainError::Conflict { what: "typing_off" }) => {}
-            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator a lane hasn't started"),
+            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator an agent hasn't started"),
         }
     }
 

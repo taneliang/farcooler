@@ -4,21 +4,22 @@
 
 use super::*;
 use crate::needs_you::{NotStarted, TRUST_ASK_PREFIX, TRUST_OPTION};
-use crate::watch::lane_start::{START_WINDOW_MS, Start, Step, Tick};
-use farcooler_store::plan::{LaneCard, NewLane};
+use crate::watch::agent_start::{START_WINDOW_MS, Start, Step, Tick};
 
 const GATE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/captures/claude-trust-gate.txt");
 
 impl Board {
-    /// A lane named `name` holding the task, worked by a claude pane opened
-    /// for it as a lane dispatch opens one, which then shows claude's trust
-    /// prompt before any sample has seen it: what a new worktree's first
-    /// launch draws.
-    async fn lane_on_trust_prompt(&self, name: &str) -> (Terminal, StandIn) {
-        let cards = [LaneCard { task_id: self.task.id, slice: String::new() }];
-        let new = NewLane { name: name.into(), ..Default::default() };
-        self.svc.store.create_lane(self.task.workspace_id, &new, &cards, None, Actor::Manager).unwrap();
-        let pane = self.svc.create_terminal_in_lane(self.lane.id, "Lane", "claude", None, Some(self.task.id), Some(name)).await.unwrap();
+    /// A claude pane opened as a builder on the task, titled `title`, as an
+    /// agent dispatch opens one, which then shows claude's trust prompt
+    /// before any sample has seen it: what a new worktree's first launch
+    /// draws.
+    async fn builder_on_trust_prompt(&self, title: &str) -> (Terminal, StandIn) {
+        let dispatch = pb::AgentDispatch { role: pb::AgentRole::Builder as i32, more_tickets: Vec::new(), title: title.into() };
+        let pane = self
+            .svc
+            .create_terminal_as_agent(self.lane.id, "Builder", "claude", None, Some(self.task.id), Some(&dispatch))
+            .await
+            .unwrap();
         let dir = self.dir.path().join(format!("si-{}", pane.id.simple()));
         std::fs::create_dir_all(dir.join("config")).unwrap();
         let program = dir.join("claude");
@@ -126,24 +127,24 @@ fn refused(r: Result<()>) -> &'static str {
     }
 }
 
-/// A lane's agent that opens on claude's trust prompt is told to its
+/// A builder that opens on claude's trust prompt is told to its
 /// orchestrator at once, with the reason, and shows in Needs You as an ask
 /// whose one answer, Trust Folder, presses Enter there and nothing else.
 /// The runner never presses it itself.
 #[tokio::test]
-async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
+async fn a_builder_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
     let b = board().await;
     let orchestrator = b.orchestrator().await;
     let _osi = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let (pane, si) = b.lane_on_trust_prompt("cleanup").await;
+    let (pane, si) = b.builder_on_trust_prompt("cleanup").await;
 
     assert!(b.sample_until_told().await, "the orchestrator was never told");
     let key = &b.task.key;
     assert_eq!(
         b.notices(),
         [format!(
-            "The lane cleanup's agent, on {key}, hasn't started: Claude Code is asking whether to trust its \
+            "The builder on {key} hasn't started: Claude Code is asking whether to trust its \
              folder. That's the owner's call, never an agent's: tell them it's waiting in Needs You."
         )]
     );
@@ -172,7 +173,7 @@ async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
     assert_eq!(si.log().matches("TRUSTED").count(), 1, "{}", si.log());
     assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, "user").await), "too_soon");
 
-    // claude starts its turn: the item goes, and the lane counts as started.
+    // claude starts its turn: the item goes, and the agent counts as started.
     let mut gone = false;
     for _ in 0..30 {
         b.watcher.sample().await;
@@ -199,7 +200,7 @@ async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
 #[tokio::test]
 async fn an_agent_cant_answer_the_trust_prompt() {
     let b = board().await;
-    let (pane, si) = b.lane_on_trust_prompt("guard").await;
+    let (pane, si) = b.builder_on_trust_prompt("guard").await;
     assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
     for actor in [format!("agent:{}", pane.id), "manager".into(), "pane".into()] {
@@ -216,7 +217,7 @@ async fn an_agent_cant_answer_the_trust_prompt() {
 #[tokio::test]
 async fn an_older_app_with_no_actor_answers_the_trust_prompt() {
     let b = board().await;
-    let (pane, si) = b.lane_on_trust_prompt("old-app").await;
+    let (pane, si) = b.builder_on_trust_prompt("old-app").await;
     assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
     let outcome = b.answer_over_rpc(pane.id, &ask, "").await;
@@ -229,7 +230,7 @@ async fn an_older_app_with_no_actor_answers_the_trust_prompt() {
 #[tokio::test]
 async fn trust_folder_never_answers_a_permission_dialog() {
     let b = board().await;
-    let (pane, si) = b.lane_on_trust_prompt("lookalike").await;
+    let (pane, si) = b.builder_on_trust_prompt("lookalike").await;
     assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
     si.show("trust-menu").await;
@@ -241,7 +242,7 @@ async fn trust_folder_never_answers_a_permission_dialog() {
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
 
-/// A notice for a lane that hasn't started isn't dropped behind one of the
+/// A notice for an agent that hasn't started isn't dropped behind one of the
 /// runner's still waiting for the orchestrator: the two are told as one.
 #[tokio::test]
 async fn a_not_started_notice_folds_into_one_still_waiting() {
@@ -250,7 +251,7 @@ async fn a_not_started_notice_folds_into_one_still_waiting() {
     let _osi = b.stand_in(&orchestrator, "claude", "claude").await;
     let earlier = b.svc.store.send_message(b.task.id, Actor::Runner, "The card's last agent stopped.", None, serde_json::json!({})).unwrap();
     messages::hold_for_tests(earlier.id);
-    let (_pane, _si) = b.lane_on_trust_prompt("again").await;
+    let (_pane, _si) = b.builder_on_trust_prompt("again").await;
     let mut told = Vec::new();
     for _ in 0..50 {
         b.watcher.sample().await;
@@ -270,7 +271,7 @@ async fn a_not_started_notice_folds_into_one_still_waiting() {
 #[tokio::test]
 async fn the_trust_answer_is_terminal_agent_answer() {
     let b = board().await;
-    let (pane, si) = b.lane_on_trust_prompt("site").await;
+    let (pane, si) = b.builder_on_trust_prompt("site").await;
     assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let since = b.watcher.activity(pane.id).await.1.unwrap();
     let outcome = b.answer_over_rpc(pane.id, &crate::needs_you::trust_ask_id(pane.id, since), "user").await;
@@ -284,7 +285,7 @@ async fn the_trust_answer_is_terminal_agent_answer() {
 async fn a_new_pane_first_seen_on_a_prompt_is_announced() {
     let b = board().await;
     let mut taps = b.watcher.tap_notices();
-    let (pane, _si) = b.lane_on_trust_prompt("first").await;
+    let (pane, _si) = b.builder_on_trust_prompt("first").await;
     b.watcher.sample().await;
     let key = b.task.key.clone();
     let told = tokio::time::timeout(Duration::from_secs(60), async {
@@ -307,7 +308,7 @@ async fn an_agent_that_never_starts_is_reported_after_the_window() {
     let orchestrator = b.orchestrator().await;
     let _osi = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let (pane, si) = b.lane_on_trust_prompt("quiet").await;
+    let (pane, si) = b.builder_on_trust_prompt("quiet").await;
     si.show("idle").await;
     b.watcher.sample().await;
     b.watcher.state.lock().await.get_mut(&pane.id).unwrap().start = Start::Waiting { since: now_millis() - START_WINDOW_MS };

@@ -140,3 +140,18 @@ fn fields_set_and_clear() {
     assert_eq!(refused(store.update_line(t[0], &sha, Actor::Manager)), "not_landed");
     assert!(line.resource_version > 1);
 }
+
+/// A change to a ticket that isn't a move is in its timeline too, naming what
+/// changed.
+#[test]
+fn an_edit_is_in_the_timeline() {
+    let (store, _, t) = board(1);
+    on_line(&store, &t);
+    let edit = LineUpdate { reason: Some("Blocked on the relay".into()), branch: Some("ov-1-relay".into()), ..Default::default() };
+    store.update_line(t[0], &edit, Actor::Manager).unwrap();
+    let events = store.line_events(LineSubject::Ticket(t[0]), 0).unwrap();
+    let last = events.last().unwrap();
+    assert_eq!((last.kind.as_str(), last.body.as_str()), ("line", "Changed its reason and branch."));
+    store.update_line(t[0], &LineUpdate::default(), Actor::Manager).unwrap();
+    assert_eq!(store.line_events(LineSubject::Ticket(t[0]), 0).unwrap().len(), events.len(), "nothing changed, nothing said");
+}
