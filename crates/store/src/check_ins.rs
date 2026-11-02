@@ -61,7 +61,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
     // The veto and epoch change happen in the writer's own transaction. In
     // particular they catch indirect and bulk writes, not only RPC entrypoints.
     let rules = [
-        ("task_update", "UPDATE OF status, workspace_id ON tasks", "NOT (OLD.status IS NEW.status AND OLD.workspace_id IS NEW.workspace_id)", "s.task_id = OLD.id"),
+        ("task_update", "UPDATE OF status, workspace_id ON tasks", "NOT (OLD.workspace_id IS NEW.workspace_id) OR ((OLD.status IN ('done', 'cancelled')) != (NEW.status IN ('done', 'cancelled')))", "s.task_id = OLD.id"),
         ("task_delete", "DELETE ON tasks", "1", "s.task_id = OLD.id"),
         ("workspace_update", "UPDATE OF wake_on_answer ON workspaces", "NOT (OLD.wake_on_answer IS NEW.wake_on_answer)", "s.workspace_id = OLD.id"),
         ("workspace_delete", "DELETE ON workspaces", "1", "s.workspace_id = OLD.id"),
