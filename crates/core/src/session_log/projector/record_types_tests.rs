@@ -90,25 +90,56 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
     }
 }
 
+/// Keep two dispatchers alive for the duration of this local capture. With
+/// tracing-core 0.1.36, a sole dispatcher's first callsite registration on
+/// another, unsubscribed thread consults that thread's default and caches
+/// `never`. A second dispatcher makes registration consult the live registry.
+/// Neither dispatcher is installed globally; the peer discards its output.
+fn with_capture<T>(sink: &Sink, f: impl FnOnce() -> T) -> T {
+    let capture = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_writer(sink.clone())
+            .with_ansi(false)
+            .finish(),
+    );
+    let registration_peer = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_writer(std::io::sink)
+            .finish(),
+    );
+    let result = tracing::dispatcher::with_default(&capture, f);
+    drop(registration_peer);
+    result
+}
+
 /// A type nothing reads is a gap, counted, and its name logged once per
 /// session; a name that isn't a plain word is logged as no name at all,
 /// so nothing a transcript wrote beyond a type's name reaches the log.
 #[test]
 fn an_unknown_type_is_a_gap_and_logged_once_by_name() {
     let sink = Sink::default();
-    let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
-    let p = tracing::subscriber::with_default(subscriber, || fold(UNKNOWN_TYPE));
+    let p = with_capture(&sink, || fold(UNKNOWN_TYPE));
     assert_unknown_capture(&p, &sink);
 }
 
 fn assert_unknown_capture(p: &super::Projection, sink: &Sink) {
     let odd = "a type with spaces ghp_0123456789abcdefghijklmnopqrstuvwxyz0123";
-    assert_eq!(unknown_gaps(&p), ["brand-new-record", "another-new-record", odd]);
+    assert_eq!(
+        unknown_gaps(p),
+        ["brand-new-record", "another-new-record", odd]
+    );
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
-    assert_eq!(logged.matches("brand-new-record").count(), 1, "once per session: {logged}");
+    assert_eq!(
+        logged.matches("brand-new-record").count(),
+        1,
+        "once per session: {logged}"
+    );
     assert_eq!(logged.matches("another-new-record").count(), 1, "{logged}");
     assert_eq!(logged.lines().count(), 3, "{logged}");
-    assert!(!logged.contains("ghp_") && !logged.contains("invented") && !logged.contains("spaces"), "{logged}");
+    assert!(
+        !logged.contains("ghp_") && !logged.contains("invented") && !logged.contains("spaces"),
+        "{logged}"
+    );
 }
 
 /// A transcript inventing types can't fill the log: the first 32 distinct
@@ -116,14 +147,14 @@ fn assert_unknown_capture(p: &super::Projection, sink: &Sink) {
 #[test]
 fn a_session_logs_at_most_32_unknown_types() {
     let sink = Sink::default();
-    let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
-    let lines: Vec<String> = (0..40).map(|n| format!(r#"{{"type":"invented-{n}"}}"#)).collect();
-    let p = tracing::subscriber::with_default(subscriber, || fold(&lines.join("\n")));
+    let lines: Vec<String> = (0..40)
+        .map(|n| format!(r#"{{"type":"invented-{n}"}}"#))
+        .collect();
+    let p = with_capture(&sink, || fold(&lines.join("\n")));
     assert_eq!(unknown_gaps(&p).len(), 40);
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logged.lines().count(), 32, "{logged}");
 }
-
 
 /// Fresh processes make first callsite registration deterministic, independent
 /// of which other unit test the harness happened to schedule first.
@@ -131,9 +162,12 @@ fn a_session_logs_at_most_32_unknown_types() {
 fn capture_registration_order() {
     const SCENARIO: &str = "FARCOOLER_RECORD_CAPTURE_SCENARIO";
     if let Ok(scenario) = std::env::var(SCENARIO) {
+        if scenario == "two-captures" {
+            concurrent_captures();
+            return;
+        }
         let sink = Sink::default();
-        let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
-        tracing::subscriber::with_default(subscriber, || {
+        with_capture(&sink, || {
             if scenario == "unsubscribed-first" {
                 let barrier = Arc::new(std::sync::Barrier::new(2));
                 let worker_barrier = barrier.clone();
@@ -151,21 +185,73 @@ fn capture_registration_order() {
         });
         return;
     }
-    for scenario in ["control", "unsubscribed-first"] {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "session_log::projector::record_types_tests::capture_registration_order", "--nocapture"])
-            .env(SCENARIO, scenario)
-            .spawn().unwrap();
+    for scenario in ["control", "unsubscribed-first", "two-captures"] {
+        let mut child = OwnedChild(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "session_log::projector::record_types_tests::capture_registration_order",
+                    "--nocapture",
+                ])
+                .env(SCENARIO, scenario)
+                .spawn()
+                .unwrap(),
+        );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let status = loop {
-            if let Some(status) = child.try_wait().unwrap() { break status; }
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break status;
+            }
             if std::time::Instant::now() >= deadline {
-                child.kill().unwrap();
-                child.wait().unwrap();
-                panic!("{scenario}: child exceeded ten seconds (killed and reaped)");
+                panic!("{scenario}: child exceeded ten seconds; guard will kill and reap it");
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         };
         assert!(status.success(), "{scenario}: {status}");
     }
+}
+
+/// Also clean up if polling or an assertion panics, not just on timeout.
+struct OwnedChild(std::process::Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn concurrent_captures() {
+    let ready = Arc::new(std::sync::Barrier::new(3));
+    let registered = Arc::new(std::sync::Barrier::new(3));
+    std::thread::scope(|scope| {
+        for (own, other) in [
+            ("capture-alpha", "capture-beta"),
+            ("capture-beta", "capture-alpha"),
+        ] {
+            let ready = ready.clone();
+            let registered = registered.clone();
+            scope.spawn(move || {
+                let sink = Sink::default();
+                with_capture(&sink, || {
+                    ready.wait();
+                    registered.wait();
+                    assert_unknown_capture(&fold(UNKNOWN_TYPE), &sink);
+                    fold(&format!(r#"{{"type":"{own}"}}"#));
+                });
+                let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+                assert_eq!(logged.lines().count(), 4, "{logged}");
+                assert_eq!(logged.matches(own).count(), 1, "{logged}");
+                assert!(
+                    !logged.contains(other),
+                    "another thread's capture leaked: {logged}"
+                );
+            });
+        }
+        ready.wait();
+        // This thread has no subscriber. It registers the production callsite
+        // while both worker captures are live, before either worker folds.
+        assert_eq!(unknown_gaps(&fold(UNKNOWN_TYPE)).len(), 3);
+        registered.wait();
+    });
 }
