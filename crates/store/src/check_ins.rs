@@ -112,3 +112,54 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use farcooler_core::DomainError;
+    use rusqlite::params;
+    use uuid::Uuid;
+
+    use crate::models::{Actor, TaskStatus, uuid_blob};
+    use crate::Store;
+
+    fn board() -> (Store, Uuid, Uuid) {
+        let store = Store::open_in_memory().unwrap();
+        let repo = store.register_repository_for_test("check-in");
+        let ws = store.ensure_main_workspace(repo).unwrap().id;
+        let task = store.create_task(ws, "audit", Actor::Manager).unwrap().id;
+        store.conn().execute(
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 1, 1, 3600001, 'enabled')",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        (store, ws, task)
+    }
+
+    #[test]
+    fn status_change_invalidates_and_does_not_revive_on_return() {
+        let (store, ws, task) = board();
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        store.set_task_status(task, TaskStatus::Backlog, Actor::Manager).unwrap();
+        let state: (String, i64) = store.conn().query_row(
+            "SELECT state, eligibility_epoch FROM check_in_schedules WHERE workspace_id = ?1",
+            [uuid_blob(ws)], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(state, ("suspended".into(), 1));
+    }
+
+    #[test]
+    fn admitted_enter_vetoes_status_until_fence_is_released() {
+        let (store, ws, task) = board();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.get_task(task).unwrap().status, TaskStatus::Backlog);
+        let state: String = store.conn().query_row(
+            "SELECT state FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(state, "enabled");
+        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+    }
+}
