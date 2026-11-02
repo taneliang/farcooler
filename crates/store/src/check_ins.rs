@@ -76,7 +76,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             token BLOB PRIMARY KEY NOT NULL,
             workspace_id BLOB,
             terminal_id BLOB NOT NULL,
-            operation TEXT NOT NULL CHECK (operation IN ('stop', 'remove')),
+            operation TEXT NOT NULL CHECK (operation IN ('stop', 'remove', 'reap')),
             phase TEXT NOT NULL CHECK (phase IN ('reserved', 'completed', 'uncertain')),
             process_id INTEGER NOT NULL,
             process_started INTEGER,
@@ -156,6 +156,9 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         "CREATE TRIGGER check_in_schedule_insert BEFORE INSERT ON check_in_schedules \
          WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = NEW.workspace_id) \
          BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
+         CREATE TRIGGER check_in_reserved_target_insert BEFORE INSERT ON terminals \
+         WHEN EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = NEW.id) \
+         BEGIN SELECT RAISE(ABORT, 'check_in_target_in_flight'); END; \
          CREATE TRIGGER check_in_reserved_target_move BEFORE UPDATE OF workspace_id, role ON terminals \
          WHEN NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.role IS NEW.role) \
           AND EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = OLD.id) \
@@ -871,6 +874,27 @@ impl crate::Store {
         Ok(true)
     }
 
+    /// Reserve an absent terminal identity before a watcher attempts to reap
+    /// its pane. The insert trigger excludes registration until this exact
+    /// token is completed and released; no transaction crosses external I/O.
+    pub fn reserve_absent_check_in_target(
+        &self, terminal: uuid::Uuid, token: uuid::Uuid, process_started: Option<i64>,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let changed = tx.execute(
+            "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id, operation, phase, process_id, process_started, created_at)
+             SELECT ?1, NULL, ?2, 'reap', 'reserved', ?3, ?4, ?5
+              WHERE NOT EXISTS (SELECT 1 FROM terminals WHERE id = ?2)",
+            params![uuid_blob(token), uuid_blob(terminal), i64::from(std::process::id()), process_started, crate::tasks::now_millis()],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(changed == 1)
+    }
+
     /// Record that the owned external operation returned successfully and
     /// cannot initiate another action. A failed or cancelled operation must
     /// not use this transition.
@@ -999,6 +1023,28 @@ mod tests {
             params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
         ).unwrap();
         (store, ws, task)
+    }
+
+    #[test]
+    fn absent_reap_reservation_orders_registration_both_ways() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repo = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repo, "test/reap", "/reap", false).unwrap();
+        let existing = store.create_terminal(worktree.id, "agent", "shell", TerminalIntent::Running, 80, 24).unwrap();
+        assert!(!store.reserve_absent_check_in_target(existing.id, Uuid::now_v7(), Some(1)).unwrap());
+        let (id, token) = (Uuid::now_v7(), Uuid::now_v7());
+        assert!(store.reserve_absent_check_in_target(id, token, Some(1)).unwrap());
+        let insert = || store.conn().execute(
+            "INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed, lease_generation, epoch, \"columns\", \"rows\", resource_version, workspace_id, role) \
+             SELECT ?1, worktree_id, title, command_preset, intent, runtime_confirmed, lease_generation, epoch, \"columns\", \"rows\", resource_version, workspace_id, role FROM terminals WHERE id = ?2",
+            params![uuid_blob(id), uuid_blob(existing.id)],
+        );
+        assert!(insert().is_err());
+        assert!(store.complete_check_in_target_change(token).unwrap());
+        assert!(store.release_check_in_target_change(token).unwrap());
+        assert_eq!(insert().unwrap(), 1);
+        assert!(!store.reserve_absent_check_in_target(id, Uuid::now_v7(), Some(1)).unwrap());
     }
 
     #[test]
