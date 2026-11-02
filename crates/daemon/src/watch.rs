@@ -4627,12 +4627,13 @@ impl Watcher {
         // time, a second `list-panes` for the same answer.
         let Ok(fleet) = self.service.fleet_as_inventoried().await else { return };
         let runtime = self.service.runtime();
-        let panes = self.service.inventory_snapshot();
+        let mut panes = self.service.inventory_snapshot();
 
         // A record is written before its pane is created, so a managed pane
-        // whose terminal is absent from this fleet snapshot is a candidate
-        // orphan. Cached absence is not proof of a pane incarnation; keep an
-        // inspectable hold instead of killing it.
+        // whose terminal is absent from a successful fleet read can never be a
+        // starting terminal. It is an orphan. Reap it here, where the durable
+        // fleet and live inventory are already read together, then publish the
+        // repaired geometry so every open client fills the recovered space.
         if panes.inventory_healthy {
             let terminals: HashSet<Uuid> = fleet
                 .iter()
@@ -4646,17 +4647,32 @@ impl Watcher {
                 .map(|pane| (pane.pane_id.clone(), pane.worktree_id, pane.terminal_id))
                 .collect();
 
-            // The inventory cannot prove a nonreused pane/server incarnation.
-            // Preserve the absent terminal identity as an owner-visible hold;
-            // never turn a cached orphan observation into a kill.
-            for (pane, _worktree, terminal) in orphaned {
-                match self.service.hold_unreapable_target(terminal) {
-                    Ok(true) => tracing::warn!(%pane, %terminal, "orphan reap held: pane incarnation unproved"),
-                    Ok(false) => {} // registered or already held
-                    Err(error) => tracing::warn!(%pane, %terminal, ?error, "orphan reap hold could not be recorded"),
+            let mut repaired = HashSet::new();
+            for (pane, worktree, terminal) in orphaned {
+                match self.service.tmux.kill_pane(&pane).await {
+                    Ok(true) => {
+                        repaired.insert(worktree);
+                        tracing::warn!(%pane, %terminal, "reaped orphaned managed pane");
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!(%pane, %terminal, ?error, "orphaned pane could not be reaped");
+                    }
                 }
             }
+
+            // And the panes it cannot see: an open that never finished.
+            // See `reap`.
             self.sweep_unfinished_opens().await;
+
+            if !repaired.is_empty() {
+                panes = self.service.inventory.refresh().await;
+                for worktree in repaired {
+                    if let Ok(groups) = self.service.layout(worktree).await {
+                        self.publish_layout(worktree, &groups);
+                    }
+                }
+            }
         }
 
         // The process table and the sockets under the panes, read in this

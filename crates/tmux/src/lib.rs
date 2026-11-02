@@ -7,7 +7,6 @@
 //! This crate implements `farcooler_core::inventory::RuntimeInventory`. The
 //! dependency points one way: `tmux` depends on `core`, never the reverse.
 
-pub mod conditional_reap;
 pub mod control;
 pub mod inventory;
 pub mod layout;

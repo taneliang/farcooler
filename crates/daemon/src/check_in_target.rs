@@ -13,18 +13,6 @@ impl Service {
         self.store.reserve_check_in_target_change(terminal, token, operation, started)
     }
 
-    /// Retain a visible hold when a watcher cannot prove a pane incarnation.
-    /// The absent-row transaction also prevents a late registration. Repeated
-    /// observations do not create a new hold for the same terminal identity.
-    pub(crate) fn hold_unreapable_target(&self, terminal: Uuid) -> Result<bool> {
-        use crate::claude_registry::{Kernel, Processes};
-        let started = i32::try_from(std::process::id()).ok().and_then(|pid| Kernel.started(pid));
-        let token = Uuid::now_v7();
-        if !self.store.reserve_absent_check_in_target(terminal, token, started)? { return Ok(false) }
-        if !self.store.mark_check_in_target_uncertain(token)? { return Err(DomainError::ResourceConflict) }
-        Ok(true)
-    }
-
     pub(crate) fn mark_target_stop_uncertain(&self, reserved: bool, token: Uuid) {
         if reserved && let Err(error) = self.store.mark_check_in_target_uncertain(token) {
             tracing::warn!(%token, error = %error, "could not mark target stop uncertain");
