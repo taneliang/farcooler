@@ -139,7 +139,7 @@ impl Runtime {
     }
 
     /// The live pane proving this terminal.
-    fn pane_id_of(&self, id: Uuid) -> Result<String> {
+    pub(crate) fn pane_id_of(&self, id: Uuid) -> Result<String> {
         let snapshot = self.inventory.snapshot();
         Ok(snapshot.claimants(id).into_iter().find(|p| p.proves_life()).ok_or(DomainError::NotFound)?.pane_id.clone())
     }

@@ -6,6 +6,10 @@
 
 use rusqlite::Transaction;
 
+fn valid_pane_id(pane: &str) -> bool {
+    pane.strip_prefix('%').is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Older runners cannot honour the admission fence and must not open this
 /// schema. Registration uses `Older::Refused`, regardless of its additive DDL.
 pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
@@ -40,6 +44,9 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             attempt_id BLOB,
             daemon_instance BLOB,
             terminal_id BLOB,
+            pane_id TEXT,
+            terminal_lease INTEGER,
+            terminal_epoch INTEGER,
             thread_id TEXT,
             rollout_path TEXT,
             rollout_device INTEGER,
@@ -143,6 +150,7 @@ impl crate::Store {
     /// The caller must hold the target's typing exclusion and complete all
     /// physical proofs before this call. `thread` is the proved session, not
     /// a value supplied by a remote client. No connection guard crosses I/O.
+    #[allow(clippy::too_many_arguments)] // The identity tuple pins the exact admitted attempt and pane.
     pub fn admit_check_in_enter(
         &self,
         occurrence: uuid::Uuid,
@@ -150,13 +158,14 @@ impl crate::Store {
         daemon: uuid::Uuid,
         terminal: uuid::Uuid,
         thread: &str,
+        pane: &str,
         now: i64,
     ) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         use rusqlite::{OptionalExtension, params};
 
-        if thread.is_empty() {
+        if thread.is_empty() || !valid_pane_id(pane) {
             return Ok(false);
         }
         let mut conn = self.conn();
@@ -169,7 +178,7 @@ impl crate::Store {
                JOIN workspaces w ON w.id = o.workspace_id
                JOIN terminals p ON p.id = ?4
               WHERE o.id = ?1 AND o.attempt_id = ?2 AND o.daemon_instance = ?3
-                AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5
+                AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5 AND o.pane_id = ?6
                 AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
                 AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
@@ -178,6 +187,7 @@ impl crate::Store {
                 AND s.template_version = o.template_version
                 AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                 AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id
+                AND p.lease_generation = o.terminal_lease AND p.epoch = o.terminal_epoch
                 AND p.role = 2 AND p.command_preset = 'codex' AND p.intent = 1
                 AND p.runtime_confirmed = 1 AND p.exit_code IS NULL AND p.exit_signal IS NULL
                 AND p.agent_session_id = ?5
@@ -186,7 +196,7 @@ impl crate::Store {
                     AND NOT EXISTS (SELECT 1 FROM device_caps d WHERE d.client_id = s.authorizer_device)
                     AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = s.authorizer_device)
                     AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device)))",
-            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread],
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, pane],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         ).optional().map_err(map_err)?;
         let Some((workspace, task, device)) = valid else { return Ok(false) };
@@ -256,6 +266,7 @@ impl crate::Store {
 
     /// Persist an attempt before its first paste. The daemon supplies its own
     /// instance and the independently proved current terminal and thread.
+    #[allow(clippy::too_many_arguments)] // Claim the exact terminal, pane and session as one identity.
     pub fn claim_check_in(
         &self,
         occurrence: uuid::Uuid,
@@ -263,16 +274,19 @@ impl crate::Store {
         daemon: uuid::Uuid,
         terminal: uuid::Uuid,
         thread: &str,
+        pane: &str,
         now: i64,
     ) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         use rusqlite::params;
 
-        if thread.is_empty() { return Ok(false) }
+        if thread.is_empty() || !valid_pane_id(pane) { return Ok(false) }
         let changed = self.conn().execute(
             "UPDATE check_in_occurrences AS o SET state = 'claimed', attempt_id = ?2, daemon_instance = ?3,
-                    terminal_id = ?4, thread_id = ?5, claimed_at = ?6
+                    terminal_id = ?4, thread_id = ?5, claimed_at = ?6, pane_id = ?7,
+                    terminal_lease = (SELECT lease_generation FROM terminals WHERE id = ?4),
+                    terminal_epoch = (SELECT epoch FROM terminals WHERE id = ?4)
               WHERE o.id = ?1 AND o.state = 'pending'
                 AND EXISTS (SELECT 1 FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id
                     JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
@@ -289,7 +303,7 @@ impl crate::Store {
                           AND NOT EXISTS (SELECT 1 FROM device_caps d WHERE d.client_id = s.authorizer_device)
                           AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = s.authorizer_device)
                           AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device))))",
-            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, now],
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, now, pane],
         ).map_err(map_err)?;
         Ok(changed == 1)
     }
@@ -615,6 +629,9 @@ pub struct CheckInObservation {
     pub inode: i64,
     pub from: i64,
     pub terminal: uuid::Uuid,
+    pub pane: String,
+    pub terminal_lease: i64,
+    pub terminal_epoch: i64,
     pub thread: String,
     pub admitted_at: i64,
 }
@@ -630,14 +647,17 @@ impl crate::Store {
         use rusqlite::{OptionalExtension, params};
 
         self.conn().query_row(
-            "SELECT rollout_path, rollout_device, rollout_inode, rollout_offset, terminal_id, thread_id, admitted_at
+            "SELECT rollout_path, rollout_device, rollout_inode, rollout_offset, terminal_id, thread_id, admitted_at,
+                    pane_id, terminal_lease, terminal_epoch
                FROM check_in_occurrences WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'
                 AND rollout_path IS NOT NULL AND rollout_device IS NOT NULL AND rollout_inode IS NOT NULL
-                AND rollout_offset IS NOT NULL AND terminal_id IS NOT NULL AND thread_id IS NOT NULL AND admitted_at IS NOT NULL",
+                AND rollout_offset IS NOT NULL AND terminal_id IS NOT NULL AND thread_id IS NOT NULL AND admitted_at IS NOT NULL
+                AND pane_id IS NOT NULL AND terminal_lease IS NOT NULL AND terminal_epoch IS NOT NULL",
             params![uuid_blob(occurrence), uuid_blob(attempt)],
             |r| Ok(CheckInObservation {
                 path: r.get(0)?, device: r.get(1)?, inode: r.get(2)?, from: r.get(3)?,
-                terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?,
+                terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?, pane: r.get(7)?,
+                terminal_lease: r.get(8)?, terminal_epoch: r.get(9)?,
             }),
         ).optional().map_err(map_err)
     }
@@ -777,8 +797,8 @@ mod tests {
         let (store, ws, _) = board();
         let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, pane_id, terminal_lease, terminal_epoch, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '%1', 1, 1, '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
         ).unwrap();
         let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
@@ -808,12 +828,13 @@ mod tests {
         store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, pane_id, terminal_lease, terminal_epoch, rollout_path, rollout_device, rollout_inode, rollout_offset)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', '%1', (SELECT lease_generation FROM terminals WHERE id = ?4), (SELECT epoch FROM terminals WHERE id = ?4), '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
         ).unwrap();
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
-        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", 5).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 5).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 5).unwrap());
+        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 5).unwrap());
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
         assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
