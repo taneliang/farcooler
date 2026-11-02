@@ -188,7 +188,9 @@ mod tests {
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws), Err(DomainError::ResourceConflict)));
         assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
-        assert!(store.settle_check_in_enter(occ, attempt, false, 6).unwrap());
+        assert!(store.settle_check_in_enter(occ, attempt, true, 6).unwrap());
+        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
+        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
         assert!(store.disable_check_in(ws).unwrap());
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
@@ -484,5 +486,42 @@ impl crate::Store {
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(generation)
+    }
+}
+
+/// A submitted check-in that has no correlated transcript receipt by this
+/// deadline becomes uncertain. It never starts the next hourly interval.
+pub const CHECK_IN_CONFIRMATION_TIMEOUT_MS: i64 = 5 * 60 * 1000;
+
+impl crate::Store {
+    /// Mark unanswered submissions uncertain without attempting another send.
+    pub fn expire_check_in_submissions(&self, now: i64) -> farcooler_core::Result<usize> {
+        use crate::error::map_err;
+        use rusqlite::params;
+
+        let cutoff = now.saturating_sub(CHECK_IN_CONFIRMATION_TIMEOUT_MS);
+        self.conn().execute(
+            "UPDATE check_in_occurrences SET state = 'uncertain', reason = 'receipt_timeout'
+              WHERE state = 'submitted' AND submitted_at IS NOT NULL AND submitted_at <= ?1",
+            params![cutoff],
+        ).map_err(map_err)
+    }
+
+    /// Recover only after the caller has exclusive daemon ownership and has
+    /// proved the previous sender cannot initiate another Enter. Store::open
+    /// must never call this: opening a second connection proves neither fact.
+    pub fn recover_check_ins_after_exclusive_start(&self) -> farcooler_core::Result<()> {
+        use crate::error::map_err;
+
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        tx.execute(
+            "UPDATE check_in_occurrences SET state = 'uncertain', reason = 'daemon_restarted_during_attempt'
+              WHERE state IN ('claimed', 'enter_admitted', 'submitted')",
+            [],
+        ).map_err(map_err)?;
+        tx.execute("DELETE FROM check_in_enter_fences", []).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(())
     }
 }
