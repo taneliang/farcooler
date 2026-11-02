@@ -49,6 +49,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TaskNoteHitList(_) => "task_note_hit_list",
         result::Value::Workspace(_) => "workspace",
         result::Value::WorkspaceList(_) => "workspace_list",
+        result::Value::CheckInStatus(_) => "check_in_status",
         result::Value::NeedsYouList(_) => "needs_you_list",
         result::Value::Report(_) => "report",
         result::Value::UsageReport(_) => "usage_report",

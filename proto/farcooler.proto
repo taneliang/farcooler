@@ -343,6 +343,8 @@ message Request {
     // `agent.stop` (ov-872), behind `agent_stop`. 610-619 are its block, the
     // rest held by `reserved` below.
     AgentStop agent_stop = 610;
+    // Fixed, owner-authorized workspace check-ins (ov-892).
+    CheckInEnable check_in_enable = 620;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -580,6 +582,7 @@ message Result {
     TicketLine ticket_line = 600;
     Agent agent = 601;
     Landing landing = 602;
+    CheckInStatus check_in_status = 620;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -6495,3 +6498,35 @@ message TrainAgentRecord { reserved 1 to 4; }
 message TrainStart { reserved 1 to 8; }
 
 message TrainSet { reserved 1 to 10; }
+
+// A single fixed hourly reminder; no command, prompt or interval is supplied.
+message CheckInEnable {
+  bytes task_id = 1;
+  // Empty only for the first configuration; otherwise the last observed generation.
+  bytes expected_generation = 2;
+  bool acknowledge_uncertain = 3;
+}
+
+// Inspectable scheduler state. Receipt means the correlated prompt appeared
+// in the pinned Codex rollout, not that reconciliation work completed.
+message CheckInStatus {
+  bool configured = 1;
+  bytes workspace_id = 2;
+  bytes task_id = 3;
+  bytes generation = 4;
+  string state = 5;
+  string reason = 6;
+  int64 authorized_at_ms = 7;
+  int64 next_due_ms = 8;
+  bytes occurrence_id = 9;
+  string occurrence_state = 10;
+  string occurrence_reason = 11;
+  bytes terminal_id = 12;
+  string thread_id = 13;
+  optional int64 claimed_at_ms = 14;
+  optional int64 admitted_at_ms = 15;
+  optional int64 submitted_at_ms = 16;
+  optional int64 confirmed_at_ms = 17;
+  string receipt_evidence = 18;
+  string authorizer_source = 19;
+}

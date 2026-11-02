@@ -362,6 +362,39 @@ fn check_in_owner_seat(person: &crate::people::Person, seat: crate::caller_seat:
     *person == crate::people::Person::Owner && seat == crate::caller_seat::Seat::Person
 }
 
+/// The fixed check-in's observable state, without exposing rollout paths.
+pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStatus> {
+    svc.store.get_workspace(workspace)?;
+    let Some(status) = svc.store.check_in_status(workspace)? else {
+        return Ok(pb::CheckInStatus { workspace_id: workspace.as_bytes().to_vec(), ..Default::default() });
+    };
+    let mut out = pb::CheckInStatus {
+        configured: true,
+        workspace_id: workspace.as_bytes().to_vec(),
+        task_id: status.task.as_bytes().to_vec(),
+        generation: status.generation.as_bytes().to_vec(),
+        state: status.state,
+        reason: status.reason.unwrap_or_default(),
+        authorized_at_ms: status.authorized_at,
+        next_due_ms: status.next_due,
+        authorizer_source: status.authorizer_source,
+        ..Default::default()
+    };
+    if let Some(occurrence) = status.occurrence {
+        out.occurrence_id = occurrence.id.as_bytes().to_vec();
+        out.occurrence_state = occurrence.state;
+        out.occurrence_reason = occurrence.reason.unwrap_or_default();
+        out.terminal_id = occurrence.terminal.map(|id| id.as_bytes().to_vec()).unwrap_or_default();
+        out.thread_id = occurrence.thread.unwrap_or_default();
+        out.claimed_at_ms = occurrence.claimed_at;
+        out.admitted_at_ms = occurrence.admitted_at;
+        out.submitted_at_ms = occurrence.submitted_at;
+        out.confirmed_at_ms = occurrence.confirmed_at;
+        out.receipt_evidence = occurrence.observation.unwrap_or_default();
+    }
+    Ok(out)
+}
+
 /// Values a person selected for the fixed schedule; identity is never among them.
 pub struct CheckInEnable {
     pub task: Uuid,

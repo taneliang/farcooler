@@ -802,6 +802,8 @@ pub mod capability {
     /// refused, telling it to stop. A CLI refuses `agent stop` before sending
     /// to a runner without it. Needs `board_line`.
     pub const AGENT_STOP: &str = "agent_stop";
+    /// Fixed, owner-authorized hourly workspace check-ins.
+    pub const WORKSPACE_CHECK_IN: &str = "workspace_check_in";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -826,7 +828,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            STEP_UP, PHONE_APPROVAL, AGENT_STOP,
+            STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1059,6 +1061,9 @@ pub mod method {
         TerminalAttach = "terminal.attach" => TERMINAL_STREAM,
         NeedsYouList = "needs_you.list" => NEEDS_YOU,
         WorkspaceSetSettings = "workspace.set_settings" => WAKE_ON_ANSWER,
+        WorkspaceCheckInShow = "workspace.check_in_show" => WORKSPACE_CHECK_IN,
+        WorkspaceCheckInEnable = "workspace.check_in_enable" => WORKSPACE_CHECK_IN,
+        WorkspaceCheckInDisable = "workspace.check_in_disable" => WORKSPACE_CHECK_IN,
         ReportGet = "report.get" => REPORT,
         UsageReport = "usage.report" => AGENT_USAGE,
         UsageTask = "usage.task" => AGENT_USAGE,

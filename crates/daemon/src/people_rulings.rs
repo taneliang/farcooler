@@ -111,6 +111,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::PageGet
         | M::PageStats
         | M::WorkspaceList
+        | M::WorkspaceCheckInShow
         | M::ClientList
         | M::MemberList
         // Who changed what about the people here (ov-757).
@@ -218,6 +219,7 @@ pub fn member_ruling(method: M) -> Ruling {
         // A workspace made only adds (ov-716 rule 2). Removing a member is
         // a runner admin's, member or owner (rule 4), by scope.
         | M::WorkspaceCreate
+        | M::WorkspaceCheckInDisable
         | M::MemberRemove => Members,
 
         M::WorkspaceMarkRead
@@ -264,7 +266,8 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::CrashReport => Owners(Why::OwnersDevice),
 
-        M::WorkspaceDelete
+        M::WorkspaceCheckInEnable
+        | M::WorkspaceDelete
         | M::WorkspaceWriteCharter
         | M::RepositoryRootAdd
         | M::RepositoryRootRemove

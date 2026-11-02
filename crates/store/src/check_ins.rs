@@ -352,7 +352,7 @@ impl crate::Store {
     pub fn disable_check_in(&self, workspace: uuid::Uuid, caller_terminal: Option<uuid::Uuid>, caller_device: Option<&str>) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
-        use rusqlite::params;
+        use rusqlite::{OptionalExtension, params};
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
@@ -374,6 +374,10 @@ impl crate::Store {
             params![uuid_blob(workspace)], |r| r.get(0),
         ).map_err(map_err)?;
         if admitted { return Err(farcooler_core::DomainError::ResourceConflict) }
+        let audit_task: Option<uuid::Uuid> = tx.query_row(
+            "SELECT s.task_id FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id AND t.workspace_id = s.workspace_id WHERE s.workspace_id = ?1",
+            params![uuid_blob(workspace)], |r| crate::models::get_uuid(r, 0),
+        ).optional().map_err(map_err)?;
         let changed = tx.execute(
             "UPDATE check_in_schedules SET state = 'disabled', eligibility_epoch = eligibility_epoch + 1, reason = 'disabled'
              WHERE workspace_id = ?1 AND state != 'disabled'",
@@ -385,6 +389,15 @@ impl crate::Store {
               WHERE workspace_id = ?1 AND state IN ('pending', 'claimed')",
             params![uuid_blob(workspace)],
         ).map_err(map_err)?;
+        if changed == 1
+            && let Some(task) = audit_task
+        {
+            crate::tasks::insert_note(
+                &tx, task, crate::models::NoteKind::Progress, crate::models::Actor::Runner,
+                "Workspace check-ins were disabled; an admitted or uncertain key may still arrive.",
+                &serde_json::json!({ "event": "check_in_disabled", "source": if caller_terminal.is_some() { "orchestrator" } else { "owner" } }), None,
+            )?;
+        }
         tx.commit().map_err(map_err)?;
         Ok(changed == 1)
     }
@@ -459,6 +472,12 @@ impl crate::Store {
                  state = 'enabled', eligibility_epoch = check_in_schedules.eligibility_epoch + 1, reason = NULL",
             params![uuid_blob(workspace), uuid_blob(task), uuid_blob(generation), device, now, next_due],
         ).map_err(map_err)?;
+        crate::tasks::insert_note(
+            &tx, task, crate::models::NoteKind::Progress, crate::models::Actor::Runner,
+            "A verified owner enabled fixed hourly workspace check-ins.",
+            &serde_json::json!({ "event": "check_in_enabled", "generation": generation.to_string(),
+                "source": if device.is_some() { "owner_device" } else { "local_person" } }), None,
+        )?;
         tx.commit().map_err(map_err)?;
         Ok(generation)
     }

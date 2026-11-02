@@ -95,6 +95,14 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Inspect, enable or disable this workspace's fixed hourly check-in.
+    CheckIn {
+        workspace: String,
+        #[arg(long)]
+        repo: Option<String>,
+        #[command(subcommand)]
+        action: CheckInAction,
+    },
     /// Delete a workspace that holds nothing. Main can't be deleted.
     ///
     /// Refused while any task, worktree or terminal still belongs to it: move
@@ -153,6 +161,22 @@ pub enum WorkspaceCmd {
     /// or with `--draft` the draft its orchestrator goes through with you.
     /// A charter that exists is never replaced.
     WriteCharter(crate::repo_survey::WriteCharterArgs),
+}
+
+#[derive(Subcommand)]
+pub enum CheckInAction {
+    /// Show the schedule and its latest delivery evidence.
+    Show,
+    /// Enable the fixed reminder for an existing task on this board.
+    Enable {
+        #[arg(long)]
+        task: String,
+        /// Acknowledge an earlier attempt may already have reached the agent.
+        #[arg(long)]
+        acknowledge_uncertain: bool,
+    },
+    /// Disable future check-ins; an admitted key may still arrive.
+    Disable,
 }
 
 /// `workspace create`'s words, including the ones it used to take.
@@ -400,6 +424,63 @@ async fn workspace_via(
                 .await
                 .map_err(|e| crate::workspace_settings::refused(e, settings.lead.is_some()))?;
             done(r.value, json, |w| settings.said(w))?;
+        }
+
+        WorkspaceCmd::CheckIn { workspace, repo, action } => {
+            if !link.daemon_capabilities().iter().any(|c| c == capability::WORKSPACE_CHECK_IN) {
+                return Err("this runner cannot schedule workspace check-ins yet. update it first".into());
+            }
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let id = uuid_of(&ws.id);
+            let request_for = |method: &str| {
+                let mut request = req_for(method, id);
+                request.required_capabilities.push(capability::WORKSPACE_CHECK_IN.to_string());
+                request
+            };
+            let shown = link.call(request_for("workspace.check_in_show")).await?;
+            let result::Value::CheckInStatus(before) = expect_value(shown.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
+            let status = match action {
+                CheckInAction::Show => before,
+                CheckInAction::Enable { task, acknowledge_uncertain } => {
+                    let task = crate::tasks::find_task(&mut link, repo.as_deref(), &task).await?;
+                    let request = with(request_for("workspace.check_in_enable"), request::Payload::CheckInEnable(pb::CheckInEnable {
+                        task_id: task.id,
+                        expected_generation: before.generation,
+                        acknowledge_uncertain,
+                    }));
+                    let sent = link.call(request).await?;
+                    let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
+                    status
+                }
+                CheckInAction::Disable => {
+                    let sent = link.call(request_for("workspace.check_in_disable")).await?;
+                    let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
+                    status
+                }
+            };
+            if json {
+                println!("{}", serde_json::json!({
+                    "configured": status.configured, "workspace": id.to_string(),
+                    "generation": (!status.generation.is_empty()).then(|| uuid_of(&status.generation).to_string()),
+                    "state": status.state, "reason": status.reason, "next_due_ms": status.next_due_ms,
+                    "occurrence": (!status.occurrence_id.is_empty()).then(|| uuid_of(&status.occurrence_id).to_string()),
+                    "occurrence_state": status.occurrence_state, "occurrence_reason": status.occurrence_reason,
+                    "submitted_at_ms": status.submitted_at_ms, "confirmed_at_ms": status.confirmed_at_ms,
+                    "receipt_evidence": status.receipt_evidence,
+                }));
+            } else if !status.configured {
+                println!("hourly check-in is off");
+            } else {
+                println!("hourly check-in: {}  next due: {}", status.state, status.next_due_ms);
+                if !status.reason.is_empty() { println!("  {}", status.reason); }
+                if !status.occurrence_id.is_empty() {
+                    println!("  occurrence {}: {} {}", uuid_of(&status.occurrence_id), status.occurrence_state, status.occurrence_reason);
+                }
+                if matches!(status.occurrence_state.as_str(), "enter_admitted" | "submitted" | "uncertain" | "resolved_uncertain") {
+                    println!("  an admitted or uncertain key may still arrive; a receipt confirms input, not completed work");
+                }
+                if !status.receipt_evidence.is_empty() { println!("  receipt: {}", status.receipt_evidence); }
+            }
         }
 
         WorkspaceCmd::Delete { workspace, repo } => {
@@ -931,6 +1012,17 @@ mod tests {
         assert_eq!(pane_workspace(Some(String::new())), None);
         assert_eq!(pane_workspace(Some("Billing".into())), None);
         assert_eq!(pane_workspace(None), None);
+    }
+
+    #[test]
+    fn check_in_commands_require_a_task_for_enablement() {
+        use clap::Parser;
+        let parse = |line: &str| crate::Cli::try_parse_from(line.split_whitespace());
+        assert!(parse("farcooler workspace check-in Main show").is_ok());
+        assert!(parse("farcooler workspace check-in Main disable").is_ok());
+        assert!(parse("farcooler workspace check-in Main enable --task ov-1").is_ok());
+        assert!(parse("farcooler workspace check-in Main enable").is_err());
+        assert!(parse("farcooler workspace check-in Main enable --task ov-1 --command whoami").is_err());
     }
 
     /// The spec's spelling works as written, and the repository may be a

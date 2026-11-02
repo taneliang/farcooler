@@ -534,7 +534,7 @@ fn scope_of(method: Method) -> Scope {
         // Workspaces: the list is the shape of the fleet, like
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
-        Method::WorkspaceList => Scope::Read,
+        Method::WorkspaceList | Method::WorkspaceCheckInShow => Scope::Read,
         // The charter's text: the team's rules, which every member reads
         // (ov-755). Whose to read is the gate's (`Ruling::Reads`).
         Method::WorkspaceCharter => Scope::Read,
@@ -550,6 +550,8 @@ fn scope_of(method: Method) -> Scope {
         | Method::WorkspaceRename
         | Method::WorkspaceSetPrefix
         | Method::WorkspaceSetSettings
+        | Method::WorkspaceCheckInEnable
+        | Method::WorkspaceCheckInDisable
         | Method::WorkspaceDelete
         | Method::WorkspaceStartOrchestrator
         | Method::TaskMove
@@ -2075,6 +2077,31 @@ impl Rpc {
                 };
                 let caller = (&self.peer, self.caller_pid);
                 Ok(result::Value::Workspace(crate::workspace_ops::set_settings(svc, &self.watcher, id, &p, scope, caller).await?))
+            }
+
+            "workspace.check_in_show" => {
+                let workspace = Self::target(&req)?;
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
+            }
+
+            "workspace.check_in_enable" => {
+                let workspace = Self::target(&req)?;
+                let Some(request::Payload::CheckInEnable(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let task = Uuid::from_slice(&p.task_id).map_err(|_| DomainError::InvalidArgument { what: "task" })?;
+                let expected_generation = if p.expected_generation.is_empty() { None } else {
+                    Some(Uuid::from_slice(&p.expected_generation).map_err(|_| DomainError::InvalidArgument { what: "generation" })?)
+                };
+                let selected = crate::workspace_ops::CheckInEnable { task, expected_generation, acknowledge_uncertain: p.acknowledge_uncertain };
+                crate::workspace_ops::enable_check_in(svc, &self.watcher, &self.peer, self.caller_pid, workspace, selected).await?;
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
+            }
+
+            "workspace.check_in_disable" => {
+                let workspace = Self::target(&req)?;
+                crate::workspace_ops::disable_check_in(svc, &self.watcher, &self.peer, self.caller_pid, workspace).await?;
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
             }
 
             "workspace.delete" => {
