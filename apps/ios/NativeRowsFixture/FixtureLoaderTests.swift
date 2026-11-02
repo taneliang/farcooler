@@ -38,6 +38,42 @@ final class FixtureLoaderTests: XCTestCase {
             var object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any]); edit(&object)
             return try JSONSerialization.data(withJSONObject: object)
         }
+        // Valid control for the pure seam; verify remains the only loader path.
+        XCTAssertEqual(try FixtureLoader.validate(data).tools.map(\.id), Array(FixtureLoader.ids.dropFirst()))
+        func rejected(_ expected: FixtureFailure, _ edit: (inout [String: Any]) -> Void) throws {
+            let altered = try mutate(edit)
+            error(expected) { _ = try FixtureLoader.validate(altered) }
+            error(.digest) { _ = try FixtureLoader.verify(identity: FixtureLoader.hostID, data: altered) }
+        }
+        for (key, bad) in [("epoch", 1.5 as Any), ("rev", 9.5 as Any), ("epoch", "1" as Any), ("rev", 1e100 as Any)] {
+            try rejected(.schema) { $0[key] = bad }
+        }
+        for (key, bad) in [("ord", 2.5 as Any), ("rev", 9.5 as Any), ("ord", true as Any)] {
+            try rejected(.rows) { object in
+                var rows = object["rows"] as! [[String: Any]]; rows[2][key] = bad; object["rows"] = rows
+            }
+        }
+        for (key, bad) in [("version", 1.5 as Any), ("version", true as Any), ("preview", "R" as Any)] {
+            try rejected(.semantics) { object in
+                var rows = object["rows"] as! [[String: Any]]; var kind = rows[2]["kind"] as! [String: Any]
+                var tool = kind["Tool"] as! [String: Any]; var op = tool["operation"] as! [String: Any]
+                op[key] = bad; tool["operation"] = op; kind["Tool"] = tool; rows[2]["kind"] = kind; object["rows"] = rows
+            }
+        }
+        for (index, key, bad) in [(1, "input", "other; command" as Any), (1, "summary", "wrong" as Any),
+                                  (2, "summary", "wrong" as Any), (1, "diff", ["wrong"] as Any),
+                                  (2, "file_path", "other" as Any), (2, "started_ms", 1793574957570.5 as Any),
+                                  (1, "ended_ms", "1793574926490" as Any)] {
+            try rejected(.semantics) { object in
+                var rows = object["rows"] as! [[String: Any]]; var kind = rows[index]["kind"] as! [String: Any]
+                var tool = kind["Tool"] as! [String: Any]; tool[key] = bad; kind["Tool"] = tool; rows[index]["kind"] = kind; object["rows"] = rows
+            }
+        }
+        try rejected(.semantics) { object in
+            var rows = object["rows"] as! [[String: Any]]; var kind = rows[0]["kind"] as! [String: Any]
+            var turn = kind["Turn"] as! [String: Any]; turn["prompt"] = "unexpected"; kind["Turn"] = turn
+            rows[0]["kind"] = kind; object["rows"] = rows
+        }
         error(.schema) { _ = try FixtureLoader.validate(mutate { $0["rev"] = 10 }) }
         error(.schema) { _ = try FixtureLoader.validate(mutate { $0["epoch"] = true }) }
         error(.schema) { _ = try FixtureLoader.validate(mutate { $0["extra"] = "unexpected" }) }
