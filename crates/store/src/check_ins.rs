@@ -124,169 +124,6 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use farcooler_core::DomainError;
-    use rusqlite::params;
-    use uuid::Uuid;
-
-    use crate::models::{Actor, TaskStatus, uuid_blob};
-    use crate::Store;
-
-    fn board() -> (Store, Uuid, Uuid) {
-        let store = Store::open_in_memory().unwrap();
-        let repo = store.register_repository_for_test("check-in");
-        let ws = store.ensure_main_workspace(repo).unwrap().id;
-        let task = store.create_task(ws, "audit", Actor::Manager).unwrap().id;
-        store.conn().execute(
-            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 3600001, 'enabled')",
-            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
-        ).unwrap();
-        (store, ws, task)
-    }
-
-    #[test]
-    fn enable_requires_expected_generation_and_starts_one_hour_later() {
-        let (store, ws, task) = board();
-        assert!(matches!(store.enable_check_in(ws, task, None, None, false, 100), Err(DomainError::ResourceConflict)));
-        let generation: Vec<u8> = store.conn().query_row(
-            "SELECT generation FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
-        ).unwrap();
-        let old = Uuid::from_slice(&generation).unwrap();
-        let next = store.enable_check_in(ws, task, None, Some(old), false, 100).unwrap();
-        assert_ne!(next, old);
-        assert!(!store.tick_check_in(ws, 3_600_099).unwrap());
-        assert!(store.tick_check_in(ws, 3_600_100).unwrap());
-    }
-
-    #[test]
-    fn missed_hours_coalesce_without_using_message_wakes() {
-        let (store, ws, _) = board();
-        assert_eq!(store.due_check_in_workspaces(3_600_000).unwrap(), []);
-        assert_eq!(store.due_check_in_workspaces(3_600_001).unwrap(), [ws]);
-        assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
-        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
-        assert_eq!(store.pending_check_ins().unwrap().len(), 1);
-        assert!(!store.tick_check_in(ws, 20_000_000).unwrap());
-        let status = store.check_in_status(ws).unwrap().unwrap();
-        assert_eq!(status.occurrence.unwrap().state, "pending");
-        let conn = store.conn();
-        let count: i64 = conn.query_row("SELECT count(*) FROM check_in_occurrences", [], |r| r.get(0)).unwrap();
-        let messages: i64 = conn.query_row("SELECT count(*) FROM message_wakes", [], |r| r.get(0)).unwrap();
-        assert_eq!((count, messages), (1, 0));
-    }
-
-    #[test]
-    fn receipt_is_bound_to_attempt_session_and_pinned_file() {
-        let (store, ws, _) = board();
-        let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
-        store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
-            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
-        ).unwrap();
-        let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
-        assert_eq!((observation.path.as_str(), observation.device, observation.inode, observation.from), ("/rollout", 1, 2, 10));
-        assert!(store.check_in_observation(occ, Uuid::now_v7()).unwrap().is_none());
-        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "other", 1, 2, 10, 5, 7).unwrap());
-        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 3, 10, 5, 7).unwrap());
-        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 9, 5, 7).unwrap());
-        assert!(store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
-        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
-        let status = store.check_in_status(ws).unwrap().unwrap();
-        assert_eq!(status.next_due, 3_600_007);
-        assert_eq!(status.occurrence.unwrap().state, "confirmed");
-    }
-
-    #[test]
-    fn admission_vetoes_mutation_and_settles_only_its_attempt() {
-        use farcooler_protocol::v1::TerminalIntent;
-        let (store, ws, task) = board();
-        let repo = store.get_workspace(ws).unwrap().repository_id;
-        let worktree = store.create_worktree(repo, "test/check-in", "/check-in", false).unwrap();
-        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
-        store.conn().execute(
-            "UPDATE terminals SET workspace_id = ?2, role = 2, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
-            params![uuid_blob(terminal.id), uuid_blob(ws)],
-        ).unwrap();
-        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
-        let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
-        store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
-            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
-        ).unwrap();
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
-        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", 5).unwrap());
-        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
-        assert!(matches!(store.disable_check_in(ws), Err(DomainError::ResourceConflict)));
-        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
-        assert!(store.settle_check_in_enter(occ, attempt, true, 6).unwrap());
-        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
-        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
-        assert!(store.disable_check_in(ws).unwrap());
-        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
-        let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
-        assert_eq!(state, "uncertain");
-    }
-
-    #[test]
-    fn admitted_fence_vetoes_a_second_connection() {
-        let dir = farcooler_core::scratch::dir("check-in-two-connections");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("store.db");
-        let first = Store::open(&path).unwrap();
-        let repo = first.register_repository_for_test("check-in");
-        let ws = first.ensure_main_workspace(repo).unwrap().id;
-        let task = first.create_task(ws, "audit", Actor::Manager).unwrap().id;
-        first.conn().execute(
-            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 10, 'enabled')",
-            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
-        ).unwrap();
-        let second = Store::open(&path).unwrap();
-        first.conn().execute(
-            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
-            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
-        ).unwrap();
-        assert!(matches!(second.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
-        assert_eq!(second.get_task(task).unwrap().status, TaskStatus::Backlog);
-        first.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
-        second.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
-        assert_eq!(first.check_in_status(ws).unwrap().unwrap().state, "suspended");
-        drop(second);
-        drop(first);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn status_change_invalidates_and_does_not_revive_on_return() {
-        let (store, ws, task) = board();
-        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
-        store.set_task_status(task, TaskStatus::Backlog, Actor::Manager).unwrap();
-        let state: (String, i64) = store.conn().query_row(
-            "SELECT state, eligibility_epoch FROM check_in_schedules WHERE workspace_id = ?1",
-            [uuid_blob(ws)], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).unwrap();
-        assert_eq!(state, ("suspended".into(), 1));
-    }
-
-    #[test]
-    fn admitted_enter_vetoes_status_until_fence_is_released() {
-        let (store, ws, task) = board();
-        store.conn().execute(
-            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
-            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
-        ).unwrap();
-        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
-        assert_eq!(store.get_task(task).unwrap().status, TaskStatus::Backlog);
-        let state: String = store.conn().query_row(
-            "SELECT state FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
-        ).unwrap();
-        assert_eq!(state, "enabled");
-        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
-        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
-    }
-}
 
 impl crate::Store {
     /// Admit one already-claimed attempt immediately before its one Enter.
@@ -450,13 +287,26 @@ impl crate::Store {
     /// verified owner or current own-workspace orchestrator before calling.
     /// A claimed attempt may already have pasted, so it becomes uncertain;
     /// an admitted attempt vetoes this transaction with ResourceConflict.
-    pub fn disable_check_in(&self, workspace: uuid::Uuid) -> farcooler_core::Result<bool> {
+    pub fn disable_check_in(&self, workspace: uuid::Uuid, caller_terminal: Option<uuid::Uuid>, caller_device: Option<&str>) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         use rusqlite::params;
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        if let Some(device) = caller_device {
+            let released: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?1)", params![device], |r| r.get(0),
+            ).map_err(map_err)?;
+            if released { return Err(farcooler_core::DomainError::Conflict { what: "person_only" }) }
+        }
+        if let Some(terminal) = caller_terminal {
+            let current: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM terminals WHERE id = ?1 AND workspace_id = ?2 AND role = 2 AND intent = 1)",
+                params![uuid_blob(terminal), uuid_blob(workspace)], |r| r.get(0),
+            ).map_err(map_err)?;
+            if !current { return Err(farcooler_core::DomainError::Conflict { what: "not_orchestrator" }) }
+        }
         let admitted: bool = tx.query_row(
             "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
             params![uuid_blob(workspace)], |r| r.get(0),
@@ -690,6 +540,7 @@ impl crate::Store {
     /// runner-authored message in the pinned file and session. This method
     /// verifies the evidence belongs to the exact submitted attempt; callers
     /// must perform file identity and content verification before invoking it.
+    #[allow(clippy::too_many_arguments)] // Each value binds the same receipt to its attempted session and file.
     pub fn confirm_check_in_receipt(
         &self,
         occurrence: uuid::Uuid,
@@ -821,5 +672,177 @@ impl crate::Store {
             id: get_uuid(r, 0)?, workspace: get_uuid(r, 1)?, task: get_uuid(r, 2)?, generation: get_uuid(r, 3)?,
         })).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use farcooler_core::DomainError;
+    use rusqlite::params;
+    use uuid::Uuid;
+
+    use crate::models::{Actor, TaskStatus, uuid_blob};
+    use crate::Store;
+
+    fn board() -> (Store, Uuid, Uuid) {
+        let store = Store::open_in_memory().unwrap();
+        let repo = store.register_repository_for_test("check-in");
+        let ws = store.ensure_main_workspace(repo).unwrap().id;
+        let task = store.create_task(ws, "audit", Actor::Manager).unwrap().id;
+        store.conn().execute(
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 3600001, 'enabled')",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        (store, ws, task)
+    }
+
+    #[test]
+    fn enable_requires_expected_generation_and_starts_one_hour_later() {
+        let (store, ws, task) = board();
+        assert!(matches!(store.enable_check_in(ws, task, None, None, false, 100), Err(DomainError::ResourceConflict)));
+        let generation: Vec<u8> = store.conn().query_row(
+            "SELECT generation FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
+        ).unwrap();
+        let old = Uuid::from_slice(&generation).unwrap();
+        let next = store.enable_check_in(ws, task, None, Some(old), false, 100).unwrap();
+        assert_ne!(next, old);
+        assert!(!store.tick_check_in(ws, 3_600_099).unwrap());
+        assert!(store.tick_check_in(ws, 3_600_100).unwrap());
+    }
+
+    #[test]
+    fn missed_hours_coalesce_without_using_message_wakes() {
+        let (store, ws, _) = board();
+        assert_eq!(store.due_check_in_workspaces(3_600_000).unwrap(), []);
+        assert_eq!(store.due_check_in_workspaces(3_600_001).unwrap(), [ws]);
+        assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        assert_eq!(store.pending_check_ins().unwrap().len(), 1);
+        assert!(!store.tick_check_in(ws, 20_000_000).unwrap());
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.occurrence.unwrap().state, "pending");
+        let conn = store.conn();
+        let count: i64 = conn.query_row("SELECT count(*) FROM check_in_occurrences", [], |r| r.get(0)).unwrap();
+        let messages: i64 = conn.query_row("SELECT count(*) FROM message_wakes", [], |r| r.get(0)).unwrap();
+        assert_eq!((count, messages), (1, 0));
+    }
+
+    #[test]
+    fn receipt_is_bound_to_attempt_session_and_pinned_file() {
+        let (store, ws, _) = board();
+        let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
+        ).unwrap();
+        let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
+        assert_eq!((observation.path.as_str(), observation.device, observation.inode, observation.from), ("/rollout", 1, 2, 10));
+        assert!(store.check_in_observation(occ, Uuid::now_v7()).unwrap().is_none());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "other", 1, 2, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 3, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 9, 5, 7).unwrap());
+        assert!(store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.next_due, 3_600_007);
+        assert_eq!(status.occurrence.unwrap().state, "confirmed");
+    }
+
+    #[test]
+    fn admission_vetoes_mutation_and_settles_only_its_attempt() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, task) = board();
+        let repo = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repo, "test/check-in", "/check-in", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute(
+            "UPDATE terminals SET workspace_id = ?2, role = 2, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
+            params![uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
+        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", 5).unwrap());
+        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
+        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
+        assert!(store.settle_check_in_enter(occ, attempt, true, 6).unwrap());
+        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
+        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
+        assert!(store.disable_check_in(ws, None, None).unwrap());
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
+        assert_eq!(state, "uncertain");
+    }
+
+    #[test]
+    fn an_unseated_agent_cannot_disable_a_check_in() {
+        let (store, ws, _) = board();
+        assert!(matches!(store.disable_check_in(ws, Some(Uuid::now_v7()), None), Err(DomainError::Conflict { what: "not_orchestrator" })));
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "enabled");
+        assert!(store.disable_check_in(ws, None, None).unwrap());
+    }
+
+    #[test]
+    fn admitted_fence_vetoes_a_second_connection() {
+        let dir = farcooler_core::scratch::dir("check-in-two-connections");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.db");
+        let first = Store::open(&path).unwrap();
+        let repo = first.register_repository_for_test("check-in");
+        let ws = first.ensure_main_workspace(repo).unwrap().id;
+        let task = first.create_task(ws, "audit", Actor::Manager).unwrap().id;
+        first.conn().execute(
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 10, 'enabled')",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        let second = Store::open(&path).unwrap();
+        first.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(second.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert_eq!(second.get_task(task).unwrap().status, TaskStatus::Backlog);
+        first.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        second.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        assert_eq!(first.check_in_status(ws).unwrap().unwrap().state, "suspended");
+        drop(second);
+        drop(first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn status_change_invalidates_and_does_not_revive_on_return() {
+        let (store, ws, task) = board();
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        store.set_task_status(task, TaskStatus::Backlog, Actor::Manager).unwrap();
+        let state: (String, i64) = store.conn().query_row(
+            "SELECT state, eligibility_epoch FROM check_in_schedules WHERE workspace_id = ?1",
+            [uuid_blob(ws)], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(state, ("suspended".into(), 1));
+    }
+
+    #[test]
+    fn admitted_enter_vetoes_status_until_fence_is_released() {
+        let (store, ws, task) = board();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.get_task(task).unwrap().status, TaskStatus::Backlog);
+        let state: String = store.conn().query_row(
+            "SELECT state FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(state, "enabled");
+        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
     }
 }

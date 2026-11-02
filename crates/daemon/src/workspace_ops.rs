@@ -358,9 +358,84 @@ pub async fn start_orchestrator(
     Ok(terminal.id)
 }
 
+fn check_in_owner_seat(person: &crate::people::Person, seat: crate::caller_seat::Seat) -> bool {
+    *person == crate::people::Person::Owner && seat == crate::caller_seat::Seat::Person
+}
+
+/// Values a person selected for the fixed schedule; identity is never among them.
+pub struct CheckInEnable {
+    pub task: Uuid,
+    pub expected_generation: Option<Uuid>,
+    pub acknowledge_uncertain: bool,
+}
+
+/// Enable a fixed check-in only for a verified owner in a person's seat.
+/// The identity comes from the connection and the process walk, never a
+/// request's actor or workspace flags. Dispatch must still enforce scope.
+pub async fn enable_check_in(
+    svc: &Service,
+    watcher: &Watcher,
+    peer: &Peer,
+    caller_pid: Option<i32>,
+    workspace: Uuid,
+    selected: CheckInEnable,
+) -> Result<Uuid> {
+    if !matches!(peer.scope, Scope::Control | Scope::HostAdmin) {
+        return Err(DomainError::ScopeDenied { needed: "control" });
+    }
+    let person = crate::people::person_of(&svc.store, peer)?;
+    let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
+    if !check_in_owner_seat(&person, seat) { return Err(DomainError::Conflict { what: "person_only" }) }
+    let generation = svc.store.enable_check_in(
+        workspace, selected.task, peer.client_id.as_deref(), selected.expected_generation,
+        selected.acknowledge_uncertain, crate::review::now_millis(),
+    )?;
+    watcher.announce_fleet_changed();
+    Ok(generation)
+}
+
+/// Disable is available to the verified owner or the current live
+/// orchestrator of this same workspace. No agent may enable or rearm.
+pub async fn disable_check_in(
+    svc: &Service,
+    watcher: &Watcher,
+    peer: &Peer,
+    caller_pid: Option<i32>,
+    workspace: Uuid,
+) -> Result<bool> {
+    if !matches!(peer.scope, Scope::Control | Scope::HostAdmin) {
+        return Err(DomainError::ScopeDenied { needed: "control" });
+    }
+    let person = crate::people::person_of(&svc.store, peer)?;
+    if person == crate::people::Person::Released {
+        return Err(DomainError::Conflict { what: "person_only" });
+    }
+    let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
+    let caller_terminal = match seat {
+        crate::caller_seat::Seat::Person if person == crate::people::Person::Owner => None,
+        crate::caller_seat::Seat::Agent(Some(terminal))
+            if svc.live_orchestrator(workspace)?.is_some_and(|t| t.id == terminal) => Some(terminal),
+        _ => return Err(DomainError::Conflict { what: "person_only" }),
+    };
+    let changed = svc.store.disable_check_in(workspace, caller_terminal, peer.client_id.as_deref())?;
+    if changed { watcher.announce_fleet_changed(); }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use farcooler_protocol::v1::Scope;
+
+    #[test]
+    fn check_in_enable_requires_owner_and_person_seat() {
+        use crate::caller_seat::Seat;
+        use crate::people::Person;
+        assert!(super::check_in_owner_seat(&Person::Owner, Seat::Person));
+        assert!(!super::check_in_owner_seat(&Person::Owner, Seat::Unreadable));
+        assert!(!super::check_in_owner_seat(&Person::Owner, Seat::Agent(None)));
+        assert!(!super::check_in_owner_seat(&Person::Member("lead".into()), Seat::Person));
+        assert!(!super::check_in_owner_seat(&Person::Released, Seat::Person));
+    }
 
     use super::*;
     use crate::test_support::fixture;
