@@ -170,8 +170,10 @@ mod tests {
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
         assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", 5).unwrap());
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert!(matches!(store.disable_check_in(ws), Err(DomainError::ResourceConflict)));
         assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
         assert!(store.settle_check_in_enter(occ, attempt, false, 6).unwrap());
+        assert!(store.disable_check_in(ws).unwrap());
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
         assert_eq!(state, "uncertain");
@@ -354,6 +356,39 @@ impl crate::Store {
                           AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device))))",
             params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, now],
         ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+}
+
+impl crate::Store {
+    /// Stop future admission for this workspace. The caller must authorize the
+    /// verified owner or current own-workspace orchestrator before calling.
+    /// A claimed attempt may already have pasted, so it becomes uncertain;
+    /// an admitted attempt vetoes this transaction with ResourceConflict.
+    pub fn disable_check_in(&self, workspace: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let admitted: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
+            params![uuid_blob(workspace)], |r| r.get(0),
+        ).map_err(map_err)?;
+        if admitted { return Err(farcooler_core::DomainError::ResourceConflict) }
+        let changed = tx.execute(
+            "UPDATE check_in_schedules SET state = 'disabled', eligibility_epoch = eligibility_epoch + 1, reason = 'disabled'
+             WHERE workspace_id = ?1 AND state != 'disabled'",
+            params![uuid_blob(workspace)],
+        ).map_err(map_err)?;
+        tx.execute(
+            "UPDATE check_in_occurrences SET state = CASE state WHEN 'pending' THEN 'cancelled' ELSE 'uncertain' END,
+                    reason = CASE state WHEN 'pending' THEN 'disabled_before_claim' ELSE 'disabled_after_claim' END
+              WHERE workspace_id = ?1 AND state IN ('pending', 'claimed')",
+            params![uuid_blob(workspace)],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
         Ok(changed == 1)
     }
 }
