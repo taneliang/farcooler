@@ -81,7 +81,7 @@ class PlanSectionsViewTest {
     @Test fun `In review and Building rows carry their agent`() {
         val tags = drawn(PlanFixtures.long())
         for (ticket in listOf("ov-311", "ov-312", "ov-310", "ov-474")) assertTrue("$ticket is a row", "plan-ticket-$ticket" in tags)
-        assertTrue(tags.getValue("plan-ticket-ov-310-agent").words, "Builder · Sonnet" in tags.getValue("plan-ticket-ov-310-agent").words)
+        assertTrue(tags.getValue("plan-ticket-ov-310-agent").words, "Builder · sonnet" in tags.getValue("plan-ticket-ov-310-agent").words)
         val review = tags.getValue("plan-in-review").bounds.top
         val building = tags.getValue("plan-building").bounds.top
         assertTrue(tags.getValue("plan-ticket-ov-311").bounds.top in review..building)
@@ -100,7 +100,7 @@ class PlanSectionsViewTest {
         assertTrue(drawn.getValue("plan-agents-header").words, "working" in drawn.getValue("plan-agents-header").words)
         assertTrue("agents are rows", "plan-agent-pane:orch" in drawn)
         val row = drawn.getValue("plan-agent-pane:orch").words
-        assertTrue(row, "Orchestrator · Opus" in row && "2.1M" in row && "≈" in row)
+        assertTrue(row, "Orchestrator · opus" in row && "2.1M" in row && "≈" in row)
         assertFalse("there is no Finished fold", "plan-agents-finished" in drawn)
         val resumed = drawn.getValue("plan-agent-agent:s1").words
         assertTrue("a subagent resumed for another round reads Working: $resumed", "Working" in resumed && "Not on a ticket" in resumed)

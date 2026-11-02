@@ -103,7 +103,7 @@ class SidebarListsViewTest {
         assertTrue("Waiting starts folded", tags.getValue("ticket-group-Waiting").words.contains("Collapsed"))
         assertFalse("its tickets are hidden", "ticket-row-ov-302" in tags)
         assertTrue("ticket-row-ov-311" in tags)
-        assertTrue(tags.keys.toString(), tags.keys.any { it.startsWith("agent-row-") && "Builder · Sonnet" in tags.getValue(it).words })
+        assertTrue(tags.keys.toString(), tags.keys.any { it.startsWith("agent-row-") && "Builder · sonnet" in tags.getValue(it).words })
         val open = drawn(tickets(folds = PlanFolds(listOf("group:Waiting"), {})))
         assertTrue("ov-302 shows once Waiting opens", "ticket-row-ov-302" in open)
     }
