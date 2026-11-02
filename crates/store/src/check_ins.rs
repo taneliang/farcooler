@@ -162,8 +162,11 @@ mod tests {
     #[test]
     fn missed_hours_coalesce_without_using_message_wakes() {
         let (store, ws, _) = board();
+        assert_eq!(store.due_check_in_workspaces(3_600_000).unwrap(), []);
+        assert_eq!(store.due_check_in_workspaces(3_600_001).unwrap(), [ws]);
         assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        assert_eq!(store.pending_check_ins().unwrap().len(), 1);
         assert!(!store.tick_check_in(ws, 20_000_000).unwrap());
         let status = store.check_in_status(ws).unwrap().unwrap();
         assert_eq!(status.occurrence.unwrap().state, "pending");
@@ -773,5 +776,50 @@ impl crate::Store {
                 terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?,
             }),
         ).optional().map_err(map_err)
+    }
+}
+
+/// Immutable identity of an unclaimed scheduler occurrence. The runner must
+/// still re-read eligibility and prove the live target before claiming it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingCheckIn {
+    pub id: uuid::Uuid,
+    pub workspace: uuid::Uuid,
+    pub task: uuid::Uuid,
+    pub generation: uuid::Uuid,
+}
+
+impl crate::Store {
+    pub fn due_check_in_workspaces(&self, now: i64) -> farcooler_core::Result<Vec<uuid::Uuid>> {
+        use crate::error::map_err;
+        use crate::models::get_uuid;
+        use rusqlite::params;
+
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT s.workspace_id FROM check_in_schedules s WHERE s.state = 'enabled' AND s.next_due <= ?1
+              AND NOT EXISTS (SELECT 1 FROM check_in_occurrences o WHERE o.workspace_id = s.workspace_id
+                  AND o.state IN ('pending', 'claimed', 'enter_admitted', 'submitted', 'uncertain'))
+              ORDER BY s.next_due, s.rowid",
+        ).map_err(map_err)?;
+        let rows = stmt.query_map(params![now], |r| get_uuid(r, 0)).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    pub fn pending_check_ins(&self) -> farcooler_core::Result<Vec<PendingCheckIn>> {
+        use crate::error::map_err;
+        use crate::models::get_uuid;
+
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT o.id, o.workspace_id, o.task_id, o.generation FROM check_in_occurrences o
+               JOIN check_in_schedules s ON s.workspace_id = o.workspace_id
+              WHERE o.state = 'pending' AND s.state = 'enabled' AND s.generation = o.generation
+                AND s.eligibility_epoch = o.eligibility_epoch ORDER BY o.due_at, o.rowid",
+        ).map_err(map_err)?;
+        let rows = stmt.query_map([], |r| Ok(PendingCheckIn {
+            id: get_uuid(r, 0)?, workspace: get_uuid(r, 1)?, task: get_uuid(r, 2)?, generation: get_uuid(r, 3)?,
+        })).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 }
