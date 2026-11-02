@@ -174,6 +174,25 @@ mod tests {
     }
 
     #[test]
+    fn receipt_is_bound_to_attempt_session_and_pinned_file() {
+        let (store, ws, _) = board();
+        let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
+        ).unwrap();
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "other", 1, 2, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 3, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 9, 5, 7).unwrap());
+        assert!(store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
+        assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 10, 5, 7).unwrap());
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.next_due, 3_600_007);
+        assert_eq!(status.occurrence.unwrap().state, "confirmed");
+    }
+
+    #[test]
     fn admission_vetoes_mutation_and_settles_only_its_attempt() {
         use farcooler_protocol::v1::TerminalIntent;
         let (store, ws, task) = board();
@@ -629,5 +648,61 @@ impl crate::Store {
             params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset],
         ).map_err(map_err)?;
         Ok(changed == 1)
+    }
+}
+
+impl crate::Store {
+    /// Persist a receipt after a trusted daemon observer has matched the exact
+    /// runner-authored message in the pinned file and session. This method
+    /// verifies the evidence belongs to the exact submitted attempt; callers
+    /// must perform file identity and content verification before invoking it.
+    pub fn confirm_check_in_receipt(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+        terminal: uuid::Uuid,
+        thread: &str,
+        device: i64,
+        inode: i64,
+        line_offset: i64,
+        message_at: i64,
+        observed_at: i64,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::{OptionalExtension, params};
+
+        if thread.is_empty() || device < 0 || inode < 0 || line_offset < 0 { return Ok(false) }
+        let Some(next_due) = observed_at.checked_add(3_600_000) else { return Ok(false) };
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let workspace: Option<Vec<u8>> = tx.query_row(
+            "SELECT workspace_id FROM check_in_occurrences
+              WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted' AND terminal_id = ?3 AND thread_id = ?4
+                AND rollout_device = ?5 AND rollout_inode = ?6 AND rollout_offset <= ?7
+                AND admitted_at IS NOT NULL AND admitted_at <= ?8 AND ?8 <= ?10 AND submitted_at IS NOT NULL
+                AND submitted_at >= ?9 AND submitted_at <= ?10",
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(terminal), thread, device, inode,
+                    line_offset, message_at, observed_at.saturating_sub(CHECK_IN_CONFIRMATION_TIMEOUT_MS), observed_at],
+            |r| r.get(0),
+        ).optional().map_err(map_err)?;
+        let Some(workspace) = workspace else { return Ok(false) };
+        let evidence = format!("codex_rollout_line:{line_offset};message_at:{message_at}");
+        let changed = tx.execute(
+            "UPDATE check_in_occurrences SET state = 'confirmed', confirmed_at = ?3, observation = ?4
+              WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'",
+            params![uuid_blob(occurrence), uuid_blob(attempt), observed_at, evidence],
+        ).map_err(map_err)?;
+        if changed != 1 { return Ok(false) }
+        tx.execute(
+            "UPDATE check_in_schedules SET next_due = ?2
+              WHERE workspace_id = ?1 AND state = 'enabled'
+                AND EXISTS (SELECT 1 FROM check_in_occurrences o WHERE o.id = ?3
+                    AND o.generation = check_in_schedules.generation
+                    AND o.eligibility_epoch = check_in_schedules.eligibility_epoch)",
+            params![workspace, next_due, uuid_blob(occurrence)],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(true)
     }
 }
