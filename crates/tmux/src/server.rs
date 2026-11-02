@@ -354,6 +354,52 @@ impl TmuxServer {
         })
     }
 
+    /// Start exactly one Enter request and supervise the tmux client to
+    /// completion. A timeout is ambiguous: even a reaped client may already
+    /// have handed the key to the server. Callers must retain their durable
+    /// admission fence if this future is dropped or returns an error.
+    pub async fn send_enter_once(&self, pane: &str) -> Result<()> {
+        let valid = pane.strip_prefix('%').is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()));
+        if !valid { return Err(DomainError::InvalidArgument { what: "terminal" }) }
+        self.ensure_config()?;
+        let tmux = match &self.program {
+            Some(program) => program.clone(),
+            None => find_tmux().await.ok_or(DomainError::TmuxUnavailable)?,
+        };
+        *self.calls.lock().expect("calls lock").entry("send-keys".to_string()).or_default() += 1;
+        let mut cmd = Command::new(&tmux);
+        #[cfg(test)]
+        if self.program.is_some() {
+            cmd = Command::new("/bin/sh");
+            cmd.arg(&tmux);
+        }
+        if let Some((key, value)) = utf8_locale() { cmd.env(key, value); }
+        cmd.arg("-L").arg(&self.socket).arg("-f").arg(&self.config_path)
+            .args(["send-keys", "-t", pane, "-H", "0d"])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+        let mut child = cmd.spawn().map_err(|_| DomainError::TmuxUnavailable)?;
+        let deadline = deadline_for(&["send-keys"]);
+        #[cfg(test)]
+        let deadline = self.deadline.unwrap_or(deadline);
+        match tokio::time::timeout(deadline, child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(_) => Err(DomainError::TmuxUnavailable),
+            Err(_) => {
+                // Reap our client before returning where possible. Neither
+                // killing nor reaping can undo a server-accepted send.
+                if let Err(error) = child.start_kill() {
+                    tracing::warn!(%error, "could not stop the timed-out tmux client");
+                }
+                match tokio::time::timeout(deadline, child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => tracing::warn!(%error, "could not reap the tmux client"),
+                    Err(_) => tracing::warn!("timed-out tmux client did not exit"),
+                }
+                Err(DomainError::TmuxTimedOut)
+            }
+        }
+    }
+
     /// True when the private server is currently running.
     pub async fn is_running(&self) -> bool {
         self.run(&["has-session", "-t", SESSION_NAME]).await.map(|o| o.ok()).unwrap_or(false)
@@ -475,6 +521,27 @@ const DEFAULT_UTF8_LOCALE: &str = "C.UTF-8";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_scheduled_enter_times_out_and_reaps_its_one_client() {
+        let dir = farcooler_core::scratch::dir("check-in-enter-client");
+        std::fs::create_dir_all(&dir).unwrap();
+        let wrapper = dir.join("fake-tmux");
+        std::fs::write(&wrapper, "echo $$ > \"$0.pid\"\nexec /bin/sleep 10\n").unwrap();
+        let mut server = TmuxServer::in_dir("check-in-test", Uuid::now_v7(), &dir).with_program(wrapper.clone());
+        server.deadline = Some(std::time::Duration::from_millis(150));
+        assert!(matches!(server.send_enter_once("bad").await, Err(DomainError::InvalidArgument { .. })));
+        assert_eq!(server.calls_total(), 0);
+        assert!(matches!(server.send_enter_once("%1").await, Err(DomainError::TmuxTimedOut)));
+        assert_eq!(server.calls_total(), 1);
+        let pid: i32 = std::fs::read_to_string(dir.join("fake-tmux.pid")).unwrap().trim().parse().unwrap();
+        // The wrapper execs sleep, so this is the same owned child the
+        // timeout killed and awaited, not an unrelated descendant.
+        let exists = unsafe { libc::kill(pid, 0) };
+        assert_eq!(exists, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn nothing_inherited_means_impose_a_utf8_locale() {
