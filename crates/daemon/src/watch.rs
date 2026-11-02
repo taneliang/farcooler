@@ -697,6 +697,8 @@ pub struct Watcher {
     /// When each untagged pane in our session was first seen. See
     /// `unfinished_to_reap`. A std mutex, never held across an await.
     unfinished_seen: std::sync::Mutex<HashMap<farcooler_tmux::UnfinishedOpen, std::time::Instant>>,
+    /// Orders scheduled delivery with watcher cleanup, never ordinary sends.
+    check_in_cleanup_gate: tokio::sync::Mutex<()>,
     /// The last screen read for each shell pane, kept while tmux says it still
     /// stands. See `screen_cache`.
     screens: screen_cache::ScreenCache,
@@ -2858,6 +2860,7 @@ impl Watcher {
             state: tokio::sync::Mutex::new(HashMap::new()),
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
             unfinished_seen: std::sync::Mutex::new(HashMap::new()),
+            check_in_cleanup_gate: tokio::sync::Mutex::new(()),
             screens: Default::default(),
             worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),
@@ -4635,7 +4638,20 @@ impl Watcher {
         // fleet and live inventory are already read together, then publish the
         // repaired geometry so every open client fills the recovered space.
         if panes.inventory_healthy {
-            let terminals: HashSet<Uuid> = fleet
+            let _cleanup_gate = self.check_in_cleanup_gate.lock().await;
+            // Re-read after exclusion: the earlier fleet and pane snapshot may
+            // precede a scheduled send or a concurrent registration.
+            self.service.inventory.refresh().await;
+            panes = self.service.inventory_snapshot();
+            let Ok(cleanup_fleet) = self.service.fleet_as_inventoried().await else { return };
+            if !panes.inventory_healthy { return }
+            let cleanup_token = Uuid::now_v7();
+            if let Err(error) = self.service.store.begin_check_in_cleanup(cleanup_token) {
+                tracing::warn!(?error, "cannot fence watcher cleanup for scheduled delivery");
+                return;
+            }
+            let mut cleanup_conclusive = true;
+            let terminals: HashSet<Uuid> = cleanup_fleet
                 .iter()
                 .flat_map(|worktree| worktree.terminals.iter().map(|terminal| terminal.terminal.id))
                 .collect();
@@ -4654,8 +4670,9 @@ impl Watcher {
                         repaired.insert(worktree);
                         tracing::warn!(%pane, %terminal, "reaped orphaned managed pane");
                     }
-                    Ok(false) => {}
+                    Ok(false) => { cleanup_conclusive = false; }
                     Err(error) => {
+                        cleanup_conclusive = false;
                         tracing::warn!(%pane, %terminal, ?error, "orphaned pane could not be reaped");
                     }
                 }
@@ -4663,7 +4680,7 @@ impl Watcher {
 
             // And the panes it cannot see: an open that never finished.
             // See `reap`.
-            self.sweep_unfinished_opens().await;
+            cleanup_conclusive &= self.sweep_unfinished_opens().await;
 
             if !repaired.is_empty() {
                 panes = self.service.inventory.refresh().await;
@@ -4672,6 +4689,13 @@ impl Watcher {
                         self.publish_layout(worktree, &groups);
                     }
                 }
+            }
+            if cleanup_conclusive {
+                if !matches!(self.service.store.complete_check_in_cleanup(cleanup_token), Ok(true)) {
+                    tracing::warn!(%cleanup_token, "scheduled check-ins remain suspended: cleanup fence not cleared");
+                }
+            } else {
+                tracing::warn!(%cleanup_token, "scheduled check-ins suspended: cleanup completion unknown");
             }
         }
 

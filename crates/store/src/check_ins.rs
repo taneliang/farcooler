@@ -83,6 +83,12 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             created_at INTEGER NOT NULL
         );
         CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id);
+        -- A cleanup whose server-side completion is unknown suspends only
+        -- the scheduler; ordinary cleanup and registration remain available.
+        CREATE TABLE check_in_cleanup_fence (
+            token BLOB PRIMARY KEY NOT NULL,
+            started_at INTEGER NOT NULL
+        );
         CREATE TABLE check_in_enter_fences (
             workspace_id BLOB PRIMARY KEY NOT NULL,
             task_id BLOB NOT NULL,
@@ -172,6 +178,25 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
 
 
 impl crate::Store {
+    /// Mark one cleanup operation before a server command may be dispatched.
+    /// Multiple outstanding operations are independent; no restart clears them.
+    pub fn begin_check_in_cleanup(&self, token: uuid::Uuid) -> farcooler_core::Result<()> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        self.conn().execute(
+            "INSERT INTO check_in_cleanup_fence (token, started_at) VALUES (?1, ?2)",
+            rusqlite::params![uuid_blob(token), crate::tasks::now_millis()],
+        ).map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Clear only the operation whose owned client concluded successfully.
+    pub fn complete_check_in_cleanup(&self, token: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        Ok(self.conn().execute("DELETE FROM check_in_cleanup_fence WHERE token = ?1", [uuid_blob(token)]).map_err(map_err)? == 1)
+    }
+
     /// Admit one already-claimed attempt immediately before its one Enter.
     /// The caller must hold the target's typing exclusion and complete all
     /// physical proofs before this call. `thread` is the proved session, not
@@ -208,6 +233,7 @@ impl crate::Store {
               WHERE o.id = ?1 AND o.attempt_id = ?2 AND o.daemon_instance = ?3
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5 AND o.pane_id = ?6 AND o.process_id = ?7 AND o.process_started = ?8
                 AND o.message_text IS NOT NULL AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
+                AND NOT EXISTS (SELECT 1 FROM check_in_cleanup_fence)
                 AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
                 AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
@@ -327,6 +353,7 @@ impl crate::Store {
                     process_id = ?9, process_started = ?10
               WHERE o.id = ?1 AND o.state = 'pending'
                 AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
+                AND NOT EXISTS (SELECT 1 FROM check_in_cleanup_fence)
                 AND EXISTS (SELECT 1 FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id
                     JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
                     WHERE s.workspace_id = o.workspace_id AND s.state = 'enabled' AND s.generation = o.generation
@@ -577,7 +604,8 @@ impl crate::Store {
         let conn = self.conn();
         let mut status = conn.query_row(
             "SELECT s.workspace_id, s.task_id, s.generation, s.authorizer_device, s.authorizer_source, s.authorized_at, s.next_due, s.state,
-                    CASE WHEN EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = s.workspace_id)
+                    CASE WHEN EXISTS (SELECT 1 FROM check_in_cleanup_fence) THEN 'cleanup_completion_unknown'
+                         WHEN EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = s.workspace_id)
                          THEN 'target_change_in_progress' ELSE s.reason END
                FROM check_in_schedules s WHERE s.workspace_id = ?1",
             params![uuid_blob(workspace)],
@@ -1002,6 +1030,21 @@ mod tests {
     }
 
     #[test]
+    fn unknown_cleanup_survives_recovery_and_only_its_token_clears_it() {
+        let (store, ws, _) = board();
+        let (first, second) = (Uuid::now_v7(), Uuid::now_v7());
+        store.begin_check_in_cleanup(first).unwrap();
+        store.begin_check_in_cleanup(second).unwrap();
+        store.recover_check_ins_after_exclusive_start().unwrap();
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().reason.as_deref(), Some("cleanup_completion_unknown"));
+        assert!(!store.complete_check_in_cleanup(Uuid::now_v7()).unwrap());
+        assert!(store.complete_check_in_cleanup(first).unwrap());
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().reason.as_deref(), Some("cleanup_completion_unknown"));
+        assert!(store.complete_check_in_cleanup(second).unwrap());
+        assert_ne!(store.check_in_status(ws).unwrap().unwrap().reason.as_deref(), Some("cleanup_completion_unknown"));
+    }
+
+    #[test]
     fn enable_requires_expected_generation_and_starts_one_hour_later() {
         let (store, ws, task) = board();
         assert!(matches!(store.enable_check_in(ws, task, None, None, false, 100), Err(DomainError::ResourceConflict)));
@@ -1069,12 +1112,20 @@ mod tests {
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
         let occ = store.pending_check_ins().unwrap()[0].id;
         let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
+        let cleanup = Uuid::now_v7();
+        store.begin_check_in_cleanup(cleanup).unwrap();
+        assert!(!store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
+        assert!(store.complete_check_in_cleanup(cleanup).unwrap());
         assert!(store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
         let text = store.claimed_check_in_message(occ, attempt).unwrap().unwrap();
         assert!(text.starts_with("[Far Cooler] Scheduled hourly check-in"));
         assert!(text.contains(&occ.to_string()));
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", 1, 2, 0).unwrap());
+        let cleanup = Uuid::now_v7();
+        store.begin_check_in_cleanup(cleanup).unwrap();
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(store.complete_check_in_cleanup(cleanup).unwrap());
         let reservation = Uuid::now_v7();
         assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());

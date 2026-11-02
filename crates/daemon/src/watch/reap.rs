@@ -54,7 +54,8 @@ fn unfinished_to_reap(
 
 impl Watcher {
     /// Kill the panes whose open never finished, once they are past the grace.
-    pub(super) async fn sweep_unfinished_opens(&self) {
+    pub(super) async fn sweep_unfinished_opens(&self) -> bool {
+        let mut conclusive = true;
         // Only panes an open marked as its own, never one a person added, and
         // only once they have been unfinished longer than any open could take.
         // From the read this tick's refresh made: no `list-panes` of its own.
@@ -66,13 +67,15 @@ impl Watcher {
             for pane in stale {
                 match self.service.tmux.kill_pane(&pane.pane_id).await {
                     Ok(true) => tracing::warn!(pane = %pane.pane_id, "reaped a pane whose open never finished"),
-                    Ok(false) => {}
+                    Ok(false) => { conclusive = false; }
                     Err(error) => {
+                        conclusive = false;
                         tracing::warn!(pane = %pane.pane_id, ?error, "an unfinished open's pane could not be reaped")
                     }
                 }
             }
         }
+        conclusive
     }
 }
 
