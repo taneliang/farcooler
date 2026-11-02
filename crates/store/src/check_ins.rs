@@ -16,6 +16,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             task_id BLOB NOT NULL,
             generation BLOB NOT NULL,
             authorizer_device TEXT,
+            authorizer_source TEXT NOT NULL CHECK (authorizer_source IN ('local_person', 'owner_device')),
             authorized_at INTEGER NOT NULL,
             template_version INTEGER NOT NULL,
             next_due INTEGER NOT NULL,
@@ -30,6 +31,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             generation BLOB NOT NULL,
             eligibility_epoch INTEGER NOT NULL,
             authorizer_device TEXT,
+            authorizer_source TEXT NOT NULL CHECK (authorizer_source IN ('local_person', 'owner_device')),
             authorized_at INTEGER NOT NULL,
             template_version INTEGER NOT NULL,
             due_at INTEGER NOT NULL,
@@ -133,7 +135,7 @@ mod tests {
         let ws = store.ensure_main_workspace(repo).unwrap().id;
         let task = store.create_task(ws, "audit", Actor::Manager).unwrap().id;
         store.conn().execute(
-            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 1, 1, 3600001, 'enabled')",
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 3600001, 'enabled')",
             params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
         ).unwrap();
         (store, ws, task)
@@ -181,7 +183,7 @@ mod tests {
         store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
              SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread' FROM check_in_schedules WHERE workspace_id = ?5",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
         ).unwrap();
@@ -263,7 +265,7 @@ impl crate::Store {
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
-                AND s.authorizer_device IS o.authorizer_device AND s.authorized_at = o.authorized_at
+                AND s.authorizer_device IS o.authorizer_device AND s.authorizer_source = o.authorizer_source AND s.authorized_at = o.authorized_at
                 AND s.template_version = o.template_version
                 AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                 AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id
@@ -332,8 +334,8 @@ impl crate::Store {
 
         let id = uuid::Uuid::now_v7();
         let changed = self.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, due_at, state)
-             SELECT ?1, s.workspace_id, s.task_id, s.generation, s.eligibility_epoch, s.authorizer_device, s.authorized_at, s.template_version, s.next_due, 'pending'
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state)
+             SELECT ?1, s.workspace_id, s.task_id, s.generation, s.eligibility_epoch, s.authorizer_device, s.authorizer_source, s.authorized_at, s.template_version, s.next_due, 'pending'
                FROM check_in_schedules s
               WHERE s.workspace_id = ?2 AND s.state = 'enabled' AND s.next_due <= ?3
                 AND NOT EXISTS (SELECT 1 FROM check_in_occurrences o WHERE o.workspace_id = s.workspace_id
@@ -367,7 +369,7 @@ impl crate::Store {
                     JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
                     WHERE s.workspace_id = o.workspace_id AND s.state = 'enabled' AND s.generation = o.generation
                       AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
-                AND s.authorizer_device IS o.authorizer_device AND s.authorized_at = o.authorized_at
+                AND s.authorizer_device IS o.authorizer_device AND s.authorizer_source = o.authorizer_source AND s.authorized_at = o.authorized_at
                 AND s.template_version = o.template_version
                       AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                       AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id AND p.role = 2
@@ -478,10 +480,10 @@ impl crate::Store {
         ).map_err(map_err)?;
         let generation = uuid::Uuid::now_v7();
         tx.execute(
-            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_device, authorized_at, template_version, next_due, state)
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 'enabled')
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_device, authorizer_source, authorized_at, template_version, next_due, state)
+             VALUES (?1, ?2, ?3, ?4, CASE WHEN ?4 IS NULL THEN 'local_person' ELSE 'owner_device' END, ?5, 1, ?6, 'enabled')
              ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id, generation = excluded.generation,
-                 authorizer_device = excluded.authorizer_device, authorized_at = excluded.authorized_at,
+                 authorizer_device = excluded.authorizer_device, authorizer_source = excluded.authorizer_source, authorized_at = excluded.authorized_at,
                  template_version = excluded.template_version, next_due = excluded.next_due,
                  state = 'enabled', eligibility_epoch = check_in_schedules.eligibility_epoch + 1, reason = NULL",
             params![uuid_blob(workspace), uuid_blob(task), uuid_blob(generation), device, now, next_due],
@@ -536,6 +538,7 @@ pub struct CheckInStatus {
     pub task: uuid::Uuid,
     pub generation: uuid::Uuid,
     pub authorizer_device: Option<String>,
+    pub authorizer_source: String,
     pub authorized_at: i64,
     pub next_due: i64,
     pub state: String,
@@ -566,13 +569,13 @@ impl crate::Store {
 
         let conn = self.conn();
         let mut status = conn.query_row(
-            "SELECT workspace_id, task_id, generation, authorizer_device, authorized_at, next_due, state, reason
+            "SELECT workspace_id, task_id, generation, authorizer_device, authorizer_source, authorized_at, next_due, state, reason
                FROM check_in_schedules WHERE workspace_id = ?1",
             params![uuid_blob(workspace)],
             |r| Ok(CheckInStatus {
                 workspace: get_uuid(r, 0)?, task: get_uuid(r, 1)?, generation: get_uuid(r, 2)?,
-                authorizer_device: r.get(3)?, authorized_at: r.get(4)?, next_due: r.get(5)?,
-                state: r.get(6)?, reason: r.get(7)?, occurrence: None,
+                authorizer_device: r.get(3)?, authorizer_source: r.get(4)?, authorized_at: r.get(5)?, next_due: r.get(6)?,
+                state: r.get(7)?, reason: r.get(8)?, occurrence: None,
             }),
         ).optional().map_err(map_err)?;
         if let Some(status) = &mut status {
