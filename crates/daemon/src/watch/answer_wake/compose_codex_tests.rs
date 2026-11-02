@@ -341,3 +341,31 @@ async fn scheduled_busy_codex_waits_without_paste_or_duplicate() {
     assert!(!si.log().contains("PASTE "), "{}", si.log());
     assert!(si.submitted().is_empty());
 }
+
+/// A runner-controlled stop must lose to a previously admitted Enter before
+/// it asks tmux to kill the target pane. The pane here is an isolated stand-in.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_admission_vetoes_stop_before_kill() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, _si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(
+        agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false,
+    ).unwrap();
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
+    let occurrence = b.svc.store.pending_check_ins().unwrap()[0].id;
+    let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
+    assert!(b.svc.store.claim_check_in(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
+    assert!(b.svc.store.pin_check_in_rollout(occurrence, attempt, "/test-rollout", 1, 1, 0).unwrap());
+    assert!(b.svc.store.admit_check_in_enter(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
+    let before = b.svc.tmux.call_counts().get("kill-pane").copied().unwrap_or(0);
+    let stopped = b.svc.stop_terminal(agent.id).await;
+    assert!(matches!(&stopped, Err(DomainError::ResourceConflict)), "{stopped:?}");
+    let after = b.svc.tmux.call_counts().get("kill-pane").copied().unwrap_or(0);
+    assert_eq!(after, before, "no external kill may start after admission");
+}
