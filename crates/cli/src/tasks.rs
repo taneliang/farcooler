@@ -1836,6 +1836,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "query" => "say what to search for",
         "key" => "name a task",
         "task_key" => "that task isn't on the board of the worktree it was sent to",
+        "check_in_hold_unresolved" => "this hold is unknown or still in flight; it cannot be cleared without proof the operation finished",
         "check_in_uncertain" => "an earlier check-in may have arrived. disable it, review the status, then enable with --acknowledge-uncertain",
         "check_in_authority_or_task" => "choose an open task on this workspace, leave wake-on-answer on, and use a verified owner connection",
         "not_orchestrator" => "only this workspace's current orchestrator can disable its check-in",

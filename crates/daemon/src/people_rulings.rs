@@ -267,6 +267,8 @@ pub fn member_ruling(method: M) -> Ruling {
         M::CrashReport => Owners(Why::OwnersDevice),
 
         M::WorkspaceCheckInEnable
+        | M::WorkspaceCheckInHolds
+        | M::WorkspaceCheckInResolveHold
         | M::WorkspaceDelete
         | M::WorkspaceWriteCharter
         | M::RepositoryRootAdd

@@ -552,6 +552,8 @@ fn scope_of(method: Method) -> Scope {
         | Method::WorkspaceSetSettings
         | Method::WorkspaceCheckInEnable
         | Method::WorkspaceCheckInDisable
+        | Method::WorkspaceCheckInHolds
+        | Method::WorkspaceCheckInResolveHold
         | Method::WorkspaceDelete
         | Method::WorkspaceStartOrchestrator
         | Method::TaskMove
@@ -2077,6 +2079,19 @@ impl Rpc {
                 };
                 let caller = (&self.peer, self.caller_pid);
                 Ok(result::Value::Workspace(crate::workspace_ops::set_settings(svc, &self.watcher, id, &p, scope, caller).await?))
+            }
+
+            "workspace.check_in_holds" => {
+                Ok(result::Value::CheckInHoldList(crate::workspace_ops::check_in_holds(svc, &self.peer, self.caller_pid).await?))
+            }
+
+            "workspace.check_in_resolve_hold" => {
+                let Some(request::Payload::CheckInHoldResolve(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let token = Uuid::from_slice(&p.token).map_err(|_| DomainError::InvalidArgument { what: "token" })?;
+                crate::workspace_ops::reconcile_check_in_hold(svc, &self.peer, self.caller_pid, token).await?;
+                Ok(result::Value::Empty(Empty {}))
             }
 
             "workspace.check_in_show" => {

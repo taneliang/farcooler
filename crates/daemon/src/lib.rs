@@ -5,6 +5,7 @@ pub mod agent_supervisor;
 pub mod chat_migration;
 pub mod allowlist;
 pub(crate) mod beneath;
+mod check_in_target;
 pub mod change_set;
 pub mod claims;
 pub mod claude_key_exports;

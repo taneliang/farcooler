@@ -122,6 +122,8 @@ fn the_board_reads_are_read_and_its_writes_are_control() {
     assert_eq!(required_scope("workspace.check_in_show"), Some(Scope::Read));
     assert_eq!(required_scope("workspace.check_in_enable"), Some(Scope::Control));
     assert_eq!(required_scope("workspace.check_in_disable"), Some(Scope::Control));
+    assert_eq!(required_scope("workspace.check_in_holds"), Some(Scope::Control));
+    assert_eq!(required_scope("workspace.check_in_resolve_hold"), Some(Scope::Control));
     assert_eq!(required_scope("report.get"), Some(Scope::Read), "a report only reads");
     for method in [
         "workspace.create",

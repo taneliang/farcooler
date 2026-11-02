@@ -1064,6 +1064,8 @@ pub mod method {
         WorkspaceCheckInShow = "workspace.check_in_show" => WORKSPACE_CHECK_IN,
         WorkspaceCheckInEnable = "workspace.check_in_enable" => WORKSPACE_CHECK_IN,
         WorkspaceCheckInDisable = "workspace.check_in_disable" => WORKSPACE_CHECK_IN,
+        WorkspaceCheckInHolds = "workspace.check_in_holds" => WORKSPACE_CHECK_IN,
+        WorkspaceCheckInResolveHold = "workspace.check_in_resolve_hold" => WORKSPACE_CHECK_IN,
         ReportGet = "report.get" => REPORT,
         UsageReport = "usage.report" => AGENT_USAGE,
         UsageTask = "usage.task" => AGENT_USAGE,

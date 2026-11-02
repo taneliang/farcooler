@@ -103,6 +103,10 @@ pub enum WorkspaceCmd {
         #[command(subcommand)]
         action: CheckInAction,
     },
+    /// Inspect unresolved target operations, including those with no workspace.
+    CheckInHolds,
+    /// Remove a hold only after its external operation was conclusively completed.
+    CheckInResolveHold { token: Uuid },
     /// Delete a workspace that holds nothing. Main can't be deleted.
     ///
     /// Refused while any task, worktree or terminal still belongs to it: move
@@ -424,6 +428,47 @@ async fn workspace_via(
                 .await
                 .map_err(|e| crate::workspace_settings::refused(e, settings.lead.is_some()))?;
             done(r.value, json, |w| settings.said(w))?;
+        }
+
+        WorkspaceCmd::CheckInHolds => {
+            if !link.daemon_capabilities().iter().any(|c| c == capability::WORKSPACE_CHECK_IN) {
+                return Err("this runner cannot inspect check-in holds yet. update it first".into());
+            }
+            let mut request = req("workspace.check_in_holds");
+            request.required_capabilities.push(capability::WORKSPACE_CHECK_IN.to_string());
+            let response = link.call(request).await.map_err(|e| check_in_refused(e, "check-in holds could not be read"))?;
+            let result::Value::CheckInHoldList(holds) = expect_value(response.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
+            if json {
+                let items: Vec<_> = holds.items.iter().map(|hold| serde_json::json!({
+                    "token": uuid_of(&hold.token).to_string(),
+                    "workspace": (!hold.workspace_id.is_empty()).then(|| uuid_of(&hold.workspace_id).to_string()),
+                    "terminal": uuid_of(&hold.terminal_id).to_string(),
+                    "operation": hold.operation, "phase": hold.phase,
+                    "process_id": hold.process_id, "process_started": hold.process_started,
+                    "created_at_ms": hold.created_at_ms,
+                })).collect();
+                println!("{}", serde_json::json!({ "holds": items }));
+            } else if holds.items.is_empty() {
+                println!("no check-in target holds");
+            } else {
+                for hold in holds.items {
+                    println!("{}  terminal {}  {}  {}", uuid_of(&hold.token), uuid_of(&hold.terminal_id), hold.operation, hold.phase);
+                    println!("  process {}  started {:?}  recorded {}", hold.process_id, hold.process_started, hold.created_at_ms);
+                    if hold.phase != "completed" { println!("  outcome is unknown; this hold cannot be cleared automatically"); }
+                }
+            }
+        }
+
+        WorkspaceCmd::CheckInResolveHold { token } => {
+            if !link.daemon_capabilities().iter().any(|c| c == capability::WORKSPACE_CHECK_IN) {
+                return Err("this runner cannot reconcile check-in holds yet. update it first".into());
+            }
+            let mut request = with(req("workspace.check_in_resolve_hold"), request::Payload::CheckInHoldResolve(pb::CheckInHoldResolve { token: id_bytes(token) }));
+            request.required_capabilities.push(capability::WORKSPACE_CHECK_IN.to_string());
+            let response = link.call(request).await.map_err(|e| check_in_refused(e, "the hold could not be reconciled"))?;
+            let result::Value::Empty(_) = expect_value(response.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
+            if json { println!("{}", serde_json::json!({ "resolved": token.to_string() })); }
+            else { println!("cleared completed target hold {token}"); }
         }
 
         WorkspaceCmd::CheckIn { workspace, repo, action } => {
@@ -1038,6 +1083,8 @@ mod tests {
     fn check_in_commands_require_a_task_for_enablement() {
         use clap::Parser;
         let parse = |line: &str| crate::Cli::try_parse_from(line.split_whitespace());
+        assert!(parse("farcooler workspace check-in-holds").is_ok());
+        assert!(parse("farcooler workspace check-in-resolve-hold 00000000-0000-0000-0000-000000000001").is_ok());
         assert!(parse("farcooler workspace check-in Main show").is_ok());
         assert!(parse("farcooler workspace check-in Main disable").is_ok());
         assert!(parse("farcooler workspace check-in Main enable --task ov-1").is_ok());

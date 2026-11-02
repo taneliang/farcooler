@@ -204,6 +204,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::WorkspaceCheckInShow
         | Method::WorkspaceCheckInEnable
         | Method::WorkspaceCheckInDisable
+        | Method::WorkspaceCheckInHolds
+        | Method::WorkspaceCheckInResolveHold
         | Method::WorkspaceDelete
         | Method::WorktreeAssign
         | Method::TerminalSetRole

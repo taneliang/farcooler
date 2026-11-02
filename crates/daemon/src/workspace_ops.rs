@@ -362,6 +362,47 @@ fn check_in_owner_seat(person: &crate::people::Person, seat: crate::caller_seat:
     *person == crate::people::Person::Owner && seat == crate::caller_seat::Seat::Person
 }
 
+async fn require_check_in_owner(svc: &Service, peer: &Peer, caller_pid: Option<i32>) -> Result<()> {
+    if !matches!(peer.scope, Scope::Control | Scope::HostAdmin) {
+        return Err(DomainError::ScopeDenied { needed: "control" });
+    }
+    let person = crate::people::person_of(&svc.store, peer)?;
+    let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
+    if !check_in_owner_seat(&person, seat) || crate::people::person_of(&svc.store, peer)? != crate::people::Person::Owner {
+        return Err(DomainError::Conflict { what: "person_only" });
+    }
+    if let Some(device) = peer.client_id.as_deref()
+        && !svc.store.is_check_in_owner_device(device)?
+    {
+        return Err(DomainError::Conflict { what: "person_only" });
+    }
+    Ok(())
+}
+
+/// Owner-only inspection includes holds for terminals with no workspace and
+/// for records already removed, so uncertain operations are never invisible.
+pub async fn check_in_holds(svc: &Service, peer: &Peer, caller_pid: Option<i32>) -> Result<pb::CheckInHoldList> {
+    require_check_in_owner(svc, peer, caller_pid).await?;
+    let items = svc.store.check_in_target_holds(peer.client_id.as_deref())?.into_iter().map(|hold| pb::CheckInHold {
+        token: hold.token.as_bytes().to_vec().into(),
+        workspace_id: hold.workspace.map(|id| id.as_bytes().to_vec().into()).unwrap_or_default(),
+        terminal_id: hold.terminal.as_bytes().to_vec().into(),
+        operation: hold.operation, phase: hold.phase, process_id: hold.process_id,
+        process_started: hold.process_started, created_at_ms: hold.created_at,
+    }).collect();
+    Ok(pb::CheckInHoldList { items })
+}
+
+/// Only a conclusively completed owned operation can be reconciled. An
+/// ambiguous or still-running one stays held, however old it is.
+pub async fn reconcile_check_in_hold(svc: &Service, peer: &Peer, caller_pid: Option<i32>, token: Uuid) -> Result<()> {
+    require_check_in_owner(svc, peer, caller_pid).await?;
+    if !svc.store.reconcile_check_in_target_change(token, peer.client_id.as_deref())? {
+        return Err(DomainError::Conflict { what: "check_in_hold_unresolved" });
+    }
+    Ok(())
+}
+
 /// The fixed check-in's observable state, without exposing rollout paths.
 pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStatus> {
     svc.store.get_workspace(workspace)?;
@@ -413,12 +454,7 @@ pub async fn enable_check_in(
     workspace: Uuid,
     selected: CheckInEnable,
 ) -> Result<Uuid> {
-    if !matches!(peer.scope, Scope::Control | Scope::HostAdmin) {
-        return Err(DomainError::ScopeDenied { needed: "control" });
-    }
-    let person = crate::people::person_of(&svc.store, peer)?;
-    let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
-    if !check_in_owner_seat(&person, seat) { return Err(DomainError::Conflict { what: "person_only" }) }
+    require_check_in_owner(svc, peer, caller_pid).await?;
     let generation = svc.store.enable_check_in(
         workspace, selected.task, peer.client_id.as_deref(), selected.expected_generation,
         selected.acknowledge_uncertain, crate::review::now_millis(),
@@ -490,6 +526,24 @@ mod tests {
         enable_check_in(&svc, &watcher, &owner, None, workspace, selected()).await.unwrap();
         assert_eq!(svc.store.check_in_status(workspace).unwrap().unwrap().state, "enabled");
         assert!(disable_check_in(&svc, &watcher, &owner, None, workspace).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn completed_concurrent_stops_release_both_tokens_after_a_version_race() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (_dir, svc, repo) = fixture().await;
+        let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
+        let terminal = svc.store.create_terminal(worktree.id, "shell", "shell", TerminalIntent::Running, 80, 24).unwrap();
+        let (first, second) = (Uuid::now_v7(), Uuid::now_v7());
+        assert!(svc.store.reserve_check_in_target_change(terminal.id, first, "stop", Some(1)).unwrap());
+        assert!(svc.store.reserve_check_in_target_change(terminal.id, second, "stop", Some(1)).unwrap());
+        assert!(svc.store.complete_check_in_target_change(first).unwrap());
+        assert!(svc.store.complete_check_in_target_change(second).unwrap());
+        svc.store.set_pane_mode(terminal.id, terminal.resource_version, terminal.pane_mode, None, false).unwrap();
+        svc.finish_target_stop(true, first, terminal.id, terminal.resource_version, Ok(())).unwrap();
+        let result: Result<()> = svc.finish_target_stop(true, second, terminal.id, terminal.resource_version, Err(DomainError::ResourceConflict));
+        assert!(matches!(result, Err(DomainError::ResourceConflict)));
+        assert!(svc.store.check_in_target_holds(None).unwrap().is_empty());
     }
 
     /// Where a workspace's home and charter are is a path on the runner, and
