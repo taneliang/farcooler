@@ -32,7 +32,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             template_version INTEGER NOT NULL,
             due_at INTEGER NOT NULL,
             state TEXT NOT NULL CHECK (state IN
-                ('pending', 'claimed', 'enter_admitted', 'submitted', 'confirmed', 'cancelled', 'uncertain')),
+                ('pending', 'claimed', 'enter_admitted', 'submitted', 'confirmed', 'cancelled', 'uncertain', 'resolved_uncertain')),
             attempt_id BLOB,
             daemon_instance BLOB,
             terminal_id BLOB,
@@ -135,6 +135,20 @@ mod tests {
             params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
         ).unwrap();
         (store, ws, task)
+    }
+
+    #[test]
+    fn enable_requires_expected_generation_and_starts_one_hour_later() {
+        let (store, ws, task) = board();
+        assert!(matches!(store.enable_check_in(ws, task, None, None, false, 100), Err(DomainError::ResourceConflict)));
+        let generation: Vec<u8> = store.conn().query_row(
+            "SELECT generation FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
+        ).unwrap();
+        let old = Uuid::from_slice(&generation).unwrap();
+        let next = store.enable_check_in(ws, task, None, Some(old), false, 100).unwrap();
+        assert_ne!(next, old);
+        assert!(!store.tick_check_in(ws, 3_600_099).unwrap());
+        assert!(store.tick_check_in(ws, 3_600_100).unwrap());
     }
 
     #[test]
@@ -390,5 +404,79 @@ impl crate::Store {
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(changed == 1)
+    }
+}
+
+impl crate::Store {
+    /// Establish a new generation after the daemon verifies the person's
+    /// owner identity and caller seat. An unresolved possible delivery requires
+    /// an explicit acknowledgement; the caller must disclose it to the owner.
+    pub fn enable_check_in(
+        &self,
+        workspace: uuid::Uuid,
+        task: uuid::Uuid,
+        device: Option<&str>,
+        expected_generation: Option<uuid::Uuid>,
+        acknowledge_uncertain: bool,
+        now: i64,
+    ) -> farcooler_core::Result<uuid::Uuid> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use farcooler_core::DomainError;
+        use rusqlite::{OptionalExtension, params};
+
+        let next_due = now.checked_add(3_600_000).ok_or(DomainError::InvalidArgument { what: "time" })?;
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let existing: Option<Vec<u8>> = tx.query_row(
+            "SELECT generation FROM check_in_schedules WHERE workspace_id = ?1",
+            params![uuid_blob(workspace)], |r| r.get(0),
+        ).optional().map_err(map_err)?;
+        if existing != expected_generation.map(uuid_blob) { return Err(DomainError::ResourceConflict) }
+        let valid: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM workspaces w JOIN tasks t ON t.workspace_id = w.id
+             WHERE w.id = ?1 AND t.id = ?2 AND t.status NOT IN ('done', 'cancelled') AND w.wake_on_answer = 1)
+             AND (?3 IS NULL OR (EXISTS (SELECT 1 FROM owner_devices WHERE client_id = ?3 AND state = 'confirmed')
+                 AND NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?3)
+                 AND NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?3)
+                 AND NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?3)))",
+            params![uuid_blob(workspace), uuid_blob(task), device], |r| r.get(0),
+        ).map_err(map_err)?;
+        if !valid { return Err(DomainError::InvalidArgument { what: "check_in_authority_or_task" }) }
+        let busy: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)
+             OR EXISTS (SELECT 1 FROM check_in_occurrences WHERE workspace_id = ?1 AND state IN ('claimed', 'enter_admitted', 'submitted'))",
+            params![uuid_blob(workspace)], |r| r.get(0),
+        ).map_err(map_err)?;
+        if busy { return Err(DomainError::ResourceConflict) }
+        let uncertain: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM check_in_occurrences WHERE workspace_id = ?1 AND state = 'uncertain')",
+            params![uuid_blob(workspace)], |r| r.get(0),
+        ).map_err(map_err)?;
+        if uncertain {
+            let disabled: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM check_in_schedules WHERE workspace_id = ?1 AND state = 'disabled')",
+                params![uuid_blob(workspace)], |r| r.get(0),
+            ).map_err(map_err)?;
+            if !disabled || !acknowledge_uncertain { return Err(DomainError::Conflict { what: "check_in_uncertain" }) }
+        }
+        tx.execute(
+            "UPDATE check_in_occurrences SET state = CASE state WHEN 'pending' THEN 'cancelled' ELSE 'resolved_uncertain' END,
+                    reason = CASE state WHEN 'pending' THEN 'superseded' ELSE 'owner_acknowledged_uncertain' END
+              WHERE workspace_id = ?1 AND state IN ('pending', 'uncertain')",
+            params![uuid_blob(workspace)],
+        ).map_err(map_err)?;
+        let generation = uuid::Uuid::now_v7();
+        tx.execute(
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_device, authorized_at, template_version, next_due, state)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 'enabled')
+             ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id, generation = excluded.generation,
+                 authorizer_device = excluded.authorizer_device, authorized_at = excluded.authorized_at,
+                 template_version = excluded.template_version, next_due = excluded.next_due,
+                 state = 'enabled', eligibility_epoch = check_in_schedules.eligibility_epoch + 1, reason = NULL",
+            params![uuid_blob(workspace), uuid_blob(task), uuid_blob(generation), device, now, next_due],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(generation)
     }
 }
