@@ -366,13 +366,13 @@ fn check_in_owner_seat(person: &crate::people::Person, seat: crate::caller_seat:
 pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStatus> {
     svc.store.get_workspace(workspace)?;
     let Some(status) = svc.store.check_in_status(workspace)? else {
-        return Ok(pb::CheckInStatus { workspace_id: workspace.as_bytes().to_vec(), ..Default::default() });
+        return Ok(pb::CheckInStatus { workspace_id: workspace.as_bytes().to_vec().into(), ..Default::default() });
     };
     let mut out = pb::CheckInStatus {
         configured: true,
-        workspace_id: workspace.as_bytes().to_vec(),
-        task_id: status.task.as_bytes().to_vec(),
-        generation: status.generation.as_bytes().to_vec(),
+        workspace_id: workspace.as_bytes().to_vec().into(),
+        task_id: status.task.as_bytes().to_vec().into(),
+        generation: status.generation.as_bytes().to_vec().into(),
         state: status.state,
         reason: status.reason.unwrap_or_default(),
         authorized_at_ms: status.authorized_at,
@@ -381,10 +381,10 @@ pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStat
         ..Default::default()
     };
     if let Some(occurrence) = status.occurrence {
-        out.occurrence_id = occurrence.id.as_bytes().to_vec();
+        out.occurrence_id = occurrence.id.as_bytes().to_vec().into();
         out.occurrence_state = occurrence.state;
         out.occurrence_reason = occurrence.reason.unwrap_or_default();
-        out.terminal_id = occurrence.terminal.map(|id| id.as_bytes().to_vec()).unwrap_or_default();
+        out.terminal_id = occurrence.terminal.map(|id| id.as_bytes().to_vec().into()).unwrap_or_default();
         out.thread_id = occurrence.thread.unwrap_or_default();
         out.claimed_at_ms = occurrence.claimed_at;
         out.admitted_at_ms = occurrence.admitted_at;
@@ -472,6 +472,25 @@ mod tests {
 
     use super::*;
     use crate::test_support::fixture;
+
+    #[tokio::test]
+    async fn check_in_owner_enable_refuses_unreadable_and_read_only_callers() {
+        let (_dir, svc, repo) = fixture().await;
+        let watcher = Watcher::new(svc.clone());
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let task = svc.store.create_task(workspace, "audit", farcooler_store::Actor::Manager).unwrap().id;
+        let selected = || CheckInEnable { task, expected_generation: None, acknowledge_uncertain: false };
+        let owner = Peer { client_id: None, scope: Scope::HostAdmin };
+        let read = Peer { client_id: None, scope: Scope::Read };
+        assert!(matches!(enable_check_in(&svc, &watcher, &owner, Some(crate::caller_seat::UNKNOWN_PID), workspace, selected()).await,
+            Err(DomainError::Conflict { what: "person_only" })));
+        assert!(matches!(enable_check_in(&svc, &watcher, &read, None, workspace, selected()).await,
+            Err(DomainError::ScopeDenied { .. })));
+        assert!(svc.store.check_in_status(workspace).unwrap().is_none());
+        enable_check_in(&svc, &watcher, &owner, None, workspace, selected()).await.unwrap();
+        assert_eq!(svc.store.check_in_status(workspace).unwrap().unwrap().state, "enabled");
+        assert!(disable_check_in(&svc, &watcher, &owner, None, workspace).await.unwrap());
+    }
 
     /// Where a workspace's home and charter are is a path on the runner, and
     /// paths go to `host_admin` only. A paired phone at Control or Read sees
