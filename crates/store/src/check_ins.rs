@@ -41,6 +41,10 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             daemon_instance BLOB,
             terminal_id BLOB,
             thread_id TEXT,
+            rollout_path TEXT,
+            rollout_device INTEGER,
+            rollout_inode INTEGER,
+            rollout_offset INTEGER,
             claimed_at INTEGER,
             admitted_at INTEGER,
             submitted_at INTEGER,
@@ -183,8 +187,8 @@ mod tests {
         store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread' FROM check_in_schedules WHERE workspace_id = ?5",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, rollout_path, rollout_device, rollout_inode, rollout_offset)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
         ).unwrap();
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
@@ -263,6 +267,8 @@ impl crate::Store {
                JOIN terminals p ON p.id = ?4
               WHERE o.id = ?1 AND o.attempt_id = ?2 AND o.daemon_instance = ?3
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5
+                AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
+                AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
                 AND s.authorizer_device IS o.authorizer_device AND s.authorizer_source = o.authorizer_source AND s.authorized_at = o.authorized_at
@@ -596,5 +602,32 @@ impl crate::Store {
             ).optional().map_err(map_err)?;
         }
         Ok(status)
+    }
+}
+
+impl crate::Store {
+    /// Pin the exact rollout identity and starting byte before Enter. The
+    /// daemon obtains these from the proved Codex process and an open file;
+    /// callers must not fill them from a remote request.
+    pub fn pin_check_in_rollout(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+        path: &str,
+        device: i64,
+        inode: i64,
+        offset: i64,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+
+        if path.is_empty() || device < 0 || inode < 0 || offset < 0 { return Ok(false) }
+        let changed = self.conn().execute(
+            "UPDATE check_in_occurrences SET rollout_path = ?3, rollout_device = ?4, rollout_inode = ?5, rollout_offset = ?6
+              WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed' AND rollout_path IS NULL",
+            params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
     }
 }

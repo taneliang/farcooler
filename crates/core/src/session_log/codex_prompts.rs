@@ -58,6 +58,12 @@ pub struct PositionedPrompt {
 /// Incomplete and malformed lines are never evidence of receipt.
 pub fn positioned_prompts_from(path: &Path, from: u64) -> Vec<PositionedPrompt> {
     let Ok(mut file) = File::open(path) else { return Vec::new() };
+    positioned_prompts_in(&mut file, from)
+}
+
+/// Read from the already-opened file, so receipt callers can check the
+/// identity of the same handle that supplied the evidence.
+pub fn positioned_prompts_in(file: &mut File, from: u64) -> Vec<PositionedPrompt> {
     if file.seek(SeekFrom::Start(from)).is_err() { return Vec::new() }
     let mut bytes = Vec::new();
     if file.take(READ_LIMIT).read_to_end(&mut bytes).is_err() { return Vec::new() }
