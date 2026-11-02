@@ -91,6 +91,25 @@ pub fn exact_prompt_in(file: &mut File, from: u64, text: &str, entered_at: i64) 
     })
 }
 
+/// Read the main Codex thread identity from this same open rollout handle.
+/// A subagent or incomplete header is never evidence for a pane's session.
+pub fn main_thread_in(file: &mut File) -> Option<String> {
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(1024 * 1024).read_to_end(&mut bytes).ok()?;
+    for line in bytes.split_inclusive(|b| *b == b'\n') {
+        if !line.ends_with(b"\n") { break }
+        let Ok(record) = serde_json::from_slice::<Value>(line) else { continue };
+        if record.get("type").and_then(Value::as_str) != Some("session_meta") { continue }
+        let payload = record.get("payload")?;
+        if payload.get("source").and_then(|source| source.get("subagent")).is_some() { return None }
+        let id = payload.get("id")?.as_str()?;
+        uuid::Uuid::parse_str(id).ok()?;
+        return Some(id.to_string());
+    }
+    None
+}
+
 /// Match a prompt only in the already-open file whose device and inode were
 /// pinned before submission. The caller must separately prove the Codex
 /// thread still names this rollout; a matching path alone is not that proof.
@@ -161,6 +180,19 @@ mod tests {
         let end = line.find('\n').unwrap();
         std::fs::write(&path, &ROLLOUT[..last + end]).unwrap();
         assert_eq!(positioned_prompts_from(&path, last), []);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn thread_identity_is_read_from_the_open_main_rollout() {
+        let dir = crate::scratch::dir("codex-receipt-thread");
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, ROLLOUT).unwrap();
+        let mut file = File::open(&path).unwrap();
+        assert_eq!(main_thread_in(&mut file).as_deref(), Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade"));
+        std::fs::write(&path, "{\"type\":\"session_meta\",\"payload\":{\"id\":\"01a1189c-23ea-7190-b6bf-1d9ac1940ade\",\"source\":{\"subagent\":{}}}}\n").unwrap();
+        let mut file = File::open(&path).unwrap();
+        assert_eq!(main_thread_in(&mut file), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

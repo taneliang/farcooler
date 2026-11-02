@@ -180,6 +180,91 @@ pub(in crate::watch::answer_wake) fn records(path: &Path, from: u64, sent: &Sent
     codex_prompts::prompts_from(path, from).iter().any(|p| p.images == sent.images && p.at_ms.is_some_and(|at| at >= sent.entered) && squeeze(&p.text) == want)
 }
 
+
+impl Watcher {
+    /// A scheduled runner notice has its own durable claim and final Enter
+    /// admission; it never enters the ordinary wake or harness queues.
+    #[cfg(unix)]
+    pub(crate) async fn send_check_in(&self, pending: &farcooler_store::PendingCheckIn, daemon: uuid::Uuid) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        use farcooler_core::composer::drawn::Expected;
+        use crate::claude_registry::{Kernel, Processes};
+
+        let Some(to) = self.service.live_orchestrator(pending.workspace)? else { return Ok(()) };
+        let Some(thread) = to.agent_session_id.as_deref() else { return Ok(()) };
+        let Some(_typing) = self.try_typing(to.id) else { return Ok(()) };
+        if !matches!(self.ready(&to).await, Ok(Turn::Between)) { return Ok(()) }
+        let Ok(proven) = self.proven_tui(&to).await else { return Ok(()) };
+        if proven.preset != "codex" || proven.turn != Turn::Between { return Ok(()) }
+        let Some(process_started) = Kernel.started(proven.pid) else { return Ok(()) };
+        if codex_turn::said_held(proven.pid, true).await.0 != registry_turn::Said::Idle { return Ok(()) }
+        let Some(path) = rollout_now(proven.pid).await else { return Ok(()) };
+        if crate::log_join::codex_thread_of(&path).is_none_or(|(id, _)| id != thread) { return Ok(()) }
+        let mut file = match std::fs::File::open(&path) { Ok(file) => file, Err(_) => return Ok(()) };
+        if farcooler_core::session_log::codex_prompts::main_thread_in(&mut file).as_deref() != Some(thread) { return Ok(()) }
+        let meta = match file.metadata() { Ok(meta) => meta, Err(_) => return Ok(()) };
+        let (Ok(device), Ok(inode), Ok(offset)) = (i64::try_from(meta.dev()), i64::try_from(meta.ino()), i64::try_from(meta.len())) else { return Ok(()) };
+        let Some(path_text) = path.to_str() else { return Ok(()) };
+        let task = self.service.store.get_task(pending.task)?;
+        let text = farcooler_store::fixed_check_in_message(&task.key, pending.id);
+        let (_, columns, rows) = self.service.screen(to.id).await?;
+        if drawn::opens_picker(&text) || !drawn::fits(&text, 0, columns, rows) { return Ok(()) }
+        let runtime = Runtime { marks: None, ..self.service.runtime() };
+        let pane = runtime.pane_id_of(to.id)?;
+        let attempt = uuid::Uuid::now_v7();
+        if !self.service.store.claim_check_in(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? { return Ok(()) }
+        let prepared = async {
+            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, device, inode, offset)? {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            }
+            let Some(stored) = self.service.store.claimed_check_in_message(pending.id, attempt)? else {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            };
+            if stored != text { return Err(DomainError::Conflict { what: "unconfirmed" }) }
+            let started = now_millis();
+            self.paste_checked(&to, &runtime, &proven.tty, "codex", true, &text).await?;
+            let expected = Expected::default().then_codex_paste(&text);
+            self.shown(&to, &proven, started, &expected, None).await.left(&proven.tty, "codex").await?;
+            let (preset, _, pid) = self.proven_agent(&to).await.map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
+            if preset != "codex" || pid != proven.pid || Kernel.started(pid) != Some(process_started) || runtime.pane_id_of(to.id)? != pane {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            }
+            if rollout_now(pid).await.as_deref() != Some(path.as_path())
+                || codex_turn::said_held(pid, true).await.0 != registry_turn::Said::Idle
+            {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            }
+            let now_meta = std::fs::metadata(&path).map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
+            if now_meta.dev() != meta.dev() || now_meta.ino() != meta.ino() { return Err(DomainError::Conflict { what: "unconfirmed" }) }
+            self.codex_still_between(&to, pid, started, &expected, true).await?;
+            Ok(())
+        }.await;
+        if let Err(error) = prepared {
+            self.service.store.fail_claimed_check_in(pending.id, attempt)?;
+            return Err(error);
+        }
+        if !self.service.store.admit_check_in_enter(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? {
+            self.service.store.fail_claimed_check_in(pending.id, attempt)?;
+            return Ok(());
+        }
+        // The fence stays durable if this future is cancelled or the client
+        // fails: no timeout is proof that tmux did not accept the key.
+        match runtime.tmux.send_enter_once(&pane).await {
+            Ok(()) => {
+                if !self.service.store.settle_check_in_enter(pending.id, attempt, true, now_millis())? {
+                    return Err(DomainError::Conflict { what: "unconfirmed" });
+                }
+                self.mark_told(to.id);
+                Ok(())
+            }
+            Err(error) => {
+                self.service.store.fail_admitted_check_in(pending.id, attempt)?;
+                Err(error)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "codex_tests.rs"]
 mod tests;

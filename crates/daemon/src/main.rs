@@ -242,6 +242,14 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    // This process holds the daemon lock. Claimed and submitted check-ins
+    // cannot be replayed after a crash; admitted fences remain held until the
+    // old sender is proven unable to start a late key.
+    if let Err(error) = service.store.recover_check_ins_after_exclusive_start() {
+        eprintln!("cannot recover check-in state: {error}");
+        return Err(1);
+    }
+
     // Repair identity on any pane still carrying it at window level. See
     // `backfill_pane_tags`: those panes read correctly until something moves
     // them, and then stop being identifiable at all.
@@ -322,6 +330,8 @@ async fn run() -> Result<(), i32> {
     // processes reading the same screens.
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
+    #[cfg(unix)]
+    tokio::spawn(watcher.clone().run_check_in_scheduler(uuid::Uuid::now_v7()));
 
     // The CI watch (ov-309): reads GitHub Actions through `gh` for the trains
     // and pages that name a commit, only here, never in a `--stdio` session.
