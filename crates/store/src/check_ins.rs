@@ -1004,6 +1004,21 @@ mod tests {
     }
 
     #[test]
+    fn admitted_enter_vetoes_wake_switch_and_task_deletion() {
+        let (store, ws, task) = board();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        let version = store.get_workspace(ws).unwrap().resource_version;
+        assert!(matches!(store.set_workspace_wake_on_answer(ws, version, false), Err(DomainError::ResourceConflict)));
+        let deleted = store.conn().execute("DELETE FROM tasks WHERE id = ?1", [uuid_blob(task)]).map_err(crate::error::map_err);
+        assert!(matches!(deleted, Err(DomainError::ResourceConflict)));
+        assert!(store.get_workspace(ws).unwrap().wake_on_answer);
+        assert_eq!(store.get_task(task).unwrap().workspace_id, ws);
+    }
+
+    #[test]
     fn fenced_task_move_rolls_back_the_whole_batch() {
         let (store, ws, audit) = board();
         let repository = store.get_workspace(ws).unwrap().repository_id;
