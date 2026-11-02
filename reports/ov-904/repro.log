@@ -1,0 +1,137 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling anyhow v1.0.104
+   Compiling once_cell v1.21.4
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.189
+   Compiling either v1.17.0
+   Compiling itertools v0.14.0
+   Compiling getrandom v0.4.3
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling rustix v1.1.4
+   Compiling errno v0.3.14
+   Compiling serde v1.0.229
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling bytes v1.12.1
+   Compiling indexmap v2.14.0
+   Compiling stable_deref_trait v1.2.1
+   Compiling regex-syntax v0.8.11
+   Compiling bitflags v2.13.1
+   Compiling prettyplease v0.2.37
+   Compiling fastrand v2.5.0
+   Compiling fixedbitset v0.5.7
+   Compiling petgraph v0.7.1
+   Compiling regex-automata v0.4.16
+   Compiling displaydoc v0.2.7
+   Compiling serde_derive v1.0.229
+   Compiling tempfile v3.27.0
+   Compiling tracing-core v0.1.36
+   Compiling protoc-bin-vendored-win32 v3.2.0
+   Compiling heck v0.5.0
+   Compiling protoc-bin-vendored-linux-ppcle_64 v3.2.0
+   Compiling synstructure v0.13.2
+   Compiling regex v1.13.1
+   Compiling protoc-bin-vendored-macos-x86_64 v3.2.0
+   Compiling multimap v0.10.1
+   Compiling log v0.4.33
+   Compiling protoc-bin-vendored-macos-aarch_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-aarch_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-s390_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-x86_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-x86_32 v3.2.0
+   Compiling tinystr v0.8.3
+   Compiling pin-project-lite v0.2.17
+   Compiling protoc-bin-vendored v3.2.0
+   Compiling icu_normalizer_data v2.1.1
+   Compiling thiserror v2.0.19
+   Compiling writeable v0.6.3
+   Compiling litemap v0.8.2
+   Compiling zmij v1.0.23
+   Compiling prost-derive v0.13.5
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling tracing-attributes v0.1.31
+   Compiling zerofrom v0.1.8
+   Compiling prost v0.13.5
+   Compiling yoke v0.8.3
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling zerovec v0.11.6
+   Compiling prost-types v0.13.5
+   Compiling icu_locale_core v2.1.1
+   Compiling tracing v0.1.44
+   Compiling potential_utf v0.1.5
+   Compiling prost-build v0.13.5
+   Compiling zerotrie v0.2.4
+   Compiling thiserror-impl v2.0.19
+   Compiling lazy_static v1.5.0
+   Compiling winnow v0.7.15
+   Compiling serde_json v1.0.151
+   Compiling smallvec v1.15.2
+   Compiling toml_write v0.1.2
+   Compiling tracing-log v0.2.0
+   Compiling sharded-slab v0.1.7
+   Compiling icu_provider v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-904-tracing-race/crates/protocol)
+   Compiling matchers v0.2.0
+   Compiling uuid v1.24.0
+   Compiling thread_local v1.1.10
+   Compiling itoa v1.0.18
+   Compiling nu-ansi-term v0.50.3
+   Compiling toml_edit v0.22.27
+   Compiling write16 v1.0.0
+   Compiling utf16_iter v1.0.5
+   Compiling utf8_iter v1.0.4
+   Compiling memchr v2.8.3
+   Compiling icu_normalizer v2.1.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-904-tracing-race/crates/ffi-guard)
+   Compiling toml v0.8.23
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-904-tracing-race/crates/core)
+    Finished `test` profile [unoptimized] target(s) in 13.73s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_core-e1c936a06f2bd7cd)
+
+running 1 test
+
+running 1 test
+test session_log::projector::record_types_tests::capture_registration_order ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 769 filtered out; finished in 0.00s
+
+
+running 1 test
+
+thread 'session_log::projector::record_types_tests::capture_registration_order' (781744226) panicked at crates/core/src/session_log/projector/record_types_tests.rs:108:5:
+assertion `left == right` failed: once per session: 
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test session_log::projector::record_types_tests::capture_registration_order ... FAILED
+
+failures:
+
+failures:
+    session_log::projector::record_types_tests::capture_registration_order
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 769 filtered out; finished in 0.00s
+
+
+thread 'session_log::projector::record_types_tests::capture_registration_order' (781744218) panicked at crates/core/src/session_log/projector/record_types_tests.rs:169:9:
+unsubscribed-first: exit status: 101
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test session_log::projector::record_types_tests::capture_registration_order ... FAILED
+
+failures:
+
+failures:
+    session_log::projector::record_types_tests::capture_registration_order
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 769 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p farcooler-core --lib`

@@ -98,6 +98,10 @@ fn an_unknown_type_is_a_gap_and_logged_once_by_name() {
     let sink = Sink::default();
     let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
     let p = tracing::subscriber::with_default(subscriber, || fold(UNKNOWN_TYPE));
+    assert_unknown_capture(&p, &sink);
+}
+
+fn assert_unknown_capture(p: &super::Projection, sink: &Sink) {
     let odd = "a type with spaces ghp_0123456789abcdefghijklmnopqrstuvwxyz0123";
     assert_eq!(unknown_gaps(&p), ["brand-new-record", "another-new-record", odd]);
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
@@ -118,4 +122,50 @@ fn a_session_logs_at_most_32_unknown_types() {
     assert_eq!(unknown_gaps(&p).len(), 40);
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logged.lines().count(), 32, "{logged}");
+}
+
+
+/// Fresh processes make first callsite registration deterministic, independent
+/// of which other unit test the harness happened to schedule first.
+#[test]
+fn capture_registration_order() {
+    const SCENARIO: &str = "FARCOOLER_RECORD_CAPTURE_SCENARIO";
+    if let Ok(scenario) = std::env::var(SCENARIO) {
+        let sink = Sink::default();
+        let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            if scenario == "unsubscribed-first" {
+                let barrier = Arc::new(std::sync::Barrier::new(2));
+                let worker_barrier = barrier.clone();
+                let worker = std::thread::spawn(move || {
+                    worker_barrier.wait();
+                    let p = fold(UNKNOWN_TYPE);
+                    assert_eq!(unknown_gaps(&p).len(), 3);
+                });
+                barrier.wait();
+                worker.join().unwrap();
+            } else {
+                assert_eq!(scenario, "control");
+            }
+            assert_unknown_capture(&fold(UNKNOWN_TYPE), &sink);
+        });
+        return;
+    }
+    for scenario in ["control", "unsubscribed-first"] {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "session_log::projector::record_types_tests::capture_registration_order", "--nocapture"])
+            .env(SCENARIO, scenario)
+            .spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() { break status; }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("{scenario}: child exceeded ten seconds (killed and reaped)");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(status.success(), "{scenario}: {status}");
+    }
 }
