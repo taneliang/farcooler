@@ -91,6 +91,24 @@ pub fn exact_prompt_in(file: &mut File, from: u64, text: &str, entered_at: i64) 
     })
 }
 
+/// Match a prompt only in the already-open file whose device and inode were
+/// pinned before submission. The caller must separately prove the Codex
+/// thread still names this rollout; a matching path alone is not that proof.
+#[cfg(unix)]
+pub fn exact_prompt_in_pinned_file(
+    file: &mut File,
+    device: u64,
+    inode: u64,
+    from: u64,
+    text: &str,
+    entered_at: i64,
+) -> Option<PositionedPrompt> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata().ok()?;
+    if metadata.dev() != device || metadata.ino() != inode || metadata.len() < from { return None }
+    exact_prompt_in(file, from, text, entered_at)
+}
+
 fn prompt(line: &str) -> Option<Prompt> {
     // Most lines aren't one: skip them before parsing.
     if !line.contains("\"UserMessage\"") {
@@ -155,6 +173,14 @@ mod tests {
         let at = item.prompt.at_ms.unwrap();
         let mut file = File::open(&path).unwrap();
         assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste test", at), Some(item.clone()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let metadata = file.metadata().unwrap();
+            assert_eq!(exact_prompt_in_pinned_file(&mut file, metadata.dev(), metadata.ino(), item.offset, "vim paste test", at), Some(item.clone()));
+            assert_eq!(exact_prompt_in_pinned_file(&mut file, metadata.dev(), metadata.ino().wrapping_add(1), item.offset, "vim paste test", at), None);
+        }
+
         assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste test", at + 1), None);
         assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste tes", at), None);
         assert_eq!(exact_prompt_in(&mut file, item.offset + 1, "vim paste test", at), None);
