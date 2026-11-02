@@ -103,7 +103,10 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         }
     }
     tx.execute_batch(
-        "CREATE TRIGGER check_in_schedule_update BEFORE UPDATE ON check_in_schedules \
+        "CREATE TRIGGER check_in_schedule_insert BEFORE INSERT ON check_in_schedules \
+         WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = NEW.workspace_id) \
+         BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
+         CREATE TRIGGER check_in_schedule_update BEFORE UPDATE ON check_in_schedules \
          WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) \
          BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
          CREATE TRIGGER check_in_schedule_delete BEFORE DELETE ON check_in_schedules \
@@ -161,5 +164,96 @@ mod tests {
         assert_eq!(state, "enabled");
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+    }
+}
+
+impl crate::Store {
+    /// Admit one already-claimed attempt immediately before its one Enter.
+    /// The caller must hold the target's typing exclusion and complete all
+    /// physical proofs before this call. `thread` is the proved session, not
+    /// a value supplied by a remote client. No connection guard crosses I/O.
+    pub fn admit_check_in_enter(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+        daemon: uuid::Uuid,
+        terminal: uuid::Uuid,
+        thread: &str,
+        now: i64,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::{OptionalExtension, params};
+
+        if thread.is_empty() {
+            return Ok(false);
+        }
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let valid: Option<(Vec<u8>, Vec<u8>, Option<String>)> = tx.query_row(
+            "SELECT o.workspace_id, o.task_id, s.authorizer_device
+               FROM check_in_occurrences o
+               JOIN check_in_schedules s ON s.workspace_id = o.workspace_id
+               JOIN tasks t ON t.id = o.task_id
+               JOIN workspaces w ON w.id = o.workspace_id
+               JOIN terminals p ON p.id = ?4
+              WHERE o.id = ?1 AND o.attempt_id = ?2 AND o.daemon_instance = ?3
+                AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5
+                AND s.state = 'enabled' AND s.generation = o.generation
+                AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
+                AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
+                AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id
+                AND p.role = 2 AND p.command_preset = 'codex' AND p.intent = 1
+                AND p.runtime_confirmed = 1 AND p.exit_code IS NULL AND p.exit_signal IS NULL
+                AND p.agent_session_id = ?5
+                AND (s.authorizer_device IS NULL OR (
+                    EXISTS (SELECT 1 FROM owner_devices d WHERE d.client_id = s.authorizer_device AND d.state = 'confirmed')
+                    AND NOT EXISTS (SELECT 1 FROM device_caps d WHERE d.client_id = s.authorizer_device)
+                    AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = s.authorizer_device)
+                    AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device)))",
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).optional().map_err(map_err)?;
+        let Some((workspace, task, device)) = valid else { return Ok(false) };
+        tx.execute(
+            "INSERT INTO check_in_enter_fences (workspace_id, task_id, terminal_id, occurrence_id, attempt_id, daemon_instance, authorizer_device)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![workspace, task, uuid_blob(terminal), uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), device],
+        ).map_err(map_err)?;
+        let changed = tx.execute(
+            "UPDATE check_in_occurrences SET state = 'enter_admitted', admitted_at = ?3 WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed'",
+            params![uuid_blob(occurrence), uuid_blob(attempt), now],
+        ).map_err(map_err)?;
+        if changed != 1 { return Ok(false) }
+        tx.commit().map_err(map_err)?;
+        Ok(true)
+    }
+
+    /// Settle only the exact admitted attempt after its sender is joined and
+    /// cannot start another send. A handed-off key may still arrive: submitted
+    /// is not a receipt and uncertain is never retried automatically.
+    pub fn settle_check_in_enter(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+        submitted: bool,
+        now: i64,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let state = if submitted { "submitted" } else { "uncertain" };
+        let changed = tx.execute(
+            "UPDATE check_in_occurrences SET state = ?3, submitted_at = ?4 WHERE id = ?1 AND attempt_id = ?2 AND state = 'enter_admitted'
+             AND EXISTS (SELECT 1 FROM check_in_enter_fences f WHERE f.occurrence_id = ?1 AND f.attempt_id = ?2)",
+            params![uuid_blob(occurrence), uuid_blob(attempt), state, now],
+        ).map_err(map_err)?;
+        if changed != 1 { return Ok(false) }
+        tx.execute("DELETE FROM check_in_enter_fences WHERE occurrence_id = ?1 AND attempt_id = ?2", params![uuid_blob(occurrence), uuid_blob(attempt)]).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(true)
     }
 }
