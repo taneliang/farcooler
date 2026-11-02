@@ -688,6 +688,38 @@ impl crate::Store {
     }
 }
 
+
+impl crate::Store {
+    /// Suspend a claimed attempt when paste or a later gate is uncertain. A
+    /// subsequent admission cannot use it, and it is never retried.
+    pub fn fail_claimed_check_in(&self, occurrence: uuid::Uuid, attempt: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+        let changed = self.conn().execute(
+            "UPDATE check_in_occurrences SET state = 'uncertain', reason = 'paste_or_gate_uncertain'
+              WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed'",
+            params![uuid_blob(occurrence), uuid_blob(attempt)],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+
+    /// An admitted sender failed or timed out. Keep its durable fence: a
+    /// transport timeout does not prove that tmux cannot accept the key.
+    pub fn fail_admitted_check_in(&self, occurrence: uuid::Uuid, attempt: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+        let changed = self.conn().execute(
+            "UPDATE check_in_occurrences SET state = 'uncertain', reason = 'enter_outcome_unknown'
+              WHERE id = ?1 AND attempt_id = ?2 AND state = 'enter_admitted'
+                AND EXISTS (SELECT 1 FROM check_in_enter_fences f WHERE f.occurrence_id = ?1 AND f.attempt_id = ?2)",
+            params![uuid_blob(occurrence), uuid_blob(attempt)],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use farcooler_core::DomainError;
@@ -792,6 +824,25 @@ mod tests {
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
         assert_eq!(state, "uncertain");
+    }
+
+    #[test]
+    fn lead_upsert_is_fenced_and_unchanged_lead_is_allowed() {
+        let (store, ws, task) = board();
+        store.conn().execute("INSERT INTO members (handle, name, created_at) VALUES ('alice', 'Alice', 1), ('bob', 'Bob', 1)", []).unwrap();
+        store.conn().execute("INSERT INTO workspace_leads (workspace_id, handle) VALUES (?1, 'alice')", [uuid_blob(ws)]).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        store.set_workspace_lead(ws, Some("alice")).unwrap();
+        assert!(matches!(store.set_workspace_lead(ws, Some("bob")), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.workspace_lead(ws).unwrap().as_deref(), Some("alice"));
+        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.set_workspace_lead(ws, Some("bob")).unwrap();
+        store.set_workspace_lead(ws, Some("alice")).unwrap();
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "suspended");
     }
 
     #[test]
