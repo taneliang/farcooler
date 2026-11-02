@@ -725,6 +725,11 @@ impl Store {
                     params![uuid_blob(workspace)], |r| r.get(0),
                 ).map_err(map_err)?;
                 if admitted { return Err(DomainError::ResourceConflict) }
+                let stopping: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = ?1)",
+                    params![uuid_blob(terminal)], |r| r.get(0),
+                ).map_err(map_err)?;
+                if stopping { return Err(DomainError::ResourceConflict) }
                 if other_live_orchestrator(&tx, workspace, Some(terminal), vacated).map_err(map_err)?.is_some() {
                     return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
                 }

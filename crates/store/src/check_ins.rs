@@ -1071,6 +1071,10 @@ mod tests {
         assert!(matches!(store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]), Err(DomainError::ResourceConflict)));
         assert_eq!(store.get_terminal(terminal.id).unwrap().resource_version, terminal.resource_version);
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        let reservation = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(matches!(store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]), Err(DomainError::ResourceConflict)));
+        assert!(store.release_check_in_target_change(reservation).unwrap());
         store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]).unwrap();
     }
 
