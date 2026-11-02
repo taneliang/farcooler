@@ -29,6 +29,8 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             task_id BLOB NOT NULL,
             generation BLOB NOT NULL,
             eligibility_epoch INTEGER NOT NULL,
+            authorizer_device TEXT,
+            authorized_at INTEGER NOT NULL,
             template_version INTEGER NOT NULL,
             due_at INTEGER NOT NULL,
             state TEXT NOT NULL CHECK (state IN
@@ -177,8 +179,8 @@ mod tests {
         store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread' FROM check_in_schedules WHERE workspace_id = ?5",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread' FROM check_in_schedules WHERE workspace_id = ?5",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
         ).unwrap();
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
@@ -257,6 +259,8 @@ impl crate::Store {
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
+                AND s.authorizer_device IS o.authorizer_device AND s.authorized_at = o.authorized_at
+                AND s.template_version = o.template_version
                 AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                 AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id
                 AND p.role = 2 AND p.command_preset = 'codex' AND p.intent = 1
@@ -324,8 +328,8 @@ impl crate::Store {
 
         let id = uuid::Uuid::now_v7();
         let changed = self.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, template_version, due_at, state)
-             SELECT ?1, s.workspace_id, s.task_id, s.generation, s.eligibility_epoch, s.template_version, s.next_due, 'pending'
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorized_at, template_version, due_at, state)
+             SELECT ?1, s.workspace_id, s.task_id, s.generation, s.eligibility_epoch, s.authorizer_device, s.authorized_at, s.template_version, s.next_due, 'pending'
                FROM check_in_schedules s
               WHERE s.workspace_id = ?2 AND s.state = 'enabled' AND s.next_due <= ?3
                 AND NOT EXISTS (SELECT 1 FROM check_in_occurrences o WHERE o.workspace_id = s.workspace_id
@@ -359,6 +363,8 @@ impl crate::Store {
                     JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
                     WHERE s.workspace_id = o.workspace_id AND s.state = 'enabled' AND s.generation = o.generation
                       AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
+                AND s.authorizer_device IS o.authorizer_device AND s.authorized_at = o.authorized_at
+                AND s.template_version = o.template_version
                       AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                       AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id AND p.role = 2
                       AND p.command_preset = 'codex' AND p.intent = 1 AND p.runtime_confirmed = 1
