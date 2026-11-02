@@ -183,7 +183,7 @@ pub(super) fn recognize(name: &str, args: &Value) -> Option<(LiteralOperation, u
         lifecycle: CommandLifecycle::Running, input_clipped: kept < source.trim_end().len(), output_available: false, output_clipped: false };
     while serde_json::to_vec(&op).ok()?.len() > 1000 {
         let preview = op.preview.as_mut()?;
-        if preview.pop().is_none() { return None; }
+        preview.pop()?;
         op.preview_clipped = true;
     }
     Some((op, fingerprint))

@@ -104,6 +104,16 @@ fn fields_text<'v>(fields: impl Iterator<Item = (&'v str, &'v Value)>) -> Option
     excerpt(&out)
 }
 
+/// Byte end of actual retained source, excluding the synthetic clipping marker.
+/// Input projections start with their field name, so no leading-newline offset is lost.
+pub(super) fn retained_end(text: &str) -> usize {
+    let text = text.trim_end();
+    let mut end = text.len();
+    if let Some((at, _)) = text.match_indices('\n').nth(DETAIL_LINES - 1) { end = at; }
+    if let Some((at, _)) = text[..end].char_indices().nth(DETAIL_CHARS) { end = at; }
+    text[..end].trim_end().len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,14 +138,4 @@ mod tests {
         assert_eq!(excerpt("  indented\n  kept").as_deref(), Some("  indented\n  kept"));
         assert_eq!(excerpt("\n \n"), None);
     }
-}
-
-/// Byte end of actual retained source, excluding the synthetic clipping marker.
-/// Input projections start with their field name, so no leading-newline offset is lost.
-pub(super) fn retained_end(text: &str) -> usize {
-    let text = text.trim_end();
-    let mut end = text.len();
-    if let Some((at, _)) = text.match_indices('\n').nth(DETAIL_LINES - 1) { end = at; }
-    if let Some((at, _)) = text[..end].char_indices().nth(DETAIL_CHARS) { end = at; }
-    text[..end].trim_end().len()
 }
