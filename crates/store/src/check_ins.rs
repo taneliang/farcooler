@@ -85,6 +85,11 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id);
         -- A cleanup whose server-side completion is unknown suspends only
         -- the scheduler; ordinary cleanup and registration remain available.
+        CREATE TABLE check_in_instance (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            instance_id BLOB NOT NULL,
+            clean INTEGER NOT NULL CHECK (clean IN (0, 1))
+        );
         CREATE TABLE check_in_cleanup_fence (
             token BLOB PRIMARY KEY NOT NULL,
             started_at INTEGER NOT NULL
@@ -178,6 +183,44 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
 
 
 impl crate::Store {
+    /// Persist a new unclean instance before allowing any scheduled effects.
+    /// Missing history is accepted only when no old operation is unresolved.
+    pub fn arm_check_in_instance(&self, instance: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let blocked: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM check_in_instance WHERE clean = 0)
+               OR EXISTS (SELECT 1 FROM check_in_cleanup_fence)
+               OR EXISTS (SELECT 1 FROM check_in_enter_fences)
+               OR EXISTS (SELECT 1 FROM check_in_occurrences WHERE state IN ('claimed', 'enter_admitted', 'submitted', 'uncertain'))
+               OR EXISTS (SELECT 1 FROM check_in_target_reservations)", [], |r| r.get(0),
+        ).map_err(map_err)?;
+        if blocked { return Ok(false) }
+        tx.execute(
+            "INSERT INTO check_in_instance (singleton, instance_id, clean) VALUES (1, ?1, 0)
+             ON CONFLICT(singleton) DO UPDATE SET instance_id = excluded.instance_id, clean = 0",
+            [uuid_blob(instance)],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(true)
+    }
+
+    /// Mark only this instance clean after its owned work is joined and no
+    /// uncertainty remains. Failure leaves the unclean sentinel intact.
+    pub fn close_check_in_instance(&self, instance: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        Ok(self.conn().execute(
+            "UPDATE check_in_instance SET clean = 1 WHERE singleton = 1 AND instance_id = ?1 AND clean = 0
+             AND NOT EXISTS (SELECT 1 FROM check_in_cleanup_fence)
+             AND NOT EXISTS (SELECT 1 FROM check_in_enter_fences)
+             AND NOT EXISTS (SELECT 1 FROM check_in_occurrences WHERE state IN ('claimed', 'enter_admitted', 'submitted', 'uncertain'))
+             AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations)", [uuid_blob(instance)],
+        ).map_err(map_err)? == 1)
+    }
+
     /// Mark one cleanup operation before a server command may be dispatched.
     /// Multiple outstanding operations are independent; no restart clears them.
     pub fn begin_check_in_cleanup(&self, token: uuid::Uuid) -> farcooler_core::Result<()> {
@@ -1027,6 +1070,22 @@ mod tests {
             params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
         ).unwrap();
         (store, ws, task)
+    }
+
+    #[test]
+    fn unclean_instance_never_rearms_and_clean_close_requires_no_unknowns() {
+        let (store, _, _) = board();
+        let (first, second, token) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        assert!(store.arm_check_in_instance(first).unwrap());
+        assert!(!store.arm_check_in_instance(second).unwrap());
+        assert!(!store.close_check_in_instance(second).unwrap());
+        store.begin_check_in_cleanup(token).unwrap();
+        assert!(!store.close_check_in_instance(first).unwrap());
+        assert!(store.complete_check_in_cleanup(token).unwrap());
+        assert!(store.close_check_in_instance(first).unwrap());
+        assert!(store.arm_check_in_instance(second).unwrap());
+        store.recover_check_ins_after_exclusive_start().unwrap();
+        assert!(!store.arm_check_in_instance(Uuid::now_v7()).unwrap());
     }
 
     #[test]

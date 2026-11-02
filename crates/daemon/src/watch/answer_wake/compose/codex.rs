@@ -192,6 +192,7 @@ impl Watcher {
 
         // Never wait ahead of cleanup: retry on a later scheduler tick.
         let Ok(_cleanup_gate) = self.check_in_cleanup_gate.try_lock() else { return Ok(()) };
+        if self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) != 1 { return Ok(()) }
         let Some(to) = self.service.live_orchestrator(pending.workspace)? else { return Ok(()) };
         if to.pane_mode != farcooler_store::models::PaneMode::Terminal
             || !super::super::may_be_typed_to(&to.command_preset, to.role)

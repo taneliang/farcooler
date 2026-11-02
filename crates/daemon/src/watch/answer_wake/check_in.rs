@@ -11,6 +11,13 @@ impl Watcher {
     /// Run only under the exclusive daemon owner, after stale attempt recovery.
     #[cfg(unix)]
     pub async fn run_check_in_scheduler(self: Arc<Self>, daemon: Uuid, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+        {
+            let _gate = self.check_in_cleanup_gate.lock().await;
+            let armed = self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) == 0
+                && matches!(self.service.store.arm_check_in_instance(daemon), Ok(true));
+            self.check_in_arm.store(if armed { 1 } else { 2 }, std::sync::atomic::Ordering::SeqCst);
+            if !armed { tracing::warn!("scheduled check-ins unavailable: unclean or unreadable instance"); }
+        }
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -43,7 +50,7 @@ impl Watcher {
             }
             match self.service.store.pending_check_ins() {
                 Ok(pending) => for occurrence in pending {
-                    if *shutdown.borrow() { break }
+                    if *shutdown.borrow() || self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) != 1 { break }
                     if let Err(error) = self.send_check_in(&occurrence, daemon).await {
                         tracing::warn!(id = %occurrence.id, error = %error, "check-in did not complete delivery");
                     }
@@ -51,6 +58,10 @@ impl Watcher {
                 Err(error) => tracing::warn!(error = %error, "could not read pending check-ins"),
             }
         }
+        let _gate = self.check_in_cleanup_gate.lock().await;
+        if self.check_in_arm.swap(2, std::sync::atomic::Ordering::SeqCst) == 1
+            && !matches!(self.service.store.close_check_in_instance(daemon), Ok(true))
+        { tracing::warn!("scheduled check-in instance remains unclean"); }
     }
 
     #[cfg(unix)]

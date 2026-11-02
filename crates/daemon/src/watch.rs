@@ -699,6 +699,8 @@ pub struct Watcher {
     unfinished_seen: std::sync::Mutex<HashMap<farcooler_tmux::UnfinishedOpen, std::time::Instant>>,
     /// Orders scheduled delivery with watcher cleanup, never ordinary sends.
     check_in_cleanup_gate: tokio::sync::Mutex<()>,
+    // 0: not armed yet, 1: armed with durable sentinel, 2: latched off.
+    check_in_arm: std::sync::atomic::AtomicU8,
     /// The last screen read for each shell pane, kept while tmux says it still
     /// stands. See `screen_cache`.
     screens: screen_cache::ScreenCache,
@@ -2861,6 +2863,7 @@ impl Watcher {
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
             unfinished_seen: std::sync::Mutex::new(HashMap::new()),
             check_in_cleanup_gate: tokio::sync::Mutex::new(()),
+            check_in_arm: std::sync::atomic::AtomicU8::new(0),
             screens: Default::default(),
             worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),

@@ -83,7 +83,27 @@ impl Drop for CleanupAttempt<'_> {
 impl Watcher {
     /// One owned cleanup client. The caller holds the scheduler/cleanup gate.
     pub(super) async fn check_in_guarded_cleanup(&self, pane: &str) -> farcooler_core::Result<bool> {
-        let mut attempt = CleanupAttempt::new(&self.service.store)?;
+        use std::sync::atomic::Ordering;
+        if self.check_in_arm.load(Ordering::SeqCst) != 1 {
+            // If this future is cancelled while an unarmed cleanup is in
+            // flight, startup must not subsequently arm this instance.
+            let was_pending = self.check_in_arm.compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst).is_ok();
+            let result = self.service.tmux.kill_pane(pane).await;
+            if was_pending && matches!(result, Ok(true) | Ok(false)) {
+                self.check_in_arm.store(0, Ordering::SeqCst);
+            }
+            return result;
+        }
+        let mut attempt = match CleanupAttempt::new(&self.service.store) {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                // Sentinel was committed before arming. Never rearm or mark
+                // clean after this failure, even if storage later recovers.
+                self.check_in_arm.store(2, Ordering::SeqCst);
+                tracing::warn!(?error, "scheduled check-ins unavailable: cleanup fence failed");
+                return self.service.tmux.kill_pane(pane).await;
+            }
+        };
         let result = self.service.tmux.run_with_submission(
             &["kill-pane", "-t", pane], || attempt.dispatched(),
         ).await;
