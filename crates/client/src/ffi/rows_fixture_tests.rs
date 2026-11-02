@@ -50,6 +50,7 @@ fn rows() -> Vec<Row> {
             file_path: Some("/w/src/main.rs".into()),
             input: None,
             result: None,
+            operation: None,
         })),
         row(4, 8, "sub:toolu_2", t, RowKind::Subagent(Subagent {
             tool_use_id: "toolu_2".into(),
@@ -207,6 +208,7 @@ fn polish_written() -> Value {
             file_path: None,
             input: Some("cron: 4 15 3 10 *\nrecurring: false".into()),
             result: Some("Scheduled f56f5668".into()),
+            operation: None,
         })),
         row(2, 4, "tasks:turn:p2", t, RowKind::Tasks(Tasks {
             items: vec![
