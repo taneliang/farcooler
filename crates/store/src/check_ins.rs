@@ -159,6 +159,8 @@ mod tests {
         assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
         assert!(!store.tick_check_in(ws, 20_000_000).unwrap());
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.occurrence.unwrap().state, "pending");
         let conn = store.conn();
         let count: i64 = conn.query_row("SELECT count(*) FROM check_in_occurrences", [], |r| r.get(0)).unwrap();
         let messages: i64 = conn.query_row("SELECT count(*) FROM message_wakes", [], |r| r.get(0)).unwrap();
@@ -523,5 +525,73 @@ impl crate::Store {
         tx.execute("DELETE FROM check_in_enter_fences", []).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(())
+    }
+}
+
+/// Durable configuration and the most recent occurrence, for authorized
+/// inspection. State words are internal; the client supplies human copy.
+#[derive(Debug, Clone)]
+pub struct CheckInStatus {
+    pub workspace: uuid::Uuid,
+    pub task: uuid::Uuid,
+    pub generation: uuid::Uuid,
+    pub authorizer_device: Option<String>,
+    pub authorized_at: i64,
+    pub next_due: i64,
+    pub state: String,
+    pub reason: Option<String>,
+    pub occurrence: Option<CheckInOccurrence>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckInOccurrence {
+    pub id: uuid::Uuid,
+    pub state: String,
+    pub terminal: Option<uuid::Uuid>,
+    pub thread: Option<String>,
+    pub due_at: i64,
+    pub claimed_at: Option<i64>,
+    pub admitted_at: Option<i64>,
+    pub submitted_at: Option<i64>,
+    pub confirmed_at: Option<i64>,
+    pub observation: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl crate::Store {
+    pub fn check_in_status(&self, workspace: uuid::Uuid) -> farcooler_core::Result<Option<CheckInStatus>> {
+        use crate::error::map_err;
+        use crate::models::{get_uuid, uuid_blob};
+        use rusqlite::{OptionalExtension, params};
+
+        let conn = self.conn();
+        let mut status = conn.query_row(
+            "SELECT workspace_id, task_id, generation, authorizer_device, authorized_at, next_due, state, reason
+               FROM check_in_schedules WHERE workspace_id = ?1",
+            params![uuid_blob(workspace)],
+            |r| Ok(CheckInStatus {
+                workspace: get_uuid(r, 0)?, task: get_uuid(r, 1)?, generation: get_uuid(r, 2)?,
+                authorizer_device: r.get(3)?, authorized_at: r.get(4)?, next_due: r.get(5)?,
+                state: r.get(6)?, reason: r.get(7)?, occurrence: None,
+            }),
+        ).optional().map_err(map_err)?;
+        if let Some(status) = &mut status {
+            status.occurrence = conn.query_row(
+                "SELECT id, state, terminal_id, thread_id, due_at, claimed_at, admitted_at, submitted_at, confirmed_at, observation, reason
+                   FROM check_in_occurrences WHERE workspace_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                params![uuid_blob(workspace)],
+                |r| {
+                    let terminal: Option<Vec<u8>> = r.get(2)?;
+                    let terminal = terminal.map(|raw| uuid::Uuid::from_slice(&raw).map_err(|err|
+                        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Blob, Box::new(err)))).transpose()?;
+                    Ok(CheckInOccurrence {
+                        id: get_uuid(r, 0)?, state: r.get(1)?, terminal, thread: r.get(3)?, due_at: r.get(4)?,
+                        claimed_at: r.get(5)?, admitted_at: r.get(6)?, submitted_at: r.get(7)?,
+                        confirmed_at: r.get(8)?, observation: r.get(9)?, reason: r.get(10)?,
+                    })
+                },
+            ).optional().map_err(map_err)?;
+        }
+        Ok(status)
     }
 }
