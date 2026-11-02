@@ -923,6 +923,27 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_enter_keeps_its_fence_across_exclusive_recovery() {
+        let (store, ws, task) = board();
+        let (occ, attempt, daemon, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'enter_admitted', ?2, ?3, ?4 FROM check_in_schedules WHERE workspace_id = ?5",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(terminal), uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon)],
+        ).unwrap();
+        assert!(store.fail_admitted_check_in(occ, attempt).unwrap());
+        assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
+        store.recover_check_ins_after_exclusive_start().unwrap();
+        assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.occurrence.unwrap().state, "uncertain");
+    }
+
+    #[test]
     fn disable_after_claim_prevents_enter_admission() {
         use farcooler_protocol::v1::TerminalIntent;
         let (store, ws, _) = board();
