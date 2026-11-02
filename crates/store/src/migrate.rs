@@ -106,6 +106,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::device_added_by::migration_0065_device_added_by, Older::Welcome), // ov-838: one new table and its index (device_added_by.rs says why)
     (crate::access::migration_0066_person_access, Older::Welcome), // ov-856: four new tables (access.rs says why)
     crate::line_migration::LINE_MIGRATION, // ov-872: agents, the line and landings replace lanes and trains, one way (line_migration.rs says why)
+    (crate::check_ins::migration_check_ins, Older::Refused), // ov-892: admission fences change permitted writes
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

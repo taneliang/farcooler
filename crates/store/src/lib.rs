@@ -54,6 +54,7 @@ mod wakes;
 mod messages;
 mod compose_holds;
 mod compose_waits;
+mod check_ins;
 pub mod people;
 mod device_enrollers;
 mod revoked_marks;
