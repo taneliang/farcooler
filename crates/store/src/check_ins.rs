@@ -923,6 +923,44 @@ mod tests {
     }
 
     #[test]
+    fn admitted_fence_refuses_a_reseat_even_when_values_are_unchanged() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, task) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/reseat", "/reseat", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.set_terminal_workspace(terminal.id, ws).unwrap();
+        let terminal = store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(terminal.id), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.get_terminal(terminal.id).unwrap().resource_version, terminal.resource_version);
+        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]).unwrap();
+    }
+
+    #[test]
+    fn fenced_task_move_rolls_back_the_whole_batch() {
+        let (store, ws, audit) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let other = store.create_workspace(repository, "Other", "other").unwrap().id;
+        let ordinary = store.create_task(ws, "ordinary", Actor::Manager).unwrap().id;
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(audit), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(store.move_tasks(&[ordinary, audit], other, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.get_task(ordinary).unwrap().workspace_id, ws);
+        assert_eq!(store.get_task(audit).unwrap().workspace_id, ws);
+        store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.move_tasks(&[ordinary, audit], other, Actor::Manager).unwrap();
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "suspended");
+    }
+
+    #[test]
     fn lead_upsert_is_fenced_and_unchanged_lead_is_allowed() {
         let (store, ws, task) = board();
         store.conn().execute("INSERT INTO members (handle, name, created_at) VALUES ('alice', 'Alice', 1), ('bob', 'Bob', 1)", []).unwrap();

@@ -717,6 +717,14 @@ impl Store {
                 && let Some(workspace) = workspace
             {
                 let workspace = Uuid::from_slice(&workspace).map_err(|_| DomainError::OperationFailed)?;
+                // Reseat precedes an external respawn even when the stored
+                // values are already identical. A value-change trigger alone
+                // cannot veto that side effect while an Enter is admitted.
+                let admitted: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
+                    params![uuid_blob(workspace)], |r| r.get(0),
+                ).map_err(map_err)?;
+                if admitted { return Err(DomainError::ResourceConflict) }
                 if other_live_orchestrator(&tx, workspace, Some(terminal), vacated).map_err(map_err)?.is_some() {
                     return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
                 }
