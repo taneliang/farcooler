@@ -75,7 +75,12 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         CREATE TABLE check_in_target_reservations (
             token BLOB PRIMARY KEY NOT NULL,
             workspace_id BLOB,
-            terminal_id BLOB NOT NULL
+            terminal_id BLOB NOT NULL,
+            operation TEXT NOT NULL CHECK (operation IN ('stop', 'remove')),
+            phase TEXT NOT NULL CHECK (phase IN ('reserved', 'completed', 'uncertain')),
+            process_id INTEGER NOT NULL,
+            process_started INTEGER,
+            created_at INTEGER NOT NULL
         );
         CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id);
         CREATE TABLE check_in_enter_fences (
@@ -832,12 +837,13 @@ impl crate::Store {
     /// observed the external operation and its row update finish. An error or
     /// cancellation must leave it in place for explicit reconciliation.
     pub fn reserve_check_in_target_change(
-        &self, terminal: uuid::Uuid, token: uuid::Uuid,
+        &self, terminal: uuid::Uuid, token: uuid::Uuid, operation: &str, process_started: Option<i64>,
     ) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         use farcooler_core::DomainError;
         use rusqlite::{OptionalExtension, params};
+        if !matches!(operation, "stop" | "remove") { return Err(DomainError::InvalidArgument { what: "operation" }) }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
         let terminal_row: Option<(Option<Vec<u8>>, i64)> = tx.query_row(
@@ -857,11 +863,53 @@ impl crate::Store {
             if admitted { return Err(DomainError::ResourceConflict) }
         }
         tx.execute(
-            "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id) VALUES (?1, ?2, ?3)",
-            params![uuid_blob(token), affected_workspace, uuid_blob(terminal)],
+            "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id, operation, phase, process_id, process_started, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7)",
+            params![uuid_blob(token), affected_workspace, uuid_blob(terminal), operation, i64::from(std::process::id()), process_started, crate::tasks::now_millis()],
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(true)
+    }
+
+    /// Record that the owned external operation returned successfully and
+    /// cannot initiate another action. A failed or cancelled operation must
+    /// not use this transition.
+    pub fn complete_check_in_target_change(&self, token: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        let changed = self.conn().execute(
+            "UPDATE check_in_target_reservations SET phase = 'completed' WHERE token = ?1 AND phase = 'reserved'",
+            [uuid_blob(token)],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+
+    /// Keep an ambiguous operation visible; no timeout removes its hold.
+    pub fn mark_check_in_target_uncertain(&self, token: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        let changed = self.conn().execute(
+            "UPDATE check_in_target_reservations SET phase = 'uncertain' WHERE token = ?1 AND phase = 'reserved'",
+            [uuid_blob(token)],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+
+    /// Owner-facing reconciliation rechecks a remote owner's binding in
+    /// the same write that removes a conclusively completed token.
+    pub fn reconcile_check_in_target_change(&self, token: uuid::Uuid, device: Option<&str>) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+        let changed = self.conn().execute(
+            "DELETE FROM check_in_target_reservations WHERE token = ?1 AND phase = 'completed'
+             AND (?2 IS NULL OR (EXISTS (SELECT 1 FROM owner_devices WHERE client_id = ?2 AND state = 'confirmed')
+                 AND NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?2)
+                 AND NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?2)
+                 AND NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?2)))",
+            params![uuid_blob(token), device],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
     }
 
     /// Release only the matching reservation after the external operation can
@@ -870,9 +918,65 @@ impl crate::Store {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         let changed = self.conn().execute(
-            "DELETE FROM check_in_target_reservations WHERE token = ?1", [uuid_blob(token)],
+            "DELETE FROM check_in_target_reservations WHERE token = ?1 AND phase = 'completed'", [uuid_blob(token)],
         ).map_err(map_err)?;
         Ok(changed == 1)
+    }
+}
+
+impl crate::Store {
+    /// A non-local owner caller must have a current confirmed, uncapped owner
+    /// binding. The local socket is separately verified by its caller seat.
+    pub fn is_check_in_owner_device(&self, device: &str) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        self.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM owner_devices WHERE client_id = ?1 AND state = 'confirmed')
+                AND NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?1)
+                AND NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?1)
+                AND NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?1)",
+            [device], |r| r.get(0),
+        ).map_err(map_err)
+    }
+}
+
+/// An unresolved or not-yet-cleaned runner target operation, including holds
+/// for terminals that have no workspace or whose row has been deleted.
+#[derive(Debug, Clone)]
+pub struct CheckInTargetHold {
+    pub token: uuid::Uuid,
+    pub workspace: Option<uuid::Uuid>,
+    pub terminal: uuid::Uuid,
+    pub operation: String,
+    pub phase: String,
+    pub process_id: i64,
+    pub process_started: Option<i64>,
+    pub created_at: i64,
+}
+
+impl crate::Store {
+    pub fn check_in_target_holds(&self, device: Option<&str>) -> farcooler_core::Result<Vec<CheckInTargetHold>> {
+        use crate::error::map_err;
+        use crate::models::get_uuid;
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT token, workspace_id, terminal_id, operation, phase, process_id, process_started, created_at
+               FROM check_in_target_reservations
+              WHERE (?1 IS NULL OR (EXISTS (SELECT 1 FROM owner_devices WHERE client_id = ?1 AND state = 'confirmed')
+                 AND NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?1)
+                 AND NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?1)
+                 AND NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?1)))
+              ORDER BY created_at, rowid",
+        ).map_err(map_err)?;
+        let rows = stmt.query_map([device], |r| {
+            let workspace: Option<Vec<u8>> = r.get(1)?;
+            let workspace = workspace.map(|raw| uuid::Uuid::from_slice(&raw).map_err(|error|
+                rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Blob, Box::new(error)))).transpose()?;
+            Ok(CheckInTargetHold {
+                token: get_uuid(r, 0)?, workspace, terminal: get_uuid(r, 2)?, operation: r.get(3)?, phase: r.get(4)?,
+                process_id: r.get(5)?, process_started: r.get(6)?, created_at: r.get(7)?,
+            })
+        }).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 }
 
@@ -972,13 +1076,14 @@ mod tests {
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", 1, 2, 0).unwrap());
         let reservation = Uuid::now_v7();
-        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(store.complete_check_in_target_change(reservation).unwrap());
         assert!(store.release_check_in_target_change(reservation).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 3_600_003).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 3_600_003).unwrap());
         assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
-        assert!(matches!(store.reserve_check_in_target_change(terminal.id, Uuid::now_v7()), Err(DomainError::ResourceConflict)));
+        assert!(matches!(store.reserve_check_in_target_change(terminal.id, Uuid::now_v7(), "stop", Some(1)), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
         assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), 3_600_004).unwrap());
@@ -1072,10 +1177,47 @@ mod tests {
         assert_eq!(store.get_terminal(terminal.id).unwrap().resource_version, terminal.resource_version);
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let reservation = Uuid::now_v7();
-        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         assert!(matches!(store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]), Err(DomainError::ResourceConflict)));
+        assert!(store.complete_check_in_target_change(reservation).unwrap());
         assert!(store.release_check_in_target_change(reservation).unwrap());
         store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]).unwrap();
+    }
+
+    #[test]
+    fn orphaned_and_uncertain_target_holds_are_visible_and_cannot_be_released() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/orphan", "/orphan", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "agent", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        let token = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, token, "remove", Some(1)).unwrap());
+        assert!(!store.release_check_in_target_change(token).unwrap());
+        assert!(store.mark_check_in_target_uncertain(token).unwrap());
+        store.conn().execute("DELETE FROM terminals WHERE id = ?1", [uuid_blob(terminal.id)]).unwrap();
+        store.recover_check_ins_after_exclusive_start().unwrap();
+        let holds = store.check_in_target_holds(None).unwrap();
+        assert_eq!(holds.len(), 1);
+        assert_eq!((holds[0].token, holds[0].workspace, holds[0].terminal, holds[0].phase.as_str()), (token, None, terminal.id, "uncertain"));
+        assert!(!store.complete_check_in_target_change(token).unwrap());
+        assert!(!store.release_check_in_target_change(token).unwrap());
+    }
+
+    #[test]
+    fn only_a_completed_target_hold_can_be_reconciled() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/completed", "/completed", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "agent", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        let token = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, token, "stop", Some(1)).unwrap());
+        assert!(!store.release_check_in_target_change(token).unwrap());
+        assert!(store.complete_check_in_target_change(token).unwrap());
+        assert_eq!(store.check_in_target_holds(None).unwrap()[0].phase, "completed");
+        assert!(store.reconcile_check_in_target_change(token, None).unwrap());
+        assert!(store.check_in_target_holds(None).unwrap().is_empty());
     }
 
     #[test]
@@ -1087,8 +1229,9 @@ mod tests {
         let terminal = store.create_terminal(worktree.id, "agent", "codex", TerminalIntent::Running, 80, 24).unwrap();
         store.set_terminal_workspace(terminal.id, ws).unwrap();
         let reservation = Uuid::now_v7();
-        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         assert!(matches!(store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator), Err(DomainError::ResourceConflict)));
+        assert!(store.complete_check_in_target_change(reservation).unwrap());
         assert!(store.release_check_in_target_change(reservation).unwrap());
         store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator).unwrap();
     }
@@ -1106,7 +1249,7 @@ mod tests {
         ).unwrap();
         store.conn().execute("DELETE FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         let reservation = Uuid::now_v7();
-        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         store.recover_check_ins_after_exclusive_start().unwrap();
         store.enable_check_in(ws, task, None, None, false, 1).unwrap();
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
@@ -1114,6 +1257,7 @@ mod tests {
         let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
         assert!(!store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
         assert_eq!(store.check_in_status(ws).unwrap().unwrap().reason.as_deref(), Some("target_change_in_progress"));
+        assert!(store.complete_check_in_target_change(reservation).unwrap());
         assert!(store.release_check_in_target_change(reservation).unwrap());
         assert!(store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
     }

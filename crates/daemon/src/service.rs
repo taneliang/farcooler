@@ -2987,14 +2987,15 @@ impl Service {
         // model needed a separate step here to stop a stored group pointing at a
         // terminal that no longer existed.
         let reservation = Uuid::now_v7();
-        let reserved = self.store.reserve_check_in_target_change(id, reservation)?;
-        let killed = self.kill_pane(id).await;
+        let reserved = self.reserve_target_stop(id, reservation, "remove")?;
+        if let Err(error) = self.kill_pane(id).await {
+            self.mark_target_stop_uncertain(reserved, reservation);
+            return Err(error);
+        }
+        self.complete_target_stop(reserved, reservation)?;
         let _ = self.store.end_pane_agent(id); // the pane's agent has finished (ov-872)
         let deleted = self.delete_terminal_record(id, record.resource_version);
-        if reserved && killed.is_ok() && deleted.is_ok() {
-            self.store.release_check_in_target_change(reservation)?;
-        }
-        deleted
+        self.finish_target_stop(reserved, reservation, id, record.resource_version, deleted)
     }
 
     /// Delete a terminal's row, and drop the in-memory state held for it.
@@ -4182,22 +4183,71 @@ impl Service {
         self.tmux.kill_pane(&pane.pane_id).await
     }
 
+    fn reserve_target_stop(&self, terminal: Uuid, token: Uuid, operation: &str) -> Result<bool> {
+        use crate::claude_registry::{Kernel, Processes};
+        static PROCESS_STARTED: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
+        let started = *PROCESS_STARTED.get_or_init(|| i32::try_from(std::process::id()).ok().and_then(|pid| Kernel.started(pid)));
+        self.store.reserve_check_in_target_change(terminal, token, operation, started)
+    }
+
+    fn mark_target_stop_uncertain(&self, reserved: bool, token: Uuid) {
+        if reserved && let Err(error) = self.store.mark_check_in_target_uncertain(token) {
+            tracing::warn!(%token, error = %error, "could not mark target stop uncertain");
+        }
+    }
+
+    fn complete_target_stop(&self, reserved: bool, token: Uuid) -> Result<()> {
+        if reserved && !self.store.complete_check_in_target_change(token)? {
+            return Err(DomainError::ResourceConflict);
+        }
+        Ok(())
+    }
+
+    /// A completed owned operation can release its exact token even if the
+    /// subsequent row write lost a version race. Preserve that write's error.
+    pub(crate) fn finish_target_stop<T>(&self, reserved: bool, token: Uuid, terminal: Uuid, expected: u64, result: Result<T>) -> Result<T> {
+        if !reserved { return result }
+        let reconciled = match &result {
+            Ok(_) => true,
+            Err(DomainError::ResourceConflict | DomainError::NotFound) => match self.store.get_terminal(terminal) {
+                Ok(current) => current.resource_version != expected,
+                Err(DomainError::NotFound) => true,
+                Err(_) => false,
+            },
+            Err(_) => false,
+        };
+        if !reconciled { return result }
+        let released = self.store.release_check_in_target_change(token);
+        match (result, released) {
+            (Err(error), release) => {
+                if !matches!(release, Ok(true)) { tracing::warn!(%token, "completed target stop needs reconciliation"); }
+                Err(error)
+            }
+            (Ok(value), Ok(true)) => Ok(value),
+            (Ok(_), Ok(false)) => Err(DomainError::ResourceConflict),
+            (Ok(_), Err(error)) => Err(error),
+        }
+    }
+
     /// Stop a terminal. Signals the daemon-owned pane, then records intent.
     pub async fn stop_terminal(&self, id: Uuid) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
         let reservation = Uuid::now_v7();
-        let reserved = self.store.reserve_check_in_target_change(id, reservation)?;
-        // A failure or cancellation leaves the durable reservation in place:
+        let reserved = self.reserve_target_stop(id, reservation, "stop")?;
+        // A failure or cancellation leaves the durable reservation visible:
         // tmux may already have received the kill.
-        self.kill_pane(id).await?;
+        if let Err(error) = self.kill_pane(id).await {
+            self.mark_target_stop_uncertain(reserved, reservation);
+            return Err(error);
+        }
+        self.complete_target_stop(reserved, reservation)?;
         self.inventory.refresh().await;
         let stopped = self.store.update_terminal(
             id,
             term.resource_version,
             terminal_update(&term, |u| u.intent = TerminalIntent::Stopped),
-        )?;
-        if reserved { self.store.release_check_in_target_change(reservation)?; }
-        Ok(stopped)
+        );
+        self.finish_target_stop(reserved, reservation, id, term.resource_version, stopped)
     }
 
     /// Forget a lost terminal, without ever claiming it exited.
