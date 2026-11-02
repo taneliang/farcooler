@@ -138,6 +138,34 @@ mod tests {
     }
 
     #[test]
+    fn admission_vetoes_mutation_and_settles_only_its_attempt() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, task) = board();
+        let repo = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repo, "test/check-in", "/check-in", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute(
+            "UPDATE terminals SET workspace_id = ?2, role = 2, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
+            params![uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread' FROM check_in_schedules WHERE workspace_id = ?5",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", 5).unwrap());
+        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", 5).unwrap());
+        assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
+        assert!(store.settle_check_in_enter(occ, attempt, false, 6).unwrap());
+        store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
+        assert_eq!(state, "uncertain");
+    }
+
+    #[test]
     fn status_change_invalidates_and_does_not_revive_on_return() {
         let (store, ws, task) = board();
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
