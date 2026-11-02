@@ -314,6 +314,29 @@ async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
     assert_eq!(si.submitted().len(), 1, "no duplicate prompt");
 }
 
+/// Cleanup already owns the gate: a due scheduled attempt must not even
+/// claim, paste or send, and must remain available for the next tick.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    let gate = b.watcher.check_in_cleanup_gate.lock().await;
+    b.watcher.send_check_in(&pending, Uuid::now_v7()).await.unwrap();
+    assert_eq!(b.svc.store.pending_check_ins().unwrap().len(), 1);
+    assert!(!si.log().contains("PASTE "), "{}", si.log());
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+    drop(gate);
+}
+
 /// Hours while the orchestrator is working remain one pending occurrence and
 /// never take the ordinary mid-turn delivery routes.
 #[cfg(unix)]
