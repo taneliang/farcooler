@@ -12,7 +12,7 @@ struct NativeOperationCaptures {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
-        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/agent-rows-ov893.json"))
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/agent-rows-ov893-producer.json"))
         let page = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let rows = try #require(page["rows"] as? [[String: Any]])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -33,9 +33,9 @@ struct NativeOperationCaptures {
             try await Capture.wait(expecting: "fixture tool group", until: { frames.views["native-tool-group"] != nil })
             await NativeAgentTests.settle(window, 300)
             try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(size)-group.png"), expecting: "collapsed group", until: { frames.views["native-tool-group"] != nil }) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
-            try #require(NativePolishTests.click("section-header-toolgroup.tools:tool:note", frames: frames, in: window))
+            try #require(NativePolishTests.click("section-header-toolgroup.tools:tool:exec-28657ce1-a066-4a00-a17b-ca479ae15b42", frames: frames, in: window))
             await NativeAgentTests.settle(window, 400)
-            try #require(NativePolishTests.click("section-header-tool.tool:note", frames: frames, in: window))
+            try #require(NativePolishTests.click("section-header-tool.tool:exec-fccc8116-d738-4d7f-ac0f-f655c8a13542", frames: frames, in: window))
             await NativeAgentTests.settle(window, 400)
             try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(size)-expanded.png"), expecting: "raw excerpt open", until: { frames.views["native-tool-detail"] != nil }) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()

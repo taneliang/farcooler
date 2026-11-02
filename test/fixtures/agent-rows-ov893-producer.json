@@ -1,0 +1,78 @@
+{
+  "epoch": 1,
+  "moreBefore": false,
+  "rev": 9,
+  "rows": [
+    {
+      "id": "turn:fixture-turn",
+      "kind": {
+        "Turn": {
+          "activity": "Busy",
+          "background_running": 0,
+          "duration_ms": null,
+          "ended_ms": null,
+          "origin": "Other",
+          "outcome": null,
+          "prompt": "",
+          "started_ms": null
+        }
+      },
+      "ord": 0,
+      "provisional": false,
+      "rev": 2,
+      "turn": null
+    },
+    {
+      "id": "tool:exec-28657ce1-a066-4a00-a17b-ca479ae15b42",
+      "kind": {
+        "Tool": {
+          "diff": [],
+          "ended_ms": 1793574926490,
+          "file_path": null,
+          "input": "command: [\"/bin/zsh\",\"-lc\",\"'/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task set ov-893 --status in_progress; '/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task note ov-893 --kind decision --body 'Research native operation rows using actual tool-call/projector data and owner screenshots, after ov-894. Keep exact raw expansion and conservative fallback for shell compounds/dynamic text; semantic recognition never supplies caller authority or success. No product edits/builds.'\"]",
+          "name": "Bash",
+          "result": "ov-893  in_progress  Agent view: Far Cooler operations get native rows\nov-893  c143ae3d  decision",
+          "started_ms": 1793574924733,
+          "status": "Done",
+          "summary": "'/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task set ov-8…"
+        }
+      },
+      "ord": 1,
+      "provisional": false,
+      "rev": 5,
+      "turn": "turn:fixture-turn"
+    },
+    {
+      "id": "tool:exec-fccc8116-d738-4d7f-ac0f-f655c8a13542",
+      "kind": {
+        "Tool": {
+          "diff": [],
+          "ended_ms": 1793574959743,
+          "file_path": null,
+          "input": "command: [\"/bin/zsh\",\"-lc\",\"'/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task note ov-893 --kind decision --body 'Recommend optional semantic metadata on existing stable Tool rows: conservative literal-command recognition for immediate presentation, later corroborated by authenticated CLI/daemon receipts. Never derive authority from actor flags or success from command text/output wording. Keep compounds/dynamic commands generic unless per-operation execution receipts prove their identity; preserve raw input/output and authorized links.'\"]",
+          "name": "Bash",
+          "operation": {
+            "input_clipped": false,
+            "kind": "task_note_decision",
+            "lifecycle": "completed",
+            "output_available": true,
+            "output_clipped": false,
+            "preview": "Recommend optional semantic metadata on existing stable Tool rows: conservative literal-command recognition for immediate presentation, later corroborated by authenticated CLI/daemon receipts. Never derive authority from actor flags or success from command text/output wording. Ke",
+            "preview_clipped": true,
+            "provenance": "literal_intent",
+            "target": "ov-893",
+            "version": 1
+          },
+          "result": "ov-893  264ca0f7  decision",
+          "started_ms": 1793574957570,
+          "status": "Done",
+          "summary": "'/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task note ov-…"
+        }
+      },
+      "ord": 2,
+      "provisional": false,
+      "rev": 9,
+      "turn": "turn:fixture-turn"
+    }
+  ]
+}

@@ -269,3 +269,43 @@ fn the_harness_fixture_is_what_the_rows_boundary_writes() {
         serde_json::to_string_pretty(&written).unwrap_or_default()
     );
 }
+
+/// ov-893 capture input is the saved producer, projected and serialized at the
+/// same client boundary as real rows. No lifecycle variants are synthesized.
+fn native_operation_producer_page() -> Value {
+    let mut projection = Projection::new();
+    projection.fold_codex_line(br#"{"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}"#);
+    for line in include_str!("../../../core/src/session_log/projector/fixtures/native-operations/codex-0.166.0.jsonl").lines() {
+        projection.fold_codex_line(line.as_bytes());
+    }
+    let page = AgentRowPage {
+        terminal_id: Default::default(), epoch: 1, rev: projection.revision(),
+        rows: projection.rows().iter().map(wire).collect(), more_before: false,
+    };
+    super::rows_args::page_of(&page)
+}
+
+#[test]
+fn native_operation_capture_fixture_is_projected_producer_and_preserves_excerpts() {
+    let producer: Vec<Value> = include_str!("../../../core/src/session_log/projector/fixtures/native-operations/codex-0.166.0.jsonl")
+        .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let command = producer[1]["payload"]["item"]["command"][2].as_str().unwrap();
+    let body = command.split_once("--body '").unwrap().1.strip_suffix('\'').unwrap();
+    let output = producer[1]["payload"]["item"]["aggregated_output"].as_str().unwrap().trim_end();
+    let written = native_operation_producer_page();
+    let rows = written["rows"].as_array().unwrap();
+    let tools: Vec<&Value> = rows.iter().filter_map(|row| row["kind"].get("Tool")).collect();
+    assert_eq!(tools.len(), 2);
+    assert!(tools[0].get("operation").is_none_or(Value::is_null), "actual compound remains generic");
+    let op = &tools[1]["operation"];
+    let preview = op["preview"].as_str().expect("preview must be visible in the retained input");
+    assert!(!preview.is_empty() && body.starts_with(preview), "preview is an exact prefix of the original body");
+    assert_eq!(op["preview_clipped"].as_bool(), Some(preview != body));
+    let input = tools[1]["input"].as_str().unwrap();
+    assert_eq!(input, format!("command: {}", producer[1]["payload"]["item"]["command"]));
+    assert!(input.contains(preview), "preview must occur within the original retained input excerpt");
+    assert_eq!(tools[1]["result"].as_str(), Some(output));
+    assert_eq!(op["lifecycle"], "completed");
+    let fixture: Value = serde_json::from_str(include_str!("../../../../test/fixtures/agent-rows-ov893-producer.json")).unwrap();
+    assert_eq!(fixture, written, "fixture differs from actual projector/client boundary output:\n{}", serde_json::to_string_pretty(&written).unwrap());
+}

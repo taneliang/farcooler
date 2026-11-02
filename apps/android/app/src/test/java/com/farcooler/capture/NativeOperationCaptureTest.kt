@@ -26,8 +26,8 @@ class NativeOperationCaptureTest {
     @After fun close() = running.close()
     @Test fun fixtureGroup() {
         var root: File? = File(System.getProperty("user.dir")).absoluteFile
-        while (root != null && !File(root, "test/fixtures/agent-rows-ov893.json").isFile) root = root.parentFile
-        val fixture = requireNotNull(root).resolve("test/fixtures/agent-rows-ov893.json")
+        while (root != null && !File(root, "test/fixtures/agent-rows-ov893-producer.json").isFile) root = root.parentFile
+        val fixture = requireNotNull(root).resolve("test/fixtures/agent-rows-ov893-producer.json")
         val source = FakeRowSource()
         val model = NativePaneModel(terminal = "fixture", store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1), source = source, sink = { _, _, _ -> false }, memory = InMemoryPaneViews(), scope = running.scope)
         source.answerPage(Json.parseToJsonElement(fixture.readText()).jsonObject)
