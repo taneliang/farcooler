@@ -132,9 +132,14 @@ data class AgentRow(
         val input: String? = null,
         /** What it answered, cut likewise; null until it does. */
         val result: String? = null,
+        val operation: LiteralOperation? = null,
     ) {
+        val presentationName: String get() = if (operation == null) name else "Far Cooler"
+        val presentationSummary: String get() = operation?.summary ?: summary
+        val presentationStatus: Status get() = operation?.status ?: status
+        val presentationAccessibility: String get() = operation?.let { "Far Cooler, recognized command, ${it.summary}, ${it.words}" } ?: listOf(name, summary).filter { it.isNotEmpty() }.joinToString(", ")
         /** Whether it has anything to open to. */
-        val opens: Boolean get() = input != null || result != null || diff.isNotEmpty()
+        val opens: Boolean get() = operation != null || input != null || result != null || diff.isNotEmpty()
     }
 
     data class Tasks(val items: List<TaskItem>)
@@ -432,6 +437,7 @@ internal object AgentRowJson {
                     filePath = string(p["file_path"]),
                     input = string(p["input"]),
                     result = string(p["result"]),
+                    operation = LiteralOperation.decode(p["operation"]),
                 ),
             )
             "Subagent" -> AgentRow.Kind.OfSubagent(

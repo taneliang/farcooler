@@ -981,6 +981,7 @@ impl Projection {
             }
             _ => {
                 let tool = Tool {
+                    operation: None,
                     name: name.to_string(),
                     summary: summarize(input),
                     status: ToolStatus::Running,

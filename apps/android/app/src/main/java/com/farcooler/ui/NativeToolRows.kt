@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.AgentConversation
+import com.farcooler.model.LiteralOperation
 import com.farcooler.model.AgentRow
 
 // The agent's machinery in the conversation view (ov-452, ov-459), set below its
@@ -104,24 +105,25 @@ internal fun NativeToolRow(id: String, tool: AgentRow.Tool, startOpen: Boolean =
         OpeningHeader(
             open = open,
             opens = tool.opens,
-            description = listOf(tool.name, tool.summary).filter { it.isNotEmpty() }.joinToString(", "),
+            description = tool.presentationAccessibility,
             toggle = { open = !open },
             time = { RunTimeChip(tool.startedMs, tool.endedMs) },
         ) { weighted ->
             Row(weighted, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusMark(tool.status)
-                Text(tool.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StatusMark(tool.presentationStatus)
+                Text(tool.presentationName, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 // Prose wraps to two lines and cuts at its end; only a path is cut in the middle.
                 Text(
-                    tool.summary,
+                    tool.presentationSummary,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 2,
+                    maxLines = if (tool.operation == null) 2 else Int.MAX_VALUE,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
+        tool.operation?.let { LiteralOperationCaption(it) }
         if (open) NativeToolDetail(tool, Modifier.padding(start = 24.dp, bottom = 8.dp))
     }
 }
@@ -130,9 +132,10 @@ internal fun NativeToolRow(id: String, tool: AgentRow.Tool, startOpen: Boolean =
 @Composable
 private fun NativeToolDetail(tool: AgentRow.Tool, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().testTag("native-tool-detail"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tool.input?.let { DetailPart("Input", it) }
+        tool.input?.let { DetailPart(if (tool.operation == null) "Input" else "Input excerpt", it) }
         if (tool.diff.isNotEmpty()) NativeDiff(tool.diff)
-        tool.result?.let { DetailPart(if (tool.status == AgentRow.Status.Failed) "Error" else "Result", it) }
+        if (tool.operation != null && tool.result == null) Text(if (tool.operation.outputAvailable) "Output is empty" else "Output unavailable")
+        tool.result?.let { DetailPart(if (tool.operation == null) { if (tool.status == AgentRow.Status.Failed) "Error" else "Result" } else { if (tool.presentationStatus == AgentRow.Status.Failed) "Error excerpt" else "Output excerpt" }, it) }
     }
 }
 
@@ -193,7 +196,7 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boo
         OpeningHeader(
             open = open,
             opens = true,
-            description = "$title: $purpose",
+            description = "$title: $purpose, ${AgentConversation.recognizedGroupLabel(tools).orEmpty()}",
             toggle = { open = !open },
             time = {
                 RunTimeChip(tools.firstOrNull()?.startedMs, if (status == AgentRow.Status.Running) null else tools.mapNotNull { it.endedMs }.maxOrNull())
@@ -219,6 +222,7 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boo
                 )
             }
         }
+        AgentConversation.recognizedGroupLabel(tools)?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
         if (open) {
             Column(Modifier.padding(start = 24.dp).testTag("native-tool-group-rows")) {
                 for (row in rows) {
@@ -310,5 +314,21 @@ internal fun FoldedText(
                 }
             }
         }
+    }
+}
+
+/** Provenance is outside the disclosure hit target and is never truncated. */
+@Composable
+private fun LiteralOperationCaption(operation: LiteralOperation) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Recognized command · ${operation.words}", style = MaterialTheme.typography.labelMedium)
+        operation.preview?.let { preview ->
+            SelectionContainer { Text(preview, style = MaterialTheme.typography.bodySmall) }
+            if (operation.previewClipped) Text("Content excerpt clipped", style = MaterialTheme.typography.labelSmall)
+            if (operation.containsControls) Text("Contains direction or control characters", style = MaterialTheme.typography.labelSmall)
+        } ?: if (operation.kind.startsWith("task_note_") || operation.kind == "message_orchestrator") {
+            Text("Preview unavailable in excerpt", style = MaterialTheme.typography.labelSmall)
+        } else Unit
+        if (operation.inputClipped || operation.outputClipped) Text("Input or output excerpt clipped", style = MaterialTheme.typography.labelSmall)
     }
 }

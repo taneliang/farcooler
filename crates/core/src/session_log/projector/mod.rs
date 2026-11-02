@@ -28,6 +28,7 @@
 
 mod asks;
 mod codex;
+pub mod literal_operation;
 pub mod detail;
 pub mod held;
 pub mod files;

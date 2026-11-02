@@ -638,8 +638,8 @@ object AgentConversation {
     fun groupPurpose(tools: List<AgentRow.Tool>): String {
         val phrases = LinkedHashSet<String>()
         for (tool in tools) {
-            val summary = tool.summary.trim()
-            phrases.add(if (summary.isEmpty()) tool.name else purpose(summary))
+            val summary = tool.presentationSummary.trim()
+            phrases.add(if (tool.operation != null) summary else if (summary.isEmpty()) tool.name else purpose(summary))
         }
         return phrases.joinToString(", ")
     }
@@ -661,9 +661,21 @@ object AgentConversation {
 
     /** A group's state: running while any call is, failed if any failed, else done. */
     fun groupStatus(tools: List<AgentRow.Tool>): AgentRow.Status = when {
-        tools.any { it.status == AgentRow.Status.Running } -> AgentRow.Status.Running
-        tools.any { it.status == AgentRow.Status.Failed } -> AgentRow.Status.Failed
+        tools.any { it.presentationStatus == AgentRow.Status.Running } -> AgentRow.Status.Running
+        tools.any { it.presentationStatus == AgentRow.Status.Failed } -> AgentRow.Status.Failed
+        tools.any { it.operation?.lifecycle == "unconfirmed" } -> AgentRow.Status.Ended("Outcome unconfirmed")
         else -> AgentRow.Status.Done
+    }
+
+    fun recognizedGroupLabel(tools: List<AgentRow.Tool>): String? {
+        if (tools.none { it.operation != null }) return null
+        val words = when (groupStatus(tools)) {
+            AgentRow.Status.Running -> "Commands running"
+            AgentRow.Status.Done -> "Commands completed"
+            AgentRow.Status.Failed -> "Command failed or declined"
+            else -> "Outcome unconfirmed"
+        }
+        return "Recognized commands · $words"
     }
 
     // Long messages

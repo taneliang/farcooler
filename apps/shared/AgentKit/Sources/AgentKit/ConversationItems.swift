@@ -98,8 +98,8 @@ extension AgentConversation {
         var seen = Set<String>()
         var phrases: [String] = []
         for tool in tools {
-            let summary = tool.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            let phrase = summary.isEmpty ? tool.name : purpose(of: summary)
+            let summary = tool.presentationSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            let phrase = tool.operation != nil ? summary : (summary.isEmpty ? tool.name : purpose(of: summary))
             if seen.insert(phrase).inserted { phrases.append(phrase) }
         }
         return phrases.joined(separator: ", ")
@@ -120,8 +120,9 @@ extension AgentConversation {
     /// A group's state: running while any call is, failed if any failed,
     /// else done.
     public static func groupStatus(_ tools: [AgentRow.Tool]) -> AgentRow.Status {
-        if tools.contains(where: { $0.status == .running }) { return .running }
-        if tools.contains(where: { $0.status == .failed }) { return .failed }
+        if tools.contains(where: { $0.presentationStatus == .running }) { return .running }
+        if tools.contains(where: { $0.presentationStatus == .failed }) { return .failed }
+        if tools.contains(where: { $0.operation?.lifecycle == .unconfirmed }) { return .ended("Outcome unconfirmed") }
         return .done
     }
 

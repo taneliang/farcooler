@@ -57,29 +57,30 @@ struct NativeToolRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             OpeningHeader(
                 open: open, opens: tool.opens,
-                accessibilityLabel: [tool.name, tool.summary].filter { !$0.isEmpty }.joined(separator: ", "),
+                accessibilityLabel: tool.presentationAccessibility,
                 toggle: { withAnimation(.snappy) { open.toggle() } }
             ) {
-                if type.isAccessibilitySize {
+                if type.isAccessibilitySize || tool.operation != nil {
                     // The words under the name, where they may take lines:
                     // beside it they were cut to a few letters (ov-685).
                     VStack(alignment: .leading, spacing: Spacing.tight) {
                         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                            NativeStatusMark(status: tool.status)
-                            Text(tool.name).fontWeight(.medium)
+                            NativeStatusMark(status: tool.presentationStatus)
+                            Text(tool.presentationName).fontWeight(.medium)
                             Spacer(minLength: Spacing.group)
                             NativeRunTime(startedMs: tool.startedMs, endedMs: tool.endedMs)
                         }
-                        Text(tool.summary).lineLimit(4).truncationMode(.middle)
+                        Text(verbatim: tool.presentationSummary).lineLimit(4).truncationMode(.middle)
                     }
                 } else {
-                    NativeStatusMark(status: tool.status)
-                    Text(tool.name).fontWeight(.medium)
-                    Text(tool.summary).lineLimit(1).truncationMode(.middle).layoutPriority(-1)
+                    NativeStatusMark(status: tool.presentationStatus)
+                    Text(tool.presentationName).fontWeight(.medium)
+                    Text(verbatim: tool.presentationSummary).lineLimit(1).truncationMode(.middle).layoutPriority(-1)
                     Spacer(minLength: Spacing.group)
                     NativeRunTime(startedMs: tool.startedMs, endedMs: tool.endedMs)
                 }
             }
+            if let operation = tool.operation { LiteralOperationCaption(operation: operation) }
             if open {
                 NativeToolDetail(tool: tool)
                     .padding(.leading, 10 + Spacing.group)
@@ -97,9 +98,10 @@ private struct NativeToolDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
-            if let input = tool.input { part("Input", input) }
+            if let input = tool.input { part(tool.operation == nil ? "Input" : "Input excerpt", input) }
             if !tool.diff.isEmpty { NativeDiff(hunks: tool.diff) }
-            if let result = tool.result { part(tool.status == .failed ? "Error" : "Result", result) }
+            if let operation = tool.operation, tool.result == nil { Text(operation.outputAvailable ? "Output is empty" : "Output unavailable").font(.caption) }
+            if let result = tool.result { part(tool.operation == nil ? (tool.status == .failed ? "Error" : "Result") : (tool.presentationStatus == .failed ? "Error excerpt" : "Output excerpt"), result) }
         }
         .accessibilityIdentifier("native-tool-detail")
     }
@@ -132,7 +134,7 @@ struct NativeToolGroupRow: View {
         let purpose = AgentConversation.groupPurpose(tools)
         let status = AgentConversation.groupStatus(tools)
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            OpeningHeader(open: open, opens: true, accessibilityLabel: "\(title): \(purpose)", toggle: { withAnimation(.snappy) { open.toggle() } }) {
+            OpeningHeader(open: open, opens: true, accessibilityLabel: "\(title): \(purpose), \(AgentConversation.recognizedGroupLabel(tools) ?? "")", toggle: { withAnimation(.snappy) { open.toggle() } }) {
                 if type.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: Spacing.tight) {
                         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
@@ -151,6 +153,7 @@ struct NativeToolGroupRow: View {
                     NativeRunTime(startedMs: tools.first?.startedMs, endedMs: status == .running ? nil : tools.compactMap(\.endedMs).max())
                 }
             }
+            if let provenance = AgentConversation.recognizedGroupLabel(tools) { Text(provenance).font(.caption).fixedSize(horizontal: false, vertical: true) }
             if open {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(boxes) { box in
@@ -339,5 +342,22 @@ struct NativeOutputText: View {
         } else {
             Text(text).textSelection(.enabled)
         }
+    }
+}
+
+private struct LiteralOperationCaption: View {
+    let operation: LiteralOperation
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            Text("Recognized command · \(operation.lifecycle.words)").font(.caption).fixedSize(horizontal: false, vertical: true)
+            if let preview = operation.preview {
+                NativeOutputText(text: preview).font(.callout).environment(\.layoutDirection, .leftToRight)
+                if operation.previewClipped { Text("Content excerpt clipped").font(.caption) }
+                if operation.containsControls { Text("Contains direction or control characters").font(.caption) }
+            } else if operation.kind.hasPrefix("task_note_") || operation.kind == "message_orchestrator" {
+                Text("Preview unavailable in excerpt").font(.caption)
+            }
+            if operation.inputClipped || operation.outputClipped { Text("Input or output excerpt clipped").font(.caption) }
+        }.foregroundStyle(.quietInk)
     }
 }

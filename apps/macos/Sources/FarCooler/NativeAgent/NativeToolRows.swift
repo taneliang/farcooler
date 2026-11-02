@@ -20,26 +20,25 @@ struct NativeToolRow: View {
     @State private var open = false
 
     var body: some View {
-        CollapsibleSection(
-            id: "tool.\(id)", metrics: .inline, isExpanded: $open, canExpand: tool.opens,
-            accessibilityLabel: [tool.name, tool.summary, NativeCopy.status(tool.status)].filter { !$0.isEmpty }.joined(separator: ", "),
-            label: { _ in
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                    NativeStatusMark(status: tool.status)
-                    Text(tool.name).fontWeight(.medium)
-                    Text(tool.summary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .layoutPriority(-1)
-                    Spacer(minLength: Spacing.group)
-                    RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
-                }
-                .font(MachineryStyle.font)
-                .foregroundStyle(.quietInk)
-            },
-            accessory: { EmptyView() }
-        ) {
-            ToolDetail(tool: tool).padding(.leading, 14 + 14 + Spacing.group)
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            CollapsibleSection(
+                id: "tool.\(id)", metrics: .inline, isExpanded: $open, canExpand: tool.opens,
+                accessibilityLabel: tool.presentationAccessibility,
+                label: { _ in
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                        NativeStatusMark(status: tool.presentationStatus)
+                        Text(tool.presentationName).fontWeight(.medium)
+                        Text(verbatim: tool.presentationSummary)
+                            .lineLimit(tool.operation == nil ? 1 : nil).layoutPriority(-1)
+                        Spacer(minLength: Spacing.group)
+                        RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
+                    }
+                    .font(MachineryStyle.font).foregroundStyle(.quietInk)
+                }, accessory: { EmptyView() }
+            ) {
+                ToolDetail(tool: tool).padding(.leading, 14 + 14 + Spacing.group)
+            }
+            if let operation = tool.operation { LiteralOperationCaption(operation: operation) }
         }
         .identified("native-tool-\(id)")
     }
@@ -52,9 +51,12 @@ struct ToolDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
-            if let input = tool.input { part("Input", input) }
+            if let input = tool.input { part(tool.operation == nil ? "Input" : "Input excerpt", input) }
             if !tool.diff.isEmpty { NativeDiff(hunks: tool.diff) }
-            if let result = tool.result { part(tool.status == .failed ? "Error" : "Result", result) }
+            if let operation = tool.operation, tool.result == nil {
+                Text(operation.outputAvailable ? "Output is empty" : "Output unavailable").font(.caption)
+            }
+            if let result = tool.result { part(tool.operation == nil ? (tool.status == .failed ? "Error" : "Result") : (tool.presentationStatus == .failed ? "Error excerpt" : "Output excerpt"), result) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .identified("native-tool-detail")
@@ -114,36 +116,41 @@ struct ToolGroupRow: View {
         }
         let title = AgentConversation.groupTitle(tools)
         let purpose = AgentConversation.groupPurpose(tools)
-        CollapsibleSection(
-            id: "toolgroup.\(id)", metrics: .inline, isExpanded: $open,
-            accessibilityLabel: "\(title): \(purpose)",
-            label: { _ in
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                    NativeStatusMark(status: AgentConversation.groupStatus(tools))
-                    Text(title).fontWeight(.medium)
-                    Text(purpose)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(-1)
-                    Spacer(minLength: Spacing.group)
-                    RunTimeChip(
-                        startedMs: tools.first?.startedMs,
-                        endedMs: AgentConversation.groupStatus(tools) == .running ? nil : tools.compactMap(\.endedMs).max())
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            CollapsibleSection(
+                id: "toolgroup.\(id)", metrics: .inline, isExpanded: $open,
+                accessibilityLabel: "\(title): \(purpose), \(AgentConversation.recognizedGroupLabel(tools) ?? "")",
+                label: { _ in
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                        NativeStatusMark(status: AgentConversation.groupStatus(tools))
+                        Text(title).fontWeight(.medium)
+                        Text(purpose)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(-1)
+                        Spacer(minLength: Spacing.group)
+                        RunTimeChip(
+                            startedMs: tools.first?.startedMs,
+                            endedMs: AgentConversation.groupStatus(tools) == .running ? nil : tools.compactMap(\.endedMs).max())
+                    }
+                    .font(MachineryStyle.font)
+                    .foregroundStyle(.quietInk)
+                },
+                accessory: { EmptyView() }
+            ) {
+                VStack(alignment: .leading, spacing: Spacing.tight) {
+                    ForEach(boxes) { box in
+                        NativeGroupMember(box: box)
+                    }
                 }
-                .font(MachineryStyle.font)
-                .foregroundStyle(.quietInk)
-            },
-            accessory: { EmptyView() }
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.tight) {
-                ForEach(boxes) { box in
-                    NativeGroupMember(box: box)
-                }
+                .padding(.leading, 14)
             }
-            .padding(.leading, 14)
+            .identified("native-tool-group")
+            .modifier(SelectsAtRest())
+            if let provenance = AgentConversation.recognizedGroupLabel(tools) {
+                Text(provenance).font(.caption).fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .identified("native-tool-group")
-        .modifier(SelectsAtRest())
     }
 }
 
@@ -326,5 +333,27 @@ extension View {
             hidden()
             if shown { identified(id) }
         }
+    }
+}
+
+/// Always visible outside the disclosure hit target, including narrow/collapsed rows.
+private struct LiteralOperationCaption: View {
+    let operation: LiteralOperation
+    @Environment(\.selectsText) private var selectsText
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            Text("Recognized command · \(operation.lifecycle.words)").font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+            if let preview = operation.preview {
+                Text(verbatim: preview).font(.callout).selectable(selectsText)
+                    .environment(\.layoutDirection, .leftToRight)
+                if operation.previewClipped { Text("Content excerpt clipped").font(.caption) }
+                if operation.containsControls { Text("Contains direction or control characters").font(.caption) }
+            } else if operation.kind.hasPrefix("task_note_") || operation.kind == "message_orchestrator" {
+                Text("Preview unavailable in excerpt").font(.caption)
+            }
+            if operation.inputClipped || operation.outputClipped { Text("Input or output excerpt clipped").font(.caption) }
+        }
+        .foregroundStyle(.quietInk)
     }
 }

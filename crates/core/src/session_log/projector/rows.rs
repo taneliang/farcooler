@@ -216,6 +216,9 @@ pub struct Thinking {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Tool {
+    /// Projector-owned literal intent, never a daemon receipt or authority.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<super::literal_operation::LiteralOperation>,
     pub name: String,
     /// The one input field a person reads first: a description, a command, a
     /// path or a pattern.

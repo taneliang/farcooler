@@ -27,7 +27,8 @@
 //! `Busy` while it is open, `Waiting` while a held permission is unanswered,
 //! and `Idle` once a record or a hook has closed it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use super::literal_operation::{self, CommandLifecycle};
 
 use serde_json::Value;
 
@@ -40,6 +41,11 @@ use crate::session_log::claude::parse_iso8601_millis;
 /// What a codex fold keeps beyond the rows.
 #[derive(Debug, Default)]
 pub(crate) struct CodexState {
+    operation_inputs: HashMap<String, u64>,
+    operation_conflicts: HashSet<String>,
+    operation_completions: HashMap<String, CommandLifecycle>,
+    pending_results: HashMap<String, (Option<String>, bool)>,
+    result_seen: HashMap<String, bool>,
     /// Turns whose first prompt the rollout has written: a later one in the
     /// same turn is a steer.
     prompted: HashSet<usize>,
@@ -303,9 +309,19 @@ impl Projection {
                 if str_at(item, "source") == Some("user_shell") && unprompted {
                     self.codex_prompt(&format!("!{command}"), None, at);
                 }
-                let args = serde_json::json!({ "cmd": command });
+                // Preserve the producer envelope; parsed_cmd is only a generic display hint.
+                let args = serde_json::json!({ "command": item.get("command").cloned().unwrap_or(Value::Null) });
                 self.codex_call(self.turn, id, "exec_command", &args, started.or(at), false);
+                // Keep the preexisting generic summary contract; never feed this hint into recognition.
+                if let Some(&i) = self.index.get(&format!("tool:{id}")) {
+                    if let RowKind::Tool(tool) = &mut self.rows[i].kind {
+                        let summary = squeeze(&command, SUMMARY_CHARS);
+                        if tool.summary != summary { tool.summary = summary; self.touch(i); }
+                    }
+                }
                 self.codex_call_done(id, failed, ended);
+                self.codex_operation_completed(id, item);
+                if let Some(output) = str_at(item, "aggregated_output") { self.codex_result(id, output); }
             }
             Some(kind @ ("FileChange" | "McpToolCall" | "Extension")) => {
                 let Some(id) = id else { return };
@@ -441,7 +457,36 @@ impl Projection {
             return self.codex_question(turn, call, args, at, provisional);
         }
         let row_id = format!("tool:{call}");
+        let mut recognized = if provisional { None } else { literal_operation::recognize(name, args) };
+        if let Some((_, fingerprint)) = &recognized {
+            if self.codex.operation_inputs.get(call).is_some_and(|old| old != fingerprint) {
+                self.codex.operation_conflicts.insert(call.to_string());
+            }
+            self.codex.operation_inputs.entry(call.to_string()).or_insert(*fingerprint);
+        } else if !provisional && self.codex.operation_inputs.contains_key(call) {
+            self.codex.operation_conflicts.insert(call.to_string());
+        }
+        if self.codex.operation_conflicts.contains(call) { recognized = None; }
         if let Some(&i) = self.index.get(&row_id) {
+            if !provisional {
+                let mut changed = false;
+                if let RowKind::Tool(tool) = &mut self.rows[i].kind {
+                    if let Some((mut operation, _)) = recognized {
+                        if let Some(old) = &tool.operation {
+                            operation.lifecycle = old.lifecycle;
+                            operation.output_available = old.output_available;
+                            operation.output_clipped = old.output_clipped;
+                        } else {
+                            if tool.status != ToolStatus::Running { operation.lifecycle = CommandLifecycle::Unconfirmed; }
+                            if let Some(&clipped) = self.codex.result_seen.get(call) { operation.output_available = true; operation.output_clipped = clipped; }
+                        }
+                        let input = super::detail::input_text(args);
+                        changed = tool.operation.as_ref() != Some(&operation) || tool.input != input;
+                        tool.operation = Some(operation); tool.input = input;
+                    } else if self.codex.operation_conflicts.contains(call) { changed = tool.operation.take().is_some(); }
+                }
+                if changed { self.touch(i); }
+            }
             if !provisional && self.rows[i].provisional {
                 self.rows[i].provisional = false;
                 if let RowKind::Tool(tool) = &mut self.rows[i].kind {
@@ -450,11 +495,13 @@ impl Projection {
                 self.touch(i);
                 self.tool_confirmed(call);
             }
+            self.codex_pending_result(call);
             return;
         }
         let Some(turn) = turn.or(self.newest_turn) else { return };
         let (name, summary, file_path) = tool_of(name, args);
         let tool = Tool {
+            operation: recognized.map(|(operation, _)| operation),
             name: name.clone(),
             summary: summary.clone(),
             status: ToolStatus::Running,
@@ -467,16 +514,52 @@ impl Projection {
         };
         self.push(row_id, Some(turn), provisional, RowKind::Tool(tool));
         self.link_tool(None, call, &name, &summary, !provisional);
+        self.codex_pending_result(call);
+    }
+
+    fn codex_pending_result(&mut self, call: &str) {
+        if let Some((result, clipped)) = self.codex.pending_results.remove(call) {
+            self.codex_bounded_result(call, result, clipped);
+        }
     }
 
     /// A call's output, on its row for a view to open (ov-452).
     fn codex_result(&mut self, call: &str, output: &str) {
-        let Some(&i) = self.index.get(&format!("tool:{call}")) else { return };
         let result = super::detail::excerpt(output);
+        let clipped = super::detail::retained_end(output) < output.trim_end().len();
+        if !self.index.contains_key(&format!("tool:{call}")) {
+            // Keep only bounded same-call output; never search nearby calls. A bounded
+            // pending cache may omit a result, which the UI honestly reports unavailable.
+            if self.codex.pending_results.len() < 64 || self.codex.pending_results.contains_key(call) {
+                self.codex.pending_results.insert(call.to_string(), (result, clipped));
+            }
+            return;
+        }
+        self.codex_bounded_result(call, result, clipped);
+    }
+
+    fn codex_bounded_result(&mut self, call: &str, result: Option<String>, clipped: bool) {
+        let Some(&i) = self.index.get(&format!("tool:{call}")) else { return };
+        self.codex.result_seen.insert(call.to_string(), clipped);
         if let RowKind::Tool(tool) = &mut self.rows[i].kind {
-            if tool.result != result {
-                tool.result = result;
-                self.touch(i);
+            let mut changed = tool.result != result;
+            if let Some(operation) = &mut tool.operation {
+                changed |= !operation.output_available || operation.output_clipped != clipped;
+                operation.output_available = true; operation.output_clipped = clipped;
+            }
+            if changed { tool.result = result; self.touch(i); }
+        }
+    }
+
+    /// Structured completion evidence stays separate from the legacy ToolStatus.
+    fn codex_operation_completed(&mut self, call: &str, item: &Value) {
+        let Some(&i) = self.index.get(&format!("tool:{call}")) else { return };
+        let next = literal_operation::completed(item);
+        let evidence = self.codex.operation_completions.entry(call.to_string()).or_insert(next);
+        if *evidence != next { *evidence = CommandLifecycle::Unconfirmed; }
+        if let RowKind::Tool(tool) = &mut self.rows[i].kind {
+            if let Some(operation) = &mut tool.operation {
+                if operation.lifecycle != *evidence { operation.lifecycle = *evidence; self.touch(i); }
             }
         }
     }
@@ -535,6 +618,9 @@ impl Projection {
                 return;
             }
             tool.status = status;
+            if let Some(operation) = &mut tool.operation {
+                if operation.lifecycle == CommandLifecycle::Running { operation.lifecycle = CommandLifecycle::Unconfirmed; }
+            }
             tool.ended_ms = clamp_end(tool.started_ms, at.or(tool.ended_ms));
         }
         row.provisional = false;

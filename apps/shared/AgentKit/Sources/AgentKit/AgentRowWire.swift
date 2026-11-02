@@ -130,6 +130,7 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
     }
 
     public struct Tool: Sendable, Equatable, Codable {
+        enum CodingKeys: String, CodingKey { case name, summary, status, startedMs, endedMs, diff, filePath, input, result, operation }
         public var name: String
         public var summary: String
         public var status: Status
@@ -142,9 +143,10 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         public var input: String? = nil
         /// What it answered, cut likewise; nil until it does.
         public var result: String? = nil
+        public var operation: LiteralOperation? = nil
 
         /// Whether it has anything to open to.
-        public var opens: Bool { input != nil || result != nil || !diff.isEmpty }
+        public var opens: Bool { operation != nil || input != nil || result != nil || !diff.isEmpty }
     }
 
     public struct Tasks: Sendable, Equatable, Codable {
@@ -472,7 +474,7 @@ extension AgentRow {
                 name: text("name"), summary: text("summary"), status: status(p["status"]),
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
                 diff: hunks, filePath: p["file_path"] as? String,
-                input: p["input"] as? String, result: p["result"] as? String))
+                input: p["input"] as? String, result: p["result"] as? String, operation: LiteralOperation.wire(p["operation"])))
         case "Subagent":
             return .subagent(Subagent(
                 toolUseId: text("tool_use_id"), agentType: text("agent_type"), description: text("description"),
