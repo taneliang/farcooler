@@ -81,6 +81,16 @@ pub fn positioned_prompts_in(file: &mut File, from: u64) -> Vec<PositionedPrompt
     found
 }
 
+/// Find an exact, image-free prompt at or after an Enter. The caller must
+/// first verify that `file` is the pinned rollout for the same session; this
+/// function makes no claim about file or thread identity on its own.
+pub fn exact_prompt_in(file: &mut File, from: u64, text: &str, entered_at: i64) -> Option<PositionedPrompt> {
+    if text.is_empty() { return None }
+    positioned_prompts_in(file, from).into_iter().find(|item| {
+        item.prompt.images == 0 && item.prompt.text == text && item.prompt.at_ms.is_some_and(|at| at >= entered_at)
+    })
+}
+
 fn prompt(line: &str) -> Option<Prompt> {
     // Most lines aren't one: skip them before parsing.
     if !line.contains("\"UserMessage\"") {
@@ -133,6 +143,21 @@ mod tests {
         let end = line.find('\n').unwrap();
         std::fs::write(&path, &ROLLOUT[..last + end]).unwrap();
         assert_eq!(positioned_prompts_from(&path, last), []);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exact_receipt_requires_matching_complete_text_and_timestamp() {
+        let dir = crate::scratch::dir("codex-exact-receipt");
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, ROLLOUT).unwrap();
+        let item = positioned_prompts_from(&path, 0).into_iter().find(|p| p.prompt.text == "vim paste test").unwrap();
+        let at = item.prompt.at_ms.unwrap();
+        let mut file = File::open(&path).unwrap();
+        assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste test", at), Some(item.clone()));
+        assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste test", at + 1), None);
+        assert_eq!(exact_prompt_in(&mut file, item.offset, "vim paste tes", at), None);
+        assert_eq!(exact_prompt_in(&mut file, item.offset + 1, "vim paste test", at), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
