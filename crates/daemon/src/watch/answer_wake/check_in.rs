@@ -47,7 +47,7 @@ impl Watcher {
     }
 
     #[cfg(unix)]
-    async fn observe_check_in(&self, occurrence: Uuid, attempt: Uuid) -> farcooler_core::Result<()> {
+    pub(super) async fn observe_check_in(&self, occurrence: Uuid, attempt: Uuid) -> farcooler_core::Result<()> {
         use std::os::unix::fs::MetadataExt;
         use crate::claude_registry::{Kernel, Processes};
         use farcooler_core::session_log::codex_prompts::exact_prompt_in_pinned_file;

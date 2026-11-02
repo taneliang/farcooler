@@ -277,3 +277,67 @@ async fn the_gate_holds_when_a_known_rollout_is_lost() {
     assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy");
     nothing_typed(&si);
 }
+
+/// The scheduler's positive control: a fixed, runner-attributed message is
+/// submitted once, then confirmed only by the same thread's rollout.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
+    let b = board().await;
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(
+        agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false,
+    ).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    b.watcher.send_check_in(&pending, Uuid::now_v7()).await.expect("scheduled delivery");
+    si.submits(1).await;
+    assert_eq!(si.submitted().len(), 1, "{}", si.log());
+    assert!(si.submitted()[0].starts_with("[Far Cooler] Scheduled hourly check-in"));
+    let submitted = b.svc.store.submitted_check_ins().unwrap();
+    assert_eq!(submitted.len(), 1);
+    for _ in 0..100 {
+        b.watcher.observe_check_in(submitted[0].0, submitted[0].1).await.unwrap();
+        if b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state == "confirmed" { break }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let status = b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap();
+    assert_eq!(status.occurrence.unwrap().state, "confirmed");
+    assert_eq!(si.submitted().len(), 1, "no duplicate prompt");
+}
+
+/// Hours while the orchestrator is working remain one pending occurrence and
+/// never take the ordinary mid-turn delivery routes.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_busy_codex_waits_without_paste_or_duplicate() {
+    let b = board().await;
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(
+        agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false,
+    ).unwrap();
+    si.show("working").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    b.watcher.send_check_in(&pending, Uuid::now_v7()).await.unwrap();
+    assert!(!b.svc.store.tick_check_in(b.task.workspace_id, now + 5 * 3_600_000).unwrap());
+    assert_eq!(b.svc.store.pending_check_ins().unwrap().len(), 1);
+    assert!(!si.log().contains("PASTE "), "{}", si.log());
+    assert!(si.submitted().is_empty());
+}
