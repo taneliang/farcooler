@@ -9,7 +9,7 @@ import Observation
 /// The inline subagent rows stay in the transcript as history; this is what
 /// doesn't scroll away. Built from the rows a store holds, so the Mac and the
 /// phone list the same agents in the same words.
-public enum AgentTray {
+extension AgentTray {
     public struct Entry: Equatable, Identifiable, Sendable {
         /// `AgentTray.mainID`, or the subagent's row id.
         public var id: String
@@ -98,22 +98,6 @@ public enum AgentTray {
 
     /// What main's line reads of a row after its newest turn: a call
     /// running, as `Name summary`, thinking not yet ended, or neither.
-    public enum Activity: Equatable, Sendable {
-        case none
-        case tool(String)
-        case thinking
-
-        public init(_ row: AgentRow) {
-            switch row.kind {
-            case .tool(let tool) where tool.status == .running:
-                self = .tool(tool.summary.isEmpty ? tool.name : "\(tool.name) \(tool.summary)")
-            case .thinking(let thinking) where thinking.endedMs == nil:
-                self = .thinking
-            default:
-                self = .none
-            }
-        }
-    }
 
     /// Main, from its newest turn: the call it's running, else thinking or
     /// working while the turn is open, else waiting on the agents it left

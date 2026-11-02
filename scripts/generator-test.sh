@@ -329,5 +329,8 @@ check "no build file appears in two sources phases" \
   "$(wc -l <<< "$refs" | tr -d ' ')" \
   "$(sort -u <<< "$refs" | wc -l | tr -d ' ')"
 
+check "pure renderer source membership in generated production targets" \
+  "yes" "$(if python3 apps/ios/NativeRowsFixture/check_production_membership.py "$PBX"; then echo yes; else echo no; fi)"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

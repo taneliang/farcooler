@@ -5,7 +5,7 @@ import Foundation
 /// the rules a phone decides by, here so `swift test` reads them back. The
 /// Mac's native view (ov-372) keeps its own copies in `NativePaneModel` and
 /// `NativeCopy`, with the same words; a later card moves it onto these.
-public enum AgentConversation {
+extension AgentConversation {
     /// Whether a runner serves the view: rows to read and a way to send. A
     /// runner with rows from before `terminal.compose` gets the terminal, not
     /// a view whose every send would fail. `agent_rows` is offered only while
@@ -376,11 +376,7 @@ public enum AgentConversation {
 
     /// "0:04", "1:12", "2:03:09": the format a running timer counts in, so
     /// a finished time reads like the running one did.
-    public static func short(ms: Int64) -> String {
-        let seconds = max(0, ms / 1000)
-        let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
+
 
     /// What a subagent row says of its work: "1 tool", "14 tools", or nothing
     /// while the count is unknown. 0 is how an agent with no transcript read

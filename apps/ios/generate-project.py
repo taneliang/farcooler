@@ -254,6 +254,8 @@ SOURCES = [
     "NativeAgent.swift",
     "NativeAgentView.swift",
     "NativeRows.swift",
+    "NativeMachineryHelpers.swift",
+    "NativeConversationSupplement.swift",
     "NativeToolRows.swift",
     # The screen's one horizontal margin, from the layout guides (ov-611).
     "ScreenMargin.swift",
@@ -485,6 +487,7 @@ AGENTKIT_SOURCES = [
     # where the SwiftUI half lives instead, and `NOTIFY_SOURCES` does not carry
     # it.
     "GlancePalette.swift",
+    "GlancePaletteFleet.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
     # The account, and the two screens it makes meaningful. Shared because
@@ -893,12 +896,15 @@ AGENTKIT_SOURCES = [
     "LiteralOperation.swift",
     "AgentRowLedger.swift",
     "AgentRowStore.swift",
+    "AgentRowBox.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    "AgentConversationBase.swift",
     "AskAnsweredWho.swift",
     "ConversationItems.swift",
     # The agent tray's rows and words, and a subagent opened (ov-453).
     "AgentTray.swift",
+    "AgentTrayActivity.swift",
     # Which pane is offered the conversation, and why not (ov-443).
     "ConversationOffer.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).
@@ -1033,6 +1039,7 @@ WATCH_AGENTKIT_SOURCES = [
     # clears it. Nothing in either file reaches for `UIColor`, an asset catalog
     # or a dynamic color provider, none of which the watch has.
     "GlancePalette.swift",
+    "GlancePaletteFleet.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
 ]
@@ -1105,6 +1112,7 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     "PlanGlanceView.swift",
     "PlanGlanceShown.swift",
     "GlancePalette.swift",
+    "GlancePaletteFleet.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
 ]
@@ -1404,6 +1412,7 @@ activity_build_ids = {
         # the point: the widget and the Live Activity are on the same phone and
         # a person meets both within a minute.
         "GlancePalette.swift",
+        "GlancePaletteFleet.swift",
         "GlanceMark.swift",
         "GlanceType.swift",
     ]
