@@ -52,10 +52,50 @@ fn unfinished_to_reap(
         .collect()
 }
 
+/// A cleanup marker is created before dispatch. Dropping before dispatch is
+/// conclusive; dropping after dispatch preserves the scheduler-only fence.
+struct CleanupAttempt<'a> {
+    store: &'a farcooler_store::Store,
+    token: uuid::Uuid,
+    dispatched: bool,
+}
+
+impl<'a> CleanupAttempt<'a> {
+    fn new(store: &'a farcooler_store::Store) -> farcooler_core::Result<Self> {
+        let token = uuid::Uuid::now_v7();
+        store.begin_check_in_cleanup(token)?;
+        Ok(Self { store, token, dispatched: false })
+    }
+    fn dispatched(&mut self) { self.dispatched = true; }
+    fn complete(self) -> farcooler_core::Result<()> {
+        if self.store.complete_check_in_cleanup(self.token)? { Ok(()) }
+        else { Err(farcooler_core::DomainError::ResourceConflict) }
+    }
+}
+impl Drop for CleanupAttempt<'_> {
+    fn drop(&mut self) {
+        if !self.dispatched && !matches!(self.store.complete_check_in_cleanup(self.token), Ok(true)) {
+            tracing::warn!(token = %self.token, "predispatch cleanup fence could not be cleared");
+        }
+    }
+}
+
 impl Watcher {
+    /// One owned cleanup client. The caller holds the scheduler/cleanup gate.
+    pub(super) async fn check_in_guarded_cleanup(&self, pane: &str) -> farcooler_core::Result<bool> {
+        let mut attempt = CleanupAttempt::new(&self.service.store)?;
+        // There is no await between marking possible dispatch and polling the
+        // client. Once reached, cancellation must retain the marker.
+        attempt.dispatched();
+        match self.service.tmux.kill_pane(pane).await {
+            Ok(true) => { attempt.complete()?; Ok(true) }
+            Ok(false) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Kill the panes whose open never finished, once they are past the grace.
-    pub(super) async fn sweep_unfinished_opens(&self) -> bool {
-        let mut conclusive = true;
+    pub(super) async fn sweep_unfinished_opens(&self) {
         // Only panes an open marked as its own, never one a person added, and
         // only once they have been unfinished longer than any open could take.
         // From the read this tick's refresh made: no `list-panes` of its own.
@@ -65,17 +105,15 @@ impl Watcher {
                 unfinished_to_reap(&mut seen, &unfinished, std::time::Instant::now(), UNFINISHED_GRACE)
             };
             for pane in stale {
-                match self.service.tmux.kill_pane(&pane.pane_id).await {
+                match self.check_in_guarded_cleanup(&pane.pane_id).await {
                     Ok(true) => tracing::warn!(pane = %pane.pane_id, "reaped a pane whose open never finished"),
-                    Ok(false) => { conclusive = false; }
+                    Ok(false) => {}
                     Err(error) => {
-                        conclusive = false;
                         tracing::warn!(pane = %pane.pane_id, ?error, "an unfinished open's pane could not be reaped")
                     }
                 }
             }
         }
-        conclusive
     }
 }
 
@@ -83,6 +121,20 @@ impl Watcher {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn only_predispatch_drop_clears_its_cleanup_token() {
+        let (_dir, svc, _) = crate::test_support::fixture().await;
+        let first = CleanupAttempt::new(&svc.store).unwrap();
+        let first_token = first.token;
+        drop(first);
+        assert!(!svc.store.complete_check_in_cleanup(first_token).unwrap());
+        let mut second = CleanupAttempt::new(&svc.store).unwrap();
+        let second_token = second.token;
+        second.dispatched();
+        drop(second);
+        assert!(svc.store.complete_check_in_cleanup(second_token).unwrap());
+    }
 
     /// The sweep, end to end on a private server.
     ///

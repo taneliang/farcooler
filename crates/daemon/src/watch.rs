@@ -4645,12 +4645,6 @@ impl Watcher {
             panes = self.service.inventory_snapshot();
             let Ok(cleanup_fleet) = self.service.fleet_as_inventoried().await else { return };
             if !panes.inventory_healthy { return }
-            let cleanup_token = Uuid::now_v7();
-            if let Err(error) = self.service.store.begin_check_in_cleanup(cleanup_token) {
-                tracing::warn!(?error, "cannot fence watcher cleanup for scheduled delivery");
-                return;
-            }
-            let mut cleanup_conclusive = true;
             let terminals: HashSet<Uuid> = cleanup_fleet
                 .iter()
                 .flat_map(|worktree| worktree.terminals.iter().map(|terminal| terminal.terminal.id))
@@ -4665,14 +4659,13 @@ impl Watcher {
 
             let mut repaired = HashSet::new();
             for (pane, worktree, terminal) in orphaned {
-                match self.service.tmux.kill_pane(&pane).await {
+                match self.check_in_guarded_cleanup(&pane).await {
                     Ok(true) => {
                         repaired.insert(worktree);
                         tracing::warn!(%pane, %terminal, "reaped orphaned managed pane");
                     }
-                    Ok(false) => { cleanup_conclusive = false; }
+                    Ok(false) => {}
                     Err(error) => {
-                        cleanup_conclusive = false;
                         tracing::warn!(%pane, %terminal, ?error, "orphaned pane could not be reaped");
                     }
                 }
@@ -4680,7 +4673,7 @@ impl Watcher {
 
             // And the panes it cannot see: an open that never finished.
             // See `reap`.
-            cleanup_conclusive &= self.sweep_unfinished_opens().await;
+            self.sweep_unfinished_opens().await;
 
             if !repaired.is_empty() {
                 panes = self.service.inventory.refresh().await;
@@ -4689,13 +4682,6 @@ impl Watcher {
                         self.publish_layout(worktree, &groups);
                     }
                 }
-            }
-            if cleanup_conclusive {
-                if !matches!(self.service.store.complete_check_in_cleanup(cleanup_token), Ok(true)) {
-                    tracing::warn!(%cleanup_token, "scheduled check-ins remain suspended: cleanup fence not cleared");
-                }
-            } else {
-                tracing::warn!(%cleanup_token, "scheduled check-ins suspended: cleanup completion unknown");
             }
         }
 
