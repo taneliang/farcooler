@@ -64,7 +64,7 @@ pub mod access_ops;
 pub mod step_up;
 pub use compose_holds::ComposeHold;
 pub use compose_waits::ComposeWait;
-pub use check_ins::{CheckInOccurrence, CheckInStatus, CHECK_IN_CONFIRMATION_TIMEOUT_MS};
+pub use check_ins::{CheckInObservation, CheckInOccurrence, CheckInStatus, CHECK_IN_CONFIRMATION_TIMEOUT_MS};
 pub use crash_signatures::{CrashFiling, CrashRecord};
 mod subagent_notes;
 mod web_panes;

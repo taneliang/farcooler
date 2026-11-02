@@ -182,6 +182,9 @@ mod tests {
              SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
         ).unwrap();
+        let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
+        assert_eq!((observation.path.as_str(), observation.device, observation.inode, observation.from), ("/rollout", 1, 2, 10));
+        assert!(store.check_in_observation(occ, Uuid::now_v7()).unwrap().is_none());
         assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "other", 1, 2, 10, 5, 7).unwrap());
         assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 3, 10, 5, 7).unwrap());
         assert!(!store.confirm_check_in_receipt(occ, attempt, terminal, "thread", 1, 2, 9, 5, 7).unwrap());
@@ -704,5 +707,43 @@ impl crate::Store {
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(true)
+    }
+}
+
+/// Internal observation coordinates captured before the Enter attempt. These
+/// are not proof on their own; the observer must open this exact file and
+/// verify its identity, session, and message before recording a receipt.
+#[derive(Debug, Clone)]
+pub struct CheckInObservation {
+    pub path: String,
+    pub device: i64,
+    pub inode: i64,
+    pub from: i64,
+    pub terminal: uuid::Uuid,
+    pub thread: String,
+    pub admitted_at: i64,
+}
+
+impl crate::Store {
+    pub fn check_in_observation(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+    ) -> farcooler_core::Result<Option<CheckInObservation>> {
+        use crate::error::map_err;
+        use crate::models::{get_uuid, uuid_blob};
+        use rusqlite::{OptionalExtension, params};
+
+        self.conn().query_row(
+            "SELECT rollout_path, rollout_device, rollout_inode, rollout_offset, terminal_id, thread_id, admitted_at
+               FROM check_in_occurrences WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'
+                AND rollout_path IS NOT NULL AND rollout_device IS NOT NULL AND rollout_inode IS NOT NULL
+                AND rollout_offset IS NOT NULL AND terminal_id IS NOT NULL AND thread_id IS NOT NULL AND admitted_at IS NOT NULL",
+            params![uuid_blob(occurrence), uuid_blob(attempt)],
+            |r| Ok(CheckInObservation {
+                path: r.get(0)?, device: r.get(1)?, inode: r.get(2)?, from: r.get(3)?,
+                terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?,
+            }),
+        ).optional().map_err(map_err)
     }
 }
