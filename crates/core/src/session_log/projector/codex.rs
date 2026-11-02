@@ -233,12 +233,19 @@ impl Projection {
         let turn_id = self.rows[i].id.clone();
         let running: Vec<usize> = self
             .since_turn(i)
-            .filter(|&j| self.rows[j].turn.as_deref() == Some(&turn_id) && matches!(&self.rows[j].kind, RowKind::Tool(t) if t.status == ToolStatus::Running))
+            .filter(|&j| self.rows[j].turn.as_deref() == Some(&turn_id) && matches!(&self.rows[j].kind, RowKind::Tool(t) if t.status == ToolStatus::Running || t.operation.as_ref().is_some_and(|op| op.lifecycle == CommandLifecycle::Running)))
             .collect();
         for j in running {
             if let RowKind::Tool(tool) = &mut self.rows[j].kind {
-                tool.status = if interrupted { ToolStatus::Failed } else { ToolStatus::Done };
-                tool.ended_ms = clamp_end(tool.started_ms, at);
+                if tool.status == ToolStatus::Running {
+                    tool.status = if interrupted { ToolStatus::Failed } else { ToolStatus::Done };
+                    tool.ended_ms = clamp_end(tool.started_ms, at);
+                }
+                if let Some(operation) = &mut tool.operation {
+                    if operation.lifecycle == CommandLifecycle::Running {
+                        operation.lifecycle = CommandLifecycle::Unconfirmed;
+                    }
+                }
             }
             self.touch(j);
         }

@@ -73,7 +73,14 @@ extension AgentRow.Tool {
     public var presentationStatus: AgentRow.Status { operation?.status ?? status }
     public var presentationAccessibility: String {
         if let operation { return "Far Cooler, recognized command, \(operation.summary), \(operation.lifecycle.words)" }
-        return [name, summary].filter { !$0.isEmpty }.joined(separator: ", ")
+        let statusWord: String
+        switch status {
+        case .running: statusWord = "Running"
+        case .done: statusWord = "Done"
+        case .failed: statusWord = "Failed"
+        case .ended: statusWord = "Ended"
+        }
+        return [name, summary, statusWord].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// Cache decoding is independent of wire decoding. Bad optional metadata cannot lose the row.

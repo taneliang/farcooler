@@ -890,6 +890,7 @@ AGENTKIT_SOURCES = [
     # off the main thread, the store a view reads, and the cache a returning
     # pane draws from; and the phone's rules for the conversation view (ov-373).
     "AgentRowWire.swift",
+    "LiteralOperation.swift",
     "AgentRowLedger.swift",
     "AgentRowStore.swift",
     "AgentRowCache.swift",

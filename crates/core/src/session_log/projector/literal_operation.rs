@@ -62,6 +62,7 @@ fn literal_words(script: &str) -> Option<Vec<(String, usize)>> {
                     _ => word.push(c),
                 },
                 None => match c {
+                    '=' if word.is_empty() => return None,
                     '\'' | '"' => quote = Some(c),
                     '\\' => {
                         let (at, escaped) = chars.next()?;
