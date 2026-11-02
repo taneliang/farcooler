@@ -21,8 +21,9 @@ struct NativeOperationCaptures {
             let check = Process(); let pipe = Pipe()
             check.executableURL = URL(fileURLWithPath: "/usr/sbin/ioreg")
             check.arguments = ["-n", "Root", "-d1"]; check.standardOutput = pipe
-            try check.run(); check.waitUntilExit()
+            try check.run()
             let state = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            check.waitUntilExit()
             try #require(check.terminationStatus == 0 && state.contains("\"IOConsoleLocked\" = No"), "Mac console must be positively unlocked")
             let model = NativeAgentTests.model(try NativeAgentTests.terminal())
             model.store.apply(try await model.store.ledger.page(NativeAgentTests.page(rows)))
