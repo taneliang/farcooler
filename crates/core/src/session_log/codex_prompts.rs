@@ -46,6 +46,35 @@ pub fn prompts_from(path: &Path, from: u64) -> Vec<Prompt> {
     String::from_utf8_lossy(&bytes[..ended]).lines().filter_map(prompt).collect()
 }
 
+/// A complete rollout line and its byte offset. The offset can be persisted
+/// with a receipt so its evidence can be found again after a restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PositionedPrompt {
+    pub offset: u64,
+    pub prompt: Prompt,
+}
+
+/// Read complete messages at or after a previously captured line boundary.
+/// Incomplete and malformed lines are never evidence of receipt.
+pub fn positioned_prompts_from(path: &Path, from: u64) -> Vec<PositionedPrompt> {
+    let Ok(mut file) = File::open(path) else { return Vec::new() };
+    if file.seek(SeekFrom::Start(from)).is_err() { return Vec::new() }
+    let mut bytes = Vec::new();
+    if file.take(READ_LIMIT).read_to_end(&mut bytes).is_err() { return Vec::new() }
+    let mut offset = from;
+    let mut found = Vec::new();
+    for line in bytes.split_inclusive(|b| *b == b'\n') {
+        if !line.ends_with(b"\n") { break }
+        if let Ok(text) = std::str::from_utf8(line)
+            && let Some(prompt) = prompt(text.trim_end_matches('\n'))
+        {
+            found.push(PositionedPrompt { offset, prompt });
+        }
+        offset = offset.saturating_add(line.len() as u64);
+    }
+    found
+}
+
 fn prompt(line: &str) -> Option<Prompt> {
     // Most lines aren't one: skip them before parsing.
     if !line.contains("\"UserMessage\"") {
@@ -80,6 +109,26 @@ mod tests {
     const ROLLOUT: &str = include_str!(
         "../../fixtures/session-logs/codex-tui-0.153.4/rollout-2026-10-07T16-04-08-01a1189c-23ea-7190-b6bf-1d9ac1940ade.jsonl"
     );
+
+    #[test]
+    fn positioned_messages_name_complete_rollout_lines() {
+        let dir = crate::scratch::dir("codex-prompt-offsets");
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, ROLLOUT).unwrap();
+        let found = positioned_prompts_from(&path, 0);
+        assert_eq!(found.len(), 4);
+        for item in &found {
+            let remainder = &ROLLOUT[item.offset as usize..];
+            assert!(remainder.starts_with('{'));
+            assert_eq!(prompts_from(&path, item.offset)[0], item.prompt);
+        }
+        let last = found.last().unwrap().offset as usize;
+        let line = &ROLLOUT[last..];
+        let end = line.find('\n').unwrap();
+        std::fs::write(&path, &ROLLOUT[..last + end]).unwrap();
+        assert_eq!(positioned_prompts_from(&path, last), []);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Every message of a real session, with its images, and none of the
     /// `/vim` commands between them; from a byte on, only those after it.
