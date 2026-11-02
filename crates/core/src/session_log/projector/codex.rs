@@ -689,6 +689,11 @@ impl Projection {
                         if let RowKind::Tool(tool) = &mut self.rows[i].kind {
                             if tool.status == ToolStatus::Running {
                                 tool.status = ToolStatus::Done;
+                                if let Some(operation) = &mut tool.operation {
+                                    if operation.lifecycle == CommandLifecycle::Running {
+                                        operation.lifecycle = CommandLifecycle::Unconfirmed;
+                                    }
+                                }
                                 tool.ended_ms = clamp_end(tool.started_ms, at);
                                 self.touch(i);
                             }
