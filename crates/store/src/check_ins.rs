@@ -199,7 +199,7 @@ impl crate::Store {
                 AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
                 AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id
                 AND p.lease_generation = o.terminal_lease AND p.epoch = o.terminal_epoch
-                AND p.role = 2 AND p.command_preset = 'codex' AND p.intent = 1
+                AND p.role = 2 AND p.pane_mode = 0 AND (p.command_preset = 'codex' OR p.command_preset LIKE 'codex:%') AND p.intent = 1
                 AND p.runtime_confirmed = 1 AND p.exit_code IS NULL AND p.exit_signal IS NULL
                 AND p.agent_session_id = ?5
                 AND (s.authorizer_device IS NULL OR (
@@ -317,8 +317,8 @@ impl crate::Store {
                 AND s.authorizer_device IS o.authorizer_device AND s.authorizer_source = o.authorizer_source AND s.authorized_at = o.authorized_at
                 AND s.template_version = o.template_version
                       AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
-                      AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id AND p.role = 2
-                      AND p.command_preset = 'codex' AND p.intent = 1 AND p.runtime_confirmed = 1
+                      AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id AND p.role = 2 AND p.pane_mode = 0
+                      AND (p.command_preset = 'codex' OR p.command_preset LIKE 'codex:%') AND p.intent = 1 AND p.runtime_confirmed = 1
                       AND p.exit_code IS NULL AND p.exit_signal IS NULL AND p.agent_session_id = ?5
                       AND (s.authorizer_device IS NULL OR (
                           EXISTS (SELECT 1 FROM owner_devices d WHERE d.client_id = s.authorizer_device AND d.state = 'confirmed')
@@ -920,6 +920,24 @@ mod tests {
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
         assert_eq!(state, "uncertain");
+    }
+
+    #[test]
+    fn agent_host_mode_cannot_be_claimed() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/drawn", "/drawn", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute(
+            "UPDATE terminals SET workspace_id = ?2, role = 2, pane_mode = 1, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
+            params![uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        let occurrence = store.pending_check_ins().unwrap()[0].id;
+        assert!(!store.claim_check_in(occurrence, Uuid::now_v7(), Uuid::now_v7(), terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
+        assert_eq!(store.pending_check_ins().unwrap().len(), 1);
     }
 
     #[test]

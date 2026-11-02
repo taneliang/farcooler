@@ -191,6 +191,10 @@ impl Watcher {
         use crate::claude_registry::{Kernel, Processes};
 
         let Some(to) = self.service.live_orchestrator(pending.workspace)? else { return Ok(()) };
+        if to.pane_mode != farcooler_store::models::PaneMode::Terminal
+            || !super::super::may_be_typed_to(&to.command_preset, to.role)
+            || !self.service.is_running(&to)
+        { return Ok(()) }
         let Some(thread) = to.agent_session_id.as_deref() else { return Ok(()) };
         let Some(_typing) = self.try_typing(to.id) else { return Ok(()) };
         if !matches!(self.ready(&to).await, Ok(Turn::Between)) { return Ok(()) }
