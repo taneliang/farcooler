@@ -1836,6 +1836,10 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "query" => "say what to search for",
         "key" => "name a task",
         "task_key" => "that task isn't on the board of the worktree it was sent to",
+        "check_in_uncertain" => "an earlier check-in may have arrived. disable it, review the status, then enable with --acknowledge-uncertain",
+        "check_in_authority_or_task" => "choose an open task on this workspace, leave wake-on-answer on, and use a verified owner connection",
+        "not_orchestrator" => "only this workspace's current orchestrator can disable its check-in",
+
         "handoff_task" => "that task isn't on this workspace's board",
         "cycle" => "those two tasks would end up waiting on each other",
         "blocked_by" => "the task it would wait on is not on this runner",

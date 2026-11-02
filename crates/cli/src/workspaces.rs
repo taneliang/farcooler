@@ -448,12 +448,12 @@ async fn workspace_via(
                         expected_generation: before.generation,
                         acknowledge_uncertain,
                     }));
-                    let sent = link.call(request).await?;
+                    let sent = link.call(request).await.map_err(|e| check_in_refused(e, "the check-in could not be enabled"))?;
                     let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
                     status
                 }
                 CheckInAction::Disable => {
-                    let sent = link.call(request_for("workspace.check_in_disable")).await?;
+                    let sent = link.call(request_for("workspace.check_in_disable")).await.map_err(|e| check_in_refused(e, "the check-in could not be disabled"))?;
                     let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
                     status
                 }
@@ -463,8 +463,11 @@ async fn workspace_via(
                     "configured": status.configured, "workspace": id.to_string(),
                     "generation": (!status.generation.is_empty()).then(|| uuid_of(&status.generation).to_string()),
                     "state": status.state, "reason": status.reason, "next_due_ms": status.next_due_ms,
+                    "authorizer_source": status.authorizer_source, "authorized_at_ms": status.authorized_at_ms,
                     "occurrence": (!status.occurrence_id.is_empty()).then(|| uuid_of(&status.occurrence_id).to_string()),
                     "occurrence_state": status.occurrence_state, "occurrence_reason": status.occurrence_reason,
+                    "terminal": (!status.terminal_id.is_empty()).then(|| uuid_of(&status.terminal_id).to_string()),
+                    "thread": status.thread_id, "claimed_at_ms": status.claimed_at_ms, "admitted_at_ms": status.admitted_at_ms,
                     "submitted_at_ms": status.submitted_at_ms, "confirmed_at_ms": status.confirmed_at_ms,
                     "receipt_evidence": status.receipt_evidence,
                 }));
@@ -472,12 +475,16 @@ async fn workspace_via(
                 println!("hourly check-in is off");
             } else {
                 println!("hourly check-in: {}  next due: {}", status.state, status.next_due_ms);
+                println!("  authorized by {} at {}", status.authorizer_source, status.authorized_at_ms);
                 if !status.reason.is_empty() { println!("  {}", status.reason); }
                 if !status.occurrence_id.is_empty() {
                     println!("  occurrence {}: {} {}", uuid_of(&status.occurrence_id), status.occurrence_state, status.occurrence_reason);
                 }
                 if matches!(status.occurrence_state.as_str(), "enter_admitted" | "submitted" | "uncertain" | "resolved_uncertain") {
                     println!("  an admitted or uncertain key may still arrive; a receipt confirms input, not completed work");
+                }
+                if !status.terminal_id.is_empty() {
+                    println!("  target {}  thread {}", uuid_of(&status.terminal_id), status.thread_id);
                 }
                 if !status.receipt_evidence.is_empty() { println!("  receipt: {}", status.receipt_evidence); }
             }
@@ -872,6 +879,19 @@ fn render_show(ws: &pb::Workspace, repositories: &[pb::Repository], worktrees: &
         out.push_str(&format!("  {label:13} {}  {}\n", short_bytes(&w.id), w.task_name));
     }
     out
+}
+
+/// Name an admitted attempt distinctly from a stale schedule version.
+fn check_in_refused(e: ClientError, fallback: &str) -> Refused {
+    if let ClientError::Daemon { code, what, .. } = &e
+        && *code == pb::ErrorCode::ResourceConflict as i32 && what.is_empty()
+    {
+        return Refused::naming(
+            "the schedule changed or an admitted check-in is in flight; inspect it and try again".to_string(),
+            *code, String::new(),
+        );
+    }
+    workspace_refused(e, GONE, fallback)
 }
 
 /// A refusal of a workspace command, in words.
