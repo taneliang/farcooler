@@ -256,6 +256,12 @@ impl TmuxServer {
 
     /// Run a tmux command against the private server.
     pub async fn run(&self, args: &[&str]) -> Result<Output> {
+        self.run_with_submission(args, || {}).await
+    }
+
+    /// Invoke `submitted` only after the owned tmux client has spawned. A
+    /// cancellation before that point cannot have submitted this request.
+    pub async fn run_with_submission<F: FnOnce()>(&self, args: &[&str], submitted: F) -> Result<Output> {
         self.ensure_config()?;
 
         // Resolved rather than spawned by name.
@@ -314,6 +320,8 @@ impl TmuxServer {
             tracing::warn!(error = %e, "failed to spawn tmux");
             DomainError::TmuxUnavailable
         })?;
+
+        submitted();
 
         // Every tmux command gets a deadline, because one of them can block
         // forever and take everything with it.
@@ -520,6 +528,25 @@ const DEFAULT_UTF8_LOCALE: &str = "C.UTF-8";
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn cleanup_submission_callback_distinguishes_pre_spawn_and_completed_negative() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use uuid::Uuid;
+        let dir = farcooler_core::scratch::dir("cleanup-submit-phase");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bad_config = super::TmuxServer::with_config("phase-bad", Uuid::now_v7(), dir.clone());
+        let submitted = AtomicBool::new(false);
+        assert!(bad_config.run_with_submission(&["kill-pane", "-t", "%1"], || submitted.store(true, Ordering::SeqCst)).await.is_err());
+        assert!(!submitted.load(Ordering::SeqCst));
+        let script = dir.join("reject.sh");
+        std::fs::write(&script, "exit 1\n").unwrap();
+        let server = super::TmuxServer::with_config("phase-reject", Uuid::now_v7(), dir.join("tmux.conf")).with_program(script);
+        let output = server.run_with_submission(&["kill-pane", "-t", "%1"], || submitted.store(true, Ordering::SeqCst)).await.unwrap();
+        assert!(submitted.load(Ordering::SeqCst));
+        assert_eq!(output.status, Some(1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     use super::*;
 
     #[tokio::test(flavor = "current_thread")]

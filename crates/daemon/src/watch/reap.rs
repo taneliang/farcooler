@@ -84,12 +84,16 @@ impl Watcher {
     /// One owned cleanup client. The caller holds the scheduler/cleanup gate.
     pub(super) async fn check_in_guarded_cleanup(&self, pane: &str) -> farcooler_core::Result<bool> {
         let mut attempt = CleanupAttempt::new(&self.service.store)?;
-        // There is no await between marking possible dispatch and polling the
-        // client. Once reached, cancellation must retain the marker.
-        attempt.dispatched();
-        match self.service.tmux.kill_pane(pane).await {
-            Ok(true) => { attempt.complete()?; Ok(true) }
-            Ok(false) => Ok(false),
+        let result = self.service.tmux.run_with_submission(
+            &["kill-pane", "-t", pane], || attempt.dispatched(),
+        ).await;
+        match result {
+            Ok(output) if output.status.is_some() => {
+                let killed = output.ok();
+                attempt.complete()?;
+                Ok(killed)
+            }
+            Ok(_) => Err(farcooler_core::DomainError::TmuxUnavailable),
             Err(error) => Err(error),
         }
     }
