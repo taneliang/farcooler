@@ -174,3 +174,22 @@ fn literal_operation_function_adapter_bounds_spans_not_text_search_and_ignores_f
     assert_eq!(op.kind, "task_show");
     assert_eq!(op.provenance, "literal_intent");
 }
+
+#[test]
+fn literal_operation_post_hook_without_completion_is_unconfirmed_and_confirmation_keeps_identity() {
+    let script = format!("{CLI} task show ov-893");
+    let mut p = project([]);
+    let id = "hook-call";
+    let hook = json!({"tool_use_id":id,"tool_name":"Bash","tool_input":{"command":script,"operation":{"provenance":"authenticated_receipt"}}});
+    p.codex_hook("PreToolUse", &hook, 1);
+    assert!(tools(&p)[0].get("operation").is_none(), "hook strings cannot synthesize operation provenance");
+    let start = json!({"type":"response_item","payload":{"type":"function_call","call_id":id,"name":"exec_command","arguments":json!({"cmd":script}).to_string()}});
+    p.fold_codex_line(start.to_string().as_bytes());
+    assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "running");
+    p.codex_hook("PostToolUse", &hook, 2);
+    assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "unconfirmed", "a post hook is not conclusive successful completion evidence");
+    let mut end = command(&script); end["payload"]["item"]["id"] = json!(id);
+    p.fold_codex_line(end.to_string().as_bytes());
+    assert_eq!(tools(&p).len(), 1);
+    assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "completed");
+}
