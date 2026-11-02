@@ -73,7 +73,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         ("task_delete", "DELETE ON tasks", "1", "s.task_id = OLD.id"),
         ("workspace_update", "UPDATE OF wake_on_answer ON workspaces", "NOT (OLD.wake_on_answer IS NEW.wake_on_answer)", "s.workspace_id = OLD.id"),
         ("workspace_delete", "DELETE ON workspaces", "1", "s.workspace_id = OLD.id"),
-        ("lead_insert", "INSERT ON workspace_leads", "1", "s.workspace_id = NEW.workspace_id"),
+        ("lead_insert", "INSERT ON workspace_leads", "NOT EXISTS (SELECT 1 FROM workspace_leads WHERE workspace_id = NEW.workspace_id AND handle IS NEW.handle)", "s.workspace_id = NEW.workspace_id"),
         ("lead_update", "UPDATE ON workspace_leads", "NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.handle IS NEW.handle)", "s.workspace_id IN (OLD.workspace_id, NEW.workspace_id)"),
         ("lead_delete", "DELETE ON workspace_leads", "1", "s.workspace_id = OLD.workspace_id"),
         ("terminal_insert", "INSERT ON terminals", "NEW.role = 2", "s.workspace_id = NEW.workspace_id"),
@@ -101,8 +101,21 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
                 format!("s.authorizer_device = {row}.client_id")
             };
             let name = format!("check_in_{table}_{}", op.to_lowercase());
+            let value = match table {
+                "owner_devices" => Some("state"),
+                "device_caps" => Some("cap"),
+                "member_devices" => Some("handle"),
+                _ => None,
+            };
+            let changed = match (op, value) {
+                ("UPDATE", Some(column)) => format!("NOT (OLD.client_id IS NEW.client_id AND OLD.{column} IS NEW.{column})"),
+                ("UPDATE", None) => "NOT (OLD.client_id IS NEW.client_id)".to_string(),
+                ("INSERT", Some(column)) => format!("NOT EXISTS (SELECT 1 FROM {table} WHERE client_id = NEW.client_id AND {column} IS NEW.{column})"),
+                ("INSERT", None) => format!("NOT EXISTS (SELECT 1 FROM {table} WHERE client_id = NEW.client_id)"),
+                _ => "1".to_string(),
+            };
             tx.execute_batch(&format!(
-                "CREATE TRIGGER {name} BEFORE {op} ON {table} BEGIN \
+                "CREATE TRIGGER {name} BEFORE {op} ON {table} WHEN {changed} BEGIN \
                  SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE {affected}) \
                      THEN RAISE(ABORT, 'check_in_enter_in_flight') END; \
                  UPDATE check_in_schedules AS s SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 \
@@ -779,6 +792,23 @@ mod tests {
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
         assert_eq!(state, "uncertain");
+    }
+
+    #[test]
+    fn unchanged_owner_device_write_does_not_disturb_an_admitted_attempt() {
+        let (store, ws, task) = board();
+        store.conn().execute("INSERT INTO owner_devices (client_id) VALUES ('owner')", []).unwrap();
+        store.conn().execute(
+            "UPDATE check_in_schedules SET authorizer_device = 'owner', authorizer_source = 'owner_device' WHERE workspace_id = ?1",
+            [uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'owner')",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        store.conn().execute("UPDATE owner_devices SET state = state WHERE client_id = 'owner'", []).unwrap();
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "enabled");
+        assert!(matches!(store.conn().execute("UPDATE owner_devices SET state = 'check' WHERE client_id = 'owner'", []).map_err(crate::error::map_err), Err(DomainError::ResourceConflict)));
     }
 
     #[test]
