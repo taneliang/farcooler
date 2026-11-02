@@ -90,3 +90,6 @@ mod runner_holds_tests;
 mod harness_tests;
 #[cfg(test)]
 mod record_types_tests;
+
+#[cfg(test)]
+mod literal_operation_tests;
