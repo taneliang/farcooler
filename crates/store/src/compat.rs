@@ -229,8 +229,9 @@ mod tests {
         // or 0065's (ov-838, the 56th), a new table (device_added_by) an older build never names,
         // or 0066's (ov-856, the 57th), four new tables (owner_devices, member_access, device_caps, step_up_keys) an older build never names.
         // 0067's (ov-872, the 58th) is `Refused`: it drops the lane, train and
-        // worker tables every older build reads, so it is the floor now.
-        assert_eq!(COMPATIBLE_DOWN_TO, 58);
+        // worker tables every older build reads. The check-in admission fence is
+        // also Refused, making schema 59 the floor.
+        assert_eq!(COMPATIBLE_DOWN_TO, 59);
     }
 
     /// The newest schema main writes is ov-194's agent-turn tables, and this
@@ -274,12 +275,12 @@ mod tests {
         let store = Store::open(&path).expect("main's newest schema opens here");
         drop(store);
         let conn = Connection::open(&path).unwrap();
-        assert_eq!(read_schema_version(&conn).unwrap(), 58, "migrated on past ov-212's waits");
+        assert_eq!(read_schema_version(&conn).unwrap(), 59, "migrated on past ov-212's waits");
         assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(COMPATIBLE_DOWN_TO));
-        assert_eq!(CURRENT_SCHEMA_VERSION, 58, "a new migration moves this test's 'next' along");
+        assert_eq!(CURRENT_SCHEMA_VERSION, 59, "a new migration moves this test's 'next' along");
         std::fs::remove_dir_all(&dir).ok();
 
-        let next = database_left_by_a_newer_build(59, None);
+        let next = database_left_by_a_newer_build(60, None);
         let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(
