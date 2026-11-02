@@ -56,5 +56,59 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             authorizer_device TEXT
         );
         "#,
-    )
+    )?;
+
+    // The veto and epoch change happen in the writer's own transaction. In
+    // particular they catch indirect and bulk writes, not only RPC entrypoints.
+    let rules = [
+        ("task_update", "UPDATE OF status, workspace_id ON tasks", "NOT (OLD.status IS NEW.status AND OLD.workspace_id IS NEW.workspace_id)", "s.task_id = OLD.id"),
+        ("task_delete", "DELETE ON tasks", "1", "s.task_id = OLD.id"),
+        ("workspace_update", "UPDATE OF wake_on_answer ON workspaces", "NOT (OLD.wake_on_answer IS NEW.wake_on_answer)", "s.workspace_id = OLD.id"),
+        ("workspace_delete", "DELETE ON workspaces", "1", "s.workspace_id = OLD.id"),
+        ("lead_insert", "INSERT ON workspace_leads", "1", "s.workspace_id = NEW.workspace_id"),
+        ("lead_update", "UPDATE ON workspace_leads", "NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.handle IS NEW.handle)", "s.workspace_id IN (OLD.workspace_id, NEW.workspace_id)"),
+        ("lead_delete", "DELETE ON workspace_leads", "1", "s.workspace_id = OLD.workspace_id"),
+        ("terminal_insert", "INSERT ON terminals", "NEW.role = 2", "s.workspace_id = NEW.workspace_id"),
+        ("terminal_update", "UPDATE ON terminals", "NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.role IS NEW.role AND OLD.command_preset IS NEW.command_preset AND OLD.intent IS NEW.intent AND OLD.runtime_confirmed IS NEW.runtime_confirmed AND OLD.exit_code IS NEW.exit_code AND OLD.exit_signal IS NEW.exit_signal AND OLD.lease_generation IS NEW.lease_generation AND OLD.epoch IS NEW.epoch AND OLD.pane_mode IS NEW.pane_mode AND OLD.agent_session_id IS NEW.agent_session_id)", "(s.workspace_id IN (OLD.workspace_id, NEW.workspace_id) AND (OLD.role = 2 OR NEW.role = 2))"),
+        ("terminal_delete", "DELETE ON terminals", "OLD.role = 2", "s.workspace_id = OLD.workspace_id"),
+        ("repository_delete", "DELETE ON repositories", "1", "s.workspace_id IN (SELECT id FROM workspaces WHERE repository_id = OLD.id)"),
+        ("worktree_delete", "DELETE ON worktrees", "1", "s.workspace_id IN (SELECT workspace_id FROM terminals WHERE worktree_id = OLD.id AND role = 2)"),
+    ];
+    for (name, event, changed, affected) in rules {
+        tx.execute_batch(&format!(
+            "CREATE TRIGGER check_in_{name} BEFORE {event} WHEN {changed} BEGIN \
+             SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE {affected}) \
+                 THEN RAISE(ABORT, 'check_in_enter_in_flight') END; \
+             UPDATE check_in_schedules AS s SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 \
+                 WHERE state = 'enabled' AND {affected}; END;"
+        ))?;
+    }
+    for table in ["owner_devices", "device_caps", "released_devices", "member_devices"] {
+        for (op, row) in [("INSERT", "NEW"), ("UPDATE", "OLD"), ("DELETE", "OLD")] {
+            // A replacement or a rebinding must invalidate even if the same
+            // device later returns to its former state.
+            let affected = if op == "UPDATE" {
+                "s.authorizer_device IN (OLD.client_id, NEW.client_id)".to_string()
+            } else {
+                format!("s.authorizer_device = {row}.client_id")
+            };
+            let name = format!("check_in_{table}_{}", op.to_lowercase());
+            tx.execute_batch(&format!(
+                "CREATE TRIGGER {name} BEFORE {op} ON {table} BEGIN \
+                 SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE {affected}) \
+                     THEN RAISE(ABORT, 'check_in_enter_in_flight') END; \
+                 UPDATE check_in_schedules AS s SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 \
+                     WHERE state = 'enabled' AND {affected}; END;"
+            ))?;
+        }
+    }
+    tx.execute_batch(
+        "CREATE TRIGGER check_in_schedule_update BEFORE UPDATE ON check_in_schedules \
+         WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) \
+         BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
+         CREATE TRIGGER check_in_schedule_delete BEFORE DELETE ON check_in_schedules \
+         WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) \
+         BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END;"
+    )?;
+    Ok(())
 }
