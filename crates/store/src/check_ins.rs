@@ -879,21 +879,24 @@ mod tests {
             params![uuid_blob(terminal.id), uuid_blob(ws)],
         ).unwrap();
         store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
-        let (occ, attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
-        store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, daemon_instance, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch, process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'claimed', ?2, ?3, ?4, 'thread', 'test message', '%1', (SELECT lease_generation FROM terminals WHERE id = ?4), (SELECT epoch FROM terminals WHERE id = ?4), 123, 1, '/rollout', 1, 2, 0 FROM check_in_schedules WHERE workspace_id = ?5",
-            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal.id), uuid_blob(ws)],
-        ).unwrap();
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 5).unwrap());
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 5).unwrap());
-        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 5).unwrap());
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        let occ = store.pending_check_ins().unwrap()[0].id;
+        let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
+        assert!(store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
+        let text = store.claimed_check_in_message(occ, attempt).unwrap().unwrap();
+        assert!(text.starts_with("[Far Cooler] Scheduled hourly check-in"));
+        assert!(text.contains(&occ.to_string()));
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", 1, 2, 0).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 3_600_003).unwrap());
+        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
-        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 6).unwrap());
-        assert!(store.settle_check_in_enter(occ, attempt, true, 6).unwrap());
-        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
-        assert_eq!(store.expire_check_in_submissions(6 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
+        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 3_600_004).unwrap());
+        assert!(store.settle_check_in_enter(occ, attempt, true, 3_600_004).unwrap());
+        assert_eq!(store.expire_check_in_submissions(3_600_004 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
+        assert_eq!(store.expire_check_in_submissions(3_600_004 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
         assert!(store.disable_check_in(ws, None, None).unwrap());
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
         let state: String = store.conn().query_row("SELECT state FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occ)], |r| r.get(0)).unwrap();
