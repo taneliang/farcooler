@@ -255,7 +255,7 @@ impl Watcher {
         // fails: no timeout is proof that tmux did not accept the key.
         match runtime.tmux.send_enter_once(&pane).await {
             Ok(()) => {
-                if !self.service.store.settle_check_in_enter(pending.id, attempt, true, now_millis())? {
+                if !self.service.store.settle_check_in_enter(pending.id, attempt, now_millis())? {
                     return Err(DomainError::Conflict { what: "unconfirmed" });
                 }
                 self.mark_told(to.id);

@@ -217,7 +217,7 @@ impl crate::Store {
             params![workspace, task, uuid_blob(terminal), uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), device],
         ).map_err(map_err)?;
         let changed = tx.execute(
-            "UPDATE check_in_occurrences SET state = 'enter_admitted', admitted_at = ?3 WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed'",
+            "UPDATE check_in_occurrences SET state = 'enter_admitted', admitted_at = ?3, reason = 'enter_in_flight' WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed'",
             params![uuid_blob(occurrence), uuid_blob(attempt), now],
         ).map_err(map_err)?;
         if changed != 1 { return Ok(false) }
@@ -226,13 +226,12 @@ impl crate::Store {
     }
 
     /// Settle only the exact admitted attempt after its sender is joined and
-    /// cannot start another send. A handed-off key may still arrive: submitted
-    /// is not a receipt and uncertain is never retried automatically.
+    /// cannot start another send. Only a successful client completion uses
+    /// this path; an error retains the fence. Submission is not a receipt.
     pub fn settle_check_in_enter(
         &self,
         occurrence: uuid::Uuid,
         attempt: uuid::Uuid,
-        submitted: bool,
         now: i64,
     ) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
@@ -241,11 +240,10 @@ impl crate::Store {
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
-        let state = if submitted { "submitted" } else { "uncertain" };
         let changed = tx.execute(
-            "UPDATE check_in_occurrences SET state = ?3, submitted_at = ?4 WHERE id = ?1 AND attempt_id = ?2 AND state = 'enter_admitted'
+            "UPDATE check_in_occurrences SET state = 'submitted', submitted_at = ?3, reason = 'awaiting_receipt' WHERE id = ?1 AND attempt_id = ?2 AND state = 'enter_admitted'
              AND EXISTS (SELECT 1 FROM check_in_enter_fences f WHERE f.occurrence_id = ?1 AND f.attempt_id = ?2)",
-            params![uuid_blob(occurrence), uuid_blob(attempt), state, now],
+            params![uuid_blob(occurrence), uuid_blob(attempt), now],
         ).map_err(map_err)?;
         if changed != 1 { return Ok(false) }
         tx.execute("DELETE FROM check_in_enter_fences WHERE occurrence_id = ?1 AND attempt_id = ?2", params![uuid_blob(occurrence), uuid_blob(attempt)]).map_err(map_err)?;
@@ -307,7 +305,7 @@ impl crate::Store {
             "UPDATE check_in_occurrences AS o SET state = 'claimed', attempt_id = ?2, daemon_instance = ?3,
                     terminal_id = ?4, thread_id = ?5, claimed_at = ?6, pane_id = ?7,
                     terminal_lease = (SELECT lease_generation FROM terminals WHERE id = ?4),
-                    terminal_epoch = (SELECT epoch FROM terminals WHERE id = ?4), message_text = ?8, reason = NULL,
+                    terminal_epoch = (SELECT epoch FROM terminals WHERE id = ?4), message_text = ?8, reason = 'delivery_in_progress',
                     process_id = ?9, process_started = ?10
               WHERE o.id = ?1 AND o.state = 'pending'
                 AND EXISTS (SELECT 1 FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id
@@ -655,7 +653,7 @@ impl crate::Store {
         let Some(workspace) = workspace else { return Ok(false) };
         let evidence = format!("codex_rollout_line:{line_offset};message_at:{message_at}");
         let changed = tx.execute(
-            "UPDATE check_in_occurrences SET state = 'confirmed', confirmed_at = ?3, observation = ?4
+            "UPDATE check_in_occurrences SET state = 'confirmed', confirmed_at = ?3, observation = ?4, reason = NULL
               WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'",
             params![uuid_blob(occurrence), uuid_blob(attempt), observed_at, evidence],
         ).map_err(map_err)?;
@@ -912,8 +910,8 @@ mod tests {
         assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
-        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), false, 3_600_004).unwrap());
-        assert!(store.settle_check_in_enter(occ, attempt, true, 3_600_004).unwrap());
+        assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), 3_600_004).unwrap());
+        assert!(store.settle_check_in_enter(occ, attempt, 3_600_004).unwrap());
         assert_eq!(store.expire_check_in_submissions(3_600_004 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS - 1).unwrap(), 0);
         assert_eq!(store.expire_check_in_submissions(3_600_004 + super::CHECK_IN_CONFIRMATION_TIMEOUT_MS).unwrap(), 1);
         assert!(store.disable_check_in(ws, None, None).unwrap());
