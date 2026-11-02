@@ -331,7 +331,9 @@ async fn run() -> Result<(), i32> {
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
     #[cfg(unix)]
-    tokio::spawn(watcher.clone().run_check_in_scheduler(uuid::Uuid::now_v7()));
+    let (check_in_shutdown, check_in_shutdown_rx) = tokio::sync::watch::channel(false);
+    #[cfg(unix)]
+    let check_in_task = tokio::spawn(watcher.clone().run_check_in_scheduler(uuid::Uuid::now_v7(), check_in_shutdown_rx));
 
     // The CI watch (ov-309): reads GitHub Actions through `gh` for the trains
     // and pages that name a commit, only here, never in a `--stdio` session.
@@ -449,6 +451,16 @@ async fn run() -> Result<(), i32> {
             Ok(())
         }
     };
+
+    // Stop between scheduler passes and join its active bounded send before
+    // shutting down the runtime, so ordinary shutdown cannot drop its gate.
+    #[cfg(unix)]
+    {
+        let _ = check_in_shutdown.send(true);
+        if let Err(error) = check_in_task.await {
+            tracing::warn!(%error, "check-in scheduler could not be joined");
+        }
+    }
 
     // A member's sign-in under way ends with the daemon, claude and all
     // (ov-584, review L3); its watchdog is the backstop for a crash.

@@ -10,11 +10,17 @@ use crate::watch::Watcher;
 impl Watcher {
     /// Run only under the exclusive daemon owner, after stale attempt recovery.
     #[cfg(unix)]
-    pub async fn run_check_in_scheduler(self: Arc<Self>, daemon: Uuid) {
+    pub async fn run_check_in_scheduler(self: Arc<Self>, daemon: Uuid, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            ticker.tick().await;
+            tokio::select! {
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { break }
+                    continue;
+                }
+                _ = ticker.tick() => {}
+            }
             let now = super::now_millis();
             match self.service.store.submitted_check_ins() {
                 Ok(submitted) => for (occurrence, attempt) in submitted {
@@ -37,6 +43,7 @@ impl Watcher {
             }
             match self.service.store.pending_check_ins() {
                 Ok(pending) => for occurrence in pending {
+                    if *shutdown.borrow() { break }
                     if let Err(error) = self.send_check_in(&occurrence, daemon).await {
                         tracing::warn!(id = %occurrence.id, error = %error, "check-in did not complete delivery");
                     }
