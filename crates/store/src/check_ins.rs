@@ -1004,6 +1004,36 @@ mod tests {
     }
 
     #[test]
+    fn admitted_enter_vetoes_target_identity_and_parent_deletion() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, task) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/identity", "/identity", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.set_terminal_workspace(terminal.id, ws).unwrap();
+        store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(terminal.id), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        for sql in [
+            "UPDATE terminals SET role = 1 WHERE id = ?1",
+            "UPDATE terminals SET pane_mode = 1 WHERE id = ?1",
+            "UPDATE terminals SET epoch = epoch + 1 WHERE id = ?1",
+            "UPDATE terminals SET agent_session_id = 'replacement' WHERE id = ?1",
+            "DELETE FROM terminals WHERE id = ?1",
+        ] {
+            let result = store.conn().execute(sql, [uuid_blob(terminal.id)]).map_err(crate::error::map_err);
+            assert!(matches!(&result, Err(DomainError::ResourceConflict)), "{sql}: {result:?}");
+        }
+        let result = store.conn().execute("DELETE FROM repositories WHERE id = ?1", [uuid_blob(repository)]).map_err(crate::error::map_err);
+        assert!(matches!(result, Err(DomainError::ResourceConflict)));
+        store.conn().execute("UPDATE terminals SET title = 'new title' WHERE id = ?1", [uuid_blob(terminal.id)]).unwrap();
+        assert_eq!(store.get_terminal(terminal.id).unwrap().title, "new title");
+    }
+
+    #[test]
     fn admitted_enter_vetoes_wake_switch_and_task_deletion() {
         let (store, ws, task) = board();
         store.conn().execute(
@@ -1048,6 +1078,9 @@ mod tests {
         ).unwrap();
         store.set_workspace_lead(ws, Some("alice")).unwrap();
         assert!(matches!(store.set_workspace_lead(ws, Some("bob")), Err(DomainError::ResourceConflict)));
+        assert_eq!(store.workspace_lead(ws).unwrap().as_deref(), Some("alice"));
+        let cascade = store.conn().execute("DELETE FROM members WHERE handle = 'alice'", []).map_err(crate::error::map_err);
+        assert!(matches!(cascade, Err(DomainError::ResourceConflict)));
         assert_eq!(store.workspace_lead(ws).unwrap().as_deref(), Some("alice"));
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         store.set_workspace_lead(ws, Some("bob")).unwrap();
