@@ -70,6 +70,14 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         );
         CREATE UNIQUE INDEX check_in_one_active ON check_in_occurrences(workspace_id)
             WHERE state IN ('pending', 'claimed', 'enter_admitted', 'submitted', 'uncertain');
+        -- Independent of a schedule: a concurrent first enable cannot race a
+        -- runner-controlled terminal stop that began while check-ins were off.
+        CREATE TABLE check_in_target_reservations (
+            token BLOB PRIMARY KEY NOT NULL,
+            workspace_id BLOB NOT NULL,
+            terminal_id BLOB NOT NULL
+        );
+        CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id);
         CREATE TABLE check_in_enter_fences (
             workspace_id BLOB PRIMARY KEY NOT NULL,
             task_id BLOB NOT NULL,
@@ -143,6 +151,10 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         "CREATE TRIGGER check_in_schedule_insert BEFORE INSERT ON check_in_schedules \
          WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = NEW.workspace_id) \
          BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
+         CREATE TRIGGER check_in_reserved_target_move BEFORE UPDATE OF workspace_id, role ON terminals \
+         WHEN NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.role IS NEW.role) \
+          AND EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = OLD.id) \
+         BEGIN SELECT RAISE(ABORT, 'check_in_target_in_flight'); END; \
          CREATE TRIGGER check_in_schedule_update BEFORE UPDATE ON check_in_schedules \
          WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) \
          BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END; \
@@ -190,7 +202,8 @@ impl crate::Store {
                JOIN terminals p ON p.id = ?4
               WHERE o.id = ?1 AND o.attempt_id = ?2 AND o.daemon_instance = ?3
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5 AND o.pane_id = ?6 AND o.process_id = ?7 AND o.process_started = ?8
-                AND o.message_text IS NOT NULL AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
+                AND o.message_text IS NOT NULL AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
+                AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
                 AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
@@ -308,6 +321,7 @@ impl crate::Store {
                     terminal_epoch = (SELECT epoch FROM terminals WHERE id = ?4), message_text = ?8, reason = 'delivery_in_progress',
                     process_id = ?9, process_started = ?10
               WHERE o.id = ?1 AND o.state = 'pending'
+                AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
                 AND EXISTS (SELECT 1 FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id
                     JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
                     WHERE s.workspace_id = o.workspace_id AND s.state = 'enabled' AND s.generation = o.generation
@@ -557,8 +571,10 @@ impl crate::Store {
 
         let conn = self.conn();
         let mut status = conn.query_row(
-            "SELECT workspace_id, task_id, generation, authorizer_device, authorizer_source, authorized_at, next_due, state, reason
-               FROM check_in_schedules WHERE workspace_id = ?1",
+            "SELECT s.workspace_id, s.task_id, s.generation, s.authorizer_device, s.authorizer_source, s.authorized_at, s.next_due, s.state,
+                    CASE WHEN EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = s.workspace_id)
+                         THEN 'target_change_in_progress' ELSE s.reason END
+               FROM check_in_schedules s WHERE s.workspace_id = ?1",
             params![uuid_blob(workspace)],
             |r| Ok(CheckInStatus {
                 workspace: get_uuid(r, 0)?, task: get_uuid(r, 1)?, generation: get_uuid(r, 2)?,
@@ -810,6 +826,50 @@ impl crate::Store {
     }
 }
 
+impl crate::Store {
+    /// Reserve a runner-controlled mutation that may stop an orchestrator
+    /// before its database row changes. The token lives until the caller has
+    /// observed the external operation and its row update finish. An error or
+    /// cancellation must leave it in place for explicit reconciliation.
+    pub fn reserve_check_in_target_change(
+        &self, terminal: uuid::Uuid, token: uuid::Uuid,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use farcooler_core::DomainError;
+        use rusqlite::{OptionalExtension, params};
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
+        let workspace: Option<Vec<u8>> = tx.query_row(
+            "SELECT workspace_id FROM terminals WHERE id = ?1 AND role = 2 AND workspace_id IS NOT NULL",
+            params![uuid_blob(terminal)], |r| r.get(0),
+        ).optional().map_err(map_err)?;
+        let Some(workspace) = workspace else { return Ok(false) };
+        let admitted: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
+            params![workspace], |r| r.get(0),
+        ).map_err(map_err)?;
+        if admitted { return Err(DomainError::ResourceConflict) }
+        tx.execute(
+            "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id) VALUES (?1, ?2, ?3)",
+            params![uuid_blob(token), workspace, uuid_blob(terminal)],
+        ).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(true)
+    }
+
+    /// Release only the matching reservation after the external operation can
+    /// no longer initiate and its final row update succeeded.
+    pub fn release_check_in_target_change(&self, token: uuid::Uuid) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        let changed = self.conn().execute(
+            "DELETE FROM check_in_target_reservations WHERE token = ?1", [uuid_blob(token)],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use farcooler_core::DomainError;
@@ -905,9 +965,14 @@ mod tests {
         assert!(text.contains(&occ.to_string()));
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", 1, 2, 0).unwrap());
+        let reservation = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(store.release_check_in_target_change(reservation).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 3_600_003).unwrap());
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 3_600_003).unwrap());
         assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(matches!(store.reserve_check_in_target_change(terminal.id, Uuid::now_v7()), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
         assert!(!store.settle_check_in_enter(occ, Uuid::now_v7(), 3_600_004).unwrap());
@@ -1001,6 +1066,31 @@ mod tests {
         assert_eq!(store.get_terminal(terminal.id).unwrap().resource_version, terminal.resource_version);
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]).unwrap();
+    }
+
+    #[test]
+    fn a_stop_started_while_off_blocks_a_new_schedule_claim() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, task) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/stop-first", "/stop-first", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute(
+            "UPDATE terminals SET workspace_id = ?2, role = 2, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
+            params![uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute("DELETE FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        let reservation = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        store.recover_check_ins_after_exclusive_start().unwrap();
+        store.enable_check_in(ws, task, None, None, false, 1).unwrap();
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        let occ = store.pending_check_ins().unwrap()[0].id;
+        let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
+        assert!(!store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().reason.as_deref(), Some("target_change_in_progress"));
+        assert!(store.release_check_in_target_change(reservation).unwrap());
+        assert!(store.claim_check_in(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
     }
 
     #[test]

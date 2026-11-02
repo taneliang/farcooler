@@ -2986,9 +2986,15 @@ impl Service {
         // removes it from the arrangement, and tmux collapses the split. The old
         // model needed a separate step here to stop a stored group pointing at a
         // terminal that no longer existed.
-        let _ = self.kill_pane(id).await;
+        let reservation = Uuid::now_v7();
+        let reserved = self.store.reserve_check_in_target_change(id, reservation)?;
+        let killed = self.kill_pane(id).await;
         let _ = self.store.end_pane_agent(id); // the pane's agent has finished (ov-872)
-        self.delete_terminal_record(id, record.resource_version)
+        let deleted = self.delete_terminal_record(id, record.resource_version);
+        if reserved && killed.is_ok() && deleted.is_ok() {
+            self.store.release_check_in_target_change(reservation)?;
+        }
+        deleted
     }
 
     /// Delete a terminal's row, and drop the in-memory state held for it.
@@ -4179,14 +4185,19 @@ impl Service {
     /// Stop a terminal. Signals the daemon-owned pane, then records intent.
     pub async fn stop_terminal(&self, id: Uuid) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
+        let reservation = Uuid::now_v7();
+        let reserved = self.store.reserve_check_in_target_change(id, reservation)?;
+        // A failure or cancellation leaves the durable reservation in place:
+        // tmux may already have received the kill.
         self.kill_pane(id).await?;
         self.inventory.refresh().await;
-
-        self.store.update_terminal(
+        let stopped = self.store.update_terminal(
             id,
             term.resource_version,
             terminal_update(&term, |u| u.intent = TerminalIntent::Stopped),
-        )
+        )?;
+        if reserved { self.store.release_check_in_target_change(reservation)?; }
+        Ok(stopped)
     }
 
     /// Forget a lost terminal, without ever claiming it exited.
