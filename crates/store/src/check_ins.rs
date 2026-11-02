@@ -923,6 +923,30 @@ mod tests {
     }
 
     #[test]
+    fn disable_after_claim_prevents_enter_admission() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/disable", "/disable", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute(
+            "UPDATE terminals SET workspace_id = ?2, role = 2, runtime_confirmed = 1, agent_session_id = 'thread' WHERE id = ?1",
+            params![uuid_blob(terminal.id), uuid_blob(ws)],
+        ).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        let occurrence = store.pending_check_ins().unwrap()[0].id;
+        let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
+        assert!(store.claim_check_in(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
+        assert!(store.pin_check_in_rollout(occurrence, attempt, "/rollout", 1, 2, 0).unwrap());
+        assert!(store.disable_check_in(ws, None, None).unwrap());
+        assert!(!store.admit_check_in_enter(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.state, "disabled");
+        assert_eq!(status.occurrence.unwrap().state, "uncertain");
+    }
+
+    #[test]
     fn admitted_fence_refuses_a_reseat_even_when_values_are_unchanged() {
         use farcooler_protocol::v1::TerminalIntent;
         let (store, ws, task) = board();
