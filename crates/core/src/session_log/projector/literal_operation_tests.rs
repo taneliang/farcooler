@@ -193,3 +193,32 @@ fn literal_operation_post_hook_without_completion_is_unconfirmed_and_confirmatio
     assert_eq!(tools(&p).len(), 1);
     assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "completed");
 }
+
+#[test]
+fn literal_operation_zsh_equals_expansion_is_not_literal() {
+    use super::literal_operation::recognize;
+    assert!(operation(command(&format!("{CLI} message orchestrator =ls"))).is_null());
+    for text in ["'=ls'", "\"=ls\"", "\\=ls"] {
+        assert_eq!(operation(command(&format!("{CLI} message orchestrator {text}")))["preview"], "=ls");
+    }
+    let (op, _) = recognize("exec_command", &json!({"command":["/Applications/Far Cooler Canary.app/Contents/Resources/farcooler", "message", "orchestrator", "=ls"]})).unwrap();
+    assert_eq!(op.preview.as_deref(), Some("=ls"));
+}
+
+#[test]
+fn literal_operation_turn_end_is_unconfirmed_until_same_call_completion() {
+    for ending in ["task_complete", "turn_aborted"] {
+        let script = format!("{CLI} task show ov-893");
+        let id = "turn-end-call";
+        let start = json!({"type":"response_item","payload":{"type":"function_call","call_id":id,"name":"exec_command","arguments":json!({"cmd":script}).to_string()}});
+        let mut p = project([start]);
+        let row_id = p.rows().iter().find(|r| matches!(r.kind, RowKind::Tool(_))).unwrap().id.clone();
+        p.fold_codex_line(json!({"type":"event_msg","payload":{"type":ending,"turn_id":"literal-test"}}).to_string().as_bytes());
+        assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "unconfirmed", "{ending}");
+        let mut end = command(&script); end["payload"]["item"]["id"] = json!(id);
+        p.fold_codex_line(end.to_string().as_bytes());
+        assert_eq!(tools(&p).len(), 1);
+        assert_eq!(tools(&p)[0]["operation"]["lifecycle"], "completed");
+        assert_eq!(p.rows().iter().find(|r| matches!(r.kind, RowKind::Tool(_))).unwrap().id, row_id);
+    }
+}

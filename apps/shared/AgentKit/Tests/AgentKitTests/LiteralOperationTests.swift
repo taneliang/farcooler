@@ -72,4 +72,12 @@ import Testing
         p["preview"] = String(repeating: "🐱", count: 280)
         #expect(try tool(p).operation == nil, "encoded metadata exceeds1024 even below scalar count ceiling")
     }
+    @Test func genericAccessibilityKeepsStatus() throws {
+        for (status, expected) in [(AgentRow.Status.running, "Running"), (.done, "Done"), (.failed, "Failed"), (.ended("other"), "Ended")] {
+            var value = try tool(nil)
+            value.status = status
+            #expect(value.presentationAccessibility.contains(expected))
+        }
+    }
+
 }

@@ -385,3 +385,10 @@ async fn a_phone_answer_reaches_the_runner_and_no_other_note_does() {
         assert!(matches!(note, Err(SessionError::Protocol(_))), "a {kind} note went out: {note:?}");
     }
 }
+
+#[test]
+fn phone_agentkit_registers_literal_operation_source() {
+    let generator = include_str!("../../../../apps/ios/generate-project.py");
+    let body = generator.split("\nAGENTKIT_SOURCES = [").nth(1).unwrap().split("\n]").next().unwrap();
+    assert!(body.lines().any(|line| line.trim() == "\"LiteralOperation.swift\","));
+}
