@@ -196,7 +196,7 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boo
         OpeningHeader(
             open = open,
             opens = true,
-            description = "$title: $purpose, ${AgentConversation.recognizedGroupLabel(tools).orEmpty()}",
+            description = listOfNotNull("$title: $purpose", AgentConversation.recognizedGroupLabel(tools)).joinToString(", "),
             toggle = { open = !open },
             time = {
                 RunTimeChip(tools.firstOrNull()?.startedMs, if (status == AgentRow.Status.Running) null else tools.mapNotNull { it.endedMs }.maxOrNull())

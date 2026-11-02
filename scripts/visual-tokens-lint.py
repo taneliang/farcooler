@@ -57,6 +57,7 @@ SOURCES = [
 # Where the tokens are defined, so the only place a radius, a material or a gray
 # may be spelled out.
 TOKEN_FILES = {"DesignTokens.swift", "Theme.kt"}
+TEST_FILES = {"FixtureHostUITests.swift"}
 TOKEN_DIRS = {"Style"}
 # UI-test targets and build output are not views.
 SKIP_DIRS = {"FarCoolerUITests", "build", ".build"}
@@ -153,7 +154,7 @@ def files():
     for root, ext, _ in SOURCES:
         for path in sorted((ROOT / root).rglob("*" + ext)):
             rel = path.relative_to(ROOT)
-            if path.name in TOKEN_FILES or (TOKEN_DIRS | SKIP_DIRS) & set(rel.parts):
+            if path.name in TOKEN_FILES | TEST_FILES or (TOKEN_DIRS | SKIP_DIRS) & set(rel.parts):
                 continue
             yield path
 
