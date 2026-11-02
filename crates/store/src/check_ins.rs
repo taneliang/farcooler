@@ -138,6 +138,18 @@ mod tests {
     }
 
     #[test]
+    fn missed_hours_coalesce_without_using_message_wakes() {
+        let (store, ws, _) = board();
+        assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
+        assert!(store.tick_check_in(ws, 3_600_001).unwrap());
+        assert!(!store.tick_check_in(ws, 20_000_000).unwrap());
+        let conn = store.conn();
+        let count: i64 = conn.query_row("SELECT count(*) FROM check_in_occurrences", [], |r| r.get(0)).unwrap();
+        let messages: i64 = conn.query_row("SELECT count(*) FROM message_wakes", [], |r| r.get(0)).unwrap();
+        assert_eq!((count, messages), (1, 0));
+    }
+
+    #[test]
     fn admission_vetoes_mutation_and_settles_only_its_attempt() {
         use farcooler_protocol::v1::TerminalIntent;
         let (store, ws, task) = board();
@@ -283,5 +295,65 @@ impl crate::Store {
         tx.execute("DELETE FROM check_in_enter_fences WHERE occurrence_id = ?1 AND attempt_id = ?2", params![uuid_blob(occurrence), uuid_blob(attempt)]).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(true)
+    }
+}
+
+impl crate::Store {
+    /// Coalesce all missed deadlines into one dedicated pending occurrence.
+    /// A claimed, submitted or uncertain occurrence prevents another tick.
+    pub fn tick_check_in(&self, workspace: uuid::Uuid, now: i64) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+
+        let id = uuid::Uuid::now_v7();
+        let changed = self.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, template_version, due_at, state)
+             SELECT ?1, s.workspace_id, s.task_id, s.generation, s.eligibility_epoch, s.template_version, s.next_due, 'pending'
+               FROM check_in_schedules s
+              WHERE s.workspace_id = ?2 AND s.state = 'enabled' AND s.next_due <= ?3
+                AND NOT EXISTS (SELECT 1 FROM check_in_occurrences o WHERE o.workspace_id = s.workspace_id
+                    AND o.state IN ('pending', 'claimed', 'enter_admitted', 'submitted', 'uncertain'))",
+            params![uuid_blob(id), uuid_blob(workspace), now],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
+    }
+
+    /// Persist an attempt before its first paste. The daemon supplies its own
+    /// instance and the independently proved current terminal and thread.
+    pub fn claim_check_in(
+        &self,
+        occurrence: uuid::Uuid,
+        attempt: uuid::Uuid,
+        daemon: uuid::Uuid,
+        terminal: uuid::Uuid,
+        thread: &str,
+        now: i64,
+    ) -> farcooler_core::Result<bool> {
+        use crate::error::map_err;
+        use crate::models::uuid_blob;
+        use rusqlite::params;
+
+        if thread.is_empty() { return Ok(false) }
+        let changed = self.conn().execute(
+            "UPDATE check_in_occurrences AS o SET state = 'claimed', attempt_id = ?2, daemon_instance = ?3,
+                    terminal_id = ?4, thread_id = ?5, claimed_at = ?6
+              WHERE o.id = ?1 AND o.state = 'pending'
+                AND EXISTS (SELECT 1 FROM check_in_schedules s JOIN tasks t ON t.id = s.task_id
+                    JOIN workspaces w ON w.id = s.workspace_id JOIN terminals p ON p.id = ?4
+                    WHERE s.workspace_id = o.workspace_id AND s.state = 'enabled' AND s.generation = o.generation
+                      AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
+                      AND t.workspace_id = o.workspace_id AND t.status NOT IN ('done', 'cancelled')
+                      AND w.wake_on_answer = 1 AND p.workspace_id = o.workspace_id AND p.role = 2
+                      AND p.command_preset = 'codex' AND p.intent = 1 AND p.runtime_confirmed = 1
+                      AND p.exit_code IS NULL AND p.exit_signal IS NULL AND p.agent_session_id = ?5
+                      AND (s.authorizer_device IS NULL OR (
+                          EXISTS (SELECT 1 FROM owner_devices d WHERE d.client_id = s.authorizer_device AND d.state = 'confirmed')
+                          AND NOT EXISTS (SELECT 1 FROM device_caps d WHERE d.client_id = s.authorizer_device)
+                          AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = s.authorizer_device)
+                          AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device))))",
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, now],
+        ).map_err(map_err)?;
+        Ok(changed == 1)
     }
 }
