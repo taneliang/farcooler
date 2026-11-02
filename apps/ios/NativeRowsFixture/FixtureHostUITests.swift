@@ -10,5 +10,9 @@ final class FixtureHostUITests: XCTestCase {
         XCTAssertTrue(group.exists)
         group.buttons.firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["native-tool-tool:exec-fccc8116-d738-4d7f-ac0f-f655c8a13542"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "native-rows-disclosure"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }
