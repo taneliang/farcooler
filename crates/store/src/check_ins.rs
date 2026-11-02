@@ -74,7 +74,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         -- runner-controlled terminal stop that began while check-ins were off.
         CREATE TABLE check_in_target_reservations (
             token BLOB PRIMARY KEY NOT NULL,
-            workspace_id BLOB NOT NULL,
+            workspace_id BLOB,
             terminal_id BLOB NOT NULL
         );
         CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id);
@@ -840,19 +840,25 @@ impl crate::Store {
         use rusqlite::{OptionalExtension, params};
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
-        let workspace: Option<Vec<u8>> = tx.query_row(
-            "SELECT workspace_id FROM terminals WHERE id = ?1 AND role = 2 AND workspace_id IS NOT NULL",
-            params![uuid_blob(terminal)], |r| r.get(0),
+        let terminal_row: Option<(Option<Vec<u8>>, i64)> = tx.query_row(
+            "SELECT workspace_id, role FROM terminals WHERE id = ?1",
+            params![uuid_blob(terminal)], |r| Ok((r.get(0)?, r.get(1)?)),
         ).optional().map_err(map_err)?;
-        let Some(workspace) = workspace else { return Ok(false) };
-        let admitted: bool = tx.query_row(
-            "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
-            params![workspace], |r| r.get(0),
-        ).map_err(map_err)?;
-        if admitted { return Err(DomainError::ResourceConflict) }
+        let Some((workspace, role)) = terminal_row else { return Err(DomainError::NotFound) };
+        // Even an unassigned shell can be promoted while a stop is in
+        // flight. Reserve its identity too, so it cannot become a target
+        // until that external operation finishes.
+        let affected_workspace = if role == 2 { workspace } else { None };
+        if let Some(workspace) = &affected_workspace {
+            let admitted: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = ?1)",
+                params![workspace], |r| r.get(0),
+            ).map_err(map_err)?;
+            if admitted { return Err(DomainError::ResourceConflict) }
+        }
         tx.execute(
             "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id) VALUES (?1, ?2, ?3)",
-            params![uuid_blob(token), workspace, uuid_blob(terminal)],
+            params![uuid_blob(token), affected_workspace, uuid_blob(terminal)],
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(true)
@@ -1066,6 +1072,21 @@ mod tests {
         assert_eq!(store.get_terminal(terminal.id).unwrap().resource_version, terminal.resource_version);
         store.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
         store.reseat_orchestrator(terminal.id, terminal.resource_version, &[]).unwrap();
+    }
+
+    #[test]
+    fn a_stopping_agent_cannot_be_promoted_to_orchestrator() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repository = store.get_workspace(ws).unwrap().repository_id;
+        let worktree = store.create_worktree(repository, "test/promote", "/promote", false).unwrap();
+        let terminal = store.create_terminal(worktree.id, "agent", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.set_terminal_workspace(terminal.id, ws).unwrap();
+        let reservation = Uuid::now_v7();
+        assert!(store.reserve_check_in_target_change(terminal.id, reservation).unwrap());
+        assert!(matches!(store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator), Err(DomainError::ResourceConflict)));
+        assert!(store.release_check_in_target_change(reservation).unwrap());
+        store.set_terminal_role(terminal.id, crate::models::TerminalRole::Orchestrator).unwrap();
     }
 
     #[test]
