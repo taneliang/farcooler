@@ -614,10 +614,10 @@ object PlanWords {
 
     /** Exact presentation names only; unknown IDs and variants stay literal. */
     fun model(raw: String): String = when (raw) {
-        "gpt-6.1-sol" -> "GPT-6.1 Sol"
-        "gpt-6.1-terra" -> "GPT-6.1 Terra"
-        "gpt-6-luna" -> "GPT-6 Luna"
-        "gemini-2.5-pro" -> "Gemini 2.5 Pro"
+        "gpt-6.1-sol" -> "GPT-6.1 Sol" // casing ok: verified model brand
+        "gpt-6.1-terra" -> "GPT-6.1 Terra" // casing ok: verified model brand
+        "gpt-6-luna" -> "GPT-6 Luna" // casing ok: verified model brand
+        "gemini-2.5-pro" -> "Gemini 2.5 Pro" // casing ok: verified model brand
         "claude-opus-5-5" -> "Claude Opus 5.5"
         "claude-opus-5" -> "Claude Opus 5"
         "claude-sonnet-5" -> "Claude Sonnet 5"
@@ -669,7 +669,7 @@ object PlanWords {
 
     /** Add the recorded ID only when presentation changed it. */
     fun accessibleModel(words: String, raw: String): String =
-        if (raw.isNotEmpty() && model(raw) != raw) "$words, Model ID: $raw" else words
+        if (raw.isNotEmpty() && model(raw) != raw) "$words, Model ID: $raw" else words // casing ok: ID is an abbreviation
 
     fun accessibleWork(work: PlanWork, now: Long, model: String = ""): String =
         accessibleModel(work(work, now, model), model)
