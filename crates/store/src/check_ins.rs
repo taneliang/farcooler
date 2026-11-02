@@ -888,7 +888,8 @@ impl crate::Store {
         let changed = tx.execute(
             "INSERT INTO check_in_target_reservations (token, workspace_id, terminal_id, operation, phase, process_id, process_started, created_at)
              SELECT ?1, NULL, ?2, 'reap', 'reserved', ?3, ?4, ?5
-              WHERE NOT EXISTS (SELECT 1 FROM terminals WHERE id = ?2)",
+              WHERE NOT EXISTS (SELECT 1 FROM terminals WHERE id = ?2)
+                AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = ?2)",
             params![uuid_blob(token), uuid_blob(terminal), i64::from(std::process::id()), process_started, crate::tasks::now_millis()],
         ).map_err(map_err)?;
         tx.commit().map_err(map_err)?;
@@ -1035,6 +1036,7 @@ mod tests {
         assert!(!store.reserve_absent_check_in_target(existing.id, Uuid::now_v7(), Some(1)).unwrap());
         let (id, token) = (Uuid::now_v7(), Uuid::now_v7());
         assert!(store.reserve_absent_check_in_target(id, token, Some(1)).unwrap());
+        assert!(!store.reserve_absent_check_in_target(id, Uuid::now_v7(), Some(1)).unwrap());
         let insert = || store.conn().execute(
             "INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed, lease_generation, epoch, \"columns\", \"rows\", resource_version, workspace_id, role) \
              SELECT ?1, worktree_id, title, command_preset, intent, runtime_confirmed, lease_generation, epoch, \"columns\", \"rows\", resource_version, workspace_id, role FROM terminals WHERE id = ?2",

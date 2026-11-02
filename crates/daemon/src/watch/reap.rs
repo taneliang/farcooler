@@ -4,7 +4,7 @@
 //! closes what it made (`abandon` in the tmux crate); when the open was cut
 //! off before tmux even answered with the window's id, nothing knows what to
 //! close, and the pane runs on with no terminal id, where the orphan reaper in
-//! `sample`, which reads tagged panes only, can never see it. This takes those.
+//! `sample`, which reads tagged panes only, can never see it. This holds those.
 //!
 //! Only panes the open marked as its own (`farcooler_tmux::windows::
 //! OPENING_MARK`) and never tagged, and only after `UNFINISHED_GRACE`. A pane
@@ -53,7 +53,7 @@ fn unfinished_to_reap(
 }
 
 impl Watcher {
-    /// Kill the panes whose open never finished, once they are past the grace.
+    /// Hold stale unfinished opens when their pane incarnation cannot be proved.
     pub(super) async fn sweep_unfinished_opens(&self) {
         // Only panes an open marked as its own, never one a person added, and
         // only once they have been unfinished longer than any open could take.
@@ -64,12 +64,23 @@ impl Watcher {
                 unfinished_to_reap(&mut seen, &unfinished, std::time::Instant::now(), UNFINISHED_GRACE)
             };
             for pane in stale {
-                match self.service.tmux.kill_pane(&pane.pane_id).await {
-                    Ok(true) => tracing::warn!(pane = %pane.pane_id, "reaped a pane whose open never finished"),
-                    Ok(false) => {}
-                    Err(error) => {
-                        tracing::warn!(pane = %pane.pane_id, ?error, "an unfinished open's pane could not be reaped")
-                    }
+                // This read identifies only a candidate terminal for a hold;
+                // it never authorizes a kill. The pane may already be replaced.
+                let output = self.service.tmux.run(&[
+                    "display-message", "-p", "-t", &pane.pane_id, "#{pane_start_command}",
+                ]).await;
+                let terminal = match output {
+                    Ok(output) if output.ok() => farcooler_tmux::conditional_reap::opening_terminal_id(&output.stdout),
+                    _ => None,
+                };
+                let Some(terminal) = terminal else {
+                    tracing::warn!(pane = %pane.pane_id, "unfinished reap held: terminal marker unavailable");
+                    continue;
+                };
+                match self.service.hold_unreapable_target(terminal) {
+                    Ok(true) => tracing::warn!(pane = %pane.pane_id, %terminal, "unfinished reap held: pane incarnation unproved"),
+                    Ok(false) => {} // registered or already held
+                    Err(error) => tracing::warn!(pane = %pane.pane_id, %terminal, ?error, "unfinished reap hold could not be recorded"),
                 }
             }
         }
@@ -83,12 +94,12 @@ mod tests {
 
     /// The sweep, end to end on a private server.
     ///
-    /// - An open that never finished is reaped once the grace has passed.
+    /// - An open that never finished is held visibly once the grace has passed.
     /// - An open still in progress is not.
     /// - A window or a split a person or an agent added to our session through
     ///   `TMUX`, untagged as it is, is never touched, however old.
     #[tokio::test]
-    async fn the_sweep_takes_only_an_open_that_never_finished() {
+    async fn the_sweep_holds_an_open_that_never_finished() {
         let (_dir, svc, _repo) = crate::test_support::fixture().await;
         if farcooler_core::programs::find("tmux").is_none() {
             assert!(std::env::var_os("CI").is_none(), "CI installs tmux");
@@ -127,7 +138,8 @@ mod tests {
 
         let alive: Vec<String> =
             run(args(&["list-panes", "-a", "-F", "#{pane_id}"])).await.stdout.lines().map(str::to_string).collect();
-        assert!(!alive.contains(&abandoned), "the unfinished open outlived the grace");
+        assert!(alive.contains(&abandoned), "an unsupported incarnation must not be killed");
+        assert!(!svc.store.check_in_target_holds(None).unwrap().is_empty(), "the hold must be visible");
         for (what, pane) in
             [("hand session", &hand), ("hand window", &hand_window), ("hand split", &hand_split), ("open under way", &opening)]
         {
