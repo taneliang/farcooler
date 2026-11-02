@@ -228,6 +228,34 @@ mod tests {
     }
 
     #[test]
+    fn admitted_fence_vetoes_a_second_connection() {
+        let dir = farcooler_core::scratch::dir("check-in-two-connections");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.db");
+        let first = Store::open(&path).unwrap();
+        let repo = first.register_repository_for_test("check-in");
+        let ws = first.ensure_main_workspace(repo).unwrap().id;
+        let task = first.create_task(ws, "audit", Actor::Manager).unwrap().id;
+        first.conn().execute(
+            "INSERT INTO check_in_schedules (workspace_id, task_id, generation, authorizer_source, authorized_at, template_version, next_due, state) VALUES (?1, ?2, ?3, 'local_person', 1, 1, 10, 'enabled')",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        let second = Store::open(&path).unwrap();
+        first.conn().execute(
+            "INSERT INTO check_in_enter_fences VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            params![uuid_blob(ws), uuid_blob(task), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7()), uuid_blob(Uuid::now_v7())],
+        ).unwrap();
+        assert!(matches!(second.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
+        assert_eq!(second.get_task(task).unwrap().status, TaskStatus::Backlog);
+        first.conn().execute("DELETE FROM check_in_enter_fences WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        second.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
+        assert_eq!(first.check_in_status(ws).unwrap().unwrap().state, "suspended");
+        drop(second);
+        drop(first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn status_change_invalidates_and_does_not_revive_on_return() {
         let (store, ws, task) = board();
         store.set_task_status(task, TaskStatus::Done, Actor::Manager).unwrap();
