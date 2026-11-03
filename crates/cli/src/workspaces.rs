@@ -506,6 +506,7 @@ async fn workspace_via(
             if json {
                 println!("{}", serde_json::json!({
                     "configured": status.configured, "workspace": id.to_string(),
+                    "task": (!status.task_id.is_empty()).then(|| uuid_of(&status.task_id).to_string()),
                     "generation": (!status.generation.is_empty()).then(|| uuid_of(&status.generation).to_string()),
                     "state": status.state, "reason": status.reason, "next_due_ms": status.next_due_ms,
                     "authorizer_source": status.authorizer_source, "authorized_at_ms": status.authorized_at_ms,
