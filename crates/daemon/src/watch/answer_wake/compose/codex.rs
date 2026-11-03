@@ -83,7 +83,7 @@ impl Watcher {
         let mut held = composer::Composer::Empty;
         let mut first = true;
         for path in paths {
-            self.paste_checked(to, &runtime, &proven.tty, preset, std::mem::replace(&mut first, false), &quoted(path)).await?;
+            self.paste_checked(to, &runtime, &proven.tty, preset, std::mem::replace(&mut first, false), &quoted(path), None).await?;
             unpasted.0.clear();
             expected = expected.then_image();
             held = self.shown(to, proven, started, &expected, None).await.left(&proven.tty, preset).await?;
@@ -91,7 +91,7 @@ impl Watcher {
         let placeholders = composer::drawn::images(&held);
         if !composed.text.is_empty() {
             let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
-            self.paste_checked(to, &runtime, &proven.tty, preset, first, &text).await?;
+            self.paste_checked(to, &runtime, &proven.tty, preset, first, &text, None).await?;
             expected = expected.then_codex_paste(&text);
             self.shown(to, proven, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
@@ -194,7 +194,8 @@ impl Watcher {
         let mut child: Option<farcooler_tmux::server::OwnedEnter> = None;
         let mut tracked: Option<(uuid::Uuid, uuid::Uuid)> = None;
         let helpers = std::sync::Arc::new(farcooler_tmux::server::ScheduledHelpers::default());
-        let mut body = Box::pin(helpers.clone().scope(self.send_check_in_body(pending, daemon, &mut child, &mut tracked)));
+        let discovery = std::sync::Arc::new(codex_turn::DiscoveryOwner::default());
+        let mut body = Box::pin(helpers.clone().scope(discovery.clone().scope(self.send_check_in_body(pending, daemon, &mut child, &mut tracked))));
         let outcome = std::future::poll_fn(|cx| {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.as_mut().poll(cx))) {
                 Ok(std::task::Poll::Ready(value)) => std::task::Poll::Ready(Ok(value)),
@@ -203,7 +204,7 @@ impl Watcher {
             }
         }).await;
         drop(body);
-        let helpers_reaped = helpers.stop_and_reap().await;
+        let helpers_reaped = helpers.stop_and_reap().await & discovery.stop_and_reap().await;
         if !helpers_reaped {
             self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
             if let Some(child) = child.as_mut() { child.stop_and_reap().await; }
@@ -245,11 +246,11 @@ impl Watcher {
         let Some(thread) = to.agent_session_id.as_deref() else { return Ok(()) };
         let Some(_typing) = self.try_typing(to.id) else { return Ok(()) };
         if !matches!(self.ready(&to).await, Ok(Turn::Between)) { return Ok(()) }
+        let Ok(proven) = self.proven_tui(&to).await else { return Ok(()) };
+        if proven.preset != "codex" || proven.turn != Turn::Between { return Ok(()) }
         let Some(destination) = self.check_in_destination(&to).await else { return Ok(()) };
-        let Ok(Ok((composer::Composer::Empty, Turn::Between, background))) = self.box_beside_background(&to, "codex").await else { return Ok(()) };
-        if self.bracketed(to.id).await.is_err() { return Ok(()) }
-        let proven = Proven { preset: "codex", tty: destination.tty.clone(), pid: destination.pid, turn: Turn::Between, held: true, background };
-        let process_started = destination.incarnation;
+        if destination.pid != proven.pid || destination.tty != proven.tty { return Ok(()) }
+        let Some(process_started) = Kernel.started(destination.pid) else { return Ok(()) };
         let path = destination.path.clone();
         if codex_turn::said(Some(&path), Kernel.started(proven.pid)) != registry_turn::Said::Idle { return Ok(()) }
         if crate::log_join::codex_thread_of(&path).is_none_or(|(id, _)| id != thread) { return Ok(()) }
@@ -264,14 +265,12 @@ impl Watcher {
         if drawn::opens_picker(&text) || !drawn::fits(&text, 0, columns, rows) { return Ok(()) }
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let pane = destination.pane.clone();
-        #[cfg(test)]
-        if let Some(run) = self.after_gate_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
         if self.check_in_destination(&to).await.as_ref() != Some(&destination) { return Ok(()) }
         let attempt = uuid::Uuid::now_v7();
         if !self.service.store.claim_check_in(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? { return Ok(()) }
         *tracked = Some((pending.id, attempt));
         let prepared = async {
-            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, &destination.tty, device, inode, offset)? {
+            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, &destination.tty, destination.incarnation, device, inode, offset)? {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
             let Some(stored) = self.service.store.claimed_check_in_message(pending.id, attempt)? else {
@@ -284,16 +283,9 @@ impl Watcher {
             if self.check_in_destination(&to).await.as_ref() != Some(&destination) {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
-            self.bracketed(to.id).await.map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
-            self.box_still_empty(&to, "codex").await?;
-            let crate::pastes::PastePlan::Hex(hex) = crate::pastes::plan_paste("codex", &text) else {
-                return Err(DomainError::Conflict { what: "unconfirmed" });
-            };
-            runtime.tmux.send_bytes_hex(&pane, &hex).await?;
+            self.paste_checked(&to, &runtime, &proven.tty, "codex", true, &text, Some(&pane)).await?;
             let expected = Expected::default().then_codex_paste(&text);
-            if !matches!(self.shown(&to, &proven, started, &expected, None).await, super::Shown::Yes(_)) {
-                return Err(DomainError::Conflict { what: "paste_left" });
-            }
+            self.shown(&to, &proven, started, &expected, None).await.left(&proven.tty, "codex").await?;
             #[cfg(test)]
             if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
             let pid = proven.pid;
@@ -302,9 +294,7 @@ impl Watcher {
             }
             let now_meta = std::fs::metadata(&path).map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
             if now_meta.dev() != meta.dev() || now_meta.ino() != meta.ino() { return Err(DomainError::Conflict { what: "unconfirmed" }) }
-            if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-                return Err(DomainError::Conflict { what: "paste_left" });
-            }
+            self.codex_still_between(&to, pid, started, &expected, true).await?;
             let screen = runtime.tmux.capture_screen(&pane).await?;
             if self.service.registry().classify("codex", &screen) != AgentActivity::Idle
                 || !expected.shown_by(&composer::read("codex", &screen))
@@ -322,7 +312,7 @@ impl Watcher {
             self.service.store.fail_claimed_check_in(pending.id, attempt)?;
             return Err(error);
         }
-        if !self.service.store.admit_check_in_enter(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? {
+        if !self.service.store.admit_check_in_enter(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, destination.incarnation, now_millis())? {
             self.service.store.fail_claimed_check_in(pending.id, attempt)?;
             return Ok(());
         }

@@ -18,7 +18,7 @@ pub(super) struct Destination {
 }
 
 #[cfg(unix)]
-async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
+pub(super) async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let listing = super::codex_turn::discovery_output("ps", &["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
     let (pid, comm) = super::in_front(&listing)?;
@@ -47,7 +47,6 @@ impl Watcher {
     pub(super) async fn check_in_destination(&self, to: &farcooler_store::models::Terminal) -> Option<Destination> {
         use std::os::unix::fs::MetadataExt;
         use crate::claude_registry::{Kernel, Processes};
-        if super::codex_turn::discovery_reap_failed() { return None }
         let inventory = self.service.inventory_snapshot();
         let pane = unique_pane(&inventory, to.id)?;
         let (preset, pid) = scheduled_foreground(&pane.tty).await?;
@@ -113,14 +112,8 @@ impl Watcher {
                 },
                 Err(error) => tracing::warn!(error = %error, "could not read pending check-ins"),
             }
-            if super::codex_turn::discovery_reap_failed() {
-                self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
-            }
         }
         let _gate = self.check_in_cleanup_gate.lock().await;
-        if super::codex_turn::discovery_reap_failed() {
-            self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
-        }
         if self.check_in_arm.swap(2, std::sync::atomic::Ordering::SeqCst) == 1
             && !matches!(self.service.store.close_check_in_instance(daemon), Ok(true))
         { tracing::warn!("scheduled check-in instance remains unclean"); }
@@ -128,7 +121,26 @@ impl Watcher {
 
     #[cfg(unix)]
     pub(super) async fn observe_check_in(&self, occurrence: Uuid, attempt: Uuid) -> farcooler_core::Result<()> {
+        use std::future::Future;
+        let owner = std::sync::Arc::new(super::codex_turn::DiscoveryOwner::default());
+        let mut body = Box::pin(owner.clone().scope(self.observe_check_in_body(occurrence, attempt)));
+        let result = std::future::poll_fn(|cx| match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.as_mut().poll(cx))) {
+            Ok(std::task::Poll::Ready(value)) => std::task::Poll::Ready(Ok(value)),
+            Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+            Err(_) => std::task::Poll::Ready(Err(())),
+        }).await;
+        drop(body);
+        if !owner.stop_and_reap().await || result.is_err() {
+            self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
+            return Err(farcooler_core::DomainError::Conflict { what: "check_in_discovery_unreaped" });
+        }
+        result.expect("panic handled above")
+    }
+
+    #[cfg(unix)]
+    async fn observe_check_in_body(&self, occurrence: Uuid, attempt: Uuid) -> farcooler_core::Result<()> {
         use std::os::unix::fs::MetadataExt;
+        use crate::claude_registry::{Kernel, Processes};
         use farcooler_core::session_log::codex_prompts::exact_prompt_in_pinned_file;
 
         let Some(observation) = self.service.store.check_in_observation(occurrence, attempt)? else { return Ok(()) };
@@ -138,7 +150,8 @@ impl Watcher {
             || i64::try_from(to.epoch).ok() != Some(observation.terminal_epoch)
         { return Ok(()) }
         let Some(destination) = self.check_in_destination(&to).await else { return Ok(()) };
-        if destination.pid != observation.process_id || destination.incarnation != observation.process_started
+        if destination.pid != observation.process_id || Kernel.started(destination.pid) != Some(observation.process_started)
+            || destination.incarnation != observation.process_incarnation
             || destination.pane != observation.pane || destination.tty != observation.tty { return Ok(()) }
         let path = std::path::Path::new(&observation.path);
         if destination.path != path

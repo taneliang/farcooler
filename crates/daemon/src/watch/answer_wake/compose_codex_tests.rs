@@ -512,8 +512,8 @@ async fn scheduled_admission_vetoes_stop_before_kill() {
     let occurrence = b.svc.store.pending_check_ins().unwrap()[0].id;
     let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
     assert!(b.svc.store.claim_check_in(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
-    assert!(b.svc.store.pin_check_in_rollout(occurrence, attempt, "/test-rollout", "/dev/test", 1, 1, 0).unwrap());
-    assert!(b.svc.store.admit_check_in_enter(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
+    assert!(b.svc.store.pin_check_in_rollout(occurrence, attempt, "/test-rollout", "/dev/test", 7, 1, 1, 0).unwrap());
+    assert!(b.svc.store.admit_check_in_enter(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, 7, now).unwrap());
     let before = b.svc.tmux.call_counts().get("kill-pane").copied().unwrap_or(0);
     let stopped = b.svc.stop_terminal(agent.id).await;
     assert!(matches!(&stopped, Err(DomainError::ResourceConflict)), "{stopped:?}");

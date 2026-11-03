@@ -1122,6 +1122,8 @@ pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
 
 /// `foreground_agent`, with the agent's pid.
 pub(crate) async fn foreground(tty: &str) -> Option<(&'static str, i32)> {
+    #[cfg(unix)]
+    if codex_turn::discovery_is_scoped() { return check_in::scheduled_foreground(tty).await }
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let out = tokio::process::Command::new("ps")
         .args(["-t", name, "-o", "pid=,ppid=,stat=,comm="])

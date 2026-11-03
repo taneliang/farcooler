@@ -114,15 +114,34 @@ fn remember(pid: i32, path: Option<PathBuf>, started: Option<i64>) {
 /// `rollout_of`'s join, kept for seconds): the one a send's record goes to.
 /// Off the executor: it spawns `ps` and `lsof`.
 pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
+    if discovery_is_scoped() { return unique_rollout_now(pid).await }
     tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
 }
 
 /// Own each discovery process until it exits or has been killed and reaped.
 /// Output is capped so a stuck writer cannot make discovery grow unbounded.
-static DISCOVERY_REAP_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+tokio::task_local! { static DISCOVERY_OWNER: std::sync::Arc<DiscoveryOwner>; }
 
-pub(super) fn discovery_reap_failed() -> bool {
-    DISCOVERY_REAP_FAILED.load(std::sync::atomic::Ordering::SeqCst)
+pub(super) fn discovery_is_scoped() -> bool { DISCOVERY_OWNER.try_with(|_| ()).is_ok() }
+
+#[derive(Default)]
+pub(super) struct DiscoveryOwner {
+    child: tokio::sync::Mutex<Option<tokio::process::Child>>,
+}
+
+impl DiscoveryOwner {
+    pub(super) async fn scope<F: std::future::Future>(self: std::sync::Arc<Self>, future: F) -> F::Output {
+        DISCOVERY_OWNER.scope(self, future).await
+    }
+    pub(super) async fn stop_and_reap(&self) -> bool {
+        let mut slot = self.child.lock().await;
+        let Some(child) = slot.as_mut() else { return true };
+        if let Ok(Some(_)) = child.try_wait() { *slot = None; return true }
+        let _ = child.start_kill();
+        let reaped = matches!(tokio::time::timeout(Duration::from_secs(2), child.wait()).await, Ok(Ok(_)));
+        if reaped { *slot = None }
+        reaped
+    }
 }
 
 #[cfg(test)]
@@ -139,9 +158,14 @@ pub(super) async fn discovery_output(program: &str, args: &[&str]) -> Option<Str
 
 async fn discovery_output_inner(program: &str, args: &[&str]) -> Option<String> {
     use tokio::io::AsyncReadExt;
-    let mut child = tokio::process::Command::new(program).args(args)
+    let owner = DISCOVERY_OWNER.try_with(Clone::clone).ok()?;
+    let mut slot = owner.child.lock().await;
+    if slot.is_some() { return None }
+    let child = tokio::process::Command::new(program).args(args)
         .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped()).kill_on_drop(true).spawn().ok()?;
+    *slot = Some(child);
+    let child = slot.as_mut()?;
     let stdout = child.stdout.take()?;
     let mut bytes = Vec::new();
     let result = tokio::time::timeout(Duration::from_secs(3), async {
@@ -150,11 +174,12 @@ async fn discovery_output_inner(program: &str, args: &[&str]) -> Option<String> 
         (status.success() && bytes.len() <= 4 * 1024 * 1024).then_some(())
     }).await;
     match result {
-        Ok(Some(())) => String::from_utf8(bytes).ok(),
+        Ok(Some(())) => { *slot = None; String::from_utf8(bytes).ok() },
         _ => {
             let _ = child.start_kill();
-            if !matches!(tokio::time::timeout(Duration::from_secs(2), child.wait()).await, Ok(Ok(_))) {
-                DISCOVERY_REAP_FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
+            if matches!(tokio::time::timeout(Duration::from_secs(2), child.wait()).await, Ok(Ok(_))) {
+                *slot = None;
+            } else {
                 tracing::error!(program, "discovery child could not be reaped");
             }
             None
@@ -240,9 +265,35 @@ mod check_in_discovery_tests {
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("pid");
         let script = format!("echo $$ > '{}'; exec sleep 30", pidfile.display());
-        assert!(discovery_output("sh", &["-c", &script]).await.is_none());
+        let owner = std::sync::Arc::new(DiscoveryOwner::default());
+        assert!(owner.clone().scope(discovery_output("sh", &["-c", &script])).await.is_none());
+        assert!(owner.stop_and_reap().await);
         let pid: i32 = std::fs::read_to_string(pidfile).unwrap().trim().parse().unwrap();
         // SAFETY: signal 0 checks existence without sending a signal.
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[tokio::test]
+    async fn cancelled_discovery_stays_owned_until_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let script = format!("echo $$ > '{}'; exec sleep 30", pidfile.display());
+        let owner = std::sync::Arc::new(DiscoveryOwner::default());
+        let scoped = owner.clone();
+        let task = tokio::spawn(async move { scoped.scope(discovery_output("sh", &["-c", &script])).await });
+        let pid: i32 = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pidfile)
+                    && let Some(line) = text.strip_suffix('\n')
+                    && let Ok(pid) = line.parse::<i32>() { break pid }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("child started");
+        task.abort();
+        let _ = task.await;
+        assert!(owner.stop_and_reap().await);
+        // SAFETY: signal 0 checks existence without delivering a signal.
         assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
         assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
     }

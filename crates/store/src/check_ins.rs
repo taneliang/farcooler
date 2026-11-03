@@ -51,7 +51,6 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             daemon_instance BLOB,
             terminal_id BLOB,
             pane_id TEXT,
-            tty TEXT,
             terminal_lease INTEGER,
             terminal_epoch INTEGER,
             process_id INTEGER,
@@ -184,6 +183,14 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Persist the additional destination proof without changing schema 59.
+/// Existing attempts lack this proof and cannot be admitted or confirmed by
+/// the new observer; recovery and expiry retain their existing safe paths.
+pub(crate) fn migration_check_in_destination(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE check_in_occurrences ADD COLUMN tty TEXT;
+                      ALTER TABLE check_in_occurrences ADD COLUMN process_incarnation INTEGER;")
+}
+
 
 impl crate::Store {
     /// Persist a new unclean instance before allowing any scheduled effects.
@@ -258,13 +265,14 @@ impl crate::Store {
         pane: &str,
         process_id: i32,
         process_started: i64,
+        process_incarnation: i64,
         now: i64,
     ) -> farcooler_core::Result<bool> {
         use crate::error::map_err;
         use crate::models::uuid_blob;
         use rusqlite::{OptionalExtension, params};
 
-        if thread.is_empty() || !valid_pane_id(pane) || process_id <= 0 || process_started <= 0 {
+        if thread.is_empty() || !valid_pane_id(pane) || process_id <= 0 || process_started <= 0 || process_incarnation <= 0 {
             return Ok(false);
         }
         let mut conn = self.conn();
@@ -280,7 +288,7 @@ impl crate::Store {
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5 AND o.pane_id = ?6 AND o.process_id = ?7 AND o.process_started = ?8
                 AND o.message_text IS NOT NULL AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
                 AND NOT EXISTS (SELECT 1 FROM check_in_cleanup_fence)
-                AND o.tty IS NOT NULL AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
+                AND o.tty IS NOT NULL AND o.process_incarnation = ?9 AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
                 AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
@@ -297,7 +305,7 @@ impl crate::Store {
                     AND NOT EXISTS (SELECT 1 FROM device_caps d WHERE d.client_id = s.authorizer_device)
                     AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = s.authorizer_device)
                     AND NOT EXISTS (SELECT 1 FROM released_devices d WHERE d.client_id = s.authorizer_device)))",
-            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, pane, process_id, process_started],
+            params![uuid_blob(occurrence), uuid_blob(attempt), uuid_blob(daemon), uuid_blob(terminal), thread, pane, process_id, process_started, process_incarnation],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         ).optional().map_err(map_err)?;
         let Some((workspace, task, device)) = valid else { return Ok(false) };
@@ -704,6 +712,7 @@ impl crate::Store {
         attempt: uuid::Uuid,
         path: &str,
         tty: &str,
+        incarnation: i64,
         device: i64,
         inode: i64,
         offset: i64,
@@ -712,11 +721,11 @@ impl crate::Store {
         use crate::models::uuid_blob;
         use rusqlite::params;
 
-        if path.is_empty() || tty.is_empty() || device < 0 || inode < 0 || offset < 0 { return Ok(false) }
+        if path.is_empty() || tty.is_empty() || incarnation <= 0 || device < 0 || inode < 0 || offset < 0 { return Ok(false) }
         let changed = self.conn().execute(
-            "UPDATE check_in_occurrences SET rollout_path = ?3, rollout_device = ?4, rollout_inode = ?5, rollout_offset = ?6, tty = ?7
+            "UPDATE check_in_occurrences SET rollout_path = ?3, rollout_device = ?4, rollout_inode = ?5, rollout_offset = ?6, tty = ?7, process_incarnation = ?8
               WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed' AND rollout_path IS NULL",
-            params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset, tty],
+            params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset, tty, incarnation],
         ).map_err(map_err)?;
         Ok(changed == 1)
     }
@@ -796,6 +805,7 @@ pub struct CheckInObservation {
     pub terminal_epoch: i64,
     pub process_id: i32,
     pub process_started: i64,
+    pub process_incarnation: i64,
     pub thread: String,
     pub message: String,
     pub admitted_at: i64,
@@ -813,17 +823,17 @@ impl crate::Store {
 
         self.conn().query_row(
             "SELECT rollout_path, rollout_device, rollout_inode, rollout_offset, terminal_id, thread_id, admitted_at,
-                    pane_id, terminal_lease, terminal_epoch, message_text, process_id, process_started, workspace_id, tty
+                    pane_id, terminal_lease, terminal_epoch, message_text, process_id, process_started, workspace_id, tty, process_incarnation
                FROM check_in_occurrences WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'
                 AND rollout_path IS NOT NULL AND rollout_device IS NOT NULL AND rollout_inode IS NOT NULL
                 AND rollout_offset IS NOT NULL AND terminal_id IS NOT NULL AND thread_id IS NOT NULL AND admitted_at IS NOT NULL
                 AND pane_id IS NOT NULL AND terminal_lease IS NOT NULL AND terminal_epoch IS NOT NULL AND message_text IS NOT NULL
-                AND process_id IS NOT NULL AND process_started IS NOT NULL AND tty IS NOT NULL",
+                AND process_id IS NOT NULL AND process_started IS NOT NULL AND tty IS NOT NULL AND process_incarnation > 0",
             params![uuid_blob(occurrence), uuid_blob(attempt)],
             |r| Ok(CheckInObservation {
                 path: r.get(0)?, device: r.get(1)?, inode: r.get(2)?, from: r.get(3)?,
                 terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?, pane: r.get(7)?,
-                terminal_lease: r.get(8)?, terminal_epoch: r.get(9)?, message: r.get(10)?, process_id: r.get(11)?, process_started: r.get(12)?, workspace: get_uuid(r, 13)?, tty: r.get(14)?,
+                terminal_lease: r.get(8)?, terminal_epoch: r.get(9)?, message: r.get(10)?, process_id: r.get(11)?, process_started: r.get(12)?, workspace: get_uuid(r, 13)?, tty: r.get(14)?, process_incarnation: r.get(15)?,
             }),
         ).optional().map_err(map_err)
     }
@@ -1077,6 +1087,25 @@ mod tests {
     use crate::models::{Actor, TaskStatus, uuid_blob};
     use crate::Store;
 
+    #[test]
+    fn destination_migration_preserves_legacy_attempt_without_inventing_proof() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
+        let tx = conn.transaction().unwrap();
+        for (migration, _) in &crate::migrate::MIGRATIONS[..59] { migration(&tx).unwrap(); }
+        tx.execute_batch("INSERT INTO check_in_occurrences
+            (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at,
+             template_version, due_at, state, process_started)
+            VALUES (zeroblob(16), zeroblob(16), zeroblob(16), zeroblob(16), 0, 'local_person', 1, 1, 1, 'submitted', 1234);").unwrap();
+        super::migration_check_in_destination(&tx).unwrap();
+        let (state, seconds, tty, incarnation): (String, i64, Option<String>, Option<i64>) = tx.query_row(
+            "SELECT state, process_started, tty, process_incarnation FROM check_in_occurrences", [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).unwrap();
+        assert_eq!((state.as_str(), seconds, tty, incarnation), ("submitted", 1234, None, None));
+        assert_eq!(crate::migrate::MIGRATIONS[59].1, crate::compat::Older::Refused);
+    }
+
     fn board() -> (Store, Uuid, Uuid) {
         let store = Store::open_in_memory().unwrap();
         let repo = store.register_repository_for_test("check-in");
@@ -1156,8 +1185,8 @@ mod tests {
         let (store, ws, _) = board();
         let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch, process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at, tty)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', 'test message', '%1', 1, 1, 123, 1, '/rollout', 1, 2, 10, 5, 6, '/dev/test' FROM check_in_schedules WHERE workspace_id = ?4",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch, process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at, tty, process_incarnation)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', 'test message', '%1', 1, 1, 123, 1, '/rollout', 1, 2, 10, 5, 6, '/dev/test', 7 FROM check_in_schedules WHERE workspace_id = ?4",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
         ).unwrap();
         let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
@@ -1171,6 +1200,23 @@ mod tests {
         let status = store.check_in_status(ws).unwrap().unwrap();
         assert_eq!(status.next_due, 3_600_007);
         assert_eq!(status.occurrence.unwrap().state, "confirmed");
+    }
+
+    #[test]
+    fn legacy_submitted_attempt_without_new_destination_proof_cannot_be_observed() {
+        let (store, ws, _) = board();
+        let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        store.conn().execute(
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at,
+                template_version, due_at, state, attempt_id, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch,
+                process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at,
+                template_version, next_due, 'submitted', ?2, ?3, 'thread', 'test', '%1', 1, 1, 123, 1000, '/rollout', 1, 2, 0, 5, 6
+             FROM check_in_schedules WHERE workspace_id = ?4",
+            params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
+        ).unwrap();
+        assert!(store.check_in_observation(occ, attempt).unwrap().is_none());
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().occurrence.unwrap().state, "submitted");
     }
 
     #[test]
@@ -1196,20 +1242,20 @@ mod tests {
         let text = store.claimed_check_in_message(occ, attempt).unwrap().unwrap();
         assert!(text.starts_with("[Far Cooler] Scheduled hourly check-in"));
         assert!(text.contains(&occ.to_string()));
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
-        assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", "/dev/test", 1, 2, 0).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap());
+        assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", "/dev/test", 7, 1, 2, 0).unwrap());
         let cleanup = Uuid::now_v7();
         store.begin_check_in_cleanup(cleanup).unwrap();
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap());
         assert!(store.complete_check_in_cleanup(cleanup).unwrap());
         let reservation = Uuid::now_v7();
         assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap());
         assert!(store.complete_check_in_target_change(reservation).unwrap());
         assert!(store.release_check_in_target_change(reservation).unwrap());
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 3_600_003).unwrap());
-        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 3_600_003).unwrap());
-        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "other", "%1", 123, 1, 7, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%2", 123, 1, 7, 3_600_003).unwrap());
+        assert!(store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap());
         assert!(matches!(store.reserve_check_in_target_change(terminal.id, Uuid::now_v7(), "stop", Some(1)), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.set_task_status(task, TaskStatus::Done, Actor::Manager), Err(DomainError::ResourceConflict)));
         assert!(matches!(store.disable_check_in(ws, None, None), Err(DomainError::ResourceConflict)));
@@ -1278,9 +1324,9 @@ mod tests {
         let occurrence = store.pending_check_ins().unwrap()[0].id;
         let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
         assert!(store.claim_check_in(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
-        assert!(store.pin_check_in_rollout(occurrence, attempt, "/rollout", "/dev/test", 1, 2, 0).unwrap());
+        assert!(store.pin_check_in_rollout(occurrence, attempt, "/rollout", "/dev/test", 7, 1, 2, 0).unwrap());
         assert!(store.disable_check_in(ws, None, None).unwrap());
-        assert!(!store.admit_check_in_enter(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
+        assert!(!store.admit_check_in_enter(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap());
         let status = store.check_in_status(ws).unwrap().unwrap();
         assert_eq!(status.state, "disabled");
         assert_eq!(status.occurrence.unwrap().state, "uncertain");
