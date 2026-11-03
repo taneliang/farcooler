@@ -251,7 +251,7 @@ struct CheckInSettings: View {
 
     static func enableAction(task: String, identity: CheckInAcknowledgementIdentity?) -> [String] {
         var action = ["enable", "--task", task]
-        if let identity { action += ["--acknowledge-uncertain", "--expected-generation", identity.generation] }
+        if let identity { action += ["--acknowledge-uncertain", "--expected-generation", identity.generation, "--expected-occurrence", identity.occurrence] }
         return action
     }
 

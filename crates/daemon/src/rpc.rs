@@ -2108,7 +2108,10 @@ impl Rpc {
                 let expected_generation = if p.expected_generation.is_empty() { None } else {
                     Some(Uuid::from_slice(&p.expected_generation).map_err(|_| DomainError::InvalidArgument { what: "generation" })?)
                 };
-                let selected = crate::workspace_ops::CheckInEnable { task, expected_generation, acknowledge_uncertain: p.acknowledge_uncertain };
+                let expected_occurrence = if p.expected_occurrence.is_empty() { None } else {
+                    Some(Uuid::from_slice(&p.expected_occurrence).map_err(|_| DomainError::InvalidArgument { what: "occurrence" })?)
+                };
+                let selected = crate::workspace_ops::CheckInEnable { task, expected_generation, expected_occurrence, acknowledge_uncertain: p.acknowledge_uncertain };
                 crate::workspace_ops::enable_check_in(svc, &self.watcher, &self.peer, self.caller_pid, workspace, selected).await?;
                 Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, &self.watcher, workspace)?))
             }

@@ -181,15 +181,19 @@ pub enum CheckInAction {
         /// Pin an acknowledged status to the generation the person saw.
         #[arg(long, requires = "acknowledge_uncertain")]
         expected_generation: Option<uuid::Uuid>,
+        /// Pin the occurrence shown when acknowledgement was given.
+        #[arg(long, requires = "expected_generation")]
+        expected_occurrence: Option<uuid::Uuid>,
     },
     /// Disable future check-ins; an admitted key may still arrive.
     Disable,
 }
 
-fn check_in_enable_payload(task_id: bytes::Bytes, current_generation: bytes::Bytes, expected_generation: Option<uuid::Uuid>, acknowledge_uncertain: bool) -> pb::CheckInEnable {
+fn check_in_enable_payload(task_id: bytes::Bytes, current_generation: bytes::Bytes, current_occurrence: bytes::Bytes, expected_generation: Option<uuid::Uuid>, expected_occurrence: Option<uuid::Uuid>, acknowledge_uncertain: bool) -> pb::CheckInEnable {
     pb::CheckInEnable {
         task_id,
         expected_generation: expected_generation.map(id_bytes).unwrap_or(current_generation),
+        expected_occurrence: if acknowledge_uncertain { expected_occurrence.map(id_bytes).unwrap_or(current_occurrence) } else { Default::default() },
         acknowledge_uncertain,
     }
 }
@@ -497,11 +501,18 @@ async fn workspace_via(
             let result::Value::CheckInStatus(before) = expect_value(shown.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
             let status = match action {
                 CheckInAction::Show => before,
-                CheckInAction::Enable { task, acknowledge_uncertain, expected_generation } => {
+                CheckInAction::Enable { task, acknowledge_uncertain, expected_generation, expected_occurrence } => {
+                    if acknowledge_uncertain && !link.daemon_capabilities().iter().any(|c| c == capability::CHECK_IN_OCCURRENCE_CAS) {
+                        return Err("this runner cannot safely acknowledge a specific check-in yet. update it first".into());
+                    }
+                    if expected_generation.is_some() && expected_occurrence.is_none() {
+                        return Err("the acknowledged occurrence is missing; refresh and try again".into());
+                    }
                     let task = crate::tasks::find_task(&mut link, repo.as_deref(), &task).await?;
-                    let request = with(request_for("workspace.check_in_enable"), request::Payload::CheckInEnable(check_in_enable_payload(
-                        task.id, before.generation, expected_generation, acknowledge_uncertain,
+                    let mut request = with(request_for("workspace.check_in_enable"), request::Payload::CheckInEnable(check_in_enable_payload(
+                        task.id, before.generation, before.occurrence_id, expected_generation, expected_occurrence, acknowledge_uncertain,
                     )));
+                    if acknowledge_uncertain { request.required_capabilities.push(capability::CHECK_IN_OCCURRENCE_CAS.to_string()); }
                     let sent = link.call(request).await.map_err(|e| check_in_refused(e, "the check-in could not be enabled"))?;
                     let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
                     status
@@ -989,20 +1000,24 @@ mod tests {
         use prost::Message;
         let displayed = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
         let current = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let argv = "farcooler workspace check-in WS --repo REPO enable --task KEY --acknowledge-uncertain --expected-generation 00000000-0000-0000-0000-000000000001 --json";
-        let crate::Command::Workspace(WorkspaceCmd::CheckIn { action: CheckInAction::Enable { task, acknowledge_uncertain, expected_generation }, .. }) =
+        let occurrence_a = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let occurrence_b = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap();
+        let argv = "farcooler workspace check-in WS --repo REPO enable --task KEY --acknowledge-uncertain --expected-generation 00000000-0000-0000-0000-000000000001 --expected-occurrence 00000000-0000-0000-0000-000000000003 --json";
+        let crate::Command::Workspace(WorkspaceCmd::CheckIn { action: CheckInAction::Enable { task, acknowledge_uncertain, expected_generation, expected_occurrence }, .. }) =
             crate::Cli::try_parse_from(argv.split_whitespace()).unwrap().command else { panic!("enable") };
         assert_eq!(task, "KEY");
         let task_id = id(7);
         for fresh in [current, displayed] {
-            let payload = check_in_enable_payload(task_id.clone(), id_bytes(fresh), expected_generation, acknowledge_uncertain);
+            let payload = check_in_enable_payload(task_id.clone(), id_bytes(fresh), id_bytes(occurrence_b), expected_generation, expected_occurrence, acknowledge_uncertain);
             let decoded = pb::CheckInEnable::decode(payload.encode_to_vec().as_slice()).unwrap();
             assert_eq!(decoded.expected_generation, id_bytes(displayed));
+            assert_eq!(decoded.expected_occurrence, id_bytes(occurrence_a));
             assert_eq!(decoded.task_id, task_id);
             assert!(decoded.acknowledge_uncertain);
         }
-        let ordinary = check_in_enable_payload(task_id, id_bytes(current), None, true);
+        let ordinary = check_in_enable_payload(task_id, id_bytes(current), id_bytes(occurrence_b), None, None, true);
         assert_eq!(ordinary.expected_generation, id_bytes(current));
+        assert_eq!(ordinary.expected_occurrence, id_bytes(occurrence_b));
     }
 
     /// A workspace refusal keeps the runner's `what`, so `--json` can say

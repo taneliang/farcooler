@@ -49,7 +49,7 @@ struct CheckInSettingsTests {
         acknowledgement.show(occurrenceA)
         acknowledgement.setAcknowledged(true)
         #expect(acknowledgement.isAcknowledged(for: occurrenceA))
-        #expect(CheckInSettings.enableAction(task: "ov-42", identity: occurrenceA) == ["enable", "--task", "ov-42", "--acknowledge-uncertain", "--expected-generation", "generation-A"])
+        #expect(CheckInSettings.enableAction(task: "ov-42", identity: occurrenceA) == ["enable", "--task", "ov-42", "--acknowledge-uncertain", "--expected-generation", "generation-A", "--expected-occurrence", "A"])
 
         acknowledgement.show(occurrenceB)
         #expect(!acknowledgement.isAcknowledged(for: occurrenceB))

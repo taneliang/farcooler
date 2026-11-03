@@ -523,6 +523,7 @@ impl crate::Store {
         task: uuid::Uuid,
         device: Option<&str>,
         expected_generation: Option<uuid::Uuid>,
+        expected_occurrence: Option<uuid::Uuid>,
         acknowledge_uncertain: bool,
         now: i64,
     ) -> farcooler_core::Result<uuid::Uuid> {
@@ -539,6 +540,13 @@ impl crate::Store {
             params![uuid_blob(workspace)], |r| r.get(0),
         ).optional().map_err(map_err)?;
         if existing != expected_generation.map(uuid_blob) { return Err(DomainError::ResourceConflict) }
+        if let Some(expected) = expected_occurrence {
+            let latest: Option<Vec<u8>> = tx.query_row(
+                "SELECT id FROM check_in_occurrences WHERE workspace_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                params![uuid_blob(workspace)], |r| r.get(0),
+            ).optional().map_err(map_err)?;
+            if latest != Some(uuid_blob(expected)) { return Err(DomainError::ResourceConflict) }
+        }
         let valid: bool = tx.query_row(
             "SELECT EXISTS (SELECT 1 FROM workspaces w JOIN tasks t ON t.workspace_id = w.id
              WHERE w.id = ?1 AND t.id = ?2 AND t.status NOT IN ('done', 'cancelled') AND w.wake_on_answer = 1)
@@ -560,6 +568,11 @@ impl crate::Store {
             params![uuid_blob(workspace)], |r| r.get(0),
         ).map_err(map_err)?;
         if uncertain {
+            let current: Vec<u8> = tx.query_row(
+                "SELECT id FROM check_in_occurrences WHERE workspace_id = ?1 AND state = 'uncertain'",
+                params![uuid_blob(workspace)], |r| r.get(0),
+            ).map_err(map_err)?;
+            if Some(current) != expected_occurrence.map(uuid_blob) { return Err(DomainError::ResourceConflict) }
             let disabled: bool = tx.query_row(
                 "SELECT EXISTS (SELECT 1 FROM check_in_schedules WHERE workspace_id = ?1 AND state = 'disabled')",
                 params![uuid_blob(workspace)], |r| r.get(0),
@@ -1152,12 +1165,12 @@ mod tests {
     #[test]
     fn enable_requires_expected_generation_and_starts_one_hour_later() {
         let (store, ws, task) = board();
-        assert!(matches!(store.enable_check_in(ws, task, None, None, false, 100), Err(DomainError::ResourceConflict)));
+        assert!(matches!(store.enable_check_in(ws, task, None, None, None, false, 100), Err(DomainError::ResourceConflict)));
         let generation: Vec<u8> = store.conn().query_row(
             "SELECT generation FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)], |r| r.get(0),
         ).unwrap();
         let old = Uuid::from_slice(&generation).unwrap();
-        let next = store.enable_check_in(ws, task, None, Some(old), false, 100).unwrap();
+        let next = store.enable_check_in(ws, task, None, Some(old), None, false, 100).unwrap();
         assert_ne!(next, old);
         assert!(!store.tick_check_in(ws, 3_600_099).unwrap());
         assert!(store.tick_check_in(ws, 3_600_100).unwrap());
@@ -1178,10 +1191,10 @@ mod tests {
     }
 
     #[test]
-    fn stale_acknowledgement_cannot_resolve_a_new_generation() {
-        let a = Uuid::now_v7();
-        let b = Uuid::now_v7();
-        let (store, ws, task, occurrence) = disabled_uncertain(b);
+    fn stale_acknowledgement_cannot_resolve_another_occurrence() {
+        let generation = Uuid::now_v7();
+        let displayed_occurrence = Uuid::now_v7();
+        let (store, ws, task, occurrence) = disabled_uncertain(generation);
         let snapshot = || {
             let conn = store.conn();
             let schedule: (Vec<u8>, String, i64, Option<String>, String, i64) = conn.query_row(
@@ -1199,14 +1212,18 @@ mod tests {
             (schedule, item, counts)
         };
         let before = snapshot();
-        assert!(matches!(store.enable_check_in(ws, task, None, Some(a), true, 100), Err(DomainError::ResourceConflict)));
+        assert!(matches!(store.enable_check_in(ws, task, None, Some(generation), Some(displayed_occurrence), true, 100), Err(DomainError::ResourceConflict)));
+        assert_eq!(snapshot(), before);
+        assert!(matches!(store.enable_check_in(ws, task, None, Some(Uuid::now_v7()), Some(occurrence), true, 100), Err(DomainError::ResourceConflict)));
+        assert_eq!(snapshot(), before);
+        assert!(matches!(store.enable_check_in(ws, task, None, Some(generation), None, true, 100), Err(DomainError::ResourceConflict)));
         assert_eq!(snapshot(), before);
 
         // Same displayed A, independently seeded as the current snapshot.
-        let (store, ws, task, occurrence) = disabled_uncertain(a);
+        let (store, ws, task, occurrence) = disabled_uncertain(generation);
         let notes_before: i64 = store.conn().query_row("SELECT count(*) FROM task_notes WHERE task_id = ?1", [uuid_blob(task)], |r| r.get(0)).unwrap();
-        let next = store.enable_check_in(ws, task, None, Some(a), true, 100).unwrap();
-        assert_ne!(next, a);
+        let next = store.enable_check_in(ws, task, None, Some(generation), Some(occurrence), true, 100).unwrap();
+        assert_ne!(next, generation);
         let status = store.check_in_status(ws).unwrap().unwrap();
         assert_eq!(status.generation, next);
         assert_eq!(status.state, "enabled");
@@ -1478,7 +1495,7 @@ mod tests {
         let reservation = Uuid::now_v7();
         assert!(store.reserve_check_in_target_change(terminal.id, reservation, "stop", Some(1)).unwrap());
         store.recover_check_ins_after_exclusive_start().unwrap();
-        store.enable_check_in(ws, task, None, None, false, 1).unwrap();
+        store.enable_check_in(ws, task, None, None, None, false, 1).unwrap();
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
         let occ = store.pending_check_ins().unwrap()[0].id;
         let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());

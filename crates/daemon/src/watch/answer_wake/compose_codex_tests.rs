@@ -297,7 +297,7 @@ async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
     ).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     b.watcher.send_check_in(&pending, Uuid::now_v7()).await.expect("scheduled delivery");
@@ -342,7 +342,7 @@ async fn scheduled_rollout_replacement_before_claim_or_enter_never_sends() {
             Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
         b.doing(agent.id, AgentActivity::Idle).await;
         let now = crate::review::now_millis();
-        b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+        b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
         b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
         let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
         let changed = path.clone();
@@ -383,7 +383,7 @@ async fn scheduled_final_discovery_transition(dialog: bool) {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -444,7 +444,7 @@ async fn scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate() {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
     let pidfile = b.dir.path().join("stalled-discovery.pid");
     let (stop, rx) = tokio::sync::watch::channel(false);
@@ -483,7 +483,7 @@ async fn scheduled_discovery_panic_reaps_owned_child_before_gate_release() {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     let stall_file = b.dir.path().join("panic-stall.pid");
@@ -519,7 +519,7 @@ async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     let gate = b.watcher.check_in_cleanup_gate.lock().await;
@@ -550,7 +550,7 @@ async fn scheduled_sender_panic_disarms_and_retains_uncertain_attempt() {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
     b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     b.watcher.panic_after_check_in_spawn.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -580,7 +580,7 @@ async fn scheduled_busy_codex_waits_without_paste_or_duplicate() {
     si.show("working").await;
     b.doing(agent.id, AgentActivity::Working).await;
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
     let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
     b.watcher.send_check_in(&pending, Uuid::now_v7()).await.unwrap();
@@ -604,7 +604,7 @@ async fn scheduled_admission_vetoes_stop_before_kill() {
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false,
     ).unwrap();
     let now = crate::review::now_millis();
-    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
     let occurrence = b.svc.store.pending_check_ins().unwrap()[0].id;
     let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());

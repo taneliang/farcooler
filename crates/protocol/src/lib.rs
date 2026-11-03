@@ -804,6 +804,7 @@ pub mod capability {
     pub const AGENT_STOP: &str = "agent_stop";
     /// Fixed, owner-authorized hourly workspace check-ins.
     pub const WORKSPACE_CHECK_IN: &str = "workspace_check_in";
+    pub const CHECK_IN_OCCURRENCE_CAS: &str = "check_in_occurrence_cas";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -828,7 +829,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN,
+            STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever

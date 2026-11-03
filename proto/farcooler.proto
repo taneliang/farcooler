@@ -6507,6 +6507,8 @@ message CheckInEnable {
   // Empty only for the first configuration; otherwise the last observed generation.
   bytes expected_generation = 2;
   bool acknowledge_uncertain = 3;
+  // The occurrence the person acknowledged, if any.
+  bytes expected_occurrence = 4;
 }
 
 // Inspectable scheduler state. Receipt means the correlated prompt appeared
