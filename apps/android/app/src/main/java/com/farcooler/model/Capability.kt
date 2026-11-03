@@ -85,5 +85,6 @@ enum class Capability(val wire: String) {
     STEP_UP("step_up"),
     PHONE_APPROVAL("phone_approval"),
     AGENT_STOP("agent_stop"),
-    WORKSPACE_CHECK_IN("workspace_check_in");
+    WORKSPACE_CHECK_IN("workspace_check_in"),
+    CHECK_IN_OCCURRENCE_CAS("check_in_occurrence_cas");
 }
