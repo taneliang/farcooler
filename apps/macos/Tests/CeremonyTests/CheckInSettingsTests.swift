@@ -69,5 +69,8 @@ struct CheckInSettingsTests {
         #expect(status.occurrenceState == "confirmed")
         #expect(status.confirmedAt == 200)
         #expect(status.receiptEvidence == "codex_rollout_line:4")
+        let missingGeneration = Data(#"{"configured":true,"task":"task-id","state":"disabled","reason":"","next_due_ms":0,"occurrence":"occ-id","occurrence_state":"uncertain","occurrence_reason":"","receipt_evidence":""}"#.utf8)
+        let uncertain = try JSONDecoder().decode(CheckInReading.self, from: missingGeneration)
+        #expect(CheckInSettings.acknowledgementIdentity(for: uncertain) == nil)
     }
 }

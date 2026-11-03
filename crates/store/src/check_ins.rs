@@ -1163,26 +1163,58 @@ mod tests {
         assert!(store.tick_check_in(ws, 3_600_100).unwrap());
     }
 
-    #[test]
-    fn stale_acknowledgement_cannot_resolve_a_new_generation() {
+    fn disabled_uncertain(generation: Uuid) -> (Store, Uuid, Uuid, Uuid) {
         let (store, ws, task) = board();
-        let a = store.check_in_status(ws).unwrap().unwrap().generation;
-        let b = Uuid::now_v7();
         let occurrence = Uuid::now_v7();
         {
             let conn = store.conn();
-            conn.execute("UPDATE check_in_schedules SET generation = ?2, state = 'disabled' WHERE workspace_id = ?1", params![uuid_blob(ws), uuid_blob(b)]).unwrap();
+            conn.execute("UPDATE check_in_schedules SET generation = ?2, state = 'disabled' WHERE workspace_id = ?1", params![uuid_blob(ws), uuid_blob(generation)]).unwrap();
             conn.execute(
-                "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, due_at, state) SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, next_due, 'uncertain' FROM check_in_schedules WHERE workspace_id = ?2",
+                "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, due_at, state, reason) SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, next_due, 'uncertain', 'fixture' FROM check_in_schedules WHERE workspace_id = ?2",
                 params![uuid_blob(occurrence), uuid_blob(ws)],
             ).unwrap();
         }
+        (store, ws, task, occurrence)
+    }
+
+    #[test]
+    fn stale_acknowledgement_cannot_resolve_a_new_generation() {
+        let a = Uuid::now_v7();
+        let b = Uuid::now_v7();
+        let (store, ws, task, occurrence) = disabled_uncertain(b);
+        let snapshot = || {
+            let conn = store.conn();
+            let schedule: (Vec<u8>, String, i64, Option<String>, String, i64) = conn.query_row(
+                "SELECT generation, state, eligibility_epoch, authorizer_device, authorizer_source, authorized_at FROM check_in_schedules WHERE workspace_id = ?1", [uuid_blob(ws)],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            ).unwrap();
+            let item: (Vec<u8>, Vec<u8>, String, Option<String>) = conn.query_row(
+                "SELECT id, generation, state, reason FROM check_in_occurrences WHERE id = ?1", [uuid_blob(occurrence)],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            ).unwrap();
+            let counts: (i64, i64, i64) = conn.query_row(
+                "SELECT (SELECT count(*) FROM check_in_schedules WHERE workspace_id = ?1), (SELECT count(*) FROM check_in_occurrences WHERE workspace_id = ?1), (SELECT count(*) FROM task_notes WHERE task_id = ?2)",
+                params![uuid_blob(ws), uuid_blob(task)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ).unwrap();
+            (schedule, item, counts)
+        };
+        let before = snapshot();
         assert!(matches!(store.enable_check_in(ws, task, None, Some(a), true, 100), Err(DomainError::ResourceConflict)));
+        assert_eq!(snapshot(), before);
+
+        // Same displayed A, independently seeded as the current snapshot.
+        let (store, ws, task, occurrence) = disabled_uncertain(a);
+        let notes_before: i64 = store.conn().query_row("SELECT count(*) FROM task_notes WHERE task_id = ?1", [uuid_blob(task)], |r| r.get(0)).unwrap();
+        let next = store.enable_check_in(ws, task, None, Some(a), true, 100).unwrap();
+        assert_ne!(next, a);
         let status = store.check_in_status(ws).unwrap().unwrap();
-        assert_eq!(status.generation, b);
-        assert_eq!(status.occurrence.unwrap().state, "uncertain");
-        assert!(store.enable_check_in(ws, task, None, Some(b), true, 100).is_ok());
-        assert_eq!(store.check_in_status(ws).unwrap().unwrap().occurrence.unwrap().state, "resolved_uncertain");
+        assert_eq!(status.generation, next);
+        assert_eq!(status.state, "enabled");
+        let old = status.occurrence.unwrap();
+        assert_eq!(old.id, occurrence);
+        assert_eq!(old.state, "resolved_uncertain");
+        let notes_after: i64 = store.conn().query_row("SELECT count(*) FROM task_notes WHERE task_id = ?1", [uuid_blob(task)], |r| r.get(0)).unwrap();
+        assert_eq!(notes_after, notes_before + 1);
     }
 
     #[test]

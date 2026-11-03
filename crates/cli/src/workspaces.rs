@@ -984,13 +984,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn acknowledged_enable_keeps_displayed_generation_when_reread_changes() {
-        let displayed = uuid::Uuid::now_v7();
-        let current = uuid::Uuid::now_v7();
-        let request = check_in_enable_payload(id(1), id_bytes(current), Some(displayed), true);
-        assert_eq!(request.expected_generation, id_bytes(displayed));
-        assert!(request.acknowledge_uncertain);
-        let ordinary = check_in_enable_payload(id(1), id_bytes(current), None, true);
+    fn displayed_acknowledgement_survives_cli_parse_and_wire_after_reread() {
+        use clap::Parser;
+        use prost::Message;
+        let displayed = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let current = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let argv = "farcooler workspace check-in WS --repo REPO enable --task KEY --acknowledge-uncertain --expected-generation 00000000-0000-0000-0000-000000000001 --json";
+        let crate::Command::Workspace(WorkspaceCmd::CheckIn { action: CheckInAction::Enable { task, acknowledge_uncertain, expected_generation }, .. }) =
+            crate::Cli::try_parse_from(argv.split_whitespace()).unwrap().command else { panic!("enable") };
+        assert_eq!(task, "KEY");
+        let task_id = id(7);
+        for fresh in [current, displayed] {
+            let payload = check_in_enable_payload(task_id.clone(), id_bytes(fresh), expected_generation, acknowledge_uncertain);
+            let decoded = pb::CheckInEnable::decode(payload.encode_to_vec().as_slice()).unwrap();
+            assert_eq!(decoded.expected_generation, id_bytes(displayed));
+            assert_eq!(decoded.task_id, task_id);
+            assert!(decoded.acknowledge_uncertain);
+        }
+        let ordinary = check_in_enable_payload(task_id, id_bytes(current), None, true);
         assert_eq!(ordinary.expected_generation, id_bytes(current));
     }
 
