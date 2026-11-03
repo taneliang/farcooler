@@ -395,17 +395,26 @@ sub draw {
         push @rows, " OpenAI Codex stand-in", "";
         push @rows, map { "• $_" } @said;
         push @rows, "";
-        push @rows, "• Working (3s • esc to interrupt)" if working($mode);
-        if (@queued) {
-            push @rows, "• Messages to be submitted after next tool call (press esc to interrupt and send immediately)";
-            push @rows, map { "  ↳ $_" } @queued;
-        }
-        if ($composer eq "") {
-            push @rows, "› \e[2mExplain this codebase\e[0m";
+        if ($mode eq 'menu') {
+            # Approval shape from core/captures/codex-blocked.txt. The
+            # composer stays in memory while the dialog covers it.
+            push @rows, "  Would you like to run the following command?", "",
+                "  \$ echo banana > fruit.txt", "", "› 1. Yes, proceed (y)",
+                "  2. Yes, and don't ask again (p)", "  3. No, and tell Codex what to do differently (esc)",
+                "", "  Press enter to confirm or esc to cancel";
         } else {
-            push @rows, "› " . shift(@box), map { "  $_" } @box;
+            push @rows, "• Working (3s • esc to interrupt)" if working($mode);
+            if (@queued) {
+                push @rows, "• Messages to be submitted after next tool call (press esc to interrupt and send immediately)";
+                push @rows, map { "  ↳ $_" } @queued;
+            }
+            if ($composer eq "") {
+                push @rows, "› \e[2mExplain this codebase\e[0m";
+            } else {
+                push @rows, "› " . shift(@box), map { "  $_" } @box;
+            }
+            push @rows, "", working($mode) && $composer ne "" ? "  \e[2mtab to queue message\e[0m" : "  gpt-5 high · ~/src";
         }
-        push @rows, "", working($mode) && $composer ne "" ? "  \e[2mtab to queue message\e[0m" : "  gpt-5 high · ~/src";
     }
     print "\e[H\e[2J" . join("\r\n", @rows);
 }

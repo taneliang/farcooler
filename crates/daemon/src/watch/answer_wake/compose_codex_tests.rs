@@ -370,40 +370,65 @@ async fn scheduled_rollout_replacement_before_claim_or_enter_never_sends() {
 /// A dialog or input arriving while the final destination proof is slow
 /// invalidates the earlier composer capture, even with identity unchanged.
 #[cfg(unix)]
+async fn scheduled_final_discovery_transition(dialog: bool) {
+    let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let marker = fired.clone();
+    let shower = si.clone();
+    let root = b.svc.root_dir().to_path_buf();
+    let id = agent.id;
+    let service = b.svc.clone();
+    let snapshot = service.inventory_snapshot();
+    assert!(snapshot.inventory_healthy);
+    let claimants = snapshot.claimants(id);
+    let [claimed] = claimants.as_slice() else { panic!("fixture must have exactly one pane") };
+    assert!(claimed.proves_life());
+    let pane = claimed.pane_id.clone();
+    *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || {
+        if dialog {
+            shower.show_in_hook("menu");
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                    let screen = runtime.block_on(service.runtime().tmux.capture_screen(&pane)).unwrap();
+                    assert_eq!(service.registry().classify("codex", &screen), AgentActivity::Blocked,
+                        "the pinned pane must show the approval before the sender continues: {screen}");
+                }).join().unwrap();
+            });
+        } else { crate::runtime::mark_input(&root, id); }
+        marker.store(true, std::sync::atomic::Ordering::SeqCst);
+    }));
+    let _ = b.watcher.send_check_in(&pending, Uuid::now_v7()).await;
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "fixture never reached the final discovery seam");
+    assert!(si.log().contains("PASTE "), "{}", si.log());
+    assert!(!si.log().contains("ENTER") && si.submitted().is_empty(), "{}", si.log());
+    assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "uncertain");
+}
+
+#[cfg(unix)]
 #[tokio::test]
-async fn scheduled_final_discovery_rechecks_dialog_and_input_before_enter() {
-    for dialog in [true, false] {
-        let b = board().await;
-        assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
-        b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
-        let path = rollout(&b);
-        let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
-        writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
-        let (agent, si) = idle_codex(&b, &path, false).await;
-        let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
-        let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
-            Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
-        b.doing(agent.id, AgentActivity::Idle).await;
-        let now = crate::review::now_millis();
-        b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
-        b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
-        let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
-        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let marker = fired.clone();
-        let shower = si.clone();
-        let root = b.svc.root_dir().to_path_buf();
-        let id = agent.id;
-        *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || {
-            if dialog { shower.show_in_hook("menu"); }
-            else { crate::runtime::mark_input(&root, id); }
-            marker.store(true, std::sync::atomic::Ordering::SeqCst);
-        }));
-        let _ = b.watcher.send_check_in(&pending, Uuid::now_v7()).await;
-        assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "fixture never reached the final discovery seam");
-        assert!(si.log().contains("PASTE "), "{}", si.log());
-        assert!(!si.log().contains("ENTER") && si.submitted().is_empty(), "{}", si.log());
-        assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "uncertain");
-    }
+async fn scheduled_final_discovery_rechecks_visible_dialog_before_enter() {
+    scheduled_final_discovery_transition(true).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_final_discovery_rechecks_input_before_enter() {
+    scheduled_final_discovery_transition(false).await;
 }
 
 #[cfg(unix)]
