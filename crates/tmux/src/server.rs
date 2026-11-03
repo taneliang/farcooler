@@ -608,10 +608,24 @@ mod tests {
         let scoped = owner.clone();
         let task = tokio::spawn(async move { scoped.scope(async move { server.run(&["send-keys", "-t", "%1", "-l", "test"]).await }).await });
         let pid_path = dir.join("tmux.pid");
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while !pid_path.exists() { tokio::task::yield_now().await; }
-        }).await.unwrap();
-        let pid: i32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+        let pid: i32 = match tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(contents) = std::fs::read_to_string(&pid_path)
+                    && let Some(line) = contents.strip_suffix('\n')
+                    && let Ok(pid) = line.parse::<i32>()
+                    && pid > 0
+                { break pid }
+                tokio::task::yield_now().await;
+            }
+        }).await {
+            Ok(pid) => pid,
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                assert!(owner.stop_and_reap().await, "timed-out fixture helper must be reaped");
+                panic!("fixture did not publish a complete positive PID");
+            }
+        };
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         assert!(owner.stop_and_reap().await);
