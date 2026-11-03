@@ -404,7 +404,7 @@ pub async fn reconcile_check_in_hold(svc: &Service, peer: &Peer, caller_pid: Opt
 }
 
 /// The fixed check-in's observable state, without exposing rollout paths.
-pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStatus> {
+pub fn check_in_status(svc: &Service, watcher: &Watcher, workspace: Uuid) -> Result<pb::CheckInStatus> {
     svc.store.get_workspace(workspace)?;
     let Some(status) = svc.store.check_in_status(workspace)? else {
         return Ok(pb::CheckInStatus { workspace_id: workspace.as_bytes().to_vec().into(), ..Default::default() });
@@ -421,6 +421,10 @@ pub fn check_in_status(svc: &Service, workspace: Uuid) -> Result<pb::CheckInStat
         authorizer_source: status.authorizer_source,
         ..Default::default()
     };
+    if !watcher.check_in_is_armed() {
+        out.state = "unavailable".into();
+        if out.reason.is_empty() { out.reason = "scheduler_unavailable_unclean_or_storage".into(); }
+    }
     if let Some(occurrence) = status.occurrence {
         out.occurrence_id = occurrence.id.as_bytes().to_vec().into();
         out.occurrence_state = occurrence.state;
@@ -525,6 +529,9 @@ mod tests {
         assert!(svc.store.check_in_status(workspace).unwrap().is_none());
         enable_check_in(&svc, &watcher, &owner, None, workspace, selected()).await.unwrap();
         assert_eq!(svc.store.check_in_status(workspace).unwrap().unwrap().state, "enabled");
+        let visible = super::check_in_status(&svc, &watcher, workspace).unwrap();
+        assert_eq!(visible.state, "unavailable");
+        assert_eq!(visible.reason, "scheduler_unavailable_unclean_or_storage");
         assert!(disable_check_in(&svc, &watcher, &owner, None, workspace).await.unwrap());
     }
 

@@ -4482,6 +4482,11 @@ impl Watcher {
         }
     }
 
+    /// Whether this process has a committed, currently armed scheduler instance.
+    pub(crate) fn check_in_is_armed(&self) -> bool {
+        self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) == 1
+    }
+
     /// Run until cancelled.
     pub async fn run(self: Arc<Self>) {
         let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);

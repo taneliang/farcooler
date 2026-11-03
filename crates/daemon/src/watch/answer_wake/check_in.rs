@@ -7,6 +7,12 @@ use uuid::Uuid;
 
 use crate::watch::Watcher;
 
+/// Unexpected scheduler termination must never leave its volatile arm set.
+struct SchedulerArmGuard<'a>(&'a std::sync::atomic::AtomicU8);
+impl Drop for SchedulerArmGuard<'_> {
+    fn drop(&mut self) { self.0.store(2, std::sync::atomic::Ordering::SeqCst); }
+}
+
 impl Watcher {
     /// Run only under the exclusive daemon owner, after stale attempt recovery.
     #[cfg(unix)]
@@ -18,6 +24,7 @@ impl Watcher {
             self.check_in_arm.store(if armed { 1 } else { 2 }, std::sync::atomic::Ordering::SeqCst);
             if !armed { tracing::warn!("scheduled check-ins unavailable: unclean or unreadable instance"); }
         }
+        let _arm_guard = SchedulerArmGuard(&self.check_in_arm);
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {

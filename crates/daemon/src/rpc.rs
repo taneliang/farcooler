@@ -2096,7 +2096,7 @@ impl Rpc {
 
             "workspace.check_in_show" => {
                 let workspace = Self::target(&req)?;
-                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, &self.watcher, workspace)?))
             }
 
             "workspace.check_in_enable" => {
@@ -2110,13 +2110,13 @@ impl Rpc {
                 };
                 let selected = crate::workspace_ops::CheckInEnable { task, expected_generation, acknowledge_uncertain: p.acknowledge_uncertain };
                 crate::workspace_ops::enable_check_in(svc, &self.watcher, &self.peer, self.caller_pid, workspace, selected).await?;
-                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, &self.watcher, workspace)?))
             }
 
             "workspace.check_in_disable" => {
                 let workspace = Self::target(&req)?;
                 crate::workspace_ops::disable_check_in(svc, &self.watcher, &self.peer, self.caller_pid, workspace).await?;
-                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, workspace)?))
+                Ok(result::Value::CheckInStatus(crate::workspace_ops::check_in_status(svc, &self.watcher, workspace)?))
             }
 
             "workspace.delete" => {
