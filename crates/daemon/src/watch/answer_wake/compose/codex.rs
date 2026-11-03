@@ -272,7 +272,7 @@ impl Watcher {
         if !self.service.store.claim_check_in(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? { return Ok(()) }
         *tracked = Some((pending.id, attempt));
         let prepared = async {
-            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, &destination.tty, destination.incarnation, device, inode, offset)? {
+            if !self.service.store.pin_check_in_rollout(farcooler_store::PinCheckInRollout { occurrence: pending.id, attempt, path: path_text, tty: &destination.tty, incarnation: destination.incarnation, device, inode, offset })? {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
             let Some(stored) = self.service.store.claimed_check_in_message(pending.id, attempt)? else {

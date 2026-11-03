@@ -179,7 +179,7 @@ mod tests {
         let line = &ROLLOUT[last..];
         let end = line.find('\n').unwrap();
         std::fs::write(&path, &ROLLOUT[..last + end]).unwrap();
-        assert_eq!(positioned_prompts_from(&path, last), []);
+        assert_eq!(positioned_prompts_from(&path, u64::try_from(last).unwrap()), []);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

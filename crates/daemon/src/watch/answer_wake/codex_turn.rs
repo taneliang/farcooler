@@ -117,8 +117,8 @@ pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
     tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
 }
 
-/// Own each discovery process until it exits or has been killed and reaped.
-/// Output is capped so a stuck writer cannot make discovery grow unbounded.
+// Own each discovery process until it exits or has been killed and reaped.
+// Output is capped so a stuck writer cannot make discovery grow unbounded.
 tokio::task_local! { static DISCOVERY_OWNER: std::sync::Arc<DiscoveryOwner>; }
 
 #[derive(Default)]
@@ -239,6 +239,27 @@ fn unique_rollout(pid: i32, files: &[(i32, PathBuf)]) -> Option<PathBuf> {
     main.filter(|_| held_by_foreground)
 }
 
+/// `said_of`, for a gate that mustn't pass a rollout it has lost (ov-428,
+/// the compose path's rule): looked up afresh, and when none is held now but
+/// one was known (`held`: an earlier check found it; or the join kept from
+/// the last few seconds has it) the lookup missed, which is not a first
+/// prompt, so a turn may run: `NotIdle`. Also whether a rollout was found,
+/// for the next check's `held`.
+pub(crate) async fn said_held(pid: i32, held: bool) -> (Said, bool) {
+    let known = held || had(pid) || cached(pid).is_some();
+    let Some(now) = rollout_now(pid).await else {
+        return (if known { Said::NotIdle } else { Said::Nothing }, false);
+    };
+    let started = Kernel.started(pid);
+    let said = tokio::task::spawn_blocking(move || {
+        remember(pid, Some(now.clone()), started);
+        said(Some(&now), started)
+    })
+    .await
+    .unwrap_or(Said::Nothing);
+    (said, true)
+}
+
 #[cfg(test)]
 mod check_in_discovery_tests {
     use super::*;
@@ -318,23 +339,3 @@ mod check_in_discovery_tests {
     }
 }
 
-/// `said_of`, for a gate that mustn't pass a rollout it has lost (ov-428,
-/// the compose path's rule): looked up afresh, and when none is held now but
-/// one was known (`held`: an earlier check found it; or the join kept from
-/// the last few seconds has it) the lookup missed, which is not a first
-/// prompt, so a turn may run: `NotIdle`. Also whether a rollout was found,
-/// for the next check's `held`.
-pub(crate) async fn said_held(pid: i32, held: bool) -> (Said, bool) {
-    let known = held || had(pid) || cached(pid).is_some();
-    let Some(now) = rollout_now(pid).await else {
-        return (if known { Said::NotIdle } else { Said::Nothing }, false);
-    };
-    let started = Kernel.started(pid);
-    let said = tokio::task::spawn_blocking(move || {
-        remember(pid, Some(now.clone()), started);
-        said(Some(&now), started)
-    })
-    .await
-    .unwrap_or(Said::Nothing);
-    (said, true)
-}

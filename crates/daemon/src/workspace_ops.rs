@@ -460,10 +460,7 @@ pub async fn enable_check_in(
     selected: CheckInEnable,
 ) -> Result<Uuid> {
     require_check_in_owner(svc, peer, caller_pid).await?;
-    let generation = svc.store.enable_check_in(
-        workspace, selected.task, peer.client_id.as_deref(), selected.expected_generation, selected.expected_occurrence,
-        selected.acknowledge_uncertain, crate::review::now_millis(),
-    )?;
+    let generation = svc.store.enable_check_in(farcooler_store::EnableCheckIn { workspace, task: selected.task, device: peer.client_id.as_deref(), expected_generation: selected.expected_generation, expected_occurrence: selected.expected_occurrence, acknowledge_uncertain: selected.acknowledge_uncertain, now: crate::review::now_millis() })?;
     watcher.announce_fleet_changed();
     Ok(generation)
 }
@@ -556,7 +553,7 @@ mod tests {
             let watcher = Watcher::new(svc.clone());
             let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
             let task = svc.store.create_task(workspace, "audit", farcooler_store::Actor::Manager).unwrap().id;
-            svc.store.enable_check_in(workspace, task, None, None, None, false, 1).unwrap();
+            svc.store.enable_check_in(farcooler_store::EnableCheckIn { workspace, task, device: None, expected_generation: None, expected_occurrence: None, acknowledge_uncertain: false, now: 1 }).unwrap();
             svc.store.bind_owner_device("owner-device", None).unwrap();
             let peer = Peer { client_id: Some("owner-device".into()), scope: Scope::HostAdmin };
             let result = disable_check_in_after_read(&svc, &watcher, &peer, None, workspace, || {

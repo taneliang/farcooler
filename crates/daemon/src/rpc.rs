@@ -13,6 +13,11 @@
 //!    reaching a phone as a generic failure at the moment the user needs to
 //!    know what actually went wrong.
 
+mod error_response;
+mod screen_revision;
+use error_response::error_response;
+use screen_revision::screen_revision;
+
 use std::sync::Arc;
 
 use farcooler_core::{DomainError, Result};
@@ -326,27 +331,6 @@ async fn agents_found_now() -> Vec<String> {
             tracing::warn!(error = %e, "could not look for the agents on this runner");
             Vec::new()
         })
-}
-
-/// A refusal in the shape every answer takes.
-///
-/// Shared with `Rpc::handle` so a response built outside the dispatcher cannot
-/// be a differently shaped one — same code mapping, same redaction.
-fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
-    let (code, retryable) = err.wire();
-    Response {
-        request_id,
-        outcome: Some(response::Outcome::Error(WireError {
-            code: code as i32,
-            retryable,
-            // Redacted by construction: never a path, terminal byte, command,
-            // or session id.
-            message: err.redacted_message(),
-            // WHICH argument, when the code alone does not say. A client
-            // switches on this and never shows it; see `DomainError::what`.
-            what: err.what().to_string(),
-        })),
-    }
 }
 
 /// The scope a method requires, by its wire name, or `None` for a name this
@@ -2447,35 +2431,6 @@ pub fn empty_payload() -> Option<request::Payload> {
 #[cfg(test)]
 #[path = "rpc_scope_tests.rs"]
 mod tests;
-
-
-/// A cheap identity for a screen.
-///
-/// FNV-1a over the capture and the cursor. Not a checksum anyone relies on for
-/// correctness — a collision means one stale frame until the next change, which
-/// is a redraw, not corruption — and it is compared only against a value this
-/// same runner produced moments earlier.
-///
-/// The scrollback is deliberately not in it. This number answers "is the screen
-/// I hold still the screen?", and history is not diffed against anything: it is
-/// asked for explicitly, by a client that has none, and sent whenever it is
-/// asked for. Hashing it in would change the revision every time a line scrolled
-/// off — resending screens a client already holds, which is the whole cost this
-/// number exists to avoid.
-fn screen_revision(contents: &str, cursor_column: u32, cursor_row: u32) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut eat = |bytes: &[u8]| {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x1000_0000_01b3);
-        }
-    };
-    eat(contents.as_bytes());
-    eat(&cursor_column.to_le_bytes());
-    eat(&cursor_row.to_le_bytes());
-    // Zero means "I have nothing" on the wire, so it must never be a real value.
-    if hash == 0 { 1 } else { hash }
-}
 
 /// `terminal.create` for a task, through the daemon's own handler, with the
 /// agent stubbed: a pane opened for a task starts on a message telling it to

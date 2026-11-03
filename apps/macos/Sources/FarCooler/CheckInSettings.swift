@@ -111,13 +111,13 @@ struct CheckInSettings: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Hourly Check-In · \(workspace.name)").font(.headline)
             Text("A fixed reminder reaches this workspace’s idle Codex orchestrator. It does not grant new approval.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(SidebarInk.secondary).fixedSize(horizontal: false, vertical: true)
             if let status {
                 statusView(status)
                 if canManage {
-                    Divider()
+                    Color.clear.frame(maxWidth: .infinity).frame(height: 0).separator(.grid, edge: .top)
                     if tasks.isEmpty {
-                        Text("No open tasks are available on this board.").foregroundStyle(.secondary)
+                        Text("No open tasks are available on this board.").foregroundStyle(SidebarInk.secondary)
                     } else {
                         Picker("Audit task", selection: $selected) {
                             Text("Choose a task").tag("")
@@ -126,7 +126,7 @@ struct CheckInSettings: View {
                     }
                     if uncertain {
                         Text("An earlier key may still arrive. A receipt confirms input, not completed work.")
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(SidebarInk.secondary).fixedSize(horizontal: false, vertical: true)
                         Toggle("I understand the earlier check-in may still arrive", isOn: Binding(
                             get: { acknowledgement.isAcknowledged(for: acknowledgementIdentity) },
                             set: { acknowledgement.show(acknowledgementIdentity); acknowledgement.setAcknowledged($0) }
@@ -144,7 +144,7 @@ struct CheckInSettings: View {
                     }
                 } else {
                     Text("Only the runner’s owner can enable or change an hourly check-in.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SidebarInk.secondary)
                 }
             } else if working {
                 ProgressView("Reading check-in…")
@@ -179,7 +179,7 @@ struct CheckInSettings: View {
                 Text(occurrence).font(.caption.monospaced()).textSelection(.enabled)
                 if let confirmed = status.confirmedAt, confirmed > 0 {
                     Text("Receipt observed: \(date(confirmed))")
-                    Text("Receipt confirms input, not completed work.").font(.caption).foregroundStyle(.secondary)
+                    Text("Receipt confirms input, not completed work.").font(.caption).foregroundStyle(SidebarInk.secondary)
                 } else if let submitted = status.submittedAt, submitted > 0 {
                     Text("Submitted \(date(submitted)); receipt not yet confirmed.").font(.caption)
                 }
