@@ -106,3 +106,32 @@ impl Watcher {
         Ok(())
     }
 }
+
+#[cfg(all(test, unix))]
+mod ownership_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn scheduler_arms_only_after_cleanup_gate_and_joins_on_shutdown() {
+        let (_dir, service, _) = crate::test_support::fixture().await;
+        let watcher = Watcher::new(service.clone());
+        let gate = watcher.check_in_cleanup_gate.lock().await;
+        let instance = Uuid::now_v7();
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        let owner = tokio::spawn(watcher.clone().run_check_in_scheduler(instance, rx));
+        tokio::task::yield_now().await;
+        assert_eq!(watcher.check_in_arm.load(Ordering::SeqCst), 0);
+        // If the owner had already armed, this competing arm would fail.
+        // Do not actually arm here: the gate is the ordering under test.
+        drop(gate);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while watcher.check_in_arm.load(Ordering::SeqCst) == 0 { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        assert_eq!(watcher.check_in_arm.load(Ordering::SeqCst), 1);
+        stop.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), owner).await.unwrap().unwrap();
+        assert_eq!(watcher.check_in_arm.load(Ordering::SeqCst), 2);
+        assert!(service.store.arm_check_in_instance(Uuid::now_v7()).unwrap(), "joined clean instance permits the next arm");
+    }
+}
