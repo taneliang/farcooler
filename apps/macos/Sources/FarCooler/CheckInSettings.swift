@@ -253,7 +253,7 @@ struct CheckInSettings: View {
         var action = ["disable"]
         if enable {
             guard let task = tasks.first(where: { $0.id == selected }) else { return }
-            action = ["enable", "--task", task.key] + (acknowledge ? ["--acknowledge-uncertain"] : [])
+            action = ["enable", "--task", task.key] + (acknowledgement.isAcknowledged(for: acknowledgementIdentity) ? ["--acknowledge-uncertain"] : [])
         }
         working = true
         defer { working = false }
