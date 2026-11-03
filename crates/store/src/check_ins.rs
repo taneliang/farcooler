@@ -1164,6 +1164,28 @@ mod tests {
     }
 
     #[test]
+    fn stale_acknowledgement_cannot_resolve_a_new_generation() {
+        let (store, ws, task) = board();
+        let a = store.check_in_status(ws).unwrap().unwrap().generation;
+        let b = Uuid::now_v7();
+        let occurrence = Uuid::now_v7();
+        {
+            let conn = store.conn();
+            conn.execute("UPDATE check_in_schedules SET generation = ?2, state = 'disabled' WHERE workspace_id = ?1", params![uuid_blob(ws), uuid_blob(b)]).unwrap();
+            conn.execute(
+                "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, due_at, state) SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, next_due, 'uncertain' FROM check_in_schedules WHERE workspace_id = ?2",
+                params![uuid_blob(occurrence), uuid_blob(ws)],
+            ).unwrap();
+        }
+        assert!(matches!(store.enable_check_in(ws, task, None, Some(a), true, 100), Err(DomainError::ResourceConflict)));
+        let status = store.check_in_status(ws).unwrap().unwrap();
+        assert_eq!(status.generation, b);
+        assert_eq!(status.occurrence.unwrap().state, "uncertain");
+        assert!(store.enable_check_in(ws, task, None, Some(b), true, 100).is_ok());
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().occurrence.unwrap().state, "resolved_uncertain");
+    }
+
+    #[test]
     fn missed_hours_coalesce_without_using_message_wakes() {
         let (store, ws, _) = board();
         assert!(store.due_check_in_workspaces(3_600_000).unwrap().is_empty());

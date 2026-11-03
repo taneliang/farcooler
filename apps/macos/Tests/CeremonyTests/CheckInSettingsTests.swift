@@ -42,13 +42,14 @@ struct CheckInSettingsTests {
 
     @Test("Refreshing from acknowledged uncertainty A to B requires fresh acknowledgement")
     func acknowledgementBelongsToDisplayedOccurrence() {
-        let occurrenceA = CheckInAcknowledgementIdentity(occurrence: "A", state: "uncertain")
-        let occurrenceB = CheckInAcknowledgementIdentity(occurrence: "B", state: "uncertain")
+        let occurrenceA = CheckInAcknowledgementIdentity(occurrence: "A", state: "uncertain", generation: "generation-A")
+        let occurrenceB = CheckInAcknowledgementIdentity(occurrence: "B", state: "uncertain", generation: "generation-B")
         var acknowledgement = CheckInAcknowledgement()
 
         acknowledgement.show(occurrenceA)
         acknowledgement.setAcknowledged(true)
         #expect(acknowledgement.isAcknowledged(for: occurrenceA))
+        #expect(CheckInSettings.enableAction(task: "ov-42", identity: occurrenceA) == ["enable", "--task", "ov-42", "--acknowledge-uncertain", "--expected-generation", "generation-A"])
 
         acknowledgement.show(occurrenceB)
         #expect(!acknowledgement.isAcknowledged(for: occurrenceB))

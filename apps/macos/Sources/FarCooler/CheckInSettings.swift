@@ -12,6 +12,7 @@ struct CheckInSheetRequest: Identifiable {
 struct CheckInReading: Decodable {
     let configured: Bool
     let task: String?
+    let generation: String?
     let state: String
     let reason: String
     let nextDue: Int64
@@ -23,7 +24,7 @@ struct CheckInReading: Decodable {
     let receiptEvidence: String
 
     enum CodingKeys: String, CodingKey {
-        case configured, task, state, reason, occurrence
+        case configured, task, generation, state, reason, occurrence
         case nextDue = "next_due_ms"
         case occurrenceState = "occurrence_state"
         case occurrenceReason = "occurrence_reason"
@@ -36,6 +37,7 @@ struct CheckInReading: Decodable {
 struct CheckInAcknowledgementIdentity: Equatable {
     let occurrence: String
     let state: String
+    let generation: String
 }
 
 struct CheckInAcknowledgement {
@@ -101,10 +103,8 @@ struct CheckInSettings: View {
     }
 
     private var acknowledgementIdentity: CheckInAcknowledgementIdentity? {
-        guard let status, Self.requiresAcknowledgement(status.occurrenceState), let occurrence = status.occurrence else {
-            return nil
-        }
-        return CheckInAcknowledgementIdentity(occurrence: occurrence, state: status.occurrenceState)
+        guard let status else { return nil }
+        return Self.acknowledgementIdentity(for: status)
     }
 
     var body: some View {
@@ -224,8 +224,9 @@ struct CheckInSettings: View {
     }
 
     static func acknowledgementIdentity(for status: CheckInReading) -> CheckInAcknowledgementIdentity? {
-        guard requiresAcknowledgement(status.occurrenceState), let occurrence = status.occurrence else { return nil }
-        return CheckInAcknowledgementIdentity(occurrence: occurrence, state: status.occurrenceState)
+        guard requiresAcknowledgement(status.occurrenceState), let occurrence = status.occurrence,
+              let generation = status.generation else { return nil }
+        return CheckInAcknowledgementIdentity(occurrence: occurrence, state: status.occurrenceState, generation: generation)
     }
 
     @MainActor private func load() async {
@@ -248,12 +249,20 @@ struct CheckInSettings: View {
         if let task = status?.task, tasks.contains(where: { $0.id == task }) { selected = task }
     }
 
+    static func enableAction(task: String, identity: CheckInAcknowledgementIdentity?) -> [String] {
+        var action = ["enable", "--task", task]
+        if let identity { action += ["--acknowledge-uncertain", "--expected-generation", identity.generation] }
+        return action
+    }
+
     @MainActor private func change(enable: Bool) async {
         guard canManage else { return }
         var action = ["disable"]
         if enable {
             guard let task = tasks.first(where: { $0.id == selected }) else { return }
-            action = ["enable", "--task", task.key] + (acknowledgement.isAcknowledged(for: acknowledgementIdentity) ? ["--acknowledge-uncertain"] : [])
+            let identity = acknowledgementIdentity
+            if uncertain && !acknowledgement.isAcknowledged(for: identity) { return }
+            action = Self.enableAction(task: task.key, identity: uncertain ? identity : nil)
         }
         working = true
         defer { working = false }

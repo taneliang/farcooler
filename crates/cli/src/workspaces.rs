@@ -178,9 +178,20 @@ pub enum CheckInAction {
         /// Acknowledge an earlier attempt may already have reached the agent.
         #[arg(long)]
         acknowledge_uncertain: bool,
+        /// Pin an acknowledged status to the generation the person saw.
+        #[arg(long, requires = "acknowledge_uncertain")]
+        expected_generation: Option<uuid::Uuid>,
     },
     /// Disable future check-ins; an admitted key may still arrive.
     Disable,
+}
+
+fn check_in_enable_payload(task_id: bytes::Bytes, current_generation: bytes::Bytes, expected_generation: Option<uuid::Uuid>, acknowledge_uncertain: bool) -> pb::CheckInEnable {
+    pb::CheckInEnable {
+        task_id,
+        expected_generation: expected_generation.map(id_bytes).unwrap_or(current_generation),
+        acknowledge_uncertain,
+    }
 }
 
 /// `workspace create`'s words, including the ones it used to take.
@@ -486,13 +497,11 @@ async fn workspace_via(
             let result::Value::CheckInStatus(before) = expect_value(shown.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
             let status = match action {
                 CheckInAction::Show => before,
-                CheckInAction::Enable { task, acknowledge_uncertain } => {
+                CheckInAction::Enable { task, acknowledge_uncertain, expected_generation } => {
                     let task = crate::tasks::find_task(&mut link, repo.as_deref(), &task).await?;
-                    let request = with(request_for("workspace.check_in_enable"), request::Payload::CheckInEnable(pb::CheckInEnable {
-                        task_id: task.id,
-                        expected_generation: before.generation,
-                        acknowledge_uncertain,
-                    }));
+                    let request = with(request_for("workspace.check_in_enable"), request::Payload::CheckInEnable(check_in_enable_payload(
+                        task.id, before.generation, expected_generation, acknowledge_uncertain,
+                    )));
                     let sent = link.call(request).await.map_err(|e| check_in_refused(e, "the check-in could not be enabled"))?;
                     let result::Value::CheckInStatus(status) = expect_value(sent.value)? else { return Err(crate::daemon_link::UNREADABLE.into()) };
                     status
@@ -974,6 +983,17 @@ pub(crate) fn workspace_refused(e: ClientError, missing: &str, fallback: &str) -
 mod tests {
     use super::*;
 
+    #[test]
+    fn acknowledged_enable_keeps_displayed_generation_when_reread_changes() {
+        let displayed = uuid::Uuid::now_v7();
+        let current = uuid::Uuid::now_v7();
+        let request = check_in_enable_payload(id(1), id_bytes(current), Some(displayed), true);
+        assert_eq!(request.expected_generation, id_bytes(displayed));
+        assert!(request.acknowledge_uncertain);
+        let ordinary = check_in_enable_payload(id(1), id_bytes(current), None, true);
+        assert_eq!(ordinary.expected_generation, id_bytes(current));
+    }
+
     /// A workspace refusal keeps the runner's `what`, so `--json` can say
     /// `what: orchestrator_taken` under its code, as the board's do.
     #[test]
@@ -1089,6 +1109,8 @@ mod tests {
         assert!(parse("farcooler workspace check-in Main show").is_ok());
         assert!(parse("farcooler workspace check-in Main disable").is_ok());
         assert!(parse("farcooler workspace check-in Main enable --task ov-1").is_ok());
+        assert!(parse("farcooler workspace check-in Main enable --task ov-1 --acknowledge-uncertain --expected-generation 00000000-0000-0000-0000-000000000001").is_ok());
+        assert!(parse("farcooler workspace check-in Main enable --task ov-1 --expected-generation 00000000-0000-0000-0000-000000000001").is_err());
         assert!(parse("farcooler workspace check-in Main enable").is_err());
         assert!(parse("farcooler workspace check-in Main enable --task ov-1 --command whoami").is_err());
     }
