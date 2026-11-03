@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(CURRENT_SCHEMA_VERSION, 60, "a new migration moves this test's 'next' along");
         std::fs::remove_dir_all(&dir).ok();
 
-        let next = database_left_by_a_newer_build(60, None);
+        let next = database_left_by_a_newer_build(CURRENT_SCHEMA_VERSION + 1, None);
         let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(

@@ -286,16 +286,31 @@ mod check_in_discovery_tests {
         let owner = std::sync::Arc::new(DiscoveryOwner::default());
         let scoped = owner.clone();
         let task = tokio::spawn(async move { scoped.scope(discovery_output("sh", &["-c", &script])).await });
-        let pid: i32 = tokio::time::timeout(Duration::from_secs(2), async {
+        let observed = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if let Ok(text) = std::fs::read_to_string(&pidfile)
                     && let Some(line) = text.strip_suffix('\n')
-                    && let Ok(pid) = line.parse::<i32>() { break pid }
+                    && let Ok(pid) = line.parse::<i32>()
+                    && pid > 0 { break pid }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        }).await.expect("child started");
+        }).await;
+        let pid = match observed {
+            Ok(pid) => pid,
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                assert!(owner.stop_and_reap().await, "setup timeout must reap discovery child");
+                panic!("child PID did not become ready");
+            }
+        };
         task.abort();
         let _ = task.await;
+        let retained = owner.child.lock().await.as_ref().and_then(|child| child.id());
+        if retained != u32::try_from(pid).ok() {
+            assert!(owner.stop_and_reap().await, "failed custody assertion must reap discovery child");
+            panic!("the owner must retain the exact child before cleanup: {retained:?} != {pid}");
+        }
         assert!(owner.stop_and_reap().await);
         // SAFETY: signal 0 checks existence without delivering a signal.
         assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
