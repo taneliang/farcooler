@@ -188,6 +188,8 @@ struct CheckInSettings: View {
         working = true
         defer { working = false }
         failure = nil
+        tasks = []
+        selected = ""
         guard await readStatus() else { return }
         guard let repository = workspace.repository else {
             failure = "This workspace’s repository is unavailable. Refresh and try again."
