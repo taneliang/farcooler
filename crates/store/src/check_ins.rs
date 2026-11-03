@@ -123,12 +123,13 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
         ("worktree_delete", "DELETE ON worktrees", "1", "s.workspace_id IN (SELECT workspace_id FROM terminals WHERE worktree_id = OLD.id AND role = 2)"),
     ];
     for (name, event, changed, affected) in rules {
+        let update_affected = affected.replace("s.", "check_in_schedules.");
         tx.execute_batch(&format!(
             "CREATE TRIGGER check_in_{name} BEFORE {event} WHEN {changed} BEGIN \
              SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE {affected}) \
                  THEN RAISE(ABORT, 'check_in_enter_in_flight') END; \
-             UPDATE check_in_schedules AS s SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 \
-                 WHERE state = 'enabled' AND {affected}; END;"
+             UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 \
+                 WHERE state = 'enabled' AND {update_affected}; END;"
         ))?;
     }
     for table in ["owner_devices", "device_caps", "released_devices", "member_devices"] {
@@ -140,6 +141,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             } else {
                 format!("s.authorizer_device = {row}.client_id")
             };
+            let update_affected = affected.replace("s.", "check_in_schedules.");
             let name = format!("check_in_{table}_{}", op.to_lowercase());
             let value = match table {
                 "owner_devices" => Some("state"),
@@ -158,8 +160,8 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
                 "CREATE TRIGGER {name} BEFORE {op} ON {table} WHEN {changed} BEGIN \
                  SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE {affected}) \
                      THEN RAISE(ABORT, 'check_in_enter_in_flight') END; \
-                 UPDATE check_in_schedules AS s SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 \
-                     WHERE state = 'enabled' AND {affected}; END;"
+                 UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 \
+                     WHERE state = 'enabled' AND {update_affected}; END;"
             ))?;
         }
     }
