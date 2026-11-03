@@ -322,11 +322,17 @@ async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
 #[tokio::test]
 async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
     let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+    assert!(b.watcher.check_in_is_armed());
     let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
     let (agent, si) = idle_codex(&b, &path, false).await;
     let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
-    b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+    let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
         Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
     let now = crate::review::now_millis();
     b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
     assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
@@ -337,6 +343,9 @@ async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
     assert!(!si.log().contains("PASTE "), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
     drop(gate);
+    b.watcher.send_check_in(&pending, Uuid::now_v7()).await.unwrap();
+    si.submits(1).await;
+    assert_eq!(si.submitted().len(), 1, "the fixture must be ready once cleanup releases: {}", si.log());
 }
 
 /// A caught sender panic leaves the admitted attempt uncertain and disarms

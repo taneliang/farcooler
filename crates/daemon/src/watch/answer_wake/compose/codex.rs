@@ -193,7 +193,8 @@ impl Watcher {
         if self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) != 1 { return Ok(()) }
         let mut child: Option<farcooler_tmux::server::OwnedEnter> = None;
         let mut tracked: Option<(uuid::Uuid, uuid::Uuid)> = None;
-        let mut body = Box::pin(self.send_check_in_body(pending, daemon, &mut child, &mut tracked));
+        let helpers = std::sync::Arc::new(farcooler_tmux::server::ScheduledHelpers::default());
+        let mut body = Box::pin(helpers.clone().scope(self.send_check_in_body(pending, daemon, &mut child, &mut tracked)));
         let outcome = std::future::poll_fn(|cx| {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.as_mut().poll(cx))) {
                 Ok(std::task::Poll::Ready(value)) => std::task::Poll::Ready(Ok(value)),
@@ -202,6 +203,16 @@ impl Watcher {
             }
         }).await;
         drop(body);
+        let helpers_reaped = helpers.stop_and_reap().await;
+        if !helpers_reaped {
+            self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
+            if let Some(child) = child.as_mut() { child.stop_and_reap().await; }
+            if let Some((occurrence, attempt)) = tracked {
+                let _ = self.service.store.fail_admitted_check_in(occurrence, attempt);
+                let _ = self.service.store.fail_claimed_check_in(occurrence, attempt);
+            }
+            return Err(DomainError::Conflict { what: "check_in_helper_unreaped" });
+        }
         match outcome {
             Ok(result) => result,
             Err(()) => {
@@ -308,6 +319,7 @@ impl Watcher {
                 Ok(())
             }
             Err(error) => {
+                self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
                 self.service.store.fail_admitted_check_in(pending.id, attempt)?;
                 Err(error)
             }

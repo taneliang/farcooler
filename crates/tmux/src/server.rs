@@ -90,7 +90,8 @@ impl OwnedEnter {
     pub async fn wait(&mut self) -> Result<()> {
         match tokio::time::timeout(self.deadline, self.child.wait()).await {
             Ok(Ok(status)) if status.success() => Ok(()),
-            Ok(_) => Err(DomainError::TmuxUnavailable),
+            Ok(Ok(_)) => Err(DomainError::TmuxUnavailable),
+            Ok(Err(_)) => { self.stop_and_reap().await; Err(DomainError::TmuxUnavailable) }
             Err(_) => { self.stop_and_reap().await; Err(DomainError::TmuxTimedOut) }
         }
     }
@@ -101,6 +102,31 @@ impl OwnedEnter {
             Ok(Err(error)) => tracing::warn!(%error, "could not reap Enter client"),
             Err(_) => tracing::warn!("Enter client did not exit"),
         }
+    }
+}
+
+// Only scheduled delivery installs this scope. It owns the active tmux
+// helper across a cancelled/panicked inner future until the outer gate holder
+// explicitly stops and joins it.
+tokio::task_local! { static SCHEDULED_HELPERS: std::sync::Arc<ScheduledHelpers>; }
+
+#[derive(Default)]
+pub struct ScheduledHelpers {
+    child: tokio::sync::Mutex<Option<tokio::process::Child>>,
+}
+impl ScheduledHelpers {
+    pub async fn scope<F: std::future::Future>(self: std::sync::Arc<Self>, future: F) -> F::Output {
+        SCHEDULED_HELPERS.scope(self, future).await
+    }
+    /// Returns false if an outstanding owned client could not be reaped.
+    pub async fn stop_and_reap(&self) -> bool {
+        let mut slot = self.child.lock().await;
+        let Some(child) = slot.as_mut() else { return true };
+        if let Ok(Some(_)) = child.try_wait() { *slot = None; return true }
+        let _ = child.start_kill();
+        let joined = matches!(tokio::time::timeout(TMUX_LIFECYCLE_TIMEOUT, child.wait()).await, Ok(Ok(_)));
+        if joined { *slot = None; }
+        joined
     }
 }
 
@@ -340,6 +366,14 @@ impl TmuxServer {
         // below a real bound rather than a way of losing track of a process.
         cmd.kill_on_drop(true);
 
+        let helper_owner = SCHEDULED_HELPERS.try_with(std::sync::Arc::clone).ok();
+        let mut helper_slot = match &helper_owner {
+            Some(owner) => Some(owner.child.lock().await),
+            None => None,
+        };
+        if helper_slot.as_ref().is_some_and(|slot| slot.is_some()) {
+            return Err(DomainError::Conflict { what: "scheduled_helper_unreaped" });
+        }
         let child = cmd.spawn().map_err(|e| {
             tracing::warn!(error = %e, "failed to spawn tmux");
             DomainError::TmuxUnavailable
@@ -366,6 +400,26 @@ impl TmuxServer {
         let deadline = deadline_for(args);
         #[cfg(test)]
         let deadline = self.deadline.unwrap_or(deadline);
+        if let Some(slot) = helper_slot.as_mut() {
+            use tokio::io::AsyncReadExt;
+            **slot = Some(child);
+            let child = slot.as_mut().expect("scheduled helper installed");
+            let mut stdout = child.stdout.take().ok_or(DomainError::TmuxUnavailable)?;
+            let mut stderr = child.stderr.take().ok_or(DomainError::TmuxUnavailable)?;
+            let mut out_bytes = Vec::new();
+            let mut err_bytes = Vec::new();
+            let joined = tokio::time::timeout(deadline, async {
+                tokio::try_join!(stdout.read_to_end(&mut out_bytes), stderr.read_to_end(&mut err_bytes), child.wait())
+            }).await;
+            return match joined {
+                Ok(Ok((_, _, status))) => {
+                    **slot = None;
+                    Ok(Output { status: status.code(), stdout: String::from_utf8_lossy(&out_bytes).into_owned(), stderr: String::from_utf8_lossy(&err_bytes).into_owned() })
+                }
+                Ok(Err(_)) => Err(DomainError::TmuxUnavailable),
+                Err(_) => Err(DomainError::TmuxTimedOut),
+            };
+        }
         let out = match tokio::time::timeout(deadline, child.wait_with_output()).await {
             Ok(result) => result.map_err(|e| {
                 tracing::warn!(error = %e, "tmux failed");
@@ -540,6 +594,31 @@ const DEFAULT_UTF8_LOCALE: &str = "C.UTF-8";
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_scheduled_helper_stays_owned_until_reaped() {
+        use std::sync::Arc;
+        use uuid::Uuid;
+        let dir = farcooler_core::scratch::dir("scheduled-owned-helper");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("tmux");
+        std::fs::write(&script, "echo $$ > \"$0.pid\"\nexec /bin/sleep 30\n").unwrap();
+        let server = super::TmuxServer::in_dir("owned-helper", Uuid::now_v7(), &dir).with_program(script.clone()).patient();
+        let owner = Arc::new(super::ScheduledHelpers::default());
+        let scoped = owner.clone();
+        let task = tokio::spawn(async move { scoped.scope(async move { server.run(&["send-keys", "-t", "%1", "-l", "test"]).await }).await });
+        let pid_path = dir.join("tmux.pid");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !pid_path.exists() { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        let pid: i32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(owner.stop_and_reap().await);
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "owned helper must be reaped");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn cleanup_submission_callback_distinguishes_pre_spawn_and_completed_negative() {
         use std::sync::atomic::{AtomicBool, Ordering};
