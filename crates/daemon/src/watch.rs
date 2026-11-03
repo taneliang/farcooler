@@ -955,6 +955,8 @@ pub struct Watcher {
     /// Enter (`compose`'s tests): a key typed after the box read back.
     #[cfg(test)]
     before_enter: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
+    panic_after_check_in_spawn: std::sync::atomic::AtomicBool,
     /// Run once, right before a pasted notice's last stop check ahead of its
     /// Enter (`finish`'s, ov-827 R1): a turn stopped mid-pass.
     #[cfg(test)]
@@ -2835,6 +2837,8 @@ impl Watcher {
             slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             before_enter: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            panic_after_check_in_spawn: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             before_notice_enter: std::sync::Mutex::new(None),
             #[cfg(test)]

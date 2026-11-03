@@ -339,6 +339,33 @@ async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
     drop(gate);
 }
 
+/// A caught sender panic leaves the admitted attempt uncertain and disarms
+/// the feature; the owner reaps its Enter client before releasing the gate.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_sender_panic_disarms_and_retains_uncertain_attempt() {
+    let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, _si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    assert!(b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap());
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    b.watcher.panic_after_check_in_spawn.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(b.watcher.send_check_in(&pending, Uuid::now_v7()).await.is_err());
+    assert!(!b.watcher.check_in_is_armed());
+    assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "uncertain");
+    assert!(b.watcher.check_in_cleanup_gate.try_lock().is_ok());
+}
+
 /// Hours while the orchestrator is working remain one pending occurrence and
 /// never take the ordinary mid-turn delivery routes.
 #[cfg(unix)]

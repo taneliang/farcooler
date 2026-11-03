@@ -295,6 +295,10 @@ impl Watcher {
             Err(error) => { self.service.store.fail_admitted_check_in(pending.id, attempt)?; return Err(error); }
         };
         *child = Some(enter);
+        #[cfg(test)]
+        if self.panic_after_check_in_spawn.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            panic!("injected scheduled sender panic after spawn");
+        }
         match child.as_mut().expect("owned Enter was just installed").wait().await {
             Ok(()) => {
                 if !self.service.store.settle_check_in_enter(pending.id, attempt, now_millis())? {
