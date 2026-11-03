@@ -169,6 +169,8 @@ struct ContentView: View {
     @State var orchestratorStartLines: [String: String] = [:]
     /// A workspace's charter, read from another machine's runner (ov-755).
     @State var charterSheet: CharterSheetRequest?
+    /// The workspace's fixed, owner-authorized hourly check-in settings.
+    @State var checkInSheet: CheckInSheetRequest?
     /// A Replace Orchestrator waiting on its confirmation.
     @State var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
@@ -648,6 +650,13 @@ struct ContentView: View {
                 guard let client = store.clients[request.host] else { return .failed(CharterReading.notSaved(request.workspace)) }
                 return await client.saveCharter(request.workspace, text: text, expected: expected)
             })
+        }
+        .sheet(item: $checkInSheet) { request in
+            if let client = store.clients[request.host] {
+                CheckInSettings(workspace: request.workspace, client: client, canManage: client.talk.viewer == "")
+            } else {
+                Text("This runner is no longer available.").padding()
+            }
         }
         .sheet(item: $signInRunner) { choice in
             RunnerSettingsSheet(

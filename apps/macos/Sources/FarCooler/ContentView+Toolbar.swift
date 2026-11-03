@@ -225,6 +225,8 @@ extension ContentView {
                 }
             },
             keepsSettings: store.clients[host]?.keepsWorkspaces,
+            onCheckInSettings: workspace.repository == nil ? nil
+                : { checkInSheet = CheckInSheetRequest(host: host, workspace: workspace) },
             starts: ConversationColumn.offers(
                 column, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))
             ).compactMap { offer in

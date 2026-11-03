@@ -113,6 +113,8 @@ struct OrchestratorMenu: View {
     /// Nil while who this Mac is isn't known: the switch goes with `canAct`,
     /// as it did before.
     var keepsSettings: Bool?
+    /// Opens the check-in settings; an older runner explains its refusal there.
+    var onCheckInSettings: (() -> Void)? = nil
     /// With no orchestrator: the harnesses Start Orchestrator offers
     /// (`ConversationColumn.offers`), and what starting one does.
     var starts: [OrchestratorHarness] = []
@@ -133,6 +135,10 @@ struct OrchestratorMenu: View {
             id: \.self
         ) { item in
             menuItem(item)
+        }
+        if let onCheckInSettings {
+            Divider() // style-exempt: menu section break
+            Button("Hourly Check-In…", action: onCheckInSettings)
         }
         if canAct {
             if let seat {
