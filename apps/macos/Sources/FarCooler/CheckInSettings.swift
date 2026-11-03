@@ -33,6 +33,33 @@ struct CheckInReading: Decodable {
     }
 }
 
+struct CheckInAcknowledgementIdentity: Equatable {
+    let occurrence: String
+    let state: String
+}
+
+struct CheckInAcknowledgement {
+    private(set) var displayed: CheckInAcknowledgementIdentity? = nil
+    private(set) var acknowledged: CheckInAcknowledgementIdentity? = nil
+
+    func isAcknowledged(for identity: CheckInAcknowledgementIdentity?) -> Bool {
+        identity != nil && displayed == identity && acknowledged == identity
+    }
+
+    mutating func show(_ identity: CheckInAcknowledgementIdentity?) {
+        if displayed != identity { acknowledged = nil }
+        displayed = identity
+    }
+
+    mutating func setAcknowledged(_ value: Bool) {
+        acknowledged = value ? displayed : nil
+    }
+
+    mutating func clear() {
+        acknowledged = nil
+    }
+}
+
 extension DaemonClient {
     static func checkInArguments(_ workspace: WorkspaceSummary, action: [String]) -> [String]? {
         guard let repository = workspace.repository else { return nil }
@@ -57,7 +84,7 @@ struct CheckInSettings: View {
     @State private var status: CheckInReading?
     @State private var tasks: [TaskRow] = []
     @State private var selected = ""
-    @State private var acknowledge = false
+    @State private var acknowledgement = CheckInAcknowledgement()
     @State private var working = false
     @State private var failure: String?
 
@@ -71,6 +98,13 @@ struct CheckInSettings: View {
 
     private var uncertain: Bool {
         status.map { Self.requiresAcknowledgement($0.occurrenceState) } ?? false
+    }
+
+    private var acknowledgementIdentity: CheckInAcknowledgementIdentity? {
+        guard let status, Self.requiresAcknowledgement(status.occurrenceState), let occurrence = status.occurrence else {
+            return nil
+        }
+        return CheckInAcknowledgementIdentity(occurrence: occurrence, state: status.occurrenceState)
     }
 
     var body: some View {
@@ -93,13 +127,16 @@ struct CheckInSettings: View {
                     if uncertain {
                         Text("An earlier key may still arrive. A receipt confirms input, not completed work.")
                             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Toggle("I understand the earlier check-in may still arrive", isOn: $acknowledge)
+                        Toggle("I understand the earlier check-in may still arrive", isOn: Binding(
+                            get: { acknowledgement.isAcknowledged(for: acknowledgementIdentity) },
+                            set: { acknowledgement.show(acknowledgementIdentity); acknowledgement.setAcknowledged($0) }
+                        ))
                     }
                     HStack {
                         Button(status.configured && status.state == "enabled" ? "Update Check-In" : "Enable Check-In") {
                             Task { await change(enable: true) }
                         }
-                        .disabled(working || selected.isEmpty || (uncertain && !acknowledge))
+                        .disabled(working || selected.isEmpty || (uncertain && !acknowledgement.isAcknowledged(for: acknowledgementIdentity)))
                         if status.configured && status.state != "disabled" {
                             Button("Disable Check-In") { Task { await change(enable: false) } }
                                 .disabled(working)
@@ -177,11 +214,18 @@ struct CheckInSettings: View {
     @MainActor private func readStatus() async -> Bool {
         let (data, message) = await client.checkIn(workspace, action: ["show"])
         guard let data, let value = try? JSONDecoder().decode(CheckInReading.self, from: data) else {
+            acknowledgement.clear()
             failure = message ?? "The runner’s check-in status could not be read."
             return false
         }
+        acknowledgement.show(Self.acknowledgementIdentity(for: value))
         status = value
         return true
+    }
+
+    static func acknowledgementIdentity(for status: CheckInReading) -> CheckInAcknowledgementIdentity? {
+        guard requiresAcknowledgement(status.occurrenceState), let occurrence = status.occurrence else { return nil }
+        return CheckInAcknowledgementIdentity(occurrence: occurrence, state: status.occurrenceState)
     }
 
     @MainActor private func load() async {
@@ -219,7 +263,8 @@ struct CheckInSettings: View {
             failure = message ?? "The check-in could not be changed."
             return
         }
+        acknowledgement.show(Self.acknowledgementIdentity(for: value))
+        acknowledgement.clear()
         status = value
-        acknowledge = false
     }
 }

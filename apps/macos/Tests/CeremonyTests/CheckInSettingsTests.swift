@@ -40,6 +40,25 @@ struct CheckInSettingsTests {
         #expect(!CheckInSettings.requiresAcknowledgement("pending"))
     }
 
+    @Test("Refreshing from acknowledged uncertainty A to B requires fresh acknowledgement")
+    func acknowledgementBelongsToDisplayedOccurrence() {
+        let occurrenceA = CheckInAcknowledgementIdentity(occurrence: "A", state: "uncertain")
+        let occurrenceB = CheckInAcknowledgementIdentity(occurrence: "B", state: "uncertain")
+        var acknowledgement = CheckInAcknowledgement()
+
+        acknowledgement.show(occurrenceA)
+        acknowledgement.setAcknowledged(true)
+        #expect(acknowledgement.isAcknowledged(for: occurrenceA))
+
+        acknowledgement.show(occurrenceB)
+        #expect(!acknowledgement.isAcknowledged(for: occurrenceB))
+        acknowledgement.setAcknowledged(true)
+        #expect(acknowledgement.isAcknowledged(for: occurrenceB))
+
+        acknowledgement.clear()
+        #expect(!acknowledgement.isAcknowledged(for: occurrenceB))
+    }
+
     @Test("A confirmed receipt and an unavailable schedule decode from the runner")
     func status() throws {
         let data = Data(#"{"configured":true,"task":"task-id","state":"unavailable","reason":"scheduler_unavailable_unclean_or_storage","next_due_ms":3600000,"occurrence":"occ-id","occurrence_state":"confirmed","occurrence_reason":"","submitted_at_ms":100,"confirmed_at_ms":200,"receipt_evidence":"codex_rollout_line:4"}"#.utf8)
