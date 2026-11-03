@@ -540,9 +540,9 @@ while (1) {
             $buf = substr($buf, 6);
             $pasting = 1;
         } elsif (substr($buf, 0, 1) eq "\r") {
-            $buf = substr($buf, 1);
             # A fenced Enter is said by the daemon's marker file (`fence_marker`).
             logit(-e "$control.fence" ? "ENTER fenced" : "ENTER");
+            $buf = substr($buf, 1);
             my $sent = whole($composer);
             if ($mode eq 'trust') {
                 logit("TRUSTED");
