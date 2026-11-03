@@ -18,7 +18,7 @@ pub(super) struct Destination {
 }
 
 #[cfg(unix)]
-pub(super) async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
+async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let listing = super::codex_turn::discovery_output("ps", &["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
     let (pid, comm) = super::in_front(&listing)?;
@@ -44,7 +44,7 @@ impl Drop for SchedulerArmGuard<'_> {
 impl Watcher {
     /// A snapshot proof only: callers recheck it at each side-effect boundary.
     #[cfg(unix)]
-    pub(super) async fn check_in_destination(&self, to: &farcooler_store::models::Terminal) -> Option<Destination> {
+    pub(super) async fn check_in_destination(&self, to: &farcooler_store::models::Terminal, _final_admission: bool) -> Option<Destination> {
         use std::os::unix::fs::MetadataExt;
         use crate::claude_registry::{Kernel, Processes};
         let inventory = self.service.inventory_snapshot();
@@ -52,6 +52,10 @@ impl Watcher {
         let (preset, pid) = scheduled_foreground(&pane.tty).await?;
         if preset != "codex" || Kernel.tty(pid)? != std::fs::metadata(&pane.tty).ok()?.rdev() { return None }
         let incarnation = crate::claude_registry::process_incarnation(pid)?;
+        #[cfg(test)]
+        if _final_admission {
+            if let Some(run) = self.after_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
+        }
         let path = super::codex_turn::unique_rollout_now(pid).await?;
         // Discovery itself may have crossed a process replacement.
         if crate::claude_registry::process_incarnation(pid) != Some(incarnation)
@@ -149,7 +153,7 @@ impl Watcher {
             || i64::try_from(to.lease_generation).ok() != Some(observation.terminal_lease)
             || i64::try_from(to.epoch).ok() != Some(observation.terminal_epoch)
         { return Ok(()) }
-        let Some(destination) = self.check_in_destination(&to).await else { return Ok(()) };
+        let Some(destination) = self.check_in_destination(&to, false).await else { return Ok(()) };
         if destination.pid != observation.process_id || Kernel.started(destination.pid) != Some(observation.process_started)
             || destination.incarnation != observation.process_incarnation
             || destination.pane != observation.pane || destination.tty != observation.tty { return Ok(()) }
@@ -165,7 +169,7 @@ impl Watcher {
         // or replacement cannot silently redirect the durable evidence.
         let Ok(path_meta) = std::fs::metadata(path) else { return Ok(()) };
         if path_meta.dev() != device || path_meta.ino() != inode { return Ok(()) }
-        if self.check_in_destination(&to).await.as_ref() != Some(&destination) { return Ok(()) }
+        if self.check_in_destination(&to, false).await.as_ref() != Some(&destination) { return Ok(()) }
         let Ok(final_meta) = std::fs::metadata(path) else { return Ok(()) };
         if final_meta.dev() != device || final_meta.ino() != inode { return Ok(()) }
         let (Some(message_at), Ok(line)) = (matched.prompt.at_ms, i64::try_from(matched.offset)) else { return Ok(()) };

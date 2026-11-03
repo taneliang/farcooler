@@ -114,15 +114,12 @@ fn remember(pid: i32, path: Option<PathBuf>, started: Option<i64>) {
 /// `rollout_of`'s join, kept for seconds): the one a send's record goes to.
 /// Off the executor: it spawns `ps` and `lsof`.
 pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
-    if discovery_is_scoped() { return unique_rollout_now(pid).await }
     tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
 }
 
 /// Own each discovery process until it exits or has been killed and reaped.
 /// Output is capped so a stuck writer cannot make discovery grow unbounded.
 tokio::task_local! { static DISCOVERY_OWNER: std::sync::Arc<DiscoveryOwner>; }
-
-pub(super) fn discovery_is_scoped() -> bool { DISCOVERY_OWNER.try_with(|_| ()).is_ok() }
 
 #[derive(Default)]
 pub(super) struct DiscoveryOwner {
@@ -146,6 +143,8 @@ impl DiscoveryOwner {
 
 #[cfg(test)]
 tokio::task_local! { pub(super) static TEST_STALLED_DISCOVERY: std::path::PathBuf; }
+#[cfg(test)]
+tokio::task_local! { pub(super) static TEST_DISCOVERY_PANIC: std::path::PathBuf; }
 
 pub(super) async fn discovery_output(program: &str, args: &[&str]) -> Option<String> {
     #[cfg(test)]
@@ -166,6 +165,11 @@ async fn discovery_output_inner(program: &str, args: &[&str]) -> Option<String> 
         .stdout(std::process::Stdio::piped()).kill_on_drop(true).spawn().ok()?;
     *slot = Some(child);
     let child = slot.as_mut()?;
+    #[cfg(test)]
+    if let Ok(path) = TEST_DISCOVERY_PANIC.try_with(Clone::clone) {
+        std::fs::write(path, child.id().expect("spawned child has a PID").to_string()).expect("record child PID");
+        panic!("injected scheduler discovery panic after spawn");
+    }
     let stdout = child.stdout.take()?;
     let mut bytes = Vec::new();
     let result = tokio::time::timeout(Duration::from_secs(3), async {

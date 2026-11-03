@@ -389,7 +389,7 @@ impl Watcher {
         let mut first = true;
         let mut paste = |text: String| {
             let (runtime, tty, was_first) = (&runtime, proven.tty.as_str(), std::mem::replace(&mut first, false));
-            async move { self.paste_checked(to, runtime, tty, preset, was_first, &text, None).await }
+            async move { self.paste_checked(to, runtime, tty, preset, was_first, &text).await }
         };
         if self.fail_sends_for_tests() {
             return Err(DomainError::OperationFailed);
@@ -459,7 +459,7 @@ impl Watcher {
     /// with no bracketed paste taken the pane, which would run a multi-line
     /// text's lines. Refused before the `first` paste as the gate would be;
     /// after one, the text so far is left at a shell or in the box.
-    async fn paste_checked(&self, to: &Terminal, runtime: &Runtime, tty: &str, preset: &str, first: bool, text: &str, fixed_pane: Option<&str>) -> Result<()> {
+    async fn paste_checked(&self, to: &Terminal, runtime: &Runtime, tty: &str, preset: &str, first: bool, text: &str) -> Result<()> {
         #[cfg(test)]
         if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
@@ -471,12 +471,6 @@ impl Watcher {
             if !agent || self.bracketed(to.id).await.is_err() {
                 return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } });
             }
-        }
-        if let Some(pane) = fixed_pane {
-            return match crate::pastes::plan_paste(preset, text) {
-                crate::pastes::PastePlan::Hex(hex) => runtime.tmux.send_bytes_hex(pane, &hex).await,
-                crate::pastes::PastePlan::Literal(literal) => runtime.tmux.send_literal(pane, &literal).await,
-            };
         }
         runtime.paste_text(to.id, preset, text).await
     }

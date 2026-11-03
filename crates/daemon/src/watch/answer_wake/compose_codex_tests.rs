@@ -367,6 +367,45 @@ async fn scheduled_rollout_replacement_before_claim_or_enter_never_sends() {
     }
 }
 
+/// A dialog or input arriving while the final destination proof is slow
+/// invalidates the earlier composer capture, even with identity unchanged.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_final_discovery_rechecks_dialog_and_input_before_enter() {
+    for dialog in [true, false] {
+        let b = board().await;
+        assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+        b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+        let path = rollout(&b);
+        let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+        writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+        let (agent, si) = idle_codex(&b, &path, false).await;
+        let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+        let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+            Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+        b.doing(agent.id, AgentActivity::Idle).await;
+        let now = crate::review::now_millis();
+        b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+        b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
+        let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker = fired.clone();
+        let shower = si.clone();
+        let root = b.svc.root_dir().to_path_buf();
+        let id = agent.id;
+        *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || {
+            if dialog { shower.show_in_hook("menu"); }
+            else { crate::runtime::mark_input(&root, id); }
+            marker.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let _ = b.watcher.send_check_in(&pending, Uuid::now_v7()).await;
+        assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "fixture never reached the final discovery seam");
+        assert!(si.log().contains("PASTE "), "{}", si.log());
+        assert!(!si.log().contains("ENTER") && si.submitted().is_empty(), "{}", si.log());
+        assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "uncertain");
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate() {
@@ -399,6 +438,39 @@ async fn scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate() {
     tokio::time::timeout(std::time::Duration::from_secs(10), task).await.expect("scheduler must join").unwrap();
     assert!(b.watcher.check_in_cleanup_gate.try_lock().is_ok());
     assert!(!si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
+    // SAFETY: signal 0 checks existence without delivering a signal.
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_discovery_panic_reaps_owned_child_before_gate_release() {
+    let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
+    let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+    let stall_file = b.dir.path().join("panic-stall.pid");
+    let child_file = b.dir.path().join("panic-child.pid");
+    use crate::watch::answer_wake::codex_turn::{TEST_DISCOVERY_PANIC, TEST_STALLED_DISCOVERY};
+    let result = TEST_STALLED_DISCOVERY.scope(stall_file, TEST_DISCOVERY_PANIC.scope(child_file.clone(),
+        b.watcher.send_check_in(&pending, Uuid::now_v7()))).await;
+    assert!(result.is_err());
+    assert!(!b.watcher.check_in_is_armed());
+    assert!(b.watcher.check_in_cleanup_gate.try_lock().is_ok());
+    assert!(!si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
+    let pid: i32 = std::fs::read_to_string(child_file).unwrap().parse().unwrap();
     // SAFETY: signal 0 checks existence without delivering a signal.
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
