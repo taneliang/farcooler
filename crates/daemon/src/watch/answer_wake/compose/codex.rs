@@ -186,13 +186,46 @@ impl Watcher {
     /// admission; it never enters the ordinary wake or harness queues.
     #[cfg(unix)]
     pub(crate) async fn send_check_in(&self, pending: &farcooler_store::PendingCheckIn, daemon: uuid::Uuid) -> Result<()> {
+        use std::future::Future;
+        // This operation is owned by the joined scheduler. The gate, child
+        // and durable attempt identity outlive the panic-catching body.
+        let Ok(_cleanup_gate) = self.check_in_cleanup_gate.try_lock() else { return Ok(()) };
+        if self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) != 1 { return Ok(()) }
+        let mut child: Option<farcooler_tmux::server::OwnedEnter> = None;
+        let mut tracked: Option<(uuid::Uuid, uuid::Uuid)> = None;
+        let mut body = Box::pin(self.send_check_in_body(pending, daemon, &mut child, &mut tracked));
+        let outcome = std::future::poll_fn(|cx| {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.as_mut().poll(cx))) {
+                Ok(std::task::Poll::Ready(value)) => std::task::Poll::Ready(Ok(value)),
+                Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+                Err(_) => std::task::Poll::Ready(Err(())),
+            }
+        }).await;
+        drop(body);
+        match outcome {
+            Ok(result) => result,
+            Err(()) => {
+                self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
+                if let Some((occurrence, attempt)) = tracked {
+                    let _ = self.service.store.fail_admitted_check_in(occurrence, attempt);
+                    let _ = self.service.store.fail_claimed_check_in(occurrence, attempt);
+                }
+                if let Some(child) = child.as_mut() { child.stop_and_reap().await; }
+                tracing::error!("scheduled check-in panicked; scheduler unavailable");
+                Err(DomainError::Conflict { what: "check_in_owner_panicked" })
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    async fn send_check_in_body(
+        &self, pending: &farcooler_store::PendingCheckIn, daemon: uuid::Uuid,
+        child: &mut Option<farcooler_tmux::server::OwnedEnter>,
+        tracked: &mut Option<(uuid::Uuid, uuid::Uuid)>,
+    ) -> Result<()> {
         use std::os::unix::fs::MetadataExt;
         use farcooler_core::composer::drawn::Expected;
         use crate::claude_registry::{Kernel, Processes};
-
-        // Never wait ahead of cleanup: retry on a later scheduler tick.
-        let Ok(_cleanup_gate) = self.check_in_cleanup_gate.try_lock() else { return Ok(()) };
-        if self.check_in_arm.load(std::sync::atomic::Ordering::SeqCst) != 1 { return Ok(()) }
         let Some(to) = self.service.live_orchestrator(pending.workspace)? else { return Ok(()) };
         if to.pane_mode != farcooler_store::models::PaneMode::Terminal
             || !super::super::may_be_typed_to(&to.command_preset, to.role)
@@ -220,6 +253,7 @@ impl Watcher {
         let pane = runtime.pane_id_of(to.id)?;
         let attempt = uuid::Uuid::now_v7();
         if !self.service.store.claim_check_in(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? { return Ok(()) }
+        *tracked = Some((pending.id, attempt));
         let prepared = async {
             if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, device, inode, offset)? {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
@@ -256,7 +290,12 @@ impl Watcher {
         }
         // The fence stays durable if this future is cancelled or the client
         // fails: no timeout is proof that tmux did not accept the key.
-        match runtime.tmux.send_enter_once(&pane).await {
+        let enter = match runtime.tmux.spawn_enter_once(&pane).await {
+            Ok(enter) => enter,
+            Err(error) => { self.service.store.fail_admitted_check_in(pending.id, attempt)?; return Err(error); }
+        };
+        *child = Some(enter);
+        match child.as_mut().expect("owned Enter was just installed").wait().await {
             Ok(()) => {
                 if !self.service.store.settle_check_in_enter(pending.id, attempt, now_millis())? {
                     return Err(DomainError::Conflict { what: "unconfirmed" });

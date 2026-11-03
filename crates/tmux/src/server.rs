@@ -80,6 +80,30 @@ set -g default-shell {}
     )
 }
 
+/// The sole owner of one scheduled Enter client. Holding it outside the
+/// fallible send body permits explicit cleanup after an unwind.
+pub struct OwnedEnter {
+    child: tokio::process::Child,
+    deadline: std::time::Duration,
+}
+impl OwnedEnter {
+    pub async fn wait(&mut self) -> Result<()> {
+        match tokio::time::timeout(self.deadline, self.child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(_) => Err(DomainError::TmuxUnavailable),
+            Err(_) => { self.stop_and_reap().await; Err(DomainError::TmuxTimedOut) }
+        }
+    }
+    pub async fn stop_and_reap(&mut self) {
+        if let Err(error) = self.child.start_kill() { tracing::warn!(%error, "could not stop Enter client"); }
+        match tokio::time::timeout(self.deadline, self.child.wait()).await {
+            Ok(Ok(_)) => {},
+            Ok(Err(error)) => tracing::warn!(%error, "could not reap Enter client"),
+            Err(_) => tracing::warn!("Enter client did not exit"),
+        }
+    }
+}
+
 /// Raw result of one tmux invocation.
 #[derive(Debug)]
 pub struct Output {
@@ -367,6 +391,10 @@ impl TmuxServer {
     /// have handed the key to the server. Callers must retain their durable
     /// admission fence if this future is dropped or returns an error.
     pub async fn send_enter_once(&self, pane: &str) -> Result<()> {
+        self.spawn_enter_once(pane).await?.wait().await
+    }
+
+    pub async fn spawn_enter_once(&self, pane: &str) -> Result<OwnedEnter> {
         let valid = pane.strip_prefix('%').is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()));
         if !valid { return Err(DomainError::InvalidArgument { what: "terminal" }) }
         self.ensure_config()?;
@@ -385,27 +413,11 @@ impl TmuxServer {
         cmd.arg("-L").arg(&self.socket).arg("-f").arg(&self.config_path)
             .args(["send-keys", "-t", pane, "-H", "0d"])
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|_| DomainError::TmuxUnavailable)?;
+        let child = cmd.spawn().map_err(|_| DomainError::TmuxUnavailable)?;
         let deadline = deadline_for(&["send-keys"]);
         #[cfg(test)]
         let deadline = self.deadline.unwrap_or(deadline);
-        match tokio::time::timeout(deadline, child.wait()).await {
-            Ok(Ok(status)) if status.success() => Ok(()),
-            Ok(_) => Err(DomainError::TmuxUnavailable),
-            Err(_) => {
-                // Reap our client before returning where possible. Neither
-                // killing nor reaping can undo a server-accepted send.
-                if let Err(error) = child.start_kill() {
-                    tracing::warn!(%error, "could not stop the timed-out tmux client");
-                }
-                match tokio::time::timeout(deadline, child.wait()).await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(error)) => tracing::warn!(%error, "could not reap the tmux client"),
-                    Err(_) => tracing::warn!("timed-out tmux client did not exit"),
-                }
-                Err(DomainError::TmuxTimedOut)
-            }
-        }
+        Ok(OwnedEnter { child, deadline })
     }
 
     /// True when the private server is currently running.

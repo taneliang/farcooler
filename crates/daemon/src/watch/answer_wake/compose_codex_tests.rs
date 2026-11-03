@@ -284,6 +284,8 @@ async fn the_gate_holds_when_a_known_rollout_is_lost() {
 #[tokio::test]
 async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
     let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
     let path = rollout(&b);
     let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
     writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
@@ -343,6 +345,8 @@ async fn scheduled_cleanup_gate_blocks_claim_paste_and_enter() {
 #[tokio::test]
 async fn scheduled_busy_codex_waits_without_paste_or_duplicate() {
     let b = board().await;
+    assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+    b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
     let path = rollout(&b);
     let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
     writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
