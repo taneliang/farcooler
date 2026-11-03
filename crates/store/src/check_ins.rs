@@ -1120,7 +1120,7 @@ mod tests {
     #[test]
     fn missed_hours_coalesce_without_using_message_wakes() {
         let (store, ws, _) = board();
-        assert_eq!(store.due_check_in_workspaces(3_600_000).unwrap(), []);
+        assert!(store.due_check_in_workspaces(3_600_000).unwrap().is_empty());
         assert_eq!(store.due_check_in_workspaces(3_600_001).unwrap(), [ws]);
         assert!(!store.tick_check_in(ws, 3_600_000).unwrap());
         assert!(store.tick_check_in(ws, 3_600_001).unwrap());
