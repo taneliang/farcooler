@@ -245,11 +245,13 @@ impl Watcher {
         let Some(thread) = to.agent_session_id.as_deref() else { return Ok(()) };
         let Some(_typing) = self.try_typing(to.id) else { return Ok(()) };
         if !matches!(self.ready(&to).await, Ok(Turn::Between)) { return Ok(()) }
-        let Ok(proven) = self.proven_tui(&to).await else { return Ok(()) };
-        if proven.preset != "codex" || proven.turn != Turn::Between { return Ok(()) }
-        let Some(process_started) = Kernel.started(proven.pid) else { return Ok(()) };
-        if codex_turn::said_held(proven.pid, true).await.0 != registry_turn::Said::Idle { return Ok(()) }
-        let Some(path) = rollout_now(proven.pid).await else { return Ok(()) };
+        let Some(destination) = self.check_in_destination(&to).await else { return Ok(()) };
+        let Ok(Ok((composer::Composer::Empty, Turn::Between, background))) = self.box_beside_background(&to, "codex").await else { return Ok(()) };
+        if self.bracketed(to.id).await.is_err() { return Ok(()) }
+        let proven = Proven { preset: "codex", tty: destination.tty.clone(), pid: destination.pid, turn: Turn::Between, held: true, background };
+        let process_started = destination.incarnation;
+        let path = destination.path.clone();
+        if codex_turn::said(Some(&path), Kernel.started(proven.pid)) != registry_turn::Said::Idle { return Ok(()) }
         if crate::log_join::codex_thread_of(&path).is_none_or(|(id, _)| id != thread) { return Ok(()) }
         let mut file = match std::fs::File::open(&path) { Ok(file) => file, Err(_) => return Ok(()) };
         if farcooler_core::session_log::codex_prompts::main_thread_in(&mut file).as_deref() != Some(thread) { return Ok(()) }
@@ -261,12 +263,15 @@ impl Watcher {
         let (_, columns, rows) = self.service.screen(to.id).await?;
         if drawn::opens_picker(&text) || !drawn::fits(&text, 0, columns, rows) { return Ok(()) }
         let runtime = Runtime { marks: None, ..self.service.runtime() };
-        let pane = runtime.pane_id_of(to.id)?;
+        let pane = destination.pane.clone();
+        #[cfg(test)]
+        if let Some(run) = self.after_gate_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
+        if self.check_in_destination(&to).await.as_ref() != Some(&destination) { return Ok(()) }
         let attempt = uuid::Uuid::now_v7();
         if !self.service.store.claim_check_in(pending.id, attempt, daemon, to.id, thread, &pane, proven.pid, process_started, now_millis())? { return Ok(()) }
         *tracked = Some((pending.id, attempt));
         let prepared = async {
-            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, device, inode, offset)? {
+            if !self.service.store.pin_check_in_rollout(pending.id, attempt, path_text, &destination.tty, device, inode, offset)? {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
             let Some(stored) = self.service.store.claimed_check_in_message(pending.id, attempt)? else {
@@ -274,21 +279,43 @@ impl Watcher {
             };
             if stored != text { return Err(DomainError::Conflict { what: "unconfirmed" }) }
             let started = now_millis();
-            self.paste_checked(&to, &runtime, &proven.tty, "codex", true, &text).await?;
-            let expected = Expected::default().then_codex_paste(&text);
-            self.shown(&to, &proven, started, &expected, None).await.left(&proven.tty, "codex").await?;
-            let (preset, _, pid) = self.proven_agent(&to).await.map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
-            if preset != "codex" || pid != proven.pid || Kernel.started(pid) != Some(process_started) || runtime.pane_id_of(to.id)? != pane {
+            #[cfg(test)]
+            if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
+            if self.check_in_destination(&to).await.as_ref() != Some(&destination) {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
-            if rollout_now(pid).await.as_deref() != Some(path.as_path())
-                || codex_turn::said_held(pid, true).await.0 != registry_turn::Said::Idle
-            {
+            self.bracketed(to.id).await.map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
+            self.box_still_empty(&to, "codex").await?;
+            let crate::pastes::PastePlan::Hex(hex) = crate::pastes::plan_paste("codex", &text) else {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            };
+            runtime.tmux.send_bytes_hex(&pane, &hex).await?;
+            let expected = Expected::default().then_codex_paste(&text);
+            if !matches!(self.shown(&to, &proven, started, &expected, None).await, super::Shown::Yes(_)) {
+                return Err(DomainError::Conflict { what: "paste_left" });
+            }
+            #[cfg(test)]
+            if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() { run(); }
+            let pid = proven.pid;
+            if codex_turn::said(Some(&path), Kernel.started(pid)) != registry_turn::Said::Idle {
                 return Err(DomainError::Conflict { what: "unconfirmed" });
             }
             let now_meta = std::fs::metadata(&path).map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
             if now_meta.dev() != meta.dev() || now_meta.ino() != meta.ino() { return Err(DomainError::Conflict { what: "unconfirmed" }) }
-            self.codex_still_between(&to, pid, started, &expected, true).await?;
+            if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+                return Err(DomainError::Conflict { what: "paste_left" });
+            }
+            let screen = runtime.tmux.capture_screen(&pane).await?;
+            if self.service.registry().classify("codex", &screen) != AgentActivity::Idle
+                || !expected.shown_by(&composer::read("codex", &screen))
+            { return Err(DomainError::Conflict { what: "paste_left" }); }
+            if self.check_in_destination(&to).await.as_ref() != Some(&destination)
+                || codex_turn::said(Some(&path), Kernel.started(pid)) != registry_turn::Said::Idle
+            { return Err(DomainError::Conflict { what: "unconfirmed" }); }
+            let final_meta = std::fs::metadata(&path).map_err(|_| DomainError::Conflict { what: "unconfirmed" })?;
+            if final_meta.dev() != meta.dev() || final_meta.ino() != meta.ino() {
+                return Err(DomainError::Conflict { what: "unconfirmed" });
+            }
             Ok(())
         }.await;
         if let Err(error) = prepared {

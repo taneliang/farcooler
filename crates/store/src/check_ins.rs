@@ -51,6 +51,7 @@ pub(crate) fn migration_check_ins(tx: &Transaction) -> rusqlite::Result<()> {
             daemon_instance BLOB,
             terminal_id BLOB,
             pane_id TEXT,
+            tty TEXT,
             terminal_lease INTEGER,
             terminal_epoch INTEGER,
             process_id INTEGER,
@@ -279,7 +280,7 @@ impl crate::Store {
                 AND o.state = 'claimed' AND o.terminal_id = ?4 AND o.thread_id = ?5 AND o.pane_id = ?6 AND o.process_id = ?7 AND o.process_started = ?8
                 AND o.message_text IS NOT NULL AND NOT EXISTS (SELECT 1 FROM check_in_target_reservations r WHERE r.workspace_id = o.workspace_id)
                 AND NOT EXISTS (SELECT 1 FROM check_in_cleanup_fence)
-                AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
+                AND o.tty IS NOT NULL AND o.rollout_path IS NOT NULL AND o.rollout_device IS NOT NULL
                 AND o.rollout_inode IS NOT NULL AND o.rollout_offset IS NOT NULL
                 AND s.state = 'enabled' AND s.generation = o.generation
                 AND s.eligibility_epoch = o.eligibility_epoch AND s.task_id = o.task_id
@@ -446,10 +447,22 @@ impl crate::Store {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
         if let Some(device) = caller_device {
-            let released: bool = tx.query_row(
-                "SELECT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?1)", params![device], |r| r.get(0),
+            // The seat lookup in the daemon may have awaited while this
+            // device's authority changed. Check the relevant branch again
+            // under the same write transaction as the disable.
+            let authorized: bool = tx.query_row(
+                "SELECT NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = ?1)
+                    AND CASE WHEN ?2 THEN
+                        EXISTS (SELECT 1 FROM owner_devices WHERE client_id = ?1 AND state = 'confirmed')
+                        AND NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?1)
+                        AND NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?1)
+                    ELSE
+                        NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = ?1 AND cap = 'viewer')
+                        AND NOT EXISTS (SELECT 1 FROM member_devices d JOIN member_access a ON a.handle = d.handle
+                                        WHERE d.client_id = ?1 AND a.access = 'viewer')
+                    END", params![device, caller_terminal.is_none()], |r| r.get(0),
             ).map_err(map_err)?;
-            if released { return Err(farcooler_core::DomainError::Conflict { what: "person_only" }) }
+            if !authorized { return Err(farcooler_core::DomainError::Conflict { what: "person_only" }) }
         }
         if let Some(terminal) = caller_terminal {
             let current: bool = tx.query_row(
@@ -690,6 +703,7 @@ impl crate::Store {
         occurrence: uuid::Uuid,
         attempt: uuid::Uuid,
         path: &str,
+        tty: &str,
         device: i64,
         inode: i64,
         offset: i64,
@@ -698,11 +712,11 @@ impl crate::Store {
         use crate::models::uuid_blob;
         use rusqlite::params;
 
-        if path.is_empty() || device < 0 || inode < 0 || offset < 0 { return Ok(false) }
+        if path.is_empty() || tty.is_empty() || device < 0 || inode < 0 || offset < 0 { return Ok(false) }
         let changed = self.conn().execute(
-            "UPDATE check_in_occurrences SET rollout_path = ?3, rollout_device = ?4, rollout_inode = ?5, rollout_offset = ?6
+            "UPDATE check_in_occurrences SET rollout_path = ?3, rollout_device = ?4, rollout_inode = ?5, rollout_offset = ?6, tty = ?7
               WHERE id = ?1 AND attempt_id = ?2 AND state = 'claimed' AND rollout_path IS NULL",
-            params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset],
+            params![uuid_blob(occurrence), uuid_blob(attempt), path, device, inode, offset, tty],
         ).map_err(map_err)?;
         Ok(changed == 1)
     }
@@ -777,6 +791,7 @@ pub struct CheckInObservation {
     pub from: i64,
     pub terminal: uuid::Uuid,
     pub pane: String,
+    pub tty: String,
     pub terminal_lease: i64,
     pub terminal_epoch: i64,
     pub process_id: i32,
@@ -798,17 +813,17 @@ impl crate::Store {
 
         self.conn().query_row(
             "SELECT rollout_path, rollout_device, rollout_inode, rollout_offset, terminal_id, thread_id, admitted_at,
-                    pane_id, terminal_lease, terminal_epoch, message_text, process_id, process_started, workspace_id
+                    pane_id, terminal_lease, terminal_epoch, message_text, process_id, process_started, workspace_id, tty
                FROM check_in_occurrences WHERE id = ?1 AND attempt_id = ?2 AND state = 'submitted'
                 AND rollout_path IS NOT NULL AND rollout_device IS NOT NULL AND rollout_inode IS NOT NULL
                 AND rollout_offset IS NOT NULL AND terminal_id IS NOT NULL AND thread_id IS NOT NULL AND admitted_at IS NOT NULL
                 AND pane_id IS NOT NULL AND terminal_lease IS NOT NULL AND terminal_epoch IS NOT NULL AND message_text IS NOT NULL
-                AND process_id IS NOT NULL AND process_started IS NOT NULL",
+                AND process_id IS NOT NULL AND process_started IS NOT NULL AND tty IS NOT NULL",
             params![uuid_blob(occurrence), uuid_blob(attempt)],
             |r| Ok(CheckInObservation {
                 path: r.get(0)?, device: r.get(1)?, inode: r.get(2)?, from: r.get(3)?,
                 terminal: get_uuid(r, 4)?, thread: r.get(5)?, admitted_at: r.get(6)?, pane: r.get(7)?,
-                terminal_lease: r.get(8)?, terminal_epoch: r.get(9)?, message: r.get(10)?, process_id: r.get(11)?, process_started: r.get(12)?, workspace: get_uuid(r, 13)?,
+                terminal_lease: r.get(8)?, terminal_epoch: r.get(9)?, message: r.get(10)?, process_id: r.get(11)?, process_started: r.get(12)?, workspace: get_uuid(r, 13)?, tty: r.get(14)?,
             }),
         ).optional().map_err(map_err)
     }
@@ -1141,8 +1156,8 @@ mod tests {
         let (store, ws, _) = board();
         let (occ, attempt, terminal) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         store.conn().execute(
-            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch, process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at)
-             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', 'test message', '%1', 1, 1, 123, 1, '/rollout', 1, 2, 10, 5, 6 FROM check_in_schedules WHERE workspace_id = ?4",
+            "INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, due_at, state, attempt_id, terminal_id, thread_id, message_text, pane_id, terminal_lease, terminal_epoch, process_id, process_started, rollout_path, rollout_device, rollout_inode, rollout_offset, admitted_at, submitted_at, tty)
+             SELECT ?1, workspace_id, task_id, generation, eligibility_epoch, authorizer_device, authorizer_source, authorized_at, template_version, next_due, 'submitted', ?2, ?3, 'thread', 'test message', '%1', 1, 1, 123, 1, '/rollout', 1, 2, 10, 5, 6, '/dev/test' FROM check_in_schedules WHERE workspace_id = ?4",
             params![uuid_blob(occ), uuid_blob(attempt), uuid_blob(terminal), uuid_blob(ws)],
         ).unwrap();
         let observation = store.check_in_observation(occ, attempt).unwrap().unwrap();
@@ -1182,7 +1197,7 @@ mod tests {
         assert!(text.starts_with("[Far Cooler] Scheduled hourly check-in"));
         assert!(text.contains(&occ.to_string()));
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
-        assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", 1, 2, 0).unwrap());
+        assert!(store.pin_check_in_rollout(occ, attempt, "/rollout", "/dev/test", 1, 2, 0).unwrap());
         let cleanup = Uuid::now_v7();
         store.begin_check_in_cleanup(cleanup).unwrap();
         assert!(!store.admit_check_in_enter(occ, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
@@ -1263,7 +1278,7 @@ mod tests {
         let occurrence = store.pending_check_ins().unwrap()[0].id;
         let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
         assert!(store.claim_check_in(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_002).unwrap());
-        assert!(store.pin_check_in_rollout(occurrence, attempt, "/rollout", 1, 2, 0).unwrap());
+        assert!(store.pin_check_in_rollout(occurrence, attempt, "/rollout", "/dev/test", 1, 2, 0).unwrap());
         assert!(store.disable_check_in(ws, None, None).unwrap());
         assert!(!store.admit_check_in_enter(occurrence, attempt, daemon, terminal.id, "thread", "%1", 123, 1, 3_600_003).unwrap());
         let status = store.check_in_status(ws).unwrap().unwrap();
@@ -1482,6 +1497,50 @@ mod tests {
         assert!(matches!(store.disable_check_in(ws, Some(Uuid::now_v7()), None), Err(DomainError::Conflict { what: "not_orchestrator" })));
         assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "enabled");
         assert!(store.disable_check_in(ws, None, None).unwrap());
+    }
+
+    #[test]
+    fn disable_rechecks_owner_device_inside_the_write_transaction() {
+        for mutation in [
+            "UPDATE owner_devices SET state = 'check' WHERE client_id = 'owner'",
+            "INSERT INTO device_caps (client_id, cap) VALUES ('owner', 'viewer')",
+            "INSERT INTO member_devices (client_id, handle) VALUES ('owner', 'alice')",
+            "INSERT INTO released_devices (client_id) VALUES ('owner')",
+        ] {
+            let (store, ws, _) = board();
+            store.conn().execute("INSERT INTO members (handle, name, created_at) VALUES ('alice', 'Alice', 1)", []).unwrap();
+            store.conn().execute("INSERT INTO owner_devices (client_id) VALUES ('owner')", []).unwrap();
+            store.conn().execute(mutation, []).unwrap();
+            assert!(matches!(store.disable_check_in(ws, None, Some("owner")), Err(DomainError::Conflict { what: "person_only" })), "{mutation}");
+            assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "enabled");
+        }
+        let (store, ws, _) = board();
+        store.conn().execute("INSERT INTO owner_devices (client_id) VALUES ('owner')", []).unwrap();
+        assert!(store.disable_check_in(ws, None, Some("owner")).unwrap());
+    }
+
+    #[test]
+    fn disable_rechecks_orchestrator_device_and_seat_in_the_write_transaction() {
+        use farcooler_protocol::v1::TerminalIntent;
+        let (store, ws, _) = board();
+        let repo = store.get_workspace(ws).unwrap().repository_id;
+        let wt = store.create_worktree(repo, "test/disable", "/disable", false).unwrap();
+        let terminal = store.create_terminal(wt.id, "manager", "codex", TerminalIntent::Running, 80, 24).unwrap();
+        store.conn().execute("UPDATE terminals SET workspace_id = ?2, role = 2 WHERE id = ?1", params![uuid_blob(terminal.id), uuid_blob(ws)]).unwrap();
+        store.conn().execute("UPDATE check_in_schedules SET state = 'enabled' WHERE workspace_id = ?1", [uuid_blob(ws)]).unwrap();
+        store.conn().execute("INSERT INTO members (handle, name, created_at) VALUES ('alice', 'Alice', 1)", []).unwrap();
+        store.conn().execute("INSERT INTO member_devices (client_id, handle) VALUES ('member', 'alice')", []).unwrap();
+        store.conn().execute("INSERT INTO member_access (handle, access) VALUES ('alice', 'viewer')", []).unwrap();
+        assert!(store.disable_check_in(ws, Some(terminal.id), Some("member")).is_err());
+        assert_eq!(store.check_in_status(ws).unwrap().unwrap().state, "enabled");
+        store.conn().execute("UPDATE member_access SET access = 'member' WHERE handle = 'alice'", []).unwrap();
+        store.conn().execute("INSERT INTO device_caps (client_id, cap) VALUES ('member', 'viewer')", []).unwrap();
+        assert!(store.disable_check_in(ws, Some(terminal.id), Some("member")).is_err());
+        store.conn().execute("DELETE FROM device_caps WHERE client_id = 'member'", []).unwrap();
+        store.conn().execute("UPDATE terminals SET role = 1 WHERE id = ?1", [uuid_blob(terminal.id)]).unwrap();
+        assert!(store.disable_check_in(ws, Some(terminal.id), Some("member")).is_err());
+        store.conn().execute("UPDATE terminals SET role = 2 WHERE id = ?1", [uuid_blob(terminal.id)]).unwrap();
+        assert!(store.disable_check_in(ws, Some(terminal.id), Some("member")).unwrap());
     }
 
     #[test]

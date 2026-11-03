@@ -306,6 +306,15 @@ async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
     assert!(si.submitted()[0].starts_with("[Far Cooler] Scheduled hourly check-in"));
     let submitted = b.svc.store.submitted_check_ins().unwrap();
     assert_eq!(submitted.len(), 1);
+    // A replacement at the same name cannot confirm the old attempt, even
+    // when it contains the same bytes. Restore it for the positive control.
+    let held = path.with_extension("pinned");
+    std::fs::rename(&path, &held).unwrap();
+    std::fs::copy(&held, &path).unwrap();
+    b.watcher.observe_check_in(submitted[0].0, submitted[0].1).await.unwrap();
+    assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "submitted");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(&held, &path).unwrap();
     for _ in 0..100 {
         b.watcher.observe_check_in(submitted[0].0, submitted[0].1).await.unwrap();
         if b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state == "confirmed" { break }
@@ -314,6 +323,85 @@ async fn scheduled_idle_codex_submits_once_and_records_a_correlated_receipt() {
     let status = b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap();
     assert_eq!(status.occurrence.unwrap().state, "confirmed");
     assert_eq!(si.submitted().len(), 1, "no duplicate prompt");
+}
+
+/// Changing the pinned rollout at either boundary must not authorize a key.
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_rollout_replacement_before_claim_or_enter_never_sends() {
+    for boundary in 0..3 {
+        let b = board().await;
+        assert!(b.svc.store.arm_check_in_instance(Uuid::now_v7()).unwrap());
+        b.watcher.check_in_arm.store(1, std::sync::atomic::Ordering::SeqCst);
+        let path = rollout(&b);
+        let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+        writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+        let (agent, si) = idle_codex(&b, &path, false).await;
+        let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+        let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+            Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+        b.doing(agent.id, AgentActivity::Idle).await;
+        let now = crate::review::now_millis();
+        b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+        b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
+        let pending = b.svc.store.pending_check_ins().unwrap().remove(0);
+        let changed = path.clone();
+        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker = fired.clone();
+        let replace = Box::new(move || {
+            std::fs::rename(&changed, changed.with_extension("old")).unwrap();
+            marker.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        match boundary {
+            0 => *b.watcher.after_gate_rollout.lock().unwrap() = Some(replace),
+            1 => *b.watcher.before_paste.lock().unwrap() = Some(replace),
+            _ => *b.watcher.before_enter.lock().unwrap() = Some(replace),
+        }
+        let _ = b.watcher.send_check_in(&pending, Uuid::now_v7()).await;
+        assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "fixture never reached the intended boundary");
+        assert!(si.submitted().is_empty(), "{}", si.log());
+        assert!(!si.log().contains("ENTER"), "{}", si.log());
+        if boundary < 2 { assert!(!si.log().contains("PASTE "), "{}", si.log()); }
+        if boundary == 0 { assert_eq!(b.svc.store.pending_check_ins().unwrap().len(), 1); }
+        else { assert_eq!(b.svc.store.check_in_status(b.task.workspace_id).unwrap().unwrap().occurrence.unwrap().state, "uncertain"); }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate() {
+    let b = board().await;
+    let path = rollout(&b);
+    let completed = ROLLOUT.lines().find(|line| line.contains(r#""type":"task_complete""#)).unwrap();
+    writeln!(std::fs::OpenOptions::new().append(true).open(&path).unwrap(), "{completed}").unwrap();
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let agent = b.svc.store.set_terminal_role(agent.id, TerminalRole::Orchestrator).unwrap();
+    let agent = b.svc.store.set_pane_mode(agent.id, agent.resource_version, agent.pane_mode,
+        Some("01a1189c-23ea-7190-b6bf-1d9ac1940ade".into()), false).unwrap();
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let now = crate::review::now_millis();
+    b.svc.store.enable_check_in(b.task.workspace_id, b.task.id, None, None, false, now - 3_600_000).unwrap();
+    b.svc.store.tick_check_in(b.task.workspace_id, now).unwrap();
+    let pidfile = b.dir.path().join("stalled-discovery.pid");
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let owner = b.watcher.clone();
+    let task = tokio::spawn(crate::watch::answer_wake::codex_turn::TEST_STALLED_DISCOVERY.scope(pidfile.clone(), async move {
+        owner.run_check_in_scheduler(Uuid::now_v7(), rx).await;
+    }));
+    let pid: i32 = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&pidfile)
+                && let Ok(pid) = text.trim().parse::<i32>() { break pid }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await.expect("discovery must start");
+    stop.send(true).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), task).await.expect("scheduler must join").unwrap();
+    assert!(b.watcher.check_in_cleanup_gate.try_lock().is_ok());
+    assert!(!si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
+    // SAFETY: signal 0 checks existence without delivering a signal.
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
 }
 
 /// Cleanup already owns the gate: a due scheduled attempt must not even
@@ -424,7 +512,7 @@ async fn scheduled_admission_vetoes_stop_before_kill() {
     let occurrence = b.svc.store.pending_check_ins().unwrap()[0].id;
     let (attempt, daemon) = (Uuid::now_v7(), Uuid::now_v7());
     assert!(b.svc.store.claim_check_in(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
-    assert!(b.svc.store.pin_check_in_rollout(occurrence, attempt, "/test-rollout", 1, 1, 0).unwrap());
+    assert!(b.svc.store.pin_check_in_rollout(occurrence, attempt, "/test-rollout", "/dev/test", 1, 1, 0).unwrap());
     assert!(b.svc.store.admit_check_in_enter(occurrence, attempt, daemon, agent.id, "01a1189c-23ea-7190-b6bf-1d9ac1940ade", "%1", 123, 1, now).unwrap());
     let before = b.svc.tmux.call_counts().get("kill-pane").copied().unwrap_or(0);
     let stopped = b.svc.stop_terminal(agent.id).await;

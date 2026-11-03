@@ -117,6 +117,137 @@ pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
     tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
 }
 
+/// Own each discovery process until it exits or has been killed and reaped.
+/// Output is capped so a stuck writer cannot make discovery grow unbounded.
+static DISCOVERY_REAP_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(super) fn discovery_reap_failed() -> bool {
+    DISCOVERY_REAP_FAILED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+tokio::task_local! { pub(super) static TEST_STALLED_DISCOVERY: std::path::PathBuf; }
+
+pub(super) async fn discovery_output(program: &str, args: &[&str]) -> Option<String> {
+    #[cfg(test)]
+    if let Ok(path) = TEST_STALLED_DISCOVERY.try_with(Clone::clone) {
+        let path = path.to_str()?;
+        return discovery_output_inner("sh", &["-c", "echo $$ > \"$1\"; exec sleep 30", "sh", path]).await;
+    }
+    discovery_output_inner(program, args).await
+}
+
+async fn discovery_output_inner(program: &str, args: &[&str]) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let mut child = tokio::process::Command::new(program).args(args)
+        .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped()).kill_on_drop(true).spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let mut bytes = Vec::new();
+    let result = tokio::time::timeout(Duration::from_secs(3), async {
+        stdout.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes).await.ok()?;
+        let status = child.wait().await.ok()?;
+        (status.success() && bytes.len() <= 4 * 1024 * 1024).then_some(())
+    }).await;
+    match result {
+        Ok(Some(())) => String::from_utf8(bytes).ok(),
+        _ => {
+            let _ = child.start_kill();
+            if !matches!(tokio::time::timeout(Duration::from_secs(2), child.wait()).await, Ok(Ok(_))) {
+                DISCOVERY_REAP_FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
+                tracing::error!(program, "discovery child could not be reaped");
+            }
+            None
+        }
+    }
+}
+
+async fn bounded_open_files(pid: i32) -> Option<Vec<(i32, PathBuf)>> {
+    let ps = discovery_output("ps", &["-axo", "pid=,ppid="]).await?;
+    if ps.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        fields.next().and_then(|p| p.parse::<i32>().ok()).is_none()
+            || fields.next().and_then(|p| p.parse::<i32>().ok()).is_none()
+            || fields.next().is_some()
+    }) { return None }
+    if !ps.lines().any(|line| line.split_whitespace().next().and_then(|p| p.parse::<i32>().ok()) == Some(pid)) { return None }
+    let subtree = crate::log_join::subtree_from_ps(pid, &ps);
+    let pids = subtree.iter().map(i32::to_string).collect::<Vec<_>>().join(",");
+    let files = discovery_output("lsof", &["-p", &pids, "-Fn"]).await?;
+    let mut owner = None;
+    let mut result = Vec::new();
+    for line in files.lines() {
+        if let Some(p) = line.strip_prefix('p') {
+            let parsed = p.parse().ok()?;
+            if !subtree.contains(&parsed) { return None }
+            owner = Some(parsed);
+        }
+        else if let Some(path) = line.strip_prefix('n') { result.push((owner?, PathBuf::from(path))); }
+    }
+    Some(result)
+}
+
+/// The scheduler cannot infer the active thread by mtime: Codex may retain
+/// an old main file after /new. Unknown or competing candidates hold.
+pub(crate) async fn unique_rollout_now(pid: i32) -> Option<PathBuf> {
+    unique_rollout(pid, &bounded_open_files(pid).await?)
+}
+
+fn unique_rollout(pid: i32, files: &[(i32, PathBuf)]) -> Option<PathBuf> {
+    let mut main = None;
+    let mut held_by_foreground = false;
+    for (holder, path) in files {
+        if !crate::log_join::is_codex_rollout(path) { continue }
+        match crate::log_join::rollout_is_subagent(path)? {
+            true => continue,
+            false => {
+                if main.as_ref().is_some_and(|old| old != path) { return None }
+                main = Some(path.clone());
+                held_by_foreground |= *holder == pid;
+            }
+        }
+    }
+    main.filter(|_| held_by_foreground)
+}
+
+#[cfg(test)]
+mod check_in_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn unique_main_requires_foreground_holder_and_rejects_competing_or_unknown_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join("sessions/2026/01/01");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let old = sessions.join("rollout-old.jsonl");
+        let new = sessions.join("rollout-new.jsonl");
+        let unknown = sessions.join("rollout-unknown.jsonl");
+        std::fs::write(&old, "{\"type\":\"session_meta\",\"payload\":{\"source\":\"cli\"}}\n").unwrap();
+        std::fs::write(&new, "{\"type\":\"session_meta\",\"payload\":{\"source\":\"cli\"}}\n").unwrap();
+        std::fs::write(&unknown, "partial").unwrap();
+        std::fs::OpenOptions::new().write(true).open(&old).unwrap()
+            .set_modified(std::time::SystemTime::now() + Duration::from_secs(60)).unwrap();
+        assert_eq!(unique_rollout(42, &[(42, old.clone())]), Some(old.clone()));
+        assert_eq!(unique_rollout(42, &[(42, old.clone()), (43, old.clone())]), Some(old.clone()));
+        assert_eq!(unique_rollout(42, &[(43, old.clone())]), None);
+        assert_eq!(unique_rollout(42, &[(42, old.clone()), (42, new.clone())]), None);
+        assert_eq!(unique_rollout(42, &[(42, old.clone()), (43, new)]), None);
+        assert_eq!(unique_rollout(42, &[(42, old), (42, unknown)]), None);
+    }
+
+    #[tokio::test]
+    async fn timed_out_discovery_is_killed_and_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let script = format!("echo $$ > '{}'; exec sleep 30", pidfile.display());
+        assert!(discovery_output("sh", &["-c", &script]).await.is_none());
+        let pid: i32 = std::fs::read_to_string(pidfile).unwrap().trim().parse().unwrap();
+        // SAFETY: signal 0 checks existence without sending a signal.
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+}
+
 /// `said_of`, for a gate that mustn't pass a rollout it has lost (ov-428,
 /// the compose path's rule): looked up afresh, and when none is held now but
 /// one was known (`held`: an earlier check found it; or the join kept from

@@ -142,6 +142,29 @@ pub trait Processes: Send + Sync {
 /// The running system.
 pub struct Kernel;
 
+/// A process incarnation at kernel resolution, for scheduler destination
+/// binding. Unlike `Processes::started`, this does not truncate to seconds.
+#[cfg(target_os = "macos")]
+pub(crate) fn process_incarnation(pid: i32) -> Option<i64> {
+    let info = bsd_info(pid)?;
+    i64::try_from(info.pbi_start_tvsec).ok()?.checked_mul(1_000_000)?
+        .checked_add(i64::try_from(info.pbi_start_tvusec).ok()?)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn process_incarnation(pid: i32) -> Option<i64> {
+    let ticks: i64 = linux_stat(pid)?.get(19)?.parse().ok()?;
+    let boot: i64 = std::fs::read_to_string("/proc/stat").ok()?.lines()
+        .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())?;
+    // SAFETY: sysconf has no preconditions.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if hz <= 0 { return None }
+    boot.checked_mul(1_000_000)?.checked_add(ticks.checked_mul(1_000_000)?.checked_div(hz)?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn process_incarnation(_: i32) -> Option<i64> { None }
+
 #[cfg(target_os = "macos")]
 fn bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();

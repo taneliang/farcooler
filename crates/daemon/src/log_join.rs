@@ -367,6 +367,10 @@ fn process_subtree(root: i32) -> Vec<i32> {
     let Ok(out) = out else { return vec![root] };
     let text = String::from_utf8_lossy(&out.stdout);
 
+    subtree_from_ps(root, &text)
+}
+
+pub(crate) fn subtree_from_ps(root: i32, text: &str) -> Vec<i32> {
     let pairs: Vec<(i32, i32)> = text
         .lines()
         .filter_map(|line| {
@@ -484,7 +488,7 @@ fn pick_codex_rollout(open_files: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// `<home>/sessions/…/rollout-*.jsonl`, whatever `<home>` is.
-fn is_codex_rollout(path: &Path) -> bool {
+pub(crate) fn is_codex_rollout(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     (name.starts_with("rollout-") && name.ends_with(".jsonl")) && path.to_string_lossy().contains("/sessions/")
 }
@@ -535,7 +539,7 @@ pub fn codex_thread_of(rollout: &Path) -> Option<(String, PathBuf)> {
 /// The record is the file's first line, and that line is large -- 18,589 and
 /// 19,380 bytes on the two 0.153.4 files this was checked against, most of it
 /// the system prompt. `scan_head`'s megabyte bound covers it many times over.
-fn rollout_is_subagent(path: &Path) -> Option<bool> {
+pub(crate) fn rollout_is_subagent(path: &Path) -> Option<bool> {
     scan_head(path, |record| {
         if record.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
             return None;

@@ -476,6 +476,17 @@ pub async fn disable_check_in(
     caller_pid: Option<i32>,
     workspace: Uuid,
 ) -> Result<bool> {
+    disable_check_in_after_read(svc, watcher, peer, caller_pid, workspace, || {}).await
+}
+
+async fn disable_check_in_after_read(
+    svc: &Service,
+    watcher: &Watcher,
+    peer: &Peer,
+    caller_pid: Option<i32>,
+    workspace: Uuid,
+    after_read: impl FnOnce(),
+) -> Result<bool> {
     if !matches!(peer.scope, Scope::Control | Scope::HostAdmin) {
         return Err(DomainError::ScopeDenied { needed: "control" });
     }
@@ -483,6 +494,7 @@ pub async fn disable_check_in(
     if person == crate::people::Person::Released {
         return Err(DomainError::Conflict { what: "person_only" });
     }
+    after_read();
     let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
     let caller_terminal = match seat {
         crate::caller_seat::Seat::Person if person == crate::people::Person::Owner => None,
@@ -533,6 +545,29 @@ mod tests {
         assert_eq!(visible.state, "unavailable");
         assert_eq!(visible.reason, "scheduler_unavailable_unclean_or_storage");
         assert!(disable_check_in(&svc, &watcher, &owner, None, workspace).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn disable_refuses_owner_device_revoked_after_initial_person_read() {
+        use farcooler_store::access::Cap;
+        for change in 0..3 {
+            let (_dir, svc, repo) = fixture().await;
+            let watcher = Watcher::new(svc.clone());
+            let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+            let task = svc.store.create_task(workspace, "audit", farcooler_store::Actor::Manager).unwrap().id;
+            svc.store.enable_check_in(workspace, task, None, None, false, 1).unwrap();
+            svc.store.bind_owner_device("owner-device", None).unwrap();
+            let peer = Peer { client_id: Some("owner-device".into()), scope: Scope::HostAdmin };
+            let result = disable_check_in_after_read(&svc, &watcher, &peer, None, workspace, || {
+                match change {
+                    0 => { svc.store.set_device_cap("owner-device", Some(Cap::Viewer)).unwrap(); }
+                    1 => { svc.store.clear_device_rows("owner-device").unwrap(); }
+                    _ => { svc.store.set_member("alice", "Alice", &["owner-device".into()]).unwrap(); }
+                }
+            }).await;
+            assert!(result.is_err(), "revocation {change}");
+            assert_eq!(svc.store.check_in_status(workspace).unwrap().unwrap().state, "enabled");
+        }
     }
 
     #[tokio::test]

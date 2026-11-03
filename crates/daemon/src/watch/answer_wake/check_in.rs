@@ -7,6 +7,34 @@ use uuid::Uuid;
 
 use crate::watch::Watcher;
 
+#[cfg(unix)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Destination {
+    pub pane: String,
+    pub tty: String,
+    pub pid: i32,
+    pub incarnation: i64,
+    pub path: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
+    let name = tty.strip_prefix("/dev/").unwrap_or(tty);
+    let listing = super::codex_turn::discovery_output("ps", &["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
+    let (pid, comm) = super::in_front(&listing)?;
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).map(|p| p.to_string_lossy().into_owned()).unwrap_or(comm);
+    let args = super::codex_turn::discovery_output("ps", &["-o", "args=", "-p", &pid.to_string()]).await?;
+    super::agent_of_process(&exe, args.trim()).map(|agent| (agent, pid))
+}
+
+#[cfg(unix)]
+fn unique_pane(snapshot: &farcooler_core::inventory::RuntimeSnapshot, terminal: Uuid) -> Option<&farcooler_core::inventory::TaggedPane> {
+    if !snapshot.inventory_healthy { return None }
+    let claimants = snapshot.claimants(terminal);
+    let [pane] = claimants.as_slice() else { return None };
+    pane.proves_life().then_some(*pane)
+}
+
 /// Unexpected scheduler termination must never leave its volatile arm set.
 struct SchedulerArmGuard<'a>(&'a std::sync::atomic::AtomicU8);
 impl Drop for SchedulerArmGuard<'_> {
@@ -14,6 +42,27 @@ impl Drop for SchedulerArmGuard<'_> {
 }
 
 impl Watcher {
+    /// A snapshot proof only: callers recheck it at each side-effect boundary.
+    #[cfg(unix)]
+    pub(super) async fn check_in_destination(&self, to: &farcooler_store::models::Terminal) -> Option<Destination> {
+        use std::os::unix::fs::MetadataExt;
+        use crate::claude_registry::{Kernel, Processes};
+        if super::codex_turn::discovery_reap_failed() { return None }
+        let inventory = self.service.inventory_snapshot();
+        let pane = unique_pane(&inventory, to.id)?;
+        let (preset, pid) = scheduled_foreground(&pane.tty).await?;
+        if preset != "codex" || Kernel.tty(pid)? != std::fs::metadata(&pane.tty).ok()?.rdev() { return None }
+        let incarnation = crate::claude_registry::process_incarnation(pid)?;
+        let path = super::codex_turn::unique_rollout_now(pid).await?;
+        // Discovery itself may have crossed a process replacement.
+        if crate::claude_registry::process_incarnation(pid) != Some(incarnation)
+            || scheduled_foreground(&pane.tty).await != Some(("codex", pid)) { return None }
+        let fresh = self.service.inventory_snapshot();
+        let fresh_pane = unique_pane(&fresh, to.id)?;
+        if fresh_pane.pane_id != pane.pane_id || fresh_pane.tty != pane.tty { return None }
+        if crate::claude_registry::process_incarnation(pid) != Some(incarnation) { return None }
+        Some(Destination { pane: pane.pane_id.clone(), tty: pane.tty.clone(), pid, incarnation, path })
+    }
     /// Run only under the exclusive daemon owner, after stale attempt recovery.
     #[cfg(unix)]
     pub async fn run_check_in_scheduler(self: Arc<Self>, daemon: Uuid, mut shutdown: tokio::sync::watch::Receiver<bool>) {
@@ -64,8 +113,14 @@ impl Watcher {
                 },
                 Err(error) => tracing::warn!(error = %error, "could not read pending check-ins"),
             }
+            if super::codex_turn::discovery_reap_failed() {
+                self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
+            }
         }
         let _gate = self.check_in_cleanup_gate.lock().await;
+        if super::codex_turn::discovery_reap_failed() {
+            self.check_in_arm.store(2, std::sync::atomic::Ordering::SeqCst);
+        }
         if self.check_in_arm.swap(2, std::sync::atomic::Ordering::SeqCst) == 1
             && !matches!(self.service.store.close_check_in_instance(daemon), Ok(true))
         { tracing::warn!("scheduled check-in instance remains unclean"); }
@@ -74,7 +129,6 @@ impl Watcher {
     #[cfg(unix)]
     pub(super) async fn observe_check_in(&self, occurrence: Uuid, attempt: Uuid) -> farcooler_core::Result<()> {
         use std::os::unix::fs::MetadataExt;
-        use crate::claude_registry::{Kernel, Processes};
         use farcooler_core::session_log::codex_prompts::exact_prompt_in_pinned_file;
 
         let Some(observation) = self.service.store.check_in_observation(occurrence, attempt)? else { return Ok(()) };
@@ -83,11 +137,11 @@ impl Watcher {
             || i64::try_from(to.lease_generation).ok() != Some(observation.terminal_lease)
             || i64::try_from(to.epoch).ok() != Some(observation.terminal_epoch)
         { return Ok(()) }
-        let Ok((preset, _, pid)) = self.proven_agent(&to).await else { return Ok(()) };
-        if preset != "codex" || pid != observation.process_id || Kernel.started(pid) != Some(observation.process_started) { return Ok(()) }
-        if self.service.runtime().pane_id_of(to.id).ok().as_deref() != Some(observation.pane.as_str()) { return Ok(()) }
+        let Some(destination) = self.check_in_destination(&to).await else { return Ok(()) };
+        if destination.pid != observation.process_id || destination.incarnation != observation.process_started
+            || destination.pane != observation.pane || destination.tty != observation.tty { return Ok(()) }
         let path = std::path::Path::new(&observation.path);
-        if super::codex_turn::rollout_now(pid).await.as_deref() != Some(path)
+        if destination.path != path
             || crate::log_join::codex_thread_of(path).is_none_or(|(id, _)| id != observation.thread)
         { return Ok(()) }
         let Ok(mut file) = std::fs::File::open(path) else { return Ok(()) };
@@ -98,6 +152,9 @@ impl Watcher {
         // or replacement cannot silently redirect the durable evidence.
         let Ok(path_meta) = std::fs::metadata(path) else { return Ok(()) };
         if path_meta.dev() != device || path_meta.ino() != inode { return Ok(()) }
+        if self.check_in_destination(&to).await.as_ref() != Some(&destination) { return Ok(()) }
+        let Ok(final_meta) = std::fs::metadata(path) else { return Ok(()) };
+        if final_meta.dev() != device || final_meta.ino() != inode { return Ok(()) }
         let (Some(message_at), Ok(line)) = (matched.prompt.at_ms, i64::try_from(matched.offset)) else { return Ok(()) };
         self.service.store.confirm_check_in_receipt(
             occurrence, attempt, to.id, &observation.thread, observation.device, observation.inode,
@@ -111,6 +168,41 @@ impl Watcher {
 mod ownership_tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn scheduler_rejects_duplicate_dead_or_unhealthy_pane_claims() {
+        use farcooler_core::inventory::{RuntimeSnapshot, ScreenStamp, TaggedPane};
+        let id = Uuid::now_v7();
+        let pane = TaggedPane {
+            daemon_id: Uuid::nil(), worktree_id: Uuid::nil(), terminal_id: id, schema_version: 1,
+            pane_id: "%1".into(), window_id: "@1".into(), columns: 80, rows: 24, left: 0, top: 0,
+            window_active: true, pane_active: true, zoomed: false, tty: "/dev/tty1".into(),
+            dead: false, dead_status: None, dead_signal: None, command: "codex".into(), title: String::new(),
+            stamp: ScreenStamp::default(),
+        };
+        let one = RuntimeSnapshot::healthy(vec![pane.clone()]);
+        assert_eq!(unique_pane(&one, id).unwrap().pane_id, "%1");
+        let mut duplicate = pane.clone();
+        duplicate.pane_id = "%2".into();
+        assert!(unique_pane(&RuntimeSnapshot::healthy(vec![pane.clone(), duplicate]), id).is_none());
+        let mut dead = pane;
+        dead.dead = true;
+        assert!(unique_pane(&RuntimeSnapshot::healthy(vec![dead]), id).is_none());
+        assert!(unique_pane(&RuntimeSnapshot::unavailable(), id).is_none());
+    }
+
+    #[test]
+    fn destination_binding_changes_for_each_incarnation_pane_tty_and_thread() {
+        let original = Destination { pane: "%1".into(), tty: "/dev/tty1".into(), pid: 42,
+            incarnation: 10_000_001, path: "/sessions/rollout-a.jsonl".into() };
+        let mut changed = original.clone();
+        changed.incarnation += 1; // Same second, distinct kernel start.
+        assert_ne!(original, changed);
+        changed = original.clone(); changed.pane = "%2".into(); assert_ne!(original, changed);
+        changed = original.clone(); changed.tty = "/dev/tty2".into(); assert_ne!(original, changed);
+        changed = original.clone(); changed.path = "/sessions/rollout-b.jsonl".into(); assert_ne!(original, changed);
+        changed = original.clone(); changed.pid += 1; assert_ne!(original, changed);
+    }
 
     #[tokio::test]
     async fn scheduler_arms_only_after_cleanup_gate_and_joins_on_shutdown() {
