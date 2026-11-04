@@ -328,10 +328,13 @@ fn a_rep_may_call_only_what_is_listed() {
         "terminal.list", "layout.list", "theme.list", "changes.inbox", "stack.get", "needs_you.list",
         "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
         "plan.get", "plan.events", "workspace.list", "client.list",
-        "member.list", "message.send", "worktree.grep", "workspace.charter",
+        "member.list", "message.send", "worktree.grep", "workspace.charter", "workspace.check_in_show",
     ];
     listed.sort();
     assert_eq!(allowed, listed);
+    for method in ["workspace.check_in_enable", "workspace.check_in_disable", "workspace.check_in_resolve_hold"] {
+        assert!(!rep_may(&Request { method: method.into(), ..Default::default() }), "{method}: a write");
+    }
     let note = |kind: pb::TaskNoteKind| Request {
         method: "task.note".into(),
         payload: Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend { kind: kind as i32, ..Default::default() })),

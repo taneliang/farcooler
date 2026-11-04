@@ -32,6 +32,36 @@ fn tmux_here(test: &str) -> bool {
     false
 }
 
+/// A scheduled sender holding exclusion may change the pane and fleet. The
+/// sample must wait before reading either, rather than spending an inventory
+/// read on a snapshot it cannot use for cleanup.
+#[tokio::test]
+async fn a_sample_waits_for_cleanup_exclusion_before_reading_inventory() {
+    if !tmux_here("a_sample_waits_for_cleanup_exclusion_before_reading_inventory") {
+        return;
+    }
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let watcher = Watcher::new(svc.clone());
+    let main = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
+    let terminal = svc.create_terminal(main.id, "shell", "shell").await.unwrap();
+    let gate = watcher.check_in_cleanup_gate.lock().await;
+    let before = svc.tmux.call_counts();
+    let sample = watcher.sample();
+    tokio::pin!(sample);
+    // Poll the sample itself, so no timer or task scheduling assumption can
+    // make this assertion pass before the sample has actually reached the gate.
+    std::future::poll_fn(|cx| {
+        assert!(sample.as_mut().poll(cx).is_pending(), "sample waits for exclusion");
+        std::task::Poll::Ready(())
+    }).await;
+    assert!(spawned_since(&svc, &before).is_empty(), "no inventory read before exclusion");
+    drop(gate);
+    sample.await;
+    assert_eq!(spawned_since(&svc, &before).get("list-panes"), Some(&1));
+    assert_eq!(svc.inventory_snapshot().claimants(terminal.id).len(), 1, "the registered pane survives cleanup");
+    assert!(watcher.check_in_cleanup_gate.try_lock().is_ok(), "sample releases exclusion");
+}
+
 /// A daemon with no terminal has no tmux server, and a tick that reads nothing
 /// from tmux spawns nothing: at most the one read that finds that out.
 #[tokio::test]

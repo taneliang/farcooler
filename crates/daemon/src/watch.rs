@@ -4608,6 +4608,9 @@ impl Watcher {
     }
 
     async fn sample(&self) {
+        // Take exclusion before reading: cleanup and scheduled delivery must
+        // agree on a fresh fleet and inventory, with one inventory read a tick.
+        let cleanup_gate = self.check_in_cleanup_gate.lock().await;
         // Refresh the inventory first: a terminal that died since the last tick
         // must not have its stale screen re-read and reported as working.
         self.service.inventory.refresh().await;
@@ -4624,14 +4627,7 @@ impl Watcher {
         // fleet and live inventory are already read together, then publish the
         // repaired geometry so every open client fills the recovered space.
         if panes.inventory_healthy {
-            let _cleanup_gate = self.check_in_cleanup_gate.lock().await;
-            // Re-read after exclusion: the earlier fleet and pane snapshot may
-            // precede a scheduled send or a concurrent registration.
-            self.service.inventory.refresh().await;
-            panes = self.service.inventory_snapshot();
-            let Ok(cleanup_fleet) = self.service.fleet_as_inventoried().await else { return };
-            if !panes.inventory_healthy { return }
-            let terminals: HashSet<Uuid> = cleanup_fleet
+            let terminals: HashSet<Uuid> = fleet
                 .iter()
                 .flat_map(|worktree| worktree.terminals.iter().map(|terminal| terminal.terminal.id))
                 .collect();
@@ -4670,6 +4666,7 @@ impl Watcher {
                 }
             }
         }
+        drop(cleanup_gate);
 
         // The process table and the sockets under the panes, read in this
         // process and only while a pane is alive. See `hostwalk`.

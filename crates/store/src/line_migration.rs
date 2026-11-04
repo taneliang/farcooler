@@ -42,7 +42,7 @@ use crate::tasks::now_millis;
 
 type Id = Vec<u8>;
 
-/// The last entry of `MIGRATIONS`: schema step 67, the 58th entry.
+/// Schema step 67, the fixed 58th entry of `MIGRATIONS`.
 pub(crate) const LINE_MIGRATION: (fn(&Transaction) -> rusqlite::Result<()>, Older) =
     (migration_0067_agents_and_the_line, Older::Refused);
 

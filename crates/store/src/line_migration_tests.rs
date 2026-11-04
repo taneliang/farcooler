@@ -317,8 +317,8 @@ fn a_train_named_without_a_number_takes_the_next_one() {
 }
 
 /// An empty board moves too, and the move is one-way: a second run fails
-/// rather than doubling anything. It is the last migration, and an older build
-/// is refused the file.
+/// rather than doubling anything. Its registration stays at schema version 58,
+/// even as later migrations arrive, and an older build is refused the file.
 #[test]
 fn an_empty_board_moves_and_the_move_runs_once() {
     let store = Store::open_in_memory().unwrap();
@@ -328,8 +328,10 @@ fn an_empty_board_moves_and_the_move_runs_once() {
     let tx = conn.unchecked_transaction().unwrap();
     assert!((LINE_MIGRATION.0)(&tx).is_err(), "the tables it made are there");
     assert_eq!(LINE_MIGRATION.1, Older::Refused);
-    let last = crate::migrate::MIGRATIONS.last().unwrap();
-    assert!(std::ptr::fn_addr_eq(last.0, LINE_MIGRATION.0), "registered, last");
+    let registered = crate::migrate::MIGRATIONS[57];
+    assert!(std::ptr::fn_addr_eq(registered.0, LINE_MIGRATION.0), "registered at version 58");
+    assert_eq!(registered.1, Older::Refused);
+    assert!(crate::compat::COMPATIBLE_DOWN_TO >= 58, "no downgrade across the line migration");
 }
 
 /// A lane with no `lane_tasks` row is named after its card: `ov-10` exactly,
