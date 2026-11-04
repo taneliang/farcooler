@@ -93,6 +93,32 @@ def slug(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower().replace(".", "-")).strip("-")
 
 
+def without_parenthetical_annotations(label):
+    """Remove balanced parenthetical annotations, including nested ones."""
+    result = []
+    depth = 0
+    for char in label:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                raise Unreadable(f"unbalanced parentheses in model label {label!r}")
+        elif depth == 0:
+            result.append(char)
+    if depth:
+        raise Unreadable(f"unbalanced parentheses in model label {label!r}")
+    return "".join(result).strip()
+
+
+def model_id(label):
+    """Map an official Claude display name to its canonical price-table ID."""
+    name = without_parenthetical_annotations(label)
+    if not re.fullmatch(r"Claude (?:Fable|Mythos|Opus|Sonnet|Haiku) \d+(?:\.\d+)?", name):
+        raise Unreadable(f"{label!r} is not a recognized Claude model name")
+    return slug(name)
+
+
 def parse_models(page):
     """{id: (input, write_5m, write_1h, read, output)} from "Model pricing"."""
     rows = table_after(page, r"^## Model pricing")
@@ -112,9 +138,7 @@ def parse_models(page):
             continue  # the cheaper tier; see the module docstring
         if tier and tier.group(1).strip() != OVER_TIER:
             raise Unreadable(f"a pricing tier this script does not know: {label!r}")
-        model = slug(re.sub(r"\(.*?\)", "", label))
-        if not model.startswith("claude-"):
-            raise Unreadable(f"{label!r} is not a Claude model name")
+        model = model_id(label)
         if model in out:
             raise Unreadable(f"{model} listed twice")
         out[model] = tuple(money(cells[c]) for c in cols)
@@ -129,7 +153,7 @@ def parse_fast(page, models):
     ids, bad = [], []
     for cells in rows[1:]:
         for name in cells[0].split(" / "):
-            model = slug(name)
+            model = model_id(name)
             if model not in models:
                 raise Unreadable(f"fast mode lists {name!r}, which is not in the model table")
             ids.append(model)
@@ -198,12 +222,25 @@ def write(models, fast_ids, src):
 
 
 def self_test():
+    official = parse_models((ROOT / "crates/core/fixtures/claude-pricing.md").read_text(encoding="utf-8"))
+    assert official["claude-opus-4-1"] == (15.0, 18.75, 30.0, 1.5, 75.0)
+    assert official["claude-sonnet-4"] == (3.0, 3.75, 6.0, 0.3, 15.0)
+    assert "claude-opus-4-1-and-bedrock" not in official
+    assert "claude-sonnet-4-and-bedrock" not in official
+    try:
+        parse_models((ROOT / "crates/core/fixtures/claude-pricing.md").read_text(encoding="utf-8")
+                     .replace("Claude Opus 4.1 (", "Claude Widget 4.1 (", 1))
+    except Unreadable:
+        pass
+    else:
+        raise AssertionError("an unrelated model label must not be accepted")
+
     page = """## Model pricing
 
 | Model | Base input tokens | 5m cache writes | 1h cache writes | Cache hits and refreshes | Output tokens |
 | :-- | :-- | :-- | :-- | :-- | :-- |
 """ + "".join(
-        f"| Claude Model {i} | $1 / MTok | $1.25 / MTok | $2 / MTok | $0.10 / MTok<sup>1</sup> | $5 / MTok |\n"
+        f"| Claude Opus {i + 1} | $1 / MTok | $1.25 / MTok | $2 / MTok | $0.10 / MTok<sup>1</sup> | $5 / MTok |\n"
         for i in range(MIN_MODELS)) + """| Claude Haiku 5.5 (for prompts up to 100,000 tokens) | $0.10 / MTok | $0.125 / MTok | $0.20 / MTok | $0.01 / MTok | $0.50 / MTok |
 | Claude Haiku 5.5 (for prompts over 100,000 tokens) | $0.50 / MTok | $0.625 / MTok | $1 / MTok | $0.05 / MTok | $2.50 / MTok |
 | Claude Mythos 5.1 ([limited availability](https://x.test)) | $10 / MTok | $12.50 / MTok | $20 / MTok | $0.25 / MTok | $50 / MTok |
@@ -212,13 +249,13 @@ def self_test():
 
 | Model | Input | Output |
 | --- | --- | --- |
-| Claude Model 1 / Claude Model 2 | $2 / MTok | $10 / MTok |
+| Claude Opus 1 / Claude Opus 2 | $2 / MTok | $10 / MTok |
 """
     models = parse_models(page)
     assert models["claude-haiku-5-5"] == (0.5, 0.625, 1.0, 0.05, 2.5), models["claude-haiku-5-5"]
-    assert models["claude-mythos-5-1"][0] == 10.0 and models["claude-model-3"][3] == 0.1
+    assert models["claude-mythos-5-1"][0] == 10.0 and models["claude-opus-3"][3] == 0.1
     ids, bad = parse_fast(page, models)
-    assert ids == ["claude-model-1", "claude-model-2"] and not bad, (ids, bad)
+    assert ids == ["claude-opus-1", "claude-opus-2"] and not bad, (ids, bad)
     src = (f'pub const PRICE_TABLE: &str = "2000-01-01";\n{render_table({"claude-old": (1.0, 1.25, 2.0, 0.1, 5.0)})}\n'
            f"{render_fast(['claude-old'])}\n")
     assert check(models, ids, src), "drift must be reported"
