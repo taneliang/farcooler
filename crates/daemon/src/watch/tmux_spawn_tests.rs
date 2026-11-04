@@ -44,6 +44,10 @@ async fn a_sample_waits_for_cleanup_exclusion_before_reading_inventory() {
     let watcher = Watcher::new(svc.clone());
     let main = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
     let terminal = svc.create_terminal(main.id, "shell", "shell").await.unwrap();
+    // First sighting announces the pane through `fleet`, which legitimately
+    // reads inventory again. Measure an already observed pane, as the idle
+    // scan budget requires, while keeping the exclusion assertion exact.
+    watcher.sample().await;
     let gate = watcher.check_in_cleanup_gate.lock().await;
     let before = svc.tmux.call_counts();
     let sample = watcher.sample();
