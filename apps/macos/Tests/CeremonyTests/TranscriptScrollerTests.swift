@@ -466,7 +466,8 @@ extension NativeSelectionTests {
         /// A fixed pause measured a layout the machine hadn't reached when
         /// it was loaded (a gate beside other builds), and the knob read
         /// then was a stack's half-built estimate, not the session (ov-842).
-        static func laidOut(_ scroll: NSScrollView, _ window: NSWindow, held: Int = 3, done: Bool = false) async {
+        @discardableResult
+        static func laidOut(_ scroll: NSScrollView, _ window: NSWindow, held: Int = 3, done: Bool = false) async -> Bool {
             var last: (CGFloat, CGFloat)?
             var same = 0
             for _ in 0..<500 where same < held || (done && TranscriptScroller.driving(scroll).map { $0.ticking || $0.restorePending } == true) {
@@ -475,6 +476,7 @@ extension NativeSelectionTests {
                 same = last.map { $0 == now } == true ? same + 1 : 0
                 last = now
             }
+            return same >= held && !(done && TranscriptScroller.driving(scroll).map { $0.ticking || $0.restorePending } == true)
         }
 
         /// Resized narrower and back a step at a time, as a window's edge
@@ -500,13 +502,20 @@ extension NativeSelectionTests {
             // still: where the reader is and the knob are read from a settled
             // stack, not a half-built one (ov-842).
             await Self.laidOut(scroll, window, held: 10, done: true)
-            let top = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
+            let initialTop = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll))
+            let top = initialTop.id
+            let initialShare: CGFloat? = {
+                guard let start = layout.origin(for: .init(id: top, share: 0), in: scroll),
+                      let end = layout.origin(for: .init(id: top, share: 1), in: scroll), end > start else { return nil }
+                return initialTop.into / (end - start)
+            }()
             let start = scroller.doubleValue
             var worst = 0.0
             // For a failure's message: how far the clip, the content and our
             // place for the reader had moved since the start, at the first
             // step and at the worst, so it says whether the clip moved.
-            let from = (y: scroll.contentView.bounds.minY, doc: scroll.documentView?.frame.height ?? 0, place: layout.knob(scroll)?.place ?? 0)
+            let initialKnob = layout.knob(scroll)
+            let from = (y: scroll.contentView.bounds.minY, doc: scroll.documentView?.frame.height ?? 0, place: initialKnob?.place ?? 0)
             func note(_ step: String) -> String {
                 let knob = layout.knob(scroll)
                 return String(
@@ -531,17 +540,26 @@ extension NativeSelectionTests {
             }
             // The knob holds while the width changes, then goes where the
             // reader is: still within 2% of where it started.
-            await Self.laidOut(scroll, window, held: 25, done: true)
+            let finalPollCompleted = await Self.laidOut(scroll, window, held: 25, done: true)
             if abs(scroller.doubleValue - start) > worst {
                 worst = abs(scroller.doubleValue - start)
                 worstAt = note("the most at the end")
             }
-            #expect(abs((TranscriptScroller.driving(scroll)?.layout?.knob(scroll)?.value ?? 0) - scroller.doubleValue) < 0.001, "the knob was left held")
+            let finalKnob = TranscriptScroller.driving(scroll)?.layout?.knob(scroll)
+            #expect(abs((finalKnob?.value ?? 0) - scroller.doubleValue) < 0.001, "the knob was left held")
+            // Reuse the original top lookup; direct frame-origin lookups do
+            // not walk rows or ask the layout engine to recompute.
+            let finalTop = TranscriptScroller.driving(scroll)?.layout?.top(scroll)
+            let finalShare: CGFloat? = finalTop.flatMap { top in
+                guard let start = layout.origin(for: .init(id: top.id, share: 0), in: scroll),
+                      let end = layout.origin(for: .init(id: top.id, share: 1), in: scroll), end > start else { return nil }
+                return top.into / (end - start)
+            }
             #expect(
                 worst <= 0.02,
-                "the knob moved \(String(format: "%.1f", worst * 100))% of its track from \(String(format: "%.4f", start)); \(first); \(worstAt)")
+                "the knob moved \(String(format: "%.1f", worst * 100))% of its track from \(String(format: "%.4f", start)); \(first); \(worstAt); initial top \(top), share \(String(describing: initialShare)), ledger place \(String(describing: initialKnob?.place)), range \(String(describing: initialKnob?.range)); final top \(String(describing: finalTop?.id)), share \(String(describing: finalShare)); ledger place \(String(describing: finalKnob?.place)), range \(String(describing: finalKnob?.range)); final poll completed \(finalPollCompleted)")
             let rows = TranscriptScroller.driving(scroll)?.layout.map { layout in Set(layout.items.map(\.id)) } ?? []
-            let now = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
+            let now = try #require(finalTop?.id)
             #expect(now == top, "the reader went from \(top) to \(now)")
             #expect(rows.contains(now))
             // Its size, with the rows laid out wide scaled to the narrow
