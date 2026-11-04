@@ -813,16 +813,20 @@ final class TranscriptScroller: NSObject {
         }
     }
 
-    /// The width has held: the knob goes where the reader is. If the stack
-    /// let go of the reader's row meanwhile (it can, with the main thread
-    /// busy), they are put back on it, as far down it as they were. Not in
-    /// a gesture of the reader's own, and not at an end, where the stack's
-    /// own anchor keeps them.
+    /// The width has held: put the reader back at the saved point in their
+    /// row. A built row supplies its direct origin; if the stack let it go,
+    /// aim through our heights until it is built again. Not in the reader's
+    /// own gesture, or at an end, where the stack's anchor keeps them.
     private func widthHeld() {
         let from = resizedFrom
         resizedFrom = nil
-        guard aimed == nil, let from, let scroll, let layout, !LiveScroll.scrolls(scroll), !layout.has(from.id),
-              let value = layout.value(for: from, in: scroll)
+        guard aimed == nil, let from, let scroll, let layout, !LiveScroll.scrolls(scroll)
+        else { return apply(confirmed: true) }
+        if let y = layout.origin(for: from, in: scroll) {
+            move(to: y, scroll)
+            return apply(confirmed: true)
+        }
+        guard !layout.has(from.id), let value = layout.value(for: from, in: scroll)
         else { return apply(confirmed: true) }
         aim(value, scroll)
     }
