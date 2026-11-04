@@ -361,7 +361,7 @@ final class PadWorkspaceUITests: XCTestCase {
         let ticket = element(app, "plan-ticket-ov-274")
         XCTAssertTrue(app.reveal(ticket), "no Next Up ticket in the board's plan")
         ticket.tap()
-        canvasTitle(app, is: "Phones: Plan view on iOS and Android", "a ticket picked in the board's plan")
+        canvasTitle(app, is: "Plan view on iOS and Android", "a ticket picked in the board's plan")
         XCTAssertTrue(app.navigationBars["Billing"].exists, "the ticket was pushed over the columns")
     }
 
