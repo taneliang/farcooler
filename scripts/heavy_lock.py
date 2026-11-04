@@ -660,11 +660,18 @@ def _self_test():
                 (bindir / tool).write_text('#!/bin/sh\necho "debug=${CARGO_PROFILE_DEV_DEBUG:-none}"\n')
                 (bindir / tool).chmod(0o755)
             e3 = {**env, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+            # These are caller-controlled Cargo profiles in production. Keep
+            # inherited values out of the fake wrapper fixtures so the main
+            # checkout and Swift cases continue to exercise their defaults.
+            for key in ("CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG", "CARGO_INCREMENTAL"):
+                e3.pop(key, None)
             def via_heavy(wt, *cmd, extra=(), more=None):
                 return subprocess.run([heavy, *extra, "--", *cmd], cwd=wt, env={**e3, **(more or {})}, capture_output=True, text=True, timeout=20).stdout.strip()
             expect("scripts/heavy gives a lane's cargo the lean build", via_heavy(lane_wt, "cargo", "build"), "debug=0")
             expect("... not the main checkout's", via_heavy(main_wt, "cargo", "build"), "debug=none")
             expect("... not a swift build", via_heavy(lane_wt, "swift", "test"), "debug=none")
+            expect("scripts/heavy preserves an explicit cargo profile override", via_heavy(lane_wt, "cargo", "build", more={"CARGO_PROFILE_DEV_DEBUG": "1"}), "debug=1")
+            expect("scripts/heavy preserves a profile override for non-cargo commands", via_heavy(lane_wt, "swift", "test", more={"CARGO_PROFILE_DEV_DEBUG": "1"}), "debug=1")
 
             # The ceiling: over it, incremental caches go first, then the whole target/. The wrapper enforces it before the command runs.
             tgt = lane_wt / "target"
