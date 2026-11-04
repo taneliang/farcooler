@@ -331,7 +331,7 @@ fn an_empty_board_moves_and_the_move_runs_once() {
     let registered = crate::migrate::MIGRATIONS[57];
     assert!(std::ptr::fn_addr_eq(registered.0, LINE_MIGRATION.0), "registered at version 58");
     assert_eq!(registered.1, Older::Refused);
-    assert!(crate::compat::COMPATIBLE_DOWN_TO >= 58, "no downgrade across the line migration");
+    const { assert!(crate::compat::COMPATIBLE_DOWN_TO >= 58, "no downgrade across the line migration") };
 }
 
 /// A lane with no `lane_tasks` row is named after its card: `ov-10` exactly,
