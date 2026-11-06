@@ -1,5 +1,7 @@
 # ov-925 source handoff
 
+Update after independent review P1: current signed source is `fd8284f3bf74e605364eca6b2125ce53af6b971d`. See [admission-fix.md](admission-fix.md) and [admission-provenance.json](admission-provenance.json) for the queued-authority correction, exact-source red/green/socket/lint/CLI evidence and pending same-reviewer addendum. The source/evidence identities below describe the preserved predecessor, not final security approval.
+
 Base: reviewed runtime `4163081e9`. Implementation begins at signed `8ffc913eb`; final source/evidence pins recorded below and in `provenance.json`.
 
 Implemented: additive protobuf tag640 and `workflow_commands` capability; canonical Swift/Kotlin capability generation; shared closed command parser and actual CLI producer. Methods are workspace.set_workflow and workflow.enqueue/get/approve/review/cancel. Existing Request target is the workspace; outer schema1, mandatory stable command identity/revision/epoch/sequence for mutations. Review supplies exact observed evidence and accept/rework choice. Server derives owner versus workspace orchestrator from existing authenticated peer/person/process/terminal records. No client principal/Grant/Observe/Resolve or operation-result authority. Existing rep and member gates still apply; this bounded fixture entry currently admits owner and owner-login workspace orchestrator, not arbitrary member controllers.

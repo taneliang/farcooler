@@ -1,0 +1,12 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 11.08s
+     Running tests/workflow_commands_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_commands_over_socket-6707024ab150cfc6)
+
+running 2 tests
+test workflow_socket_publication_approve_cancel_and_reconnect_receipts ... ok
+test workflow_socket_scope_unknown_caller_disabled_runtime_and_forged_authority_refuse ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+
+exit=0, stopped=None

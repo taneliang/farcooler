@@ -1,0 +1,38 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/scripts/heavy",
+    "--load-limit",
+    "20",
+    "--",
+    "/Users/e-liang/.cargo/bin/cargo",
+    "test",
+    "--offline",
+    "-p",
+    "farcooler-daemon",
+    "--lib",
+    "workflow_held_queue",
+    "--",
+    "--nocapture"
+  ],
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "profile": "debug0/test0/incremental0/jobs6/offline",
+  "exit": 101,
+  "stopped": null,
+  "seconds": 40.278861541999994,
+  "minimum_free": 42494914560,
+  "head": "a86aace42c48939c7830662198cd188851edf71a",
+  "before": {
+    "crates/daemon/src/rpc.rs": "63c3f0136ec9270e0d294911de651863015943e9c35a4d86d3812f29b7082778",
+    "crates/daemon/src/workflow_runtime.rs": "a19074725a608381c55578f83ee2393034d448df99cee8e2c635d916869193af",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "fe508071e5b773d1a14bb4e735312c0a557cbce08739509b11c00d5f91a0d69f",
+    "crates/daemon/src/workflow_runtime/admission_tests.rs": "ab6768794a0022d5c55942c21c6064d2461eb3ae194f394d1114f394c9f9b33c"
+  },
+  "after": {
+    "crates/daemon/src/rpc.rs": "63c3f0136ec9270e0d294911de651863015943e9c35a4d86d3812f29b7082778",
+    "crates/daemon/src/workflow_runtime.rs": "a19074725a608381c55578f83ee2393034d448df99cee8e2c635d916869193af",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "fe508071e5b773d1a14bb4e735312c0a557cbce08739509b11c00d5f91a0d69f",
+    "crates/daemon/src/workflow_runtime/admission_tests.rs": "ab6768794a0022d5c55942c21c6064d2461eb3ae194f394d1114f394c9f9b33c"
+  },
+  "source_unchanged": true
+}

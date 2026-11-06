@@ -1,0 +1,42 @@
+  waiting for the machine-wide heavy-job lock (/Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_held_queue -- --nocapture); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-workflow-renderers, PID 76216, started 2026-11-06 23:26:49, running /usr/bin/python3 reports/ov-926/run-checks.py kotlin-view (1 in line ahead of you)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-admission-fix/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 33.07s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 2 tests
+
+thread 'workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes' (822153627) panicked at crates/daemon/src/workflow_runtime/admission_tests.rs:46:5:
+changed authority committed: Response { request_id: b"\x01\xa1\xb1x\xe6hvS\xa0\xc0\xb9\x93\x0eZ\x95[", outcome: Some(Result(Result { value: Some(WorkflowReply(WorkflowReply { schema: 1, json: "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:p\",\"result\":{\"Ok\":0}},\"schema\":1}" })) })) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes' (822153629) panicked at crates/daemon/src/workflow_runtime/admission_tests.rs:46:5:
+changed authority committed: Response { request_id: b"\x01\xa1\xb1x\xe6\x9c\x7fS\x9e-\xf0\xdb\xe5\xb6_\xd4", outcome: Some(Result(Result { value: Some(WorkflowReply(WorkflowReply { schema: 1, json: "{\"receipt\":{\"effects\":[\"wf1:87f06af5c618ed6f25df13e73ff579ab8feaba7052e7f496bd2c27fdb3787961\"],\"id\":\"wire:orchestrator:e\",\"result\":{\"Ok\":1}},\"schema\":1}" })) })) }
+test workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes ... FAILED
+test workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes
+    workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 2679 filtered out; finished in 0.49s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None
