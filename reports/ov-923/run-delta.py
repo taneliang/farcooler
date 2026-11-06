@@ -12,6 +12,8 @@ root = Path(__file__).resolve().parents[2]
 env = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Users/e-liang/.cargo/bin',
            CARGO_TARGET_DIR=str(root.parent / 'ov-923-workflow-runtime/target'), CARGO_BUILD_JOBS='6', CARGO_PROFILE_DEV_DEBUG='0', CARGO_PROFILE_TEST_DEBUG='0', CARGO_INCREMENTAL='0')
 mode = sys.argv[1] if len(sys.argv) > 1 else 'focused'
+publication = mode == 'publication'
+if publication: mode = 'focused'
 validate = mode == 'validate'
 if validate: mode = 'focused'
 fixture_root = Path('/private/tmp') / f'ov-923-runtime-{uuid.uuid4()}'
@@ -24,6 +26,9 @@ command = [str(root / 'scripts/heavy'), '--load-limit', '20', '--', '/Users/e-li
 if validate:
     mode = 'validation'
     command = [str(root / 'scripts/heavy'), '--load-limit', '20', '--', '/usr/bin/python3', str(root / 'reports/ov-923/check-delta.py')]
+if publication:
+    mode = 'publication-validation'
+    command = [str(root / 'scripts/heavy'), '--load-limit', '20', '--', '/usr/bin/python3', str(root / 'reports/ov-923/check-publication.py')]
 minimum = None
 start = time.monotonic()
 with open(root / f'reports/ov-923/delta-{mode}.log', 'a') as log:

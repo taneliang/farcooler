@@ -1,0 +1,28 @@
+{
+  "source_pin": "096931d48b739004884702390445cbeb4d5d7db9",
+  "base": "f98cdcd85",
+  "source_base": "f52442374",
+  "core_store_base": "bd87202f0",
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "target_authorization": "task manager decision 3871ae56",
+  "python": "/usr/bin/python3",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "jobs": 6,
+  "dev_debug": 0,
+  "test_debug": 0,
+  "incremental": 0,
+  "offline": true,
+  "fifo": "normal scripts/heavy; CI and HEAVY_LOCK_HELD absent",
+  "load5_limit": 20,
+  "reserve_bytes": 10737418240,
+  "deadline_seconds": 1800,
+  "minimum_free_bytes": 20447875072,
+  "notes": [
+    "Publication-only same-reviewer follow-up; original three findings closed.",
+    "publication-validation wrapper exit0 cancelledFalse; runtime17/clippy0; mutation101/restored0.",
+    "Store unchanged; previous store13 and original mutation evidence credited without repeat.",
+    "Source changed only runtime/adapters/tests; signed pin and exact hashes saved."
+  ],
+  "correction_base": "6d72a898b490e7d9bbadd34b0acd602ff61f9f65"
+}

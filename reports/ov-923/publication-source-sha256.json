@@ -1,0 +1,6 @@
+{
+  "crates/daemon/src/workflow_runtime.rs": "21e74f25cb95d5a9b40950dc33f00459e404bca3f32adab871fccce68cf7880b",
+  "crates/daemon/src/workflow_runtime/adapters.rs": "4b9fbfcd7052d6f3bbba8e05d2f3da08e792fdd857882744ab1be1dc5729788b",
+  "crates/daemon/src/workflow_runtime/tests.rs": "32346209ef2db33da95f84b24d5bfa1d7caceaf198a7e56eea93809cb622c670",
+  "crates/store/src/workflow.rs": "81e453c335d05104ad37ed8945983ee32a43d1cda65cd13f7d2f261704b1f12f"
+}

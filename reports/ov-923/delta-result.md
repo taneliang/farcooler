@@ -66,3 +66,36 @@ final runtime and lint were repeated, without repeating unchanged store/mutation
 Whitespace/file-size checks pass. Exact hashes/toolchain/minimum disk reserve and
 signature verification are retained in delta-source-sha256.json,
 delta-provenance.json and delta-signature.log. Independent delta verdict pending.
+
+## Same-reviewer publication correction
+
+The first delta audit closed the original three findings and identified one P2
+ordinary-crash boundary: the old durable writer could leave an empty/truncated
+final base file before admission. Existence alone then admitted that effect before
+JSON validation. That audit is authoritative; 74e8ccc is superseded for closure.
+
+The narrow follow-up writes/fsyncs a unique private temporary file, atomically
+renames it to the selected base, validates the selected bytes, and fsyncs the file
+and containing directory before admission. Runtime uses that returned validated
+base to construct the admitted binding. Existing valid pins are reused, not
+resampled. Old incomplete final pins are repaired only if the sole item outbox
+entry is this exact original Provision in claimed state; Store cannot transition
+admitted back to claimed and never erases outbox history. Any other corrupt
+historical/admitted pin is refused without repair or execution. Abandoned
+publication temporaries are ignored and preserved.
+
+New regressions create empty/truncated pre-admission final files and abandoned
+temporaries, recover/reopen the second coding item, and prove it lands using the
+first item's candidate as base. Another regression deliberately corrupts an
+admitted legacy pin and verifies refusal without resampling or external execution.
+These are deterministic crash-boundary fixtures, not a hardware power-loss proof.
+The initial follow-up runtime suite passes 17 tests; publication-* logs record the
+new negative control, restored/final runtime checks and lint. Unchanged store and
+previous three negative-control evidence remain credited, not repeated.
+
+Publication correction source: `096931d48b739004884702390445cbeb4d5d7db9`. Final publication-validation wrapper
+exit0/cancelledFalse; publication-mutation exit101, restored exit0, final runtime
+17 passed and daemon/store all-target clippy -D warnings exit0. Minimum free bytes
+20,447,875,072. Exact final hashes/provenance and Good signature (unknown trust)
+are saved under publication-source-sha256.json, publication-provenance.json and
+publication-signature.log. Same-reviewer publication-only closure pending.

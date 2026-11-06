@@ -1,0 +1,30 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+warning: unused variable: `selected`
+  --> crates/daemon/src/workflow_runtime/adapters.rs:82:13
+   |
+82 |         let selected = if exists { self.item_base(workspace, effect) } else {
+   |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_selected`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-daemon` (lib test) generated 1 warning (run `cargo fix --lib -p farcooler-daemon --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 23.24s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission' (821616238) panicked at crates/daemon/src/workflow_runtime/tests.rs:504:33:
+called `Result::unwrap()` on an `Err` value: Encoding(Error("EOF while parsing a value", line: 1, column: 0))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2674 filtered out; finished in 0.68s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

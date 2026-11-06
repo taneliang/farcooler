@@ -120,3 +120,17 @@ Touched source paths: workflow_runtime.rs (inbox/run/lease wake),
 workflow_runtime/adapters.rs (durable base propagation), workflow_runtime/tests.rs
 (focused regressions), and store/src/workflow.rs (read-only lease_until exposure).
 No other source files or production callers change in this correction package.
+
+### Atomic base publication correction
+
+The initial correction pin's direct final-file publication is superseded by the
+publication follow-up described in delta-result.md. A selected pin is written and
+fsynced at a unique private temporary name, atomically renamed, validated and
+file/directory-fsynced before admission; the validated base is passed directly to
+Binding construction. Existing valid pins are preserved. An old incomplete final
+pin can be replaced only when durable outbox history proves this exact original
+Provision is the item's sole effect and is still claimed (never admitted).
+Historical/admitted malformed pins are refused, never resampled. Orphan temporary
+files are ignored, not interpreted as selected pins or receipts.
+
+Final publication source pin: `096931d48b739004884702390445cbeb4d5d7db9`.

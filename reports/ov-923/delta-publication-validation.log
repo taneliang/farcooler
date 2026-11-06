@@ -1,0 +1,8 @@
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/reports/ov-923/check-publication.py']
+publication-mutation: exit=101, expected=101
+publication-restored: exit=0, expected=0
+publication-focused: exit=0, expected=0
+publication-clippy: exit=0, expected=0
+
+wrapper_exit=0 cancelled=False minimum_free_bytes=20447875072
