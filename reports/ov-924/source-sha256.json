@@ -1,0 +1,21 @@
+{
+  "base": "4163081e91353481ae00e80ff7bd3cbab0924915",
+  "source_pin": "18c724ab04d002367b331ed8418a73504fbdfd56",
+  "sha256": {
+    "Cargo.lock": "fff88bbe8614b2a70576a84b2ff13c7d7ccffd9a6cf2debb61d5dd8c24b43c4d",
+    "crates/android/src/lib.rs": "cf51c20e624917119511c537afce2549e0958050406da4a1a1bedd2b5bf6801c",
+    "crates/android/src/workflow.rs": "9d23e58ae8d1394fbc56a8f18fc946b4057ba34b165709358fbd2e045b78e230",
+    "crates/client/Cargo.toml": "c2d2d7ed234ec4f523750dfaf5a9317f306f884744c0f8655843813c2fd7ba6b",
+    "crates/client/include/farcooler_client.h": "2100523e739cee59120b9ec5f5d83a94ea58d61b8883bf1558075ecb9a239677",
+    "crates/client/src/ffi.rs": "0ad409aa873667f05a95efcfb8ce83f66c8a6febfd375dd9128fba45ccd9cf8c",
+    "crates/client/src/lib.rs": "2baf842826c59e18c687847b98527c7aa3870eef72ce7bc5f9ce02794f46e83d",
+    "crates/client/src/testdata/workflow-presentation.json": "29e823bc0186422b4a4d6ec447017c0fede3ca872031eab319a6de02ab82056f",
+    "crates/client/src/workflow_presentation.rs": "ecf30e0f7f5f741b5137ade4989df008fa6af1864ab0693ea636daae001811fd",
+    "crates/client/src/workflow_presentation/ffi.rs": "99d8c42aabd01ba9271f9caf76d2c47ad99f0257f47561c5a25b1a12327291de",
+    "crates/client/src/workflow_presentation/tests.rs": "cc6d1100c26a2871a051e92ccb810d1af6915ac76edc41a1c7506f3821eb89d1",
+    "crates/web/Cargo.lock": "2b0bcbbcaa0fbfb8302ee1f8f73885c1bb4804b2681f1cd6e09c4428fd98ea6b",
+    "crates/web/src/lib.rs": "d095f73ac990813474af58c397240495ba44b0e96d071686dd0a4d0b37637d7c",
+    "crates/web/src/workflow.rs": "6b9eb94326e119b36e75902fbc31c510018ef54a6aee5e8bf982bca4a3d1d44f",
+    "crates/web/tests/workflow_presentation.rs": "f0db560a55d3528e59ba8f7f6cf7bfbca1757c0d747495c3421cc93815cd9ef1"
+  }
+}

@@ -1,0 +1,212 @@
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'check', '--offline', '--manifest-path', 'crates/web/Cargo.toml', '--target', 'wasm32-unknown-unknown']
+   Compiling wasm-bindgen-shared v0.2.129
+    Checking cfg-if v1.0.5
+    Checking once_cell v1.21.4
+   Compiling bumpalo v3.20.3
+   Compiling wasm-bindgen v0.2.129
+    Checking unicode-ident v1.0.27
+    Checking typenum v1.20.1
+    Checking subtle v2.6.1
+    Checking zeroize v1.9.1
+    Checking cmov v0.5.4
+    Checking rand_core v0.10.1
+   Compiling getrandom v0.4.3
+    Checking const-oid v0.10.2
+    Checking ctutils v0.4.6
+    Checking cpubits v0.1.1
+   Compiling num-traits v0.2.19
+    Checking base64ct v1.8.3
+    Checking hybrid-array v0.4.15
+    Checking pem-rfc7468 v1.0.0
+    Checking memchr v2.8.3
+    Checking der v0.8.3
+    Checking pin-project-lite v0.2.17
+   Compiling wasm-bindgen-macro-support v0.2.129
+    Checking block-buffer v0.12.1
+    Checking block-padding v0.4.2
+    Checking inout v0.2.5
+   Compiling serde_core v1.0.229
+    Checking bytes v1.12.1
+    Checking spki v0.8.1
+    Checking futures-sink v0.3.34
+    Checking futures-core v0.3.34
+    Checking ff v0.14.0
+    Checking futures-channel v0.3.34
+    Checking futures-task v0.3.34
+    Checking slab v0.4.12
+    Checking futures-io v0.3.34
+    Checking group v0.14.0
+    Checking base16ct v1.0.0
+   Compiling serde v1.0.229
+    Checking futures-util v0.3.34
+    Checking sec1 v0.8.1
+    Checking zerofrom v0.1.8
+   Compiling generic-array v0.14.7
+    Checking stable_deref_trait v1.2.1
+    Checking yoke v0.8.3
+   Compiling curve25519-dalek v5.0.0
+   Compiling zmij v1.0.23
+   Compiling thiserror v2.0.21
+    Checking zerovec v0.11.8
+   Compiling serde_json v1.0.154
+    Checking tinystr v0.8.4
+    Checking prost v0.13.5
+    Checking equivalent v1.0.3
+    Checking writeable v0.6.4
+    Checking litemap v0.8.3
+    Checking hashbrown v0.17.1
+    Checking byteorder v1.5.0
+    Checking itoa v1.0.18
+    Checking icu_locale_core v2.1.1
+   Compiling icu_normalizer_data v2.1.1
+    Checking prost-types v0.13.5
+    Checking indexmap v2.14.2
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking potential_utf v0.1.6
+    Checking zerotrie v0.2.5
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking keccak v0.2.2
+    Checking toml_write v0.1.2
+    Checking winnow v0.7.15
+    Checking sponge-cursor v0.1.0
+   Compiling wasm-bindgen-macro v0.2.129
+    Checking tokio v1.54.1
+    Checking icu_provider v2.1.1
+    Checking icu_collections v2.1.1
+    Checking crypto-common v0.1.7
+    Checking block-buffer v0.10.4
+    Checking num-integer v0.1.47
+    Checking tracing-core v0.1.36
+    Checking utf8_iter v1.0.4
+    Checking utf16_iter v1.0.5
+    Checking hex v0.4.3
+    Checking write16 v1.0.0
+    Checking smallvec v1.16.2
+    Checking tracing v0.1.44
+    Checking digest v0.10.7
+    Checking icu_normalizer v2.1.1
+   Compiling ring v0.17.14
+    Checking futures-executor v0.3.34
+    Checking toml_edit v0.22.27
+    Checking module-lattice v0.2.3
+    Checking log v0.4.34
+    Checking untrusted v0.9.0
+    Checking futures v0.3.34
+    Checking sha2 v0.10.9
+    Checking num-bigint v0.4.8
+    Checking generic-array v1.4.5
+    Checking hex-literal v1.1.0
+    Checking md5 v0.8.1
+    Checking bitflags v2.13.2
+    Checking data-encoding v2.11.1
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/workflow)
+    Checking toml v0.8.23
+    Checking js-sys v0.3.106
+    Checking uuid v1.26.1
+    Checking crypto-common v0.2.2
+    Checking crypto-bigint v0.7.9
+    Checking digest v0.11.3
+    Checking cipher v0.5.2
+    Checking universal-hash v0.6.1
+    Checking hmac v0.13.0
+    Checking aead v0.6.1
+    Checking polyval v0.7.3
+    Checking sha2 v0.11.0
+    Checking pbkdf2 v0.13.0
+    Checking ghash v0.6.0
+    Checking ctr v0.10.1
+    Checking aes v0.9.2
+    Checking salsa20 v0.11.0
+    Checking cbc v0.2.1
+    Checking aes-gcm v0.11.1
+    Checking hkdf v0.13.0
+    Checking scrypt v0.12.0
+    Checking signature v3.0.0
+    Checking chacha20 v0.10.2
+    Checking pkcs5 v0.8.1
+    Checking poly1305 v0.9.1
+    Checking ssh-encoding v0.3.0
+    Checking pkcs8 v0.11.0
+    Checking blowfish v0.10.0
+    Checking blake2 v0.11.0
+    Checking ed25519 v3.0.0
+    Checking bcrypt-pbkdf v0.11.0
+    Checking argon2 v0.6.0
+    Checking ssh-cipher v0.3.0
+    Checking ed25519-dalek v3.0.0
+    Checking rand v0.10.3
+    Checking sha1 v0.11.0
+    Checking x25519-dalek v3.0.0
+    Checking chacha20poly1305 v0.11.0
+    Checking sha3 v0.12.0
+    Checking elliptic-curve v0.14.1
+    Checking primefield v0.14.0
+    Checking rfc6979 v0.6.0
+    Checking shake v0.1.0
+    Checking wnaf v0.14.1
+    Checking kem v0.3.0
+    Checking internal-russh-num-bigint v0.5.0
+    Checking hpke v0.15.0
+    Checking ml-kem v0.3.3
+    Checking primeorder v0.14.0
+    Checking ecdsa v0.17.0
+    Checking russh-cryptovec v0.62.0
+    Checking p256 v0.14.0
+    Checking p384 v0.14.0
+    Checking p521 v0.14.0
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking wasm-bindgen-futures v0.4.79
+    Checking getrandom v0.2.17
+    Checking chrono v0.4.45
+    Checking web-sys v0.3.106
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking russh-util v0.52.0
+    Checking ssh-key v0.7.0-rc.11
+    Checking russh v0.62.7
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+warning: function `value_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:211:15
+    |
+211 | pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, SessionError> {
+    |               ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `key_state_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:222:15
+    |
+222 | pub(crate) fn key_state_json(s: &farcooler_protocol::v1::StepUpKeyState) -> serde_json::Value {
+    |               ^^^^^^^^^^^^^^
+
+warning: `farcooler-client` (lib) generated 2 warnings
+    Checking farcooler-web v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/web)
+    Finished `dev` profile [unoptimized] target(s) in 14.75s
+
+raw_exit=0 cancelled=False minimum_free_bytes=19005440000
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'check', '--offline', '--manifest-path', 'crates/web/Cargo.toml', '--target', 'wasm32-unknown-unknown']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+warning: function `value_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:211:15
+    |
+211 | pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, SessionError> {
+    |               ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `key_state_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:222:15
+    |
+222 | pub(crate) fn key_state_json(s: &farcooler_protocol::v1::StepUpKeyState) -> serde_json::Value {
+    |               ^^^^^^^^^^^^^^
+
+warning: `farcooler-client` (lib) generated 2 warnings
+    Checking farcooler-web v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/web)
+    Finished `dev` profile [unoptimized] target(s) in 4.17s
+
+raw_exit=0 cancelled=False minimum_free_bytes=18923520000

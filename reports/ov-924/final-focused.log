@@ -1,0 +1,15 @@
+command=['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_presentation', '--', '--nocapture']
+    Finished `test` profile [unoptimized] target(s) in 0.16s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_client-8363de3da7e65318)
+
+running 5 tests
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 260 filtered out; finished in 0.01s
+
+
+raw_exit=0 expected=0

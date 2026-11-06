@@ -1,0 +1,36 @@
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'clippy', '--offline', '-p', 'farcooler-client', '--lib', '--', '-D', 'warnings']
+    Checking serde_core v1.0.229
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking bitflags v2.13.1
+   Compiling rustix v1.1.4
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ffi-guard)
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/tailcat)
+    Checking nix v0.31.3
+    Checking russh-cryptovec v0.62.0
+    Checking russh v0.62.4
+    Checking serde v1.0.229
+    Checking uuid v1.24.0
+    Checking serde_json v1.0.151
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking toml_edit v0.22.27
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/workflow)
+    Checking toml v0.8.23
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Finished `dev` profile [unoptimized] target(s) in 6.12s
+
+raw_exit=0 cancelled=False minimum_free_bytes=18964480000
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'clippy', '--offline', '-p', 'farcooler-client', '--lib', '--', '-D', 'warnings']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Finished `dev` profile [unoptimized] target(s) in 4.85s
+
+raw_exit=0 cancelled=False minimum_free_bytes=18923520000

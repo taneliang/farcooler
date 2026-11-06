@@ -5,6 +5,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 mode = sys.argv[1]
 commands = {
+    'mutations': [],
     'golden': ['test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_presentation_golden', '--', '--nocapture'],
     'focused': ['test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_presentation', '--', '--nocapture'],
     'jni': ['check', '--offline', '-p', 'farcooler-jni'],
@@ -17,6 +18,8 @@ env = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Us
 if mode == 'golden': env['UPDATE_WORKFLOW_GOLDEN'] = '1'
 args = commands[mode]
 command = [str(root / 'scripts/heavy'), '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', *args]
+if mode == 'mutations':
+    command = [str(root / 'scripts/heavy'), '--load-limit', '20', '--', '/usr/bin/python3', str(root / 'reports/ov-924/mutations.py')]
 minimum = None
 started = time.monotonic()
 with open(root / f'reports/ov-924/{mode}.log', 'a') as log:

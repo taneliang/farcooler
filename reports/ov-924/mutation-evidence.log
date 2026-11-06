@@ -1,0 +1,23 @@
+command=['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_presentation_invalidated_inspection_and_rework', '--', '--nocapture']
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 4.86s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_client-8363de3da7e65318)
+
+running 1 test
+
+thread 'workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework' (821782374) panicked at crates/client/src/workflow_presentation/tests.rs:120:5:
+assertion failed: project(invalidated,
+                        &auth()).unwrap().runs[0].reasons.contains(&Reason::EvidenceInvalidated)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... FAILED
+
+failures:
+
+failures:
+    workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 264 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p farcooler-client --lib`
+
+raw_exit=101 expected=101

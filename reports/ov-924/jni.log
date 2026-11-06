@@ -1,0 +1,59 @@
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'check', '--offline', '-p', 'farcooler-jni']
+    Checking tracing-core v0.1.36
+   Compiling rustix v1.1.4
+    Checking smallvec v1.15.2
+    Checking log v0.4.33
+    Checking tinystr v0.8.3
+    Checking futures-core v0.3.33
+    Checking futures-channel v0.3.33
+    Checking tokio v1.53.1
+    Checking icu_locale_core v2.1.1
+    Checking farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking tracing v0.1.44
+    Checking zerotrie v0.2.4
+    Checking futures-util v0.3.33
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ffi-guard)
+    Checking parking_lot_core v0.9.12
+    Checking icu_provider v2.1.1
+   Compiling jni-sys-macros v0.4.1
+    Checking icu_normalizer v2.1.1
+   Compiling jni-sys v0.3.1
+   Compiling thiserror v1.0.69
+    Checking futures-executor v0.3.33
+    Checking vte v0.15.0
+    Checking futures v0.3.33
+    Checking jni-sys v0.4.1
+    Checking parking_lot v0.12.5
+    Checking russh-cryptovec v0.62.0
+   Compiling thiserror-impl v1.0.69
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/workflow)
+    Checking rustix-openpty v0.2.0
+    Checking polling v3.11.0
+    Checking alacritty_terminal v0.26.0
+    Checking russh-util v0.52.0
+    Checking russh v0.62.4
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/tailcat)
+    Checking combine v4.6.7
+    Checking cesu8 v1.1.0
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/fence)
+    Checking farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/vt)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking jni v0.21.1
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Checking farcooler-jni v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/android)
+    Finished `dev` profile [unoptimized] target(s) in 5.07s
+
+raw_exit=0 cancelled=False minimum_free_bytes=19742720000
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'check', '--offline', '-p', 'farcooler-jni']
+    Checking farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/fence)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Checking farcooler-jni v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/android)
+    Finished `dev` profile [unoptimized] target(s) in 3.80s
+
+raw_exit=0 cancelled=False minimum_free_bytes=18923520000
