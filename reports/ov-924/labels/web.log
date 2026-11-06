@@ -1,0 +1,32 @@
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--manifest-path', 'crates/web/Cargo.toml', '--test', 'workflow_presentation']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/transport)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+warning: function `value_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:211:15
+    |
+211 | pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, SessionError> {
+    |               ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `key_state_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client/src/session/step_up.rs:222:15
+    |
+222 | pub(crate) fn key_state_json(s: &farcooler_protocol::v1::StepUpKeyState) -> serde_json::Value {
+    |               ^^^^^^^^^^^^^^
+
+warning: `farcooler-client` (lib) generated 2 warnings
+   Compiling farcooler-web v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/web)
+    Finished `test` profile [unoptimized] target(s) in 6.96s
+     Running tests/workflow_presentation.rs (target/debug/deps/workflow_presentation-7ad3266e7ce46fa6)
+
+running 1 test
+test workflow_presentation_shared_golden_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+raw_exit=0 cancelled=False minimum_free_bytes=45465600000

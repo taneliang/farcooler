@@ -1,0 +1,12 @@
+command=['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_presentation_invalidated_inspection_and_rework', '--', '--nocapture']
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 4.95s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_client-8363de3da7e65318)
+
+running 1 test
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 265 filtered out; finished in 0.02s
+
+
+raw_exit=0 expected=0

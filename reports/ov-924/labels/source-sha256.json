@@ -1,0 +1,24 @@
+{
+  "base": "4163081e91353481ae00e80ff7bd3cbab0924915",
+  "source_pin": "791345ee80f7a28337ec49dfed514d176381760e",
+  "presentation_schema": 2,
+  "sha256": {
+    "Cargo.lock": "fff88bbe8614b2a70576a84b2ff13c7d7ccffd9a6cf2debb61d5dd8c24b43c4d",
+    "crates/android/src/lib.rs": "cf51c20e624917119511c537afce2549e0958050406da4a1a1bedd2b5bf6801c",
+    "crates/android/src/workflow.rs": "9d23e58ae8d1394fbc56a8f18fc946b4057ba34b165709358fbd2e045b78e230",
+    "crates/client/Cargo.toml": "c2d2d7ed234ec4f523750dfaf5a9317f306f884744c0f8655843813c2fd7ba6b",
+    "crates/client/include/farcooler_client.h": "58da7f9e4e76fcdc49dd43550b1d10ddba1dad1b27e293a3a24e530189fd3da9",
+    "crates/client/src/ffi.rs": "0ad409aa873667f05a95efcfb8ce83f66c8a6febfd375dd9128fba45ccd9cf8c",
+    "crates/client/src/lib.rs": "2baf842826c59e18c687847b98527c7aa3870eef72ce7bc5f9ce02794f46e83d",
+    "crates/client/src/testdata/workflow-presentation.json": "5a7220dda0f7dcf1f9a32b3b98dd87282f4ee1a7667220cc78209e18fe3ced35",
+    "crates/client/src/workflow_presentation.rs": "c6340060e45d35eb8d9baea779e8713b10dbc58b24c4a26d7c0d2d6b990cc6d2",
+    "crates/client/src/workflow_presentation/display.rs": "72af37907dbcf91da361f7c981c9a0d941db4c6053155d7d2b79fed7a31faeb9",
+    "crates/client/src/workflow_presentation/ffi.rs": "e47640bf6f9eb4f793d117b2885e67064d531a54cf27f8d5d98a35360522bc81",
+    "crates/client/src/workflow_presentation/tests.rs": "d61a10eb6172a99c3ea580650afaf02b5ceae7d31e14913a8eeb1539bc52ba1d",
+    "crates/web/Cargo.lock": "2b0bcbbcaa0fbfb8302ee1f8f73885c1bb4804b2681f1cd6e09c4428fd98ea6b",
+    "crates/web/src/lib.rs": "d095f73ac990813474af58c397240495ba44b0e96d071686dd0a4d0b37637d7c",
+    "crates/web/src/workflow.rs": "6b9eb94326e119b36e75902fbc31c510018ef54a6aee5e8bf982bca4a3d1d44f",
+    "crates/web/tests/workflow_presentation.rs": "f0db560a55d3528e59ba8f7f6cf7bfbca1757c0d747495c3421cc93815cd9ef1",
+    "reports/ov-924/contract.md": "bc1c0d186ccbd90c7d93ba2835e8a77203c19ca09ab8e13c865345f27fc44f2e"
+  }
+}

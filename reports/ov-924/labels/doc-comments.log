@@ -1,0 +1,2 @@
+command=['/usr/bin/python3', 'scripts/doc-comment-check.py', '--base', '4163081e91353481ae00e80ff7bd3cbab0924915', '--head', '791345ee80f7a28337ec49dfed514d176381760e']
+raw_exit=0

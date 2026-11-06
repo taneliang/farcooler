@@ -1,0 +1,10 @@
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-924-workflow-presentation/reports/ov-924/labels/mutations.py']
+mutation-display-copy 101 101
+restored-display-copy 0 0
+mutation-stale 101 101
+restored-stale 0 0
+mutation-evidence 101 101
+restored-evidence 0 0
+final-focused 0 0
+
+raw_exit=0 cancelled=False minimum_free_bytes=45056000000
