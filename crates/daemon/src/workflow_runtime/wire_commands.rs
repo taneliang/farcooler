@@ -4,9 +4,9 @@ use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_store::workflow_publication::Write;
 
 impl CommandHandle {
-    pub(crate) async fn wire_command(&self, workspace: String, principal: String, action: Action) -> Result<serde_json::Value> {
+    pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
-        self.send.send(Inbox::Wire(workspace, principal, Box::new(action), send)).await
+        self.send.send(Inbox::Wire(Box::new(admission), Box::new(action), send)).await
             .map_err(|_| Error::Refused("runtime inbox closed"))?;
         receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
     }

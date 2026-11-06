@@ -855,21 +855,12 @@ impl Rpc {
                 let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;
                 if action.method() != req.method { return Err(DomainError::NotFound); }
                 let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "isolated workflow fixture" })?;
-                let principal = match crate::caller_seat::caller_seat(svc, self.caller_pid).await {
-                    crate::caller_seat::Seat::Person => "owner",
-                    crate::caller_seat::Seat::Agent(Some(pane)) => {
-                        let term = svc.store.get_terminal(pane)?;
-                        if term.workspace_id != Some(workspace) || term.role != farcooler_store::models::TerminalRole::Orchestrator {
-                            return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" });
-                        }
-                        "orchestrator"
-                    }
-                    _ => return Err(DomainError::ScopeDenied { needed: "known caller" }),
-                };
-                if principal != "owner" && matches!(action, Action::Publish { .. }) {
-                    return Err(DomainError::ScopeDenied { needed: "person" });
-                }
-                let value = handle.wire_command(workspace.to_string(), principal.into(), action).await
+                let admission = crate::workflow_runtime::Admission::capture(
+                    svc.clone(), self.peer.clone(), self.session.clone(), self.caller_pid,
+                    self.caller_pane.clone(), workspace,
+                ).await?;
+                admission.permits(&action)?;
+                let value = handle.wire_command(admission, action).await
                     .map_err(|_| DomainError::NotFound)?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
             }
