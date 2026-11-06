@@ -1009,6 +1009,7 @@ dependencies = [
  "farcooler-tmux",
  "farcooler-transport",
  "farcooler-vt",
+ "farcooler-workflow",
  "landlock",
  "libc",
  "notify",

@@ -23,12 +23,20 @@ pub struct Receipt {
     pub result: std::result::Result<u64, Refusal>,
     pub effects: Vec<String>,
 }
+/// Stable delivery identity; reading or withholding this is never execution authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowNotice {
+    pub id: String,
+    pub revision: u64,
+    pub body: String,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredEffect {
     pub effect: Effect,
     /// True means referenced by current state, not necessarily eligible for dispatch.
     pub active: bool,
     pub dispatch_state: String,
+    pub resource_generation: Option<u64>,
 }
 
 impl Store {
@@ -163,6 +171,13 @@ impl Store {
         Ok(receipt)
     }
 
+    /// Recovery discovers persisted aggregates without a connected controller.
+    pub fn workflow_workspaces(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT workspace FROM workflow_states ORDER BY workspace")?;
+        Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn workflow_state(&self, workspace: &str) -> Result<Option<State>> {
         let raw: Option<String> = self.conn().query_row(
             "SELECT state FROM workflow_states WHERE workspace = ?1", [workspace], |r| r.get(0),
@@ -175,12 +190,27 @@ impl Store {
         let rows = stmt.query_map([workspace], |r| r.get::<_, String>(0))?;
         rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
     }
+    pub fn workflow_notices(&self, workspace: &str, after_revision: u64) -> Result<Vec<WorkflowNotice>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT revision, notices FROM workflow_events WHERE workspace = ?1 AND revision > ?2 ORDER BY revision"
+        )?;
+        let rows = stmt.query_map(params![workspace, after_revision], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut notices = Vec::new();
+        for row in rows {
+            let (revision, raw) = row?;
+            for (index, body) in serde_json::from_str::<Vec<String>>(&raw)?.into_iter().enumerate() {
+                notices.push(WorkflowNotice { id: digest(&("notice/v1", workspace, revision, index)), revision, body });
+            }
+        }
+        Ok(notices)
+    }
     pub fn workflow_outbox(&self, workspace: &str) -> Result<Vec<StoredEffect>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT payload, active, dispatch_state FROM workflow_outbox WHERE workspace = ?1 ORDER BY revision, id")?;
-        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)))?;
-        rows.map(|r| { let (payload, active, dispatch_state) = r?;
-            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state }) }).collect()
+        let mut stmt = conn.prepare("SELECT payload, active, dispatch_state, resource_generation FROM workflow_outbox WHERE workspace = ?1 ORDER BY revision, id")?;
+        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?)))?;
+        rows.map(|r| { let (payload, active, dispatch_state, resource_generation) = r?;
+            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state, resource_generation }) }).collect()
     }
 }
 

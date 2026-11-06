@@ -439,27 +439,9 @@ async fn gate(s: &Setup<'_>, l: &Landing, tree: &Path) -> Step<()> {
 /// One gate command, its output appended to `log`: whether it passed, and
 /// its last line of output.
 async fn run_gate(tree: &Path, command: &str, log: &Path, limit: Duration) -> (bool, String) {
-    let Ok(file) = std::fs::OpenOptions::new().append(true).create(true).open(log) else {
-        return (false, format!("couldn't write {}", log.display()));
-    };
-    let Ok(err) = file.try_clone() else { return (false, "couldn't write its log".into()) };
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c").arg(command).current_dir(tree).stdin(Stdio::null()).stdout(file).stderr(err).kill_on_drop(true);
-    cmd.process_group(0);
-    let Ok(mut child) = cmd.spawn() else { return (false, "couldn't start sh".into()) };
-    let pid = child.id();
-    let passed = match tokio::time::timeout(limit, child.wait()).await {
-        Ok(Ok(status)) => status.success(),
-        Ok(Err(_)) => false,
-        Err(_) => {
-            if let Some(pid) = pid {
-                // SAFETY: killpg on the group this child leads; it was made
-                // for this command alone.
-                unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
-            }
-            let _ = child.wait().await;
-            return (false, format!("still running after {} minutes", limit.as_secs() / 60));
-        }
+    let passed = match crate::effect_runner::run(tree, command, log, limit).await {
+        Ok(passed) => passed,
+        Err(error) => return (false, error.to_string()),
     };
     let text = std::fs::read_to_string(log).unwrap_or_default();
     (passed, last_line(&text).to_string())
