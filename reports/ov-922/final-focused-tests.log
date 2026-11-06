@@ -1,0 +1,54 @@
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/workflow)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 4.04s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_store-b7c2de7d5335f34a)
+
+running 13 tests
+test workflow::tests::workflow_refusals_deduplicated_without_revision ... ok
+test workflow::tests::workflow_immutable_history_and_refusing_registry ... ok
+test workflow::tests::workflow_atomic_reopen_duplicate_payload_and_replay ... ok
+test workflow::tests::workflow_concurrent_resource_admission_across_connections ... ok
+test workflow::tests::workflow_blocked_shared_resource_reopen_and_generation_handoff ... ok
+test workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay ... ok
+test workflow::tests::workflow_claim_dispatch_crash_boundaries_and_generation ... ok
+test workflow::tests::workflow_complete_coding_trace_reopens_between_every_effect ... ok
+test workflow::tests::workflow_uncertain_boundary_reopen_and_cancellation_holds_resource ... ok
+test workflow::tests::workflow_tracker_exact_approval_duplicate_and_reopen_done ... ok
+test workflow::tests::workflow_concurrent_same_revision_and_duplicate_command ... ok
+test workflow::tests::workflow_sql_failure_rolls_back_every_boundary ... ok
+migration source schemas tested=61
+test workflow::tests::workflow_migration_from_every_registered_source_schema ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 474 filtered out; finished in 3.50s
+
+     Running unittests src/lib.rs (target/debug/deps/farcooler_workflow-0da0a1260f3bad3c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workflow.rs (target/debug/deps/workflow-b090dd3bee565536)
+
+running 16 tests
+test workflow_canonical_encoding_golden ... ok
+test workflow_definition_bounds_and_stage_order ... ok
+test workflow_definition_rejects_missing_candidate_paths ... ok
+test workflow_no_git_checklist_pin_and_exact_decision ... ok
+test workflow_invalid_snapshot_and_pinned_operation_payload ... ok
+test workflow_dependencies_and_resource_conflict ... ok
+test workflow_blocked_shared_resource_does_not_reserve_and_releases_one_waiter ... ok
+test workflow_noncoding_named_actions_and_stable_rework_target ... ok
+test workflow_retry_limit_and_exact_candidate ... ok
+test workflow_every_stage_approval_and_informational_ack_exclusion ... ok
+test workflow_stale_revision_epoch_source_and_duplicate_refused ... ok
+test workflow_reviewer_person_and_rework_exhaustion ... ok
+test workflow_uncertainty_cancel_and_late_result_fences ... ok
+test workflow_automatic_coding_replay_with_review_rework ... ok
+test workflow_definition_driven_no_review_multiple_checks_and_approvals ... ok
+generated seeds=128 steps=8192 accepted=572 refused=7620
+test workflow_seeded_adversarial_replay_properties ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.72s
+
+
+wrapper_exit=0 reserve_cancelled=False minimum_free_bytes=22876811264

@@ -1,0 +1,17 @@
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 0.68s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_workflow-82da507122996644)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workflow.rs (target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 1 test
+test workflow_definition_driven_no_review_multiple_checks_and_approvals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+
+exit=0 expected=0

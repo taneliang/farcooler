@@ -148,8 +148,7 @@ fn the_layer_s_migrations_are_marked() {
     use crate::compat::Older;
     let marked = |i: usize| crate::migrate::MIGRATIONS[i].1;
     assert_eq!(marked(22), Older::Welcome, "0023, the plan layer");
-    assert_eq!(crate::migrate::MIGRATIONS.last().unwrap().1, Older::Refused, "0067, the line");
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 60);
+    assert_eq!(crate::migrate::MIGRATIONS[57].1, Older::Refused, "0067, the line");
 }
 
 /// Nothing existing carries a column for the layer: every table old code

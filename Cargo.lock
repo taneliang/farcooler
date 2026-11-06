@@ -1093,7 +1093,9 @@ version = "0.1.0"
 dependencies = [
  "farcooler-core",
  "farcooler-protocol",
+ "farcooler-workflow",
  "rusqlite",
+ "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tracing",
@@ -1152,6 +1154,15 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "farcooler-ffi-guard",
+]
+
+[[package]]
+name = "farcooler-workflow"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

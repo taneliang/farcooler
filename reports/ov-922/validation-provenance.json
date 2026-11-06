@@ -1,0 +1,16 @@
+{
+  "head": "d625aaeb9c4c41d5849170eb21b909e55bd56d11",
+  "branch": "ov-922-workflow-core",
+  "python": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/target",
+  "profile": {
+    "CARGO_BUILD_JOBS": "6",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "route": "scripts/heavy normal FIFO foreground; offline; 5min load limit20; 10GiB reserve; owned process group cancel/reap",
+  "minimum_free_bytes": 22821310464
+}

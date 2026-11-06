@@ -1,0 +1,29 @@
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 0.66s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_workflow-82da507122996644)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workflow.rs (target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 1 test
+
+thread 'workflow_stale_revision_epoch_source_and_duplicate_refused' (821088782) panicked at crates/workflow/tests/workflow.rs:87:9:
+assertion `left == right` failed
+  left: Ok(Transition { state: State { schema: 1, workspace: "workspace", revision: 2, epoch: 1, items: {"item": Item { definition: Definition { schema: 1, source: "coding/v1", stages: [Stage { id: "stage-0", kind: Provision, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-0"], environment: {} } }, Stage { id: "stage-1", kind: Build, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-1"], environment: {} } }, Stage { id: "stage-2", kind: Check, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["cargo", "test", "--locked"], environment: {} } }, Stage { id: "stage-3", kind: Review(Dispatch), progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-3"], environment: {} } }, Stage { id: "stage-4", kind: Land, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-4"], environment: {} } }, Stage { id: "stage-5", kind: Ci, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-5"], environment: {} } }], max_reworks: 2, rework_target: Some("stage-1") }, pin: "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4", policy_pin: "policy-1", dependencies: {}, resource: "repo/branch", stage: 1, iteration: 0, attempt: 1, fence: 2, phase: Running, run: "wf1:05a95fa934b085655611dcd424809ef5ce582977b0c4fc6d9265a16f75c72991", pending: Some("wf1:cf334cc9855a6738ba5e8c9141aef67b95aa09eb742e90abe5a73e5e1e970473"), candidate: None, last_evidence: Some(Evidence { candidate: "candidate-a", manifest: "sha256:manifest", receipt: "operation-receipt", policy_pin: "policy-1" }), stopping: None }}, seen: {"command-1", "command-2"}, source_sequences: {"fixture": 2} }, effects: [Effect { id: "wf1:cf334cc9855a6738ba5e8c9141aef67b95aa09eb742e90abe5a73e5e1e970473", item: "item", run: "wf1:05a95fa934b085655611dcd424809ef5ce582977b0c4fc6d9265a16f75c72991", epoch: 1, fence: 2, resource: "repo/branch", definition_pin: "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4", policy_pin: "policy-1", candidate: None, kind: Execute(Build), operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-1"], environment: {} }, created_ms: 1000 }], notices: ["item:Running"] })
+ right: Err(Stale)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_stale_revision_epoch_source_and_duplicate_refused ... FAILED
+
+failures:
+
+failures:
+    workflow_stale_revision_epoch_source_and_duplicate_refused
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p farcooler-workflow --test workflow`
+
+exit=101 expected=101

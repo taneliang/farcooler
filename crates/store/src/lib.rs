@@ -70,6 +70,8 @@ mod subagent_notes;
 mod web_panes;
 pub mod waits;
 pub mod workers;
+pub mod workflow;
+pub mod workflow_effects;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 mod workspaces;

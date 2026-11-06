@@ -108,6 +108,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     crate::line_migration::LINE_MIGRATION, // ov-872: agents, the line and landings replace lanes and trains, one way (line_migration.rs says why)
     (crate::check_ins::migration_check_ins, Older::Refused), // ov-892: admission fences change permitted writes
     (crate::check_ins::migration_check_in_destination, Older::Refused), // ov-892: old observers lack destination proof
+    (crate::workflow::migration_workflow, Older::Refused), // ov-922: workflow receipts and ownership require current admission
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

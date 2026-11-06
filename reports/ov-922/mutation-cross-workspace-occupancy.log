@@ -1,0 +1,24 @@
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/workflow)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 4.36s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_store-b7c2de7d5335f34a)
+
+running 1 test
+
+thread 'workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay' (821093926) panicked at crates/store/src/workflow/tests.rs:373:9:
+assertion `left == right` failed
+  left: Err(Resource)
+ right: Ok(3)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay ... FAILED
+
+failures:
+
+failures:
+    workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 486 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101 expected=101

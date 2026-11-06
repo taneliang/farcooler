@@ -1,0 +1,16 @@
+mutation-stale-revision: exit=101, expected=101
+restored-stale-revision: exit=0, expected=0
+mutation-mandatory-review: exit=101, expected=101
+restored-mandatory-review: exit=0, expected=0
+mutation-blocked-reservation: exit=101, expected=101
+restored-blocked-reservation: exit=0, expected=0
+mutation-fixed-rework-index: exit=101, expected=101
+restored-fixed-rework-index: exit=0, expected=0
+mutation-candidate-producer: exit=101, expected=101
+restored-candidate-producer: exit=0, expected=0
+mutation-cross-workspace-occupancy: exit=101, expected=101
+restored-cross-workspace-occupancy: exit=0, expected=0
+store-regressions: exit=0, expected=0
+clippy: exit=0, expected=0
+
+wrapper_exit=0 reserve_cancelled=False minimum_free_bytes=22821310464

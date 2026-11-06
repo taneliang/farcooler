@@ -12,6 +12,8 @@ license.workspace = true
 testing = []
 
 [dependencies]
+farcooler-workflow.workspace = true
+serde.workspace = true
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 rusqlite.workspace = true

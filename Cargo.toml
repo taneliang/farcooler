@@ -6,6 +6,7 @@ members = [
     "crates/agent-core",
     "crates/agent-hooks",
     "crates/store",
+    "crates/workflow",
     "crates/tmux",
     "crates/transport",
     "crates/tailcat",
@@ -32,6 +33,7 @@ farcooler-core = { path = "crates/core" }
 farcooler-agent-core = { path = "crates/agent-core" }
 farcooler-agent-hooks = { path = "crates/agent-hooks" }
 farcooler-store = { path = "crates/store" }
+farcooler-workflow = { path = "crates/workflow" }
 farcooler-tmux = { path = "crates/tmux" }
 farcooler-transport = { path = "crates/transport" }
 farcooler-tailcat = { path = "crates/tailcat" }

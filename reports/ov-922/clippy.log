@@ -1,0 +1,5 @@
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/workflow)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-922-workflow-core/crates/store)
+    Finished `dev` profile [unoptimized] target(s) in 3.31s
+
+exit=0 expected=0
