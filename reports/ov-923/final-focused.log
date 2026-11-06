@@ -1,0 +1,32 @@
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.19s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 12 tests
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 2658 filtered out; finished in 4.77s
+
+
+exit=0

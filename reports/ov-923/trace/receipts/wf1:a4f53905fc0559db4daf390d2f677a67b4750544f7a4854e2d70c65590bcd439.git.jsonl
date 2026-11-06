@@ -1,0 +1,3 @@
+{"args":["add","--","result.txt"],"ok":true,"stderr":"","stdout":""}
+{"args":["-c","user.name=Workflow Fixture","-c","user.email=fixture@localhost","-c","commit.gpgsign=false","commit","--quiet","--allow-empty","-m","fixture wf1:1a5cbdc211576fc8955aa5cdedc6b61b53ec5913a264a30a5dc75894360c52e7"],"ok":true,"stderr":"","stdout":""}
+{"args":["rev-parse","HEAD"],"ok":true,"stderr":"","stdout":"32b83cb71461de6ddee12f358e86345d12b82a7b\n"}

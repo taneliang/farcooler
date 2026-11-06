@@ -1,0 +1,14 @@
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/reports/ov-923/checks.py']
+mutation-binding: exit=101, expected=101
+restored-binding: exit=0, expected=0
+mutation-advance: exit=101, expected=101
+restored-advance: exit=0, expected=0
+mutation-decision: exit=101, expected=101
+restored-decision: exit=0, expected=0
+final-focused: exit=0, expected=0
+retained-gate: exit=0, expected=0
+store: exit=0, expected=0
+clippy: exit=0, expected=0
+
+wrapper_exit=0 cancelled=False minimum_free_bytes=20981166080

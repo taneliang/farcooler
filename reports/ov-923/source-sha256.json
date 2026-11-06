@@ -1,0 +1,12 @@
+{
+  "Cargo.lock": "b2b1df76b0a21d548597d5d033d06350a14e06180af19ea182691f5a9e1719a2",
+  "crates/daemon/Cargo.toml": "6ee7df6e0c1a0d2df96e15716ad7a0b4c25d8ea4efeb375f280877a8c68c3e8c",
+  "crates/daemon/src/lib.rs": "ab9217c597020c6f464f7fc8f1d4b56a2a079577061ad0af0d47b7d9b76ce250",
+  "crates/daemon/src/landing_job.rs": "6807cabe74e300aed7286301c7bfe44ced0a58156b49b39e486ba17081a2cfa4",
+  "crates/daemon/src/effect_runner.rs": "c57b25200e1a4ca25156a9e769af0cc6fb6ba256cccdfe2feb5de4622bf9e33c",
+  "crates/daemon/src/workflow_runtime.rs": "6e6c6b85e0d7f8c1f2c0e3a81cf8f911022665aa40d33894d843811b813f8460",
+  "crates/daemon/src/workflow_runtime/adapters.rs": "e627115713eb13465f414769213d9475836f513e2aedbbca43dae9a220b7253c",
+  "crates/daemon/src/workflow_runtime/tests.rs": "a48d5a9e2e842d535d99a1b8ae33558d6b4c9da4222e34fa16b119ab2000ddb9",
+  "crates/daemon/examples/workflow_fixture.rs": "5d4f4f8420c44bcb782218be24d1db01687f8d2eda6f06b232e38fc696f6186a",
+  "crates/store/src/workflow.rs": "33993e4df924abd7a334170e205456da4eb35626f1c7a178a3574b6d646ae893"
+}

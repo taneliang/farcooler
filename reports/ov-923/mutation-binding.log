@@ -1,0 +1,23 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 22.70s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties' (821320292) panicked at crates/daemon/src/workflow_runtime/tests.rs:283:13:
+assertion `left == right` failed
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2669 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

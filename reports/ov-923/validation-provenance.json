@@ -1,0 +1,28 @@
+{
+  "source_commit": "f52442374c3acaa5c5d6f18fe5fb346e1ebbc367",
+  "base": "bd87202f0fa7628c8905e5179e6fd5d8c408002c",
+  "python": "/usr/bin/python3",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "jobs": 6,
+  "load5_limit": 20,
+  "reserve_bytes": 10737418240,
+  "deadline_seconds": 1800,
+  "cargo_offline": true,
+  "dev_debug": 0,
+  "test_debug": 0,
+  "incremental": 0,
+  "fifo": "normal scripts/heavy (no --light/no-lock/CI override)",
+  "fixture_root": "/private/tmp/ov-923-runtime-8321a2e4-d0a9-40be-84b8-bc38ffcc75be",
+  "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+  "minimum_validation_free_bytes": 20981166080,
+  "minimum_smoke_free_bytes": 20865556480,
+  "source_hashes": "source-sha256.json",
+  "notes": [
+    "No alternate/shared target selected; this tree initially had no target cache.",
+    "Initial sandbox Git sandbox initialization failure and helper visibility compile failures are retained in focused.log.",
+    "Final-focused.log and validation.log certify restored source; three expected mutation failures are separate logs.",
+    "64 generated tracker workspace traces exercise two receipt-arrival schedules, not 64 independent schedule classes or a proof.",
+    "Independent reviewer reads source and saved evidence; full release/main/provider gates remain parent."
+  ]
+}

@@ -1,0 +1,4 @@
+{"args":["rev-parse","HEAD"],"ok":true,"stderr":"","stdout":"32b83cb71461de6ddee12f358e86345d12b82a7b\n"}
+{"args":["status","--porcelain"],"ok":true,"stderr":"","stdout":""}
+{"args":["update-ref","refs/heads/landed","32b83cb71461de6ddee12f358e86345d12b82a7b","1cb9e27f6fb3324ac847476af760282439e05138"],"ok":true,"stderr":"","stdout":""}
+{"args":["rev-parse","refs/heads/landed"],"ok":true,"stderr":"","stdout":"32b83cb71461de6ddee12f358e86345d12b82a7b\n"}

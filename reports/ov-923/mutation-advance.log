@@ -1,0 +1,23 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 22.29s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn' (821329446) panicked at crates/daemon/src/workflow_runtime/tests.rs:256:5:
+assertion `left == right` failed
+  left: Blocked
+ right: Done
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2669 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

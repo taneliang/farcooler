@@ -1,0 +1,23 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.34s
+     Running unittests src/lib.rs (target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication' (821337018) panicked at crates/daemon/src/workflow_runtime/tests.rs:93:13:
+assertion `left == right` failed
+  left: Ok(2)
+ right: Err(Unauthorized)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2669 filtered out; finished in 1.04s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

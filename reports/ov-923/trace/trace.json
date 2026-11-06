@@ -1,0 +1,606 @@
+{
+  "events": [
+    {
+      "busy_resources": [],
+      "command": {
+        "Enqueue": {
+          "definition": {
+            "max_reworks": 2,
+            "rework_target": "stage-1",
+            "schema": 1,
+            "source": "coding/v1",
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "local-worktree/v1",
+                  "arguments": [
+                    "pinned-base"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "fixture-harness/v1",
+                  "arguments": [
+                    "draft",
+                    "ready"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "fixture-check/v1",
+                  "arguments": [
+                    "result.txt"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "fixture-review/v1",
+                  "arguments": [
+                    "ready"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "local-land/v1",
+                  "arguments": [
+                    "refs/heads/landed"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "max_attempts": 2,
+                "operation": {
+                  "adapter_version": "fixture-ci/v1",
+                  "arguments": [
+                    "fixture-check"
+                  ],
+                  "environment": {}
+                },
+                "progression": "Automatic"
+              }
+            ]
+          },
+          "dependencies": [],
+          "initial_candidate": null,
+          "item": "coding",
+          "policy_pin": "policy/v1",
+          "resource": "wf1:10f56cb32c160fe55c68197f0d488f956670b0dc65d3ef68a2d1e3ab75b342da"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 0,
+      "grant": "Controller",
+      "id": "enqueue-fixture",
+      "now_ms": 1,
+      "schema": 1,
+      "source": "controller",
+      "source_sequence": 1,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:a28f7c1312bf41c665bd1d389b0c47bd6af2669fe22f5011ce91ab3297cd132c",
+          "fence": 1,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "1cb9e27f6fb3324ac847476af760282439e05138",
+              "manifest": "wf1:28457f895741159523a086b52ae15d763d5f8a1e604c42d313e7e809c2ac20e9",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:cdc7e93de0e11d9c71aca6a1c19fe15381262dc662ac2a4392660ee4b8ab6073"
+            }
+          },
+          "run": "wf1:b6bab54e7536eb86027db1260dbf78416ec38d04a72f1ee1e33ea268ec8d55e3"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 1,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:a28f7c1312bf41c665bd1d389b0c47bd6af2669fe22f5011ce91ab3297cd132c",
+          "fence": 1,
+          "run": "wf1:b6bab54e7536eb86027db1260dbf78416ec38d04a72f1ee1e33ea268ec8d55e3"
+        }
+      },
+      "id": "runtime:01a1b139-5657-7492-944b-aaa1059f56fa",
+      "now_ms": 2,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 1,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:c6bb156bbfb00a63436a4ac294475d67a397e92701a463b6007ac06b7a3dce9b",
+          "fence": 2,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "adf46e3b0f21ea66f49389cabb285070211d7aca",
+              "manifest": "wf1:18eec5c465ee056a0faea505016e9c2557f8811443dc9132f3a142406bf3034f",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:cc9b2e4d416b3349afe4c0557c2434a8ce5c8110008a10a73f2150dd8b43b5e2"
+            }
+          },
+          "run": "wf1:30aff1d373f41c356614cde8c8380cea42a969cd3b2e008bd87713a900291bc0"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 2,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:c6bb156bbfb00a63436a4ac294475d67a397e92701a463b6007ac06b7a3dce9b",
+          "fence": 2,
+          "run": "wf1:30aff1d373f41c356614cde8c8380cea42a969cd3b2e008bd87713a900291bc0"
+        }
+      },
+      "id": "runtime:01a1b139-568f-78c1-8536-fb22e1f027ae",
+      "now_ms": 3,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 2,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:04f3a08dd682d6edefae44bdafac7f31c2dc0b6dd2cd7bbc39272ec920cf0e63",
+          "fence": 3,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "adf46e3b0f21ea66f49389cabb285070211d7aca",
+              "manifest": "wf1:15c91b172b725dc1cf75069aebb77d28c4358bd7abf6ea325e4260275fc3dc42",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:1a485d5d686b6127ff7251176ddd4f9ace1772f0d4163fd82f93e5262832d321"
+            }
+          },
+          "run": "wf1:e5695d35b53c3e2db3fefe16a5d9176575e20297e3921d703e47746a2ed37667"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 3,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:04f3a08dd682d6edefae44bdafac7f31c2dc0b6dd2cd7bbc39272ec920cf0e63",
+          "fence": 3,
+          "run": "wf1:e5695d35b53c3e2db3fefe16a5d9176575e20297e3921d703e47746a2ed37667"
+        }
+      },
+      "id": "runtime:01a1b139-56c7-7792-b9f5-fa14d2843ae0",
+      "now_ms": 4,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 3,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:8b37389153936f63994dec31771acee5d4c6f7a6d3b3380992cd2e9860b0fd4d",
+          "fence": 4,
+          "item": "coding",
+          "outcome": {
+            "Rejected": {
+              "candidate": "adf46e3b0f21ea66f49389cabb285070211d7aca",
+              "manifest": "wf1:dd2f4add70d235d8c0d601a3199d0479889d1936b0e9eca0b638a92416dc1511",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:96315d4f5ade23217367e32fdf611f5bd1c2fe344f28beac5b45d742ad9d079f"
+            }
+          },
+          "run": "wf1:b411e5bbca9bcf108fda39e551079d0ab27e24ff737e57a9c984ea396798f091"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 4,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:8b37389153936f63994dec31771acee5d4c6f7a6d3b3380992cd2e9860b0fd4d",
+          "fence": 4,
+          "run": "wf1:b411e5bbca9bcf108fda39e551079d0ab27e24ff737e57a9c984ea396798f091"
+        }
+      },
+      "id": "runtime:01a1b139-5702-7eb2-ad96-cc949cc75483",
+      "now_ms": 5,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 4,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:a4f53905fc0559db4daf390d2f677a67b4750544f7a4854e2d70c65590bcd439",
+          "fence": 5,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+              "manifest": "wf1:0bdcdb1ce3e4e2549999a5907419100a16e582ba4787567acce62b955d255f63",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:0bef67ba2dbdb40a54de76a69b7abfa713bc93c1691e68911eac65d79da63f63"
+            }
+          },
+          "run": "wf1:1a5cbdc211576fc8955aa5cdedc6b61b53ec5913a264a30a5dc75894360c52e7"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 5,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:a4f53905fc0559db4daf390d2f677a67b4750544f7a4854e2d70c65590bcd439",
+          "fence": 5,
+          "run": "wf1:1a5cbdc211576fc8955aa5cdedc6b61b53ec5913a264a30a5dc75894360c52e7"
+        }
+      },
+      "id": "runtime:01a1b139-5737-7572-8aef-52fdb65bdec0",
+      "now_ms": 6,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 5,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:d017cd65d5690175ee32bad4a05b751bfa2951cc3a155e99efb30fcfa118746b",
+          "fence": 6,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+              "manifest": "wf1:513aaf8a6c517a3b088a3d68d8b62447b5198a112f712b5132528dd739ffc48e",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:618901e907232a663070eb5536a4133b7f534829b0bbe0c6fbcdd38f51711fbf"
+            }
+          },
+          "run": "wf1:5617d63f4afed8f3a41fb16677fdb1569bbd26bb38408d1d1f00aa3c05c67196"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 6,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:d017cd65d5690175ee32bad4a05b751bfa2951cc3a155e99efb30fcfa118746b",
+          "fence": 6,
+          "run": "wf1:5617d63f4afed8f3a41fb16677fdb1569bbd26bb38408d1d1f00aa3c05c67196"
+        }
+      },
+      "id": "runtime:01a1b139-5773-7cb0-b651-3ac1856f6869",
+      "now_ms": 7,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 6,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:f6951300415386a598933b3bd00acacb7fc2a250a0a65b9a5157eb548a64826f",
+          "fence": 7,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+              "manifest": "wf1:348ba6e4dff8f3ece6b599fb7cc542628eefb4e3bb9ceff8f1a14ed0cee139fc",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:94ee0177790077313292d05947189634b412225a2e080b064903ac4616ce0f1c"
+            }
+          },
+          "run": "wf1:5dd13e2e84d1524dd9fa78b5954019a948beb1e300378e2f33081201ab683c63"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 7,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:f6951300415386a598933b3bd00acacb7fc2a250a0a65b9a5157eb548a64826f",
+          "fence": 7,
+          "run": "wf1:5dd13e2e84d1524dd9fa78b5954019a948beb1e300378e2f33081201ab683c63"
+        }
+      },
+      "id": "runtime:01a1b139-57b8-7130-b427-60228d0eb036",
+      "now_ms": 8,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 7,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:234d507be8dc6083fcb17644c55b61d3f1ee6440bf6660aff2229ada6a7e9383",
+          "fence": 8,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+              "manifest": "wf1:68452134133c899c254486d73393627d995fb821f7821e9c264d56f81893a5a6",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:715efbf29c7d79dc9b6246f6f6d3bf700d5611efce89c0187990237120087dbf"
+            }
+          },
+          "run": "wf1:79b75c3ff0b9b63e286b48dafb872147d28ffe89f398e1afb3610a2fe602a056"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 8,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:234d507be8dc6083fcb17644c55b61d3f1ee6440bf6660aff2229ada6a7e9383",
+          "fence": 8,
+          "run": "wf1:79b75c3ff0b9b63e286b48dafb872147d28ffe89f398e1afb3610a2fe602a056"
+        }
+      },
+      "id": "runtime:01a1b139-57ef-77a3-abf9-78e1ae854c93",
+      "now_ms": 9,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 8,
+      "workspace": "fixture"
+    },
+    {
+      "busy_resources": [],
+      "command": {
+        "Observe": {
+          "effect": "wf1:661cfe81360884f6db9d7c61b7bfd07c7298327ea9fbf0cb2755dc6c8956e954",
+          "fence": 9,
+          "item": "coding",
+          "outcome": {
+            "Passed": {
+              "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+              "manifest": "wf1:c947c9ea72f7412acde861fec4600ba598f1a7265833dd2a6d0d247fdb34db4e",
+              "policy_pin": "policy/v1",
+              "receipt": "wf1:57293ec0508f322c717c1fc1d1da460887d3e277573fe8a9f3c3e92d91b746cb"
+            }
+          },
+          "run": "wf1:902953070bf04362ec1c476a4e590350d739c7ab343542251141c659bfe2822b"
+        }
+      },
+      "epoch": 1,
+      "expected_revision": 9,
+      "grant": {
+        "Operation": {
+          "effect": "wf1:661cfe81360884f6db9d7c61b7bfd07c7298327ea9fbf0cb2755dc6c8956e954",
+          "fence": 9,
+          "run": "wf1:902953070bf04362ec1c476a4e590350d739c7ab343542251141c659bfe2822b"
+        }
+      },
+      "id": "runtime:01a1b139-5805-7a11-9e37-7dd54eb0ee7e",
+      "now_ms": 10,
+      "schema": 1,
+      "source": "runtime",
+      "source_sequence": 9,
+      "workspace": "fixture"
+    }
+  ],
+  "notices": [
+    {
+      "body": "coding:Running",
+      "id": "wf1:08ee7026fb82f309aa2cc2140307632872fe167c96e29ad27a434a1fedc8af4d",
+      "revision": 1
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:82e91b9104ab3f0021af064027240f658eafc02b757fda45cd37af8087bdce67",
+      "revision": 2
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:2862e685ccc03ca24f782b7f4b3332984bdfa679793860986ff993fc85219da4",
+      "revision": 3
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:e5965fbafdc056149523ff12fba8069da9b2a11a3f64548bb6b894c1039e3585",
+      "revision": 4
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:e7ed0c649fe14074fd5341eb877f5ba77528c2b0fd4344507ad9da4c3ef94bdf",
+      "revision": 5
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:d7a86f4229c034fece15fe128b84f59b3815b55952293072558434d17d851304",
+      "revision": 6
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:67a98a4f9b768a6ab39e75e169aa7209d06f9de440209469a8336c8d2f4ad4b5",
+      "revision": 7
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:798957317665867625d05b88d00360852e04114475213798598207f709c64abb",
+      "revision": 8
+    },
+    {
+      "body": "coding:Running",
+      "id": "wf1:05a62149a02fdb0fad1cb09c8e97cf03ed4d540565087a7c69555821355a6619",
+      "revision": 9
+    },
+    {
+      "body": "coding:Done",
+      "id": "wf1:2df55a3c053baed5c2327f2c50b5cd5e406ae9fc8644313004d0ad3a8bc2f144",
+      "revision": 10
+    }
+  ],
+  "state": {
+    "epoch": 1,
+    "items": {
+      "coding": {
+        "attempt": 1,
+        "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+        "definition": {
+          "max_reworks": 2,
+          "rework_target": "stage-1",
+          "schema": 1,
+          "source": "coding/v1",
+          "stages": [
+            {
+              "id": "stage-0",
+              "kind": "Provision",
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "local-worktree/v1",
+                "arguments": [
+                  "pinned-base"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            },
+            {
+              "id": "stage-1",
+              "kind": "Build",
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "fixture-harness/v1",
+                "arguments": [
+                  "draft",
+                  "ready"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            },
+            {
+              "id": "stage-2",
+              "kind": "Check",
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "fixture-check/v1",
+                "arguments": [
+                  "result.txt"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            },
+            {
+              "id": "stage-3",
+              "kind": {
+                "Review": "Dispatch"
+              },
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "fixture-review/v1",
+                "arguments": [
+                  "ready"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            },
+            {
+              "id": "stage-4",
+              "kind": "Land",
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "local-land/v1",
+                "arguments": [
+                  "refs/heads/landed"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            },
+            {
+              "id": "stage-5",
+              "kind": "Ci",
+              "max_attempts": 2,
+              "operation": {
+                "adapter_version": "fixture-ci/v1",
+                "arguments": [
+                  "fixture-check"
+                ],
+                "environment": {}
+              },
+              "progression": "Automatic"
+            }
+          ]
+        },
+        "dependencies": [],
+        "fence": 10,
+        "iteration": 1,
+        "last_evidence": {
+          "candidate": "32b83cb71461de6ddee12f358e86345d12b82a7b",
+          "manifest": "wf1:c947c9ea72f7412acde861fec4600ba598f1a7265833dd2a6d0d247fdb34db4e",
+          "policy_pin": "policy/v1",
+          "receipt": "wf1:57293ec0508f322c717c1fc1d1da460887d3e277573fe8a9f3c3e92d91b746cb"
+        },
+        "pending": null,
+        "phase": "Done",
+        "pin": "wf1:dfc6d98544bd0dae975c5481e5f1ac3233ee7e0017ef4ca602d2575c327654cd",
+        "policy_pin": "policy/v1",
+        "resource": "wf1:10f56cb32c160fe55c68197f0d488f956670b0dc65d3ef68a2d1e3ab75b342da",
+        "run": "wf1:902953070bf04362ec1c476a4e590350d739c7ab343542251141c659bfe2822b",
+        "stage": 6,
+        "stopping": null
+      }
+    },
+    "revision": 10,
+    "schema": 1,
+    "seen": [
+      "enqueue-fixture",
+      "runtime:01a1b139-5657-7492-944b-aaa1059f56fa",
+      "runtime:01a1b139-568f-78c1-8536-fb22e1f027ae",
+      "runtime:01a1b139-56c7-7792-b9f5-fa14d2843ae0",
+      "runtime:01a1b139-5702-7eb2-ad96-cc949cc75483",
+      "runtime:01a1b139-5737-7572-8aef-52fdb65bdec0",
+      "runtime:01a1b139-5773-7cb0-b651-3ac1856f6869",
+      "runtime:01a1b139-57b8-7130-b427-60228d0eb036",
+      "runtime:01a1b139-57ef-77a3-abf9-78e1ae854c93",
+      "runtime:01a1b139-5805-7a11-9e37-7dd54eb0ee7e"
+    ],
+    "source_sequences": {
+      "controller": 1,
+      "runtime": 9
+    },
+    "workspace": "fixture"
+  }
+}

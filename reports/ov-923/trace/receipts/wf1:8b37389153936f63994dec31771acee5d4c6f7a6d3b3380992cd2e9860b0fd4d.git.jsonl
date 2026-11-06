@@ -1,0 +1,4 @@
+{"args":["rev-parse","HEAD"],"ok":true,"stderr":"","stdout":"adf46e3b0f21ea66f49389cabb285070211d7aca\n"}
+{"args":["status","--porcelain"],"ok":true,"stderr":"","stdout":""}
+{"args":["rev-parse","HEAD"],"ok":true,"stderr":"","stdout":"adf46e3b0f21ea66f49389cabb285070211d7aca\n"}
+{"args":["status","--porcelain"],"ok":true,"stderr":"","stdout":""}

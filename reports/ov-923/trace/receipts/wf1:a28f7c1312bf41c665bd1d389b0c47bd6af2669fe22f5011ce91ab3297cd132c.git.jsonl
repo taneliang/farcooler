@@ -1,0 +1,1 @@
+{"args":["rev-parse","HEAD"],"ok":true,"stderr":"","stdout":"1cb9e27f6fb3324ac847476af760282439e05138\n"}

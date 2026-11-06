@@ -1,7 +1,7 @@
-# ov-923 runtime API (implementation in progress)
+# ov-923 isolated runtime API
 
 Source baseline: signed bd87202f0fa7628c8905e5179e6fd5d8c408002c.
-Only an explicit isolated fixture runtime is constructed; no Service/main selector.
+Source implementation pin: signed f52442374. Only an explicit isolated fixture runtime is constructed; no Service/main selector.
 
 `workflow_runtime::Runtime::create(root)` creates its own private repository,
 SQLite database and receipt directory. `open(root)` resumes that exact fixture.
@@ -35,3 +35,50 @@ First-slice limitation: trusted deterministic fixtures only. This is not an
 untrusted-code sandbox or real provider authorization. Real harness/provider smoke,
 all-client integration, conservation/removal/cutover and main gates remain parent
 release requirements. Independent review and final evidence will freeze this API.
+
+## Source and caller obligations
+
+- `crates/daemon/src/workflow_runtime.rs:30`: nonserializable instance-bound local
+  capabilities; `Request` rejects unknown fields. `controller()` is trusted local
+  construction, not remote authentication. Keep the runtime handle behind the
+  existing authenticated service boundary when adding a protocol caller. Admission
+  rejects operation/Resolve commands from callers. Caller retries must preserve
+  request fields and the supplied `now_ms`, matching the core typed-input identity.
+- `workflow_runtime.rs:78`: canonical private root, lifetime writer flock,
+  alias checks, full immutable base SHA and one derived repository resource.
+- `workflow_runtime.rs:164`: persisted aggregate discovery, occupancy-change/recovery
+  Advance, claim/admit CAS, receipt-only admitted recovery. `active` alone is not
+  execution eligibility. `run` owns the bounded pump and shutdown loop.
+- `workflow_runtime/adapters.rs:5`: full binding includes workspace, entire immutable
+  effect, reservation generation, fixture iteration and base. The private receipt
+  directory is trusted local storage; it is not proof against malicious same-UID
+  processes. There is no public serialized receipt/result ingress.
+- `workflow_runtime/adapters.rs:115`: actual retained guarded Git worktree primitive;
+  Build uses a deterministic owned process, not a signed-in agent. Check/reviewer
+  surround evaluation with exact HEAD/clean-tree verification. Landing is a local
+  ref CAS; no push. CI parses a local exact-SHA fixture using retained CI code.
+- `effect_runner.rs:17` and `landing_job.rs:440`: one shared process-group runner,
+  deadline/kill/reap/quiescence checks; the existing landing gate retains its
+  inherited environment. Fixture children get fixed environment plus run/fence,
+  resource generation, definition pin and candidate context.
+- `workflow_runtime/adapters.rs:190`: stop can settle only a never-admitted original
+  or an original with correlated runner settlement. An ambiguous original holds
+  ownership. Cancellation never claims an accepted mutation was undone.
+- `Store::workflow_workspaces`, `workflow_notices` and StoredEffect's generation
+  field are additive read/recovery APIs; no migration or legacy caller changed.
+  `notices(workspace, after_revision)` supplies deterministic delivery IDs. Delivery
+  reads/cursors cannot approve or block an effect. Subscription/reconnect policy
+  belongs to the next caller package, not this runtime fixture.
+
+`coding_definition(review)` supplies pinned finite fixture specs; definitions can
+adapt approval principals/progression, omit review, or use the no-Git tracker. This
+is a closed fixture capability set, not a promise that all core-validated arbitrary
+stage arrangements can execute in this isolated repository. Unsupported operation
+versions/arguments/environment reject before enqueue.
+
+Uncertainty without an exact runner receipt deliberately has no automatic replay
+or arbitrary controller-supplied success override. Recovery tests supply a delayed
+trusted journal internally; a real-provider reconciliation mechanism is not claimed.
+The fixture holds one writer and serializes effects; command/cancel admission occurs
+between bounded effects. Real concurrent harness cancellation and provider-specific
+reconciliation remain integration work before production authority is connected.
