@@ -1,0 +1,36 @@
+holder probe: /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/.cargo-lock exit 1  
+holder probe: /Users/e-liang/.cargo/.package-cache exit 1  
+load5 3.93603515625 argv ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'rpc::tests::']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/workflow)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/agent-hooks)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 28.74s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 10 tests
+test rpc::tests::a_lower_scope_cannot_reach_a_higher_method ... ok
+test rpc::tests::an_unknown_method_is_refused_rather_than_defaulted ... ok
+test rpc::tests::scope_is_ordered_so_admin_can_do_everything ... ok
+test rpc::tests::reads_never_require_more_than_read ... ok
+test rpc::tests::enrolling_a_device_requires_control_and_looking_does_not ... ok
+test rpc::tests::the_dangerous_methods_require_host_admin ... ok
+test rpc::tests::every_runner_setting_method_requires_host_admin ... ok
+test rpc::tests::tiling_is_control_not_admin ... ok
+test rpc::tests::the_board_reads_are_read_and_its_writes_are_control ... ok
+test rpc::tests::every_method_has_a_scope ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 2671 filtered out; finished in 0.00s
+
+
+exit=0, stopped=None

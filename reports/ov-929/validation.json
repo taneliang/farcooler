@@ -1,0 +1,37 @@
+[
+  {
+    "check": "scope",
+    "passed": 10,
+    "exit": 0,
+    "minimum_free": 38246887424,
+    "seconds": 31.254317416
+  },
+  {
+    "check": "green",
+    "passed": 31,
+    "exit": 0,
+    "minimum_free": 38399004672,
+    "seconds": 12.061875375
+  },
+  {
+    "check": "socket",
+    "passed": 2,
+    "exit": 0,
+    "minimum_free": 38410194944,
+    "seconds": 14.087444125
+  },
+  {
+    "check": "session",
+    "passed": 2,
+    "exit": 0,
+    "minimum_free": 38367330304,
+    "seconds": 16.116992083
+  },
+  {
+    "check": "lint",
+    "passed": null,
+    "exit": 0,
+    "minimum_free": 38404792320,
+    "seconds": 22.139382042
+  }
+]

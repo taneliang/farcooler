@@ -1,0 +1,16 @@
+holder probe: /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/.cargo-lock exit 1  
+holder probe: /Users/e-liang/.cargo/.package-cache exit 1  
+load5 4.03173828125 argv ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'session::workflow::tests::socket::']
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-929-rpc-budget/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 13.10s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 2 tests
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... ok
+test session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 269 filtered out; finished in 0.63s
+
+
+exit=0, stopped=None

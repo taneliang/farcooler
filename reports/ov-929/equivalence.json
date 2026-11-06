@@ -1,0 +1,12 @@
+{
+  "base": "7cae4421e9d2c3aae62ed06153c3f7f627267bd5",
+  "base_rpc_sha256": "b0ae766edee06b12433d9991644c538c26bf838bebb3ac8290db65e5754b9131",
+  "rpc_sha256": "eda81a9fc0c99703a4f0daee6d6b8bde6d795e89760db606a3bbaf53c1eb8bd2",
+  "module_sha256": "a452297dd09021dc1e38b177247ffe6f7c84b39e8e8d92a5a7068421e0077f97",
+  "base_lines": 2482,
+  "rpc_lines": 2405,
+  "module_lines": 82,
+  "mapping": "base rpc.rs:763-840 -> rpc/runner_settings.rs:4-81; inverse removes four pub(super) tokens and module/import/impl wrapper, reinserts block before dispatch",
+  "exact_inverse_equal": true,
+  "all_other_rpc_bytes_unchanged": true
+}
