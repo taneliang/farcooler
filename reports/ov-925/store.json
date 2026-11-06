@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/Users/e-liang/.cargo/bin/cargo",
+    "test",
+    "--offline",
+    "-p",
+    "farcooler-store",
+    "--lib",
+    "workflow"
+  ],
+  "exit": 0,
+  "stopped": null,
+  "seconds": 13.081328582999998,
+  "minimum_free": 45407854592,
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "profile": "debug0/test0/incremental0/jobs6/offline",
+  "source": "4163081e91353481ae00e80ff7bd3cbab0924915"
+}

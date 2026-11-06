@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/Users/e-liang/.cargo/bin/cargo",
+    "script",
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-workflow-commands/reports/ov-925/mutation.py"
+  ],
+  "exit": 0,
+  "stopped": null,
+  "seconds": 61.423511208,
+  "minimum_free": 43346522112,
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "profile": "debug0/test0/incremental0/jobs6/offline",
+  "source": "f49af8924426298cf38e26dfb7095f6d0ed36324"
+}

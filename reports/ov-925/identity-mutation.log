@@ -1,0 +1,29 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-workflow-commands/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 25.91s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 1 test
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... FAILED
+
+failures:
+
+---- workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution stdout ----
+
+thread 'workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution' (822000246) panicked at crates/daemon/src/workflow_runtime/wire_commands.rs:115:9:
+assertion failed: runtime.wire_command("ws", "owner",
+        Action::Enqueue {
+            mutation: m("enqueue", 0, 1),
+            item: "different".into(),
+            pin: pin.clone(),
+        }).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2678 filtered out; finished in 0.13s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, expected=101

@@ -1,0 +1,225 @@
+{
+  "base": "4163081e91353481ae00e80ff7bd3cbab0924915",
+  "final_source": "f49af8924426298cf38e26dfb7095f6d0ed36324",
+  "source_files_sha256": {
+    "Cargo.lock": "4d815dca79e623ae903be073cb6a64a496c8e082ba7a904547d4cf8c5451b098",
+    "apps/android/app/src/main/java/com/farcooler/model/Capability.kt": "d32607f517b58af6f8af3e7a12ce559ab7f8a11f349ea2099d7703fca4ed9cdd",
+    "apps/shared/AgentKit/Sources/AgentKit/Capability.swift": "5d178410d81c4eb5eb08688717e1915aec4f8091c7af722292ccb92f18fee25d",
+    "crates/cli/src/main.rs": "4b8ba3b7b0db6bd1992474811ebbad9ef56ef10f8a1ad79f70eae7ff6b18c84f",
+    "crates/cli/src/workflow.rs": "4b89ec88d1421bd39a3a0a81327edd61e152f7db5f98af39305a10552a074e47",
+    "crates/cli/src/workspaces.rs": "90ad6886eaa50e8a82780e244a8ba960468a8880eeeb759212ce377d1b169264",
+    "crates/client/src/ffi/route.rs": "f40c17fc5d90d527159ad6297d8d44c5046f626c5b495185f8fbd756944b0697",
+    "crates/client/src/session/results.rs": "88f6c504ed1f46ae36c89cc97a231ec82ad79533e1c26ab6d7dba4c97c1ac788",
+    "crates/daemon/examples/workflow_command_server.rs": "62c5b69536a8c7701f3a72f25d610d5bde8d0f3ab5a3687f4f49625a15d8e786",
+    "crates/daemon/src/people_rulings.rs": "a6bbc001ccc11b744a53f63a045a22cd9b0c89d48b22741e9f9a83b10e15d442",
+    "crates/daemon/src/rpc.rs": "63c3f0136ec9270e0d294911de651863015943e9c35a4d86d3812f29b7082778",
+    "crates/daemon/src/workflow_runtime.rs": "20c9b44e8ffaf9fa0ebc95f538d40e4f8e2e2a4ba532cae5757961abd6254d11",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "fe508071e5b773d1a14bb4e735312c0a557cbce08739509b11c00d5f91a0d69f",
+    "crates/daemon/tests/workflow_commands_over_socket.rs": "4a089ce08ed6f45a2787ac1ba42c4e5953d81a2dc923ac0b202cbe4723ec8227",
+    "crates/protocol/Cargo.toml": "ea154e87727b728d7b681994c43bcc6baf2ab7731fbd8b2e5e4a8b490f74f33b",
+    "crates/protocol/src/lib.rs": "1c5992264e963e2edf2fde12aa8f96862d9d31b418a4a53fbaf6c47a3f9f2b77",
+    "crates/protocol/src/workflow_commands.rs": "374bbe66f6f70f26c4e5430f371ab7cae5c580b6aa9a34fd65114b5adfc6de5d",
+    "crates/store/src/lib.rs": "1dddec35b0e8b952958a703dad6fd02afb800e0b98e3dbf707d65f05956ddc89",
+    "crates/store/src/migrate.rs": "674df6e3fab66de0e6e652c04d97124be724022a087f64cfefcf3509f46d2bfa",
+    "crates/store/src/workflow.rs": "1138ea23fb3df0b2a4604cbe5d1a0f3cdb83f156c1e16459d5d2c8653280dfdb",
+    "crates/store/src/workflow_publication.rs": "79c0f54a5bda143148774bb0e05abb002cf3d08033a4d00a4a598a1b64cb6786",
+    "proto/farcooler.proto": "68612a3b0e60a523db3fc7aad4f830e9355a38b46d25112e58227046c532a5af",
+    "reports/ov-925/api.md": "c574a34e1b756c0ceac94d287598ca517bedac85a9392d70262f3e23fa2ea4f4"
+  },
+  "checks": {
+    "build": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "build",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "-p",
+        "farcooler-daemon",
+        "--example",
+        "workflow_command_server",
+        "--bin",
+        "farcooler"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 20.142227833999996,
+      "minimum_free": 43346522112,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "f49af8924426298cf38e26dfb7095f6d0ed36324"
+    },
+    "cli": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "workflow_"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 27.185613042,
+      "minimum_free": 43647512576,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "8ffc913eb5edad33e52b49aa7ae4976c6873d2b1"
+    },
+    "compile": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "check",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "-p",
+        "farcooler-daemon",
+        "-p",
+        "farcooler-store",
+        "--all-targets"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 26.151848,
+      "minimum_free": 43676835840,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "8ffc913eb5edad33e52b49aa7ae4976c6873d2b1"
+    },
+    "lint": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "clippy",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "-p",
+        "farcooler-daemon",
+        "-p",
+        "farcooler-store",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 26.153202375000006,
+      "minimum_free": 43531317248,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "8ffc913eb5edad33e52b49aa7ae4976c6873d2b1"
+    },
+    "mutation": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "script",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-workflow-commands/reports/ov-925/mutation.py"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 61.423511208,
+      "minimum_free": 43346522112,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "f49af8924426298cf38e26dfb7095f6d0ed36324"
+    },
+    "protocol": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-protocol",
+        "workflow_wire"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 8.046273332999995,
+      "minimum_free": 44742107136,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "4163081e91353481ae00e80ff7bd3cbab0924915"
+    },
+    "runtime": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 36.2425715,
+      "minimum_free": 44742107136,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "4163081e91353481ae00e80ff7bd3cbab0924915"
+    },
+    "socket": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_commands_over_socket"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 21.158943750000006,
+      "minimum_free": 43531317248,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "8ffc913eb5edad33e52b49aa7ae4976c6873d2b1"
+    },
+    "store": {
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "workflow"
+      ],
+      "exit": 0,
+      "stopped": null,
+      "seconds": 13.081328582999998,
+      "minimum_free": 45407854592,
+      "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "profile": "debug0/test0/incremental0/jobs6/offline",
+      "source": "4163081e91353481ae00e80ff7bd3cbab0924915"
+    }
+  },
+  "toolchain": {
+    "cargo": "1.98.1 (797e8a9bc 2026-08-05)",
+    "rustc": "1.98.1 (48a229cea 2026-09-01)",
+    "python": "/usr/bin/python3"
+  },
+  "warm_target_authorization": "ov-925 manager92694015; no open .cargo-lock holder verified before first build; normal exclusive heavy FIFO",
+  "counts": {
+    "workflow_store": 14,
+    "daemon_workflow_filter": 29,
+    "wire_parser": 1,
+    "CLI_producer": 1,
+    "socket": 2
+  },
+  "mutation": {
+    "expected_red": 101,
+    "restored_green": 0,
+    "restored_source_sha256": "fe508071e5b773d1a14bb4e735312c0a557cbce08739509b11c00d5f91a0d69f",
+    "intermediate_commit_not_for_integration": "eeee4bdd6",
+    "restoration_commit": "f49af8924426298cf38e26dfb7095f6d0ed36324"
+  },
+  "actual_cli_trace": "trace.json; final revision9, item a Done, item b Cancelled; fresh private fixture",
+  "signature_verification": "git verify-commit 8ffc913eb and f49af8924 exit0; good PGP signatures, key trust unknown",
+  "independent_review": "manager a07d43de started exact8ffc; scoped final delta addendum requested; pending before integration",
+  "implemented_Session_transport": false,
+  "Session_next_delta_contract": "session-contract.md"
+}

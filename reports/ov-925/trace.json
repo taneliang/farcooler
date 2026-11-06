@@ -1,0 +1,244 @@
+[
+  {
+    "args": [
+      "workspace",
+      "set-workflow",
+      "Main",
+      "--file",
+      "/tmp/ov925-42cc9smi/fresh/definition.json",
+      "--command-id",
+      "publish",
+      "--revision",
+      "0",
+      "--epoch",
+      "1",
+      "--sequence",
+      "1"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:publish\",\"result\":{\"Ok\":0}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "enqueue",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "a",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "enqueue",
+      "--revision",
+      "0",
+      "--epoch",
+      "1",
+      "--sequence",
+      "1"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:enqueue\",\"result\":{\"Ok\":1}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "enqueue",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "a",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "enqueue",
+      "--revision",
+      "0",
+      "--epoch",
+      "1",
+      "--sequence",
+      "1"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:enqueue\",\"result\":{\"Ok\":1}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":null,\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":1,\"iteration\":0,\"last_evidence\":null,\"pending\":null,\"phase\":\"WaitingApproval\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:77eba13cb72ab05c1d20805d4d9b4bf242dd149be4d722966215021cd19185ff\",\"stage\":0,\"stopping\":null}},\"revision\":1,\"schema\":1,\"seen\":[\"wire:owner:enqueue\"],\"source_sequences\":{\"wire:owner\":1},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "approve",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "a",
+      "--run",
+      "wf1:77eba13cb72ab05c1d20805d4d9b4bf242dd149be4d722966215021cd19185ff",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "approve",
+      "--revision",
+      "1",
+      "--epoch",
+      "1",
+      "--sequence",
+      "2"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[\"wf1:74336575eeb6ed8fa53fbee6f838fb24f1d7dda7b01688328cee6fb04897c9b7\"],\"id\":\"wire:owner:approve\",\"result\":{\"Ok\":2}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1},{\"body\":\"a:Running\",\"id\":\"wf1:549fc212979fe611f100d1cbb620b47bdfd1b85eebb394f9b6e0105cc2174706\",\"revision\":2},{\"body\":\"a:Running\",\"id\":\"wf1:9e3c2d1834147b113cf9f1cd4298c229f0a5ec2af80da6658fecd912b7ae74fd\",\"revision\":3}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":null,\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":2,\"iteration\":0,\"last_evidence\":{\"candidate\":\"27e382203352c786be496c5b8e36afed99860e1d\",\"manifest\":\"wf1:1ff25aa842f6e858601693fec2a19bbeff6ca47758dd2200552c8155448d8ee1\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"receipt\":\"wf1:e5c3a898bd9c956889aac09ec7e3e418243d6b6672683d92c9f28b34265a9b9c\"},\"pending\":\"wf1:b0719cbe2ff0b8b0a8e1010b5065be88e894d0abdc703a88e01e60168e6e542e\",\"phase\":\"Running\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:8779953624e7c06598106befdedb0da065ca9dd88d54c9eccf462bd5a92da9df\",\"stage\":1,\"stopping\":null}},\"revision\":3,\"schema\":1,\"seen\":[\"runtime:01a1b16e-4db4-7e41-b2fb-2a9ac659563e\",\"wire:owner:approve\",\"wire:owner:enqueue\"],\"source_sequences\":{\"runtime\":1,\"wire:owner\":2},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1},{\"body\":\"a:Running\",\"id\":\"wf1:549fc212979fe611f100d1cbb620b47bdfd1b85eebb394f9b6e0105cc2174706\",\"revision\":2},{\"body\":\"a:Running\",\"id\":\"wf1:9e3c2d1834147b113cf9f1cd4298c229f0a5ec2af80da6658fecd912b7ae74fd\",\"revision\":3},{\"body\":\"a:Running\",\"id\":\"wf1:abfd1c7e8aaf0d74dcad067a66b4d2c8a0a86e9d255b0732321910322b6c72a0\",\"revision\":4},{\"body\":\"a:Running\",\"id\":\"wf1:f0396251e737f45dc84456f884ae64a1fd07be3357126691a2924d6ba4c7e151\",\"revision\":5}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":4,\"iteration\":0,\"last_evidence\":{\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"manifest\":\"wf1:67bc629ff7431550cd8f2303fde57d6d643efc196c73a89eeceea372060a470f\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"receipt\":\"wf1:68397fdb12e8dc31e145b9c2b20246125b0edea0601ead06849a12fcec59507d\"},\"pending\":\"wf1:ed32cbdd0eaeb667a22fcea91e8e5e64b12d8a35a6ed63721154be011a93c933\",\"phase\":\"Running\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:c84355fbf2df4475b925874f1988d359661c7f0a96d5124c3e1128617210d50e\",\"stage\":3,\"stopping\":null}},\"revision\":5,\"schema\":1,\"seen\":[\"runtime:01a1b16e-4db4-7e41-b2fb-2a9ac659563e\",\"runtime:01a1b16e-4dff-7203-b01c-3b9899005d78\",\"runtime:01a1b16e-4e40-7411-a833-f86a60cce730\",\"wire:owner:approve\",\"wire:owner:enqueue\"],\"source_sequences\":{\"runtime\":3,\"wire:owner\":2},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1},{\"body\":\"a:Running\",\"id\":\"wf1:549fc212979fe611f100d1cbb620b47bdfd1b85eebb394f9b6e0105cc2174706\",\"revision\":2},{\"body\":\"a:Running\",\"id\":\"wf1:9e3c2d1834147b113cf9f1cd4298c229f0a5ec2af80da6658fecd912b7ae74fd\",\"revision\":3},{\"body\":\"a:Running\",\"id\":\"wf1:abfd1c7e8aaf0d74dcad067a66b4d2c8a0a86e9d255b0732321910322b6c72a0\",\"revision\":4},{\"body\":\"a:Running\",\"id\":\"wf1:f0396251e737f45dc84456f884ae64a1fd07be3357126691a2924d6ba4c7e151\",\"revision\":5},{\"body\":\"a:Running\",\"id\":\"wf1:e72340113ca07fc14f9638fa0ffc5f5a502f3375a1a5980e28f42da8f2c2af93\",\"revision\":6},{\"body\":\"a:Done\",\"id\":\"wf1:79f5058a2aec84b39109215a4722be3cb201dd5c1d22fcb2da78b74768e424ea\",\"revision\":7}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":6,\"iteration\":0,\"last_evidence\":{\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"manifest\":\"wf1:c32dcdcd26d9b88104f2929ded98b210044763ec0e6a8dea7536cf819075a09b\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"receipt\":\"wf1:b78e97471d3befa9ad58de501567906b48278ba0094a14701e86a9767f713996\"},\"pending\":null,\"phase\":\"Done\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:5c5fb5b9f51885f266b9e12b98a90e39613b13df1dbd3b384ff691527321b43f\",\"stage\":5,\"stopping\":null}},\"revision\":7,\"schema\":1,\"seen\":[\"runtime:01a1b16e-4db4-7e41-b2fb-2a9ac659563e\",\"runtime:01a1b16e-4dff-7203-b01c-3b9899005d78\",\"runtime:01a1b16e-4e40-7411-a833-f86a60cce730\",\"runtime:01a1b16e-4e7f-7030-9255-7093980219be\",\"runtime:01a1b16e-4e9c-7d80-87e2-516a9c83aa04\",\"wire:owner:approve\",\"wire:owner:enqueue\"],\"source_sequences\":{\"runtime\":5,\"wire:owner\":2},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "approve",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "a",
+      "--run",
+      "wf1:77eba13cb72ab05c1d20805d4d9b4bf242dd149be4d722966215021cd19185ff",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "approve",
+      "--revision",
+      "1",
+      "--epoch",
+      "1",
+      "--sequence",
+      "2"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[\"wf1:74336575eeb6ed8fa53fbee6f838fb24f1d7dda7b01688328cee6fb04897c9b7\"],\"id\":\"wire:owner:approve\",\"result\":{\"Ok\":2}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "enqueue",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "b",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "second",
+      "--revision",
+      "7",
+      "--epoch",
+      "1",
+      "--sequence",
+      "3"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:second\",\"result\":{\"Ok\":8}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1},{\"body\":\"a:Running\",\"id\":\"wf1:549fc212979fe611f100d1cbb620b47bdfd1b85eebb394f9b6e0105cc2174706\",\"revision\":2},{\"body\":\"a:Running\",\"id\":\"wf1:9e3c2d1834147b113cf9f1cd4298c229f0a5ec2af80da6658fecd912b7ae74fd\",\"revision\":3},{\"body\":\"a:Running\",\"id\":\"wf1:abfd1c7e8aaf0d74dcad067a66b4d2c8a0a86e9d255b0732321910322b6c72a0\",\"revision\":4},{\"body\":\"a:Running\",\"id\":\"wf1:f0396251e737f45dc84456f884ae64a1fd07be3357126691a2924d6ba4c7e151\",\"revision\":5},{\"body\":\"a:Running\",\"id\":\"wf1:e72340113ca07fc14f9638fa0ffc5f5a502f3375a1a5980e28f42da8f2c2af93\",\"revision\":6},{\"body\":\"a:Done\",\"id\":\"wf1:79f5058a2aec84b39109215a4722be3cb201dd5c1d22fcb2da78b74768e424ea\",\"revision\":7},{\"body\":\"b:WaitingApproval\",\"id\":\"wf1:43be6e65c58f8ee82bc791d1c03c8aa358bbd26e41c2203af567289a60f36702\",\"revision\":8}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":6,\"iteration\":0,\"last_evidence\":{\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"manifest\":\"wf1:c32dcdcd26d9b88104f2929ded98b210044763ec0e6a8dea7536cf819075a09b\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"receipt\":\"wf1:b78e97471d3befa9ad58de501567906b48278ba0094a14701e86a9767f713996\"},\"pending\":null,\"phase\":\"Done\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:5c5fb5b9f51885f266b9e12b98a90e39613b13df1dbd3b384ff691527321b43f\",\"stage\":5,\"stopping\":null},\"b\":{\"attempt\":1,\"candidate\":null,\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":1,\"iteration\":0,\"last_evidence\":null,\"pending\":null,\"phase\":\"WaitingApproval\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:768cee9e9e0e6082b9520fca8de25e86933140868f9e9d995b245bcf7e4e746f\",\"stage\":0,\"stopping\":null}},\"revision\":8,\"schema\":1,\"seen\":[\"runtime:01a1b16e-4db4-7e41-b2fb-2a9ac659563e\",\"runtime:01a1b16e-4dff-7203-b01c-3b9899005d78\",\"runtime:01a1b16e-4e40-7411-a833-f86a60cce730\",\"runtime:01a1b16e-4e7f-7030-9255-7093980219be\",\"runtime:01a1b16e-4e9c-7d80-87e2-516a9c83aa04\",\"wire:owner:approve\",\"wire:owner:enqueue\",\"wire:owner:second\"],\"source_sequences\":{\"runtime\":5,\"wire:owner\":3},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "cancel",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "b",
+      "--run",
+      "wf1:768cee9e9e0e6082b9520fca8de25e86933140868f9e9d995b245bcf7e4e746f",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "cancel",
+      "--revision",
+      "8",
+      "--epoch",
+      "1",
+      "--sequence",
+      "4"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:cancel\",\"result\":{\"Ok\":9}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "cancel",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4",
+      "b",
+      "--run",
+      "wf1:768cee9e9e0e6082b9520fca8de25e86933140868f9e9d995b245bcf7e4e746f",
+      "--pin",
+      "wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86",
+      "--command-id",
+      "cancel",
+      "--revision",
+      "8",
+      "--epoch",
+      "1",
+      "--sequence",
+      "4"
+    ],
+    "exit": 0,
+    "stdout": "{\"receipt\":{\"effects\":[],\"id\":\"wire:owner:cancel\",\"result\":{\"Ok\":9}},\"schema\":1}\n",
+    "stderr": ""
+  },
+  {
+    "args": [
+      "workflow",
+      "get",
+      "01a1b16e-4939-77f3-8298-80dd568ce1d4"
+    ],
+    "exit": 0,
+    "stdout": "{\"configuration\":{\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\"},\"notices\":[{\"body\":\"a:WaitingApproval\",\"id\":\"wf1:08f0b9d6973e36fb57fee074ff272a2485d8c52af9cf7a093069bbabb1cfc42c\",\"revision\":1},{\"body\":\"a:Running\",\"id\":\"wf1:549fc212979fe611f100d1cbb620b47bdfd1b85eebb394f9b6e0105cc2174706\",\"revision\":2},{\"body\":\"a:Running\",\"id\":\"wf1:9e3c2d1834147b113cf9f1cd4298c229f0a5ec2af80da6658fecd912b7ae74fd\",\"revision\":3},{\"body\":\"a:Running\",\"id\":\"wf1:abfd1c7e8aaf0d74dcad067a66b4d2c8a0a86e9d255b0732321910322b6c72a0\",\"revision\":4},{\"body\":\"a:Running\",\"id\":\"wf1:f0396251e737f45dc84456f884ae64a1fd07be3357126691a2924d6ba4c7e151\",\"revision\":5},{\"body\":\"a:Running\",\"id\":\"wf1:e72340113ca07fc14f9638fa0ffc5f5a502f3375a1a5980e28f42da8f2c2af93\",\"revision\":6},{\"body\":\"a:Done\",\"id\":\"wf1:79f5058a2aec84b39109215a4722be3cb201dd5c1d22fcb2da78b74768e424ea\",\"revision\":7},{\"body\":\"b:WaitingApproval\",\"id\":\"wf1:43be6e65c58f8ee82bc791d1c03c8aa358bbd26e41c2203af567289a60f36702\",\"revision\":8},{\"body\":\"b:Cancelled\",\"id\":\"wf1:c12eb3582cb907489bcb4f4ab5d72fc7c0ab8a7475f52e9911b5ceb92fa3f601\",\"revision\":9}],\"schema\":1,\"state\":{\"epoch\":1,\"items\":{\"a\":{\"attempt\":1,\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":6,\"iteration\":0,\"last_evidence\":{\"candidate\":\"6875adcc739e2aeed14043028c08ee3468d7eced\",\"manifest\":\"wf1:c32dcdcd26d9b88104f2929ded98b210044763ec0e6a8dea7536cf819075a09b\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"receipt\":\"wf1:b78e97471d3befa9ad58de501567906b48278ba0094a14701e86a9767f713996\"},\"pending\":null,\"phase\":\"Done\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:5c5fb5b9f51885f266b9e12b98a90e39613b13df1dbd3b384ff691527321b43f\",\"stage\":5,\"stopping\":null},\"b\":{\"attempt\":1,\"candidate\":null,\"definition\":{\"max_reworks\":0,\"rework_target\":null,\"schema\":1,\"source\":\"coding/v1\",\"stages\":[{\"id\":\"stage-0\",\"kind\":\"Provision\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-worktree/v1\",\"arguments\":[\"pinned-base\"],\"environment\":{}},\"progression\":{\"AwaitApproval\":{\"principal\":\"owner\"}}},{\"id\":\"stage-1\",\"kind\":\"Build\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-harness/v1\",\"arguments\":[\"draft\",\"ready\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-2\",\"kind\":\"Check\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-check/v1\",\"arguments\":[\"result.txt\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-4\",\"kind\":\"Land\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"local-land/v1\",\"arguments\":[\"refs/heads/landed\"],\"environment\":{}},\"progression\":\"Automatic\"},{\"id\":\"stage-5\",\"kind\":\"Ci\",\"max_attempts\":2,\"operation\":{\"adapter_version\":\"fixture-ci/v1\",\"arguments\":[\"fixture-check\"],\"environment\":{}},\"progression\":\"Automatic\"}]},\"dependencies\":[],\"fence\":2,\"iteration\":0,\"last_evidence\":null,\"pending\":null,\"phase\":\"Cancelled\",\"pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"policy_pin\":\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\",\"resource\":\"wf1:afe5e0b617a5721c8cbdcb4f18fe40263cb755b16c14f186b845f60f2e7fa46a\",\"run\":\"wf1:768cee9e9e0e6082b9520fca8de25e86933140868f9e9d995b245bcf7e4e746f\",\"stage\":0,\"stopping\":null}},\"revision\":9,\"schema\":1,\"seen\":[\"runtime:01a1b16e-4db4-7e41-b2fb-2a9ac659563e\",\"runtime:01a1b16e-4dff-7203-b01c-3b9899005d78\",\"runtime:01a1b16e-4e40-7411-a833-f86a60cce730\",\"runtime:01a1b16e-4e7f-7030-9255-7093980219be\",\"runtime:01a1b16e-4e9c-7d80-87e2-516a9c83aa04\",\"wire:owner:approve\",\"wire:owner:cancel\",\"wire:owner:enqueue\",\"wire:owner:second\"],\"source_sequences\":{\"runtime\":5,\"wire:owner\":4},\"workspace\":\"01a1b16e-4939-77f3-8298-80dd568ce1d4\"}}\n",
+    "stderr": ""
+  },
+  {
+    "summary": "CLI publication/enqueue/read/approve/automatic progression/cancel and distinct-connection identity retries passed",
+    "fixture": "/tmp/ov925-42cc9smi/fresh",
+    "final_revision": 9,
+    "owner_app_data_or_provider_used": false,
+    "auth_boundary": "fixture server supplies known owner peer; production role admission separately exercised by socket tests"
+  }
+]

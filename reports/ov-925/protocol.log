@@ -1,0 +1,24 @@
+   Compiling libc v0.2.189
+   Compiling syn v2.0.119
+   Compiling serde_json v1.0.151
+   Compiling cpufeatures v0.2.17
+   Compiling getrandom v0.4.3
+   Compiling sha2 v0.10.9
+   Compiling uuid v1.24.0
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-workflow-commands/crates/workflow)
+   Compiling prettyplease v0.2.37
+   Compiling prost-derive v0.13.5
+   Compiling prost v0.13.5
+   Compiling prost-types v0.13.5
+   Compiling prost-build v0.13.5
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-925-workflow-commands/crates/protocol)
+    Finished `test` profile [unoptimized] target(s) in 6.91s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_protocol-779e7337a25e3c31)
+
+running 1 test
+test workflow_commands::tests::workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in 0.00s
+
+
+exit=0, stopped=None
