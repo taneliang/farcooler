@@ -9,7 +9,7 @@
         "inspect": true,
         "workspace": "workspace"
       },
-      "schema": 1,
+      "schema": 2,
       "selection": null,
       "snapshot": {
         "epoch": 1,
@@ -140,8 +140,9 @@
           {
             "actions": [
               {
-                "guard": "wf1:204b500dc520ac3c58b06385dd3f213dc9f48d7675de34714f1e078a2c17eafe",
-                "kind": "Cancel"
+                "guard": "wf1:42fd5dbeccac4ecbdcf4b1a82f44e164fac3b18c3d406461fe8b5c986b634673",
+                "kind": "Cancel",
+                "label": "Cancel Run"
               }
             ],
             "attempt": 1,
@@ -151,62 +152,82 @@
             "gate": null,
             "item": "item",
             "iteration": 0,
+            "label": "Workflow Run",
             "latest_evidence": null,
             "pending_effect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
             "phase": "Running",
+            "phase_label": "Running",
             "policy_pin": "policy",
             "reasons": [
-              "Automatic"
+              {
+                "kind": "Automatic",
+                "label": "Running",
+                "text": "The engine is executing this stage."
+              }
             ],
             "reworks_remaining": 2,
             "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
             "stage": {
               "id": "stage-0",
               "kind": "Provision",
-              "progression": "Automatic"
+              "label": "Prepare Workspace",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
             },
             "stages": [
               {
                 "id": "stage-0",
                 "kind": "Provision",
-                "progression": "Automatic"
+                "label": "Prepare Workspace",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
-                "progression": "Automatic"
+                "label": "Build",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
-                "progression": "Automatic"
+                "label": "Run Checks",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-3",
                 "kind": {
                   "Review": "Dispatch"
                 },
-                "progression": "Automatic"
+                "label": "Review",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
-                "progression": "Automatic"
+                "label": "Land Changes",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
-                "progression": "Automatic"
+                "label": "Check CI",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               }
             ]
           }
         ],
-        "schema": 1,
+        "schema": 2,
         "workspace": "workspace"
       },
       "error": null,
       "intent": null,
-      "schema": 1
+      "schema": 2
     }
   },
   {
@@ -219,7 +240,7 @@
         "inspect": true,
         "workspace": "workspace"
       },
-      "schema": 1,
+      "schema": 2,
       "selection": null,
       "snapshot": {
         "epoch": 1,
@@ -374,12 +395,14 @@
           {
             "actions": [
               {
-                "guard": "wf1:482546d6cacd009c14a43c26a4aac12b0eecbb84116131e9050e559a7a5ca82f",
-                "kind": "Approve"
+                "guard": "wf1:1ce42e416e974eed65572a0e4bac98b1788cbb23faacc972469e0d53f8cf3003",
+                "kind": "Approve",
+                "label": "Approve"
               },
               {
-                "guard": "wf1:482546d6cacd009c14a43c26a4aac12b0eecbb84116131e9050e559a7a5ca82f",
-                "kind": "Cancel"
+                "guard": "wf1:1ce42e416e974eed65572a0e4bac98b1788cbb23faacc972469e0d53f8cf3003",
+                "kind": "Cancel",
+                "label": "Cancel Run"
               }
             ],
             "attempt": 1,
@@ -388,94 +411,116 @@
             "fence": 1,
             "gate": {
               "kind": "Approval",
-              "principal": "owner"
+              "label": "Approval Required",
+              "principal": "owner",
+              "text": "Waiting for approval from owner."
             },
             "item": "item",
             "iteration": 0,
+            "label": "Workflow Run",
             "latest_evidence": null,
             "pending_effect": null,
             "phase": "WaitingApproval",
+            "phase_label": "Awaiting Approval",
             "policy_pin": "policy",
             "reasons": [
-              "ApprovalRequired"
+              {
+                "kind": "ApprovalRequired",
+                "label": "Approval Required",
+                "text": "This stage is waiting for its configured approval."
+              }
             ],
             "reworks_remaining": 2,
             "run": "wf1:44c33962a5e1c3994dd7cf9ee3b33c7fd4bc7dba64a8d229360dcf782ca8370a",
             "stage": {
               "id": "stage-0",
               "kind": "Provision",
+              "label": "Prepare Workspace",
               "progression": {
                 "AwaitApproval": {
                   "principal": "owner"
                 }
-              }
+              },
+              "progression_label": "Approval from owner"
             },
             "stages": [
               {
                 "id": "stage-0",
                 "kind": "Provision",
+                "label": "Prepare Workspace",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
+                "label": "Build",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
+                "label": "Run Checks",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               },
               {
                 "id": "stage-3",
                 "kind": {
                   "Review": "Dispatch"
                 },
+                "label": "Review",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
+                "label": "Land Changes",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
+                "label": "Check CI",
                 "progression": {
                   "AwaitApproval": {
                     "principal": "owner"
                   }
-                }
+                },
+                "progression_label": "Approval from owner"
               }
             ]
           }
         ],
-        "schema": 1,
+        "schema": 2,
         "workspace": "workspace"
       },
       "error": null,
       "intent": null,
-      "schema": 1
+      "schema": 2
     }
   },
   {
@@ -488,7 +533,7 @@
         "inspect": true,
         "workspace": "workspace"
       },
-      "schema": 1,
+      "schema": 2,
       "selection": null,
       "snapshot": {
         "epoch": 1,
@@ -628,12 +673,14 @@
           {
             "actions": [
               {
-                "guard": "wf1:a289ec524d64d131f3ace5dba31011ef2fdc4f30e6eaf42e3e49ad605b807089",
-                "kind": "InspectLatestEvidence"
+                "guard": "wf1:d3ee26b18fb76af2763913832bdc746f71b6a5be75d16cecedaf2cf31ae0ce64",
+                "kind": "InspectLatestEvidence",
+                "label": "Inspect Latest Evidence…"
               },
               {
-                "guard": "wf1:a289ec524d64d131f3ace5dba31011ef2fdc4f30e6eaf42e3e49ad605b807089",
-                "kind": "Cancel"
+                "guard": "wf1:d3ee26b18fb76af2763913832bdc746f71b6a5be75d16cecedaf2cf31ae0ce64",
+                "kind": "Cancel",
+                "label": "Cancel Run"
               }
             ],
             "attempt": 1,
@@ -643,6 +690,7 @@
             "gate": null,
             "item": "item",
             "iteration": 1,
+            "label": "Workflow Run",
             "latest_evidence": {
               "candidate": "candidate",
               "manifest": "manifest-4",
@@ -651,61 +699,88 @@
             },
             "pending_effect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
             "phase": "Running",
+            "phase_label": "Running",
             "policy_pin": "policy",
             "reasons": [
-              "Automatic",
-              "Reworking",
-              "EvidenceInvalidated"
+              {
+                "kind": "Automatic",
+                "label": "Running",
+                "text": "The engine is executing this stage."
+              },
+              {
+                "kind": "Reworking",
+                "label": "Rework Iteration",
+                "text": "This run has entered a rework iteration."
+              },
+              {
+                "kind": "EvidenceInvalidated",
+                "label": "Evidence Invalidated",
+                "text": "The latest evidence no longer matches the current candidate or policy."
+              }
             ],
             "reworks_remaining": 1,
             "run": "wf1:58a37a47d788ba6e03b25f93f23a3076ac12c0e825248b24e7b4de118ffb9dd2",
             "stage": {
               "id": "stage-1",
               "kind": "Build",
-              "progression": "Automatic"
+              "label": "Build",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
             },
             "stages": [
               {
                 "id": "stage-0",
                 "kind": "Provision",
-                "progression": "Automatic"
+                "label": "Prepare Workspace",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
-                "progression": "Automatic"
+                "label": "Build",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
-                "progression": "Automatic"
+                "label": "Run Checks",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-3",
                 "kind": {
                   "Review": "Dispatch"
                 },
-                "progression": "Automatic"
+                "label": "Review",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
-                "progression": "Automatic"
+                "label": "Land Changes",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
-                "progression": "Automatic"
+                "label": "Check CI",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               }
             ]
           }
         ],
-        "schema": 1,
+        "schema": 2,
         "workspace": "workspace"
       },
       "error": null,
       "intent": null,
-      "schema": 1
+      "schema": 2
     }
   },
   {
@@ -718,7 +793,7 @@
         "inspect": true,
         "workspace": "workspace"
       },
-      "schema": 1,
+      "schema": 2,
       "selection": null,
       "snapshot": {
         "epoch": 1,
@@ -857,16 +932,19 @@
           {
             "actions": [
               {
-                "guard": "wf1:1994b4ece13b6b1cdeb389744d45e230ac2631f550870c799e3ba91351d1cd41",
-                "kind": "InspectLatestEvidence"
+                "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
+                "kind": "InspectLatestEvidence",
+                "label": "Inspect Latest Evidence…"
               },
               {
-                "guard": "wf1:1994b4ece13b6b1cdeb389744d45e230ac2631f550870c799e3ba91351d1cd41",
-                "kind": "InspectUncertainty"
+                "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
+                "kind": "InspectUncertainty",
+                "label": "Inspect Uncertain Operation…"
               },
               {
-                "guard": "wf1:1994b4ece13b6b1cdeb389744d45e230ac2631f550870c799e3ba91351d1cd41",
-                "kind": "Cancel"
+                "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
+                "kind": "Cancel",
+                "label": "Cancel Run"
               }
             ],
             "attempt": 1,
@@ -876,6 +954,7 @@
             "gate": null,
             "item": "item",
             "iteration": 0,
+            "label": "Workflow Run",
             "latest_evidence": {
               "candidate": "candidate",
               "manifest": "manifest-2",
@@ -884,59 +963,78 @@
             },
             "pending_effect": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
             "phase": "Uncertain",
+            "phase_label": "Outcome Uncertain",
             "policy_pin": "policy",
             "reasons": [
-              "EffectUncertain"
+              {
+                "kind": "EffectUncertain",
+                "label": "Outcome Uncertain",
+                "text": "The operation outcome needs inspection before execution can continue."
+              }
             ],
             "reworks_remaining": 2,
             "run": "wf1:19540cdd3703a146d6c1fb8cf9a1f62f8ba501e1504383196170f71c554350bb",
             "stage": {
               "id": "stage-2",
               "kind": "Check",
-              "progression": "Automatic"
+              "label": "Run Checks",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
             },
             "stages": [
               {
                 "id": "stage-0",
                 "kind": "Provision",
-                "progression": "Automatic"
+                "label": "Prepare Workspace",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
-                "progression": "Automatic"
+                "label": "Build",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
-                "progression": "Automatic"
+                "label": "Run Checks",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-3",
                 "kind": {
                   "Review": "Dispatch"
                 },
-                "progression": "Automatic"
+                "label": "Review",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
-                "progression": "Automatic"
+                "label": "Land Changes",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
-                "progression": "Automatic"
+                "label": "Check CI",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               }
             ]
           }
         ],
-        "schema": 1,
+        "schema": 2,
         "workspace": "workspace"
       },
       "error": null,
       "intent": null,
-      "schema": 1
+      "schema": 2
     }
   },
   {
@@ -949,7 +1047,7 @@
         "inspect": true,
         "workspace": "workspace"
       },
-      "schema": 1,
+      "schema": 2,
       "selection": null,
       "snapshot": {
         "epoch": 1,
@@ -1090,12 +1188,14 @@
           {
             "actions": [
               {
-                "guard": "wf1:acd5fe309c844ea7995a26ead8ebbc34206f7f2f10ae52fe6bd053d2121849d2",
-                "kind": "InspectLatestEvidence"
+                "guard": "wf1:fc9b50d8420c349b9783dd6ae86fe2dab1bad9ac5bfad21e8f67705cfa776cd6",
+                "kind": "InspectLatestEvidence",
+                "label": "Inspect Latest Evidence…"
               },
               {
-                "guard": "wf1:acd5fe309c844ea7995a26ead8ebbc34206f7f2f10ae52fe6bd053d2121849d2",
-                "kind": "Cancel"
+                "guard": "wf1:fc9b50d8420c349b9783dd6ae86fe2dab1bad9ac5bfad21e8f67705cfa776cd6",
+                "kind": "Cancel",
+                "label": "Cancel Run"
               }
             ],
             "attempt": 1,
@@ -1105,6 +1205,7 @@
             "gate": null,
             "item": "item",
             "iteration": 1,
+            "label": "Workflow Run",
             "latest_evidence": {
               "candidate": "candidate",
               "manifest": "manifest-2",
@@ -1113,61 +1214,88 @@
             },
             "pending_effect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
             "phase": "Running",
+            "phase_label": "Running",
             "policy_pin": "policy",
             "reasons": [
-              "Automatic",
-              "Reworking",
-              "EvidenceInvalidated"
+              {
+                "kind": "Automatic",
+                "label": "Running",
+                "text": "The engine is executing this stage."
+              },
+              {
+                "kind": "Reworking",
+                "label": "Rework Iteration",
+                "text": "This run has entered a rework iteration."
+              },
+              {
+                "kind": "EvidenceInvalidated",
+                "label": "Evidence Invalidated",
+                "text": "The latest evidence no longer matches the current candidate or policy."
+              }
             ],
             "reworks_remaining": 1,
             "run": "wf1:7badf97655f38b541eff64d4b27b5b9d09f83d87f7549b9f66d02cfecca13679",
             "stage": {
               "id": "stage-2",
               "kind": "Check",
-              "progression": "Automatic"
+              "label": "Run Checks",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
             },
             "stages": [
               {
                 "id": "stage-0",
                 "kind": "Provision",
-                "progression": "Automatic"
+                "label": "Prepare Workspace",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
-                "progression": "Automatic"
+                "label": "Build",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
-                "progression": "Automatic"
+                "label": "Run Checks",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-3",
                 "kind": {
                   "Review": "Dispatch"
                 },
-                "progression": "Automatic"
+                "label": "Review",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
-                "progression": "Automatic"
+                "label": "Land Changes",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
-                "progression": "Automatic"
+                "label": "Check CI",
+                "progression": "Automatic",
+                "progression_label": "Automatic"
               }
             ]
           }
         ],
-        "schema": 1,
+        "schema": 2,
         "workspace": "workspace"
       },
       "error": null,
       "intent": null,
-      "schema": 1
+      "schema": 2
     }
   }
 ]

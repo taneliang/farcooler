@@ -117,7 +117,7 @@ fn workflow_presentation_invalidated_inspection_and_rework() {
         }
     }
     let invalidated = &cases[4].1;
-    assert!(project(invalidated, &auth()).unwrap().runs[0].reasons.contains(&Reason::EvidenceInvalidated));
+    assert!(project(invalidated, &auth()).unwrap().runs[0].reasons.iter().any(|r| r.kind == Reason::EvidenceInvalidated));
     let mut definition = Definition::coding();
     definition.stages[3].kind = StageKind::Review(Reviewer::Person("owner".into()));
     let state = enqueue(definition);
@@ -174,7 +174,7 @@ fn workflow_presentation_selected_and_every_stage_approval() {
         for index in 0..6 {
             let card = project(&state, &auth()).unwrap().runs.remove(0);
             if every || index == 2 {
-                assert_eq!(card.gate, Some(GateCard { kind: GateKind::Approval, principal: "owner".into() }));
+                assert_eq!(card.gate, Some(display::gate_card(GateKind::Approval, "owner")));
                 let approve = card.actions.iter().find(|a| a.kind == ActionKind::Approve).unwrap();
                 let Intent::Command(command) = action(&state, &auth(), "item", approve).unwrap() else { panic!() };
                 state = apply(&state, command, Grant::Decision { principal: "owner".into() });
@@ -186,4 +186,44 @@ fn workflow_presentation_selected_and_every_stage_approval() {
         assert!(card.stage.is_none() && card.gate.is_none());
         assert!(!card.actions.iter().any(|a| matches!(a.kind, ActionKind::Approve | ActionKind::Cancel)));
     }
+}
+
+#[test]
+fn workflow_presentation_generic_display_slots() {
+    // A renderer reads only shared text and forwards the supplied action descriptor.
+    // There is no feature-specific kind/phase/stage switch or copy map in this renderer.
+    fn text_slots(card: &RunCard) -> Vec<&str> {
+        let mut slots = vec![card.label.as_str(), card.phase_label.as_str()];
+        if let Some(stage) = &card.stage {
+            slots.extend([stage.label.as_str(), stage.progression_label.as_str()]);
+        }
+        if let Some(gate) = &card.gate { slots.extend([gate.label.as_str(), gate.text.as_str()]); }
+        for reason in &card.reasons { slots.extend([reason.label.as_str(), reason.text.as_str()]); }
+        slots.extend(card.actions.iter().map(|a| a.label.as_str()));
+        slots
+    }
+    for (_, state) in fixtures() {
+        let view = project(&state, &auth()).unwrap();
+        let slots = text_slots(&view.runs[0]);
+        assert!(slots.iter().all(|s| !s.is_empty()));
+        assert!(view.runs[0].stages.iter().all(|s| !s.label.is_empty() && !s.progression_label.is_empty()));
+    }
+    let state = fixtures().remove(4).1;
+    let card = project(&state, &auth()).unwrap().runs.remove(0);
+    let slots = text_slots(&card);
+    assert!(slots.contains(&"Evidence Invalidated"));
+    assert!(slots.contains(&"The latest evidence no longer matches the current candidate or policy."));
+    let label = "Inspect Latest Evidence…";
+    assert!(slots.contains(&label));
+    let button = card.actions.iter().find(|a| a.label == label).unwrap();
+    let request = Request { schema: SCHEMA, snapshot: state, capabilities: auth(),
+        selection: Some(Selection { item: card.item.clone(), action: button.clone() }) };
+    let response: Response = serde_json::from_str(&json(&serde_json::to_string(&request).unwrap())).unwrap();
+    assert_eq!(response.schema, 2);
+    assert!(matches!(response.intent, Some(Intent::InspectLatestEvidence { .. })));
+    assert!(response.error.is_none());
+    // The v1 bare-enum contract is explicitly rejected rather than silently frozen by consumers.
+    let mut old = request; old.schema = 1;
+    let response: Response = serde_json::from_str(&json(&serde_json::to_string(&old).unwrap())).unwrap();
+    assert_eq!(response.error, Some(Error::Invalid));
 }

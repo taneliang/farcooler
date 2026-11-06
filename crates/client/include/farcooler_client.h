@@ -839,7 +839,7 @@ uint64_t farcooler_client_paste_file(void *handle, const char *terminal,
                                      const char *name, const char *mime,
                                      const uint8_t *data, size_t len);
 
-/* Pure v1 workflow projection/action intent. No transport or authentication.
+/* Pure v2 workflow projection/action intent. No transport or authentication.
  * Host supplies authenticated capability context in the request DTO; user JSON
  * must not be treated as a grant. Stable response/error shape is shared with JNI
  * nativeWorkflowPresentation and WASM workflowPresentation. Returns required

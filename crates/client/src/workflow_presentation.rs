@@ -3,7 +3,9 @@
 use farcooler_workflow::{digest, Command, Evidence, Phase, Progression, Reviewer, StageKind, State};
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
+
+mod display;
 
 /// This is an explicit trusted input, not a credential or a transport grant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,21 +27,33 @@ pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, Accept
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Action {
     pub kind: ActionKind,
+    pub label: String,
     /// Binds the entire snapshot and capability context; not a secret or an authorization token.
     pub guard: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StageCard {
     pub id: String,
+    pub label: String,
+    pub progression_label: String,
     pub kind: StageKind,
     pub progression: Progression,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GateKind { Approval, Review }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GateCard { pub kind: GateKind, pub principal: String }
+pub struct GateCard {
+    pub kind: GateKind,
+    pub principal: String,
+    pub label: String,
+    pub text: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonCard { pub kind: Reason, pub label: String, pub text: String }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunCard {
+    pub label: String,
+    pub phase_label: String,
     pub item: String,
     pub run: String,
     pub definition_pin: String,
@@ -56,7 +70,7 @@ pub struct RunCard {
     pub reworks_remaining: u8,
     pub attempt: u8,
     pub fence: u64,
-    pub reasons: Vec<Reason>,
+    pub reasons: Vec<ReasonCard>,
     pub actions: Vec<Action>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,7 +98,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
     if auth.workspace != state.workspace || auth.epoch != state.epoch || !auth.inspect {
         return Err(Error::Unauthorized);
     }
-    let snapshot_guard = digest(&("workflow-presentation/v1", state, auth));
+    let snapshot_guard = digest(&("workflow-presentation/v2", state, auth));
     let mut runs = Vec::new();
     for (id, item) in &state.items {
         let guard = digest(&(&snapshot_guard, id));
@@ -96,13 +110,11 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
         let stage = item.definition.stages.get(item.stage);
         let gate = match (&item.phase, stage) {
             (Phase::WaitingApproval, Some(s)) => match &s.progression {
-                Progression::AwaitApproval { principal } => Some(GateCard {
-                    kind: GateKind::Approval, principal: principal.clone() }),
+                Progression::AwaitApproval { principal } => Some(display::gate_card(GateKind::Approval, principal)),
                 _ => return Err(Error::Invalid),
             },
             (Phase::WaitingReview, Some(s)) => match &s.kind {
-                StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(GateCard {
-                    kind: GateKind::Review, principal: p.clone() }),
+                StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(display::gate_card(GateKind::Review, p)),
                 _ => return Err(Error::Invalid),
             },
             _ => None,
@@ -141,16 +153,16 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
         if auth.controller && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::Cancelling)
             && !item.run.starts_with("cancel:")
         { kinds.push(ActionKind::Cancel); }
-        runs.push(RunCard { item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
+        runs.push(RunCard { label: "Workflow Run".into(), phase_label: display::phase_label(&item.phase).into(),
+            item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
             policy_pin: item.policy_pin.clone(), phase: item.phase.clone(),
-            stages: item.definition.stages.iter().map(|s| StageCard { id: s.id.clone(),
-                kind: s.kind.clone(), progression: s.progression.clone() }).collect(),
-            stage: stage.map(|s| StageCard { id: s.id.clone(), kind: s.kind.clone(),
-                progression: s.progression.clone() }), gate, candidate: item.candidate.clone(),
+            stages: item.definition.stages.iter().map(display::stage_card).collect(),
+            stage: stage.map(display::stage_card), gate, candidate: item.candidate.clone(),
             latest_evidence: item.last_evidence.clone(), pending_effect: item.pending.clone(),
             iteration: item.iteration, reworks_remaining: item.definition.max_reworks - item.iteration,
-            attempt: item.attempt, fence: item.fence, reasons,
-            actions: kinds.into_iter().map(|kind| Action { kind, guard: guard.clone() }).collect() });
+            attempt: item.attempt, fence: item.fence,
+            reasons: reasons.into_iter().map(display::reason_card).collect(),
+            actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind).into(), kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
         revision: state.revision, runs })
@@ -161,7 +173,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
 pub fn action(state: &State, auth: &Capabilities, item: &str, requested: &Action) -> Result<Intent, Error> {
     let view = project(state, auth)?;
     let card = view.runs.iter().find(|c| c.item == item).ok_or(Error::Missing)?;
-    if requested.guard != digest(&(digest(&("workflow-presentation/v1", state, auth)), item)) { return Err(Error::Stale); }
+    if requested.guard != digest(&(digest(&("workflow-presentation/v2", state, auth)), item)) { return Err(Error::Stale); }
     if !card.actions.contains(requested) { return Err(Error::Unavailable); }
     Ok(match requested.kind {
         ActionKind::InspectLatestEvidence => Intent::InspectLatestEvidence {
