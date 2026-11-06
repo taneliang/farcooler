@@ -318,6 +318,8 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    "WorkflowRuns.swift",
+    "WorkflowRunsView.swift",
     # The People screen (ov-856): Access, each person's devices, the step-up flow and its key, and the app lock.
     "PeopleAccess.swift",
     "PeopleAccessView.swift",

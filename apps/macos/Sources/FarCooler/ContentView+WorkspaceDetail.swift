@@ -97,6 +97,11 @@ extension ContentView {
         }
         // No subtitle: "Billing · shop" is the switcher's, beside it (ov-86).
         .modifier(WindowTitle(title: title.title, subtitle: ""))
+        .toolbar {
+            if let summary {
+                WorkflowRunsButton(host: host, workspace: summary.id)
+            }
+        }
         // What the empty states offer: start this workspace's orchestrator, or
         // show it (ov-519).
         .environment(\.orchestratorInvite, orchestratorInvite(host: host, workspace: summary))

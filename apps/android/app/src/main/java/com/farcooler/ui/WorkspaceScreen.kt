@@ -270,6 +270,7 @@ fun WorkspaceScreen(
                         }
                     },
                     actions = {
+                        WorkflowRunsButton(route.hostId, route.workspaceId)
                         // The tree is always up, so its two ways to make a
                         // worktree are always here; so are the chat's controls.
                         if (mayControl) {
@@ -376,6 +377,7 @@ fun WorkspaceScreen(
                         }
                     },
                     actions = {
+                        WorkflowRunsButton(route.hostId, route.workspaceId)
                         // The tree's two ways to make a worktree, where the
                         // Worktrees list had them: actions of the top app bar,
                         // an icon each (ov-300 review 18).

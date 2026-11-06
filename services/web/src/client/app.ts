@@ -21,6 +21,7 @@
 /// never markup: the CSP's Trusted Types (`require-trusted-types-for
 /// 'script'`) refuse an HTML string sink outright.
 
+import { openWorkflow } from './workflow-view'
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
 import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
@@ -454,6 +455,8 @@ let drawn = ''
 /// The terminal buttons by id, which is what an Open on an item can go to.
 const buttonFor = new Map<string, HTMLButtonElement>()
 
+/// The workspace workflow sheet, preserving the panes behind it.
+let workflowSheet: ReturnType<typeof openWorkflow> | null = null
 /// The plan tab, while a runner is connected.
 let planTab: PlanTab | null = null
 let planList: PlanList | null = null
@@ -553,6 +556,8 @@ function answersFor(runner: string, task: string): Answer[] {
 
 function stopNeeds(): void {
   sheet?.close()
+  workflowSheet?.close()
+  workflowSheet = null
   planList?.close()
   planTab?.stop()
   planTab = null
@@ -660,6 +665,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     },
     show: view => {
       showLink(view, target.label)
+      workflowSheet?.connection(view.kind === 'up')
       // Its list is read as soon as the connection is up, and set aside while
       // it is not.
       if (view.kind === 'up') mineFleet?.up(target.id)
@@ -718,6 +724,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   frontRunner = target.id
   spaces = boards
   chosenSpace = pickSpace(spaces, savedSpace(target.id))
+  $<HTMLButtonElement>('show-workflow').disabled = !chosenSpace
   const opening = (id: string) => void buttonFor.get(id)?.click()
   buttonFor.clear()
   const mine = new Fleet(
@@ -1012,6 +1019,11 @@ async function boot(): Promise<void> {
   $('show-terminals').addEventListener('click', () => showTab('terminals'))
   $('show-needs').addEventListener('click', () => showTab('needs'))
   $('show-plan').addEventListener('click', () => showTab('plan'))
+  $('show-workflow').addEventListener('click', () => {
+    if (!frontRunner || !chosenSpace) return
+    workflowSheet?.close()
+    workflowSheet = openWorkflow($('workflow-runs') as HTMLDialogElement, frontRunner, chosenSpace)
+  })
   $('bar-count').addEventListener('click', () => showTab('needs'))
   window.addEventListener('focus', () => void checkVersion())
   document.addEventListener('visibilitychange', () => {

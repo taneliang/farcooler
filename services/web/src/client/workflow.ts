@@ -1,0 +1,79 @@
+// Schema 2 is a local display DTO, never a credential. The authenticated Rust
+// Session adapter owns reads, availability and latest-state action validation.
+export interface WorkflowAction { kind: string; label: string; guard: string; [key: string]: unknown }
+export interface WorkflowStage { id: string; label: string; progression_label: string }
+export interface WorkflowRun {
+  label: string; phase_label: string; item: string; run: string
+  definition_pin: string; policy_pin: string; candidate: string | null
+  latest_evidence: { candidate: string; manifest: string; receipt: string; policy_pin: string } | null
+  pending_effect: string | null; iteration: number; attempt: number; fence: number | bigint | string
+  reworks_remaining: number; stages: WorkflowStage[]; stage: WorkflowStage | null
+  gate: { label: string; text: string; principal: string } | null
+  reasons: { kind: string; label: string; text: string }[]; actions: WorkflowAction[]
+}
+export interface WorkflowPresentation { schema: 2; workspace: string; epoch: number | bigint | string; revision: number | bigint | string; runs: WorkflowRun[] }
+export interface WorkflowPort {
+  read(workspace: string): Promise<WorkflowPresentation>
+  // Forward the complete supplied descriptor. Rust must authenticate, re-read
+  // State and validate the guard; no client-generated Grant or command.
+  dispatch(workspace: string, item: string, action: WorkflowAction): Promise<string>
+}
+export interface WorkflowView {
+  presentation: WorkflowPresentation | null; selected: string | null
+  ready: boolean; busy: boolean; notice: string; inspection: string
+}
+export const WORKFLOW_PENDING = 'Workflow runs are not connected on this runner yet.'
+
+// No polling, ACK or runtime ownership. Refresh on open/reconnect is display I/O.
+export class WorkflowBoard {
+  private generation = 0
+  private view: WorkflowView = { presentation: null, selected: null, ready: false, busy: false, notice: '', inspection: '' }
+  constructor(readonly workspace: string, private port: () => WorkflowPort | null,
+    private show: (view: WorkflowView) => void, private keep: (item: string | null) => void = () => {}) {}
+  select(item: string | null): void {
+    this.view = { ...this.view, selected: item, inspection: '' }
+    this.keep(item); this.draw()
+  }
+  disconnect(): void {
+    ++this.generation
+    this.view = { ...this.view, ready: false, busy: false, inspection: '', notice: 'Reconnect to refresh workflow runs.' }; this.draw()
+  }
+  async refresh(): Promise<void> {
+    if (this.view.busy) return
+    const generation = ++this.generation
+    this.view = { ...this.view, ready: false }; this.draw()
+    const port = this.port()
+    if (!port) { this.view = { ...this.view, notice: WORKFLOW_PENDING }; this.draw(); return }
+    try {
+      const presentation = await port.read(this.workspace)
+      if (generation !== this.generation) return
+      if (presentation.schema !== 2 || presentation.workspace !== this.workspace) throw new Error('Invalid workflow presentation')
+      this.view = { ...this.view, presentation, ready: true, notice: '' }
+    } catch {
+      if (generation !== this.generation) return
+      this.view = { ...this.view, ready: false, notice: 'Couldn’t refresh workflow runs. Reconnect or try Refresh.' }
+    }
+    this.draw()
+  }
+  async dispatch(item: string, action: WorkflowAction): Promise<void> {
+    const port = this.port()
+    const card = this.view.presentation?.runs.find(r => r.item === item)
+    if (!port || !this.view.ready || this.view.busy || !card?.actions.includes(action)) return
+    const generation = this.generation
+    this.view = { ...this.view, busy: true, inspection: '' }; this.draw()
+    let failed = false
+    try {
+      const inspection = await port.dispatch(this.workspace, item, action)
+      if (generation === this.generation) this.view = { ...this.view, inspection }
+    } catch {
+      failed = true
+    } finally {
+      if (generation === this.generation) {
+        this.view = { ...this.view, busy: false, ready: false }; this.draw()
+        await this.refresh()
+        if (failed) { this.view = { ...this.view, notice: 'The action wasn’t confirmed. Check the refreshed run before trying again.' }; this.draw() }
+      }
+    }
+  }
+  private draw(): void { this.show({ ...this.view }) }
+}

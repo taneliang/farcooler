@@ -73,6 +73,9 @@ struct WorkspaceScreen: View {
         // 3.4:1 over a light terminal theme's ground; this is primary, and
         // smaller than the name.
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                WorkflowRunsButton(host: place.runner, workspace: place.workspace)
+            }
             if let summary, let seat = subtitle(summary) {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {

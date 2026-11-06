@@ -259,3 +259,11 @@ button.danger { color: var(--danger); }
   .plan-more { padding-left: 42px; }
   .plan-sheet-body .plan-ticket { padding-left: 8px; }
 }
+
+/* Shared workflow values remain readable at narrow widths and large type. */
+.workflow-runs { display: grid; gap: 1rem; min-width: 0; }
+.workflow-runs article { min-width: 0; }
+.workflow-runs dd { margin-inline-start: 0; }
+.workflow-runs dd, .workflow-runs p, .workflow-runs h2, .workflow-runs h3,
+.workflow-runs button, .workflow-runs pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.workflow-runs .actions { flex-wrap: wrap; }
