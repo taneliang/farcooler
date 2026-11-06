@@ -1,0 +1,3 @@
+COMMAND ['/opt/homebrew/bin/node', '/Users/e-liang/.npm/_npx/67eb4586ca667318/node_modules/typescript/bin/tsc', '--strict', '--target', 'es2022', '--module', 'commonjs', '--lib', 'es2022,dom,dom.iterable', '--outDir', '/private/tmp/ov926-review-checks/web', 'services/web/src/client/workflow.ts', 'services/web/src/client/workflow-view.ts']
+
+EXIT 0

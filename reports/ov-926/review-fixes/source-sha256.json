@@ -1,0 +1,15 @@
+{
+  "source": "32a00811271f4b56cda5b0592dcb32759dad932f",
+  "base": "26b1665acad8d20e9cf4027cf0eedfab66716985",
+  "sha256": {
+    "apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt": "a49b665894d39ffdca9cc5fbfcd3b247fe403b3b7e37f7e4110d39a45d8355ad",
+    "apps/android/app/src/test/java/com/farcooler/ui/WorkflowRunsTest.kt": "3a0e929c317957dbd41b26134f5cc14c25d922ea5e38b38cc0f6f7a0b17bdcb0",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift": "4889ca0a33498390886e3b6000f6cd6aee7792037cd3a7edeb820e73d1b5e740",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift": "9752d58ada43dd6ecfa63c260f5dddca0dac141e6eaf10e521e4f8d0081efb30",
+    "apps/shared/AgentKit/Tests/AgentKitTests/WorkflowLifecycleChecks.swift": "505466cc76bf97be110a89f87d0d5b663d05d93dcbb0ddbbaf83ec07fe9da1b0",
+    "apps/shared/AgentKit/Tests/AgentKitTests/WorkflowRunsTests.swift": "8c87fc640436579c4bd59186d475b583a8a28251e194362d3d5564877b7b0809",
+    "services/web/src/client/workflow-view.ts": "3adcb10a6c993acbc23ed2a61ed3dcd949bea0704dacfa7d462c5536872a7134",
+    "services/web/src/client/workflow.ts": "aa0b09f59e476411a6dfe580fa6a5427dbd8fb989a3c9d6b73b8e4946481df9e",
+    "services/web/test/workflow.test.mjs": "0219cc900b5b4bbdcf74febecfe443ea3771bf4c25692e022910e85e20aff7af"
+  }
+}

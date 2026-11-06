@@ -1,0 +1,4 @@
+COMMAND ['/private/tmp/ov926-review-checks/swift-check', 'crates/client/src/testdata/workflow-presentation.json']
+FAIL lifecycle regression: staleDisplay
+
+EXIT 1

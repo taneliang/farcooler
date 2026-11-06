@@ -1,0 +1,10 @@
+COMMAND ['/opt/homebrew/bin/node', 'reports/ov-926/review-fixes/browser-focus.mjs', '/private/tmp/ov926-review-checks/web']
+PASS real Enter run entry -> All Runs
+PASS real Enter action -> busy fallback -> action restored
+PASS stable focus through shared copy change and colliding label
+PASS failed read fallback and recovery
+PASS removed action -> All Runs
+PASS redraw does not steal focus from dialog Close
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36
+
+EXIT 0

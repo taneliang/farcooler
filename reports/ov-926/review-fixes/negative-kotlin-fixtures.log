@@ -1,0 +1,59 @@
+COMMAND ['/opt/homebrew/opt/openjdk@21/bin/java', '-Xmx512m', '-cp', '/private/tmp/ov926-review-checks/kotlin:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.10/8943c84ddc6d5cc00a10dbc3736c397066eeaab5/kotlin-stdlib-2.4.10.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.11.0/3d57dc678bd8d72a60e7adf0eca5c54e3f4f4b79/kotlinx-coroutines-core-jvm-1.11.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-json-jvm/1.9.0/aea6f7d49fe5c458f8963ee6d4bdaf4a459ab3e7/kotlinx-serialization-json-jvm-1.9.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-core-jvm/1.9.0/91448df39c558f7c6147b8bd8db01debe16e0cc1/kotlinx-serialization-core-jvm-1.9.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12/junit-4.13.2.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/42a25dc3219429f0e5d060061f71acb49bf010a0/hamcrest-core-1.3.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/23.0.0/8cc20c07506ec18e0834947b84a864bfc094484e/annotations-23.0.0.jar', 'org.junit.runner.JUnitCore', 'com.farcooler.ui.WorkflowRunsTest']
+JUnit version 4.13.2
+..E..E...E
+Time: 0.059
+There were 3 failures:
+1) selectionFencesReplyWithoutStrandingBusyOrRefresh(com.farcooler.ui.WorkflowRunsTest)
+org.junit.ComparisonFailure: expected:<[]> but was:<[old evidence]>
+	at org.junit.Assert.assertEquals(Assert.java:117)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.ui.WorkflowRunsTest$selectionFencesReplyWithoutStrandingBusyOrRefresh$1.invokeSuspend(WorkflowRunsTest.kt:89)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source)
+	at com.farcooler.ui.WorkflowRunsTest.selectionFencesReplyWithoutStrandingBusyOrRefresh(WorkflowRunsTest.kt:71)
+2) replacedRunClearsInspectionOnRefreshAndPostActionRead(com.farcooler.ui.WorkflowRunsTest)
+org.junit.ComparisonFailure: expected:<[]> but was:<[old evidence]>
+	at org.junit.Assert.assertEquals(Assert.java:117)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.ui.WorkflowRunsTest$replacedRunClearsInspectionOnRefreshAndPostActionRead$1.invokeSuspend(WorkflowRunsTest.kt:109)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source)
+	at com.farcooler.ui.WorkflowRunsTest.replacedRunClearsInspectionOnRefreshAndPostActionRead(WorkflowRunsTest.kt:93)
+3) failedActionReadCannotOverwriteDisconnectOrReconnect(com.farcooler.ui.WorkflowRunsTest)
+org.junit.ComparisonFailure: expected:<[Reconnect to refresh workflow runs].> but was:<[The action wasn’t confirmed. Check the refreshed run before trying again].>
+	at org.junit.Assert.assertEquals(Assert.java:117)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.ui.WorkflowRunsTest$failedActionReadCannotOverwriteDisconnectOrReconnect$1.invokeSuspend(WorkflowRunsTest.kt:132)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source)
+	at com.farcooler.ui.WorkflowRunsTest.failedActionReadCannotOverwriteDisconnectOrReconnect(WorkflowRunsTest.kt:112)
+
+FAILURES!!!
+Tests run: 7,  Failures: 3
+
+
+EXIT 1

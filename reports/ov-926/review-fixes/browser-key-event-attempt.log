@@ -1,0 +1,23 @@
+COMMAND ['/opt/homebrew/bin/node', 'reports/ov-926/review-fixes/browser-focus.mjs', '/private/tmp/ov926-review-checks/web']
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ '["run","item"]'
+- 'all-runs'
+
+    at file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-renderer-review-fixes/reports/ov-926/review-fixes/browser-focus.mjs:70:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '["run","item"]',
+  expected: 'all-runs',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.0
+
+EXIT 1

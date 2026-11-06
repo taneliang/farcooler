@@ -1,0 +1,3 @@
+COMMAND ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov926-review-checks/swift-cache', '-emit-module', '-enable-testing', '-module-name', 'AgentKit', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', '-emit-module-path', '/private/tmp/ov926-review-checks/AgentKit.swiftmodule']
+
+EXIT 0

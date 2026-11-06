@@ -1,0 +1,25 @@
+COMMAND ['/opt/homebrew/bin/node', 'services/web/test/workflow.test.mjs', '/private/tmp/ov926-review-checks/old-web']
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ 'The action wasn’t confirmed. Check the refreshed run before trying again.'
+- 'Reconnect to refresh workflow runs.'
+
+    at file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-renderer-review-fixes/services/web/test/workflow.test.mjs:138:12
+    at async test (file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-renderer-review-fixes/services/web/test/workflow.test.mjs:14:134)
+    at async file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-renderer-review-fixes/services/web/test/workflow.test.mjs:129:1 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'The action wasn’t confirmed. Check the refreshed run before trying again.',
+  expected: 'Reconnect to refresh workflow runs.',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.0
+
+EXIT 1
