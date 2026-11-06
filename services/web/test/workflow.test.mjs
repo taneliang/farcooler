@@ -11,14 +11,19 @@ const { renderWorkflow } = require(path.resolve(process.argv[2], 'workflow-view.
 const fixtures = JSON.parse(fs.readFileSync(new URL('../../../crates/client/src/testdata/workflow-presentation.json', import.meta.url)))
 const clone = value => structuredClone(value)
 let count = 0
-const test = async (name, fn) => { await fn(); console.log(`ok ${++count} ${name}`) }
+const test = async (name, fn) => { if (process.env.WORKFLOW_TEST_FILTER && !name.includes(process.env.WORKFLOW_TEST_FILTER)) return; await fn(); console.log(`ok ${++count} ${name}`) }
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
 class Element {
   children = []; textContent = ''; disabled = false; attributes = {}; parent = null
   constructor(tag) { this.tagName = tag }
   append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node) } }
-  replaceChildren(...nodes) { this.children = []; this.append(...nodes) }
+  replaceChildren(...nodes) {
+    if (this.contains(document.activeElement)) document.activeElement = null
+    for (const child of this.children) child.parent = null
+    this.children = []; this.append(...nodes)
+  }
   setAttribute(key, value) { this.attributes[key] = value }
+  getAttribute(key) { return this.attributes[key] ?? null }
   contains(node) { return node === this || this.children.some(c => c.contains(node)) }
   querySelectorAll(tag) { return this.children.flatMap(c => [...(c.tagName === tag ? [c] : []), ...c.querySelectorAll(tag)]) }
   focus() { document.activeElement = this }
@@ -91,5 +96,77 @@ await test('lossless u64 identity and unknown shared copy use existing text slot
   await board.refresh(); board.select(p.runs[0].item)
   const root = new Element('div'); renderWorkflow(root, view, board)
   assert(allText(root).includes('18446744073709551615')); assert(allText(root).includes(p.runs[0].reasons[0].text))
+})
+await test('late inspection is fenced by selection while cleanup and refresh still finish', async () => {
+  for (const target of [null, 'item-b', fixtures[0].response.card.runs[0].item]) {
+    const p = clone(fixtures[0].response.card); const run = p.runs[0]
+    p.runs.push({ ...clone(run), item: 'item-b', run: 'run-b' })
+    const reply = deferred(); let view; let reads = 0
+    const port = { read: async () => { reads++; return p }, dispatch: () => reply.promise }
+    const board = new WorkflowBoard(p.workspace, () => port, v => { view = v })
+    await board.refresh(); board.select(run.item)
+    const sending = board.dispatch(run.item, run.actions[0])
+    board.select(null); board.select(target)
+    reply.resolve('A evidence'); await sending
+    assert.equal(view.inspection, ''); assert.equal(view.busy, false); assert.equal(view.ready, true); assert.equal(reads, 2)
+  }
+})
+await test('run replacement or removal clears retained inspection including post-action refresh', async () => {
+  for (const remove of [false, true]) {
+    let p = clone(fixtures[0].response.card); const run = p.runs[0]; let view
+    const port = { read: async () => p, dispatch: async () => 'A evidence' }
+    const board = new WorkflowBoard(p.workspace, () => port, v => { view = v })
+    await board.refresh(); board.select(run.item); await board.dispatch(run.item, run.actions[0]); assert.equal(view.inspection, 'A evidence')
+    p = clone(p); if (remove) p.runs = []; else p.runs[0].run = 'replacement'
+    await board.refresh(); assert.equal(view.inspection, '')
+  }
+  const p = clone(fixtures[0].response.card); const run = p.runs[0]; let view; let reads = 0
+  const board = new WorkflowBoard(p.workspace, () => ({
+    read: async () => ++reads === 1 ? p : { ...p, runs: [{ ...run, run: 'replacement' }] }, dispatch: async () => 'old evidence'
+  }), v => { view = v })
+  await board.refresh(); board.select(run.item); await board.dispatch(run.item, run.actions[0]); assert.equal(view.inspection, '')
+})
+await test('old failed action cannot overwrite disconnect or newer session after its awaited read', async () => {
+  for (const reconnect of [false, true]) {
+    const p = clone(fixtures[0].response.card); const read = deferred(); const started = deferred(); let view; let reads = 0
+    let port = { read: async () => { if (++reads === 1) return p; started.resolve(); return read.promise }, dispatch: async () => { throw Error('lost') } }
+    const board = new WorkflowBoard(p.workspace, () => port, v => { view = v })
+    await board.refresh(); const sending = board.dispatch(p.runs[0].item, p.runs[0].actions[0]); await started.promise
+    board.disconnect()
+    if (reconnect) { port = { read: async () => p }; await board.refresh() }
+    const notice = view.notice; read.resolve(p); await sending
+    assert.equal(view.notice, notice); assert.equal(view.ready, reconnect); assert.equal(view.inspection, '')
+  }
+})
+await test('disconnect fences delayed action result through reconnect without replay', async () => {
+  for (const reconnect of [false, true]) {
+    const p = clone(fixtures[0].response.card); const reply = deferred(); let view; let calls = 0
+    const port = { read: async () => p, dispatch: () => { calls++; return reply.promise } }
+    const board = new WorkflowBoard(p.workspace, () => port, v => { view = v }); await board.refresh(); board.select(p.runs[0].item)
+    const sending = board.dispatch(p.runs[0].item, p.runs[0].actions[0]); board.disconnect()
+    if (reconnect) await board.refresh()
+    reply.resolve('old evidence'); await sending
+    assert.equal(view.inspection, ''); assert.equal(view.ready, reconnect); assert.equal(view.busy, false); assert.equal(calls, 1)
+  }
+})
+await test('stable focus survives run entry, busy completion, copy changes, failed read and action removal', async () => {
+  let p = clone(fixtures[0].response.card); p.runs[0].actions[0].label = 'Refresh'
+  const root = new Element('div'); const reply = deferred(); let failRead = false
+  const port = { read: async () => { if (failRead) throw Error('offline'); return p }, dispatch: () => reply.promise }
+  const board = new WorkflowBoard(p.workspace, () => port, v => renderWorkflow(root, v, board))
+  const controls = () => root.querySelectorAll('button')
+  const activeKey = () => document.activeElement?.getAttribute('data-workflow-control')
+  await board.refresh()
+  const entry = controls()[1]
+  entry.focus(); entry.onclick(); assert.equal(document.activeElement?.textContent, 'All Runs')
+  let action = controls().find(b => b.getAttribute('data-workflow-control').startsWith('["action"'))
+  const key = action.getAttribute('data-workflow-control'); action.focus()
+  const sending = board.dispatch(p.runs[0].item, p.runs[0].actions[0]); assert.equal(activeKey(), 'all-runs')
+  reply.resolve('evidence'); await sending; assert.equal(activeKey(), key)
+  p = clone(p); p.runs[0].actions[0].label = 'New shared copy'; await board.refresh(); assert.equal(activeKey(), key)
+  failRead = true; await board.refresh(); assert.equal(activeKey(), 'all-runs')
+  failRead = false; await board.refresh(); assert.equal(activeKey(), key)
+  p = clone(p); p.runs[0].actions = []; await board.refresh(); assert.equal(activeKey(), 'all-runs')
+  assert(root.contains(document.activeElement)); assert(!document.activeElement.disabled)
 })
 console.log(`${count} workflow fixture/controller/DOM tests passed; simulated DOM only`)

@@ -46,37 +46,49 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
     private val mutable = MutableStateFlow(WorkflowView())
     val view = mutable.asStateFlow()
     private var generation = 0L
-    fun clearInspection() { mutable.value = mutable.value.copy(inspection = "") }
+    private var selection = 0L
+    fun clearInspection() { selection++; mutable.value = mutable.value.copy(inspection = "") }
     fun disconnect() {
         generation++
         mutable.value = mutable.value.copy(ready = false, busy = false, inspection = "", notice = "Reconnect to refresh workflow runs.")
     }
-    suspend fun refresh(port: WorkflowPort?) {
-        if (mutable.value.busy) return
+    // Recheck this completion ticket after the caller resumes from suspension.
+    suspend fun refresh(port: WorkflowPort?): Long? {
+        if (mutable.value.busy) return null
         val ticket = ++generation
         mutable.value = mutable.value.copy(ready = false)
         if (port == null) {
             mutable.value = mutable.value.copy(notice = "Workflow runs are not connected on this runner yet.")
-            return
+            return null
         }
         try {
             val presentation = WorkflowPresentation.decode(port.read(host, workspace), workspace)
-            if (ticket == generation) mutable.value = mutable.value.copy(presentation = presentation, ready = true, notice = "")
+            if (ticket == generation) {
+                if (mutable.value.presentation?.runs?.any { old ->
+                    presentation.runs.none { it.item == old.item && it.text("run") == old.text("run") }
+                } == true) clearInspection()
+                mutable.value = mutable.value.copy(presentation = presentation, ready = true, notice = "")
+            }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) {
             if (ticket == generation) mutable.value = mutable.value.copy(notice = "Couldn’t refresh workflow runs. Reconnect or try Refresh.")
         }
+        return if (ticket == generation) ticket else null
     }
     suspend fun perform(item: String, action: WorkflowAction, port: WorkflowPort?) {
         val current = mutable.value
         if (port == null || !current.ready || current.busy ||
             current.presentation?.runs?.firstOrNull { it.item == item }?.actions?.contains(action) != true) return
         val ticket = generation
+        val display = selection
+        val run = current.presentation?.runs?.firstOrNull { it.item == item }?.text("run")
         mutable.value = current.copy(busy = true, inspection = "")
         var failed = false
         try {
             val result = port.dispatch(host, workspace, item, action.descriptor.toString())
-            if (ticket == generation) mutable.value = mutable.value.copy(inspection = result)
+            if (ticket == generation && display == selection &&
+                mutable.value.presentation?.runs?.any { it.item == item && it.text("run") == run } == true)
+                mutable.value = mutable.value.copy(inspection = result)
         } catch (cancel: CancellationException) {
             disconnect(); throw cancel
         } catch (_: Exception) {
@@ -84,8 +96,8 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
         }
         if (ticket == generation) {
             mutable.value = mutable.value.copy(busy = false, ready = false)
-            refresh(port)
-            if (failed) mutable.value = mutable.value.copy(notice = "The action wasn’t confirmed. Check the refreshed run before trying again.")
+            val currentRefresh = refresh(port)
+            if (failed && currentRefresh != null && currentRefresh == generation) mutable.value = mutable.value.copy(notice = "The action wasn’t confirmed. Check the refreshed run before trying again.")
         }
     }
 }

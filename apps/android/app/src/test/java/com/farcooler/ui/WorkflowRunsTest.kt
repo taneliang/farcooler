@@ -68,4 +68,89 @@ class WorkflowRunsTest {
         assertEquals(Json.parseToJsonElement(raw), action.descriptor)
     }
 
+    @Test fun selectionFencesReplyWithoutStrandingBusyOrRefresh() = runBlocking {
+        for (backToOriginal in listOf(false, true)) {
+            val json = cards().first()
+            val model = WorkflowRunsModel("runner", "workspace")
+            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val result = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>()
+            var reads = 0
+            val port = object : WorkflowPort {
+                override suspend fun read(host: String, workspace: String): String { reads++; return json }
+                override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String {
+                    started.complete(Unit); return result.await()
+                }
+            }
+            model.refresh(port)
+            val sending = async { model.perform(card.item, card.actions.first(), port) }; started.await()
+            model.clearInspection() // All Runs / another selected item
+            if (backToOriginal) model.clearInspection() // Return to original before reply
+            result.complete("old evidence"); sending.await()
+            assertEquals("", model.view.value.inspection); assertFalse(model.view.value.busy)
+            assertTrue(model.view.value.ready); assertEquals(2, reads)
+        }
+    }
+    @Test fun replacedRunClearsInspectionOnRefreshAndPostActionRead() = runBlocking {
+        for (replaceDuringAction in listOf(false, true)) {
+            var json = cards().first()
+            val model = WorkflowRunsModel("runner", "workspace")
+            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val replacement = json.replace("\"run\":\"${card.text("run")}\"", "\"run\":\"replacement\"")
+            assertNotEquals(json, replacement)
+            val port = object : WorkflowPort {
+                override suspend fun read(host: String, workspace: String): String = json
+                override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String {
+                    if (replaceDuringAction) json = replacement
+                    return "old evidence"
+                }
+            }
+            model.refresh(port); model.perform(card.item, card.actions.first(), port)
+            if (!replaceDuringAction) { assertEquals("old evidence", model.view.value.inspection); json = replacement; model.refresh(port) }
+            assertEquals("", model.view.value.inspection)
+        }
+    }
+    @Test fun failedActionReadCannotOverwriteDisconnectOrReconnect() = runBlocking {
+        for (reconnect in listOf(false, true)) {
+            val json = cards().first(); val model = WorkflowRunsModel("runner", "workspace")
+            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val read = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>(); var reads = 0
+            val old = object : WorkflowPort {
+                override suspend fun read(host: String, workspace: String): String {
+                    if (++reads == 1) return json
+                    started.complete(Unit); return read.await()
+                }
+                override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String = error("lost reply")
+            }
+            model.refresh(old)
+            val sending = async { model.perform(card.item, card.actions.first(), old) }; started.await(); model.disconnect()
+            if (reconnect) model.refresh(object : WorkflowPort {
+                override suspend fun read(host: String, workspace: String): String = json
+                override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String = error("must not replay")
+            })
+            val notice = model.view.value.notice
+            read.complete(json); sending.await()
+            assertEquals(notice, model.view.value.notice); assertEquals(reconnect, model.view.value.ready)
+        }
+    }
+
+    @Test fun disconnectFencesDelayedActionReply() = runBlocking {
+        for (reconnect in listOf(false, true)) {
+            val json = cards().first(); val model = WorkflowRunsModel("runner", "workspace")
+            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val reply = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>()
+            val port = object : WorkflowPort {
+                override suspend fun read(host: String, workspace: String): String = json
+                override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String {
+                    started.complete(Unit); return reply.await()
+                }
+            }
+            model.refresh(port)
+            val sending = async { model.perform(card.item, card.actions.first(), port) }; started.await(); model.disconnect()
+            if (reconnect) model.refresh(port)
+            reply.complete("old evidence"); sending.await()
+            assertEquals("", model.view.value.inspection); assertFalse(model.view.value.busy)
+            assertEquals(reconnect, model.view.value.ready)
+        }
+    }
+
 }

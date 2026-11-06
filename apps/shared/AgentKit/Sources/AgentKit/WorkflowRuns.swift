@@ -102,43 +102,56 @@ public final class WorkflowRunsModel: ObservableObject {
     @Published public private(set) var notice = ""
     @Published public private(set) var inspection = ""
     private var generation: UInt64 = 0
+    private var selection: UInt64 = 0
     public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
-    public func clearInspection() { inspection = "" }
+    public func clearInspection() { selection &+= 1; inspection = "" }
     public func disconnect() {
         generation &+= 1; ready = false; busy = false; inspection = ""
         notice = "Reconnect to refresh workflow runs."
     }
-    public func refresh(_ port: WorkflowPort?) async {
-        guard !busy else { return }
+    // A completion ticket must still match after the caller resumes from await.
+    @discardableResult
+    public func refresh(_ port: WorkflowPort?) async -> UInt64? {
+        guard !busy else { return nil }
         generation &+= 1
         let ticket = generation
         ready = false
-        guard let port else { notice = "Workflow runs are not connected on this runner yet."; return }
+        guard let port else { notice = "Workflow runs are not connected on this runner yet."; return nil }
         do {
             let json = try await port.read(host, workspace)
-            guard ticket == generation else { return }
-            presentation = try WorkflowPresentation.decode(json, workspace: workspace)
+            guard ticket == generation else { return nil }
+            let next = try WorkflowPresentation.decode(json, workspace: workspace)
+            if presentation?.runs.contains(where: { old in
+                !next.runs.contains(where: { $0.item == old.item && $0.run == old.run })
+            }) == true { clearInspection() }
+            presentation = next
             ready = true; notice = ""
         } catch {
-            guard ticket == generation else { return }
+            guard ticket == generation else { return nil }
             notice = "Couldn’t refresh workflow runs. Reconnect or try Refresh."
         }
+        return ticket == generation ? ticket : nil
     }
     public func perform(item: String, action: WorkflowAction, port: WorkflowPort?) async {
         guard ready, !busy, let port,
-            presentation?.runs.first(where: { $0.item == item })?.actions.contains(action) == true else { return }
+            let card = presentation?.runs.first(where: { $0.item == item }),
+            card.actions.contains(action) else { return }
         let ticket = generation
+        let display = selection
         busy = true; inspection = ""
         var failed = false
         do {
             let result = try await port.dispatch(host, workspace, item, action.json())
-            if ticket == generation { inspection = result }
+            if ticket == generation, display == selection,
+                presentation?.runs.contains(where: { $0.item == item && $0.run == card.run }) == true {
+                inspection = result
+            }
         } catch {
             failed = true
         }
         guard ticket == generation else { return }
         busy = false; ready = false
-        await refresh(port)
-        if failed { notice = "The action wasn’t confirmed. Check the refreshed run before trying again." }
+        let current = await refresh(port)
+        if failed, let current, current == generation { notice = "The action wasn’t confirmed. Check the refreshed run before trying again." }
     }
 }

@@ -6,24 +6,41 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => {
 const button = (title: string, act: () => void, disabled = false) => {
   const node = el('button', title); node.type = 'button'; node.disabled = disabled; node.onclick = act; return node
 }
+// Retain intended focus across disabled busy renders. A user move to another
+// control replaces that intent; removed actions fall back to navigation.
+const focusMemory = new WeakMap<HTMLElement, { intended: string; fallback: string | null }>()
+function keyed(node: HTMLButtonElement, key: string): HTMLButtonElement {
+  node.setAttribute('data-workflow-control', key); return node
+}
 export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: WorkflowBoard): void {
-  const focused = root.contains(document.activeElement) ? document.activeElement?.textContent : null
+  const active = root.contains(document.activeElement) ? document.activeElement : null
+  const key = active?.getAttribute('data-workflow-control') ?? null
+  const remembered = focusMemory.get(root)
+  const focused = key && key === remembered?.fallback ? remembered.intended : key
   const content = el('div'); content.className = 'workflow-runs'
-  content.append(button('Refresh', () => void board.refresh(), view.busy))
+  content.append(keyed(button('Refresh', () => void board.refresh(), view.busy), 'refresh'))
   if (view.notice) { const note = el('p', view.notice); note.setAttribute('role', 'status'); content.append(note) }
   const selected = view.presentation?.runs.find(r => r.item === view.selected)
-  if (view.selected) content.append(button('All Runs', () => board.select(null)))
+  if (view.selected) content.append(keyed(button('All Runs', () => board.select(null)), 'all-runs'))
   if (selected) content.append(runCard(selected, view, board))
   else {
     for (const run of view.presentation?.runs ?? []) {
-      content.append(button(`${run.label} · ${run.item} · ${run.phase_label}`, () => board.select(run.item)))
+      content.append(keyed(button(`${run.label} · ${run.item} · ${run.phase_label}`, () => board.select(run.item)), JSON.stringify(['run', run.item])))
     }
     if (view.ready && view.presentation?.runs.length === 0) content.append(el('p', 'No workflow runs.'))
     if (view.selected && view.ready) content.append(el('p', 'This run is no longer available.'))
   }
   if (view.inspection) content.append(el('pre', view.inspection))
   root.replaceChildren(content)
-  if (focused) Array.from(root.querySelectorAll('button')).find(b => b.textContent === focused && !b.disabled)?.focus()
+  if (focused) {
+    const buttons = Array.from(root.querySelectorAll('button'))
+    const intended = buttons.find(b => b.getAttribute('data-workflow-control') === focused)
+    const target = intended && !intended.disabled ? intended :
+      buttons.find(b => b.getAttribute('data-workflow-control') === 'all-runs' && !b.disabled) ?? buttons.find(b => !b.disabled)
+    target?.focus()
+    if (intended?.disabled) focusMemory.set(root, { intended: focused, fallback: target?.getAttribute('data-workflow-control') ?? null })
+    else focusMemory.delete(root)
+  } else focusMemory.delete(root)
 }
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
   const card = el('article'); card.append(el('h2', run.label), el('p', run.phase_label))
@@ -41,7 +58,7 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
   for (const stage of run.stages) card.append(el('p', `${stage.id} · ${stage.label} · ${stage.progression_label}`))
   for (const reason of run.reasons) card.append(el('h3', reason.label), el('p', reason.text))
   const actions = el('div'); actions.className = 'actions'
-  for (const action of run.actions) actions.append(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy))
+  for (const action of run.actions) actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), JSON.stringify(['action', run.item, run.run, action.kind, action.guard])))
   card.append(actions); return card
 }
 

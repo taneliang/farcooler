@@ -49,4 +49,10 @@ struct WorkflowRunsTests {
         await model.refresh(nil)
         #expect(!model.ready && model.notice.contains("not connected"))
     }
+    @Test @MainActor func delayedDisplayLifecycle() async throws {
+        let fixtures = try fixtures()
+        let card = (fixtures[0]["response"] as! [String: Any])["card"]!
+        try await workflowLifecycleChecks(json: String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self))
+    }
+
 }

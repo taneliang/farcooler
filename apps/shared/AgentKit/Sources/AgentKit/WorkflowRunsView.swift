@@ -38,13 +38,13 @@ public struct WorkflowRunsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if !model.notice.isEmpty { Text(model.notice).accessibilityAddTraits(.updatesFrequently) }
                     if !selected.isEmpty {
-                        Button("All Runs") { selected = "" }
+                        Button("All Runs") { model.clearInspection(); selected = "" }
                     }
                     if let run = model.presentation?.runs.first(where: { $0.item == selected }) {
                         card(run)
                     } else {
                         ForEach(model.presentation?.runs ?? []) { run in
-                            Button { selected = run.item } label: {
+                            Button { model.clearInspection(); selected = run.item } label: {
                                 VStack(alignment: .leading) {
                                     Text(run.label); Text(run.item); Text(run.phase_label)
                                 }
