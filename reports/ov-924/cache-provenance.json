@@ -1,0 +1,16 @@
+{
+  "base": "4163081e91353481ae00e80ff7bd3cbab0924915",
+  "donor_tree": "../ov-923-workflow-runtime",
+  "donor_head": "f98cdcd8580cfa603da2b8c7f8a5fd2f6b14488a",
+  "donor_and_initial_lock_sha256": "b2b1df76b0a21d548597d5d033d06350a14e06180af19ea182691f5a9e1719a2",
+  "client_native_fingerprint": {"rustc": 17329007180185699724, "profile": 8378823585564974145, "rustflags": []},
+  "reuse": "APFS cp -cR donor target into own target; no shared writes; Cargo revalidates paths/source",
+  "python": "/usr/bin/python3 (Xcode native interpreter)",
+  "jobs": 6,
+  "debug": 0,
+  "incremental": 0,
+  "offline": true,
+  "fifo": "normal scripts/heavy --load-limit 20",
+  "reserve_bytes": 10737418240,
+  "deadline_seconds": 1800
+}

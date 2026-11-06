@@ -59,6 +59,7 @@ web = ["russh/ring", "uuid/js"]
 tailcat = ["native", "farcooler-tailcat/linked"]
 
 [dependencies]
+farcooler-workflow.workspace = true
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 # A path, not `workspace = true`: an inherited dependency keeps the

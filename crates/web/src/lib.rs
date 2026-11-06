@@ -25,6 +25,7 @@ pub mod passkey;
 pub mod register;
 pub mod ssh;
 pub mod wire;
+pub mod workflow;
 
 #[cfg(target_arch = "wasm32")]
 mod js;

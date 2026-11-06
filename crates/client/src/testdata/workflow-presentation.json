@@ -1,0 +1,1173 @@
+[
+  {
+    "name": "automatic",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 1,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": null,
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                }
+              ]
+            },
+            "dependencies": [],
+            "fence": 1,
+            "iteration": 0,
+            "last_evidence": null,
+            "pending": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+            "phase": "Running",
+            "pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+            "stage": 0,
+            "stopping": null
+          }
+        },
+        "revision": 1,
+        "schema": 1,
+        "seen": [
+          "event-0"
+        ],
+        "source_sequences": {
+          "fixture": 1
+        },
+        "workspace": "workspace"
+      }
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 1,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:146ddcb2952ad30ff9d55620f334246194458fb618bca22238cf654fe2b2d79f",
+                "kind": "Cancel"
+              }
+            ],
+            "attempt": 1,
+            "candidate": null,
+            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "fence": 1,
+            "gate": null,
+            "item": "item",
+            "iteration": 0,
+            "latest_evidence": null,
+            "pending_effect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+            "phase": "Running",
+            "policy_pin": "policy",
+            "reasons": [
+              "Automatic"
+            ],
+            "reworks_remaining": 2,
+            "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+            "stage": {
+              "id": "stage-0",
+              "kind": "Provision",
+              "progression": "Automatic"
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "progression": "Automatic"
+              }
+            ]
+          }
+        ],
+        "schema": 1,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 1
+    }
+  },
+  {
+    "name": "approval",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 1,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": null,
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": {
+                    "AwaitApproval": {
+                      "principal": "owner"
+                    }
+                  }
+                }
+              ]
+            },
+            "dependencies": [],
+            "fence": 1,
+            "iteration": 0,
+            "last_evidence": null,
+            "pending": null,
+            "phase": "WaitingApproval",
+            "pin": "wf1:f97b17e10cb183f0ee3e9d8bf1fde8b0142d9f669baa54c22a033e6e4ab42010",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:44c33962a5e1c3994dd7cf9ee3b33c7fd4bc7dba64a8d229360dcf782ca8370a",
+            "stage": 0,
+            "stopping": null
+          }
+        },
+        "revision": 1,
+        "schema": 1,
+        "seen": [
+          "event-0"
+        ],
+        "source_sequences": {
+          "fixture": 1
+        },
+        "workspace": "workspace"
+      }
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 1,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:98592043e710b03607fed8c9f0a920dfa20bbb9969ad34cff4ef475344372cad",
+                "kind": "Approve"
+              },
+              {
+                "guard": "wf1:98592043e710b03607fed8c9f0a920dfa20bbb9969ad34cff4ef475344372cad",
+                "kind": "Cancel"
+              }
+            ],
+            "attempt": 1,
+            "candidate": null,
+            "definition_pin": "wf1:f97b17e10cb183f0ee3e9d8bf1fde8b0142d9f669baa54c22a033e6e4ab42010",
+            "fence": 1,
+            "gate": {
+              "kind": "Approval",
+              "principal": "owner"
+            },
+            "item": "item",
+            "iteration": 0,
+            "latest_evidence": null,
+            "pending_effect": null,
+            "phase": "WaitingApproval",
+            "policy_pin": "policy",
+            "reasons": [
+              "ApprovalRequired"
+            ],
+            "reworks_remaining": 2,
+            "run": "wf1:44c33962a5e1c3994dd7cf9ee3b33c7fd4bc7dba64a8d229360dcf782ca8370a",
+            "stage": {
+              "id": "stage-0",
+              "kind": "Provision",
+              "progression": {
+                "AwaitApproval": {
+                  "principal": "owner"
+                }
+              }
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "progression": {
+                  "AwaitApproval": {
+                    "principal": "owner"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "schema": 1,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 1
+    }
+  },
+  {
+    "name": "rework",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 1,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": null,
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                }
+              ]
+            },
+            "dependencies": [],
+            "fence": 5,
+            "iteration": 1,
+            "last_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-4",
+              "policy_pin": "policy",
+              "receipt": "receipt-4"
+            },
+            "pending": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
+            "phase": "Running",
+            "pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:58a37a47d788ba6e03b25f93f23a3076ac12c0e825248b24e7b4de118ffb9dd2",
+            "stage": 1,
+            "stopping": null
+          }
+        },
+        "revision": 5,
+        "schema": 1,
+        "seen": [
+          "event-0",
+          "event-1",
+          "event-2",
+          "event-3",
+          "event-4"
+        ],
+        "source_sequences": {
+          "fixture": 5
+        },
+        "workspace": "workspace"
+      }
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 5,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:90e239ec06dc13217cf75545296293fdff935414fc8754d029101432d1fbd36b",
+                "kind": "InspectLatestEvidence"
+              },
+              {
+                "guard": "wf1:90e239ec06dc13217cf75545296293fdff935414fc8754d029101432d1fbd36b",
+                "kind": "Cancel"
+              }
+            ],
+            "attempt": 1,
+            "candidate": null,
+            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "fence": 5,
+            "gate": null,
+            "item": "item",
+            "iteration": 1,
+            "latest_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-4",
+              "policy_pin": "policy",
+              "receipt": "receipt-4"
+            },
+            "pending_effect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
+            "phase": "Running",
+            "policy_pin": "policy",
+            "reasons": [
+              "Automatic",
+              "Reworking",
+              "EvidenceInvalidated"
+            ],
+            "reworks_remaining": 1,
+            "run": "wf1:58a37a47d788ba6e03b25f93f23a3076ac12c0e825248b24e7b4de118ffb9dd2",
+            "stage": {
+              "id": "stage-1",
+              "kind": "Build",
+              "progression": "Automatic"
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "progression": "Automatic"
+              }
+            ]
+          }
+        ],
+        "schema": 1,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 1
+    }
+  },
+  {
+    "name": "uncertain",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 1,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": "candidate",
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                }
+              ]
+            },
+            "dependencies": [],
+            "fence": 3,
+            "iteration": 0,
+            "last_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-2",
+              "policy_pin": "policy",
+              "receipt": "receipt-2"
+            },
+            "pending": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
+            "phase": "Uncertain",
+            "pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:19540cdd3703a146d6c1fb8cf9a1f62f8ba501e1504383196170f71c554350bb",
+            "stage": 2,
+            "stopping": null
+          }
+        },
+        "revision": 4,
+        "schema": 1,
+        "seen": [
+          "event-0",
+          "event-1",
+          "event-2",
+          "event-3"
+        ],
+        "source_sequences": {
+          "fixture": 4
+        },
+        "workspace": "workspace"
+      }
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 4,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:77e53268ddb5110ccfdaa1a62aa33fbd9a35fb4e688bcc35d5707dd59319ead1",
+                "kind": "InspectLatestEvidence"
+              },
+              {
+                "guard": "wf1:77e53268ddb5110ccfdaa1a62aa33fbd9a35fb4e688bcc35d5707dd59319ead1",
+                "kind": "InspectUncertainty"
+              },
+              {
+                "guard": "wf1:77e53268ddb5110ccfdaa1a62aa33fbd9a35fb4e688bcc35d5707dd59319ead1",
+                "kind": "Cancel"
+              }
+            ],
+            "attempt": 1,
+            "candidate": "candidate",
+            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "fence": 3,
+            "gate": null,
+            "item": "item",
+            "iteration": 0,
+            "latest_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-2",
+              "policy_pin": "policy",
+              "receipt": "receipt-2"
+            },
+            "pending_effect": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
+            "phase": "Uncertain",
+            "policy_pin": "policy",
+            "reasons": [
+              "EffectUncertain"
+            ],
+            "reworks_remaining": 2,
+            "run": "wf1:19540cdd3703a146d6c1fb8cf9a1f62f8ba501e1504383196170f71c554350bb",
+            "stage": {
+              "id": "stage-2",
+              "kind": "Check",
+              "progression": "Automatic"
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "progression": "Automatic"
+              }
+            ]
+          }
+        ],
+        "schema": 1,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 1
+    }
+  },
+  {
+    "name": "invalidated",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 1,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": "new-candidate",
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                }
+              ]
+            },
+            "dependencies": [],
+            "fence": 6,
+            "iteration": 1,
+            "last_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-2",
+              "policy_pin": "policy",
+              "receipt": "receipt-2"
+            },
+            "pending": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
+            "phase": "Running",
+            "pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:7badf97655f38b541eff64d4b27b5b9d09f83d87f7549b9f66d02cfecca13679",
+            "stage": 2,
+            "stopping": null
+          }
+        },
+        "revision": 6,
+        "schema": 1,
+        "seen": [
+          "event-0",
+          "event-1",
+          "event-2",
+          "event-3",
+          "event-4",
+          "event-5"
+        ],
+        "source_sequences": {
+          "fixture": 6
+        },
+        "workspace": "workspace"
+      }
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 6,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:9d21a83fba4db9aeadf45907d1b926e18dd8dc848dfa0d56a65199a50354473c",
+                "kind": "InspectLatestEvidence"
+              },
+              {
+                "guard": "wf1:9d21a83fba4db9aeadf45907d1b926e18dd8dc848dfa0d56a65199a50354473c",
+                "kind": "Cancel"
+              }
+            ],
+            "attempt": 1,
+            "candidate": "new-candidate",
+            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "fence": 6,
+            "gate": null,
+            "item": "item",
+            "iteration": 1,
+            "latest_evidence": {
+              "candidate": "candidate",
+              "manifest": "manifest-2",
+              "policy_pin": "policy",
+              "receipt": "receipt-2"
+            },
+            "pending_effect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
+            "phase": "Running",
+            "policy_pin": "policy",
+            "reasons": [
+              "Automatic",
+              "Reworking",
+              "EvidenceInvalidated"
+            ],
+            "reworks_remaining": 1,
+            "run": "wf1:7badf97655f38b541eff64d4b27b5b9d09f83d87f7549b9f66d02cfecca13679",
+            "stage": {
+              "id": "stage-2",
+              "kind": "Check",
+              "progression": "Automatic"
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "progression": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "progression": "Automatic"
+              }
+            ]
+          }
+        ],
+        "schema": 1,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 1
+    }
+  }
+]

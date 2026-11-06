@@ -3426,3 +3426,6 @@ mod identity_tests {
         assert_eq!(shown.len(), "SHA256:".len() + 43, "{shown}");
     }
 }
+#[path = "workflow_presentation/ffi.rs"]
+mod workflow;
+pub use workflow::farcooler_client_workflow_presentation;

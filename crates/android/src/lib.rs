@@ -1332,3 +1332,5 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeEncodePaste(
 fn clamp_u16(value: jint) -> u16 {
     value.clamp(0, u16::MAX as jint) as u16
 }
+
+mod workflow;

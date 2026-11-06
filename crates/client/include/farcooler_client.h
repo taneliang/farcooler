@@ -839,6 +839,15 @@ uint64_t farcooler_client_paste_file(void *handle, const char *terminal,
                                      const char *name, const char *mime,
                                      const uint8_t *data, size_t len);
 
+/* Pure v1 workflow projection/action intent. No transport or authentication.
+ * Host supplies authenticated capability context in the request DTO; user JSON
+ * must not be treated as a grant. Stable response/error shape is shared with JNI
+ * nativeWorkflowPresentation and WASM workflowPresentation. Returns required
+ * UTF-8 byte length, no NUL; NULL/short out is untouched. NULL request returns 0.
+ * See crates/client/src/workflow_presentation.rs for the typed versioned schema.
+ */
+size_t farcooler_client_workflow_presentation(const char *request, uint8_t *out, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif
