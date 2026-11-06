@@ -1,0 +1,36 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 13.64s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 10 tests
+
+thread 'session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence' (825580194) panicked at crates/client/src/session/workflow/tests.rs:81:64:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... ok
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... FAILED
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+
+thread 'session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change' (825580192) panicked at crates/client/src/session/workflow/tests/socket.rs:44:5:
+assertion failed: session.workflow_wire(h.workspace,
+                    serde_json::to_string(&a).unwrap()).await.unwrap().pointer("/receipt/result/Ok").is_some()
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... FAILED
+
+failures:
+
+failures:
+    session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change
+    session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence
+
+test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 260 filtered out; finished in 0.19s
+
+error: test failed, to rerun pass `-p farcooler-client --lib`
+
+exit=101, stopped=None

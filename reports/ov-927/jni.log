@@ -1,0 +1,47 @@
+    Checking tracing-core v0.1.36
+   Compiling rustix v1.1.4
+    Checking smallvec v1.15.2
+    Checking log v0.4.33
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/workflow)
+    Checking tinystr v0.8.3
+    Checking futures-core v0.3.33
+    Checking icu_locale_core v2.1.1
+    Checking tokio v1.53.1
+    Checking futures-channel v0.3.33
+    Checking tracing v0.1.44
+    Checking zerotrie v0.2.4
+    Checking futures-util v0.3.33
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/ffi-guard)
+    Checking icu_provider v2.1.1
+    Checking farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/protocol)
+    Checking parking_lot_core v0.9.12
+   Compiling jni-sys-macros v0.4.1
+    Checking icu_normalizer v2.1.1
+   Compiling thiserror v1.0.69
+   Compiling jni-sys v0.3.1
+    Checking futures-executor v0.3.33
+    Checking futures v0.3.33
+    Checking vte v0.15.0
+    Checking jni-sys v0.4.1
+    Checking parking_lot v0.12.5
+    Checking russh-cryptovec v0.62.0
+    Checking polling v3.11.0
+    Checking rustix-openpty v0.2.0
+   Compiling thiserror-impl v1.0.69
+    Checking combine v4.6.7
+    Checking alacritty_terminal v0.26.0
+    Checking russh-util v0.52.0
+    Checking russh v0.62.4
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/tailcat)
+    Checking cesu8 v1.1.0
+    Checking farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/vt)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/ceremony)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/fence)
+    Checking jni v0.21.1
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/client)
+    Checking farcooler-jni v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/android)
+    Finished `dev` profile [unoptimized] target(s) in 5.00s
+
+exit=0, stopped=None

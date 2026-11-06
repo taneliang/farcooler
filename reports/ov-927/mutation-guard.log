@@ -1,0 +1,45 @@
+  waiting for the machine-wide heavy-job lock (/Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-client --lib workflow_ -- --nocapture); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-926-renderer-review-fixes, PID 78690, started 2026-11-07 06:14:19, running /usr/bin/python3 reports/ov-926/review-fixes/run-checks.py suite (1 in line ahead of you)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 4.60s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 10 tests
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+
+thread 'session::workflow::tests::workflow_session_stale_observation_and_admission_binding' (825602826) panicked at crates/client/src/session/workflow/tests.rs:41:9:
+change 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... FAILED
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+
+thread 'session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence' (825602825) panicked at crates/client/src/session/workflow/tests.rs:95:9:
+assertion failed: prepare(&unseen, Uuid::nil(), "item", selected, identity(&unseen)).is_err()
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... FAILED
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+
+thread 'session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change' (825602823) panicked at crates/client/src/session/workflow/tests/socket.rs:99:5:
+assertion failed: changed.workflow_prepare_action(h.workspace, "b", a.clone(),
+            WorkflowCommandIdentity {
+                id: "approve-b".into(),
+                sequence: 4,
+                revision: old.state.revision,
+                epoch: old.state.epoch,
+            }).await.is_err()
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... FAILED
+
+failures:
+
+failures:
+    session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change
+    session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence
+    session::workflow::tests::workflow_session_stale_observation_and_admission_binding
+
+test result: FAILED. 7 passed; 3 failed; 0 ignored; 0 measured; 260 filtered out; finished in 0.17s
+
+error: test failed, to rerun pass `-p farcooler-client --lib`
+
+exit=101, stopped=None

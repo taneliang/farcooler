@@ -1,0 +1,23 @@
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 5.50s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 11 tests
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... ok
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+trace=Session/C-JNI-dispatch -> authenticated getter -> schema2 -> opaque Cancel -> prepared bytes -> dropped answer -> reconnect durable receipt; stale/auth-context/withdrawal refused; prepared={"action":"Cancel","mutation":{"id":"cancel-a","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:46dd2d8c318c74111fdcdf385146710858e1bd35d36e7cc4e15a25d7493736de","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86"}; receipt={"receipt":{"effects":[],"id":"wire:owner:cancel-a","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... ok
+effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision=7; request={"action":"Approve","mutation":{"id":"approve-effectful","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:d0ade96d14a19d54170373ca793b914ad02dc103114beeeb89b720bbc92cc012","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:2e7e73ed72003ef9f414b4ec2820208b973b62d70d969ebb4fb770071e05271e"],"id":"wire:owner:approve-effectful","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 260 filtered out; finished in 0.68s
+
+
+exit=0, stopped=None

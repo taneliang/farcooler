@@ -1,0 +1,12 @@
+{
+  "diff-check": 0,
+  "doc-comments": 0,
+  "size-budget": 1,
+  "rpc_unchanged_from_approved925": true,
+  "rpc_lines_base_and_current": [
+    2482,
+    2482
+  ],
+  "identity_tests_moved_verbatim": true,
+  "identity_tests_sha256": "8559581027743b8643eedc191317194559da85e310300de66e9c2084ee519a94"
+}

@@ -1,0 +1,25 @@
+    Checking serde_core v1.0.229
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/protocol)
+    Checking bitflags v2.13.1
+   Compiling rustix v1.1.4
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/ffi-guard)
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/tailcat)
+    Checking nix v0.31.3
+    Checking russh-cryptovec v0.62.0
+    Checking russh v0.62.4
+    Checking serde v1.0.229
+    Checking serde_json v1.0.151
+    Checking uuid v1.24.0
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking toml_edit v0.22.27
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/workflow)
+    Checking toml v0.8.23
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/ceremony)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/fence)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-927-workflow-session/crates/client)
+    Finished `dev` profile [unoptimized] target(s) in 5.18s
+
+exit=0, stopped=None

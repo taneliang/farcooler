@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized] target(s) in 0.16s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 9 tests
+test ffi::identity_tests::a_dying_subscription_does_not_report_the_live_one_dead ... ok
+test ffi::identity_tests::a_board_notice_names_the_repository_to_read_again ... ok
+test ffi::identity_tests::news_about_different_things_is_kept_apart ... ok
+test ffi::identity_tests::a_board_reads_workspace_is_optional_but_never_guessed ... ok
+test ffi::identity_tests::the_same_news_twice_is_queued_once ... ok
+test ffi::identity_tests::two_boards_in_one_repository_are_two_notices ... ok
+test ffi::identity_tests::nonsense_is_refused_rather_than_guessed_at ... ok
+test ffi::identity_tests::the_fingerprint_is_of_the_key_this_device_holds ... ok
+test ffi::identity_tests::the_derived_public_key_matches_the_generated_one ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 262 filtered out; finished in 0.00s
+
+
+exit=0, stopped=None

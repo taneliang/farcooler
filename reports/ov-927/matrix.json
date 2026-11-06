@@ -1,0 +1,10 @@
+{
+  "client": 0,
+  "green": 0,
+  "socket": 0,
+  "jni": 0,
+  "web": 0,
+  "wasm": 0,
+  "client-lint": 0,
+  "lint": 0
+}
