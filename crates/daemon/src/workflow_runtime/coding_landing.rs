@@ -44,6 +44,9 @@ impl Runtime {
             .collect();
         let target = crate::landing_job::push_target(candidate, &identity.target);
         let argv = vec![git.program.to_string_lossy().into_owned(), "push".into(), "--porcelain".into(),
+            // Local push policy must not expand this one-ref operation to tags,
+            // submodule remotes or signing machinery outside its pinned identity.
+            "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
             format!("--force-with-lease={}:{}", identity.target, binding.base),
             identity.repository.to_string_lossy().into_owned(), target];
         let log = self.remote_log(binding);
@@ -179,3 +182,7 @@ mod failure_tests {
         assert!(runtime.reconcile_coding(&binding).await.is_err(), "recovery must not retry the rejected push");
     }
 }
+
+#[cfg(test)]
+#[path = "coding_security_tests.rs"]
+mod security_tests;

@@ -1,0 +1,8 @@
+{
+  "probe": "remove only recursion argv pin",
+  "exit": 0,
+  "interpretation": "No secondary destination change reproduced under remaining retained guard environment; not a red proof of expansion.",
+  "original": "f2836ba466bb984056671001aeaf3dd2f16e4966c19c5c984f08c07ad48acbcf",
+  "mutated": "e1edc3bdde02a42420581254fe53fb6565d33f08600fe68a3189fb9c9b47117b",
+  "restored": "f2836ba466bb984056671001aeaf3dd2f16e4966c19c5c984f08c07ad48acbcf"
+}

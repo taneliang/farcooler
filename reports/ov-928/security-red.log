@@ -1,0 +1,43 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.60s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 5 tests
+
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_receipt_file_identity_and_size ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpoI1DRo/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp08GWlH/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpMTggvw/private-remote.git
+ * [new branch]      HEAD -> main
+
+thread 'workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing' (826635264) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 6, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:a706b3b065613d6b41052783f465f16477558e216abed38ab8508a7b6f9e4c8f", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:117d91a839c4e8187a0ead1253658991fb20708c29cfc20d881c304a5da3e54e", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:23bbf6968ec8361cddb7b1922bbfee9aa041b713b6582f0bfb6a6867897f8e71", stage: 4, iteration: 0, attempt: 1, fence: 5, phase: Uncertain, run: "wf1:ddc6821097dfabb81f7115e3d1553e2edb54541670ed5342736a15c191cd1d02", pending: Some("wf1:e60e3258e4a3d5b20a46dc0359e4c9a74dc0a30e07c3402ec41299f260b6d65d"), candidate: Some("b2adbe68bb40c66443a7350428b8c68f5050b7f7"), last_evidence: Some(Evidence { candidate: "b2adbe68bb40c66443a7350428b8c68f5050b7f7", manifest: "wf1:670437b44a3a3b50b0c7623bd92e9f4141e0fbc23e302b8ff436ee1bf6abd8c0", receipt: "wf1:4bd1944a93e63780a806632099f784d2184d73c65946f2ed178f2d2a6f151c88", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b334-5c96-7d62-8e15-25d97ddddb00", "runtime:01a1b334-5d75-7931-bc9e-02aad5e4f071", "runtime:01a1b334-5e7d-7ce0-97be-95d5826ee596", "runtime:01a1b334-5f9e-72f2-bf32-595760e9b3bc", "runtime:01a1b334-6021-7642-9a83-bb93f3ed9247"}, source_sequences: {"controller": 1, "runtime": 5} })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing ... FAILED
+
+thread 'workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags' (826635263) panicked at crates/daemon/src/workflow_runtime/coding_security_tests.rs:24:5:
+assertion `left == right` failed
+  left: "refs/tags/unselected 67f176e37f219765f05b80ac3829e55c6ae2317c"
+ right: ""
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags ... FAILED
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... ok
+
+thread 'workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed' (826635261) panicked at crates/daemon/src/workflow_runtime/coding_security_tests.rs:110:13:
+receipt runtime exceeded 10s without any FIFO writer
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed
+    workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags
+    workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing
+
+test result: FAILED. 2 passed; 3 failed; 0 ignored; 0 measured; 2704 filtered out; finished in 10.02s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

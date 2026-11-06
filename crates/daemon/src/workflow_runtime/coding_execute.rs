@@ -51,9 +51,12 @@ impl Runtime {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
     }
     pub(super) fn bytes(&self, path: &Path) -> Result<Vec<u8>> {
-        let file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
-        if file.metadata()?.nlink() != 1 || file.metadata()?.len() > 8 * 1024 * 1024 {
-            return Err(Error::Refused("aliased or oversized coding receipt"));
+        // A producer may leave a FIFO: no-follow alone still blocks in open.
+        // Inspect the opened descriptor before any read, as charter_read does.
+        let file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > 8 * 1024 * 1024 {
+            return Err(Error::Refused("nonregular, aliased or oversized coding receipt"));
         }
         use std::io::Read;
         let mut bytes = Vec::new(); file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;

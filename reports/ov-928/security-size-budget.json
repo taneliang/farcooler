@@ -1,0 +1,6 @@
+{
+  "exit": 1,
+  "stdout": "",
+  "stderr": "crates/daemon/src/rpc.rs: 2,482 lines, past its grandfathered ceiling of 2,450.\n  This file is already over the 1,500-line budget and has used its headroom.\n  Move at least 32 lines out into a\n  new file: a type, a handler group or an inline test module that\n  stands on its own. Then run ./scripts/file-size-budget.py --update\n  if it shrinks. Don't raise the number in\n  scripts/file-size-budget.txt: that is the growth this check exists to stop.\n\nfile-size-budget: 1 file(s) over budget.\n",
+  "baseline": "unchanged rpc.rs, separately owned by ov-929"
+}

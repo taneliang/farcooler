@@ -1,0 +1,16 @@
+{
+  "crates/daemon/src/workflow_runtime/coding_security_tests.rs": "9baf199c38722020749bbf62e6b1e975af3afd5b717f3738781681376c76808d",
+  "crates/daemon/src/hook_install/native_host.rs": "0926dd443161f3d7e7dd43aa2475a8357ddd8da9a37058425e1d00ec8e1113fa",
+  "crates/daemon/src/hook_install.rs": "0905dadfbb4d6bc3ac3dfb0eb2372becaa4448aa9b2a03f1f91adeba50df7145",
+  "crates/daemon/src/workflow_runtime/coding_native.rs": "0f1078de2571e22acb9cf6763d635de88868fe8f3713d73a5b099a89113bb147",
+  "crates/daemon/src/workflow_runtime/coding_landing.rs": "f2836ba466bb984056671001aeaf3dd2f16e4966c19c5c984f08c07ad48acbcf",
+  "crates/daemon/src/landing_job.rs": "0f6696516bb28d3ba5d1997b21c140583303e9c602086e8a67f7692b9fb984dd",
+  "crates/daemon/src/effect_runner.rs": "521420af936d979ddb28fb739fbd66426aa6a991444b87eaa5c0c60caf5121df",
+  "crates/daemon/src/workflow_runtime.rs": "263f2d4b373da08fe7fe8990d926023dbf2de56e6a8723d05635c7e7ee5a374e",
+  "crates/daemon/src/workflow_runtime/adapters.rs": "1604f47b9ee88f28ee1bed8d13f174578b00ec090003ee20ce52852a6cc89776",
+  "crates/daemon/src/workflow_runtime/wire_commands.rs": "ec15e3d7bcfe18e1585235012a4111460870d6f7aab6cbfd98ce23bdbec43648",
+  "crates/daemon/src/workflow_runtime/coding.rs": "7d6280487c0f564032d8154b0fb821ee4661f691f3c9ca9a2f1ced68d1ce5b16",
+  "crates/daemon/src/workflow_runtime/coding_execute.rs": "d595b568148f6abc9bd512e7c74fcee39b54e2e2cb6165697ed7b1fb83a47942",
+  "crates/daemon/src/workflow_runtime/coding_tests.rs": "25e694893bae8f83902cb87b9f999373ee38f3f1e5249c04566a269fc3df698d",
+  "crates/daemon/src/workflow_runtime/tests.rs": "def851684716b8554b40917a171615c55cce55ee521f0816f05e59878ab3e65b"
+}

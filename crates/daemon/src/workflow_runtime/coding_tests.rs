@@ -34,9 +34,15 @@ elif stage == 'check':
         sys.exit(0)
     assert pathlib.Path('result.txt').read_text().startswith('candidate')
 elif stage == 'review':
+    if mode == 'review-fifo':
+        os.mkfifo(receipt)
+        sys.exit(0)
     receipt.write_text(json.dumps(dict(binding='foreign' if mode == 'review-foreign' else binding, identity='reviewer', candidate=candidate,
         passed=iteration != '0' and mode != 'review-reject')))
 elif stage == 'ci':
+    if mode == 'ci-fifo':
+        os.mkfifo(receipt)
+        sys.exit(0)
     if mode == 'ci-missing': sys.exit(0)
     if mode == 'ci-wrong': candidate = 'a' * 40
     receipt.write_text(json.dumps(dict(binding='foreign' if mode == 'ci-foreign' else binding, repository='offline/repository', run=dict(

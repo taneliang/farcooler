@@ -1,0 +1,49 @@
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-security-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 33.12s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 4 tests
+
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_receipt_file_identity_and_size ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpnRsDM2/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp9PIZ8T/private-remote.git
+ * [new branch]      HEAD -> main
+
+thread 'workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags_and_disables_signing' (826621071) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 6, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:58889d3344aef7f72364d797eba97a06132aa4614ca7718f26330257e5f73f3d", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:ab8f529ccdb7d0c8ebc465f35f57c3263db1bf8a0cec0db3c3eb3e16519e2509", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:599bff5744581057965259d6321f23a58d17ff579e7b54b0cd51fcffa59a6786", stage: 4, iteration: 0, attempt: 1, fence: 5, phase: Uncertain, run: "wf1:1b5583877bc337c5ce4b344ea84fef9511ac39a0b5a9030d69165ff1abcd6abb", pending: Some("wf1:3d2630e709c42581b8310f945efb8c2fd7a33c4f9d2c409461d381dee626df82"), candidate: Some("428601ade35ff4c9cd5c4e8379a8061f43cee8a7"), last_evidence: Some(Evidence { candidate: "428601ade35ff4c9cd5c4e8379a8061f43cee8a7", manifest: "wf1:0c1c0fd8efca98a122c02596fe6671bb8c31c6f9d4f7e57a72cfe39308b78d1f", receipt: "wf1:c1861d1c4b19fb694a12164983c827b5113738e932eda6c0b888b34122684424", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b333-54df-7250-9556-fb3b8d8963a3", "runtime:01a1b333-55b1-7e73-964a-25493e8db261", "runtime:01a1b333-56a6-7e12-a130-b969daa4b11b", "runtime:01a1b333-578d-7d71-84ac-3e7c619b004c", "runtime:01a1b333-57f8-7ad3-809c-df4f147ffb16"}, source_sequences: {"controller": 1, "runtime": 5} })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags_and_disables_signing ... FAILED
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... ok
+
+thread 'workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed' (826621069) panicked at crates/daemon/src/workflow_runtime/coding_security_tests.rs:99:13:
+receipt runtime exceeded 10s without any FIFO writer
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed
+    workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags_and_disables_signing
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 2704 filtered out; finished in 10.03s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None
