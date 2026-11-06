@@ -1,0 +1,46 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/scripts/heavy",
+    "--load-limit",
+    "20",
+    "--",
+    "/Users/e-liang/.cargo/bin/cargo",
+    "test",
+    "--offline",
+    "-p",
+    "farcooler-daemon",
+    "--lib",
+    "workflow_",
+    "--",
+    "--nocapture"
+  ],
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "profile": "debug0/test0/incremental0/jobs6/offline",
+  "exit": 0,
+  "stopped": null,
+  "seconds": 47.296753875,
+  "minimum_free": 38499299328,
+  "head": "7038e170476ee842ebb9e741005516a9b0bb82bb",
+  "before": {
+    "crates/daemon/src/effect_runner.rs": "521420af936d979ddb28fb739fbd66426aa6a991444b87eaa5c0c60caf5121df",
+    "crates/daemon/src/workflow_runtime.rs": "c497972b3faec31f2290906fcb895e9223aaafc2d555125762499298c58dcb4d",
+    "crates/daemon/src/workflow_runtime/adapters.rs": "1604f47b9ee88f28ee1bed8d13f174578b00ec090003ee20ce52852a6cc89776",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "df88e8634e08ad4bf1a9e927650d08f436e1a06c804eb581a7424443fb70f21f",
+    "crates/daemon/src/workflow_runtime/coding.rs": "d34fc106c8d3808ed031ab8397a9583682ecebcf2139ad44a54d6b00c57032a4",
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "a48b74a984061a742e96c171b37ff88db91296ed4669fe28b805781cab789034",
+    "crates/daemon/src/workflow_runtime/coding_tests.rs": "6b568a5a93d6c0b48b63b2da214d510037ddb9c29355f757045daee0591c9597",
+    "crates/daemon/src/workflow_runtime/tests.rs": "def851684716b8554b40917a171615c55cce55ee521f0816f05e59878ab3e65b"
+  },
+  "after": {
+    "crates/daemon/src/effect_runner.rs": "521420af936d979ddb28fb739fbd66426aa6a991444b87eaa5c0c60caf5121df",
+    "crates/daemon/src/workflow_runtime.rs": "c497972b3faec31f2290906fcb895e9223aaafc2d555125762499298c58dcb4d",
+    "crates/daemon/src/workflow_runtime/adapters.rs": "1604f47b9ee88f28ee1bed8d13f174578b00ec090003ee20ce52852a6cc89776",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "df88e8634e08ad4bf1a9e927650d08f436e1a06c804eb581a7424443fb70f21f",
+    "crates/daemon/src/workflow_runtime/coding.rs": "d34fc106c8d3808ed031ab8397a9583682ecebcf2139ad44a54d6b00c57032a4",
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "a48b74a984061a742e96c171b37ff88db91296ed4669fe28b805781cab789034",
+    "crates/daemon/src/workflow_runtime/coding_tests.rs": "6b568a5a93d6c0b48b63b2da214d510037ddb9c29355f757045daee0591c9597",
+    "crates/daemon/src/workflow_runtime/tests.rs": "def851684716b8554b40917a171615c55cce55ee521f0816f05e59878ab3e65b"
+  },
+  "source_unchanged": true
+}

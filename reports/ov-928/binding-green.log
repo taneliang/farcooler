@@ -1,0 +1,11 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.07s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 1 test
+test workflow_runtime::coding_tests::workflow_coding_foreign_provider_binding_cannot_settle_success ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2694 filtered out; finished in 3.68s
+
+
+exit=0, stopped=None

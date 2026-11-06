@@ -1,0 +1,17 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.00s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 7 tests
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... ok
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... ok
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 2681 filtered out; finished in 9.35s
+
+
+exit=0, stopped=None

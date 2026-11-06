@@ -95,7 +95,7 @@ impl Runtime {
                 { return Err(Error::Refused("cannot repair an admitted or historical base")); }
             }
             let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
-                git(&self.root.join("repo"), &["rev-parse", "refs/heads/landed"]).await?
+                git(&self.repository(), &["rev-parse", self.landing_ref()]).await?
             } else { self.base.clone() };
             // A crash while writing leaves only an ignored private temporary file.
             // The exclusive fixture writer makes replacing a proven partial pin safe.
@@ -130,7 +130,7 @@ impl Runtime {
     pub(super) fn tree(&self, binding: &Binding) -> PathBuf {
         self.root.join(format!("tree-{}", digest(&(&binding.workspace, &binding.effect.item))))
     }
-    async fn git_recorded(&self, binding: &Binding, tree: &Path, args: &[&str]) -> Result<String> {
+    pub(super) async fn git_recorded(&self, binding: &Binding, tree: &Path, args: &[&str]) -> Result<String> {
         let result = crate::git::git(tree, args).await;
         let raw = match &result {
             Ok(output) => serde_json::json!({ "args": args, "ok": output.ok,
@@ -231,14 +231,14 @@ impl Runtime {
             ("FARCOOLER_CANDIDATE", effect.candidate.as_deref().unwrap_or(""))];
         Ok(crate::effect_runner::fixture(tree, script, log, Duration::from_secs(5), &environment).await?)
     }
-    async fn verify_candidate(&self, binding: &Binding, tree: &Path) -> Result<()> {
+    pub(super) async fn verify_candidate(&self, binding: &Binding, tree: &Path) -> Result<()> {
         let candidate = binding.effect.candidate.as_ref().ok_or(Error::Refused("missing candidate"))?;
         if self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await? != *candidate
             || !self.git_recorded(binding, tree, &["status", "--porcelain"]).await?.is_empty()
         { return Err(Error::Refused("candidate changed or dirty")); }
         Ok(())
     }
-    fn stop(&self, workspace: &str, binding: &Binding, operation: &str) -> Result<Outcome> {
+    pub(super) fn stop(&self, workspace: &str, binding: &Binding, operation: &str) -> Result<Outcome> {
         let effects = self.store.workflow_outbox(workspace)?;
         let original = effects.iter().find(|s| s.effect.id == operation)
             .ok_or(Error::Refused("missing original operation"))?;

@@ -1,0 +1,27 @@
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 18 tests
+test landing_job::tests::an_unreadable_branch_never_defaults_to_push ... ok
+test landing_job::tests::an_asked_ticket_needs_your_word ... ok
+test landing_job::tests::a_red_base_stops_the_job ... ok
+test landing_job::tests::a_departed_landing_is_taken_up ... ok
+test landing_job::tests::a_ticket_branch_changed_during_base_ci_cannot_bypass_ask ... ok
+test landing_job::tests::changed_paths_preserves_git_path_bytes ... ok
+test landing_job::tests::a_moved_base_is_never_pushed_without_a_new_gate ... ok
+test landing_job::tests::a_branch_tip_changed_during_base_ci_cannot_bypass_ask ... ok
+test landing_job::tests::a_conflict_stops_cleanly ... ok
+test landing_job::tests::landing_membership_changed_during_base_ci_cannot_bypass_ask ... ok
+test landing_job::tests::a_site_ticket_waits_for_you_and_the_rest_is_pushed ... ok
+test landing_job::tests::one_ticket_is_pushed_to_the_remote_and_lands ... ok
+test landing_job::tests::retrying_keeps_the_previous_scratch_worktree ... ok
+test landing_job::tests::pushed_landing_membership_cannot_absorb_unrouted_tickets_during_ci ... ok
+test landing_job::tests::a_failed_batch_splits_and_lands_the_good_half ... ok
+test landing_job::tests::red_ci_stops_and_a_canceled_run_is_run_again_once ... ok
+test landing_job::tests::gating_landing_membership_cannot_absorb_unrouted_tickets_during_push_fetch ... ok
+test landing_job::tests::reopened_landing_membership_cannot_be_certified_during_push_fetch ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 2677 filtered out; finished in 3.08s
+
+
+exit=0, stopped=None

@@ -6,7 +6,7 @@ async fn fixture() -> (tempfile::TempDir, Runtime) {
     let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     (dir, runtime)
 }
-fn enqueue(runtime: &mut Runtime, workspace: &str, item: &str, definition: Definition) {
+pub(super) fn enqueue(runtime: &mut Runtime, workspace: &str, item: &str, definition: Definition) {
     let controller = runtime.controller();
     let revision = runtime.state(workspace).unwrap().map_or(0, |s| s.revision);
     let sequence = runtime.state(workspace).unwrap().and_then(|s| s.source_sequences.get("controller").copied())
@@ -16,7 +16,7 @@ fn enqueue(runtime: &mut Runtime, workspace: &str, item: &str, definition: Defin
             resource: runtime.resource().into(), dependencies: BTreeSet::new(), initial_candidate: None } };
     assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
 }
-async fn finish(runtime: &mut Runtime, workspace: &str) -> State {
+pub(super) async fn finish(runtime: &mut Runtime, workspace: &str) -> State {
     for time in 2..40 {
         runtime.pump(time).await.unwrap();
         let state = runtime.state(workspace).unwrap().unwrap();
@@ -174,7 +174,7 @@ async fn workflow_runtime_cancel_requires_original_settlement() {
 async fn workflow_runtime_capabilities_specs_and_writer_are_local() {
     let (dir, runtime) = fixture().await;
     assert!(Runtime::open(&dir.path().join("runtime")).is_err());
-    let (_other_dir, mut other) = fixture().await;
+    let (_other_dir, other) = fixture().await;
     let controller = runtime.controller();
     let request = Request { id: "forged".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
         command: Command::Advance };

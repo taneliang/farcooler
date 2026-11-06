@@ -27,25 +27,52 @@ pub(crate) async fn fixture(tree: &Path, script: &str, log: &Path, limit: Durati
 async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
     environment: Option<&[(&str, &str)]>) -> std::io::Result<bool>
 {
-    let file = std::fs::OpenOptions::new().append(true).create(true).open(log)?;
     let mut command = Command::new("/bin/sh");
+    command.arg("-c").arg(script);
     if let Some(environment) = environment {
         command.env_clear().env("PATH", "/usr/bin:/bin").envs(environment.iter().copied());
     }
-    command.arg("-c").arg(script).current_dir(tree)
+    supervise(command, tree, log, limit, None).await.map(|status| status == Some(0))
+}
+
+/// Configured argv uses the same group ownership/quiescence boundary as gates.
+/// No inherited credentials/environment; callers explicitly pin every variable.
+pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
+    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>) -> std::io::Result<Option<i32>>
+{
+    let program = argv.first().ok_or_else(|| std::io::Error::other("empty argv"))?;
+    let mut command = Command::new(program);
+    command.args(&argv[1..]).env_clear().envs(environment);
+    supervise(command, tree, log, limit, Some(cancel)).await
+}
+
+async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
+    mut cancel: Option<tokio::sync::watch::Receiver<bool>>) -> std::io::Result<Option<i32>>
+{
+    let file = std::fs::OpenOptions::new().append(true).create(true).open(log)?;
+    command.current_dir(tree)
         .stdin(Stdio::null()).stdout(file.try_clone()?).stderr(file).kill_on_drop(true);
     command.process_group(0);
     let mut child = command.spawn()?;
     let pid = child.id().expect("newly spawned child has a pid");
     let mut group = Group(Some(pid));
-    let result = tokio::time::timeout(limit, child.wait()).await;
+    let result = tokio::select! {
+        result = tokio::time::timeout(limit, child.wait()) => Some(result),
+        _ = async {
+            if let Some(cancel) = cancel.as_mut() {
+                while !*cancel.borrow_and_update() {
+                    if cancel.changed().await.is_err() { break; }
+                }
+            } else { std::future::pending::<()>().await; }
+        } => None,
+    };
     // Always stop descendants, including on success and timeout. Keep the group
     // guard across every await so cancellation also kills the group.
     unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
-    let timed_out = result.is_err();
-    let passed = match result {
-        Ok(status) => status?.success(),
-        Err(_) => { child.wait().await?; false }
+    let timed_out = matches!(result, Some(Err(_)));
+    let status = match result {
+        Some(Ok(status)) => status?.code(),
+        Some(Err(_)) | None => { child.wait().await?; None }
     };
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {
@@ -53,7 +80,7 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
         if !alive {
             group.0 = None;
             return if timed_out { Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "process deadline exceeded")) }
-                else { Ok(passed) };
+                else { Ok(status) };
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }

@@ -1,0 +1,60 @@
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/protocol)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/tailcat)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/vt)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+warning: variable does not need to be mutable
+   --> crates/daemon/src/workflow_runtime/tests.rs:177:22
+    |
+177 |     let (_other_dir, mut other) = fixture().await;
+    |                      ----^^^^^
+    |                      |
+    |                      help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-daemon` (lib test) generated 1 warning (run `cargo fix --lib -p farcooler-daemon --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 31.21s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 7 tests
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+
+thread 'workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base' (825707493) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 5, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", "1"], environment: {} } }, Stage { id: "review", kind: Review(Orchestrator("reviewer")), progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-review/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", "reviewer"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:72083a3186ee791fffa628407683a1cc449c3ecf6441c9f10a12b460cac7016c", "offline/repository"], environment: {} } }], max_reworks: 2, rework_target: Some("build") }, pin: "wf1:b1a3f9eca55c0c86f5d0c61914d9ae9b2dcdbd56bfbee427619b381b91a6a5f6", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:4e1bbd7102a48da8beee95d35c9391d769a5694a222283202040d7d0110098b6", stage: 4, iteration: 0, attempt: 1, fence: 5, phase: WaitingReview, run: "wf1:99d73acb2b987cbe3ea5c7701417936a981aa109d9a477e299977164cc3173f4", pending: None, candidate: Some("b754ee090b573adcd24368ea87f0a4a4b7159abd"), last_evidence: Some(Evidence { candidate: "b754ee090b573adcd24368ea87f0a4a4b7159abd", manifest: "wf1:9c56cc99bb8a04311f40f8784052927046703f3bbda22534c6d6d178ab052f7f", receipt: "wf1:9fefb321642e53afb4cdff72b59f7cf763e32a38c0df8e2583eecb3154ff73e6", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b2f4-e584-7f33-adb5-715d0e6b181e", "runtime:01a1b2f4-e69e-7c51-97ad-2b666e1eb61c", "runtime:01a1b2f4-e7a9-7520-834d-2b5cd0578b58", "runtime:01a1b2f4-e8ab-7ae0-bca1-9586f0d94230"}, source_sequences: {"controller": 1, "runtime": 4} })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... FAILED
+
+thread 'workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success' (825707490) panicked at crates/daemon/src/workflow_runtime/coding_tests.rs:89:9:
+assertion `left == right` failed: mutate: State { schema: 1, workspace: "w", revision: 4, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:378a52fa9065220eda599da025e0dea23d2de1d1c0f8e730ed7e42a1ffa63e98", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:f339cc27c10c7e1362b931fff04f546ffe03a41d510bb75c8461e6e9e8841649", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:81b78ab424bdf58c8d38ba1d7a34f6673b15164939418221f1277c96ad76772c", stage: 2, iteration: 0, attempt: 1, fence: 3, phase: Failed, run: "wf1:bb0c3ca7678e3c2e42d77dc55f684a76a80eb8e21e613a756c16e5bd7085fccf", pending: None, candidate: Some("d761a04efebd7b26a8c89125d8d14f7e02a5c926"), last_evidence: Some(Evidence { candidate: "d761a04efebd7b26a8c89125d8d14f7e02a5c926", manifest: "wf1:291cb1839eb0524d75fbf2c7a31d0692427914230cf66fc866116f386db70c49", receipt: "wf1:2ffeed31aaf350683b673a6c1ef5442a4809e143d317722205f6d11468dbfd40", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b2f4-e8ff-7fa0-9ba4-34aaba8fbe08", "runtime:01a1b2f4-e9db-7123-815e-7a4b29ce04d4", "runtime:01a1b2f4-ea62-7e03-bad4-26102d229ae2"}, source_sequences: {"controller": 1, "runtime": 3} }
+  left: Failed
+ right: Uncertain
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... FAILED
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+
+thread 'workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution' (825707489) panicked at crates/daemon/src/workflow_runtime/coding_tests.rs:103:93:
+called `Option::unwrap()` on a `None` value
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution
+    workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success
+    workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base
+
+test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 2681 filtered out; finished in 6.81s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

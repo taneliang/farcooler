@@ -12,6 +12,10 @@ use uuid::Uuid;
 use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
+mod coding;
+mod coding_execute;
+pub use coding::{CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, LaunchFile};
+pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
 mod admission;
 pub(crate) use admission::Admission;
@@ -87,6 +91,7 @@ pub struct Runtime {
     instance: Uuid,
     resource: String,
     base: String,
+    coding: Option<CodingConfig>,
     last_occupancy: Option<String>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
@@ -95,6 +100,7 @@ pub struct Runtime {
     sweeps: usize,
     // Kept after all state/process owners; dropping the runtime releases ownership.
     _writer: File,
+    _repository_writer: Option<File>,
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
@@ -102,6 +108,9 @@ impl Drop for Runtime {
         // descriptor. Explicit unlock ends our ownership even during that window.
         if let Err(error) = rustix::fs::flock(&self._writer, rustix::fs::FlockOperation::Unlock) {
             tracing::warn!(%error, "could not unlock isolated workflow writer");
+        }
+        if let Some(file) = &self._repository_writer {
+            let _ = rustix::fs::flock(file, rustix::fs::FlockOperation::Unlock);
         }
     }
 }
@@ -131,7 +140,28 @@ impl Runtime {
             .mode(0o600).custom_flags(libc::O_NOFOLLOW).open(root.join("writer.lock"))?;
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("fixture already has a writer"))?;
-        for name in ["repo", "receipts"] {
+        let coding_path = root.join("coding.json");
+        if coding_path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink() || m.nlink() > 1) {
+            return Err(Error::Refused("coding configuration is an alias"));
+        }
+        let coding: Option<CodingConfig> = if coding_path.try_exists()? {
+            let config: CodingConfig = serde_json::from_slice(&std::fs::read(&coding_path)?)?;
+            config.validate()?;
+            if matches!(config.harness, CodingHarness::Native { .. }) {
+                return Err(Error::Refused("native terminal/hook ownership requires coordinated adapter allocation"));
+            }
+            Some(config)
+        } else { None };
+        let repository_writer = if let Some(config) = &coding {
+            let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)
+                .mode(0o600).custom_flags(libc::O_NOFOLLOW)
+                .open(config.repository.join(".git/farcooler-workflow.lock"))?;
+            if file.metadata()?.nlink() != 1 { return Err(Error::Refused("repository writer lock is aliased")); }
+            rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+                .map_err(|_| Error::Refused("repository already has a configured writer"))?;
+            Some(file)
+        } else { None };
+        for name in if coding.is_some() { vec!["receipts"] } else { vec!["repo", "receipts"] } {
             if root.join(name).canonicalize()? != root.join(name) {
                 return Err(Error::Refused("fixture path is an alias"));
             }
@@ -142,18 +172,25 @@ impl Runtime {
                 return Err(Error::Refused("fixture file is an alias"));
             }
         }
-        if !root.join("repo/.git").is_dir() { return Err(Error::Refused("fixture git directory is external")); }
-        let base: String = serde_json::from_slice(&std::fs::read(root.join("fixture.json"))?)?;
+        if coding.is_none() && !root.join("repo/.git").is_dir() { return Err(Error::Refused("fixture git directory is external")); }
+        let base: String = match &coding {
+            Some(config) => config.base.clone(),
+            None => serde_json::from_slice(&std::fs::read(root.join("fixture.json"))?)?,
+        };
         if base.len() != 40 || !base.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::Refused("fixture base must be a full SHA"));
         }
-        let resource = digest(&("local-fixture/v1", root.join("repo")));
+        let resource = match &coding {
+            Some(config) => digest(&("configured-repository/v1", &config.repository)),
+            None => digest(&("local-fixture/v1", root.join("repo"))),
+        };
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
         Ok(Self { inbox, send, next_lease: None,
             #[cfg(test)] sweeps: 0,
-            root, store, instance: Uuid::now_v7(), resource, base, last_occupancy: None, _writer: writer })
+            root, store, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
+            _writer: writer, _repository_writer: repository_writer })
     }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
         self.authorize(controller.instance)?;
@@ -180,19 +217,19 @@ impl Runtime {
     pub fn events(&self, workspace: &str) -> Result<Vec<Input>> {
         Ok(self.store.workflow_events(workspace)?)
     }
-    pub fn submit(&mut self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
+    pub fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
         self.authorize(controller.instance)?;
         match &request.command {
             Command::Enqueue { definition, resource, .. } => {
                 if resource != &self.resource { return Err(Error::Refused("noncanonical resource")); }
-                adapters::validate(definition)?;
+                self.validate_definition(definition)?;
             }
             Command::Cancel { .. } => {}
             _ => return Err(Error::Refused("not a controller command")),
         }
         self.apply(request, "controller", Grant::Controller, now_ms)
     }
-    pub fn decide(&mut self, session: &DecisionSession, request: Request, now_ms: i64) -> Result<Receipt> {
+    pub fn decide(&self, session: &DecisionSession, request: Request, now_ms: i64) -> Result<Receipt> {
         self.authorize(session.instance)?;
         if !matches!(request.command, Command::Approve { .. } | Command::Review { .. }) {
             return Err(Error::Refused("not a decision"));
@@ -245,8 +282,13 @@ impl Runtime {
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     let binding = Binding::new(&workspace, &effect, stored.resource_generation
                         .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
-                    let outcome = match self.read_journal(&binding) {
-                        Ok(journal) => journal.map(|j| j.outcome).unwrap_or(Outcome::Uncertain),
+                    let recovered = if self.coding.is_some() {
+                        self.reconcile_coding(&binding).await.map(Some)
+                    } else {
+                        self.read_journal(&binding).map(|journal| journal.map(|j| j.outcome))
+                    };
+                    let outcome = match recovered {
+                        Ok(outcome) => outcome.unwrap_or(Outcome::Uncertain),
                         Err(error) => {
                             tracing::warn!(effect = %effect.id, %error, "invalid recovery receipt");
                             Outcome::Uncertain
@@ -271,7 +313,34 @@ impl Runtime {
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
                 let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
-                let outcome = match self.execute(&workspace, &binding).await {
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                // Move only the receiver, leaving the immutable execution context
+                // available while commands (especially Cancel) are admitted.
+                let (_, placeholder) = mpsc::channel(1);
+                let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
+                let result = {
+                    let execution = async {
+                        if self.coding.is_some() { self.execute_coding(&workspace, &binding, cancelled).await }
+                        else { self.execute(&workspace, &binding).await }
+                    };
+                    tokio::pin!(execution);
+                    loop {
+                        tokio::select! {
+                            result = &mut execution => break result,
+                            message = inbox.recv() => {
+                                if let Some(message) = message {
+                                    self.receive(message);
+                                    if self.state(&workspace)?.is_some_and(|s| s.items.get(&effect.item)
+                                        .is_some_and(|i| i.phase == Phase::Cancelling)) {
+                                        cancel.send_replace(true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+                self.inbox = inbox;
+                let outcome = match result {
                     Ok(outcome) => {
                         self.write_journal(&Journal { binding, outcome: outcome.clone() })?;
                         outcome
@@ -281,7 +350,12 @@ impl Runtime {
                         Outcome::Uncertain
                     }
                 };
-                self.observe(&workspace, &effect, outcome, false, now_ms)?;
+                // A cancel fences the original Observe; its private settlement
+                // remains available for the Stop effect's quiescence check.
+                let current = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
+                if current.items[&effect.item].pending.as_ref() == Some(&effect.id) {
+                    self.observe(&workspace, &effect, outcome, false, now_ms)?;
+                }
                 count += 1;
             }
         }
@@ -302,7 +376,7 @@ impl Runtime {
         if receipt.result.is_err() { return Err(Error::Refused("result admission refused")); }
         Ok(())
     }
-    fn receive(&mut self, message: Inbox) {
+    fn receive(&self, message: Inbox) {
         match message {
             Inbox::Apply(authority, request, time, reply) => {
                 let request = *request;
@@ -380,3 +454,6 @@ fn durable(path: &Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod coding_tests;
