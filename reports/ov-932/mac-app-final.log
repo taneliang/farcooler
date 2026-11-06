@@ -1,0 +1,33 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/swift', 'build', '--package-path', 'apps/macos', '--scratch-path', '/private/tmp/ov932-apps/mac-build', '--cache-path', '/private/tmp/ov932-apps/swiftpm-cache', '--config-path', '/private/tmp/ov932-apps/swiftpm-config', '--security-path', '/private/tmp/ov932-apps/swiftpm-security', '-c', 'debug', '--jobs', '6', '--disable-automatic-resolution', '--skip-update']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: 'macos': found 4 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.heic
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.md
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-dark-2x.png
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-unfocused-light-2x.png
+Building for debugging...
+[2 / 4] AgentKit
+[5 / 7] Far Cooler-product
+[7 / 9] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Components/ListChanges.swift:37:33: warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 35 |     /// A test's ear on a `listChanges` list's rows: each transaction one is
+ 36 |     /// drawn in, and each wash as it starts. Nil in the app.
+ 37 |     @Entry var listChangeProbe: ((ListChangeEvent) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 38 | }
+ 39 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/NativeRows.swift:279:33: warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+277 |     /// Opens a subagent's own conversation in the pane's place, by its row id
+278 |     /// and `agentId` (ov-453); nil where the runner can't.
+279 |     @Entry var nativeOpenAgent: ((String, String?) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+280 | }
+281 | 
+[8 / 9] Far Cooler-product
+[9 / 9] Far Cooler-product
+[11 / 11] Far Cooler-product
+Build complete! (6.32 sec)
+
+EXIT 0

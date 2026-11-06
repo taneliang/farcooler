@@ -1,0 +1,10 @@
+{
+  "target/release/libfarcooler_client.a": {
+    "bytes": 118580152,
+    "sha256": "b31a6ad2ca95d702094d3b75f311644fe8aa5cbe18708aae7a55b28ac9076de0"
+  },
+  "target/release/libfarcooler_vt.a": {
+    "bytes": 34788864,
+    "sha256": "237f43f3660df60676b57ea6068171c7ed08d48ec0cef7ed4f59539fad75f241"
+  }
+}

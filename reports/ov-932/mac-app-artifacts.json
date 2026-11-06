@@ -1,0 +1,13 @@
+{
+  "source": "5de71fdeb3c9bdd86f8119b865b4aadc59e45b30",
+  "production_delta": {
+    "apps/macos/Sources/FarCooler/NativeAgent/NativeAgents.swift": "a55a9433060babf4281547016eae0d53daab0cde296bcfe4734f27aa7696bfc6"
+  },
+  "artifact": {
+    "/private/tmp/ov932-apps/mac-build/out/Products/Debug/Far Cooler": {
+      "bytes": 141208096,
+      "sha256": "f856af4c0af7665e59c685bfceda024ce3c28940fbc1d78ccdab8f44eeb42471"
+    }
+  },
+  "receipt": "mac-app-final.json"
+}

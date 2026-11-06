@@ -1,0 +1,135 @@
+{
+  "free_bytes": 37806080000,
+  "reserve_bytes": 10737418240,
+  "load": [
+    5.6171875,
+    4.57861328125,
+    4.22705078125
+  ],
+  "commands": [
+    {
+      "command": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0,
+      "stdout": "5de71fdeb3c9bdd86f8119b865b4aadc59e45b30\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "status",
+        "--short"
+      ],
+      "exit": 0,
+      "stdout": "?? .codex/\n?? .cursor/\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "xcodebuild",
+        "-version"
+      ],
+      "exit": 0,
+      "stdout": "Xcode 27.1\nBuild version 27A9275\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "xcrun",
+        "swift",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0\n",
+      "stderr": "swift-driver version: 1.168.6 "
+    },
+    {
+      "command": [
+        "/Users/e-liang/.cargo/bin/rustc",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "rustc 1.98.1 (48a229cea 2026-09-01)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/e-liang/.cargo/bin/rustup",
+        "target",
+        "list",
+        "--installed"
+      ],
+      "exit": 0,
+      "stdout": "aarch64-apple-darwin\naarch64-apple-ios\naarch64-apple-ios-sim\naarch64-linux-android\naarch64-unknown-linux-musl\nwasm32-unknown-unknown\nx86_64-linux-android\nx86_64-unknown-linux-musl\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/opt/homebrew/opt/openjdk@17/bin/java",
+        "-version"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "openjdk version \"17.0.21.0.3\" 2026-10-24\nOpenJDK Runtime Environment Homebrew (build 17.0.21.0.3+0)\nOpenJDK 64-Bit Server VM Homebrew (build 17.0.21.0.3+0, mixed mode, sharing)\n"
+    },
+    {
+      "command": [
+        "/opt/homebrew/bin/go",
+        "version"
+      ],
+      "exit": 0,
+      "stdout": "go version go1.27.3 darwin/arm64\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "v26.13.0\n",
+      "stderr": ""
+    }
+  ],
+  "files": {
+    "Cargo.lock": {
+      "exists": true,
+      "bytes": 108335,
+      "sha256": "5c04784f74ebbf3dfd74c41a9b823aa37d9a15552d6e33bdfc2db2321705baa4"
+    },
+    "apps/macos/Package.resolved": {
+      "exists": true,
+      "bytes": 387,
+      "sha256": "a4a7ef490c2008f892529afb14f6352eb731079ffa18f1719544a64e6b81fde0"
+    },
+    "apps/android/gradle/wrapper/gradle-wrapper.properties": {
+      "exists": true,
+      "bytes": 281,
+      "sha256": "c94d41b634a5e0ff8a2f812023697b1337eebac18e9962610356a1793f72896d"
+    },
+    "services/web/package-lock.json": {
+      "exists": true,
+      "bytes": 137861,
+      "sha256": "0a27f1854a3fdd7118d4299b5b6310a509be2e60aaac8ee9ea22ec39daef43c6"
+    },
+    "crates/tailcat/go/go.sum": {
+      "exists": true,
+      "bytes": 25969,
+      "sha256": "97fa67d01205250d96aec87b33ab981452b0a04d5eb1daf1fcd9555bb6d93517"
+    },
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/libfarcooler_client.a": {
+      "exists": false
+    },
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/libfarcooler_vt.a": {
+      "exists": false
+    },
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/.cargo-lock": {
+      "exists": true,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

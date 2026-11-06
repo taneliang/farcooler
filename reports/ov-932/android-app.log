@@ -1,0 +1,200 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/env', 'JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home', 'GRADLE_USER_HOME=/private/tmp/ov932-apps/gradle', 'ANDROID_HOME=/Users/e-liang/Library/Android/sdk', 'ANDROID_USER_HOME=/private/tmp/ov932-apps/android', '/bin/sh', '-c', 'cd apps/android && exec ./gradlew --offline --no-daemon --max-workers=6 -Dkotlin.compiler.execution.strategy=in-process assembleDebug assembleAndroidTest']
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /usr/bin/env JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home GRADLE_USER_HOME=/private/tmp/ov932-apps/gradle ANDROID_HOME=/Users/e-liang/Library/Android/sdk ANDROID_USER_HOME=/private/tmp/ov932-apps/android /bin/sh -c 'cd apps/android && exec ./gradlew --offline --no-daemon --max-workers=6 -Dkotlin.compiler.execution.strategy=in-process assembleDebug assembleAndroidTest'); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service, PID 21484, started 2026-11-07 07:50:59, running /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon -p farcooler-cli -p farcooler-store -p farcooler-protocol workflow_ -- --nocapture (1 in line ahead of you)
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :app
+No Rust core and tunnel found in app/src/main/jniLibs. Run ./scripts/build-android-libs.sh before building the app.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :app:stageFonts
+> Task :app:generateDebugResources FROM-CACHE
+> Task :app:packageDebugResources FROM-CACHE
+> Task :app:processDebugNavigationResources FROM-CACHE
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:generateDebugRFile FROM-CACHE
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets FROM-CACHE
+> Task :app:generateDebugGlobalSynthetics FROM-CACHE
+> Task :app:desugarDebugFileDependencies FROM-CACHE
+> Task :app:checkDebugDuplicateClasses
+> Task :app:checkDebugAarMetadata
+> Task :app:mergeExtDexDebug FROM-CACHE
+> Task :app:mergeLibDexDebug FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources FROM-CACHE
+> Task :app:mergeDebugResources FROM-CACHE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:mergeDebugJniLibFolders
+> Task :app:mergeDebugNativeLibs
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:preInstrumentedBuild UP-TO-DATE
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libimage_processing_util_jni.so, libsurface_util_jni.so. Run with --info option to learn more.
+
+> Task :app:generateInstrumentedBuildConfig
+> Task :app:generateInstrumentedResources FROM-CACHE
+> Task :app:packageInstrumentedResources FROM-CACHE
+> Task :app:processInstrumentedNavigationResources FROM-CACHE
+> Task :app:parseInstrumentedLocalResources FROM-CACHE
+> Task :app:generateInstrumentedRFile FROM-CACHE
+> Task :app:javaPreCompileInstrumented FROM-CACHE
+> Task :app:mapInstrumentedSourceSetPaths
+> Task :app:compileInstrumentedNavigationResources FROM-CACHE
+> Task :app:checkInstrumentedAarMetadata
+> Task :app:mergeInstrumentedResources FROM-CACHE
+> Task :app:createInstrumentedCompatibleScreenManifests
+> Task :app:extractDeepLinksInstrumented FROM-CACHE
+> Task :app:processInstrumentedMainManifest
+> Task :app:processInstrumentedManifest
+> Task :app:preInstrumentedAndroidTestBuild SKIPPED
+> Task :app:mergeInstrumentedAndroidTestManifest
+> Task :app:processInstrumentedAndroidTestManifest
+> Task :app:generateInstrumentedAndroidTestBuildConfig FROM-CACHE
+> Task :app:generateInstrumentedAndroidTestResources FROM-CACHE
+> Task :app:packageInstrumentedAndroidTestResources FROM-CACHE
+> Task :app:processInstrumentedAndroidTestNavigationResources FROM-CACHE
+> Task :app:parseInstrumentedAndroidTestLocalResources FROM-CACHE
+> Task :app:generateInstrumentedAndroidTestRFile FROM-CACHE
+> Task :app:javaPreCompileInstrumentedAndroidTest FROM-CACHE
+> Task :app:generateInstrumentedAndroidTestAssets UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestAssets
+> Task :app:compressInstrumentedAndroidTestAssets FROM-CACHE
+> Task :app:generateInstrumentedAndroidTestGlobalSynthetics FROM-CACHE
+> Task :app:checkInstrumentedAndroidTestDuplicateClasses
+> Task :app:desugarInstrumentedAndroidTestFileDependencies FROM-CACHE
+> Task :app:mergeExtDexInstrumentedAndroidTest FROM-CACHE
+> Task :app:mergeLibDexInstrumentedAndroidTest FROM-CACHE
+> Task :app:checkInstrumentedAndroidTestAarMetadata
+> Task :app:processDebugManifestForPackage
+> Task :app:mapInstrumentedAndroidTestSourceSetPaths
+> Task :app:compileInstrumentedAndroidTestNavigationResources FROM-CACHE
+> Task :app:mergeInstrumentedAndroidTestResources FROM-CACHE
+> Task :app:processInstrumentedAndroidTestResources FROM-CACHE
+> Task :app:mergeInstrumentedAndroidTestJniLibFolders
+> Task :app:mergeInstrumentedJniLibFolders
+> Task :app:processInstrumentedManifestForPackage
+> Task :app:mergeInstrumentedNativeLibs
+> Task :app:mergeInstrumentedAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripInstrumentedAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningInstrumentedAndroidTest
+> Task :app:writeInstrumentedAndroidTestSigningConfigVersions
+> Task :app:processDebugResources
+> Task :app:processInstrumentedResources
+> Task :app:compileDebugKotlin
+> Task :app:compileInstrumentedKotlin
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ceremony/CeremonyStore.kt:712:9 Redundant creation of Json format. Creating instances for each usage can be slow.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/AskAboutTask.kt:52:79 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:242:64 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:243:66 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/NeedsYou.kt:335:56 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:173:102 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:203:61 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:370:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:388:52 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:393:9 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:401:13 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:401:27 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanAgents.kt:116:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanLandings.kt:236:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:122:47 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:126:78 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:404:49 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:524:23 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FilesScreen.kt:193:68 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:46:33 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:65:30 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAgentView.kt:173:130 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:80:46 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:130:26 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativePromptImages.kt:166:17 'fun rememberTransformableState(onTransformation: (Float, Offset, Float) -> Unit): TransformableState' is deprecated. Prefer remembering a TransformableState with a onTransformation lambda that takes the centroid. This centroid (if specified) is the point at which zooming or rotation should happen around which allows for more natural transformations.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:357:54 Unnecessary safe call on a non-null receiver of type 'Connection'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:358:83 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/PhoneEmptyRows.kt:36:39 'val Icons.Outlined.CallMerge: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.CallMerge.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/PlanPageScreens.kt:354:44 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:210:45 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:216:62 Unnecessary safe call on a non-null receiver of type 'Runner'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt:89:39 Unnecessary safe call on a non-null receiver of type 'WorkflowPresentation'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/WorkspaceScreen.kt:726:5 'fun TabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryTabRow and SecondaryTabRow.
+
+> Task :app:compileDebugKotlin
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ceremony/CeremonyStore.kt:712:9 Redundant creation of Json format. Creating instances for each usage can be slow.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/AskAboutTask.kt:52:79 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:242:64 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:243:66 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/NeedsYou.kt:335:56 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:173:102 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:203:61 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:370:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:388:52 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:393:9 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:401:13 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:401:27 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanAgents.kt:116:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanLandings.kt:236:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:122:47 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:126:78 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:404:49 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:524:23 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FilesScreen.kt:193:68 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:46:33 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:65:30 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAgentView.kt:173:130 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:80:46 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:130:26 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NativePromptImages.kt:166:17 'fun rememberTransformableState(onTransformation: (Float, Offset, Float) -> Unit): TransformableState' is deprecated. Prefer remembering a TransformableState with a onTransformation lambda that takes the centroid. This centroid (if specified) is the point at which zooming or rotation should happen around which allows for more natural transformations.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:357:54 Unnecessary safe call on a non-null receiver of type 'Connection'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:358:83 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/PhoneEmptyRows.kt:36:39 'val Icons.Outlined.CallMerge: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.CallMerge.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/PlanPageScreens.kt:354:44 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:210:45 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:216:62 Unnecessary safe call on a non-null receiver of type 'Runner'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt:89:39 Unnecessary safe call on a non-null receiver of type 'WorkflowPresentation'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/app/src/main/java/com/farcooler/ui/WorkspaceScreen.kt:726:5 'fun TabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryTabRow and SecondaryTabRow.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:mergeDebugJavaResource
+> Task :app:dexBuilderDebug
+> Task :app:compileInstrumentedJavaWithJavac
+> Task :app:bundleInstrumentedClassesToCompileJar
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileInstrumentedAndroidTestKotlin
+> Task :app:compileInstrumentedAndroidTestJavaWithJavac
+> Task :app:processInstrumentedAndroidTestJavaRes
+> Task :app:dexBuilderInstrumentedAndroidTest FROM-CACHE
+> Task :app:mergeProjectDexInstrumentedAndroidTest FROM-CACHE
+> Task :app:mergeInstrumentedAndroidTestJavaResource
+> Task :app:packageInstrumentedAndroidTest
+> Task :app:createInstrumentedAndroidTestApkListingFileRedirect
+> Task :app:assembleInstrumentedAndroidTest
+> Task :app:assembleAndroidTest
+
+[Incubating] Problems report is available at: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 54s
+93 actionable tasks: 53 executed, 40 from cache
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html
+
+EXIT 0

@@ -44,17 +44,22 @@ final class NativeAgents: ObservableObject {
     var core: RunnerCore? { links[""]?.core }
 
     /// Resolve an existing authenticated Session only; never pair or dial from a workflow view.
-    lazy var workflows = WorkflowSessionAdapter(root: WorkflowSessionAdapter.journalRoot()) { [weak self] target in
-        guard let self, let core = self.links[target]?.core, let hostID = self.links[target]?.workflowHost else { return nil }
-        let account = Account.shared.userId.isEmpty
-            ? (target.isEmpty ? "local-user:" + NSUserName() : self.pairing.key.clientID ?? "") : Account.shared.userId
-        return WorkflowSessionAdapter.Current(account: account, host: hostID,
-            connection: String(describing: ObjectIdentifier(core))) { [weak self] method, raw in
-                guard let self, let current = self.links[target]?.core, await current.isConnected,
-                      self.links[target]?.core === current else { throw WorkflowDisplayError.pending }
-                let args = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
-                return String(decoding: try await current.call(method, json: RunnerCore.JSONArguments(value: args)), as: UTF8.self)
-            }
+    lazy var workflows = makeWorkflowAdapter()
+
+    /// Keep closure isolation in a main-actor method rather than a lazy initializer.
+    private func makeWorkflowAdapter() -> WorkflowSessionAdapter {
+        WorkflowSessionAdapter(root: WorkflowSessionAdapter.journalRoot()) { [weak self] target in
+            guard let self, let core = self.links[target]?.core, let hostID = self.links[target]?.workflowHost else { return nil }
+            let account = Account.shared.userId.isEmpty
+                ? (target.isEmpty ? "local-user:" + NSUserName() : self.pairing.key.clientID ?? "") : Account.shared.userId
+            return WorkflowSessionAdapter.Current(account: account, host: hostID,
+                connection: String(describing: ObjectIdentifier(core))) { [weak self] method, raw in
+                    guard let self, let current = self.links[target]?.core, await current.isConnected,
+                          self.links[target]?.core === current else { throw WorkflowDisplayError.pending }
+                    let args = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
+                    return String(decoding: try await current.call(method, json: RunnerCore.JSONArguments(value: args)), as: UTF8.self)
+                }
+        }
     }
 
     /// The remote runners the fleet brought up, connected where paired.

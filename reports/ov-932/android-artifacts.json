@@ -1,0 +1,33 @@
+[
+  {
+    "path": "apps/android/app/build/outputs/apk/androidTest/instrumented/app-instrumented-androidTest.apk",
+    "bytes": 850297,
+    "sha256": "8bae2328f63bec0f20d6f4349cc4e8a91dc0a8c4edb84e451df30126cc10e7ec",
+    "native_entries": [],
+    "current_farcooler_jni_present": false
+  },
+  {
+    "path": "apps/android/app/build/outputs/apk/debug/app-debug.apk",
+    "bytes": 95038020,
+    "sha256": "8075bb805af7cf3b5dfda6932f83ecf7db4d82206d8e65998ddb5fa10bd7e5c9",
+    "native_entries": [
+      "lib/arm64-v8a/libandroidx.graphics.path.so",
+      "lib/arm64-v8a/libdatastore_shared_counter.so",
+      "lib/arm64-v8a/libimage_processing_util_jni.so",
+      "lib/arm64-v8a/libsurface_util_jni.so",
+      "lib/armeabi-v7a/libandroidx.graphics.path.so",
+      "lib/armeabi-v7a/libdatastore_shared_counter.so",
+      "lib/armeabi-v7a/libimage_processing_util_jni.so",
+      "lib/armeabi-v7a/libsurface_util_jni.so",
+      "lib/x86/libandroidx.graphics.path.so",
+      "lib/x86/libdatastore_shared_counter.so",
+      "lib/x86/libimage_processing_util_jni.so",
+      "lib/x86/libsurface_util_jni.so",
+      "lib/x86_64/libandroidx.graphics.path.so",
+      "lib/x86_64/libdatastore_shared_counter.so",
+      "lib/x86_64/libimage_processing_util_jni.so",
+      "lib/x86_64/libsurface_util_jni.so"
+    ],
+    "current_farcooler_jni_present": false
+  }
+]

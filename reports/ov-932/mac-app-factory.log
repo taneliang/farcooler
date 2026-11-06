@@ -1,0 +1,626 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/swift', 'build', '--package-path', 'apps/macos', '--scratch-path', '/private/tmp/ov932-apps/mac-build', '--cache-path', '/private/tmp/ov932-apps/swiftpm-cache', '--config-path', '/private/tmp/ov932-apps/swiftpm-config', '--security-path', '/private/tmp/ov932-apps/swiftpm-security', '-c', 'debug', '--jobs', '6', '--disable-automatic-resolution', '--skip-update']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: 'macos': found 4 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.heic
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.md
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-dark-2x.png
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-unfocused-light-2x.png
+Building for debugging...
+[1 / 23]
+[3 / 10] AgentKit
+[9 / 34] AgentKit
+[11 / 34] Far Cooler-product
+[12 / 34] Far Cooler-product
+[13 / 34] Far Cooler-product
+[14 / 34] Far Cooler-product
+[15 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Components/ListChanges.swift:37:33: warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 35 |     /// A test's ear on a `listChanges` list's rows: each transaction one is
+ 36 |     /// drawn in, and each wash as it starts. Nil in the app.
+ 37 |     @Entry var listChangeProbe: ((ListChangeEvent) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 38 | }
+ 39 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/NativeRows.swift:279:33: warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+277 |     /// Opens a subagent's own conversation in the pane's place, by its row id
+278 |     /// and `agentId` (ov-453); nil where the runner can't.
+279 |     @Entry var nativeOpenAgent: ((String, String?) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+280 | }
+281 | 
+[16 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/NativeRows.swift:279:33: warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+277 |     /// Opens a subagent's own conversation in the pane's place, by its row id
+278 |     /// and `agentId` (ov-453); nil where the runner can't.
+279 |     @Entry var nativeOpenAgent: ((String, String?) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var nativeOpenAgent' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+280 | }
+281 | 
+[18 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TerminalRenderView.swift:829:27: warning: value 'character' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 827 |                 let cell = snapshot[row, column]
+ 828 |                 let step = cell.isWide ? 2 : 1
+ 829 |                 guard let character = cell.character else {
+     |                           `- warning: value 'character' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 830 |                     column += step
+ 831 |                     continue
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:648:32: warning: call to main actor-isolated static method 'width' in a synchronous nonisolated context [#ActorIsolatedCall]
+646 |         trailingWidth = TitleStatus.trailing(
+647 |             editor: editor, changes: changes, files: files, trouble: trouble, needsYou: needsYou)
+648 |             + TerminalsToolbar.width(terminals)
+    |                                `- warning: call to main actor-isolated static method 'width' in a synchronous nonisolated context [#ActorIsolatedCall]
+649 |     }
+650 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TerminalsToolbar.swift:38:17: note: calls to static method 'width' from outside of its actor context are implicitly asynchronous
+36 | 
+37 |     /// What the toolbar keeps room for: the glyph, the count and the capsule.
+38 |     static func width(_ count: Int) -> CGFloat {
+   |                 |- note: calls to static method 'width' from outside of its actor context are implicitly asynchronous
+   |                 `- note: main actor isolation inferred from conformance to protocol 'ToolbarContent'
+39 |         count == 0 ? 0 : 36 + TitleStatus.textWidth(label(count)) + 8
+40 |     }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:720:19: warning: main actor-isolated property 'toolbarStyle' can not be referenced from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+    |                   `- warning: main actor-isolated property 'toolbarStyle' can not be referenced from a nonisolated context
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:312:32: note: property declared here
+ 310 | 
+ 311 | /// Specifies how the titlebar area of the window should appear when the window displays an NSToolbar
+ 312 | @property NSWindowToolbarStyle toolbarStyle API_AVAILABLE(macos(11.0));
+     |                                `- note: property declared here
+ 313 | 
+ 314 | /// The \c contentLayoutRect will return the area inside the window that is for non-obscured content. Typically, this is the same thing as the `contentView`'s frame. However, for windows with the \c NSFullSizeContentViewWindowMask set, there needs to be a way to determine the portion that is not under the toolbar. The \c contentLayoutRect returns the portion of the layout that is not obscured under the toolbar. \c contentLayoutRect is in window coordinates. It is KVO compliant. */
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:720:57: warning: main actor-isolated property 'toolbarStyle' can not be mutated from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+    |                                                         `- warning: main actor-isolated property 'toolbarStyle' can not be mutated from a nonisolated context
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:312:32: note: mutation of this property is only permitted within the actor
+ 310 | 
+ 311 | /// Specifies how the titlebar area of the window should appear when the window displays an NSToolbar
+ 312 | @property NSWindowToolbarStyle toolbarStyle API_AVAILABLE(macos(11.0));
+     |                                `- note: mutation of this property is only permitted within the actor
+ 313 | 
+ 314 | /// The \c contentLayoutRect will return the area inside the window that is for non-obscured content. Typically, this is the same thing as the `contentView`'s frame. However, for windows with the \c NSFullSizeContentViewWindowMask set, there needs to be a way to determine the portion that is not under the toolbar. The \c contentLayoutRect returns the portion of the layout that is not obscured under the toolbar. \c contentLayoutRect is in window coordinates. It is KVO compliant. */
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:721:20: warning: main actor-isolated property 'titlebarAppearsTransparent' can not be referenced from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+    |                    `- warning: main actor-isolated property 'titlebarAppearsTransparent' can not be referenced from a nonisolated context
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+723 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:309:16: note: property declared here
+ 307 | 
+ 308 | /// When \c YES, the titlebar doesn't draw its background, allowing all buttons to show through, and "click through" to happen. In general, this is only useful when \c NSFullSizeContentViewWindowMask is set.
+ 309 | @property BOOL titlebarAppearsTransparent API_AVAILABLE(macos(10.10));
+     |                `- note: property declared here
+ 310 | 
+ 311 | /// Specifies how the titlebar area of the window should appear when the window displays an NSToolbar
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:721:56: warning: main actor-isolated property 'titlebarAppearsTransparent' can not be mutated from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+    |                                                        `- warning: main actor-isolated property 'titlebarAppearsTransparent' can not be mutated from a nonisolated context
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+723 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:309:16: note: mutation of this property is only permitted within the actor
+ 307 | 
+ 308 | /// When \c YES, the titlebar doesn't draw its background, allowing all buttons to show through, and "click through" to happen. In general, this is only useful when \c NSFullSizeContentViewWindowMask is set.
+ 309 | @property BOOL titlebarAppearsTransparent API_AVAILABLE(macos(10.10));
+     |                `- note: mutation of this property is only permitted within the actor
+ 310 | 
+ 311 | /// Specifies how the titlebar area of the window should appear when the window displays an NSToolbar
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:722:19: warning: main actor-isolated property 'titlebarSeparatorStyle' can not be referenced from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+    |                   `- warning: main actor-isolated property 'titlebarSeparatorStyle' can not be referenced from a nonisolated context
+723 |     }
+724 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:644:36: note: property declared here
+ 642 |     The default value is NSTitlebarSeparatorStyleAutomatic. Changing this value will override any preference made by `NSSplitViewItem`.
+ 643 |  */
+ 644 | @property NSTitlebarSeparatorStyle titlebarSeparatorStyle API_AVAILABLE(macos(11.0));
+     |                                    `- note: property declared here
+ 645 | 
+ 646 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TitleBarStatus.swift:722:60: warning: main actor-isolated property 'titlebarSeparatorStyle' can not be mutated from a nonisolated context
+717 |     /// gutters are one frosted surface, and Increase Contrast's and Reduce
+718 |     /// Transparency's opaque fallback is the plane's own.
+719 |     static func unify(_ window: NSWindow) {
+    |                 `- note: add '@MainActor' to make static method 'unify' part of global actor 'MainActor'
+720 |         if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+721 |         if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+722 |         if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+    |                                                            `- warning: main actor-isolated property 'titlebarSeparatorStyle' can not be mutated from a nonisolated context
+723 |     }
+724 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:644:36: note: mutation of this property is only permitted within the actor
+ 642 |     The default value is NSTitlebarSeparatorStyleAutomatic. Changing this value will override any preference made by `NSSplitViewItem`.
+ 643 |  */
+ 644 | @property NSTitlebarSeparatorStyle titlebarSeparatorStyle API_AVAILABLE(macos(11.0));
+     |                                    `- note: mutation of this property is only permitted within the actor
+ 645 | 
+ 646 | 
+
+[#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[20 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceScreen.swift:265:35: warning: call to main actor-isolated static method 'ownLayouts(_:of:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+263 |         func opened(_ worktree: Worktree, terminal: String?) -> ShownLayout? {
+264 |             let all = layouts(worktree.host ?? "", worktree.id) ?? []
+265 |             let own = ContentView.ownLayouts(all, of: worktree)
+    |                                   `- warning: call to main actor-isolated static method 'ownLayouts(_:of:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+266 |             // An orchestrator's window is never a worktree's layout, even
+267 |             // named: it's the conversation column's. Nor is a window a
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceRules.swift:112:17: note: calls to static method 'ownLayouts(_:of:)' from outside of its actor context are implicitly asynchronous
+110 |     /// checkout's terminals, and its window is left out all the same:
+111 |     /// selecting it shows that window alone. See `WorkspaceScreen.shown`.
+112 |     static func ownLayouts(_ groups: [PaneGroup], of worktree: Worktree) -> [PaneGroup] {
+    |                 |- note: calls to static method 'ownLayouts(_:of:)' from outside of its actor context are implicitly asynchronous
+    |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+113 |         let orchestrators = orchestrators(in: worktree)
+114 |         guard !orchestrators.isEmpty else { return groups }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceScreen.swift:273:45: warning: call to main actor-isolated static method 'orchestrators(in:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+271 |             // orchestrator nobody seats has no column, so the window it
+272 |             // shares is where the named terminal is shown.
+273 |             let orchestrators = ContentView.orchestrators(in: worktree)
+    |                                             `- warning: call to main actor-isolated static method 'orchestrators(in:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+274 |             let seated = Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id))
+275 |             if let terminal, !orchestrators.contains(terminal),
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceRules.swift:96:17: note: calls to static method 'orchestrators(in:)' from outside of its actor context are implicitly asynchronous
+ 94 |     /// the checkout's session. `worktree` is the runner's, not a
+ 95 |     /// row's: a row's has the orchestrators drawn elsewhere taken out.
+ 96 |     static func orchestrators(in worktree: Worktree) -> Set<String> {
+    |                 |- note: calls to static method 'orchestrators(in:)' from outside of its actor context are implicitly asynchronous
+    |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+ 97 |         Set(worktree.terminals.filter(\.isOrchestrator).map(\.id))
+ 98 |     }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceScreen.swift:283:43: warning: call to main actor-isolated static method 'shownLayout(_:of:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+281 |                     groups: own.contains { $0.id == group.id } ? own : [group])
+282 |             }
+283 |             guard let group = ContentView.shownLayout(all, of: worktree), !group.terminals.isEmpty else {
+    |                                           `- warning: call to main actor-isolated static method 'shownLayout(_:of:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+284 |                 return nil
+285 |             }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceRules.swift:120:17: note: calls to static method 'shownLayout(_:of:)' from outside of its actor context are implicitly asynchronous
+118 |     /// The layout selecting a worktree's own row shows: the active one of its
+119 |     /// own layouts, else the first of them. Nil when it has none.
+120 |     static func shownLayout(_ groups: [PaneGroup]?, of worktree: Worktree) -> PaneGroup? {
+    |                 |- note: calls to static method 'shownLayout(_:of:)' from outside of its actor context are implicitly asynchronous
+    |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+121 |         let own = ownLayouts(groups ?? [], of: worktree)
+122 |         return own.first { $0.isActive } ?? own.first
+
+[#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+[21 / 34] Far Cooler-product
+[22 / 34] Far Cooler-product
+[23 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/TaskColumn.swift:423:65: warning: converting non-Sendable function value to '@isolated(any) @Sendable (TaskTab) -> Void' may introduce data races
+421 |         let gap = form == .tight ? ColumnGrid.rhythm / 2 : ColumnGrid.rhythm
+422 |         HStack(spacing: gap) {
+423 |             Picker("Tab", selection: Binding(get: { tab }, set: onChoose)) {
+    |                                                                 `- warning: converting non-Sendable function value to '@isolated(any) @Sendable (TaskTab) -> Void' may introduce data races
+424 |                 ForEach(TaskTab.allCases) { tab in Text(tab.title).tag(tab) }
+425 |             }
+[23 / 34] AllExcludingTests
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ConversationColumn.swift:211:83: warning: converting non-Sendable function value to '@isolated(any) @Sendable (Bool) -> Void' may introduce data races
+209 |         case .wakeOnAnswer:
+210 |             Divider()  // style-exempt: menu section break
+211 |             Toggle(item.title, isOn: Binding(get: { wakeOnAnswer ?? false }, set: onSetWakeOnAnswer))
+    |                                                                                   `- warning: converting non-Sendable function value to '@isolated(any) @Sendable (Bool) -> Void' may introduce data races
+212 |                 .help("When you answer one of this board’s decisions, type the answer into the agent working that task, or else the orchestrator, once it’s idle.")
+213 |         case .showBoard, .startOrchestrator:
+[24 / 34] AllExcludingTests
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:83:43: warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+  81 | 
+  82 |         init(_ scroll: NSScrollView) {
+  83 |             let clip = scroll.contentView.bounds
+     |                                           `- warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+  84 |             let insets = scroll.contentInsets
+  85 |             y = clip.minY
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSView.h:139:18: note: property declared here
+137 | - (void)scaleUnitSquareToSize:(NSSize)newUnitSize;
+138 | - (void)rotateByAngle:(CGFloat)angle;
+139 | @property NSRect bounds;
+    |                  `- note: property declared here
+140 | 
+141 | @property (getter=isFlipped, readonly) BOOL flipped;
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:83:31: warning: main actor-isolated property 'contentView' can not be referenced from a nonisolated context
+  81 | 
+  82 |         init(_ scroll: NSScrollView) {
+  83 |             let clip = scroll.contentView.bounds
+     |                               `- warning: main actor-isolated property 'contentView' can not be referenced from a nonisolated context
+  84 |             let insets = scroll.contentInsets
+  85 |             y = clip.minY
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSScrollView.h:50:32: note: property declared here
+ 48 | @property (readonly) NSSize contentSize;
+ 49 | @property (nullable, strong) __kindof NSView *documentView;
+ 50 | @property (strong) NSClipView *contentView;
+    |                                `- note: property declared here
+ 51 | @property (nullable, strong) NSCursor *documentCursor;
+ 52 | @property NSBorderType borderType;
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:84:33: warning: main actor-isolated property 'contentInsets' can not be referenced from a nonisolated context
+  82 |         init(_ scroll: NSScrollView) {
+  83 |             let clip = scroll.contentView.bounds
+  84 |             let insets = scroll.contentInsets
+     |                                 `- warning: main actor-isolated property 'contentInsets' can not be referenced from a nonisolated context
+  85 |             y = clip.minY
+  86 |             height = clip.height
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSScrollView.h:129:24: note: property declared here
+127 | /* The distance that the sub views are inset from the enclosing scroll view during tiling. When contentInset equal to NSEdgeInsetsZero, traditional tiling is performed. That is, the rulers, headers, etc... are tiled with the contentView frame filling the remaining space. When contentInset is not equal to NSEdgeInsetsZero, the rulers, header, etc... are inset as specified. The contentView is is placed underneath these sibling views and is only inset by scroll view border and non-overlay scrollers.
+128 | */
+129 | @property NSEdgeInsets contentInsets API_AVAILABLE(macos(10.10));
+    |                        `- note: property declared here
+130 | 
+131 | /* The distance the scrollers are inset from the edge of the scroll view. */
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:88:45: warning: main actor-isolated property 'frame' can not be referenced from a nonisolated context
+  86 |             height = clip.height
+  87 |             width = clip.width
+  88 |             document = scroll.documentView?.frame.height ?? 0
+     |                                             `- warning: main actor-isolated property 'frame' can not be referenced from a nonisolated context
+  89 |             top = insets.top
+  90 |             bottom = insets.bottom
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSView.h:129:18: note: property declared here
+127 | - (void)setFrameOrigin:(NSPoint)newOrigin;
+128 | - (void)setFrameSize:(NSSize)newSize;
+129 | @property NSRect frame;
+    |                  `- note: property declared here
+130 | @property CGFloat frameRotation;
+131 | @property CGFloat frameCenterRotation API_AVAILABLE(macos(10.5));
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:88:31: warning: main actor-isolated property 'documentView' can not be referenced from a nonisolated context
+  86 |             height = clip.height
+  87 |             width = clip.width
+  88 |             document = scroll.documentView?.frame.height ?? 0
+     |                               `- warning: main actor-isolated property 'documentView' can not be referenced from a nonisolated context
+  89 |             top = insets.top
+  90 |             bottom = insets.bottom
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSScrollView.h:49:47: note: property declared here
+ 47 | @property (readonly) NSRect documentVisibleRect;
+ 48 | @property (readonly) NSSize contentSize;
+ 49 | @property (nullable, strong) __kindof NSView *documentView;
+    |                                               `- note: property declared here
+ 50 | @property (strong) NSClipView *contentView;
+ 51 | @property (nullable, strong) NSCursor *documentCursor;
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/NativeAgent/TranscriptScroller.swift:1100:69: warning: main actor-isolated static property 'space' can not be referenced from a Sendable closure
+  32 |     /// The coordinate space rows report their frames in: the content's own,
+  33 |     /// which is the scroll view's document.
+  34 |     static let space = "native-transcript-content"
+     |                `- note: static property declared here
+  35 |     /// The stack's padding on each side, inside the clip.
+  36 |     static let padding = Spacing.section
+     :
+1098 |     func placed(_ id: String, in layout: TranscriptLayout) -> some View {
+1099 |         onGeometryChange(for: TranscriptLayout.Placed.self) { proxy in
+1100 |             let space = NamedCoordinateSpace.named(TranscriptLayout.space)
+     |                                                                     `- warning: main actor-isolated static property 'space' can not be referenced from a Sendable closure
+1101 |             return TranscriptLayout.Placed(frame: proxy.frame(in: space), space: proxy.bounds(of: space)?.width)
+1102 |         } action: { layout.place(id, $0.frame, in: $0.space) }
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Prefix.swift:72:48: warning: main actor-isolated property 'sheetParent' can not be referenced from a nonisolated autoclosure
+ 70 |         func reaches(_ window: NSWindow?) -> Bool {
+ 71 |             guard let target = self.window, let window else { return false }
+ 72 |             return target === window || target.sheetParent === window || target.parent === window
+    |                                                `- warning: main actor-isolated property 'sheetParent' can not be referenced from a nonisolated autoclosure
+ 73 |         }
+ 74 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:602:50: note: property declared here
+ 600 |  * Returns nil if the window is not a sheet or has no sheet parent.
+ 601 |  */
+ 602 | @property (nullable, readonly, strong) NSWindow *sheetParent API_AVAILABLE(macos(10.9));
+     |                                                  `- note: property declared here
+ 603 | 
+ 604 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Prefix.swift:72:81: warning: main actor-isolated property 'parent' can not be referenced from a nonisolated autoclosure
+ 70 |         func reaches(_ window: NSWindow?) -> Bool {
+ 71 |             guard let target = self.window, let window else { return false }
+ 72 |             return target === window || target.sheetParent === window || target.parent === window
+    |                                                                                 `- warning: main actor-isolated property 'parent' can not be referenced from a nonisolated autoclosure
+ 73 |         }
+ 74 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSWindow.h:612:38: note: property declared here
+ 610 | @property (nullable, readonly, copy) NSArray<__kindof NSWindow *> *childWindows;
+ 611 | 
+ 612 | @property (nullable, weak) NSWindow *parentWindow;
+     |                                      `- note: property declared here
+ 613 | 
+ 614 | /// If set, the receiver will inherit the appearance of that object, as well as use KVO to observe its effectiveAppearance for changes. Typically this is used for child windows that are shown from a parent window or specific view. Defaults to NSApp.
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/RunnerSettingsStore+Access.swift:56:13: warning: initialization of immutable value 'runner' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+ 54 |     /// exactly that action (ov-858). Nothing here signs: this Mac holds no key.
+ 55 |     private func signedActions(_ remote: RemoteStepUp) -> PeopleAccessActions {
+ 56 |         let runner = target.isEmpty ? "this Mac" : target
+    |             `- warning: initialization of immutable value 'runner' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+ 57 |         return PeopleAccessActions(
+ 58 |             removeDevice: { [weak self] device, withAdded in
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ServiceRegistration.swift:213:58: warning: capture of 'turnOn' with non-Sendable type '() -> Void' in a '@Sendable' closure [#SendableClosureCaptures]
+211 |         turnOff: @escaping () -> Void
+212 |     ) -> Binding<Bool> {
+213 |         Binding(get: { isOn }, set: { wanted in wanted ? turnOn() : turnOff() })
+    |                                                          |- warning: capture of 'turnOn' with non-Sendable type '() -> Void' in a '@Sendable' closure [#SendableClosureCaptures]
+    |                                                          `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+214 |     }
+215 | }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ServiceRegistration.swift:213:69: warning: capture of 'turnOff' with non-Sendable type '() -> Void' in a '@Sendable' closure [#SendableClosureCaptures]
+211 |         turnOff: @escaping () -> Void
+212 |     ) -> Binding<Bool> {
+213 |         Binding(get: { isOn }, set: { wanted in wanted ? turnOn() : turnOff() })
+    |                                                                     |- warning: capture of 'turnOff' with non-Sendable type '() -> Void' in a '@Sendable' closure [#SendableClosureCaptures]
+    |                                                                     `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+214 |     }
+215 | }
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>
+[26 / 34] AgentKit
+[28 / 34] AgentKit
+[28 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanColumnView.swift:185:26: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+183 |             ForEach(facts) { fact in
+184 |                 fact.runs.reduce(Text("")) { line, run in
+185 |                     line + Text(run.text).fontWeight(run.strong ? .semibold : .regular)
+    |                          `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+186 |                 }
+187 |                 .monospacedDigit()
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanColumnView.swift:213:21: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+211 |                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+212 |                 (Text(title).fontWeight(.medium)
+213 |                     + Text(detail.isEmpty ? "" : "   \(detail)").foregroundStyle(.quietInk))
+    |                     `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+214 |                     .frame(maxWidth: .infinity, alignment: .leading)
+215 |                     .fixedSize(horizontal: false, vertical: true)
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanColumnView.swift:406:66: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+404 |                 .accessibilityHidden(true)
+405 |                 .probed("plan-agent-glyph-\(agent.id)")
+406 |             (Text(agent.name).fontWeight(.semibold) + Text("  ") + Text(agent.doing).foregroundStyle(trouble))
+    |                                                                  `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+407 |                 .frame(maxWidth: .infinity, alignment: .leading)
+408 |                 .fixedSize(horizontal: false, vertical: true)
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanColumnView.swift:406:53: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+404 |                 .accessibilityHidden(true)
+405 |                 .probed("plan-agent-glyph-\(agent.id)")
+406 |             (Text(agent.name).fontWeight(.semibold) + Text("  ") + Text(agent.doing).foregroundStyle(trouble))
+    |                                                     `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+407 |                 .frame(maxWidth: .infinity, alignment: .leading)
+408 |                 .fixedSize(horizontal: false, vertical: true)
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanOverview.swift:527:94: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+525 |                 .frame(width: 6, height: 6)
+526 |                 .accessibilityHidden(true)
+527 |             (Text("Needs you: ").fontWeight(.medium).foregroundStyle(Tint.attention(scheme)) + Text(text))
+    |                                                                                              `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+528 |                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
+529 |                 .lineLimit(lines)
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanRulings.swift:280:49: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+278 |     /// weight so the words read first.
+279 |     private func line(_ label: String, _ text: String) -> some View {
+280 |         (Text("\(label): ").fontWeight(.medium) + Text(text))
+    |                                                 `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+281 |             .font(.system(size: WorkspaceStyle.PaneText.secondary))
+282 |             .foregroundStyle(.quietInk)
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Plan/PlanTicketPage.swift:75:33: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+ 73 |                         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+ 74 |                             (Text(agent).fontWeight(.semibold)
+ 75 |                                 + Text(work.doing.map { $0.isEmpty ? "" : "  " + $0 } ?? ""))
+    |                                 `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+ 76 |                                 .font(TaskTypography.body)
+ 77 |                                 .fixedSize(horizontal: false, vertical: true)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[28 / 34] AgentKit
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/shared/AgentKit/Sources/AgentKit/MarkdownPiece.swift:119:11: warning: main actor-isolated property 'run' can not be referenced from a nonisolated context
+ 75 | /// still redraws it when that changes.
+ 76 | struct MarkdownPiece: View, Equatable {
+ 77 |     let run: Markdown.Run
+    |         `- note: property declared here
+ 78 |     var secondary = false
+ 79 |     /// Still being written: the last paragraph of a reply that's streaming.
+    :
+117 | 
+118 |     nonisolated static func == (a: MarkdownPiece, b: MarkdownPiece) -> Bool {
+119 |         a.run == b.run && a.secondary == b.secondary && a.open == b.open && a.gap == b.gap
+    |           `- warning: main actor-isolated property 'run' can not be referenced from a nonisolated context
+120 |     }
+121 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/shared/AgentKit/Sources/AgentKit/MarkdownPiece.swift:119:20: warning: main actor-isolated property 'run' can not be referenced from a nonisolated context
+ 75 | /// still redraws it when that changes.
+ 76 | struct MarkdownPiece: View, Equatable {
+ 77 |     let run: Markdown.Run
+    |         `- note: property declared here
+ 78 |     var secondary = false
+ 79 |     /// Still being written: the last paragraph of a reply that's streaming.
+    :
+117 | 
+118 |     nonisolated static func == (a: MarkdownPiece, b: MarkdownPiece) -> Bool {
+119 |         a.run == b.run && a.secondary == b.secondary && a.open == b.open && a.gap == b.gap
+    |                    `- warning: main actor-isolated property 'run' can not be referenced from a nonisolated context
+120 |     }
+121 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/shared/AgentKit/Sources/AgentKit/MarkdownView.swift:272:9: warning: call to main actor-isolated initializer 'init(handler:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+269 |     /// goes to `linker`, opened in the app or not at all; the rest of
+270 |     /// `opens`'s links go to the system; everything else is dropped.
+271 |     public static func openGuard(_ linker: TaskKeyLinker) -> OpenURLAction {
+    |                        `- note: add '@MainActor' to make static method 'openGuard' part of global actor 'MainActor'
+272 |         OpenURLAction { url in
+    |         `- warning: call to main actor-isolated initializer 'init(handler:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+273 |             if TaskKeyLinks.parse(url) != nil {
+274 |                 MainActor.assumeIsolated { _ = linker.follow(url) }
+
+SwiftUI.OpenURLAction.init:3:37: note: calls to initializer 'init(handler:)' from outside of its actor context are implicitly asynchronous
+1 | struct OpenURLAction {
+2 | @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+3 |   @MainActor @preconcurrency public init(handler: @escaping (URL) -> OpenURLAction.Result)}
+  |                                     `- note: calls to initializer 'init(handler:)' from outside of its actor context are implicitly asynchronous
+4 | 
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/shared/AgentKit/Sources/AgentKit/PageTable.swift:66:21: warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+ 64 |             Button { PageOpen.open(destination, onOpen: onOpen, openURL: openURL) } label: {
+ 65 |                 (Text(parts.text).foregroundStyle(.tint)
+ 66 |                     + Text(parts.domain.map { " \($0)" } ?? "").foregroundStyle(.quietInk))
+    |                     `- warning: '+' was deprecated in macOS 26.0: Use string interpolation on `Text` instead: `Text("Hello \(name)")` [#DeprecatedDeclaration]
+ 67 |                     .fixedSize(horizontal: false, vertical: true)
+ 68 |             }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/shared/AgentKit/Sources/AgentKit/PageView.swift:495:68: warning: call to main actor-isolated instance method 'callAsFunction' in a synchronous nonisolated context [#ActorIsolatedCall]
+491 | /// the app.
+492 | enum PageOpen {
+493 |     static func open(_ destination: PageDestination, onOpen: (PageDestination) -> Void, openURL: OpenURLAction) {
+    |                 `- note: add '@MainActor' to make static method 'open(_:onOpen:openURL:)' part of global actor 'MainActor'
+494 |         if case .url(let url) = destination {
+495 |             if PageLinks.https(url.absoluteString) != nil { openURL(url) }
+    |                                                                    `- warning: call to main actor-isolated instance method 'callAsFunction' in a synchronous nonisolated context [#ActorIsolatedCall]
+496 |             return
+497 |         }
+
+SwiftUI.OpenURLAction.callAsFunction:2:40: note: calls to instance method 'callAsFunction' from outside of its actor context are implicitly asynchronous
+1 | struct OpenURLAction {
+2 | @MainActor @preconcurrency public func callAsFunction(_ url: URL)}
+  |                                        `- note: calls to instance method 'callAsFunction' from outside of its actor context are implicitly asynchronous
+3 | 
+
+[#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[30 / 34] AgentKit
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Components/ListChanges.swift:37:33: warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 35 |     /// A test's ear on a `listChanges` list's rows: each transaction one is
+ 36 |     /// drawn in, and each wash as it starts. Nil in the app.
+ 37 |     @Entry var listChangeProbe: ((ListChangeEvent) -> Void)? = nil
+    |                                 `- warning: Storing a closure in '@Entry var listChangeProbe' may invalidate dependents on every update because closures may not be comparable. (from macro 'Entry ')
+ 38 | }
+ 39 | 
+[30 / 34] Far Cooler-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Components/MarkReadConfirmation.swift:28:46: warning: call to main actor-isolated static method 'title(filtering:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 26 | 
+ 27 |     /// "Mark All as Read?", or "Mark These as Read?" under a filter.
+ 28 |     var title: String { "\(MarkAllReadButton.title(filtering: filtering))?" }
+    |                                              `- warning: call to main actor-isolated static method 'title(filtering:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 29 | 
+ 30 |     /// "68 tasks will be marked as read on all your devices.", "1 task will
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/Components/SectionHeaderHover.swift:64:17: note: calls to static method 'title(filtering:)' from outside of its actor context are implicitly asynchronous
+62 | 
+63 |     /// What it says it does: everything, or under a filter, what's listed.
+64 |     static func title(filtering: Bool) -> String { filtering ? "Mark These as Read" : "Mark All as Read" }
+   |                 |- note: calls to static method 'title(filtering:)' from outside of its actor context are implicitly asynchronous
+   |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+65 | 
+66 |     /// Whether it's drawn: only while the pointer is over its header.
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ContentView+Detail.swift:503:25: warning: call to main actor-isolated static method 'boardWorkspace(for:in:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+501 |                 opened: focus == nil ? nil : WorkspaceSelection.place(selection))
+502 |         case .looseWorktree(let host, _, _):
+503 |             let found = boardWorkspace(for: selection, in: fleet)
+    |                         `- warning: call to main actor-isolated static method 'boardWorkspace(for:in:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+504 |             return WorkspaceScene(
+505 |                 host: host, board: found?.id, summary: found, hasConversation: found.map { !$0.isImplicit } ?? false,
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/WorkspaceRules.swift:175:17: note: calls to static method 'boardWorkspace(for:in:)' from outside of its actor context are implicitly asynchronous
+173 |     /// runner without workspaces whose CLI sent no repository id — the
+174 |     /// caller then looks its repository up by name.
+175 |     static func boardWorkspace(for selection: Selection, in fleet: Fleet) -> WorkspaceSummary? {
+    |                 |- note: calls to static method 'boardWorkspace(for:in:)' from outside of its actor context are implicitly asynchronous
+    |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+176 |         guard let found = workspaceID(of: selection, in: fleet) else { return nil }
+177 |         let (host, worktree, id) = found
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ContentView+Panes.swift:48:17: warning: immutable value 'repository' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 46 |             }
+ 47 |         } else if let client = store.clients[host], let workspace = board(host: host, id: id),
+ 48 |             let repository = client.repositories.first(where: {
+    |                 `- warning: immutable value 'repository' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 49 |                 $0.id == (workspace.repository ?? workspace.id)
+ 50 |             })
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ContentView+Tiling.swift:306:13: warning: initialization of immutable value 'inConversation' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+304 |         changesFocus = nil
+305 |         keyboardOnBoard = false
+306 |         let inConversation = shown.contains { $0.column == .conversation && $0.contains(pane) }
+    |             `- warning: initialization of immutable value 'inConversation' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+307 |         guard let next = WorkspaceScreen.focusing(pane, selection: selection, shown: shown, fleet: store.fleet)
+308 |         else {
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/ContentView+Welcome.swift:82:33: warning: call to main actor-isolated static method 'mainOfNewRepository(known:in:fleet:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+80 |     ) -> Selection? {
+81 |         guard current == nil else { return nil }
+82 |         return FleetPlaceholder.mainOfNewRepository(known: known, in: repositories, fleet: fleet).map {
+   |                                 `- warning: call to main actor-isolated static method 'mainOfNewRepository(known:in:fleet:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+83 |             .workspace(host: $0.host, workspace: $0.workspace.id, focus: nil)
+84 |         }
+
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/apps/macos/Sources/FarCooler/FleetPlaceholder.swift:151:17: note: calls to static method 'mainOfNewRepository(known:in:fleet:)' from outside of its actor context are implicitly asynchronous
+149 |     /// registration, or nil when none or several are new, so the window
+150 |     /// never guesses where to go (ov-519).
+151 |     static func mainOfNewRepository(
+    |                 |- note: calls to static method 'mainOfNewRepository(known:in:fleet:)' from outside of its actor context are implicitly asynchronous
+    |                 `- note: main actor isolation inferred from conformance to protocol 'View'
+152 |         known: Set<String>, in repositories: [(host: String, repository: Repository)], fleet: Fleet
+153 |     ) -> (host: String, workspace: WorkspaceSummary)? {
+
+[#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[32 / 34] Far Cooler-product
+[33 / 34] Far Cooler-product
+Build complete! (31.97 sec)
+
+EXIT 0

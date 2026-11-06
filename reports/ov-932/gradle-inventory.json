@@ -1,0 +1,11 @@
+{
+  "root": "/private/tmp/ov893-gradle/caches",
+  "file_count": 0,
+  "logical_bytes": 0,
+  "note": "Recursive inventory confirms zero files despite populated directory structure; allocation alone was inconclusive, actual file enumeration establishes missing dependencies here.",
+  "alternative": {
+    "root": "/private/tmp/ov892-gate-1/gradle/caches",
+    "file_count": 18400,
+    "logical_bytes": 2139325331
+  }
+}

@@ -1,0 +1,39 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'build', '--offline', '--locked', '-p', 'farcooler-client', '-p', 'farcooler-vt']
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /Users/e-liang/.cargo/bin/cargo build --offline --locked -p farcooler-client -p farcooler-vt); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service, PID 79393, started 2026-11-07 07:45:57, running /Users/e-liang/.cargo/bin/cargo check --offline -p farcooler-daemon -p farcooler-cli --all-targets (1 in line ahead of you)
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/protocol)
+   Compiling rustix v1.1.4
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/workflow)
+   Compiling tinystr v0.8.3
+   Compiling futures-core v0.3.33
+   Compiling tokio v1.53.1
+   Compiling icu_locale_core v2.1.1
+   Compiling futures-channel v0.3.33
+   Compiling aws-lc-sys v0.43.0
+   Compiling zerotrie v0.2.4
+   Compiling futures-util v0.3.33
+   Compiling icu_provider v2.1.1
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/ffi-guard)
+   Compiling icu_normalizer v2.1.1
+   Compiling parking_lot_core v0.9.12
+   Compiling vte v0.15.0
+   Compiling parking_lot v0.12.5
+   Compiling russh-cryptovec v0.62.0
+   Compiling polling v3.11.0
+   Compiling rustix-openpty v0.2.0
+   Compiling alacritty_terminal v0.26.0
+   Compiling futures-executor v0.3.33
+   Compiling futures v0.3.33
+   Compiling russh-util v0.52.0
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/tailcat)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/vt)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/transport)
+   Compiling aws-lc-rs v1.17.3
+   Compiling russh v0.62.4
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/crates/client)
+    Finished `dev` profile [unoptimized] target(s) in 16.83s
+
+EXIT 0
