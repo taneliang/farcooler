@@ -1,0 +1,28 @@
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/protocol)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/ffi-guard)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.55s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-b7c2de7d5335f34a)
+
+running 13 tests
+test workflow::tests::workflow_immutable_history_and_refusing_registry ... ok
+test workflow::tests::workflow_claim_dispatch_crash_boundaries_and_generation ... ok
+test workflow::tests::workflow_refusals_deduplicated_without_revision ... ok
+test workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay ... ok
+test workflow::tests::workflow_atomic_reopen_duplicate_payload_and_replay ... ok
+test workflow::tests::workflow_concurrent_resource_admission_across_connections ... ok
+test workflow::tests::workflow_blocked_shared_resource_reopen_and_generation_handoff ... ok
+test workflow::tests::workflow_complete_coding_trace_reopens_between_every_effect ... ok
+test workflow::tests::workflow_concurrent_same_revision_and_duplicate_command ... ok
+test workflow::tests::workflow_tracker_exact_approval_duplicate_and_reopen_done ... ok
+test workflow::tests::workflow_uncertain_boundary_reopen_and_cancellation_holds_resource ... ok
+test workflow::tests::workflow_sql_failure_rolls_back_every_boundary ... ok
+migration source schemas tested=61
+test workflow::tests::workflow_migration_from_every_registered_source_schema ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 474 filtered out; finished in 3.76s
+
+
+exit=0

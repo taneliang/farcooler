@@ -1,0 +1,19 @@
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/reports/ov-923/check-delta.py']
+mutation-inbox: exit=101, expected=101
+restored-inbox: exit=0, expected=0
+mutation-idle: exit=101, expected=101
+restored-idle: exit=0, expected=0
+mutation-base: exit=101, expected=101
+restored-base: exit=0, expected=0
+final-focused: exit=0, expected=0
+store: exit=0, expected=0
+clippy: exit=101, expected=0
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/reports/ov-923/check-delta.py", line 48, in <module>
+    run('clippy', ['clippy', '--offline', '-p', 'farcooler-daemon', '-p', 'farcooler-store', '--all-targets', '--', '-D', 'warnings'])
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/reports/ov-923/check-delta.py", line 16, in run
+    raise RuntimeError(f'{name} returned {code}')
+RuntimeError: clippy returned 101
+
+wrapper_exit=1 cancelled=False minimum_free_bytes=20381356032

@@ -1,0 +1,23 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 24.68s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle' (821490899) panicked at crates/daemon/src/workflow_runtime/tests.rs:414:9:
+assertion `left == right` failed: idle reads/timer rescanned history
+  left: 43
+ right: 38
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2672 filtered out; finished in 0.94s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

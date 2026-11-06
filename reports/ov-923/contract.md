@@ -82,3 +82,41 @@ trusted journal internally; a real-provider reconciliation mechanism is not clai
 The fixture holds one writer and serializes effects; command/cancel admission occurs
 between bounded effects. Real concurrent harness cancellation and provider-specific
 reconciliation remain integration work before production authority is connected.
+
+## Review-correction API (supersedes loop/base descriptions above)
+
+Correction source pin: `74e8ccc8380da15c55531124a46b7094b205f779`. Original implementation line numbers above refer
+to f52442374; use this correction source for current locations.
+
+The review-fix stack adds `command_handle(&Controller) -> Result<CommandHandle>`.
+Mint it before starting `run`; clones share a bounded 32-slot local inbox. Its
+async `submit(&Controller, Request, now_ms)` and `decide(&DecisionSession, Request,
+now_ms)` return the existing durable Receipt and use the owning runtime's existing
+instance/principal/command/revision checks. Queue admission awaits capacity; only
+SQLite acceptance is durable. On lost replies/restart, retry the identical request
+and time. A dropped caller does not revoke accepted work. No raw Grant or result
+is accepted. `state(workspace)` is read-only and does not trigger a scheduler scan.
+`reconcile()` explicitly wakes local bound-journal reconciliation, supplying no
+result or authority override. Handles/capabilities do not survive Runtime reopen.
+
+`run` drains commands between effect sweeps and continues immediately while work
+progresses. Once idle it waits on inbox, shutdown or the nearest actual expired
+pre-admission claim deadline. Startup discovers persisted work; resource release
+still triggers the existing occupancy-driven Advance. There is no idle polling,
+notice/ACK dependency or receipt-file timer. A trusted runner that writes a delayed
+receipt must signal reconcile (or restart the runtime); foreign/mismatched receipt
+bytes still fail exact binding. Shutdown/cancel remain between bounded effects.
+
+Provision claims ownership, then writes and fsyncs an immutable per-item base pin
+before admission. It samples the current landed ref only for a new item's first
+Provision. All that item's effects, rework, stop validation, durable journals,
+recovery and landing CAS reuse the pin. Reopen never resamples an admitted pin;
+legacy admitted v1 items without a pin retain their original creation base.
+The pin is private trusted fixture storage, not remotely supplied configuration.
+This permits consecutive coding items to land descendants in the same isolated
+repository without weakening the exact old-SHA update-ref CAS.
+
+Touched source paths: workflow_runtime.rs (inbox/run/lease wake),
+workflow_runtime/adapters.rs (durable base propagation), workflow_runtime/tests.rs
+(focused regressions), and store/src/workflow.rs (read-only lease_until exposure).
+No other source files or production callers change in this correction package.

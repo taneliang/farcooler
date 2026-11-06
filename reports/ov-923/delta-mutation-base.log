@@ -1,0 +1,23 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.72s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 1 test
+
+thread 'workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers' (821499204) panicked at crates/daemon/src/workflow_runtime/tests.rs:427:5:
+assertion `left == right` failed
+  left: "49b4f6a30774ac52512575a55d403a720550528c"
+ right: "0daa947f9efa20bc9c33fffaac6cd496270c5e94"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... FAILED
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2672 filtered out; finished in 0.74s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101

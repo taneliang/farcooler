@@ -1,0 +1,122 @@
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_runtime', '--', '--nocapture']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/protocol)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/ffi-guard)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/workflow)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+error[E0624]: method `item_base` is private
+   --> crates/daemon/src/workflow_runtime.rs:241:108
+    |
+241 | ...   .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
+    |                                                                                          ^^^^^^^^^ private method
+    |
+   ::: crates/daemon/src/workflow_runtime/adapters.rs:65:5
+    |
+ 65 |     fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
+    |     ----------------------------------------------------------------------- private method defined here
+
+error[E0624]: method `pin_base` is private
+   --> crates/daemon/src/workflow_runtime.rs:264:22
+    |
+264 |                 self.pin_base(&workspace, &effect).await?;
+    |                      ^^^^^^^^ private method
+    |
+   ::: crates/daemon/src/workflow_runtime/adapters.rs:79:5
+    |
+ 79 |     async fn pin_base(&self, workspace: &str, effect: &Effect) -> Result<()> {
+    |     ------------------------------------------------------------------------ private method defined here
+
+error[E0624]: method `item_base` is private
+   --> crates/daemon/src/workflow_runtime.rs:266:114
+    |
+266 | ...   let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &self.item_base(&workspace, &effec...
+    |                                                                                                        ^^^^^^^^^ private method
+    |
+   ::: crates/daemon/src/workflow_runtime/adapters.rs:65:5
+    |
+ 65 |     fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
+    |     ----------------------------------------------------------------------- private method defined here
+
+error[E0624]: method `item_base` is private
+   --> crates/daemon/src/workflow_runtime/tests.rs:427:24
+    |
+427 |     assert_eq!(runtime.item_base("w", &effect).unwrap(), first);
+    |                        ^^^^^^^^^ private method
+    |
+   ::: crates/daemon/src/workflow_runtime/adapters.rs:65:5
+    |
+ 65 |     fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
+    |     ----------------------------------------------------------------------- private method defined here
+
+For more information about this error, try `rustc --explain E0624`.
+error: could not compile `farcooler-daemon` (lib test) due to 4 previous errors
+
+wrapper_exit=101 cancelled=False minimum_free_bytes=20724883456
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_runtime', '--', '--nocapture']
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.52s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 15 tests
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 2658 filtered out; finished in 5.52s
+
+
+wrapper_exit=0 cancelled=False minimum_free_bytes=20563505152
+
+command=['/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_runtime', '--', '--nocapture']
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-runtime-review-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 24.87s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-a359f23c8051160a)
+
+running 15 tests
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 2658 filtered out; finished in 5.45s
+
+
+wrapper_exit=0 cancelled=False minimum_free_bytes=20577865728

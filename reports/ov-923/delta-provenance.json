@@ -1,0 +1,29 @@
+{
+  "source_pin": "74e8ccc8380da15c55531124a46b7094b205f779",
+  "base": "f98cdcd85",
+  "source_base": "f52442374",
+  "core_store_base": "bd87202f0",
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "target_authorization": "task manager decision 3871ae56",
+  "python": "/usr/bin/python3",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "jobs": 6,
+  "dev_debug": 0,
+  "test_debug": 0,
+  "incremental": 0,
+  "offline": true,
+  "fifo": "normal scripts/heavy; CI and HEAVY_LOCK_HELD absent",
+  "load5_limit": 20,
+  "reserve_bytes": 10737418240,
+  "deadline_seconds": 1800,
+  "minimum_free_bytes": 20381356032,
+  "notes": [
+    "Preflight tool call found no external cargo/rustc or target lock holders.",
+    "Original evidence unchanged; new log names use delta prefix.",
+    "First compile failed helper visibility; corrected before tests.",
+    "Three mutation failures and exact restored passes; final boxed-request layout change followed by 15 runtime passes and daemon/store all-target clippy success.",
+    "Store workflow suite 13 passes, all61 source schemas.",
+    "Initial commit hook resolved a wrong-architecture python3; retry used native Python PATH with normal signing/hooks."
+  ]
+}
