@@ -318,7 +318,15 @@ impl Runtime {
             Inbox::Wire(admission, action, reply) => {
                 let result = admission.recheck().and_then(|()| admission.permits(&action))
                     .map_err(|_| Error::Refused("workflow caller authority changed"))
-                    .and_then(|()| self.wire_command(&admission.workspace(), admission.principal(), *action));
+                    .and_then(|()| {
+                        let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
+                        let mut result = self.wire_command(&admission.workspace(), admission.principal(), *action)?;
+                        if get {
+                            let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
+                            result["context"] = admission.context(epoch);
+                        }
+                        Ok(result)
+                    });
                 let _ = reply.send(result);
             }
             Inbox::Reconcile => {}

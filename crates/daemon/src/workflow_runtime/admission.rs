@@ -64,6 +64,16 @@ impl Admission {
     pub(super) fn principal(&self) -> &'static str {
         match self.seat { Seat::Person => "owner", Seat::Agent(Some(_)) => "orchestrator", _ => unreachable!() }
     }
+    // Informational context only. Generation and all retained caller proofs bind
+    // the Session guard; receipt/mutation authority is always recomputed here.
+    pub(super) fn context(&self, epoch: u64) -> serde_json::Value {
+        let binding = farcooler_workflow::digest(&("workflow-admission/v1", self.service.host_id.to_string(), self.workspace.to_string(),
+            format!("{:?}", (&self.authority, &self.owner_device, &self.peer.client_id, self.peer.scope,
+                self.caller_pid, self.incarnation, self.seat, &self.terminal, self.session.workflow_auth_generation()))));
+        serde_json::json!({"binding":binding,"capabilities":{
+            "workspace":self.workspace.to_string(),"epoch":epoch,"inspect":true,
+            "controller":true,"decision_principal":self.principal()}})
+    }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
         if matches!(action, Action::Publish { .. }) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });

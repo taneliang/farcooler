@@ -316,6 +316,12 @@ impl WebRunner {
         serde_json::to_string(&list).map_err(|e| failure("protocol", &e.to_string()))
     }
 
+    /// Authenticated workflow routes using the shared Session JSON contract.
+    pub async fn workflow_call(&self, method: String, args: String) -> Result<String, JsValue> {
+        let args = serde_json::from_str(&args).map_err(|e| failure("invalid", &e.to_string()))?;
+        Ok(self.0.workflow_call(&method, args).await.map_err(web_failure)?.to_string())
+    }
+
     /// `needs_you.list`, as JSON in the phones' shape (`needs_you_json`).
     #[wasm_bindgen(js_name = needsYou)]
     pub async fn needs_you(&self) -> Result<String, JsValue> {

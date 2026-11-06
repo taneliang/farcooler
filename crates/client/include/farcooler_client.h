@@ -302,6 +302,11 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *
  * Returns a ticket, or 0 if the arguments could not be read.
  */
+/* Workflow uses this same Session ticket/poll transport: workflow.snapshot,
+ * workflow.prepare_action, workflow.submit_action. Snapshot supplies authenticated
+ * schema2 cards. Forward an entire Action to prepare; retain the returned prepared
+ * envelope unchanged for submit/reconnect retry. Never supply caller capabilities
+ * or reconstruct a pending mutation from a newer snapshot. */
 uint64_t farcooler_client_call(void *handle, const char *method, const char *args);
 
 /*

@@ -297,6 +297,9 @@ pub struct Session {
 }
 
 impl Session {
+    /// Revocation generation captured at authentication; stable across ordinary reconnects.
+    pub(crate) fn workflow_auth_generation(&self) -> u64 { self.revocations_at_open }
+
     /// This connection's step-up challenges.
     pub fn challenges(&self) -> &crate::step_up::Challenges {
         &self.challenges

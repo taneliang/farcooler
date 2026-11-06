@@ -173,6 +173,11 @@ impl Runner {
         self.link.as_ref().is_some_and(|l| l.is_lost())
     }
 
+    /// Shared authenticated workflow routes, with the native Session contract.
+    pub async fn workflow_call(&self, method: &str, args: serde_json::Value) -> Result<serde_json::Value, WebError> {
+        Ok(self.session.workflow_call(method, args).await?)
+    }
+
     pub fn capabilities(&self) -> &[String] {
         self.session.capabilities()
     }
