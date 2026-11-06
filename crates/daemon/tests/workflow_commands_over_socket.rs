@@ -60,9 +60,18 @@ async fn workflow_socket_publication_approve_cancel_and_reconnect_receipts() {
     let receipt=call(&mut link,h.workspace,&publish).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some());
     let enqueue=Action::Enqueue {mutation:m("enqueue",0,1),item:"a".into(),pin:pin.clone()};
+    // Retain the send until another connection observes admission, then discard
+    // the answer without ever awaiting it. Reply delivery cannot be a commit ACK.
+    let lost=link.send(req(h.workspace,&enqueue),farcooler_transport::CallOptions::default()).unwrap();
+    let mut observer=connect(&h).await;
+    for _ in 0..100 {
+        if call(&mut observer,h.workspace,&Action::Get).await.pointer("/state/items/a").is_some() {break;}
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(call(&mut observer,h.workspace,&Action::Get).await.pointer("/state/items/a").is_some());
+    drop(lost);drop(link);let mut link=connect(&h).await;
     let accepted=call(&mut link,h.workspace,&enqueue).await;
-    drop(link);let mut link=connect(&h).await;
-    assert_eq!(call(&mut link,h.workspace,&enqueue).await,accepted);
+    assert_eq!(accepted["receipt"]["result"]["Ok"],1);
     let snapshot=call(&mut link,h.workspace,&Action::Get).await;
     assert_eq!(snapshot["state"]["items"]["a"]["phase"],"WaitingApproval");
     let approve=Action::Approve {mutation:m("approve",snapshot["state"]["revision"].as_u64().unwrap(),2),item:"a".into(),run:snapshot["state"]["items"]["a"]["run"].as_str().unwrap().into(),pin:pin.clone(),candidate:None};

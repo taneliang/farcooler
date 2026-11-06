@@ -49,7 +49,7 @@ enum Authority { Controller(Uuid), Decision(Uuid, String) }
 enum Inbox {
     Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
     State(String, oneshot::Sender<Result<Option<State>>>),
-    Wire(String, String, farcooler_protocol::workflow_commands::Action, oneshot::Sender<Result<serde_json::Value>>),
+    Wire(String, String, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<serde_json::Value>>),
     Reconcile,
 }
 impl CommandHandle {
@@ -312,7 +312,7 @@ impl Runtime {
             }
             Inbox::State(workspace, reply) => { let _ = reply.send(self.state(&workspace)); }
             Inbox::Wire(workspace, principal, action, reply) => {
-                let _ = reply.send(self.wire_command(&workspace, &principal, action));
+                let _ = reply.send(self.wire_command(&workspace, &principal, *action));
             }
             Inbox::Reconcile => {}
         }

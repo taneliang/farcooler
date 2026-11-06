@@ -24,12 +24,7 @@ pub struct Publication {
 }
 impl Publication {
     pub fn action(&self) -> Result<Action, Box<dyn std::error::Error>> {
-        use std::os::unix::fs::OpenOptionsExt;
-        let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(&self.file)?;
-        if !file.metadata()?.is_file() { return Err("workflow definition must be a regular file".into()); }
-        let mut bytes = Vec::new();
-        file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes)?;
-        if bytes.len() > MAX_BYTES { return Err("workflow definition exceeds 60 KiB".into()); }
+        let bytes = read_file(&self.file)?;
         let value:serde_json::Value = serde_json::from_slice(&bytes)?;
         let definition = serde_json::from_value(value.clone())?;
         if serde_json::to_value(&definition)? != value { return Err("unknown definition fields".into()); }
@@ -56,14 +51,20 @@ impl WorkflowCmd {
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
             Self::Review { workspace,item,run,pin,evidence,passed,identity } => {
-                let file=std::fs::File::open(evidence)?; let mut bytes=Vec::new();
-                file.take((MAX_BYTES+1) as u64).read_to_end(&mut bytes)?;
-                if bytes.len()>MAX_BYTES { return Err("evidence exceeds bound".into()); }
+                let bytes=read_file(&evidence)?;
                 (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
         })
     }
+}
+fn read_file(path:&std::path::Path) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file=std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(path)?;
+    if !file.metadata()?.is_file() { return Err("workflow input must be a regular file".into()); }
+    let mut bytes=Vec::new();file.take((MAX_BYTES+1) as u64).read_to_end(&mut bytes)?;
+    if bytes.len()>MAX_BYTES { return Err("workflow input exceeds 60 KiB".into()); }
+    Ok(bytes)
 }
 pub fn request(workspace:Uuid, action:&Action) -> Result<pb::Request, Box<dyn std::error::Error>> {
     let json = serde_json::to_string(action)?;

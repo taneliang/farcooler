@@ -6,14 +6,14 @@ use farcooler_store::workflow_publication::Write;
 impl CommandHandle {
     pub(crate) async fn wire_command(&self, workspace: String, principal: String, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
-        self.send.send(Inbox::Wire(workspace, principal, action, send)).await
+        self.send.send(Inbox::Wire(workspace, principal, Box::new(action), send)).await
             .map_err(|_| Error::Refused("runtime inbox closed"))?;
         receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
     }
 }
 impl Runtime {
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
-        let payload = serde_json::to_string(&(principal, &action))?;
+        let payload = serde_json::to_string(principal)?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         if matches!(action, Action::Get) {
             return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
