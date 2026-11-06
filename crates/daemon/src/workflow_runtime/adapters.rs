@@ -76,12 +76,39 @@ impl Runtime {
         }
         Ok(base)
     }
-    pub(super) async fn pin_base(&self, workspace: &str, effect: &Effect) -> Result<()> {
-        if self.base_path(workspace, effect).try_exists()? { return Ok(()); }
-        let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
-            git(&self.root.join("repo"), &["rev-parse", "refs/heads/landed"]).await?
-        } else { self.base.clone() };
-        durable(&self.base_path(workspace, effect), &serde_json::to_vec(&base)?)
+    pub(super) async fn pin_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
+        let path = self.base_path(workspace, effect);
+        let exists = path.try_exists()?;
+        let selected = if exists { self.item_base(workspace, effect) } else {
+            Err(Error::Refused("base not yet published"))
+        };
+        if selected.is_err() {
+            if exists {
+                // Only the original claimed Provision can repair an old interrupted
+                // publication. Claimed cannot follow admitted, and outbox history is
+                // never erased, so no previously admitted item binding is resampled.
+                let effects = self.store.workflow_outbox(workspace)?;
+                let item_effects: Vec<_> = effects.iter().filter(|s| s.effect.item == effect.item).collect();
+                if item_effects.len() != 1 || item_effects[0].effect != *effect
+                    || item_effects[0].dispatch_state != "claimed"
+                    || !matches!(effect.kind, EffectKind::Execute(StageKind::Provision))
+                { return Err(Error::Refused("cannot repair an admitted or historical base")); }
+            }
+            let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
+                git(&self.root.join("repo"), &["rev-parse", "refs/heads/landed"]).await?
+            } else { self.base.clone() };
+            // A crash while writing leaves only an ignored private temporary file.
+            // The exclusive fixture writer makes replacing a proven partial pin safe.
+            let temporary = self.root.join(format!("base-publish-{}.tmp", Uuid::now_v7()));
+            durable(&temporary, &serde_json::to_vec(&base)?)?;
+            std::fs::rename(&temporary, &path)?;
+        }
+        // Validate and make even a recovered pre-rename/fsync selection durable
+        // before the caller can cross the admission boundary.
+        let base = self.item_base(workspace, effect)?;
+        OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path)?.sync_all()?;
+        File::open(&self.root)?.sync_all()?;
+        Ok(base)
     }
     pub(super) fn journal_path(&self, effect: &Effect) -> PathBuf {
         self.root.join("receipts").join(format!("{}.json", digest(effect)))

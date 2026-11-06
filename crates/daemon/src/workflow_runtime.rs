@@ -261,9 +261,9 @@ impl Runtime {
                     continue;
                 };
                 // Persist the base while ownership is held, before any external admission.
-                self.pin_base(&workspace, &effect).await?;
+                let base = self.pin_base(&workspace, &effect).await?;
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
-                let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &self.item_base(&workspace, &effect)?);
+                let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
                 let outcome = match self.execute(&workspace, &binding).await {
                     Ok(outcome) => {

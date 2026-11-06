@@ -483,3 +483,50 @@ async fn workflow_runtime_owned_lease_deadline_and_explicit_reconciliation() {
         assert!(runtime.sweeps <= 4, "deadline/reconcile unexpectedly polled");
     }
 }
+
+#[tokio::test]
+async fn workflow_runtime_interrupted_base_publication_recovers_before_admission() {
+    for partial in [Some(""), Some("\"truncated"), None] {
+        let (dir, mut runtime) = fixture().await;
+        enqueue(&mut runtime, "w", "first", coding_definition(true));
+        let first = finish(&mut runtime, "w").await.items["first"].candidate.clone().unwrap();
+        enqueue(&mut runtime, "w", "second", coding_definition(true));
+        let state = runtime.state("w").unwrap().unwrap();
+        let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
+        runtime.store.workflow_claim_effect("w", &effect.id, "crashed-publisher", state.revision,
+            state.epoch, 2, 7).unwrap().unwrap();
+        let path = runtime.root.join(format!("base-{}.json", digest(&("w", &effect.item))));
+        if let Some(bytes) = partial { durable(&path, bytes.as_bytes()).unwrap(); }
+        // A crash during the new writer's temporary publication is ignored too.
+        durable(&runtime.root.join("base-publish-orphan.tmp"), b"\"unfinished").unwrap();
+        drop(runtime);
+        let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
+        runtime.pump(100).await.unwrap();
+        assert_eq!(runtime.item_base("w", &effect).unwrap(), first);
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["second"].stage, 1);
+        let pin = std::fs::read(&path).unwrap();
+        drop(runtime);
+        let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
+        assert_eq!(finish(&mut runtime, "w").await.items["second"].phase, Phase::Done);
+        assert_eq!(std::fs::read(&path).unwrap(), pin, "valid selected pin changed after reopen");
+    }
+}
+
+#[tokio::test]
+async fn workflow_runtime_admitted_base_is_never_recreated() {
+    let (dir, mut runtime) = fixture().await;
+    enqueue(&mut runtime, "w", "coding", coding_definition(true));
+    let (binding, claim) = claim(&runtime, "w", 2);
+    runtime.pin_base("w", &binding.effect).await.unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
+    let path = runtime.root.join(format!("base-{}.json", digest(&("w", &binding.effect.item))));
+    // Corrupt legacy admitted pins are refused, never resampled or automatically repaired.
+    std::fs::write(&path, b"").unwrap();
+    drop(runtime);
+    let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
+    assert!(runtime.pump(100).await.is_err());
+    assert!(runtime.pin_base("w", &binding.effect).await.is_err());
+    assert!(std::fs::read(path).unwrap().is_empty());
+    assert_eq!(runtime.store.workflow_outbox("w").unwrap()[0].dispatch_state, "admitted");
+    assert!(!runtime.tree(&binding).exists());
+}
