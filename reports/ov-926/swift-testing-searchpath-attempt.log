@@ -1,0 +1,9 @@
+COMMAND ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov926-checks/swift-cache', '-typecheck', '-I', '/private/tmp/ov926-checks', 'apps/shared/AgentKit/Tests/AgentKitTests/WorkflowRunsTests.swift']
+apps/shared/AgentKit/Tests/AgentKitTests/WorkflowRunsTests.swift:2:8: error: no such module 'Testing'
+ 1 | import Foundation
+ 2 | import Testing
+   |        `- error: no such module 'Testing'
+ 3 | @testable import AgentKit
+ 4 | 
+
+EXIT 1

@@ -1,0 +1,25 @@
+{
+  "source_commit": "db43f6393aa4c480b4e12a4365e9302819209fcb",
+  "branch": "ov-926-workflow-renderers",
+  "checks": {
+    "web-typecheck": "pass, new modules only",
+    "web-fixtures": "pass, 10 Node fixture/controller/simulated-DOM cases",
+    "web-baseline": "pass comparison; same8 pre-existing missing-dependency diagnostics, full-app typecheck NOT green",
+    "swift-compile": "pass, model+SwiftUI macOS26 target, SDK27/Swift6.4",
+    "swift-fixtures": "pass, five Rust goldens plus delayed disconnect/long opaque descriptor/pending seam",
+    "swift-test-module": "pass, focused AgentKit module only",
+    "swift-test-typecheck": "pass, normal AgentKit test SOURCE typecheck, full suite NOT run",
+    "kotlin-compile": "pass, production model and test only",
+    "kotlin-fixtures": "pass, JUnit3",
+    "kotlin-compose": "pass, two new source files, cached2.4.10 plugin + AndroidX + Android37 jar only",
+    "ios-generator": "pass, canonical source membership; no target/app build",
+    "actual-session-integration": "pending ov-927 after ov-925 security closure",
+    "independent-review": "requested from orchestrator at signeddb43; pending",
+    "real-navigation-input-accessibility-layout-runtime": "NOT RUN; no graphical app/browser/device/simulator launch"
+  },
+  "remaining_free_gib": 39.73,
+  "load5_at_handoff": 6.2412109375,
+  "temporary_outputs": "/private/tmp/ov926-checks",
+  "ui_launches": 0,
+  "owner_data_operations": 0
+}

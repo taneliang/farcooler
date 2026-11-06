@@ -1,0 +1,9 @@
+COMMAND ['/private/tmp/ov926-checks/swift-check', 'crates/client/src/testdata/workflow-presentation.json']
+ok automatic shared copy/whole action/disconnect/reconnect
+ok approval shared copy/whole action/disconnect/reconnect
+ok rework shared copy/whole action/disconnect/reconnect
+ok uncertain shared copy/whole action/disconnect/reconnect
+ok invalidated shared copy/whole action/disconnect/reconnect
+5 Rust golden cases and pending seam passed; SwiftUI typechecked, no app launch
+
+EXIT 0

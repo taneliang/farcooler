@@ -1,0 +1,9 @@
+COMMAND ['/opt/homebrew/opt/openjdk@21/bin/java', '-Xmx512m', '-cp', '/private/tmp/ov926-checks/kotlin:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.10/8943c84ddc6d5cc00a10dbc3736c397066eeaab5/kotlin-stdlib-2.4.10.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.11.0/3d57dc678bd8d72a60e7adf0eca5c54e3f4f4b79/kotlinx-coroutines-core-jvm-1.11.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-json-jvm/1.9.0/aea6f7d49fe5c458f8963ee6d4bdaf4a459ab3e7/kotlinx-serialization-json-jvm-1.9.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-core-jvm/1.9.0/91448df39c558f7c6147b8bd8db01debe16e0cc1/kotlinx-serialization-core-jvm-1.9.0.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12/junit-4.13.2.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/42a25dc3219429f0e5d060061f71acb49bf010a0/hamcrest-core-1.3.jar:/private/tmp/ov892-gate-1/gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/23.0.0/8cc20c07506ec18e0834947b84a864bfc094484e/annotations-23.0.0.jar', 'org.junit.runner.JUnitCore', 'com.farcooler.ui.WorkflowRunsTest']
+JUnit version 4.13.2
+...
+Time: 0.074
+
+OK (3 tests)
+
+
+EXIT 0

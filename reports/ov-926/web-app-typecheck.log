@@ -1,0 +1,8 @@
+services/web/src/client/qr.ts(8,18): error TS2307: Cannot find module 'jsqr' or its corresponding type declarations.
+services/web/src/client/qr.ts(9,20): error TS2307: Cannot find module 'qrcode-generator' or its corresponding type declarations.
+services/web/src/client/terminal.ts(9,29): error TS2307: Cannot find module '@xterm/addon-canvas' or its corresponding type declarations.
+services/web/src/client/terminal.ts(10,26): error TS2307: Cannot find module '@xterm/addon-fit' or its corresponding type declarations.
+services/web/src/client/terminal.ts(11,26): error TS2307: Cannot find module '@xterm/xterm' or its corresponding type declarations.
+services/web/src/client/terminal.ts(57,22): error TS7006: Parameter 'text' implicitly has an 'any' type.
+services/web/src/client/terminal.ts(59,24): error TS7006: Parameter 'text' implicitly has an 'any' type.
+services/web/src/client/terminal.ts(59,69): error TS18046: 'c' is of type 'unknown'.

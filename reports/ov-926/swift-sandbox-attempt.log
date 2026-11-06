@@ -1,0 +1,46 @@
+COMMAND ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov926-checks/swift-cache', '-j6', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', 'reports/ov-926/swift-check.swift', '-o', '/private/tmp/ov926-checks/swift-check']
+sandbox-exec: sandbox_apply: Operation not permitted
+apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift:18:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server' produced malformed response
+ 16 |     let host: String
+ 17 |     let workspace: String
+ 18 |     @State private var showing = false
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server' produced malformed response
+ 19 |     public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
+ 20 |     public var body: some View {
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift:18:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server' produced malformed response
+ 16 |     let host: String
+ 17 |     let workspace: String
+ 18 |     @State private var showing = false
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server' produced malformed response
+ 19 |     public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
+ 20 |     public var body: some View {
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift:22:33: error: cannot find '$showing' in scope
+ 20 |     public var body: some View {
+ 21 |         Button("Workflow Runs") { showing = true }
+ 22 |             .sheet(isPresented: $showing) { WorkflowRunsView(host: host, workspace: workspace) }
+    |                                 `- error: cannot find '$showing' in scope
+ 23 |     }
+ 24 | }
+
+apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift:21:35: error: cannot assign to property: 'self' is immutable
+ 19 |     public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
+ 20 |     public var body: some View {
+ 21 |         Button("Workflow Runs") { showing = true }
+    |                                   `- error: cannot assign to property: 'self' is immutable
+ 22 |             .sheet(isPresented: $showing) { WorkflowRunsView(host: host, workspace: workspace) }
+ 23 |     }
+sandbox-exec: sandbox_apply: Operation not permitted
+sandbox-exec: sandbox_apply: Operation not permitted
+sandbox-exec: sandbox_apply: Operation not permitted
+
+EXIT 1

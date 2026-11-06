@@ -1,4 +1,4 @@
-# Thin workflow renderer seam (pending ov-925 integration)
+# Thin workflow renderer seam (pending ov-927 integration after ov-925 review)
 
 Baseline: reviewed schema 2 source791345ee8, evidence72ccadf5c. Each shell
 consumes `Presentation` directly, not State or user-provided Capabilities.
@@ -27,7 +27,7 @@ only a stale guard. Shells never create Grant/commands/receipts/ACKs.
 
 Default port is absent and screen states it is not connected. No raw-state RPC
 or protocol route is guessed. Actual execution integration is explicitly
-PENDING ov-925's reviewed Session contract. There is no production activation,
+PENDING ov-927's reviewed Session implementation after ov-925 review. There is no production activation,
 installed-app edit, owner-data access or UI/device proof in this seam.
 
 The authenticated adapter must own command identity, lost-reply receipt retry
@@ -36,3 +36,19 @@ must not cancel accepted runtime work or reset a command identity. The display
 controllers never retry a mutation automatically. Connect/disconnect host hooks
 must invalidate readiness (`WorkflowRunsModel.disconnect`/Web sheet.connection)
 and refresh after a new authenticated session before allowing clicks.
+
+## Manager ownership clarification at final handoff
+
+Task decisions c424de3e/2f4203a4/504b425b assign the actual Session adapter to
+**ov-927**, after corrected ov-925 security review closes. The proposed contract
+is `ov-925-workflow-commands/reports/ov-925/session-contract.md` (not implemented):
+`workflow.snapshot`, `workflow.prepare_action`, `workflow.submit_action` over
+the existing generic Session handle. Native ports may encapsulate those calls:
+read returns only snapshot.presentation; dispatch forwards the original whole
+Action into prepare ONCE, then uses exact opaque Prepared bytes for submission.
+The shared client driver must retain pending Prepared bytes through errors,
+refresh, disconnect, view cancellation and restoration, and retry those bytes
+before preparing a replacement mutation. No renderer refresh may mint a new
+identity for unresolved work. This is a host integration obligation, not code
+implemented by the present renderer source. Source comments naming ov-925
+refer to the upstream transport dependency; concrete driver ownership is927.
