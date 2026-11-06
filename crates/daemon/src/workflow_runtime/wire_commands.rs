@@ -13,7 +13,7 @@ impl CommandHandle {
 }
 impl Runtime {
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
-        let payload = serde_json::to_string(principal)?;
+        let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         if matches!(action, Action::Get) {
             return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
