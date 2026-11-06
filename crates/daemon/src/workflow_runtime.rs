@@ -12,6 +12,7 @@ use uuid::Uuid;
 use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
+mod wire_commands;
 use adapters::{Binding, Journal};
 pub use adapters::coding_definition;
 
@@ -48,6 +49,7 @@ enum Authority { Controller(Uuid), Decision(Uuid, String) }
 enum Inbox {
     Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
     State(String, oneshot::Sender<Result<Option<State>>>),
+    Wire(String, String, farcooler_protocol::workflow_commands::Action, oneshot::Sender<Result<serde_json::Value>>),
     Reconcile,
 }
 impl CommandHandle {
@@ -309,6 +311,9 @@ impl Runtime {
                 let _ = reply.send(result);
             }
             Inbox::State(workspace, reply) => { let _ = reply.send(self.state(&workspace)); }
+            Inbox::Wire(workspace, principal, action, reply) => {
+                let _ = reply.send(self.wire_command(&workspace, &principal, action));
+            }
             Inbox::Reconcile => {}
         }
     }

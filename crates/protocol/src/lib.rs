@@ -233,9 +233,12 @@ pub mod accepts {
     pub const NEEDS_YOU_FYI: &str = "needs_you_fyi";
 }
 
+pub mod workflow_commands;
+
 /// Named per user-visible FEATURE, not per method. A client asks "does this
 /// runner do stacks", never "does it implement stack.set_parent".
 pub mod capability {
+    pub const WORKFLOW_COMMANDS: &str = "workflow_commands";
     /// Worktrees, repositories and roots. The floor: a daemon without this is
     /// not a daemon, and every build that has ever existed has it.
     ///
@@ -812,7 +815,7 @@ pub mod capability {
     /// hellos, which makes the list diffable in a log.
     pub const ALL: &[&str] =
         &[
-            WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, THEMES,
+            WORKFLOW_COMMANDS, WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
@@ -1022,6 +1025,12 @@ pub mod method {
         LayoutResize = "layout.resize" => LAYOUT,
         LayoutBreak = "layout.break" => LAYOUT,
         LayoutRename = "layout.rename" => LAYOUT,
+        WorkspaceSetWorkflow = "workspace.set_workflow" => WORKFLOW_COMMANDS,
+        WorkflowEnqueue = "workflow.enqueue" => WORKFLOW_COMMANDS,
+        WorkflowGet = "workflow.get" => WORKFLOW_COMMANDS,
+        WorkflowApprove = "workflow.approve" => WORKFLOW_COMMANDS,
+        WorkflowReview = "workflow.review" => WORKFLOW_COMMANDS,
+        WorkflowCancel = "workflow.cancel" => WORKFLOW_COMMANDS,
         LayoutViewport = "layout.viewport" => LAYOUT,
         LayoutPreset = "layout.preset" => LAYOUT,
         LayoutCycle = "layout.cycle" => LAYOUT,

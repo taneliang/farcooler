@@ -8,6 +8,7 @@ package com.farcooler.model
  * word, which is not always the same: `WORKTREES` is "workspaces".
  */
 enum class Capability(val wire: String) {
+    WORKFLOW_COMMANDS("workflow_commands"),
     WORKTREES("workspaces"),
     WORKSTREAMS("workstreams"),
     TERMINALS("terminals"),

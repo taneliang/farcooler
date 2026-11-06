@@ -1,0 +1,92 @@
+//! Publication and authenticated wire receipts share the workflow transaction.
+use crate::{Store, workflow::{Receipt, Result, WorkflowError, apply_in}};
+use farcooler_workflow::{Definition, Input, Refusal};
+use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Configuration { pub pin: String, pub definition: Definition }
+pub enum Write<'a> {
+    Publish { expected_pin: Option<&'a str>, definition: &'a Definition, revision: u64 },
+    Apply(&'a Input),
+    Refuse(Refusal),
+}
+impl Store {
+    pub fn workflow_configuration(&self, workspace: &str) -> Result<Option<Configuration>> {
+        let conn = self.conn();
+        let raw: Option<(String, String)> = conn.query_row(
+            "SELECT c.pin, d.definition FROM workflow_configurations c JOIN workflow_definitions d ON d.pin=c.pin WHERE c.workspace=?1",
+            [workspace], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        raw.map(|(pin, raw)| Ok(Configuration { pin, definition: serde_json::from_str(&raw)? })).transpose()
+    }
+    pub fn workflow_definition(&self, pin: &str) -> Result<Option<Definition>> {
+        let raw: Option<String> = self.conn().query_row("SELECT definition FROM workflow_definitions WHERE pin=?1", [pin], |r| r.get(0)).optional()?;
+        raw.map(|r| serde_json::from_str(&r).map_err(Into::into)).transpose()
+    }
+    /// Called before any current-state validation; identity includes authenticated principal.
+    pub fn workflow_wire_receipt(&self, workspace: &str, id: &str, payload: &str) -> Result<Option<Receipt>> {
+        cached(&self.conn(), workspace, id, payload)
+    }
+    pub fn workflow_wire_write(&self, workspace: &str, id: &str, payload: &str, write: Write<'_>) -> Result<Receipt> {
+        if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
+        let receipt = match write {
+            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?)?,
+            Write::Refuse(reason) => Receipt { id: id.into(), result: Err(reason), effects: vec![] },
+            Write::Publish { expected_pin, definition, revision } => {
+                let current: Option<String> = tx.query_row("SELECT pin FROM workflow_configurations WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
+                let result = if current.as_deref() != expected_pin { Err(Refusal::Stale) }
+                    else { definition.validate().map(|()| revision) };
+                if result.is_ok() {
+                    let pin = definition.pin();
+                    tx.execute("INSERT INTO workflow_definitions(pin,definition) VALUES(?1,?2) ON CONFLICT(pin) DO NOTHING", params![pin, serde_json::to_string(definition)?])?;
+                    tx.execute("INSERT INTO workflow_configurations(workspace,pin) VALUES(?1,?2) ON CONFLICT(workspace) DO UPDATE SET pin=excluded.pin", params![workspace,pin])?;
+                }
+                Receipt { id: id.into(), result, effects: vec![] }
+            }
+        };
+        tx.execute("INSERT INTO workflow_wire_receipts(workspace,id,payload,receipt) VALUES(?1,?2,?3,?4)", params![workspace,id,payload,serde_json::to_string(&receipt)?])?;
+        tx.commit()?;
+        Ok(receipt)
+    }
+}
+fn cached(conn: &rusqlite::Connection, workspace: &str, id: &str, payload: &str) -> Result<Option<Receipt>> {
+    let previous: Option<(String,String)> = conn.query_row("SELECT payload,receipt FROM workflow_wire_receipts WHERE workspace=?1 AND id=?2", params![workspace,id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+    previous.map(|(original,receipt)| {
+        if original != payload { return Err(WorkflowError::IdentityConflict); }
+        Ok(serde_json::from_str(&receipt)?)
+    }).transpose()
+}
+pub(crate) fn migration_publication(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE TABLE workflow_definitions(pin TEXT PRIMARY KEY NOT NULL, definition TEXT NOT NULL);
+        CREATE TABLE workflow_configurations(workspace TEXT PRIMARY KEY NOT NULL, pin TEXT NOT NULL REFERENCES workflow_definitions(pin));
+        CREATE TABLE workflow_wire_receipts(workspace TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(workspace,id));
+        CREATE TRIGGER workflow_definitions_immutable_update BEFORE UPDATE ON workflow_definitions BEGIN SELECT RAISE(ABORT, 'immutable definition'); END;
+        CREATE TRIGGER workflow_definitions_immutable_delete BEFORE DELETE ON workflow_definitions BEGIN SELECT RAISE(ABORT, 'immutable definition'); END;
+        CREATE TRIGGER workflow_wire_receipts_immutable_update BEFORE UPDATE ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT, 'immutable wire receipt'); END;
+        CREATE TRIGGER workflow_wire_receipts_immutable_delete BEFORE DELETE ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT, 'immutable wire receipt'); END;
+        ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn workflow_publication_rolls_back_definition_config_and_receipt_together() {
+        let store=Store::open_in_memory().unwrap();
+        store.conn().execute_batch("CREATE TRIGGER fail_publication BEFORE INSERT ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT,'fixture crash'); END;").unwrap();
+        let definition=Definition::tracker("owner");
+        assert!(store.workflow_wire_write("ws","p","payload",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).is_err());
+        assert!(store.workflow_configuration("ws").unwrap().is_none());
+        assert!(store.workflow_definition(&definition.pin()).unwrap().is_none());
+        store.conn().execute_batch("DROP TRIGGER fail_publication").unwrap();
+        let receipt=store.workflow_wire_write("ws","p","payload",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).unwrap();
+        assert!(receipt.result.is_ok());
+        assert!(store.conn().execute("UPDATE workflow_definitions SET definition='{}'",[]).is_err());
+        assert!(store.conn().execute("DELETE FROM workflow_wire_receipts",[]).is_err());
+        let refusal=store.workflow_wire_write("ws","p2","payload2",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).unwrap();
+        assert_eq!(refusal.result,Err(Refusal::Stale));
+    }
+}

@@ -50,6 +50,8 @@ pub(crate) const NO_WORKSPACES: &str =
 
 #[derive(Subcommand)]
 pub enum WorkspaceCmd {
+    /// Publish a bounded JSON workflow definition and immutable operation settings.
+    SetWorkflow { workspace: String, #[arg(long)] repo: Option<String>, #[command(flatten)] publication: crate::workflow::Publication },
     /// Make a workstream: a board, a task prefix, and later an orchestrator.
     ///
     /// Its charter starts as a copy of Main's. It owns no worktree until one
@@ -342,6 +344,11 @@ async fn workspace_via(
     let env = pane_workspace(std::env::var(WORKSPACE_ENV).ok());
 
     match cmd {
+        WorkspaceCmd::SetWorkflow { workspace, repo, publication } => {
+            let action = publication.action()?;
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            crate::workflow::send(&mut link, uuid_of(&ws.id), action, json).await?;
+        }
         WorkspaceCmd::Create(args) => {
             let asked = args.checked()?;
             let repositories = crate::list_repositories(&mut link).await?;

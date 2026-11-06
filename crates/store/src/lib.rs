@@ -86,3 +86,5 @@ pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::{TaskScope, derive_prefix};
 pub use wakes::{PendingWake, WakeKind};
 pub use workspaces::{Vacated, valid_prefix};
+
+pub mod workflow_publication;

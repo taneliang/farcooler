@@ -109,6 +109,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::check_ins::migration_check_ins, Older::Refused), // ov-892: admission fences change permitted writes
     (crate::check_ins::migration_check_in_destination, Older::Refused), // ov-892: old observers lack destination proof
     (crate::workflow::migration_workflow, Older::Refused), // ov-922: workflow receipts and ownership require current admission
+    (crate::workflow_publication::migration_publication, Older::Refused), // ov-925: pinned configuration and wire command receipts
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

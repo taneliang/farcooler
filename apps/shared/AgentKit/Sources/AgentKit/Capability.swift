@@ -5,6 +5,7 @@
 /// constant. The case follows the Rust constant's name and the raw value is the
 /// wire word, which is not always the same: `worktrees` is "workspaces".
 public enum Capability: String, CaseIterable, Sendable {
+    case workflowCommands = "workflow_commands"
     case worktrees = "workspaces"
     case workstreams = "workstreams"
     case terminals = "terminals"

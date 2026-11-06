@@ -8,6 +8,7 @@ pub(super) fn wrong(expected: &'static str, got: &result::Value) -> SessionError
 
 fn variant_name(value: &result::Value) -> &'static str {
     match value {
+        result::Value::WorkflowReply(_) => "workflow_reply",
         result::Value::Host(_) => "host",
         result::Value::RepositoryRoot(_) => "repository_root",
         result::Value::RepositoryRootList(_) => "repository_root_list",

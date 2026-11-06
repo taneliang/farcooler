@@ -86,6 +86,7 @@ mod confirmation;
 mod tasks;
 mod workspaces;
 mod workspace_settings;
+mod workflow;
 mod repo_landing;
 mod repo_survey;
 mod worktree_lfs;
@@ -186,6 +187,9 @@ enum Command {
     /// workspace named after a branch.
     #[command(subcommand)]
     Workspace(workspaces::WorkspaceCmd),
+    /// Control an explicitly configured workflow.
+    #[command(subcommand)]
+    Workflow(workflow::WorkflowCmd),
     /// What a worktree changed.
     #[command(subcommand)]
     Changes(changes::ChangesCmd),
@@ -1243,6 +1247,7 @@ async fn run() -> Fallible {
         Command::Theme(c) => theme(runner, c, cli.json).await,
         Command::Settings(c) => settings(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
+        Command::Workflow(c) => workflow::workflow(runner, c, cli.json).await,
         Command::Workspace(c) => workspaces::workspace(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
         Command::Files(c) => files::files(runner, c, cli.json).await,

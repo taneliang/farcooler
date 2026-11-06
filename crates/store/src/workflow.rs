@@ -49,125 +49,7 @@ impl Store {
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous: Option<(String, String)> = tx.query_row(
-            "SELECT payload, receipt FROM workflow_receipts WHERE workspace = ?1 AND id = ?2",
-            params![input.workspace, input.id], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).optional()?;
-        if let Some((original, receipt)) = previous {
-            if original != payload { return Err(WorkflowError::IdentityConflict); }
-            return Ok(serde_json::from_str(&receipt)?);
-        }
-        let raw: Option<String> = tx.query_row(
-            "SELECT state FROM workflow_states WHERE workspace = ?1", [&input.workspace], |r| r.get(0),
-        ).optional()?;
-        let state = match &raw {
-            Some(raw) => serde_json::from_str(raw)?,
-            None => State::empty(input.workspace.clone(), input.epoch),
-        };
-        // The transaction, not a caller, supplies external occupancy. Persist it
-        // with the accepted event so replay needs no database/global state reads.
-        let mut admitted = input.clone();
-        let mut relevant: std::collections::BTreeSet<_> = state.items.values().map(|i| i.resource.clone()).collect();
-        if let farcooler_workflow::Command::Enqueue { resource, .. } = &input.command {
-            relevant.insert(resource.clone());
-        }
-        admitted.busy_resources = tx.prepare(
-            "SELECT resource FROM workflow_resources WHERE workspace != ?1
-             AND resource IN (SELECT value FROM json_each(?2))"
-        )?.query_map(params![input.workspace, serde_json::to_string(&relevant)?], |r| r.get::<_, String>(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let mut result = if raw.is_none() && input.grant != Grant::Controller {
-            Err(Refusal::Unauthorized)
-        } else { step(&state, &admitted) };
-        if result.is_ok() {
-            if let farcooler_workflow::Command::Observe { effect, .. }
-                | farcooler_workflow::Command::Resolve { effect, .. } = &input.command
-            {
-                let status: Option<String> = tx.query_row(
-                    "SELECT dispatch_state FROM workflow_outbox WHERE workspace = ?1 AND id = ?2",
-                    params![input.workspace, effect], |r| r.get(0),
-                ).optional()?;
-                let required = if matches!(input.command, farcooler_workflow::Command::Resolve { .. }) {
-                    "uncertain"
-                } else { "admitted" };
-                if status.as_deref() != Some(required) { result = Err(Refusal::Phase); }
-            }
-        }
-        if let Ok(transition) = &result {
-            for item in transition.state.items.values().filter(|i| owns_resource(i)) {
-                let owner: Option<String> = tx.query_row(
-                    "SELECT workspace FROM workflow_resources WHERE resource = ?1",
-                    [&item.resource], |r| r.get(0),
-                ).optional()?;
-                if owner.as_ref().is_some_and(|owner| owner != &input.workspace) {
-                    result = Err(Refusal::Resource);
-                    break;
-                }
-            }
-        }
-        let receipt = match result {
-            Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![] },
-            Ok(transition) => {
-                let revision = transition.state.revision;
-                tx.execute(
-                    "INSERT INTO workflow_events (workspace, revision, id, payload, payload_hash, notices)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![input.workspace, revision, input.id, serde_json::to_string(&admitted)?, digest(&admitted),
-                        serde_json::to_string(&transition.notices)?],
-                )?;
-                tx.execute(
-                    "INSERT INTO workflow_states (workspace, revision, epoch, state) VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(workspace) DO UPDATE SET revision = excluded.revision,
-                     epoch = excluded.epoch, state = excluded.state",
-                    params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
-                )?;
-                crate::workflow_effects::reserve(&tx, &transition.state)?;
-                // Never erase operation history. Cancellation/rework makes old intents inert.
-                tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;
-                for effect in &transition.effects {
-                    tx.execute(
-                        "INSERT INTO workflow_outbox (workspace, id, revision, payload, payload_hash, active)
-                         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                        params![input.workspace, effect.id, revision, serde_json::to_string(effect)?, digest(effect)],
-                    )?;
-                }
-                for item in transition.state.items.values() {
-                    if let Some(effect) = &item.pending {
-                        tx.execute("UPDATE workflow_outbox SET active = 1 WHERE workspace = ?1 AND id = ?2",
-                            params![input.workspace, effect])?;
-                    }
-                }
-                if let farcooler_workflow::Command::Observe { effect, outcome, .. }
-                    | farcooler_workflow::Command::Resolve { effect, outcome, .. } = &input.command
-                {
-                    let status = if matches!(outcome, farcooler_workflow::Outcome::Uncertain) {
-                        "uncertain"
-                    } else { "settled" };
-                    tx.execute("UPDATE workflow_outbox SET dispatch_state = ?3 WHERE workspace = ?1 AND id = ?2",
-                        params![input.workspace, effect, status])?;
-                }
-                if let farcooler_workflow::Command::Observe { outcome: farcooler_workflow::Outcome::Stopped { operation, .. }, .. }
-                    | farcooler_workflow::Command::Resolve { outcome: farcooler_workflow::Outcome::Stopped { operation, .. }, .. } = &input.command
-                {
-                    tx.execute("UPDATE workflow_outbox SET dispatch_state = 'settled' WHERE workspace = ?1 AND id = ?2",
-                        params![input.workspace, operation])?;
-                }
-                tx.execute(
-                    "UPDATE workflow_outbox SET dispatch_state = CASE
-                        WHEN dispatch_state IN ('admitted', 'uncertain') THEN 'uncertain'
-                        ELSE 'suppressed' END
-                     WHERE workspace = ?1 AND active = 0 AND dispatch_state NOT IN ('settled', 'suppressed')",
-                    [&input.workspace],
-                )?;
-                Receipt { id: input.id.clone(), result: Ok(revision),
-                    effects: transition.effects.iter().map(|e| e.id.clone()).collect() }
-            }
-        };
-        tx.execute(
-            "INSERT INTO workflow_receipts (workspace, id, payload, payload_hash, receipt)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![input.workspace, input.id, payload, digest(input), serde_json::to_string(&receipt)?],
-        )?;
+        let receipt = apply_in(&tx, input, &payload)?;
         tx.commit()?;
         Ok(receipt)
     }
@@ -262,3 +144,126 @@ pub(crate) fn migration_workflow(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Result<Receipt> {
+        let previous: Option<(String, String)> = tx.query_row(
+            "SELECT payload, receipt FROM workflow_receipts WHERE workspace = ?1 AND id = ?2",
+            params![input.workspace, input.id], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        if let Some((original, receipt)) = previous {
+            if original != payload { return Err(WorkflowError::IdentityConflict); }
+            return Ok(serde_json::from_str(&receipt)?);
+        }
+        let raw: Option<String> = tx.query_row(
+            "SELECT state FROM workflow_states WHERE workspace = ?1", [&input.workspace], |r| r.get(0),
+        ).optional()?;
+        let state = match &raw {
+            Some(raw) => serde_json::from_str(raw)?,
+            None => State::empty(input.workspace.clone(), input.epoch),
+        };
+        // The transaction, not a caller, supplies external occupancy. Persist it
+        // with the accepted event so replay needs no database/global state reads.
+        let mut admitted = input.clone();
+        let mut relevant: std::collections::BTreeSet<_> = state.items.values().map(|i| i.resource.clone()).collect();
+        if let farcooler_workflow::Command::Enqueue { resource, .. } = &input.command {
+            relevant.insert(resource.clone());
+        }
+        admitted.busy_resources = tx.prepare(
+            "SELECT resource FROM workflow_resources WHERE workspace != ?1
+             AND resource IN (SELECT value FROM json_each(?2))"
+        )?.query_map(params![input.workspace, serde_json::to_string(&relevant)?], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut result = if raw.is_none() && input.grant != Grant::Controller {
+            Err(Refusal::Unauthorized)
+        } else { step(&state, &admitted) };
+        if result.is_ok() {
+            if let farcooler_workflow::Command::Observe { effect, .. }
+                | farcooler_workflow::Command::Resolve { effect, .. } = &input.command
+            {
+                let status: Option<String> = tx.query_row(
+                    "SELECT dispatch_state FROM workflow_outbox WHERE workspace = ?1 AND id = ?2",
+                    params![input.workspace, effect], |r| r.get(0),
+                ).optional()?;
+                let required = if matches!(input.command, farcooler_workflow::Command::Resolve { .. }) {
+                    "uncertain"
+                } else { "admitted" };
+                if status.as_deref() != Some(required) { result = Err(Refusal::Phase); }
+            }
+        }
+        if let Ok(transition) = &result {
+            for item in transition.state.items.values().filter(|i| owns_resource(i)) {
+                let owner: Option<String> = tx.query_row(
+                    "SELECT workspace FROM workflow_resources WHERE resource = ?1",
+                    [&item.resource], |r| r.get(0),
+                ).optional()?;
+                if owner.as_ref().is_some_and(|owner| owner != &input.workspace) {
+                    result = Err(Refusal::Resource);
+                    break;
+                }
+            }
+        }
+        let receipt = match result {
+            Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![] },
+            Ok(transition) => {
+                let revision = transition.state.revision;
+                tx.execute(
+                    "INSERT INTO workflow_events (workspace, revision, id, payload, payload_hash, notices)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![input.workspace, revision, input.id, serde_json::to_string(&admitted)?, digest(&admitted),
+                        serde_json::to_string(&transition.notices)?],
+                )?;
+                tx.execute(
+                    "INSERT INTO workflow_states (workspace, revision, epoch, state) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(workspace) DO UPDATE SET revision = excluded.revision,
+                     epoch = excluded.epoch, state = excluded.state",
+                    params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
+                )?;
+                crate::workflow_effects::reserve(tx, &transition.state)?;
+                // Never erase operation history. Cancellation/rework makes old intents inert.
+                tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;
+                for effect in &transition.effects {
+                    tx.execute(
+                        "INSERT INTO workflow_outbox (workspace, id, revision, payload, payload_hash, active)
+                         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                        params![input.workspace, effect.id, revision, serde_json::to_string(effect)?, digest(effect)],
+                    )?;
+                }
+                for item in transition.state.items.values() {
+                    if let Some(effect) = &item.pending {
+                        tx.execute("UPDATE workflow_outbox SET active = 1 WHERE workspace = ?1 AND id = ?2",
+                            params![input.workspace, effect])?;
+                    }
+                }
+                if let farcooler_workflow::Command::Observe { effect, outcome, .. }
+                    | farcooler_workflow::Command::Resolve { effect, outcome, .. } = &input.command
+                {
+                    let status = if matches!(outcome, farcooler_workflow::Outcome::Uncertain) {
+                        "uncertain"
+                    } else { "settled" };
+                    tx.execute("UPDATE workflow_outbox SET dispatch_state = ?3 WHERE workspace = ?1 AND id = ?2",
+                        params![input.workspace, effect, status])?;
+                }
+                if let farcooler_workflow::Command::Observe { outcome: farcooler_workflow::Outcome::Stopped { operation, .. }, .. }
+                    | farcooler_workflow::Command::Resolve { outcome: farcooler_workflow::Outcome::Stopped { operation, .. }, .. } = &input.command
+                {
+                    tx.execute("UPDATE workflow_outbox SET dispatch_state = 'settled' WHERE workspace = ?1 AND id = ?2",
+                        params![input.workspace, operation])?;
+                }
+                tx.execute(
+                    "UPDATE workflow_outbox SET dispatch_state = CASE
+                        WHEN dispatch_state IN ('admitted', 'uncertain') THEN 'uncertain'
+                        ELSE 'suppressed' END
+                     WHERE workspace = ?1 AND active = 0 AND dispatch_state NOT IN ('settled', 'suppressed')",
+                    [&input.workspace],
+                )?;
+                Receipt { id: input.id.clone(), result: Ok(revision),
+                    effects: transition.effects.iter().map(|e| e.id.clone()).collect() }
+            }
+        };
+        tx.execute(
+            "INSERT INTO workflow_receipts (workspace, id, payload, payload_hash, receipt)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![input.workspace, input.id, payload, digest(input), serde_json::to_string(&receipt)?],
+        )?;
+        Ok(receipt)
+}

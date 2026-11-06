@@ -54,6 +54,7 @@ impl Drop for Attachment {
 }
 
 pub struct Rpc {
+    workflow: Option<crate::workflow_runtime::CommandHandle>,
     service: Arc<Service>,
     watcher: Arc<crate::watch::Watcher>,
     /// Where `terminal.attach` sends this connection's terminal bytes.
@@ -105,6 +106,7 @@ impl Rpc {
         attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     ) -> Self {
         Self {
+            workflow: None,
             service,
             watcher,
             peer,
@@ -150,6 +152,7 @@ impl Rpc {
 /// view of the tmux inventory.
 #[derive(Clone)]
 pub struct RpcFactory {
+    workflow: Option<crate::workflow_runtime::CommandHandle>,
     service: Arc<Service>,
     watcher: Arc<crate::watch::Watcher>,
     /// Shared with whatever is waiting to stop this process. See `daemon.shutdown`.
@@ -195,6 +198,11 @@ pub struct RpcFactory {
 }
 
 impl RpcFactory {
+    /// Explicit fixture embedding only; ordinary daemon construction never calls this.
+    pub fn with_workflow_fixture(mut self, handle: crate::workflow_runtime::CommandHandle) -> Self {
+        self.workflow = Some(handle);
+        self
+    }
     /// This connection's process, as the kernel named it at accept: what
     /// `people::gate` reads to tell a rep's pane from the owner (ov-494).
     pub fn with_caller_pid(mut self, pid: Option<i32>) -> Self {
@@ -230,6 +238,7 @@ impl RpcFactory {
         let session = service.sessions().open(peer.client_id.clone());
         let (push, pushes) = farcooler_transport::push_queue(crate::resync::TERMINAL_BACKLOG_BYTES);
         Self {
+            workflow: None,
             service,
             watcher,
             stop,
@@ -252,6 +261,7 @@ impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
         let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
+        rpc.workflow = self.workflow.clone();
         rpc.caller_pid = self.caller_pid;
         rpc.caller_pane = self.caller_pane.clone();
         async move {
@@ -347,6 +357,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 /// rather than defaulting it.
 fn scope_of(method: Method) -> Scope {
     match method {
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowReview => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -832,6 +843,36 @@ impl Rpc {
         let scope = self.peer.scope;
 
         match req.method.as_str() {
+            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.review" => {
+                use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
+                let workspace = Self::target(&req)?;
+                svc.store.get_workspace(workspace)?;
+                if self.caller()? != crate::people::Person::Owner {
+                    return Err(DomainError::ScopeDenied { needed: "owner" });
+                }
+                let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
+                if p.schema != 1 || p.json.len() > MAX_BYTES { return Err(DomainError::NotFound); }
+                let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;
+                if action.method() != req.method { return Err(DomainError::NotFound); }
+                let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "isolated workflow fixture" })?;
+                let principal = match crate::caller_seat::caller_seat(svc, self.caller_pid).await {
+                    crate::caller_seat::Seat::Person => "owner",
+                    crate::caller_seat::Seat::Agent(Some(pane)) => {
+                        let term = svc.store.get_terminal(pane)?;
+                        if term.workspace_id != Some(workspace) || term.role != farcooler_store::models::TerminalRole::Orchestrator {
+                            return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" });
+                        }
+                        "orchestrator"
+                    }
+                    _ => return Err(DomainError::ScopeDenied { needed: "known caller" }),
+                };
+                if principal != "owner" && matches!(action, Action::Publish { .. }) {
+                    return Err(DomainError::ScopeDenied { needed: "person" });
+                }
+                let value = handle.wire_command(workspace.to_string(), principal.into(), action).await
+                    .map_err(|_| DomainError::NotFound)?;
+                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
+            }
             // ---- reads ----
             "host.get" | "host.health" => {
                 // Refresh before answering: a client asking about health wants

@@ -1069,10 +1069,13 @@ name = "farcooler-protocol"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "farcooler-workflow",
  "prost",
  "prost-build",
  "prost-types",
  "protoc-bin-vendored",
+ "serde",
+ "serde_json",
  "thiserror 2.0.19",
  "uuid",
 ]
