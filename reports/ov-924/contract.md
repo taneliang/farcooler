@@ -20,14 +20,18 @@ action, and submit the resulting command through reducer/store authorization.
 The digest is a stale-action guard, not an authentication token.
 
 Cards preserve immutable run/definition/policy/candidate/latest evidence,
-current stage plus ALL stage kinds and progression policies, iteration, attempt,
+current StageCard and explicit GateCard (Approval/Review + principal), plus ALL
+stage kinds and progression policies, iteration, attempt,
 fence, pending effect, reasons and finite action descriptors. EvidenceInvalidated
 means retained evidence differs from current candidate or policy. It never
 erases the receipt. InspectLatestEvidence returns that precise retained evidence,
 even if invalidated. It does not imply a remote artifact has been fetched.
 Rework eligibility follows the definition bound and reviewer principal; stale
 or invalidated review evidence cannot authorize a review/rework intent.
-Uncertainty offers inspection, not invented reconciliation authority.
+Exhausted rework exposes RejectReview, producing the reducer rejection/Failed
+intent rather than forcing approval. Uncertainty offers inspection, not invented
+reconciliation authority. Snapshot/context hashing is once per projection, then
+item-bound, so producing cards does not serialize the whole snapshot per item.
 
 Native screens, Kotlin declarations/consumers, browser JS consumers,
 authenticated workflow transport and full release/UI parity remain pending.

@@ -84,9 +84,10 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
     if auth.workspace != state.workspace || auth.epoch != state.epoch || !auth.inspect {
         return Err(Error::Unauthorized);
     }
+    let snapshot_guard = digest(&("workflow-presentation/v1", state, auth));
     let mut runs = Vec::new();
     for (id, item) in &state.items {
-        let guard = digest(&("workflow-presentation/v1", state, auth, id));
+        let guard = digest(&(&snapshot_guard, id));
         if item.definition.validate().is_err() || item.pin != item.definition.pin()
             || item.iteration > item.definition.max_reworks
             || (if item.phase == Phase::Done { item.stage != item.definition.stages.len() }
@@ -160,7 +161,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
 pub fn action(state: &State, auth: &Capabilities, item: &str, requested: &Action) -> Result<Intent, Error> {
     let view = project(state, auth)?;
     let card = view.runs.iter().find(|c| c.item == item).ok_or(Error::Missing)?;
-    if requested.guard != digest(&("workflow-presentation/v1", state, auth, item)) { return Err(Error::Stale); }
+    if requested.guard != digest(&(digest(&("workflow-presentation/v1", state, auth)), item)) { return Err(Error::Stale); }
     if !card.actions.contains(requested) { return Err(Error::Unavailable); }
     Ok(match requested.kind {
         ActionKind::InspectLatestEvidence => Intent::InspectLatestEvidence {
