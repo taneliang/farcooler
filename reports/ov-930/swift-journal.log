@@ -1,0 +1,50 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov930-checks/swift-cache', '-j6', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift', '-DWORKFLOW_STANDALONE', 'apps/shared/AgentKit/Tests/AgentKitTests/WorkflowLifecycleChecks.swift', 'reports/ov-930/swift-check.swift', '-o', '/private/tmp/ov930-checks/swift-check']
+reports/ov-930/swift-check.swift:41:27: warning: expression of type 'UInt64?' is unused [#NoUsage]
+ 39 |             while resume == nil { await Task.yield() }
+ 40 |             model.disconnect(); resume!.resume(returning: json)
+ 41 |             await reading.value; precondition(!model.ready)
+    |                           `- warning: expression of type 'UInt64?' is unused [#NoUsage]
+ 42 |             do { try await workflowLifecycleChecks(json: json) }
+ 43 |             catch { print("FAIL lifecycle regression: \(error)"); exit(1) }
+
+reports/ov-930/swift-check.swift:98:13: warning: 'account' mutated after capture by sendable closure
+ 67 |     let view = try WorkflowPresentation.decode(String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self), workspace: workspace)
+ 68 |     let run = view.runs[0], action = run.actions[0]
+ 69 |     var account = "account", connection = "first", prepareCount = 0, submissions: [String] = []
+    |         `- note: variable defined here
+ 70 |     let current: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+    |                                                                           `- note: variable captured by sendable closure
+ 71 |         WorkflowSessionAdapter.Current(account: account, host: "actual-host", connection: connection) { method, args in
+    |                                                 `- note: capturing use
+ 72 |             if method == "workflow.snapshot" { return raw }
+ 73 |             if method == "workflow.prepare_selection" {
+    :
+ 96 |     precondition(prepareCount == 1 && submissions.count == 3 && Set(submissions).count == 1)
+ 97 |     let exhausted = try await port.pending("host", workspace); precondition(exhausted.isEmpty)
+ 98 |     account = "other-account"; let isolated = try await port.pending("host", workspace); precondition(isolated.isEmpty)
+    |             `- warning: 'account' mutated after capture by sendable closure
+ 99 |     print("ok durable Swift Prepared, max-u64 observation, current-session retry, process restoration, account isolation, three-attempt bound")
+100 | }
+
+reports/ov-930/swift-check.swift:93:116: warning: 'connection' mutated after capture by sendable closure
+ 67 |     let view = try WorkflowPresentation.decode(String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self), workspace: workspace)
+ 68 |     let run = view.runs[0], action = run.actions[0]
+ 69 |     var account = "account", connection = "first", prepareCount = 0, submissions: [String] = []
+    |                              `- note: variable defined here
+ 70 |     let current: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+    |                                                                           `- note: variable captured by sendable closure
+ 71 |         WorkflowSessionAdapter.Current(account: account, host: "actual-host", connection: connection) { method, args in
+    |                                                                                           `- note: capturing use
+ 72 |             if method == "workflow.snapshot" { return raw }
+ 73 |             if method == "workflow.prepare_selection" {
+    :
+ 91 |     precondition(prepareCount == 1 && submissions.count == 1)
+ 92 |     let pending = try await port.pending("host", workspace); precondition(pending.count == 1)
+ 93 |     adapter = WorkflowSessionAdapter(root: root, current: current); port = adapter.port(host: "host")!; connection = "replacement"
+    |                                                                                                                    `- warning: 'connection' mutated after capture by sendable closure
+ 94 |     _ = try await port.read("host", workspace); precondition(submissions.count == 1)
+ 95 |     for _ in 0..<2 { do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { } }
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+
+EXIT 0

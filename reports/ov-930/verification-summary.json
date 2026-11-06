@@ -1,0 +1,106 @@
+{
+  "source": "9b80d9a4ad5ed3f3b31d04b3049b0a81731360a3",
+  "checks": {
+    "final-web": {
+      "exit": 0,
+      "seconds": 0.508558208,
+      "minimum_free": 38229159936
+    },
+    "final-web-test": {
+      "exit": 0,
+      "seconds": 0.261529292,
+      "minimum_free": 38229151744
+    },
+    "final-negative": {
+      "exit": 0,
+      "seconds": 0.507246209,
+      "minimum_free": 38229008384
+    },
+    "final-web-lifecycle": {
+      "exit": 0,
+      "seconds": 0.25461341600000004,
+      "minimum_free": 38228992000
+    },
+    "final-web-baseline": {
+      "exit": 0,
+      "seconds": 1.0334503750000001,
+      "minimum_free": 38228975616
+    },
+    "final-swift": {
+      "exit": 0,
+      "seconds": 1.037281,
+      "minimum_free": 38227533824
+    },
+    "final-swift-test": {
+      "exit": 0,
+      "seconds": 1.032045083,
+      "minimum_free": 38229008384
+    },
+    "final-swift-host-parse": {
+      "exit": 0,
+      "seconds": 0.261626333,
+      "minimum_free": 38269595648
+    },
+    "final-kotlin": {
+      "exit": 0,
+      "seconds": 3.863229167,
+      "minimum_free": 38227730432
+    },
+    "final-kotlin-test": {
+      "exit": 0,
+      "seconds": 0.25456716700000004,
+      "minimum_free": 38227783680
+    },
+    "final-kotlin-compose": {
+      "exit": 0,
+      "seconds": 3.852822792,
+      "minimum_free": 38227591168
+    },
+    "final-browser-focus": {
+      "exit": 0,
+      "seconds": 0.5143894579999999,
+      "minimum_free": 38227021824
+    },
+    "final-rust": {
+      "exit": 0,
+      "seconds": 6.676585,
+      "minimum_free": 38189133824
+    },
+    "final-rust-lint": {
+      "exit": 0,
+      "seconds": 5.167946375,
+      "minimum_free": 38230089728
+    },
+    "final-jni": {
+      "exit": 0,
+      "seconds": 1.553349375,
+      "minimum_free": 38230028288
+    },
+    "final-wasm": {
+      "exit": 0,
+      "seconds": 2.057748166,
+      "minimum_free": 38229835776
+    },
+    "final-browser": {
+      "exit": 0,
+      "seconds": 1.809946375,
+      "minimum_free": 38226911232
+    },
+    "final-ios-generator": {
+      "exit": 0,
+      "seconds": 6.188043917,
+      "minimum_free": 38190342144
+    },
+    "native-graphical": {
+      "exit": 0,
+      "seconds": 219.575115291,
+      "minimum_free": 38163169280
+    }
+  },
+  "limitations": [
+    "full native app builds and graphical/authenticated caller proof open",
+    "full web build has 8 inherited diagnostics",
+    "inherited RPC size ceiling failure",
+    "independent reviews pending"
+  ]
+}

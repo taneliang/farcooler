@@ -1,0 +1,51 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_', '--', '--nocapture']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/ffi-guard)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/agent-core)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/tailcat)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+error[E0599]: no associated function or constant named `new_v4` found for struct `uuid::Uuid` in the current scope
+   --> crates/client/src/session/workflow.rs:85:19
+    |
+ 85 |         id: Uuid::new_v4().to_string(), sequence, revision, epoch,
+    |                   ^^^^^^ associated function or constant not found in `uuid::Uuid`
+    |
+note: if you're trying to build a new `uuid::Uuid` consider using one of the following associated functions:
+      uuid::builder::<impl uuid::Uuid>::nil
+      uuid::builder::<impl uuid::Uuid>::max
+      uuid::builder::<impl uuid::Uuid>::from_fields
+      uuid::builder::<impl uuid::Uuid>::from_fields_le
+      and 12 others
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/uuid-1.24.0/src/builder.rs:72:5
+    |
+ 72 |     pub const fn nil() -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 98 |     pub const fn max() -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+122 |     pub const fn from_fields(d1: u32, d2: u16, d3: u16, d4: &[u8; 8]) -> Uuid {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+168 |     pub const fn from_fields_le(d1: u32, d2: u16, d3: u16, d4: &[u8; 8]) -> Uuid {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `new_v7` with a similar name
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/uuid-1.24.0/src/v7.rs:71:5
+    |
+ 71 |     pub fn new_v7(ts: Timestamp) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `farcooler-client` (lib test) due to 1 previous error
+
+EXIT 101

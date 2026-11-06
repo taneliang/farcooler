@@ -1,0 +1,11 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'clippy', '--offline', '-p', 'farcooler-client', '--lib', '--', '-D', 'warnings']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/protocol)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/core)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/ceremony)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/fence)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/transport)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+    Finished `dev` profile [unoptimized] target(s) in 4.74s
+
+EXIT 0

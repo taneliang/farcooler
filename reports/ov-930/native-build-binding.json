@@ -1,0 +1,28 @@
+{
+  "source": "9b80d9a4ad5ed3f3b31d04b3049b0a81731360a3",
+  "command": [
+    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+    "-swift-version",
+    "6",
+    "-target",
+    "arm64-apple-macosx26.0",
+    "-sdk",
+    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk",
+    "-module-cache-path",
+    "/private/tmp/ov930-checks/swift-cache",
+    "-j6",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift",
+    "reports/ov-930/native-check.swift",
+    "-o",
+    "/private/tmp/ov930-native-60736/Ov930 Native Workflow.app/Contents/MacOS/Ov930 Native Workflow"
+  ],
+  "hashes": {
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift": "6c3b16404e0553ec9d65fa71f800665e153be29b5c9a3f3c9127c29cc40d4233",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift": "6e1b6c95bf2b77e02bb253830b382ddc2d6b6e470dc1729f65ba349dcaadfb55",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift": "bced369fc19343eacf120dbd1231b2728001c9afdd3a58164a8518f249f1a185",
+    "reports/ov-930/native-check.swift": "29d35886a9d92e044b2151eb19f9899bd10f10abbe928e01749991142f4cb543",
+    "executable": "1d6e5f312a58e04e5ac870df71ea3a50493ef5f78710765ca7fe3d438ae4b71e"
+  }
+}

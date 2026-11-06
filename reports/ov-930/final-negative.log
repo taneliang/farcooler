@@ -1,0 +1,4 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/negative.py']
+all three meaningful byte/session/persistence mutations rejected; production unchanged
+
+EXIT 0

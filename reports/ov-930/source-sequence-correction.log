@@ -1,0 +1,40 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_', '--', '--nocapture']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 5.82s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 15 tests
+test session::workflow::tests::socket::workflow_host_browser_bridge ... ignored, owned browser harness only
+
+thread 'session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion' (826395249) panicked at crates/client/src/session/workflow/tests.rs:68:70:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion ... FAILED
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+test session::workflow::tests::workflow_selection_allocates_once_and_preserves_observation ... ok
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+trace=Session/C-JNI-dispatch -> authenticated getter -> schema2 -> opaque Cancel -> prepared bytes -> dropped answer -> reconnect durable receipt; stale/auth-context/withdrawal refused; prepared={"action":"Cancel","mutation":{"id":"cancel-a","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:3f9a563f0a8ea097edaf740e9f614d7fc254747def08d7b6bab70fac140cfd60","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86"}; receipt={"receipt":{"effects":[],"id":"wire:owner:cancel-a","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... ok
+FeatureA actual socket/shared selection -> persisted envelope -> submit -> replacement Session same receipt -> stale selection and revoked retry refused; bytes={"action":"Approve","mutation":{"id":"01a1b320-8b7a-7752-9e5b-09ce1dcbc95b","revision":1,"epoch":1,"sequence":2},"item":"FeatureA","run":"wf1:2b1ce08382aaf73ad0f44ae88b951df237f557a50e27394233fae7cbd9db58f6","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:2d6e09e2eea09175bd7a6ce860a0e049346b5789ec634cf84891289edb7ab3c3"],"id":"wire:owner:01a1b320-8b7a-7752-9e5b-09ce1dcbc95b","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_selection_route_stale_auth_and_retry ... ok
+effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision=7; request={"action":"Approve","mutation":{"id":"approve-effectful","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:8b3a8188aab7ba4b617876a4657b679e093d2246bf6b398519ff99b5f0e914c4","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:26705d97cfe17f8a0481a29a1704d087b69e4aec1e734cd59ed489600b306b38"],"id":"wire:owner:approve-effectful","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute ... ok
+
+failures:
+
+failures:
+    session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion
+
+test result: FAILED. 13 passed; 1 failed; 1 ignored; 0 measured; 260 filtered out; finished in 0.89s
+
+error: test failed, to rerun pass `-p farcooler-client --lib`
+
+EXIT 101

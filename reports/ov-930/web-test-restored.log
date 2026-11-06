@@ -1,0 +1,4 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/opt/homebrew/bin/node', 'services/web/test/workflow-session.test.mjs', '/private/tmp/ov930-checks/web']
+PASS lossless max-u64 snapshot/identity, whole Action, persisted-before-submit, discarded reply, process restoration, current-session retry, three-attempt bound, account isolation, storage refusal, no lifecycle replay
+
+EXIT 0

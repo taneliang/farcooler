@@ -1,0 +1,17 @@
+[
+  {
+    "mutation": "opaque-bytes",
+    "exit": 1,
+    "production_unchanged": true
+  },
+  {
+    "mutation": "captured-session",
+    "exit": 1,
+    "production_unchanged": true
+  },
+  {
+    "mutation": "missing-persistence",
+    "exit": 1,
+    "production_unchanged": true
+  }
+]

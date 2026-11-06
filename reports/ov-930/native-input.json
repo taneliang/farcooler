@@ -1,0 +1,24 @@
+{
+  "source": "9b80d9a4ad5ed3f3b31d04b3049b0a81731360a3",
+  "input": "System Events accessibility presses on isolated process only; CUA unavailable: CUA_REPL_ENABLED_SURFACES is required",
+  "flow": [
+    "workspace Workflow Runs button",
+    "FeatureA run entry",
+    "Approve (opaque Action confirmed in native-calls)",
+    "discard accepted submit reply",
+    "Close sheet",
+    "Restore Adapter From Private Journal",
+    "reopen Workflow Runs; no automatic prepare/submit",
+    "Retry Retained Action; current generation3",
+    "Completed capture and fixture final assertions"
+  ],
+  "prepares": 1,
+  "submits": 2,
+  "prepared_bytes_identical": true,
+  "submit_connections": [
+    "2",
+    "3"
+  ],
+  "capture_console_eligible": true,
+  "time": 1794007307.322044
+}

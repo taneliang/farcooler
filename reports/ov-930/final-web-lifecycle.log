@@ -1,0 +1,19 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/opt/homebrew/bin/node', 'services/web/test/workflow.test.mjs', '/private/tmp/ov930-checks/web']
+ok 1 Rust automatic renders shared slots and whole descriptor
+ok 2 Rust approval renders shared slots and whole descriptor
+ok 3 Rust rework renders shared slots and whole descriptor
+ok 4 Rust uncertain renders shared slots and whole descriptor
+ok 5 Rust invalidated renders shared slots and whole descriptor
+ok 6 Feature A invalidated evidence stays visible; action has no shell mapping
+ok 7 disconnect fences delayed read; reconnect replaces actions; selection restores
+ok 8 wrong-workspace/schema response stays disabled; pending seam is explicit
+ok 9 lost action reply does not auto-retry; overlapping refresh cannot unfreeze actions
+ok 10 lossless u64 identity and unknown shared copy use existing text slots
+ok 11 late inspection is fenced by selection while cleanup and refresh still finish
+ok 12 run replacement or removal clears retained inspection including post-action refresh
+ok 13 old failed action cannot overwrite disconnect or newer session after its awaited read
+ok 14 disconnect fences delayed action result through reconnect without replay
+ok 15 stable focus survives run entry, busy completion, copy changes, failed read and action removal
+15 workflow fixture/controller/DOM tests passed; simulated DOM only
+
+EXIT 0

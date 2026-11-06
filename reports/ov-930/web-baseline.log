@@ -1,0 +1,25 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/opt/homebrew/bin/node', 'reports/ov-930/web-baseline.cjs']
+  waiting for the machine-wide heavy-job lock (/opt/homebrew/bin/node reports/ov-930/web-baseline.cjs); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters, PID 53460, started 2026-11-07 06:55:10, running /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_ -- --nocapture (1 in line ahead of you)
+BASELINE [
+  "services/web/src/client/qr.ts:2307 Cannot find module 'jsqr' or its corresponding type declarations.",
+  "services/web/src/client/qr.ts:2307 Cannot find module 'qrcode-generator' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/addon-canvas' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/addon-fit' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/xterm' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:7006 Parameter 'text' implicitly has an 'any' type.",
+  "services/web/src/client/terminal.ts:7006 Parameter 'text' implicitly has an 'any' type.",
+  "services/web/src/client/terminal.ts:18046 'c' is of type 'unknown'."
+]
+CURRENT [
+  "services/web/src/client/qr.ts:2307 Cannot find module 'jsqr' or its corresponding type declarations.",
+  "services/web/src/client/qr.ts:2307 Cannot find module 'qrcode-generator' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/addon-canvas' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/addon-fit' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:2307 Cannot find module '@xterm/xterm' or its corresponding type declarations.",
+  "services/web/src/client/terminal.ts:7006 Parameter 'text' implicitly has an 'any' type.",
+  "services/web/src/client/terminal.ts:7006 Parameter 'text' implicitly has an 'any' type.",
+  "services/web/src/client/terminal.ts:18046 'c' is of type 'unknown'."
+]
+Same 8 diagnostics at baseline and current; missing local npm dependencies. Not a full app typecheck pass.
+
+EXIT 0

@@ -1,0 +1,5 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'apps/ios/generate-project.py']
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 apps/ios/generate-project.py); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports, PID 1598, started 2026-11-07 07:10:34, running /usr/bin/python3 reports/ov-930/entry.py '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-client --lib workflow_ -- --nocapture (1 in line ahead of you)
+wrote /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/apps/ios/FarCooler.xcodeproj/project.pbxproj
+
+EXIT 0

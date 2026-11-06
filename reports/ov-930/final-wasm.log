@@ -1,0 +1,22 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'check', '--offline', '--manifest-path', 'crates/web/Cargo.toml', '--target', 'wasm32-unknown-unknown']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+warning: function `value_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client/src/session/step_up.rs:211:15
+    |
+211 | pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, SessionError> {
+    |               ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `key_state_json` is never used
+   --> /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client/src/session/step_up.rs:222:15
+    |
+222 | pub(crate) fn key_state_json(s: &farcooler_protocol::v1::StepUpKeyState) -> serde_json::Value {
+    |               ^^^^^^^^^^^^^^
+
+warning: `farcooler-client` (lib) generated 2 warnings
+    Checking farcooler-web v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/web)
+    Finished `dev` profile [unoptimized] target(s) in 1.55s
+
+EXIT 0

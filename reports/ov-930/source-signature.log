@@ -1,0 +1,9 @@
+gpg: Signature made Sat Nov  7 07:13:18 2026 CST
+gpg:                using RSA key 464E0AAAA49AF22F9F24D713692BCC42C61FC9B2
+gpg: Good signature from "E-Liang Tan <eliang@eliangtan.com>" [unknown]
+gpg:                 aka "E-Liang Tan <eliang@elt.sg>" [unknown]
+gpg:                 aka "E-Liang Tan <gnaileliang@gmail.com>" [unknown]
+gpg: WARNING: This key is not certified with a trusted signature!
+gpg:          There is no indication that the signature belongs to the owner.
+      2425857DB3F3CC5CA54B3495AA5C967105EA723F
+      464E0AAAA49AF22F9F24D713692BCC42C61FC9B2

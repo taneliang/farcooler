@@ -1,0 +1,18 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_', '--', '--nocapture']
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+error[E0599]: no method named `revoke_owner_device` found for struct `std::sync::Arc<farcooler_store::Store>` in the current scope
+   --> crates/client/src/session/workflow/tests/socket.rs:179:21
+    |
+179 |     h.service.store.revoke_owner_device("phone").unwrap();
+    |                     ^^^^^^^^^^^^^^^^^^^
+    |
+help: there is a method `bind_owner_device` with a similar name, but with different arguments
+   --> crates/store/src/access_ops.rs:135:5
+    |
+135 |     pub fn bind_owner_device(&self, device: &str, cap: Option<Cap>) -> Result<()> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `farcooler-client` (lib test) due to 1 previous error
+
+EXIT 101

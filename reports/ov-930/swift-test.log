@@ -1,0 +1,10 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/private/tmp/ov930-checks/swift-check', 'crates/client/src/testdata/workflow-presentation.json']
+ok automatic shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok approval shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok rework shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok uncertain shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok invalidated shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok durable Swift Prepared, max-u64 observation, current-session retry, process restoration, account isolation, three-attempt bound
+5 Rust golden cases and pending seam passed; SwiftUI typechecked, no app launch
+
+EXIT 0

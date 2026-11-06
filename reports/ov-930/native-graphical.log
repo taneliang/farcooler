@@ -1,0 +1,7 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/python3', 'reports/ov-930/native.py']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+/private/tmp/ov930-native-60736/Ov930 Native Workflow.app: replacing existing signature
+PRIVATE_NATIVE_READY /private/tmp/ov930-native-60736/Ov930 Native Workflow.app
+native graphical fixture final assertions passed
+
+EXIT 0

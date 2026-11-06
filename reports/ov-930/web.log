@@ -1,0 +1,6 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/opt/homebrew/bin/node', '/Users/e-liang/.npm/_npx/67eb4586ca667318/node_modules/typescript/bin/tsc', '--strict', '--target', 'es2022', '--module', 'commonjs', '--lib', 'es2022,dom,dom.iterable', '--outDir', '/private/tmp/ov930-checks/web', 'services/web/src/client/workflow.ts', 'services/web/src/client/workflow-view.ts', 'services/web/src/client/workflow-session.ts']
+services/web/src/client/workflow-session.ts(27,51): error TS2322: Type 'Promise<Promise<T>>' is not assignable to type 'Promise<T>'.
+  Type 'Promise<T>' is not assignable to type 'T'.
+    'T' could be instantiated with an arbitrary type which could be unrelated to 'Promise<T>'.
+
+EXIT 2

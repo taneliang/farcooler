@@ -1,0 +1,18 @@
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/services/web/test/workflow-session.test.mjs:45:61 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.0

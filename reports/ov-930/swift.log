@@ -1,0 +1,12 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov930-checks/swift-cache', '-j6', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift', '-DWORKFLOW_STANDALONE', 'apps/shared/AgentKit/Tests/AgentKitTests/WorkflowLifecycleChecks.swift', 'reports/ov-930/swift-check.swift', '-o', '/private/tmp/ov930-checks/swift-check']
+reports/ov-930/swift-check.swift:41:27: warning: expression of type 'UInt64?' is unused [#NoUsage]
+39 |             while resume == nil { await Task.yield() }
+40 |             model.disconnect(); resume!.resume(returning: json)
+41 |             await reading.value; precondition(!model.ready)
+   |                           `- warning: expression of type 'UInt64?' is unused [#NoUsage]
+42 |             do { try await workflowLifecycleChecks(json: json) }
+43 |             catch { print("FAIL lifecycle regression: \(error)"); exit(1) }
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+
+EXIT 0

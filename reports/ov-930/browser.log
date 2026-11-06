@@ -1,0 +1,18 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/bridge.py']
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 reports/ov-930/bridge.py); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports, PID 25558, started 2026-11-07 06:52:45, running /opt/homebrew/bin/node /Users/e-liang/.npm/_npx/67eb4586ca667318/node_modules/typescript/bin/tsc --strict --target es2022 --module commonjs --lib es2022,dom,dom.iterable --outDir /private/tmp/ov930-checks/web services/web/src/client/workflow.ts services/web/src/client/workflow-view.ts services/web/src/client/workflow-session.ts (1 in line ahead of you)
+file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/reports/ov-930/browser-session.mjs:61
+    if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails))
+                                       ^
+
+Error: {"exceptionId":1,"text":"Uncaught","lineNumber":0,"columnNumber":7,"scriptId":"11","exception":{"type":"object","subtype":"error","className":"DOMException","description":"SyntaxError: Failed to execute 'querySelector' on 'Element': '[data-workflow-control^=\"[\"action\"\"]' is not a valid selector.\n    at <anonymous>:1:8","objectId":"246885369904462556.1.2","preview":{"type":"object","subtype":"error","description":"SyntaxError: Failed to execute 'querySelector' on 'Element': '[data-workflow-control^=\"[\"action\"\"]' is not a valid selector.\n    at <anonymous>:1:8","overflow":false,"properties":[{"name":"stack","type":"string","value":"SyntaxError: Failed to execute 'querySelector' on …' is not a valid selector.\n    at <anonymous>:1:8"},{"name":"code","type":"number","value":"12"},{"name":"name","type":"string","value":"SyntaxError"},{"name":"message","type":"string","value":"Failed to execute 'querySelector' on 'Element': '[…w-control^=\"[\"action\"\"]' is not a valid selector."}]}}}
+    at evaluate (file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/reports/ov-930/browser-session.mjs:61:40)
+    at async waitFor (file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/reports/ov-930/browser-session.mjs:75:34)
+    at async file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/reports/ov-930/browser-session.mjs:81:3
+
+Node.js v26.13.0
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/reports/ov-930/bridge.py", line 28, in <module>
+    if browser.wait(timeout=120):raise RuntimeError('browser check')
+RuntimeError: browser check
+
+EXIT 1

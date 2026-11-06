@@ -1,0 +1,30 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-client', '--lib', 'workflow_', '--', '--nocapture']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 4.33s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 15 tests
+test session::workflow::tests::socket::workflow_host_browser_bridge ... ignored, owned browser harness only
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+test session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion ... ok
+test session::workflow::tests::workflow_selection_allocates_once_and_preserves_observation ... ok
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... ok
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+trace=Session/C-JNI-dispatch -> authenticated getter -> schema2 -> opaque Cancel -> prepared bytes -> dropped answer -> reconnect durable receipt; stale/auth-context/withdrawal refused; prepared={"action":"Cancel","mutation":{"id":"cancel-a","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:65782489e786715346c855e08c7092e76e9bb907240e2c14c9e5b71bb9dd89a9","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86"}; receipt={"receipt":{"effects":[],"id":"wire:owner:cancel-a","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... ok
+FeatureA actual socket/shared selection -> persisted envelope -> submit -> replacement Session same receipt -> stale selection and revoked retry refused; bytes={"action":"Approve","mutation":{"id":"01a1b321-7081-7572-ada6-59f6f57b4be5","revision":1,"epoch":1,"sequence":2},"item":"FeatureA","run":"wf1:d723607a47d5b7408e403bbffdf9b24fec397dbc54ed358d5bb1d0560014b317","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:cccc1c9eb56780513dc49b4125ee10d063ff9851820788abfd2244f18daec015"],"id":"wire:owner:01a1b321-7081-7572-ada6-59f6f57b4be5","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_selection_route_stale_auth_and_retry ... ok
+effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision=7; request={"action":"Approve","mutation":{"id":"approve-effectful","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:4a36dff47ff3844aa0ed4678321c2f326ce10ffe24ff739da4692a28b4f537ae","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:e2a3e9bb344277e52ccd53313f353d91014191f53e3e318cef0db86e3eba2b0a"],"id":"wire:owner:approve-effectful","result":{"Ok":2}},"schema":1}
+test session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute ... ok
+
+test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 260 filtered out; finished in 0.89s
+
+
+EXIT 0

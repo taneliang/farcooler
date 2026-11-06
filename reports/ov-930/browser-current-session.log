@@ -1,0 +1,8 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/python3', 'reports/ov-930/bridge.py']
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 reports/ov-930/entry.py '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /usr/bin/python3 reports/ov-930/bridge.py); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters, PID 35501, started 2026-11-07 06:53:52, running /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_ -- --nocapture (1 in line ahead of you)
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+PASS real workspace Enter -> FeatureA -> opaque Approve -> discarded reply -> close/reopen journal -> explicit retained retry identical bytes -> Completed; prepare once, submit twice
+PASS actual browser max-u64 snapshot decoder -> decimal prepare identity, no Number rounding
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36
+
+EXIT 0

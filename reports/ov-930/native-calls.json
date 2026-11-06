@@ -1,0 +1,42 @@
+[
+  {
+    "method" : "workflow.snapshot",
+    "connection" : "1",
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}"
+  },
+  {
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}",
+    "method" : "workflow.snapshot",
+    "connection" : "2"
+  },
+  {
+    "method" : "workflow.prepare_selection",
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\",\"item\":\"FeatureA\",\"action\":{\"guard\":\"wf1:71de30c3ddaa2c84fd2219c136964451c734ac91b5a023f3fbe8faf2d574e3a5\",\"kind\":\"Approve\",\"label\":\"Approve\"},\"revision\":\"1\",\"epoch\":\"1\"}",
+    "connection" : "2"
+  },
+  {
+    "connection" : "2",
+    "args" : "{\"prepared\":{\"json\":\"{\\\"action\\\":\\\"Approve\\\",\\\"mutation\\\":{\\\"id\\\":\\\"01a1b32a-0c07-7d21-ade3-893c455cfe05\\\",\\\"revision\\\":1,\\\"epoch\\\":1,\\\"sequence\\\":2},\\\"item\\\":\\\"FeatureA\\\",\\\"run\\\":\\\"wf1:e1077d42b4299687fd56ccd29c95e11684bfab3aecf369141f5e77a26dee7883\\\",\\\"pin\\\":\\\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\\\",\\\"candidate\\\":null}\",\"schema\":1,\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}}",
+    "method" : "workflow.submit_action"
+  },
+  {
+    "method" : "workflow.snapshot",
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}",
+    "connection" : "2"
+  },
+  {
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}",
+    "connection" : "3",
+    "method" : "workflow.snapshot"
+  },
+  {
+    "args" : "{\"prepared\":{\"json\":\"{\\\"action\\\":\\\"Approve\\\",\\\"mutation\\\":{\\\"id\\\":\\\"01a1b32a-0c07-7d21-ade3-893c455cfe05\\\",\\\"revision\\\":1,\\\"epoch\\\":1,\\\"sequence\\\":2},\\\"item\\\":\\\"FeatureA\\\",\\\"run\\\":\\\"wf1:e1077d42b4299687fd56ccd29c95e11684bfab3aecf369141f5e77a26dee7883\\\",\\\"pin\\\":\\\"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86\\\",\\\"candidate\\\":null}\",\"schema\":1,\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}}",
+    "connection" : "3",
+    "method" : "workflow.submit_action"
+  },
+  {
+    "method" : "workflow.snapshot",
+    "args" : "{\"workspace\":\"01a1b328-101c-73c3-9e95-c6e7b9f1b405\"}",
+    "connection" : "3"
+  }
+]

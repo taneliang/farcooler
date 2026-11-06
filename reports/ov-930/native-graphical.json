@@ -1,0 +1,28 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports/scripts/heavy",
+    "--load-limit",
+    "20",
+    "--",
+    "/usr/bin/python3",
+    "reports/ov-930/entry.py",
+    "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+    "/usr/bin/python3",
+    "reports/ov-930/native.py"
+  ],
+  "exit": 0,
+  "stopped": null,
+  "seconds": 219.575115291,
+  "minimum_free": 38163169280,
+  "before": {
+    "services/web/src/client/workflow-session.ts": "9bcd176339ffe2833d570c13f8ce70c52bfedc25a10b1198e17b9b0842578ed7",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift": "bced369fc19343eacf120dbd1231b2728001c9afdd3a58164a8518f249f1a185",
+    "apps/android/app/src/main/java/com/farcooler/ui/WorkflowSession.kt": "72562dc696d33bf04d0ccd9267604f9778fe086996f23e17695b31275b347599"
+  },
+  "after": {
+    "services/web/src/client/workflow-session.ts": "9bcd176339ffe2833d570c13f8ce70c52bfedc25a10b1198e17b9b0842578ed7",
+    "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift": "bced369fc19343eacf120dbd1231b2728001c9afdd3a58164a8518f249f1a185",
+    "apps/android/app/src/main/java/com/farcooler/ui/WorkflowSession.kt": "72562dc696d33bf04d0ccd9267604f9778fe086996f23e17695b31275b347599"
+  }
+}
