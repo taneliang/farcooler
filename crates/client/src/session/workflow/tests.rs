@@ -13,7 +13,7 @@ fn snapshot() -> WorkflowSnapshot {
     }).unwrap().state;
     let context = WorkflowContext { capabilities:Capabilities { workspace,epoch:1,inspect:true,controller:true,
         decision_principal:Some("owner".into()) },binding:"generation-1".into() };
-    WorkflowSnapshot { schema:2,presentation:project(&state,&context).unwrap(),state,context,
+    WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context).unwrap(),state,context,
         configuration:serde_json::Value::Null,notices:serde_json::json!([]) }
 }
 fn identity(s: &WorkflowSnapshot) -> WorkflowCommandIdentity {
@@ -101,4 +101,46 @@ fn workflow_session_review_and_inspection_keep_exact_evidence() {
     let PreparedWorkflowResult::Inspection {intent:Intent::InspectUncertainty {effect:actual,run,fence}}=
         prepare(&uncertain,Uuid::nil(),"item",a.clone(),identity(&uncertain)).unwrap() else {panic!()};
     assert_eq!(actual,effect);assert_eq!(run,item.run);assert_eq!(fence,item.fence);
+}
+
+#[test]
+fn workflow_selection_allocates_once_and_preserves_observation() {
+    let mut s = snapshot();
+    s.state.source_sequences.insert("unrelated-source".into(), u64::MAX);
+    s.state.source_sequences.insert("wire:owner".into(), 41);
+    s.state.revision = u64::MAX - 2;
+    s.state.epoch = u64::MAX;
+    s.context.capabilities.epoch = u64::MAX;
+    s.presentation = project(&s.state, &s.context).unwrap();
+    let selected = approve(&s);
+    let PreparedWorkflowResult::Mutation { prepared } = prepare_selection(&s, Uuid::nil(), "item", selected.clone(),
+        s.state.revision, s.state.epoch).unwrap() else { panic!() };
+    let value: serde_json::Value = serde_json::from_str(&prepared.json).unwrap();
+    assert_eq!(value["mutation"]["sequence"].as_u64(), Some(42));
+    assert_eq!(value["mutation"]["revision"].as_u64(), Some(u64::MAX - 2));
+    assert_eq!(value["mutation"]["epoch"].as_u64(), Some(u64::MAX));
+    assert!(prepare_selection(&s, Uuid::nil(), "item", selected.clone(), s.state.revision - 1, s.state.epoch).is_err());
+    let mut changed = s.clone(); changed.context.binding.push('x');
+    assert!(prepare_selection(&changed, Uuid::nil(), "item", selected.clone(), s.state.revision, s.state.epoch).is_err());
+    s.state.source_sequences.insert("wire:owner".into(), u64::MAX);
+    s.presentation = project(&s.state, &s.context).unwrap();
+    let exhausted = approve(&s);
+    assert!(matches!(prepare_selection(&s, Uuid::nil(), "item", exhausted, s.state.revision, s.state.epoch),
+        Err(SessionError::Protocol(message)) if message == "workflow source sequence exhausted"));
+}
+
+#[test]
+fn workflow_selection_readonly_ignores_all_sequence_exhaustion() {
+    let initial = snapshot(); let item = &initial.state.items["item"];
+    let running = observed(&initial, Command::Approve { item:"item".into(), run:item.run.clone(), pin:item.pin.clone(), candidate:None },
+        Grant::Decision { principal:"owner".into() });
+    let mut s = finish(&running, "candidate");
+    s.state.source_sequences.insert("wire:owner".into(), u64::MAX);
+    s.state.source_sequences.insert("unrelated".into(), u64::MAX);
+    s.context.capabilities.decision_principal = None;
+    s.presentation = project(&s.state, &s.context).unwrap();
+    let selected = s.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::InspectLatestEvidence).unwrap().clone();
+    assert!(matches!(prepare_selection(&s, Uuid::nil(), "item", selected.clone(), s.state.revision, s.state.epoch).unwrap(),
+        PreparedWorkflowResult::Inspection { .. }));
+    assert!(prepare_selection(&s, Uuid::nil(), "item", selected, s.state.revision - 1, s.state.epoch).is_err());
 }

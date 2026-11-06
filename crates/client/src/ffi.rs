@@ -1585,7 +1585,7 @@ async fn dispatch(
     };
 
     match method {
-        "workflow.snapshot" | "workflow.prepare_action" | "workflow.submit_action" => session.workflow_call(method, args.clone()).await,
+        "workflow.snapshot" | "workflow.prepare_action" | "workflow.prepare_selection" | "workflow.submit_action" => session.workflow_call(method, args.clone()).await,
         "fleet" => session.fleet().await,
         // Whether the link answers, on the short clock (ov-613).
         crate::deadlines::PROBE_METHOD => session.probe().await.map(|()| json!({})),

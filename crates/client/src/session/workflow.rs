@@ -11,6 +11,7 @@ pub struct WorkflowContext { pub capabilities: Capabilities, pub binding: String
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowSnapshot {
     pub schema: u32,
+    pub host: String,
     pub state: State,
     pub configuration: serde_json::Value,
     pub notices: serde_json::Value,
@@ -45,11 +46,11 @@ fn project(state: &State, context: &WorkflowContext) -> Result<Presentation, Ses
     }}
     Ok(view)
 }
-fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
-    identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
+fn selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
+    revision: u64, epoch: u64) -> Result<(Intent, cards::RunCard), SessionError>
 {
-    if snapshot.state.workspace != workspace.to_string() || identity.revision != snapshot.state.revision
-        || identity.epoch != snapshot.state.epoch { return Err(stale()); }
+    if snapshot.state.workspace != workspace.to_string() || revision != snapshot.state.revision
+        || epoch != snapshot.state.epoch { return Err(stale()); }
     let view = project(&snapshot.state, &snapshot.context)?;
     let card = view.runs.iter().find(|c| c.item == item).ok_or_else(stale)?;
     if !card.actions.contains(&selected) { return Err(stale()); }
@@ -57,7 +58,11 @@ fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: A
     let original = pure.runs.iter().find(|c| c.item == item).and_then(|c|
         c.actions.iter().find(|a| a.kind == selected.kind && a.label == selected.label)).ok_or_else(stale)?;
     let intent = cards::action(&snapshot.state, &snapshot.context.capabilities, item, original).map_err(|_| stale())?;
-    let Intent::Command(command) = intent else { return Ok(PreparedWorkflowResult::Inspection { intent }); };
+    Ok((intent, card.clone()))
+}
+fn mutation(workspace: Uuid, command: Command, card: cards::RunCard,
+    identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
+{
     if identity.id.is_empty() || identity.id.len() > 100 { return Err(invalid("invalid workflow command identity")); }
     let mutation = Mutation { id: identity.id, sequence: identity.sequence, revision: identity.revision, epoch: identity.epoch };
     // The single finite Intent -> wire mapping for every transport binding.
@@ -71,6 +76,32 @@ fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: A
     let json = serde_json::to_string(&action).map_err(|e| invalid(e.to_string()))?;
     wire::parse(&json).map_err(invalid)?;
     Ok(PreparedWorkflowResult::Mutation { prepared: PreparedWorkflowAction { schema: 1, workspace, json } })
+}
+fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
+    identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
+{
+    let (intent, card) = selection(snapshot, workspace, item, selected, identity.revision, identity.epoch)?;
+    match intent {
+        Intent::Command(command) => mutation(workspace, command, card, identity),
+        intent => Ok(PreparedWorkflowResult::Inspection { intent }),
+    }
+}
+// Only the authenticated server context supplies the caller. This matches
+// daemon workflow_runtime/wire_commands.rs's `wire:{principal}` source key;
+// socket tests assert the allocated source against actual server consumption.
+fn prepare_selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
+    revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
+{
+    let (intent, card) = selection(snapshot, workspace, item, selected, revision, epoch)?;
+    let Intent::Command(command) = intent else { return Ok(PreparedWorkflowResult::Inspection { intent }); };
+    let principal = snapshot.context.capabilities.decision_principal.as_deref()
+        .filter(|p| matches!(*p, "owner" | "orchestrator")).ok_or_else(|| invalid("missing workflow caller source"))?;
+    let source = format!("wire:{principal}");
+    let sequence = snapshot.state.source_sequences.get(&source).copied().unwrap_or(0)
+        .checked_add(1).ok_or_else(|| invalid("workflow source sequence exhausted"))?;
+    mutation(workspace, command, card, WorkflowCommandIdentity {
+        id: Uuid::now_v7().to_string(), sequence, revision, epoch,
+    })
 }
 impl Session {
     async fn workflow_wire(&self, workspace: Uuid, json: String) -> Result<serde_json::Value, SessionError> {
@@ -91,13 +122,21 @@ impl Session {
             else { serde_json::from_value(raw["state"].clone()).map_err(|e| invalid(e.to_string()))? };
         if state.workspace != workspace.to_string() { return Err(invalid("wrong workflow workspace")); }
         let presentation = project(&state, &context)?;
-        Ok(WorkflowSnapshot { schema: 2, state, context, presentation, configuration: raw["configuration"].clone(), notices: raw["notices"].clone() })
+        let host = self.host().await?;
+        let host = Uuid::from_slice(&host.id).map_err(|_| invalid("invalid workflow host identity"))?.to_string();
+        Ok(WorkflowSnapshot { schema: 2, host, state, context, presentation, configuration: raw["configuration"].clone(), notices: raw["notices"].clone() })
     }
     /// Revalidate the exact displayed selection without advancing its observation.
     pub async fn workflow_prepare_action(&self, workspace: Uuid, item: &str, selected: Action,
         identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
     {
         prepare(&self.workflow_snapshot(workspace).await?, workspace, item, selected, identity)
+    }
+    /// Prepare the exact displayed selection with shared sequence/identity allocation.
+    pub async fn workflow_prepare_selection(&self, workspace: Uuid, item: &str, selected: Action,
+        revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
+    {
+        prepare_selection(&self.workflow_snapshot(workspace).await?, workspace, item, selected, revision, epoch)
     }
     /// Send retained canonical mutation bytes; reconnect retries must reuse this envelope.
     pub async fn workflow_submit_action(&self, prepared: &PreparedWorkflowAction) -> Result<serde_json::Value, SessionError> {
@@ -114,12 +153,22 @@ impl Session {
         #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Prepare {
             workspace: Uuid, item: String, action: Action, identity: WorkflowCommandIdentity,
         }
+        #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Selection {
+            workspace: Uuid, item: String, action: Action, revision: String, epoch: String,
+        }
         #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Submit { prepared: PreparedWorkflowAction }
         let value = match method {
             "workflow.snapshot" => { let a: Snapshot = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
                 serde_json::to_value(self.workflow_snapshot(a.workspace).await?) },
             "workflow.prepare_action" => { let a: Prepare = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
                 serde_json::to_value(self.workflow_prepare_action(a.workspace, &a.item, a.action, a.identity).await?) },
+            "workflow.prepare_selection" => { let a: Selection = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
+                let decimal = |s: &str| -> Result<u64, SessionError> {
+                    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) { return Err(invalid("invalid workflow observation")); }
+                    s.parse().map_err(|_| invalid("invalid workflow observation"))
+                };
+                serde_json::to_value(self.workflow_prepare_selection(a.workspace, &a.item, a.action,
+                    decimal(&a.revision)?, decimal(&a.epoch)?).await?) },
             "workflow.submit_action" => { let a: Submit = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
                 return self.workflow_submit_action(&a.prepared).await; },
             _ => return Err(invalid("unknown workflow Session method")),

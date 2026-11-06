@@ -72,6 +72,20 @@ class AppModel(
     val reading = ReadingRegister()
     val notifier = Notifier(application, settings, reading)
     val account = Account(application)
+    private var workflowSessionPort: WorkflowSessionPort? = null
+    fun workflowPort(files: java.io.File): WorkflowSessionPort = workflowSessionPort ?: WorkflowSessionPort(
+        java.io.File(files, "workflow-intents"), current = { host ->
+            fleet.connection(host)?.takeIf { it.link.value == com.farcooler.model.RunnerLink.ANSWERING }?.let { connection ->
+                val actualHost = connection.daemon.value?.runnerId ?: return@let null
+                WorkflowSessionPort.Current(account.userId.value.ifEmpty { com.farcooler.net.ownClientId.orEmpty() }, actualHost) { method, args ->
+                    val current = fleet.connection(host)
+                    check(current != null && current.link.value == com.farcooler.model.RunnerLink.ANSWERING)
+                    current.core.call(method, args)
+                }
+            }
+        }
+    ).also { workflowSessionPort = it }
+
     val push = PushRegistration(application, account, settings)
 
     /**

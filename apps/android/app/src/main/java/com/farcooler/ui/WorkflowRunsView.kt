@@ -72,6 +72,11 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     LaunchedEffect(model, port) { model.refresh(port) }
     BackHandler(selected != null) { select(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        view.retained.forEach { entry ->
+            TextButton(onClick = { select(entry.item); scope.launch { model.retry(entry, port) } }, enabled = view.ready && !view.busy) {
+                Text("${if (entry.reinspect) "Reinspect Unsubmitted Action" else "Retry Retained Action"} · ${entry.item} · ${entry.label}")
+            }
+        }
         Text("Workflow Runs", style = MaterialTheme.typography.headlineSmall)
         TextButton(onClick = close) { Text("Close") }
         Button(onClick = { scope.launch { model.refresh(port) } }, enabled = !view.busy) { Text("Refresh") }

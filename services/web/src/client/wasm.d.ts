@@ -51,6 +51,7 @@ declare module 'fc-web' {
   ): Promise<WebRunner>
   export function build(): string
   export class WebRunner {
+    workflow_call(method: string, args: string): Promise<string>
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>
     /// The phones' shapes (crates/client's needs_you_json, plan_json and

@@ -153,3 +153,94 @@ async fn workflow_session_socket_effectful_approval_retry_does_not_reexecute() {
     assert!(done.state.revision>receipt["receipt"]["result"]["Ok"].as_u64().unwrap());
     eprintln!("effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision={}; request={bytes}; receipt={receipt}",done.state.revision);
 }
+
+#[tokio::test]
+async fn workflow_session_selection_route_stale_auth_and_retry() {
+    let h=start().await; let session=Session::connect_local(&h.socket).await.unwrap();
+    seed(&session,&h,"FeatureA",0,1).await;
+    let snapshot=session.workflow_snapshot(h.workspace).await.unwrap();
+    assert_eq!(snapshot.host,h.service.host_id.to_string());
+    let action=snapshot.presentation.runs[0].actions.iter().find(|a|a.kind==cards::ActionKind::Approve).unwrap();
+    let args=json!({"workspace":h.workspace,"item":"FeatureA","action":action,
+        "revision":snapshot.presentation.revision.to_string(),"epoch":snapshot.presentation.epoch.to_string()});
+    let result=call(&session,"workflow.prepare_selection",args.clone()).await;
+    let prepared:PreparedWorkflowAction=serde_json::from_value(result["prepared"].clone()).unwrap();
+    let before=prepared.json.clone();
+    let wire: serde_json::Value=serde_json::from_str(&before).unwrap();
+    let sequence=wire["mutation"]["sequence"].as_u64().unwrap();
+    assert_eq!(sequence,snapshot.state.source_sequences.get("wire:owner").copied().unwrap_or(0)+1);
+    let accepted=call(&session,"workflow.submit_action",json!({"prepared":prepared})).await;
+    assert!(accepted.pointer("/receipt/result/Ok").is_some());
+    assert_eq!(session.workflow_snapshot(h.workspace).await.unwrap().state.source_sequences.get("wire:owner"),Some(&sequence));
+    drop(session);
+    let replacement=Session::connect_local(&h.socket).await.unwrap();
+    assert_eq!(call(&replacement,"workflow.submit_action",json!({"prepared":prepared})).await,accepted);
+    assert_eq!(before,prepared.json);
+    assert!(replacement.workflow_call("workflow.prepare_selection",args.clone()).await.is_err());
+    let mut forged=args.clone();forged["capabilities"]=json!({"controller":true});
+    assert!(replacement.workflow_call("workflow.prepare_selection",forged).await.is_err());
+    let mut rounded=args.clone();rounded["revision"]=json!(snapshot.presentation.revision);
+    assert!(replacement.workflow_call("workflow.prepare_selection",rounded).await.is_err());
+    h.service.sessions().mark_revoked("phone");
+    assert!(replacement.workflow_call("workflow.submit_action",json!({"prepared":prepared})).await.is_err());
+    eprintln!("FeatureA actual socket/shared selection -> persisted envelope -> submit -> replacement Session same receipt -> stale selection and revoked retry refused; bytes={before}; receipt={accepted}");
+}
+
+/// Private browser evidence bridge. Explicit trusted fixture admission, never
+/// a production listener or a claim about an enrolled owner's credentials.
+#[tokio::test]
+#[ignore = "owned browser harness only"]
+async fn workflow_host_browser_bridge() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let output=std::path::PathBuf::from(std::env::var("OV930_BROWSER_BRIDGE").expect("private output directory"));
+    let h=start().await;
+    let session=Session::connect_local(&h.socket).await.unwrap();
+    seed(&session,&h,"FeatureA",0,1).await; drop(session);
+    let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    std::fs::write(output.join("ready.json"),json!({"port":listener.local_addr().unwrap().port(),"workspace":h.workspace}).to_string()).unwrap();
+    let mut submitted=Vec::new(); let mut receipts=Vec::new(); let mut preparations=0; let mut lossless=Vec::new();
+    loop {
+        let (mut stream,_)=tokio::time::timeout(std::time::Duration::from_secs(120),listener.accept()).await.unwrap().unwrap();
+        let mut bytes=Vec::new(); let (header_end,length)=loop {
+            let mut buf=[0u8;4096];let n=stream.read(&mut buf).await.unwrap();assert!(n>0);bytes.extend_from_slice(&buf[..n]);
+            if let Some(end)=bytes.windows(4).position(|v|v==b"\r\n\r\n") {
+                let headers=String::from_utf8_lossy(&bytes[..end]);
+                let length=headers.lines().find_map(|s|s.to_ascii_lowercase().strip_prefix("content-length:")
+                    .map(|n|n.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                break (end+4,length)
+            }
+            assert!(bytes.len()<16*1024);
+        };
+        assert!(length<1024*1024);
+        while bytes.len()<header_end+length {let mut buf=[0u8;4096];let n=stream.read(&mut buf).await.unwrap();assert!(n>0);bytes.extend_from_slice(&buf[..n]);}
+        let body:serde_json::Value=serde_json::from_slice(&bytes[header_end..header_end+length]).unwrap();
+        let method=body["method"].as_str().unwrap();
+        let result=if method=="stop" {json!({"stopped":true})} else {
+            // Fresh actual Session for each call, equivalent fixture admission.
+            // The browser adapter still controls prepare, persistence and retry.
+            let current=Session::connect_local(&h.socket).await.unwrap();
+            let maximum=method=="workflow.prepare_selection" && body["args"]["revision"]=="18446744073709551614";
+            if method=="workflow.prepare_selection" && !maximum {preparations+=1;}
+            if method=="workflow.submit_action" {submitted.push(body["args"]["prepared"].clone());}
+            let result=if maximum {
+                assert_eq!(body["args"]["epoch"],"18446744073709551615");
+                let error=current.workflow_call(method,body["args"].clone()).await.unwrap_err();
+                assert!(matches!(error,SessionError::Refused { ref what,.. } if what=="workflow_stale"));
+                lossless.push(body["args"].clone());
+                json!({"error":"workflow_stale"})
+            } else {call(&current,method,body["args"].clone()).await};
+            if method=="workflow.submit_action" {receipts.push(result.clone());}
+            result
+        };
+        let raw=result.to_string();
+        let response=format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",raw.len(),raw);
+        stream.write_all(response.as_bytes()).await.unwrap();stream.shutdown().await.unwrap();
+        if method=="stop" {break;}
+    }
+    assert_eq!(preparations,1);assert_eq!(submitted.len(),2);assert_eq!(submitted[0],submitted[1]);assert_eq!(receipts[0],receipts[1]);
+    let current=Session::connect_local(&h.socket).await.unwrap();let final_state=current.workflow_snapshot(h.workspace).await.unwrap();
+    assert_eq!(final_state.state.items["FeatureA"].phase,farcooler_workflow::Phase::Done);
+    std::fs::write(output.join("result.json"),json!({"preparations":preparations,"submitted":submitted,"receipts":receipts,
+        "lossless_stale_observations":lossless,"final_revision":final_state.state.revision,"phase":final_state.state.items["FeatureA"].phase}).to_string()).unwrap();
+    eprintln!("actual browser -> host adapter -> shared Session/C-JNI dispatch -> Unix socket -> Runtime FeatureA Done; same prepared bytes/receipt after discarded answer, preparations={preparations}");
+}

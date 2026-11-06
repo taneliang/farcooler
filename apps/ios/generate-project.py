@@ -24,6 +24,7 @@ SOURCES = [
     "AddFlow.swift",
     "ClientCore.swift",
     "Connection.swift",
+    "ConnectionWorkflow.swift",
     # Quick Task's calls, out of `Connection.swift` for its size budget (ov-818).
     "ConnectionQuickTask.swift",
     # Add Teammate's call to a runner (ov-854), out of `Connection.swift` for its size budget.
@@ -319,6 +320,7 @@ CEREMONY_SOURCES = [
 # `Fonts/`.
 AGENTKIT_SOURCES = [
     "WorkflowRuns.swift",
+    "WorkflowSession.swift",
     "WorkflowRunsView.swift",
     # The People screen (ov-856): Access, each person's devices, the step-up flow and its key, and the app lock.
     "PeopleAccess.swift",

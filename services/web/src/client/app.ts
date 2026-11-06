@@ -21,7 +21,8 @@
 /// never markup: the CSP's Trusted Types (`require-trusted-types-for
 /// 'script'`) refuse an HTML string sink outright.
 
-import { openWorkflow } from './workflow-view'
+import { openWorkflow, installWorkflowPort } from './workflow-view'
+import { WorkflowSessionPort } from './workflow-session'
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
 import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
@@ -558,6 +559,7 @@ function stopNeeds(): void {
   sheet?.close()
   workflowSheet?.close()
   workflowSheet = null
+  installWorkflowPort(() => null)
   planList?.close()
   planTab?.stop()
   planTab = null
@@ -683,6 +685,10 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       if (!reconnector.hasLost(from) && reconnector.current === from) paneNote('This terminal’s stream ended. Select it to open it again.')
     }, 100)
   }
+  const workflowPort = new WorkflowSessionPort(() => {
+    const current = reconnector.current
+    return current ? { account: session.device.account, host: target.id, session: current } : null
+  }, localStorage)
   link = reconnector
   let dialed: TunnelConn | null = null
   try {
@@ -721,6 +727,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   show('work')
 
   stopNeeds()
+  installWorkflowPort(id => id === target.id && reconnector.current ? workflowPort : null)
   frontRunner = target.id
   spaces = boards
   chosenSpace = pickSpace(spaces, savedSpace(target.id))

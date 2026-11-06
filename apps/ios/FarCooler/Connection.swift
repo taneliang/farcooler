@@ -165,6 +165,8 @@ final class Connection: ObservableObject {
     // same core, rather than opening a second SSH session just to poll one
     // terminal's screen.
     let core = ClientCore()
+    lazy var workflows = makeWorkflowAdapter()
+    var workflowConnectionID: String { "\(hostId?.uuidString ?? ""):\(daemonLink)" }
 
     /// One review store per worktree, outliving the panes that show them. See
     /// `ChangesStores` for why they cannot live in the view.

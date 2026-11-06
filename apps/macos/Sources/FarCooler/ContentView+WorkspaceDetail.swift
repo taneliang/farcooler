@@ -100,6 +100,7 @@ extension ContentView {
         .toolbar {
             if let summary {
                 WorkflowRunsButton(host: host, workspace: summary.id)
+                    .environment(\.workflowPort, nativeAgents.workflows.port(host: host))
             }
         }
         // What the empty states offer: start this workspace's orchestrator, or

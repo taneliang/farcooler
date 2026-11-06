@@ -85,11 +85,15 @@ public struct WorkflowPort: Sendable {
     public let id: String
     public let read: @MainActor @Sendable (String, String) async throws -> String
     public let dispatch: @MainActor @Sendable (String, String, String, String) async throws -> String
+    public let pending: @MainActor @Sendable (String, String) async throws -> [RetainedWorkflow]
+    public let retry: @MainActor @Sendable (String, String, String) async throws -> String
     public init(
         id: String,
         read: @escaping @MainActor @Sendable (String, String) async throws -> String,
-        dispatch: @escaping @MainActor @Sendable (String, String, String, String) async throws -> String
-    ) { self.id = id; self.read = read; self.dispatch = dispatch }
+        dispatch: @escaping @MainActor @Sendable (String, String, String, String) async throws -> String,
+        pending: @escaping @MainActor @Sendable (String, String) async throws -> [RetainedWorkflow] = { _, _ in [] },
+        retry: @escaping @MainActor @Sendable (String, String, String) async throws -> String = { _, _, _ in throw WorkflowDisplayError.pending }
+    ) { self.id = id; self.read = read; self.dispatch = dispatch; self.pending = pending; self.retry = retry }
 }
 
 @MainActor
@@ -97,6 +101,7 @@ public final class WorkflowRunsModel: ObservableObject {
     public let host: String
     public let workspace: String
     @Published public private(set) var presentation: WorkflowPresentation?
+    @Published public private(set) var retained: [RetainedWorkflow] = []
     @Published public private(set) var ready = false
     @Published public private(set) var busy = false
     @Published public private(set) var notice = ""
@@ -119,11 +124,13 @@ public final class WorkflowRunsModel: ObservableObject {
         guard let port else { notice = "Workflow runs are not connected on this runner yet."; return nil }
         do {
             let json = try await port.read(host, workspace)
+            let pending = try await port.pending(host, workspace)
             guard ticket == generation else { return nil }
             let next = try WorkflowPresentation.decode(json, workspace: workspace)
             if presentation?.runs.contains(where: { old in
                 !next.runs.contains(where: { $0.item == old.item && $0.run == old.run })
             }) == true { clearInspection() }
+            retained = pending
             presentation = next
             ready = true; notice = ""
         } catch {
@@ -154,4 +161,20 @@ public final class WorkflowRunsModel: ObservableObject {
         let current = await refresh(port)
         if failed, let current, current == generation { notice = "The action wasn’t confirmed. Check the refreshed run before trying again." }
     }
+    public func retry(_ entry: RetainedWorkflow, port: WorkflowPort?) async {
+        guard ready, !busy, let port else { return }
+        let ticket = generation, display = selection
+        busy = true; inspection = ""
+        do {
+            let result = try await port.retry(host, workspace, entry.id)
+            if ticket == generation, display == selection,
+                presentation?.runs.contains(where: { $0.item == entry.item && $0.run == entry.run }) == true {
+                inspection = result
+            }
+        } catch { /* Keep the journal for the next explicit bounded retry. */ }
+        guard ticket == generation else { return }
+        busy = false; ready = false
+        await refresh(port)
+    }
+
 }

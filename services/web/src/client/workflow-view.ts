@@ -20,6 +20,8 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
   const content = el('div'); content.className = 'workflow-runs'
   content.append(keyed(button('Refresh', () => void board.refresh(), view.busy), 'refresh'))
   if (view.notice) { const note = el('p', view.notice); note.setAttribute('role', 'status'); content.append(note) }
+  for (const retained of view.retained ?? []) content.append(keyed(button(
+    `${retained.reinspect ? 'Reinspect Unsubmitted Action' : 'Retry Retained Action'} · ${retained.item} · ${retained.label}`, () => void board.retry(retained), view.busy || !view.ready), `retry:${retained.id}`))
   const selected = view.presentation?.runs.find(r => r.item === view.selected)
   if (view.selected) content.append(keyed(button('All Runs', () => board.select(null)), 'all-runs'))
   if (selected) content.append(runCard(selected, view, board))
@@ -80,8 +82,9 @@ export function openWorkflow(dialog: HTMLDialogElement, runner: string, workspac
   window.addEventListener('online', refresh)
   const offline = () => board.disconnect()
   window.addEventListener('offline', offline)
-  const stop = () => { board.disconnect(); window.removeEventListener('online', refresh); window.removeEventListener('offline', offline); dialog.removeEventListener('close', stop) }
-  dialog.addEventListener('close', stop)
+  const stop = () => { board.disconnect(); window.removeEventListener('online', refresh); window.removeEventListener('offline', offline); dialog.removeEventListener('close', onClose) }
+  const onClose = () => { if (!dialog.open) stop() }
+  dialog.addEventListener('close', onClose)
   dialog.showModal(); void board.refresh()
   return { close: () => { dialog.close(); stop() }, connection: up => { if (up) refresh(); else board.disconnect() } }
 }

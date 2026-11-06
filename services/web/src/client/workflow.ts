@@ -12,14 +12,17 @@ export interface WorkflowRun {
   reasons: { kind: string; label: string; text: string }[]; actions: WorkflowAction[]
 }
 export interface WorkflowPresentation { schema: 2; workspace: string; epoch: number | bigint | string; revision: number | bigint | string; runs: WorkflowRun[] }
+export interface RetainedWorkflow { reinspect?: boolean; id: string; item: string; run: string; label: string }
 export interface WorkflowPort {
+  pending?(workspace: string): Promise<RetainedWorkflow[]>
+  retry?(workspace: string, id: string): Promise<string>
   read(workspace: string): Promise<WorkflowPresentation>
   // Forward the complete supplied descriptor. Rust must authenticate, re-read
   // State and validate the guard; no client-generated Grant or command.
   dispatch(workspace: string, item: string, action: WorkflowAction): Promise<string>
 }
 export interface WorkflowView {
-  presentation: WorkflowPresentation | null; selected: string | null
+  retained?: RetainedWorkflow[]; presentation: WorkflowPresentation | null; selected: string | null
   ready: boolean; busy: boolean; notice: string; inspection: string
 }
 export const WORKFLOW_PENDING = 'Workflow runs are not connected on this runner yet.'
@@ -49,6 +52,7 @@ export class WorkflowBoard {
     if (!port) { this.view = { ...this.view, notice: WORKFLOW_PENDING }; this.draw(); return null }
     try {
       const presentation = await port.read(this.workspace)
+      const retained = await port.pending?.(this.workspace) ?? []
       if (generation !== this.generation) return null
       if (presentation.schema !== 2 || presentation.workspace !== this.workspace) throw new Error('Invalid workflow presentation')
       // A replaced/removed run cannot retain inspection output from its predecessor.
@@ -56,7 +60,7 @@ export class WorkflowBoard {
         ++this.selection
         this.view = { ...this.view, inspection: '' }
       }
-      this.view = { ...this.view, presentation, ready: true, notice: '' }
+      this.view = { ...this.view, presentation, retained, ready: true, notice: '' }
     } catch {
       if (generation !== this.generation) return null
       this.view = { ...this.view, ready: false, notice: 'Couldn’t refresh workflow runs. Reconnect or try Refresh.' }
@@ -87,6 +91,23 @@ export class WorkflowBoard {
         if (failed && current !== null && current === this.generation) { this.view = { ...this.view, notice: 'The action wasn’t confirmed. Check the refreshed run before trying again.' }; this.draw() }
       }
     }
+  }
+  async retry(entry: RetainedWorkflow): Promise<void> {
+    const port = this.port()
+    if (!port?.retry || !this.view.ready || this.view.busy) return
+    this.select(entry.item)
+    const generation = this.generation, selection = this.selection
+    this.view = { ...this.view, busy: true, inspection: '' }; this.draw()
+    try {
+      const result = await port.retry(this.workspace, entry.id)
+      if (generation === this.generation && selection === this.selection && this.view.selected === entry.item &&
+        this.view.presentation?.runs.some(r => r.item === entry.item && r.run === entry.run)) {
+        this.view = { ...this.view, inspection: result }
+      }
+    } catch { /* Refresh exposes any remaining bounded explicit retry. */ }
+    if (generation !== this.generation) return
+    this.view = { ...this.view, busy: false, ready: false }; this.draw()
+    await this.refresh()
   }
   private draw(): void { this.show({ ...this.view }) }
 }

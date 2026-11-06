@@ -29,6 +29,7 @@ final class NativeAgents: ObservableObject {
     /// One runner's connection, as its last hello left it.
     struct Link {
         var core: RunnerCore?
+        var workflowHost: String?
         /// What the runner offered in its last hello.
         var offered: Set<String> = []
         /// Whether it serves rows and compose (`serves`).
@@ -41,6 +42,20 @@ final class NativeAgents: ObservableObject {
     var rowsServed: Bool { links[""]?.rowsServed ?? false }
     /// This Mac's runner's connection.
     var core: RunnerCore? { links[""]?.core }
+
+    /// Resolve an existing authenticated Session only; never pair or dial from a workflow view.
+    lazy var workflows = WorkflowSessionAdapter(root: WorkflowSessionAdapter.journalRoot()) { [weak self] target in
+        guard let self, let core = self.links[target]?.core, let hostID = self.links[target]?.workflowHost else { return nil }
+        let account = Account.shared.userId.isEmpty
+            ? (target.isEmpty ? "local-user:" + NSUserName() : self.pairing.key.clientID ?? "") : Account.shared.userId
+        return WorkflowSessionAdapter.Current(account: account, host: hostID,
+            connection: String(describing: ObjectIdentifier(core))) { [weak self] method, raw in
+                guard let self, let current = self.links[target]?.core, await current.isConnected,
+                      self.links[target]?.core === current else { throw WorkflowDisplayError.pending }
+                let args = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
+                return String(decoding: try await current.call(method, json: RunnerCore.JSONArguments(value: args)), as: UTF8.self)
+            }
+    }
 
     /// The remote runners the fleet brought up, connected where paired.
     @Published private(set) var remotes: Set<String> = []
@@ -141,6 +156,13 @@ final class NativeAgents: ObservableObject {
             // `terminal.compose` gets the terminal, not a view whose every
             // send would fail.
             links[target] = Link(core: core, offered: offered, rowsServed: Self.serves(offered))
+            Task { [weak self] in
+                guard let data = try? await core.call("host", [:]),
+                      let facts = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let host = facts["runnerId"] as? String, !host.isEmpty,
+                      let self, self.links[target]?.core === core else { return }
+                self.links[target]?.workflowHost = host
+            }
             // Panes opened on the old connection follow on the new one.
             if Self.serves(offered) {
                 for (terminal, pane) in panes where paneTargets[terminal] == target {

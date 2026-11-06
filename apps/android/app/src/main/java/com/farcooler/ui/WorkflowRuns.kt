@@ -31,13 +31,17 @@ data class WorkflowPresentation(val value: JsonObject) {
         }
     }
 }
+data class RetainedWorkflow(val id: String, val item: String, val run: String, val label: String, val reinspect: Boolean = false)
 interface WorkflowPort {
+    suspend fun pending(host: String, workspace: String): List<RetainedWorkflow> = emptyList()
+    suspend fun retry(host: String, workspace: String, id: String): String = error("No retained action")
     suspend fun read(host: String, workspace: String): String
     // Current authenticated Rust Session re-reads State/auth and validates the
     // opaque descriptor; return inspection identity/result text for a text slot.
     suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String
 }
 data class WorkflowView(
+    val retained: List<RetainedWorkflow> = emptyList(),
     val presentation: WorkflowPresentation? = null, val ready: Boolean = false,
     val busy: Boolean = false, val notice: String = "", val inspection: String = "",
 )
@@ -63,11 +67,12 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
         }
         try {
             val presentation = WorkflowPresentation.decode(port.read(host, workspace), workspace)
+            val retained = port.pending(host, workspace)
             if (ticket == generation) {
                 if (mutable.value.presentation?.runs?.any { old ->
                     presentation.runs.none { it.item == old.item && it.text("run") == old.text("run") }
                 } == true) clearInspection()
-                mutable.value = mutable.value.copy(presentation = presentation, ready = true, notice = "")
+                mutable.value = mutable.value.copy(presentation = presentation, retained = retained, ready = true, notice = "")
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) {
@@ -100,4 +105,21 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
             if (failed && currentRefresh != null && currentRefresh == generation) mutable.value = mutable.value.copy(notice = "The action wasn’t confirmed. Check the refreshed run before trying again.")
         }
     }
+    suspend fun retry(entry: RetainedWorkflow, port: WorkflowPort?) {
+        if (port == null || !mutable.value.ready || mutable.value.busy) return
+        val ticket = generation; val display = selection
+        mutable.value = mutable.value.copy(busy = true, inspection = "")
+        try {
+            val result = port.retry(host, workspace, entry.id)
+            if (ticket == generation && display == selection && mutable.value.presentation?.runs?.any {
+                it.item == entry.item && it.text("run") == entry.run } == true)
+                mutable.value = mutable.value.copy(inspection = result)
+        } catch (cancel: CancellationException) { disconnect(); throw cancel }
+        catch (_: Exception) { }
+        if (ticket == generation) {
+            mutable.value = mutable.value.copy(busy = false, ready = false)
+            refresh(port)
+        }
+    }
+
 }

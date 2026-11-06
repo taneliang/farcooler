@@ -37,6 +37,10 @@ public struct WorkflowRunsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if !model.notice.isEmpty { Text(model.notice).accessibilityAddTraits(.updatesFrequently) }
+                    ForEach(model.retained) { entry in
+                        Button("\(entry.reinspect ? "Reinspect Unsubmitted Action" : "Retry Retained Action") · \(entry.item) · \(entry.label)") { model.clearInspection(); selected = entry.item; Task { await model.retry(entry, port: port) } }
+                            .disabled(!model.ready || model.busy)
+                    }
                     if !selected.isEmpty {
                         Button("All Runs") { model.clearInspection(); selected = "" }
                     }
