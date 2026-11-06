@@ -345,3 +345,141 @@ async fn workflow_runtime_every_accepted_adapter_result_reopens_without_reexecut
     }
     assert_eq!(runtime.state("w").unwrap().unwrap().items["coding"].phase, Phase::Done);
 }
+
+#[tokio::test]
+async fn workflow_runtime_owned_inbox_approval_cancel_and_idle() {
+    for cancel in [false, true] {
+        let (_dir, mut runtime) = fixture().await;
+        let mut definition = coding_definition(true);
+        for stage in &mut definition.stages {
+            stage.progression = Progression::AwaitApproval { principal: "owner".into() };
+        }
+        enqueue(&mut runtime, "w", "coding", definition);
+        let controller = runtime.controller();
+        let owner = runtime.decision_session(&controller, "owner").unwrap();
+        let intruder = runtime.decision_session(&controller, "intruder").unwrap();
+        let (_foreign_dir, foreign) = fixture().await;
+        let foreign_controller = foreign.controller();
+        let handle = runtime.command_handle(&controller).unwrap();
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let mut sequence = 0;
+            loop {
+                let state = handle.state("w").await.unwrap().unwrap();
+                let item = &state.items["coding"];
+                if matches!(item.phase, Phase::Done | Phase::Cancelled) { break; }
+                if item.phase != Phase::WaitingApproval { tokio::task::yield_now().await; continue; }
+                let request = Request { id: format!("inbox-{sequence}"), workspace: "w".into(),
+                    expected_revision: state.revision, sequence: sequence + 1,
+                    command: Command::Approve { item: "coding".into(), run: item.run.clone(),
+                        pin: item.pin.clone(), candidate: item.candidate.clone() } };
+                assert_eq!(handle.decide(&intruder, request.clone(), 20).await.unwrap().result,
+                    Err(Refusal::Unauthorized));
+                let mut stale = request.clone();
+                stale.id = format!("stale-inbox-{sequence}");
+                stale.expected_revision -= 1;
+                assert_eq!(handle.decide(&owner, stale, 20).await.unwrap().result, Err(Refusal::Stale));
+                if cancel {
+                    let request = Request { id: "inbox-cancel".into(), sequence: 2,
+                        command: Command::Cancel { item: "coding".into() }, ..request };
+                    assert!(handle.submit(&foreign_controller, request.clone(), 20).await.is_err());
+                    assert!(handle.submit(&controller, request, 20).await.unwrap().result.is_ok());
+                } else {
+                    let mut request = request;
+                    request.id = format!("valid-inbox-{sequence}");
+                    assert!(handle.decide(&owner, request, 20).await.unwrap().result.is_ok());
+                    sequence += 1;
+                }
+            }
+        }).await.unwrap();
+        // Reads and time passing must not trigger further full-history sweeps.
+        let (send, receive) = oneshot::channel();
+        handle.send.send(Inbox::State("w".into(), send)).await.unwrap();
+        receive.await.unwrap().unwrap();
+        stop.send(true).unwrap();
+        let mut runtime = task.await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(state.items["coding"].phase, if cancel { Phase::Cancelled } else { Phase::Done });
+        let before = runtime.sweeps;
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let handle = runtime.command_handle(&controller).unwrap();
+        let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
+        for _ in 0..5 {
+            handle.state("w").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+        stop.send(true).unwrap();
+        let runtime = task.await.unwrap();
+        assert_eq!(runtime.sweeps, before + 1, "idle reads/timer rescanned history");
+    }
+}
+
+#[tokio::test]
+async fn workflow_runtime_second_coding_item_pins_new_base_and_recovers() {
+    let (dir, mut runtime) = fixture().await;
+    enqueue(&mut runtime, "w", "first", coding_definition(true));
+    let first = finish(&mut runtime, "w").await.items["first"].candidate.clone().unwrap();
+    enqueue(&mut runtime, "w", "second", coding_definition(true));
+    runtime.pump(100).await.unwrap(); // Second Provision pins the landed first candidate.
+    let effect = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| s.active).unwrap().effect;
+    assert_eq!(runtime.item_base("w", &effect).unwrap(), first);
+    let state = runtime.state("w").unwrap().unwrap();
+    let claim = runtime.store.workflow_claim_effect("w", &effect.id, "crash", state.revision,
+        state.epoch, 101, 106).unwrap().unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 101).unwrap());
+    let binding = Binding::new("w", &effect, claim.resource_generation,
+        state.items["second"].iteration, &first);
+    let outcome = runtime.execute("w", &binding).await.unwrap();
+    runtime.write_journal(&Journal { binding: binding.clone(), outcome }).unwrap();
+    let candidate = adapters::git(&runtime.tree(&binding), &["rev-parse", "HEAD"]).await.unwrap();
+    drop(runtime);
+    let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
+    runtime.pump(200).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["second"].candidate, Some(candidate));
+    let state = finish(&mut runtime, "w").await;
+    let second = state.items["second"].candidate.clone().unwrap();
+    assert_eq!(state.items["second"].phase, Phase::Done);
+    assert_ne!(first, second);
+    assert_eq!(adapters::git(&runtime.root.join("repo"), &["rev-parse", "refs/heads/landed"])
+        .await.unwrap(), second);
+    assert!(crate::git::git(&runtime.root.join("repo"), &["merge-base", "--is-ancestor", &first, &second])
+        .await.unwrap().ok);
+}
+
+#[tokio::test]
+async fn workflow_runtime_owned_lease_deadline_and_explicit_reconciliation() {
+    for admitted in [false, true] {
+        let (_dir, mut runtime) = fixture().await;
+        enqueue_tracker(&mut runtime, "w", "item", &[]);
+        let (binding, claim) = claim(&runtime, "w", now() + 150);
+        let journal = if admitted {
+            assert!(runtime.store.workflow_admit_effect(&claim, now()).unwrap());
+            Some(Journal { outcome: runtime.execute("w", &binding).await.unwrap(), binding })
+        } else { None };
+        let controller = runtime.controller();
+        let handle = runtime.command_handle(&controller).unwrap();
+        let path = journal.as_ref().map(|j| runtime.journal_path(&j.binding.effect));
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            if let Some(journal) = journal {
+                loop {
+                    if handle.state("w").await.unwrap().unwrap().items["item"].phase == Phase::Uncertain { break; }
+                    tokio::task::yield_now().await;
+                }
+                // Only the trusted runner writes a delayed bound receipt; wake contains no result.
+                durable(&path.unwrap(), &serde_json::to_vec(&journal).unwrap()).unwrap();
+                handle.reconcile().await.unwrap();
+            }
+            loop {
+                if handle.state("w").await.unwrap().unwrap().items["item"].phase == Phase::Done { break; }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }).await.unwrap();
+        stop.send(true).unwrap();
+        let runtime = task.await.unwrap();
+        assert!(runtime.sweeps <= 4, "deadline/reconcile unexpectedly polled");
+    }
+}

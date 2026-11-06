@@ -59,6 +59,30 @@ pub(super) async fn git(tree: &Path, args: &[&str]) -> Result<String> {
     Ok(output.stdout.trim().into())
 }
 impl Runtime {
+    fn base_path(&self, workspace: &str, effect: &Effect) -> PathBuf {
+        self.root.join(format!("base-{}.json", digest(&(workspace, &effect.item))))
+    }
+    pub(super) fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
+        let path = self.base_path(workspace, effect);
+        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
+            Ok(file) => file,
+            // Existing admitted v1 fixtures used the immutable creation base.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(self.base.clone()),
+            Err(e) => return Err(e.into()),
+        };
+        let base: String = serde_json::from_reader(file)?;
+        if base.len() != 40 || !base.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::Refused("invalid item base"));
+        }
+        Ok(base)
+    }
+    pub(super) async fn pin_base(&self, workspace: &str, effect: &Effect) -> Result<()> {
+        if self.base_path(workspace, effect).try_exists()? { return Ok(()); }
+        let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
+            git(&self.root.join("repo"), &["rev-parse", "refs/heads/landed"]).await?
+        } else { self.base.clone() };
+        durable(&self.base_path(workspace, effect), &serde_json::to_vec(&base)?)
+    }
     pub(super) fn journal_path(&self, effect: &Effect) -> PathBuf {
         self.root.join("receipts").join(format!("{}.json", digest(effect)))
     }
@@ -98,7 +122,7 @@ impl Runtime {
     }
     pub(super) async fn execute(&self, workspace: &str, binding: &Binding) -> Result<Outcome> {
         let effect = &binding.effect;
-        if effect.resource != self.resource || binding.base != self.base || binding.workspace != workspace {
+        if effect.resource != self.resource || binding.base != self.item_base(workspace, effect)? || binding.workspace != workspace {
             return Err(Error::Refused("foreign execution binding"));
         }
         if let EffectKind::Stop { operation } = &effect.kind {
@@ -109,12 +133,12 @@ impl Runtime {
         let tree = self.tree(binding);
         let repo = self.root.join("repo");
         let log = self.root.join("receipts").join(format!("{}.log", effect.id));
-        let mut candidate = effect.candidate.clone().unwrap_or_else(|| self.base.clone());
+        let mut candidate = effect.candidate.clone().unwrap_or_else(|| binding.base.clone());
         let mut passed = true;
         match kind {
             StageKind::Provision => {
                 let branch = format!("wf-{}", &digest(&(workspace, &effect.item))[4..]);
-                crate::git::create_worktree_with(&repo, &branch, &self.base, &tree, true).await
+                crate::git::create_worktree_with(&repo, &branch, &binding.base, &tree, true).await
                     .map_err(|_| Error::Refused("worktree provisioning uncertain"))?;
                 self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
             }
@@ -142,7 +166,7 @@ impl Runtime {
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
                 // Local analogue of retained landing's gated-base CAS; no remote push.
-                self.git_recorded(binding, &repo, &["update-ref", "refs/heads/landed", &candidate, &self.base]).await?;
+                self.git_recorded(binding, &repo, &["update-ref", "refs/heads/landed", &candidate, &binding.base]).await?;
                 if self.git_recorded(binding, &repo, &["rev-parse", "refs/heads/landed"]).await? != candidate {
                     return Err(Error::Refused("landing moved after CAS"));
                 }
@@ -199,7 +223,7 @@ impl Runtime {
             let journal: Journal = serde_json::from_reader(file)?;
             if journal.binding.effect != original.effect || journal.binding.workspace != workspace
                 || Some(journal.binding.generation) != original.resource_generation
-                || journal.binding.base != self.base || journal.outcome == Outcome::Uncertain
+                || journal.binding.base != binding.base || journal.outcome == Outcome::Uncertain
             { return Err(Error::Refused("original settlement not authenticated")); }
         }
         Ok(Outcome::Stopped { operation: operation.into(), receipt: digest(&("quiescent/v1", binding, operation)) })

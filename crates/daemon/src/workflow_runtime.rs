@@ -9,6 +9,7 @@ use farcooler_store::{Store, workflow::{Receipt, WorkflowError}};
 use farcooler_workflow::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
 use adapters::{Binding, Journal};
@@ -40,6 +41,40 @@ pub struct Request {
     pub command: Command,
 }
 
+/// Bounded local inbox. Capability checks still occur on the owning runtime.
+#[derive(Clone)]
+pub struct CommandHandle { send: mpsc::Sender<Inbox> }
+enum Authority { Controller(Uuid), Decision(Uuid, String) }
+enum Inbox {
+    Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
+    State(String, oneshot::Sender<Result<Option<State>>>),
+    Reconcile,
+}
+impl CommandHandle {
+    pub async fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
+        self.apply(Authority::Controller(controller.instance), request, now_ms).await
+    }
+    pub async fn decide(&self, session: &DecisionSession, request: Request, now_ms: i64) -> Result<Receipt> {
+        self.apply(Authority::Decision(session.instance, session.principal.clone()), request, now_ms).await
+    }
+    async fn apply(&self, authority: Authority, request: Request, now_ms: i64) -> Result<Receipt> {
+        let (send, receive) = oneshot::channel();
+        self.send.send(Inbox::Apply(authority, Box::new(request), now_ms, send)).await
+            .map_err(|_| Error::Refused("runtime inbox closed"))?;
+        receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
+    }
+    pub async fn state(&self, workspace: &str) -> Result<Option<State>> {
+        let (send, receive) = oneshot::channel();
+        self.send.send(Inbox::State(workspace.into(), send)).await
+            .map_err(|_| Error::Refused("runtime inbox closed"))?;
+        receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
+    }
+    /// Trusted runner signals that a delayed local receipt is available; never supplies a result.
+    pub async fn reconcile(&self) -> Result<()> {
+        self.send.send(Inbox::Reconcile).await.map_err(|_| Error::Refused("runtime inbox closed"))
+    }
+}
+
 pub struct Runtime {
     root: PathBuf,
     store: Store,
@@ -47,6 +82,11 @@ pub struct Runtime {
     resource: String,
     base: String,
     last_occupancy: Option<String>,
+    inbox: mpsc::Receiver<Inbox>,
+    send: mpsc::Sender<Inbox>,
+    next_lease: Option<i64>,
+    #[cfg(test)]
+    sweeps: usize,
     // Kept after all state/process owners; dropping the runtime releases ownership.
     _writer: File,
 }
@@ -104,7 +144,14 @@ impl Runtime {
         let resource = digest(&("local-fixture/v1", root.join("repo")));
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
-        Ok(Self { root, store, instance: Uuid::now_v7(), resource, base, last_occupancy: None, _writer: writer })
+        let (send, inbox) = mpsc::channel(32);
+        Ok(Self { inbox, send, next_lease: None,
+            #[cfg(test)] sweeps: 0,
+            root, store, instance: Uuid::now_v7(), resource, base, last_occupancy: None, _writer: writer })
+    }
+    pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
+        self.authorize(controller.instance)?;
+        Ok(CommandHandle { send: self.send.clone() })
     }
     pub fn resource(&self) -> &str { &self.resource }
     pub fn controller(&self) -> Controller { Controller { instance: self.instance } }
@@ -162,6 +209,8 @@ impl Runtime {
     }
     /// One owned sweep. This API has no delivery cursor, informational ACK or controller dependency.
     pub async fn pump(&mut self, now_ms: i64) -> Result<usize> {
+        #[cfg(test)] { self.sweeps += 1; }
+        self.next_lease = None;
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();
@@ -189,7 +238,7 @@ impl Runtime {
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     let binding = Binding::new(&workspace, &effect, stored.resource_generation
-                        .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.base);
+                        .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
                     let outcome = match self.read_journal(&binding) {
                         Ok(journal) => journal.map(|j| j.outcome).unwrap_or(Outcome::Uncertain),
                         Err(error) => {
@@ -205,9 +254,16 @@ impl Runtime {
                 if !matches!(item.phase, Phase::Running | Phase::Cancelling) { continue; }
                 let Some(claim) = self.store.workflow_claim_effect(&workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
-                    now_ms, now_ms.saturating_add(30_000))? else { continue; };
+                    now_ms, now_ms.saturating_add(30_000))? else {
+                    if let Some(deadline) = stored.lease_until.filter(|t| *t > now_ms) {
+                        self.next_lease = Some(self.next_lease.map_or(deadline, |t| t.min(deadline)));
+                    }
+                    continue;
+                };
+                // Persist the base while ownership is held, before any external admission.
+                self.pin_base(&workspace, &effect).await?;
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
-                let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &self.base);
+                let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &self.item_base(&workspace, &effect)?);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
                 let outcome = match self.execute(&workspace, &binding).await {
                     Ok(outcome) => {
@@ -240,13 +296,51 @@ impl Runtime {
         if receipt.result.is_err() { return Err(Error::Refused("result admission refused")); }
         Ok(())
     }
+    fn receive(&mut self, message: Inbox) {
+        match message {
+            Inbox::Apply(authority, request, time, reply) => {
+                let request = *request;
+                let result = match authority {
+                    Authority::Controller(instance) => self.submit(&Controller { instance }, request, time),
+                    Authority::Decision(instance, principal) =>
+                        self.decide(&DecisionSession { instance, principal }, request, time),
+                };
+                // A dropped caller never rolls back an accepted durable command.
+                let _ = reply.send(result);
+            }
+            Inbox::State(workspace, reply) => { let _ = reply.send(self.state(&workspace)); }
+            Inbox::Reconcile => {}
+        }
+    }
     pub async fn run(&mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         loop {
             if *shutdown.borrow() { return Ok(()); }
-            self.pump(now()).await?;
-            tokio::select! {
-                changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { return Ok(()); } }
-                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+            // Bounded drain prevents a busy sender from starving effects/shutdown.
+            for _ in 0..32 {
+                let Ok(message) = self.inbox.try_recv() else { break; };
+                self.receive(message);
+            }
+            if self.pump(now()).await? > 0 { continue; }
+            loop {
+                let deadline = self.next_lease;
+                tokio::select! {
+                    changed = shutdown.changed() => {
+                        if changed.is_err() || *shutdown.borrow() { return Ok(()); }
+                    }
+                    message = self.inbox.recv() => {
+                        let Some(message) = message else { return Ok(()); };
+                        let read_only = matches!(message, Inbox::State(..));
+                        self.receive(message);
+                        if !read_only { break; }
+                    }
+                    _ = async {
+                        match deadline {
+                            Some(time) => tokio::time::sleep(Duration::from_millis(
+                                time.saturating_sub(now()).max(0) as u64)).await,
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => break,
+                }
             }
         }
     }

@@ -37,6 +37,7 @@ pub struct StoredEffect {
     pub active: bool,
     pub dispatch_state: String,
     pub resource_generation: Option<u64>,
+    pub lease_until: Option<i64>,
 }
 
 impl Store {
@@ -207,10 +208,10 @@ impl Store {
     }
     pub fn workflow_outbox(&self, workspace: &str) -> Result<Vec<StoredEffect>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT payload, active, dispatch_state, resource_generation FROM workflow_outbox WHERE workspace = ?1 ORDER BY revision, id")?;
-        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?)))?;
-        rows.map(|r| { let (payload, active, dispatch_state, resource_generation) = r?;
-            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state, resource_generation }) }).collect()
+        let mut stmt = conn.prepare("SELECT payload, active, dispatch_state, resource_generation, lease_until FROM workflow_outbox WHERE workspace = ?1 ORDER BY revision, id")?;
+        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<i64>>(4)?)))?;
+        rows.map(|r| { let (payload, active, dispatch_state, resource_generation, lease_until) = r?;
+            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state, resource_generation, lease_until }) }).collect()
     }
 }
 
