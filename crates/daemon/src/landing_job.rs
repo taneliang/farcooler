@@ -455,7 +455,7 @@ async fn push(s: &Setup<'_>, l: &Landing, tree: &Path, base: &str, gated_base: &
         // untested result; a fresh attempt must fold and gate the new base.
         return Err(Stop(format!("{base} moved after the gate; start a fresh landing attempt to gate it again.")));
     }
-    let target = format!("HEAD:refs/heads/{}", s.rules.base);
+    let target = push_target("HEAD", &format!("refs/heads/{}", s.rules.base));
     git_ok(tree, &["push", "--quiet", &s.rules.remote, &target]).await.map_err(|e| Stop(format!("The push was refused: {e}")))?;
     let sha = rev(tree, "HEAD").await?;
     s.store.record_landing_push(l.id, &sha, &l.tickets).map_err(|e| Stop(match e {
@@ -468,6 +468,11 @@ async fn push(s: &Setup<'_>, l: &Landing, tree: &Path, base: &str, gated_base: &
     let body = format!("Pushed {} to {}.", short(&sha), s.rules.base);
     note(s, l, "pushed", &body, serde_json::json!({ "sha": sha }));
     Ok(sha)
+}
+
+/// Shared retained landing target grammar; configured adapters pin both operands.
+pub(crate) fn push_target(candidate: &str, target: &str) -> String {
+    format!("{candidate}:{target}")
 }
 
 /// The job stopped on `l`: say so on its timeline.

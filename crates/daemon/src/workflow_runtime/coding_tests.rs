@@ -1,7 +1,7 @@
 use super::*;
 use super::tests::{enqueue, finish};
 
-async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, Runtime) {
+pub(super) async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, Runtime) {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("selected"); std::fs::create_dir(&repo).unwrap();
     adapters::git(&repo, &["init", "--quiet"]).await.unwrap();
@@ -18,7 +18,7 @@ iteration = os.environ['FARCOOLER_ITERATION']
 binding = os.environ['FARCOOLER_OPERATION_BINDING']
 receipt = pathlib.Path(os.environ['FARCOOLER_RECEIPT'])
 if stage == 'build':
-    pathlib.Path('result.txt').write_text('candidate iteration ' + iteration)
+    pathlib.Path('result.txt').write_text('candidate iteration ' + iteration + ' run ' + os.environ['FARCOOLER_WORKFLOW_RUN'])
     if mode == 'cancel':
         pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
         subprocess.run(['/bin/sleep', '30'])
@@ -51,7 +51,7 @@ elif stage == 'ci':
     let mut build = command("build");
     build.environment.insert("STARTED".into(), dir.path().join("started").to_string_lossy().into_owned());
     let config = CodingConfig { repository: repo.canonicalize().unwrap(), base,
-        landing_ref: "refs/heads/workflow-target".into(), harness: CodingHarness::Command(build),
+        landing_ref: "refs/heads/workflow-target".into(), landing: None, harness: CodingHarness::Command(build),
         checks: vec![command("check"), command("check")],
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),
         ci: CodingCi { repository: "offline/repository".into(), workflow: "configured-check".into(),
@@ -100,7 +100,7 @@ async fn workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_succe
     }
 }
 
-async fn admitted(runtime: &Runtime) -> Binding {
+pub(super) async fn admitted(runtime: &Runtime) -> Binding {
     let state = runtime.state("w").unwrap().unwrap();
     let stored = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
     let claim = runtime.store.workflow_claim_effect("w", &stored.effect.id, "crash-test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
@@ -273,8 +273,6 @@ async fn workflow_coding_native_launch_pins_existing_hooks_without_installing_or
         project_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     config.definition().unwrap();
-    assert!(Runtime::create_configured(&dir.path().join("native-runtime"), config.clone()).await.is_err());
-    assert!(!dir.path().join("native-runtime").exists());
     runtime.coding = Some(config.clone());
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.

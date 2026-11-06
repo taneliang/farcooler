@@ -1,0 +1,96 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 23.41s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 54 tests
+test landing::tests::a_workflow_runs_on_merge_group_only_in_its_code ... ok
+test landing::tests::a_merge_queue_no_workflow_answers_warns_it_will_wait_forever ... ok
+test ci_canary::tests::a_workflow_run_of_another_workflow_is_not_the_trains ... ok
+test landing::tests::deployment_workflow_and_code_scanning_rules_lean_to_pull_requests ... ok
+test ci_watch::tests::a_commit_s_runs_count_each_workflow_once ... ok
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test landing_read::tests::a_workflow_in_a_subdirectory_does_not_run_so_it_does_not_count ... ok
+test landing_read::tests::a_planted_workflow_without_merge_group_is_seen_and_one_with_it_is_too ... ok
+test landing_read::tests::a_workflow_that_cannot_be_read_leaves_the_answer_unread ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpdny3WS/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpJjw0Pn/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpUgLKL7/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpKHmKBJ/private-remote.git
+ * [new branch]      HEAD -> main
+device change=0 publication=true
+orchestrator change=0
+device change=0 publication=false
+test workflow_runtime::coding_native::recovery_tests::workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant ... ok
+orchestrator change=1
+test workflow_runtime::coding_landing::failure_tests::workflow_coding_remote_rejected_update_records_exit_without_acceptance ... ok
+device change=1 publication=true
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass ... ok
+orchestrator change=2
+test workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence ... ok
+device change=1 publication=false
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpXj0Kod/private-remote.git
+ * [new branch]      HEAD -> main
+orchestrator change=3
+device change=2 publication=true
+test workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again ... ok
+test workflow_runtime::coding_tests::workflow_coding_approval_is_exact_and_configuration_cannot_change_admitted_work ... ok
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpXj0Kod/private-remote.git
+   e3c6949..72b45cc  72b45cc1a60fc69c54f160acbe39f8983f5dd1c4 -> main
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... ok
+orchestrator change=4
+device change=2 publication=false
+test workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes ... ok
+test workflow_runtime::coding_tests::workflow_coding_native_launch_pins_existing_hooks_without_installing_or_launching ... ok
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_fact ... ok
+test workflow_runtime::coding_tests::workflow_coding_visible_git_without_process_settlement_remains_uncertain ... ok
+device change=3 publication=true
+test workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated ... ok
+test workflow_runtime::coding_tests::workflow_coding_landing_cas_refuses_changed_base_and_retains_uncertainty ... ok
+device change=3 publication=false
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+device change=4 publication=true
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+device change=4 publication=false
+device change=5 publication=true
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::coding_tests::workflow_coding_reviewer_rejection_has_bounded_rework ... ok
+test workflow_runtime::coding_tests::workflow_coding_foreign_provider_binding_cannot_settle_success ... ok
+device change=5 publication=false
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+device change=6 publication=true
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+device change=6 publication=false
+test workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes ... ok
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
+runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... ok
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... ok
+test workflow_runtime::wire_commands::semantic_review_tests::workflow_wire_semantic_review_requires_exact_observation_and_principal ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_approval_preserve_policy ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission ... ok
+
+test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 21.26s
+
+
+exit=0, stopped=None

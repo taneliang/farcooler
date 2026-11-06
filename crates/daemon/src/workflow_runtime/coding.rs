@@ -36,12 +36,24 @@ pub struct CodingCi {
     pub command: CodingCommand,
 }
 
+/// Explicit local transport identity; no named remote lookup or network URL.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodingLanding {
+    pub job: String,
+    pub repository: PathBuf,
+    pub target: String,
+    pub config_digest: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodingConfig {
     pub repository: PathBuf,
     pub base: String,
     pub landing_ref: String,
+    #[serde(default)]
+    pub landing: Option<CodingLanding>,
     pub harness: CodingHarness,
     pub checks: Vec<CodingCommand>,
     pub reviewer: Option<CodingReviewer>,
@@ -69,6 +81,15 @@ impl CodingConfig {
             || self.checks.is_empty() || self.checks.len() > 8
             || self.ci.repository.is_empty() || self.ci.workflow.is_empty() || self.ci.event.is_empty()
         { return Err(Error::Refused("invalid coding configuration")); }
+        if let Some(landing) = &self.landing {
+            if !valid_id(&landing.job) || landing.repository.canonicalize()? != landing.repository
+                || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
+                || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
+                || landing.target.contains("..")
+                || digest(&std::fs::read(landing.repository.join("config"))?) != landing.config_digest {
+                return Err(Error::Refused("invalid or changed local landing identity"));
+            }
+        }
         match &self.harness {
             CodingHarness::Command(command) => command.validate()?,
             CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
@@ -148,11 +169,13 @@ impl Runtime {
     /// repository for this allocation; no installed Service calls this constructor.
     pub async fn create_configured(root: &Path, config: CodingConfig) -> Result<Self> {
         config.validate()?;
-        if matches!(config.harness, CodingHarness::Native { .. }) {
-            return Err(Error::Refused("native terminal/hook ownership requires coordinated adapter allocation"));
-        }
         if adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await? != config.base {
             return Err(Error::Refused("configured landing ref differs from selected base"));
+        }
+        if let Some(landing) = &config.landing {
+            if adapters::git(&landing.repository, &["rev-parse", &landing.target]).await? != config.base {
+                return Err(Error::Refused("remote landing ref differs from selected base"));
+            }
         }
         std::fs::create_dir(root)?;
         std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;

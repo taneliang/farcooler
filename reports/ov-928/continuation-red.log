@@ -1,0 +1,15 @@
+  waiting for the machine-wide heavy-job lock (/Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_coding -- --nocapture); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-930-workflow-app-ports, PID 28214, started 2026-11-07 06:53:00, running /usr/bin/python3 reports/ov-930/bridge.py (1 in line ahead of you)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+error[E0432]: unresolved imports `farcooler_agent_core::AgentEvent`, `farcooler_agent_core::EndReason`
+ --> crates/daemon/src/workflow_runtime/coding_native.rs:3:28
+  |
+3 | use farcooler_agent_core::{AgentEvent, EndReason};
+  |                            ^^^^^^^^^^  ^^^^^^^^^ no `EndReason` in the root
+  |                            |
+  |                            no `AgentEvent` in the root
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `farcooler-daemon` (lib test) due to 1 previous error
+
+exit=101, stopped=None

@@ -313,6 +313,9 @@ pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
         && hooks.values().all(|list| list.as_array().is_some_and(|l| l.iter().all(|e| entry_is_ours_or_gone(e, &us))))
 }
 
+mod native_host;
+pub(crate) use native_host::native_completion_targets;
+
 /// The path this binary was launched as, resolved the same way the shim's
 /// own command line is (`service::cli_binary`), so a hooks file and a pane
 /// command never disagree about which CLI they mean.

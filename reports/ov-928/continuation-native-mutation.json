@@ -1,0 +1,6 @@
+{
+  "original": "da3937125f873be408ac51bc0e6839fe8293489a56d2ed2f948f5aee7510f9cf",
+  "mutant": "749816a0f31e35bc7444e82e0cc642c34ac4811bafea068bcead44e11e2595e8",
+  "exit": 101,
+  "restored": "da3937125f873be408ac51bc0e6839fe8293489a56d2ed2f948f5aee7510f9cf"
+}

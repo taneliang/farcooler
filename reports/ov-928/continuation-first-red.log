@@ -1,0 +1,124 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-928-coding-adapters/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 24.70s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-338a6716aac7e2ca)
+
+running 52 tests
+test landing::tests::a_workflow_runs_on_merge_group_only_in_its_code ... ok
+test landing::tests::a_merge_queue_no_workflow_answers_warns_it_will_wait_forever ... ok
+test landing::tests::deployment_workflow_and_code_scanning_rules_lean_to_pull_requests ... ok
+test ci_canary::tests::a_workflow_run_of_another_workflow_is_not_the_trains ... ok
+test ci_watch::tests::a_commit_s_runs_count_each_workflow_once ... ok
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test landing_read::tests::a_workflow_in_a_subdirectory_does_not_run_so_it_does_not_count ... ok
+test landing_read::tests::a_planted_workflow_without_merge_group_is_seen_and_one_with_it_is_too ... ok
+test landing_read::tests::a_workflow_that_cannot_be_read_leaves_the_answer_unread ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp9pZ6OF/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpZk17Zr/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpSQOuhe/private-remote.git
+ * [new branch]      HEAD -> main
+
+thread 'workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass' (826141147) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 3, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:a4b01b4022790cbf00fb4e78aae955b4692b205a0135218b52db64b34b508d3c", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:ee6a165eda3da8bcb72b0d5b28856657176f5dadb6fc49c663f00d9d5a47d565", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:ac1fe5f9e7856e63fe4d80e46ce8490e880dee6c09d65ad7019620270fdad664", stage: 1, iteration: 0, attempt: 1, fence: 2, phase: Uncertain, run: "wf1:cec5d6fad45e482e8c2f9c35bdebb771cf2e3548fad88c63e96d7b2dcad0b8f1", pending: Some("wf1:124d8e1ac0260585f4fdc134f9a7cd5abf7adcd9f0626263f318e3ad202f4116"), candidate: None, last_evidence: Some(Evidence { candidate: "053034d8e9744507092481313f7ca68ef2a9a524", manifest: "wf1:d47672c7cf9ad7a5a1ed284a5e0cbe417c4137c02d0a508897902a059cffb657", receipt: "wf1:2010a153fea1096f64c59dfad7586d9cca8c6f6a1f1b545a3530af74fd697105", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b311-f1dd-7231-9fff-d383a39abc88", "runtime:01a1b311-f217-7073-bee2-71fb3de21663"}, source_sequences: {"controller": 1, "runtime": 2} })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again' (826141480) panicked at crates/daemon/src/workflow_runtime/coding_native.rs:291:64:
+called `Result::unwrap()` on an `Err` value: Refused("native hooks must already target this private host")
+test workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again ... FAILED
+test workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass ... orchestrator change=FAILED
+0
+device change=0 publication=true
+
+thread 'workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence' (826141379) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 3, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:676eddbb22d556cdc5c5d1b70e011958ab153b4cd27861152e30db2932667c4e", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:3e1ae4556e2cce4c208fc4c186460c73b8a4c204ded13c5dcb5d2dd124da53b2", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:5be683a6b5d7cb7ccad14213aa42317431f89151cca8287838bfe0efc4111ab9", stage: 1, iteration: 0, attempt: 1, fence: 2, phase: Uncertain, run: "wf1:805437cbbeefa44e133e2c970f40f522e9562bbb5179cf6df6a2bc37a50d1d13", pending: Some("wf1:837a8608c1d13c17a6b77457fc5d286d9a37ed76591cca9ece0d7b084fc81488"), candidate: None, last_evidence: Some(Evidence { candidate: "053034d8e9744507092481313f7ca68ef2a9a524", manifest: "wf1:3bf15fcfdd14d2befe061d16f888acb600f85a1a2879fd98390ee084cc856f5a", receipt: "wf1:c5440d6cdf606e74aa237e8880ff2656408c6347f9db29d289c35d2d8c8b4f60", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b311-f24f-7d42-ba4f-693d01ff7f70", "runtime:01a1b311-f2c3-72c0-a15f-17378ff8b7f7"}, source_sequences: {"controller": 1, "runtime": 2} })
+test workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence ... FAILED
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+device change=0 publication=false
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+orchestrator change=1
+test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... ok
+
+thread 'workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases' (826141145) panicked at crates/daemon/src/workflow_runtime/coding_landing.rs:110:13:
+assertion `left == right` failed
+  left: Failed
+ right: Done
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... FAILED
+device change=1 publication=true
+test workflow_runtime::coding_tests::workflow_coding_approval_is_exact_and_configuration_cannot_change_admitted_work ... ok
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpesLyCx/private-remote.git
+ * [new branch]      HEAD -> main
+orchestrator change=2
+test workflow_runtime::coding_tests::workflow_coding_native_launch_pins_existing_hooks_without_installing_or_launching ... ok
+device change=1 publication=false
+orchestrator change=3
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpesLyCx/private-remote.git
+   6587f77..3cac06b  3cac06bb9650b531512547f23c1fef3813099678 -> main
+test workflow_runtime::coding_tests::workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_fact ... ok
+
+thread 'workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal' (826141146) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "w", revision: 6, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:a179b5bbd39bfa1f52b9d3f700ba43876ab1192a2ac21a463e21cff959301e21", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:0d5fca6de579916c6e060f720de4f1e7ca1313c91a923c57bf381b16343b002c", policy_pin: "policy/v1", dependencies: {}, resource: "wf1:7844e014552d68f3fc8c79b6ca1488aa4b53f5854dee024fe3749c7a9fd82fdb", stage: 4, iteration: 0, attempt: 1, fence: 5, phase: Uncertain, run: "wf1:4c37e7cb617b725513d7263d6778fa7587839b80c9b5e2f5753140cc494b1d6a", pending: Some("wf1:07757b24cac699043ea843958590a8a12e049bf2fc895262969e925f9ceafa93"), candidate: Some("3cac06bb9650b531512547f23c1fef3813099678"), last_evidence: Some(Evidence { candidate: "3cac06bb9650b531512547f23c1fef3813099678", manifest: "wf1:8f933af3d5b5ef2e02b984f57d79572cde21dd83c5fe9f8227777c70e8d3820a", receipt: "wf1:906d576ba3deb623b8db823124742ae16bbd3309c22a4cb2400c9e76c84b2d1d", policy_pin: "policy/v1" }), stopping: None }}, seen: {"enqueue-one", "runtime:01a1b312-001a-7470-a077-8540da8e34b9", "runtime:01a1b312-014b-7bb0-b14a-0f2c0ac1936e", "runtime:01a1b312-02c8-7811-ad7e-92665fa3bcbd", "runtime:01a1b312-044a-7ce2-ae63-2d9334b4cd5f", "runtime:01a1b312-0523-7b62-a61e-671c32ca58f6"}, source_sequences: {"controller": 1, "runtime": 5} })
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... FAILED
+test workflow_runtime::coding_tests::workflow_coding_landing_cas_refuses_changed_base_and_retains_uncertainty ... ok
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+device change=2 publication=true
+
+thread 'workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant' (826141369) panicked at crates/daemon/src/workflow_runtime/coding_native.rs:312:13:
+interactive fixture did not start
+test workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant ... FAILED
+orchestrator change=4
+test workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes ... ok
+test workflow_runtime::coding_tests::workflow_coding_visible_git_without_process_settlement_remains_uncertain ... ok
+test workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated ... ok
+device change=2 publication=false
+device change=3 publication=true
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+device change=3 publication=false
+test workflow_runtime::coding_tests::workflow_coding_foreign_provider_binding_cannot_settle_success ... ok
+device change=4 publication=true
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::coding_tests::workflow_coding_reviewer_rejection_has_bounded_rework ... ok
+device change=4 publication=false
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+device change=5 publication=true
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+device change=5 publication=false
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... ok
+device change=6 publication=true
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... ok
+device change=6 publication=false
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
+test workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... ok
+test workflow_runtime::wire_commands::semantic_review_tests::workflow_wire_semantic_review_requires_exact_observation_and_principal ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_approval_preserve_policy ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... ok
+test workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission ... ok
+
+failures:
+
+failures:
+    workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases
+    workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal
+    workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass
+    workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant
+    workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+    workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again
+
+test result: FAILED. 46 passed; 6 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 21.03s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

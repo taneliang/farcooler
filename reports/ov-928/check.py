@@ -6,6 +6,11 @@ root = Path(__file__).resolve().parents[2]
 target = root.parent / 'ov-923-workflow-runtime/target'
 mode = sys.argv[1]
 args = {
+    'continuation-native-red': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass', '--', '--nocapture'],
+    'continuation-red': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_coding', '--', '--nocapture'],
+    'continuation': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_', '--', '--nocapture'],
+    'continuation-lint': ['clippy', '--offline', '-p', 'farcooler-daemon', '--all-targets', '--', '-D', 'warnings'],
+    'continuation-gate': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'landing_job', '--', '--nocapture'],
     'binding-red': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_coding_foreign_provider_binding', '--', '--nocapture'],
     'binding-green': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_coding_foreign_provider_binding', '--', '--nocapture'],
     'focused': ['test', '--offline', '-p', 'farcooler-daemon', '--lib', 'workflow_coding', '--', '--nocapture'],
@@ -16,7 +21,7 @@ args = {
 env = {**os.environ, 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Users/e-liang/.cargo/bin',
        'CARGO_TARGET_DIR': str(target), 'CARGO_BUILD_JOBS': '6', 'CARGO_PROFILE_DEV_DEBUG': '0',
        'CARGO_PROFILE_TEST_DEBUG': '0', 'CARGO_INCREMENTAL': '0'}
-paths = ['crates/daemon/src/effect_runner.rs', 'crates/daemon/src/workflow_runtime.rs',
+paths = ['crates/daemon/src/hook_install/native_host.rs', 'crates/daemon/src/hook_install.rs', 'crates/daemon/src/workflow_runtime/coding_native.rs', 'crates/daemon/src/workflow_runtime/coding_landing.rs', 'crates/daemon/src/landing_job.rs', 'crates/daemon/src/effect_runner.rs', 'crates/daemon/src/workflow_runtime.rs',
          'crates/daemon/src/workflow_runtime/adapters.rs', 'crates/daemon/src/workflow_runtime/wire_commands.rs',
          'crates/daemon/src/workflow_runtime/coding.rs', 'crates/daemon/src/workflow_runtime/coding_execute.rs',
          'crates/daemon/src/workflow_runtime/coding_tests.rs', 'crates/daemon/src/workflow_runtime/tests.rs']

@@ -14,7 +14,9 @@ use tokio::sync::{mpsc, oneshot};
 mod adapters;
 mod coding;
 mod coding_execute;
-pub use coding::{CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, LaunchFile};
+mod coding_native;
+mod coding_landing;
+pub use coding::{CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
 mod admission;
@@ -101,6 +103,7 @@ pub struct Runtime {
     // Kept after all state/process owners; dropping the runtime releases ownership.
     _writer: File,
     _repository_writer: Option<File>,
+    _landing_writer: Option<File>,
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
@@ -109,7 +112,7 @@ impl Drop for Runtime {
         if let Err(error) = rustix::fs::flock(&self._writer, rustix::fs::FlockOperation::Unlock) {
             tracing::warn!(%error, "could not unlock isolated workflow writer");
         }
-        if let Some(file) = &self._repository_writer {
+        for file in [&self._repository_writer, &self._landing_writer].into_iter().flatten() {
             let _ = rustix::fs::flock(file, rustix::fs::FlockOperation::Unlock);
         }
     }
@@ -147,9 +150,6 @@ impl Runtime {
         let coding: Option<CodingConfig> = if coding_path.try_exists()? {
             let config: CodingConfig = serde_json::from_slice(&std::fs::read(&coding_path)?)?;
             config.validate()?;
-            if matches!(config.harness, CodingHarness::Native { .. }) {
-                return Err(Error::Refused("native terminal/hook ownership requires coordinated adapter allocation"));
-            }
             Some(config)
         } else { None };
         let repository_writer = if let Some(config) = &coding {
@@ -159,6 +159,14 @@ impl Runtime {
             if file.metadata()?.nlink() != 1 { return Err(Error::Refused("repository writer lock is aliased")); }
             rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
                 .map_err(|_| Error::Refused("repository already has a configured writer"))?;
+            Some(file)
+        } else { None };
+        let landing_writer = if let Some(identity) = coding.as_ref().and_then(|c| c.landing.as_ref()) {
+            let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)
+                .mode(0o600).custom_flags(libc::O_NOFOLLOW).open(identity.repository.join("farcooler-workflow.lock"))?;
+            if file.metadata()?.nlink() != 1 { return Err(Error::Refused("landing writer lock is aliased")); }
+            rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+                .map_err(|_| Error::Refused("landing repository already has a configured writer"))?;
             Some(file)
         } else { None };
         for name in if coding.is_some() { vec!["receipts"] } else { vec!["repo", "receipts"] } {
@@ -187,10 +195,12 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        Ok(Self { inbox, send, next_lease: None,
+        let runtime = Self { inbox, send, next_lease: None,
             #[cfg(test)] sweeps: 0,
             root, store, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
-            _writer: writer, _repository_writer: repository_writer })
+            _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
+        runtime.validate_native_host()?;
+        Ok(runtime)
     }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
         self.authorize(controller.instance)?;

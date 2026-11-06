@@ -44,13 +44,13 @@ impl Runtime {
     fn provider_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provider.json", digest(&binding.effect)))
     }
-    fn process_log(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
     fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
     }
-    fn bytes(&self, path: &Path) -> Result<Vec<u8>> {
+    pub(super) fn bytes(&self, path: &Path) -> Result<Vec<u8>> {
         let file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
         if file.metadata()?.nlink() != 1 || file.metadata()?.len() > 8 * 1024 * 1024 {
             return Err(Error::Refused("aliased or oversized coding receipt"));
@@ -77,9 +77,16 @@ impl Runtime {
                     let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
                         plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(prompt.clone())),
                         ..Default::default() };
-                    let launch = crate::service::preset_command_with_hooks(preset, None, &extras);
+                    let launch = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
                     let mut command = process.clone();
-                    command.argv = vec!["/bin/sh".into(), "-c".into(), launch]; command
+                    command.argv = vec!["/bin/sh".into(), "-c".into(), launch];
+                    #[cfg(test)]
+                    if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) { command.argv = argv; }
+                    command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());
+                    command.environment.entry("COLORTERM".into()).or_insert_with(|| "truecolor".into());
+                    command.environment.insert("FARCOOLER_NATIVE_SESSION".into(), Self::native_session(binding));
+                    command.environment.insert("FARCOOLER_NATIVE_HOOK_SOCKET".into(), self.root.join("h.sock").to_string_lossy().into_owned());
+                    command
                 }
             },
             StageKind::Check => config.checks.get(operation.arguments.get(1)
@@ -111,8 +118,12 @@ impl Runtime {
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
-        let exit = crate::effect_runner::configured(&self.tree(binding), &command.argv, &command.environment,
-            &log, Duration::from_millis(command.timeout_ms), cancel).await?;
+        let exit = if self.is_native_build(binding) {
+            self.run_native(binding, &command, cancel).await?
+        } else {
+            crate::effect_runner::configured(&self.tree(binding), &command.argv, &command.environment,
+                &log, Duration::from_millis(command.timeout_ms), cancel).await?
+        };
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, exit, log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
@@ -145,6 +156,14 @@ impl Runtime {
         let original_binding = Binding::new(&binding.workspace, &original.effect,
             original.resource_generation.ok_or(Error::Refused("missing original generation"))?,
             binding.iteration, &binding.base);
+        if self.is_native_build(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
+            self.cancel_interrupted_native(&original_binding).await?;
+            let command = self.coding_command(&original_binding)?;
+            let fact = ProcessFact { binding: original_binding.clone(), argv: command.argv,
+                environment: command.environment, exit: None,
+                log_digest: digest(&self.bytes(&self.process_log(&original_binding))?) };
+            durable(&self.fact_path(&original_binding), &serde_json::to_vec(&fact)?)?;
+        }
         // Reconcile the original facts even if Cancel fenced its Observe or a
         // crash lost its journal. Never execute it, and never infer that external
         // acceptance was undone. Box breaks the Stop -> original reconciliation
@@ -173,6 +192,7 @@ impl Runtime {
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
                 let candidate = binding.effect.candidate.as_deref().ok_or(Error::Refused("missing landing candidate"))?;
+                self.land_remote(binding, cancel).await?;
                 self.git_recorded(binding, &self.repository(), &["update-ref", "-m", &format!("workflow:{}", digest(binding)),
                     self.landing_ref(), candidate, &binding.base]).await?;
             }
@@ -203,6 +223,7 @@ impl Runtime {
         Ok(candidate)
     }
     async fn verify_landing(&self, binding: &Binding) -> Result<()> {
+        self.verify_remote_landing(binding).await?;
         if self.git_recorded(binding, &self.repository(), &["rev-parse", self.landing_ref()]).await?
             != binding.effect.candidate.as_deref().unwrap_or("") {
             return Err(Error::Refused("landed SHA differs from CI candidate"));
@@ -229,6 +250,7 @@ impl Runtime {
                 || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
                 return Err(Error::Refused("configured process receipt mismatch"));
             }
+            if self.is_native_build(binding) { self.verify_native_settlement(binding, fact.exit)?; }
             // Even a dirty interrupted build can settle cancellation once this
             // exact owned group has been reaped; it supplies no candidate success.
             if fact.exit != Some(0) { return Ok(Outcome::SafeFailure); }
