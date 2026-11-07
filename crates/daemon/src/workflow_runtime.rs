@@ -718,3 +718,5 @@ mod concurrency_tests;
 mod observe_tests;
 #[cfg(test)]
 mod coding_verbs_tests;
+#[cfg(test)]
+mod landing_templates_tests;

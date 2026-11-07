@@ -24,7 +24,7 @@ const GATE: &str = r#"elif stage == 'gate':
 
 /// A configured runtime whose landing target is a private bare repository. Every ticket's build writes a file of
 /// its own, so tickets fold without clashing, and the second check is a gate that can move the remote under the group.
-async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
+pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
     let (dir, runtime) = configured(false, mode).await;
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
@@ -83,17 +83,17 @@ fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64) -> Definit
             stage(c, "check", StageKind::Check, "coding-check/v1", "0"), join],
         groups: [("landing".to_string(), GroupDef { limit: 4, exclusive: c.landing_resource().unwrap(), steps })].into() }
 }
-fn command(runtime: &Runtime, command: Command) -> Receipt {
+pub(super) fn command(runtime: &Runtime, command: Command) -> Receipt {
     let controller = runtime.controller();
     let state = runtime.state("w").unwrap().unwrap();
     let sequence = state.source_sequences.get("controller").copied().unwrap_or(0) + 1;
     runtime.submit(&controller, Request { id: format!("test-{sequence}"), workspace: "w".into(),
         expected_revision: state.revision, sequence, command }, 1).unwrap()
 }
-fn phase_of(state: &State, id: &str) -> Option<Phase> {
+pub(super) fn phase_of(state: &State, id: &str) -> Option<Phase> {
     state.items.get(id).map(|i| i.phase.clone()).or_else(|| state.archive.get(id).map(|a| a.phase.clone()))
 }
-async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) -> State {
+pub(super) async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) -> State {
     for time in 2..200 {
         runtime.pump(time).await.unwrap();
         let state = runtime.state("w").unwrap().unwrap();
@@ -111,21 +111,21 @@ async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) -> State {
     panic!("runtime failed to settle:\n{}\n{}\n{}", items.join("\n"), effects.join("\n"), facts.iter().map(|f| f.split("\"detail\"").last().unwrap().to_string()).collect::<Vec<_>>().join("\n"));
 }
 /// Enqueue a ticket and run it to its join step.
-async fn at_join(runtime: &mut Runtime, item: &str, definition: &Definition) {
+pub(super) async fn at_join(runtime: &mut Runtime, item: &str, definition: &Definition) {
     enqueue_item(runtime, "w", item, definition.clone());
     until(runtime, |s| phase_of(s, item) == Some(Phase::WaitingJoin)).await;
 }
-fn candidate_of<'a>(state: &'a State, id: &str) -> Option<&'a str> {
+pub(super) fn candidate_of<'a>(state: &'a State, id: &str) -> Option<&'a str> {
     state.items.get(id).and_then(|i| i.candidate.as_deref()).or_else(|| state.archive.get(id).and_then(|a| a.candidate.as_deref()))
 }
 fn group_id(state: &State) -> String {
     state.items.iter().chain(std::iter::empty()).find(|(_, i)| i.group_of.is_some()).map(|(id, _)| id.clone()).expect("a group is live")
 }
-async fn remote_head(runtime: &Runtime) -> String {
+pub(super) async fn remote_head(runtime: &Runtime) -> String {
     let landing = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap();
     adapters::git(&landing.repository, &["rev-parse", &landing.target]).await.unwrap()
 }
-fn outbox(runtime: &Runtime, kind: StageKind) -> usize {
+pub(super) fn outbox(runtime: &Runtime, kind: StageKind) -> usize {
     runtime.store.workflow_outbox("w").unwrap().iter().filter(|s| s.effect.kind == EffectKind::Execute(kind.clone())).count()
 }
 

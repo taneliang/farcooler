@@ -21,7 +21,7 @@ impl CommandValidation for CodingCommand {
     fn validate(&self) -> Result<()> {
         if self.argv.is_empty() || self.argv.len() > 32 || !Path::new(&self.argv[0]).is_absolute()
             || self.argv.iter().any(|a| a.len() > 4096 || a.contains('\0'))
-            || self.timeout_ms == 0 || self.timeout_ms > 3_600_000
+            || self.timeout_ms == 0 || self.timeout_ms > MAX_COMMAND_MS
             || self.environment.len() > 24 || self.environment.iter().any(|(k,v)|
                 k.is_empty() || !k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 || k.starts_with("FARCOOLER_") || v.len() > 4096 || v.contains('\0'))
@@ -120,6 +120,8 @@ impl CodingConfigExt for CodingConfig {
             arguments: vec![self.pin(), argument.into(), every_ms.to_string(), patience_ms.to_string()] }
     }
 }
+/// The longest any configured command may run: the landing job's own allowance for a gate.
+pub const MAX_COMMAND_MS: u64 = 3 * 3_600_000;
 /// How often a waiting step looks, and the longest it may wait.
 pub(super) const WAIT_EVERY_MS: std::ops::RangeInclusive<u64> = 10..=3_600_000;
 pub(super) const WAIT_PATIENCE_MS: std::ops::RangeInclusive<u64> = 10..=14 * 24 * 3_600_000;
@@ -148,6 +150,8 @@ impl Pinned for CodingConfig {
                 StageKind::Provision if !provisioned && !built => { provisioned = true; self.operation("coding-worktree/v1", "") },
                 StageKind::Build if provisioned && !landed => { built = true; self.operation("coding-harness/v1", "") },
                 StageKind::Check if built => self.operation("coding-check/v1", &gate_index(stage.operation.arguments.get(1))?.to_string()),
+                // A person decides; nothing runs, so no reviewer needs configuring.
+                StageKind::Review(Reviewer::Person(person)) if built && !landed => self.operation("coding-review/v1", &format!("person:{person}")),
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
                     self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
                 StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },

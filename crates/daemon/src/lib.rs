@@ -120,6 +120,7 @@ pub(crate) mod pr_timing_read;
 pub(crate) mod pr_actions;
 pub mod pr_watch;
 pub mod landing;
+pub mod landing_templates;
 pub mod landing_job;
 pub(crate) mod landing_run;
 pub mod landing_read;
