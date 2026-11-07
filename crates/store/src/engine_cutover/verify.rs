@@ -14,7 +14,7 @@ pub(super) fn catalog_matches(plan:&Preflight, after:&manifest::Manifest) -> boo
     catalog_hash(after)==SOURCE_SCHEMA_HASH
         && after.tables.iter().all(|(name,table)|plan.raw.tables.contains_key(name)||table.rows.is_empty())
 }
-fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
+pub(super) fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
     let mut after=preflight(conn)?.raw;
     // These are named transfer deltas, checked for exact +1. Never ignore an
     // entire column or table; every other value in the row must match the source.
@@ -79,7 +79,9 @@ impl Store {
         let unknown:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='schema:unknown')",[],|r|r.get(0))?;
         if unknown { return refuse("unreviewed source schema stays frozen"); }
         tx.execute("UPDATE engine_cutover_authority SET phase='released' WHERE singleton=1",[])?;
+        boundary::reach("release.in-transaction");
         tx.commit()?;
+        boundary::reach("release.after");
         Ok(())
     }
 }

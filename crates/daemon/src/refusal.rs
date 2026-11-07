@@ -1,8 +1,9 @@
 //! A daemon that is up but must not serve.
 //!
-//! One reason today: the database was written by a newer Far Cooler than this
+//! Two reasons today. The database was written by a newer Far Cooler than this
 //! one (`DomainError::NewerData`), which is what a rollback to an older build
-//! leaves behind. The store refuses to open it, so there is no `Service`.
+//! leaves behind; or the engine cutover holds it (`DomainError::CutoverHeld`).
+//! The store refuses to open either, so there is no `Service`.
 //!
 //! Exiting is the obvious answer and the wrong one. The LaunchAgent and the
 //! systemd unit both restart a daemon that exits non-zero, so it would restart
@@ -31,7 +32,7 @@ use farcooler_transport::UnixListenerServer;
 /// that was busy or a directory not there yet, and exiting into the
 /// supervisor's restart is still the right way to retry it.
 pub fn stays_up_for(err: &DomainError) -> bool {
-    matches!(err, DomainError::NewerData)
+    matches!(err, DomainError::NewerData | DomainError::CutoverHeld)
 }
 
 /// Hold `socket` and refuse every session on it with `err` until `shutdown`

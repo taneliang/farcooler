@@ -12,6 +12,6 @@ pub const DATABASE: &str = "farcooler.db";
 pub fn admit(root: &Path) -> Result<Admission> {
     ordinary_admission(&root.join(DATABASE)).map_err(|error| {
         tracing::error!(%error, "ordinary startup refused by the engine cutover gate");
-        DomainError::OperationFailed
+        DomainError::CutoverHeld
     })
 }

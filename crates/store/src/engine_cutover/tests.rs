@@ -193,5 +193,6 @@ mod startup_gate;
 mod manual_delivery;
 mod engine_delivery;
 mod recovery;
+mod commit_closed;
 mod released_board;
 mod source60;

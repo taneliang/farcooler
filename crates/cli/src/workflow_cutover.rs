@@ -13,6 +13,8 @@ pub enum CutoverCmd {
     Prepare { #[arg(long)] attempt: String },
     /// In the recovery daemon: end an uncommitted attempt, restoring the original database if it was upgraded.
     Recover,
+    /// In the recovery daemon: take the closed backup and commit a frozen attempt. It recovers forward only after this.
+    Commit,
     /// In the recovery daemon: re-check a committed transfer against its original baseline.
     Verify,
     /// In the recovery daemon: release a verified transfer.
@@ -26,6 +28,7 @@ impl CutoverCmd {
             Self::Inspect => Cutover::Inspect,
             Self::Prepare { attempt } => Cutover::Prepare { attempt },
             Self::Recover => Cutover::Recover,
+            Self::Commit => Cutover::Commit,
             Self::Verify => Cutover::Verify,
             Self::Release => Cutover::Release,
             Self::Finish => Cutover::Finish,
@@ -60,7 +63,10 @@ mod tests {
         assert_eq!(r.method, "workflow.cutover");
         let Some(request::Payload::WorkflowCommand(body)) = r.payload else { panic!("payload") };
         assert_eq!(farcooler_protocol::workflow_cutover::parse(&body.json).unwrap(), Cutover::Prepare { attempt: "a-1".into() });
-        assert!(crate::Cli::try_parse_from(["farcooler", "workflow-cutover", "commit"]).is_err(), "commit is not offered");
+        let cli = crate::Cli::try_parse_from(["farcooler", "workflow-cutover", "commit"]).unwrap();
+        let crate::Command::WorkflowCutover(cmd) = cli.command else { panic!("cutover command") };
+        assert_eq!(cmd.op(), Cutover::Commit);
+        assert!(crate::Cli::try_parse_from(["farcooler", "workflow-cutover", "commit", "--backup", "x"]).is_err(), "the daemon decides the backup");
         assert!(crate::Cli::try_parse_from(["farcooler", "workflow-cutover", "prepare"]).is_err(), "attempt is required");
     }
 }

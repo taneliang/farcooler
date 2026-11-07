@@ -161,18 +161,54 @@ pub fn released_transfer_for_tests(db: &std::path::Path, attempt: &str) {
     transfer::finish(db, &store, JoinedOwners::unit(attempt)).unwrap();
 }
 
-/// Fixture-only: commit a prepared attempt without the closed backup, which is
-/// the parent's to prove, so a daemon test can drive the stages after it.
-pub fn commit_for_tests(db: &std::path::Path, attempt: &str) {
-    use crate::engine_cutover::{JoinedOwners, Quiescence, REQUIRED_OWNERS, StoppedWriter, rehearsal::CommitPermit, startup, transfer};
-    let owners = JoinedOwners::acquire(db, attempt).unwrap();
-    let store = startup::open_recovery(db, &owners).unwrap();
-    let (_, plan) = transfer::bound_plan(db, &store).unwrap();
-    let protected = store.engine_protected_resources().unwrap();
-    let stopped = REQUIRED_OWNERS.iter().enumerate().map(|(n, identity)| StoppedWriter { identity: (*identity).into(), incarnation: "fixture".into(),
-        joined_receipt: "fixture".into(), resources: if n == 0 { protected.clone() } else { Default::default() } }).collect();
-    let evidence = Quiescence { inventory: REQUIRED_OWNERS.iter().map(|s| (*s).to_owned()).collect(), stopped, protected_resources: protected };
-    store.engine_commit(&plan, owners, &CommitPermit::unit(&plan, &evidence, attempt)).unwrap();
+fn source60_put(conn: &Connection, table: &str, given: &[(&str, rusqlite::types::Value)]) {
+    use rusqlite::types::Value;
+    let mut columns: Vec<String> = given.iter().map(|(c, _)| (*c).to_owned()).collect();
+    let mut values: Vec<Value> = given.iter().map(|(_, v)| v.clone()).collect();
+    let info: Vec<(String, String, bool, bool)> = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap()
+        .query_map([], |r| Ok((r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? == 1, r.get::<_, Option<String>>(4)?.is_some()))).unwrap().map(|r| r.unwrap()).collect();
+    for (name, kind, required, defaulted) in info {
+        if !required || defaulted || columns.contains(&name) { continue; }
+        values.push(match kind.as_str() { "INTEGER" => Value::Integer(0), "TEXT" => Value::Text(String::new()), _ => Value::Blob(vec![0; 16]) });
+        columns.push(name);
+    }
+    let marks = vec!["?"; columns.len()].join(",");
+    conn.execute(&format!("INSERT INTO \"{table}\"({}) VALUES({marks})", columns.join(",")), rusqlite::params_from_iter(values)).unwrap();
+}
+fn source60_id(n: u8) -> rusqlite::types::Value { rusqlite::types::Value::Blob(vec![n; 16]) }
+fn source60_text(s: &str) -> rusqlite::types::Value { rusqlite::types::Value::Text(s.into()) }
+fn source60_int(n: i64) -> rusqlite::types::Value { rusqlite::types::Value::Integer(n) }
+
+/// Registry prefix 60 with invalid wait bytes, value-type distinctions, equal-time
+/// notes, a deleted high allocator id, edges, policy, budget and check-in history.
+pub fn write_source60(path: &Path) {
+    let mut conn = Connection::open(path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+    crate::migrate::migrate_only_to(&mut conn, 60);
+    crate::compat::stamp_compatible_down_to(&conn).unwrap();
+    conn.execute("UPDATE meta SET value='60' WHERE key='compatible_down_to'", []).unwrap();
+    source60_put(&conn, "repository_roots", &[("id", source60_id(1)), ("path", source60_text("resources/repo"))]);
+    source60_put(&conn, "repositories", &[("id", source60_id(2)), ("repository_root_id", source60_id(1)), ("canonical_git_dir", source60_text("resources/repo/.git"))]);
+    source60_put(&conn, "workspaces", &[("id", source60_id(3)), ("repository_id", source60_id(2)), ("name", source60_text("Main")), ("is_main", source60_int(1))]);
+    for (n, key, status) in [(4u8, "ov-1", "in_progress"), (5, "ov-2", "done"), (6, "ov-3", "not-a-status")] {
+        source60_put(&conn, "tasks", &[("id", source60_id(n)), ("workspace_id", source60_id(3)), ("repository_id", source60_id(2)), ("key", source60_text(key)), ("title", source60_text("空\nmultiline")), ("status", source60_text(status)), ("status_since", source60_int(n as i64))]);
+    }
+    conn.execute("UPDATE tasks SET wait_kind='\u{1}bad', wait_rank=x'00ff' WHERE key='ov-3'", []).unwrap();
+    use rusqlite::types::Value;
+    for (n, at, extra) in [(7u8, source60_int(1000), Value::Text("{}".into())), (8, source60_int(1000), Value::Blob(vec![0, 255])), (9, Value::Real(1.5), Value::Text(String::new()))] {
+        source60_put(&conn, "task_notes", &[("id", source60_id(n)), ("task_id", source60_id(4)), ("kind", source60_text("decision")), ("actor", source60_text("user")), ("at", at), ("body", source60_text("")), ("extra", extra)]);
+    }
+    source60_put(&conn, "task_blocks", &[("task_id", source60_id(4)), ("blocked_by", source60_id(5)), ("reason", source60_text("edge"))]);
+    source60_put(&conn, "task_reads", &[("task_id", source60_id(4))]);
+    source60_put(&conn, "task_reads", &[("task_id", source60_id(5))]);
+    source60_put(&conn, "ticket_lines", &[("task_id", source60_id(4)), ("stage", source60_text("waiting")), ("stack_parent", source60_id(5)), ("same_branch", source60_id(5))]);
+    source60_put(&conn, "ticket_lines", &[("task_id", source60_id(5)), ("stage", source60_text("landed"))]);
+    source60_put(&conn, "plan_budgets", &[("id", source60_id(10)), ("workspace_id", source60_id(3)), ("task_id", source60_id(4)), ("tokens", source60_int(5))]);
+    source60_put(&conn, "check_in_schedules", &[("workspace_id", source60_id(3)), ("task_id", source60_id(4)), ("authorizer_source", source60_text("local_person")), ("state", source60_text("enabled"))]);
+    source60_put(&conn, "check_in_occurrences", &[("id", source60_id(11)), ("workspace_id", source60_id(3)), ("task_id", source60_id(4)), ("authorizer_source", source60_text("local_person")), ("state", source60_text("uncertain"))]);
+    source60_put(&conn, "check_in_enter_fences", &[("workspace_id", source60_id(3)), ("task_id", source60_id(4)), ("occurrence_id", source60_id(11)), ("attempt_id", source60_id(12))]);
+    source60_put(&conn, "people_events", &[("id", source60_int(900)), ("actor", source60_text("user"))]);
+    conn.execute("DELETE FROM people_events", []).unwrap();
 }
 
 /// Fixture-only: the row count of `table`.

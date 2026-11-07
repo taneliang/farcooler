@@ -161,6 +161,13 @@ pub enum DomainError {
     #[error("This runner's data was written by a newer Far Cooler. Update Far Cooler to use it.")]
     NewerData,
 
+    /// The engine cutover holds this runner's database: an upgrade has begun
+    /// and not finished, or has not begun on data that needs it. `NewerData`'s
+    /// sibling, for the same audience: a sentence for whoever is looking, sent
+    /// to a device even by a process that then exits.
+    #[error("This runner's data is being upgraded. Finish the upgrade on the runner to use it.")]
+    CutoverHeld,
+
     /// A page (ov-269) the runner refused, in the sentence that says where and
     /// why: `blocks[3].rows[50]: a table has at most 50 rows.`
     ///
@@ -234,7 +241,7 @@ impl DomainError {
             // The handshake's own code, naming which in `what`, the way
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
             // about versions, and only installing something fixes it.
-            DomainError::NewerData => (ErrorCode::VersionIncompatible, false),
+            DomainError::NewerData | DomainError::CutoverHeld => (ErrorCode::VersionIncompatible, false),
             DomainError::PageRefused { .. } => (ErrorCode::InvalidArgument, false),
         }
     }
@@ -263,6 +270,7 @@ impl DomainError {
         match self {
             DomainError::InvalidArgument { what } | DomainError::Conflict { what } | DomainError::NotYours { what } => what,
             DomainError::NewerData => "newer_data",
+            DomainError::CutoverHeld => "cutover_held",
             DomainError::PageRefused { .. } => "page",
             DomainError::AuthRequired
             | DomainError::ScopeDenied { .. }
@@ -536,6 +544,7 @@ mod tests {
             DomainError::Conflict { what: "not_held" },
             DomainError::NotYours { what: "not_lead" },
             DomainError::NewerData,
+            DomainError::CutoverHeld,
             DomainError::PageRefused { said: "blocks[0].type: there's no block called x.".into() },
         ]
     }
@@ -572,7 +581,7 @@ mod tests {
         // `PageRefused` is `InvalidArgument`'s.
         for e in all_variants()
             .into_iter()
-            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::PageRefused { .. }))
+            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::PageRefused { .. }))
         {
             assert!(seen.insert(e.code() as i32), "{e:?} reuses a wire code");
         }
@@ -602,7 +611,7 @@ mod tests {
             assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
             // `Conflict` shares `resource-conflict` by design, and `NewerData`
             // `version-incompatible`; see above.
-            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::PageRefused { .. }) {
+            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::PageRefused { .. }) {
                 continue;
             }
             assert!(seen.insert(w), "{e:?} reuses the word {w}");
@@ -664,6 +673,7 @@ mod tests {
                     | DomainError::Conflict { .. }
                     | DomainError::NotYours { .. }
                     | DomainError::NewerData
+                    | DomainError::CutoverHeld
                     | DomainError::PageRefused { .. }
             ) {
                 continue;

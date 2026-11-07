@@ -2,11 +2,10 @@
 //! in a recovery process, one that started no writer, under the kernel proof
 //! that no other process has the database open (`engine_cutover::owners`).
 //! Nothing a caller says is quiescence. The live daemon can only inspect, or
-//! drain and stop so that the next start is that process. Commit is not offered:
-//! it needs the closed-backup permit, and `recover` is the exit until it exists.
+//! drain and stop so that the next start is that process.
 use std::path::{Path, PathBuf};
 use farcooler_protocol::workflow_cutover::Cutover;
-use farcooler_store::engine_cutover::{JoinedOwners, startup, transfer};
+use farcooler_store::engine_cutover::{JoinedOwners, boundary, closing, owners, startup, transfer};
 use serde_json::{Value, json};
 
 #[derive(Debug)]
@@ -23,7 +22,8 @@ pub fn inspect(root: &Path) -> Value {
     let authority = startup::read_authority(&db).ok().flatten();
     let baseline = transfer::validate_artifacts(&db).ok().map(|(b, _)| json!({"attempt": b.attempt, "registry": b.registry, "raw_hash": b.raw_hash}));
     json!({"schema": 1, "ordinary_startup": admission, "artifacts": startup::artifact_dir(&db).exists(),
-        "crash_journal": startup::crash_journal(&db), "authority": authority, "baseline": baseline})
+        "crash_journal": startup::crash_journal(&db), "authority": authority, "baseline": baseline,
+        "open_elsewhere": owners::other_holders(&db).ok()})
 }
 
 fn attempt_of(db: &Path) -> Result<String, Refused> { Ok(transfer::validate_artifacts(db).map_err(refuse)?.0.attempt) }
@@ -46,12 +46,24 @@ pub fn recover(root: &Path) -> Result<Value, Refused> {
     Ok(json!({"schema": 1, "restored": recovered.restored, "evidence": recovered.evidence}))
 }
 
+/// Take the closed backup and map the frozen attempt, under one proof. Past this
+/// the attempt recovers forward only.
+pub fn commit(root: &Path) -> Result<Value, Refused> {
+    let db = database(root);
+    let owners = JoinedOwners::acquire(&db, &attempt_of(&db)?).map_err(refuse)?;
+    let committed = closing::commit(&db, owners).map_err(refuse)?;
+    Ok(json!({"schema": 1, "committed": committed.attempt, "resumed": committed.resumed, "backup": committed.backup}))
+}
+
 pub fn verify(root: &Path) -> Result<Value, Refused> {
     let db = database(root);
     let owners = JoinedOwners::acquire(&db, &attempt_of(&db)?).map_err(refuse)?;
     let store = startup::open_recovery(&db, &owners).map_err(refuse)?;
     let (baseline, plan) = transfer::bound_plan(&db, &store).map_err(refuse)?;
+    closing::held(&db, &store, &baseline).map_err(refuse)?;
     store.engine_verify(&plan).map_err(refuse)?;
+    boundary::reach("verify.after");
+    closing::record_up_to(&db, &baseline, "verified").map_err(refuse)?;
     Ok(json!({"schema": 1, "verified": baseline.attempt}))
 }
 
@@ -60,7 +72,9 @@ pub fn release(root: &Path) -> Result<Value, Refused> {
     let owners = JoinedOwners::acquire(&db, &attempt_of(&db)?).map_err(refuse)?;
     let store = startup::open_recovery(&db, &owners).map_err(refuse)?;
     let (baseline, plan) = transfer::bound_plan(&db, &store).map_err(refuse)?;
+    closing::held(&db, &store, &baseline).map_err(refuse)?;
     store.engine_release(&plan, owners).map_err(refuse)?;
+    closing::record_up_to(&db, &baseline, "released").map_err(refuse)?;
     Ok(json!({"schema": 1, "released": baseline.attempt}))
 }
 
@@ -92,6 +106,7 @@ pub fn recovery(root: &Path, op: &Cutover) -> Result<Value, Refused> {
         Cutover::Inspect => Ok(inspect(root)),
         Cutover::Prepare { attempt } => prepare(root, attempt),
         Cutover::Recover => recover(root),
+        Cutover::Commit => commit(root),
         Cutover::Verify => verify(root),
         Cutover::Release => release(root),
         Cutover::Finish => finish(root),

@@ -5,13 +5,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use crate::Store;
+pub mod boundary;
+pub mod closing;
 pub mod manifest;
 pub mod rehearsal;
 pub mod startup;
 pub mod owners;
 pub mod transfer;
 mod verify;
-use manifest::{Cell, Manifest};
+pub(crate) use manifest::Manifest;
+use manifest::Cell;
 use rehearsal::CommitPermit;
 pub use owners::JoinedOwners;
 pub const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"];
@@ -409,7 +412,7 @@ impl Store {
         owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         frozen_by(&tx,attempt)?;
-        if required_resources(&tx)?!=proof.protected_resources { return refuse("protected resource inventory changed"); }
+        if required_resources(&tx)?!=*proof.protected() { return refuse("protected resource inventory changed"); }
         if authority(&tx)?.phase!="quiesced" { return refuse("cutover not quiesced"); }
         let current=Manifest::capture(&tx)?;
         if !plan.raw.conserved_by(&current) { return refuse("source changed after raw preflight"); }
@@ -453,11 +456,20 @@ impl Store {
         crate::engine_manual::record_notice_floor(&tx,incarnation)?;
         tx.execute("UPDATE engine_cutover_authority SET phase='committed',incarnation=?1,manifest=?2 WHERE singleton=1",params![incarnation,plan.raw.hash()])?;
         crate::compat::stamp_compatible_down_to(&tx).map_err(|e|Error::Refused(e.to_string()))?;
+        #[cfg(test)]
+        if let Some(hook)=BEFORE_SEAL.with(|h|h.borrow_mut().take()) { hook(&tx); }
+        // A commit that could not verify must stay frozen, where Recover still
+        // works: past this transaction the attempt only goes forward.
+        verify::check(plan,&tx)?;
+        boundary::reach("commit.in-mapping");
         tx.commit()?;
+        boundary::reach("commit.after-mapping");
         authority(&conn)
     }
 }
 
+#[cfg(test)]
+thread_local! { pub(crate) static BEFORE_SEAL: std::cell::RefCell<Option<Box<dyn FnOnce(&Connection)>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 mod tests;
 

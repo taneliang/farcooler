@@ -16,14 +16,19 @@ pub type SeatOf = fn(i32) -> Seat;
 /// reused since.
 pub type StartOf = fn(i32) -> Option<i64>;
 
-pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf }
+/// The exit status that asks a supervisor for a restart: launchd and systemd
+/// restart a daemon only on failure, and the next start is ordinary service.
+pub const RESTART_EXIT: i32 = 75;
+
+pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf, done: std::sync::Arc<tokio::sync::Notify> }
 impl RecoveryHandler {
     pub fn new(root: std::path::PathBuf, peer: Peer, pid: Option<i32>) -> Self {
         Self::with_walk(root, peer, pid, recovery_seat, crate::claude_registry::process_incarnation)
     }
     pub(crate) fn with_walk(root: std::path::PathBuf, peer: Peer, pid: Option<i32>, seat_of: SeatOf, start_of: StartOf) -> Self {
-        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of }
+        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of, done: Default::default() }
     }
+    fn ending(mut self, done: std::sync::Arc<tokio::sync::Notify>) -> Self { self.done = done; self }
     fn caller_is_a_person(&self) -> bool {
         let Some((pid, Some(start))) = self.caller else { return false };
         (self.start_of)(pid) == Some(start) && (self.seat_of)(pid) == Seat::Person
@@ -48,7 +53,18 @@ impl Handler for RecoveryHandler {
     fn peer(&self) -> Peer { self.peer.clone() }
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let outcome = self.run(&req);
+        let done = self.done.clone();
+        // Past these there is nothing left for recovery to do. A moment's grace
+        // lets the reply reach the caller, as a live Prepare does.
+        let finished = outcome.is_ok() && matches!(&req.payload, Some(request::Payload::WorkflowCommand(p))
+            if matches!(workflow_cutover::parse(&p.json), Ok(workflow_cutover::Cutover::Recover | workflow_cutover::Cutover::Finish)));
         async move {
+            if finished {
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    done.notify_one();
+                });
+            }
             match outcome {
                 Ok(value) => Response { request_id: req.request_id, outcome: Some(response::Outcome::Result(WireResult {
                     value: Some(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json: value.to_string() })) })) },
@@ -58,15 +74,22 @@ impl Handler for RecoveryHandler {
     }
 }
 
-/// Hold `socket` and answer only cutover recovery until a termination signal.
-pub async fn serve(socket: &std::path::Path, root: std::path::PathBuf) -> std::io::Result<()> {
+/// Hold `socket` and answer only cutover recovery until a termination signal,
+/// or until an attempt ends. True means it ended, and the next start is ordinary.
+pub async fn serve(socket: &std::path::Path, root: std::path::PathBuf) -> std::io::Result<bool> {
     let server = farcooler_transport::UnixListenerServer::bind(socket)?;
     tracing::warn!(socket = %socket.display(), "ordinary startup refused; serving cutover recovery only");
+    let done = std::sync::Arc::new(tokio::sync::Notify::new());
+    let ended = done.clone();
     let sessions = move |preamble: Option<farcooler_transport::SessionPreamble>, pid: Option<i32>| {
         let peer = crate::sessions::peer_from_preamble(preamble.as_ref())?;
-        Some((farcooler_transport::HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() }, RecoveryHandler::new(root.clone(), peer, pid)))
+        Some((farcooler_transport::HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() }, RecoveryHandler::new(root.clone(), peer, pid).ending(ended.clone())))
     };
-    let result = tokio::select! { served = server.serve_with_pid(sessions) => served, _ = crate::refusal::signaled() => Ok(()) };
+    let result = tokio::select! {
+        served = server.serve_with_pid(sessions) => served.map(|()| false),
+        _ = crate::refusal::signaled() => Ok(false),
+        _ = done.notified() => Ok(true),
+    };
     let _ = std::fs::remove_file(socket);
     result
 }

@@ -11,7 +11,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use super::{JoinedOwners, Preflight, Result, Error, refuse, startup::{self, artifact_dir}, preflight};
+use super::{JoinedOwners, Preflight, Result, Error, boundary::reach, refuse, startup::{self, artifact_dir}, preflight};
 use crate::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,16 +40,20 @@ const HOLD: &str = "hold.json";
 const REPLAY_DB: &str = "replay.db";
 const RESTORE_DB: &str = "restore.db";
 
-fn sync_dir(dir: &Path) -> Result<()> { File::open(dir)?.sync_all()?; Ok(()) }
+pub(super) fn sync_dir(dir: &Path) -> Result<()> { File::open(dir)?.sync_all()?; Ok(()) }
 fn sync_parent(db: &Path) -> Result<()> { if let Some(parent) = db.parent() { sync_dir(parent)?; } Ok(()) }
-fn publish(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+/// `torn` names the boundary where a crash leaves half of this file behind.
+pub(super) fn publish(dir: &Path, name: &str, bytes: &[u8], torn: &'static str) -> Result<()> {
     let mut f = OpenOptions::new().write(true).create_new(true).open(dir.join(name))?;
-    f.write_all(bytes)?;
+    let (first, rest) = bytes.split_at(bytes.len() / 2);
+    f.write_all(first)?;
+    reach(torn);
+    f.write_all(rest)?;
     f.sync_all()?;
     sync_dir(dir)
 }
-fn db_hash(db: &Path) -> Result<String> { Ok(farcooler_workflow::digest(&fs::read(db)?)) }
-fn refuse_sidecars(db: &Path) -> Result<()> {
+pub(super) fn db_hash(db: &Path) -> Result<String> { Ok(farcooler_workflow::digest(&fs::read(db)?)) }
+pub(super) fn refuse_sidecars(db: &Path) -> Result<()> {
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut p = db.as_os_str().to_owned();
         p.push(suffix);
@@ -59,7 +63,7 @@ fn refuse_sidecars(db: &Path) -> Result<()> {
 }
 /// An empty journal is not hot: SQLite neither replays nor removes it, and it
 /// would refuse the transfer forever. Under the proof, nothing else can own it.
-fn clear_inert_journal(db: &Path) -> Result<()> {
+pub(super) fn clear_inert_journal(db: &Path) -> Result<()> {
     startup::settle_journal(db)?;
     let mut name = db.as_os_str().to_owned();
     name.push("-journal");
@@ -82,9 +86,12 @@ pub fn hold(db: &Path, attempt: &str) -> Result<()> {
     // No authority table is a source below 67; a database past legacy has nothing to hold.
     if startup::read_authority(db)?.is_some_and(|a| a.phase != "legacy") { return refuse("only a legacy database can be held for cutover"); }
     let dir = artifact_dir(db);
+    reach("hold.before");
     create_artifacts(&dir)?;
-    publish(&dir, HOLD, &serde_json::to_vec(&Hold { attempt: attempt.into() })?)?;
-    sync_parent(db)
+    publish(&dir, HOLD, &serde_json::to_vec(&Hold { attempt: attempt.into() })?, "hold.torn")?;
+    sync_parent(db)?;
+    reach("hold.after");
+    Ok(())
 }
 fn held(dir: &Path) -> Result<Option<Hold>> {
     if fs::symlink_metadata(dir).is_err() { return Ok(None); }
@@ -155,6 +162,7 @@ pub fn begin(db: &Path, owners: JoinedOwners) -> Result<(Store, Preflight)> {
     source.seek(SeekFrom::Start(0))?;
     source.read_to_end(&mut bytes)?;
     if hold.is_none() { create_artifacts(&dir)?; }
+    reach("begin.before-baseline-db");
     // Original, closed, byte-identical copy; synced before the intent exists.
     let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(BASELINE_DB))?;
     copy.write_all(&bytes)?;
@@ -164,15 +172,20 @@ pub fn begin(db: &Path, owners: JoinedOwners) -> Result<(Store, Preflight)> {
         catalog_hash: farcooler_workflow::digest(&plan.raw.objects), db_hash: farcooler_workflow::digest(&bytes),
         raw_hash: plan.raw.hash(), owners_hash: farcooler_workflow::digest(&owners.receipt()?), resources };
     if db_hash(&dir.join(BASELINE_DB))? != baseline.db_hash { return refuse("baseline copy differs from source"); }
-    publish(&dir, BASELINE, &serde_json::to_vec(&baseline)?)?;
+    reach("begin.after-baseline-db");
+    publish(&dir, BASELINE, &serde_json::to_vec(&baseline)?, "begin.torn-baseline")?;
+    reach("begin.before-intent");
     let intent = Intent { attempt: baseline.attempt.clone(), baseline_hash: farcooler_workflow::digest(&baseline) };
-    publish(&dir, INTENT, &serde_json::to_vec(&intent)?)?;
+    publish(&dir, INTENT, &serde_json::to_vec(&intent)?, "begin.torn-intent")?;
     sync_parent(db)?;
+    reach("begin.after-intent");
     #[cfg(test)]
     if let Some(hook) = AFTER_CAPTURE.with(|h| h.borrow_mut().take()) { hook(); }
     // Atomic upgrade: DDL + version + refusing floor + frozen attempt together.
     freeze(&tx, plan.registry, &baseline)?;
+    reach("begin.in-upgrade");
     tx.commit()?;
+    reach("begin.after-upgrade");
     drop(source);
     let store = Store::from_engine_cutover_connection(conn, owners.into_lock()).map_err(|e| Error::Refused(e.to_string()))?;
     Ok((store, plan))
@@ -236,15 +249,19 @@ pub fn recover(db: &Path, owners: JoinedOwners) -> Result<Recovered> {
             copy.set_permissions(fs::metadata(db)?.permissions())?;
             drop(copy);
             if db_hash(&restore)? != baseline.db_hash { return refuse("restore copy differs from baseline"); }
+            reach("recover.before-rename");
             fs::rename(&restore, db)?;
             sync_parent(db)?;
-            Ok(Recovered { restored: true, evidence: retire(db, "abandoned")? })
+            reach("recover.after-rename");
+            let evidence = retire(db, "abandoned")?;
+            reach("recover.after-retire");
+            Ok(Recovered { restored: true, evidence })
         }
         Some(_) => refuse("committed authority recovers forward only"),
     }
 }
 /// The database's frozen attempt must be the one these artifacts describe.
-fn frozen_as(conn: &Connection, baseline: &Baseline) -> Result<()> {
+pub(super) fn frozen_as(conn: &Connection, baseline: &Baseline) -> Result<()> {
     let manifest: Option<String> = conn.query_row("SELECT manifest FROM engine_cutover_attempts WHERE id=?1", [frozen_id(&baseline.attempt)], |r| r.get(0)).optional()?;
     if manifest.as_deref() != Some(baseline.raw_hash.as_str()) { return refuse("database was frozen by another attempt"); }
     Ok(())
@@ -261,12 +278,15 @@ pub fn finish(db: &Path, store: &Store, owners: JoinedOwners) -> Result<PathBuf>
     if authority.phase != "released" || authority.manifest.as_deref() != Some(baseline.raw_hash.as_str()) {
         return refuse("attempt is not verified and released against its baseline");
     }
+    super::closing::record_up_to(db, &baseline, "resolved")?;
     let dir = artifact_dir(db);
     let mut done = dir.as_os_str().to_owned();
     done.push(format!("-resolved-{}", baseline.attempt));
     let done = PathBuf::from(done);
+    reach("finish.before-rename");
     fs::rename(&dir, &done)?;
     sync_parent(db)?;
+    reach("finish.after-rename");
     Ok(done)
 }
 

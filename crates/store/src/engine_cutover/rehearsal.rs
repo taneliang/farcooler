@@ -272,9 +272,35 @@ impl PrivateRehearsal {
 
 /// Non-wire capability minted only after a closed backup and independent restore
 /// compare. No public constructor or deserializer can fabricate this evidence.
-pub struct CommitPermit {baseline:String,proof:String,attempt:String,backup:String,evidence:super::Quiescence}
+pub struct CommitPermit {baseline:String,proof:String,attempt:String,backup:String,evidence:Evidence}
+/// What a permit says stood behind it. A rehearsal's written-down inventory, or
+/// a real attempt's kernel proof, which needs no list of writers.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub(super) enum Evidence {
+    Rehearsal(super::Quiescence),
+    Kernel {owners_hash:String,protected_resources:std::collections::BTreeSet<String>},
+}
+impl Evidence {
+    pub(super) fn validate(&self) -> Result<()> {
+        match self {
+            Self::Rehearsal(proof) => proof.validate(),
+            Self::Kernel {owners_hash,..} if owners_hash.is_empty() => refuse("commit permit names no owner proof"),
+            Self::Kernel {..} => Ok(()),
+        }
+    }
+    pub(super) fn protected(&self) -> &std::collections::BTreeSet<String> {
+        match self { Self::Rehearsal(proof) => &proof.protected_resources, Self::Kernel {protected_resources,..} => protected_resources }
+    }
+}
 impl CommitPermit {
-    pub(super) fn evidence(&self)->&super::Quiescence {&self.evidence}
+    pub(super) fn evidence(&self)->&Evidence {&self.evidence}
+    /// A real attempt's permit: `closing::commit` holds the proof and has just
+    /// compared the closed backup. Nothing outside this crate reaches it.
+    pub(super) fn closed(plan:&super::Preflight,owners:&super::JoinedOwners,backup:String,protected_resources:std::collections::BTreeSet<String>) -> Result<Self> {
+        let evidence=Evidence::Kernel {owners_hash:farcooler_workflow::digest(&owners.receipt()?),protected_resources};
+        Ok(Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(&evidence),attempt:owners.attempt().into(),backup,evidence})
+    }
     pub(super) fn validate(&self,plan:&super::Preflight) -> Result<()> {
         if self.baseline!=plan.raw.hash() || self.proof!=farcooler_workflow::digest(&self.evidence) || self.attempt.is_empty() || self.backup.is_empty() {return refuse("commit permit does not bind baseline/quiescence/backup");}
         Ok(())
@@ -283,7 +309,7 @@ impl CommitPermit {
     pub(super) fn backup_hash(&self)->&str {&self.backup}
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn unit(plan:&super::Preflight,proof:&super::Quiescence,attempt:&str)->Self {
-        Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into(),evidence:proof.clone()}
+        Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into(),evidence:Evidence::Rehearsal(proof.clone())}
     }
 }
 impl PrivateRehearsal {
@@ -299,7 +325,7 @@ impl PrivateRehearsal {
         let db=Connection::open_with_flags(backup.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let baseline=super::preflight(&db)?;
         if !plan.raw.conserved_by(&baseline.raw) || super::required_resources(&db)?!=proof.protected_resources {return refuse("backup baseline/resource binding differs from plan");}
-        let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot),evidence:proof.clone()};
+        let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot),evidence:Evidence::Rehearsal(proof.clone())};
         self.record(sequence,&JournalEntry {attempt:attempt.into(),stage:"backed_up".into(),evidence:serde_json::to_string(&(permit.baseline.clone(),permit.proof.clone(),permit.backup.clone()))?})?;
         Ok(permit)
     }

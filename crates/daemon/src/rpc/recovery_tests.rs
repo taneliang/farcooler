@@ -52,11 +52,9 @@ async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
     released(&root).await;
     (dir, root)
 }
-/// The domain refusal, or the parser's for a word outside the vocabulary: either
-/// way past the caller check, unlike the denial the seat test pins.
+/// The domain refusal: past the caller check, unlike the denial the seat test pins.
 fn failed(json: &str) -> String {
-    let error = if json.contains("Commit") { DomainError::NotFound } else { DomainError::OperationFailed };
-    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), error).outcome)
+    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::OperationFailed).outcome)
 }
 const INSPECT: &str = r#"{"op":"Inspect"}"#;
 const PREPARE: &str = r#"{"op":"Prepare","attempt":"a-1"}"#;
@@ -107,7 +105,7 @@ async fn recovery_prepares_then_recovers_a_real_database_back_to_ordinary_servic
     assert_eq!(inspected["authority"]["phase"], "quiesced");
     assert!(inspected["ordinary_startup"].as_str().unwrap().starts_with("refused"));
     assert_eq!(inspected["baseline"]["attempt"], "a-1");
-    for refused in [r#"{"op":"Verify"}"#, r#"{"op":"Release"}"#, r#"{"op":"Finish"}"#, r#"{"op":"Commit"}"#, PREPARE] {
+    for refused in [r#"{"op":"Verify"}"#, r#"{"op":"Release"}"#, r#"{"op":"Finish"}"#, PREPARE] {
         assert_eq!(op(&owner, refused).await.unwrap_err(), failed(refused), "{refused} is refused before a commit");
     }
     assert_eq!(op(&owner, r#"{"op":"Recover"}"#).await.unwrap()["restored"], true);
@@ -133,7 +131,9 @@ async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit
     let owner = person(&root);
     prepare(&owner).await.unwrap();
     assert!(op(&owner, r#"{"op":"Verify"}"#).await.is_err(), "not committed");
-    farcooler_store::testing::commit_for_tests(&db, "a-1");
+    let committed = op(&owner, r#"{"op":"Commit"}"#).await.unwrap();
+    assert_eq!(committed["committed"], "a-1");
+    assert!(std::path::Path::new(committed["backup"].as_str().unwrap()).join("db").is_file(), "with a closed backup");
     assert!(op(&owner, r#"{"op":"Recover"}"#).await.is_err(), "committed recovers forward only");
     assert!(op(&owner, r#"{"op":"Finish"}"#).await.is_err(), "not released");
     assert_eq!(op(&owner, r#"{"op":"Verify"}"#).await.unwrap()["verified"], "a-1");

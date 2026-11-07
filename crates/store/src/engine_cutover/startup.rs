@@ -116,7 +116,7 @@ pub fn open_recovery(db: &Path, proof: &JoinedOwners) -> Result<crate::Store> {
 /// Run under the shared owner lock it returns, so a transfer cannot begin
 /// between this answer and the migration that relies on it.
 pub(crate) fn admit_or_refuse(db: &Path) -> farcooler_core::Result<std::fs::File> {
-    let refused = |e: Error| { tracing::warn!(error=%e, "ordinary open refused before normalization"); farcooler_core::DomainError::OperationFailed };
+    let refused = |e: Error| { tracing::warn!(error=%e, "ordinary open refused before normalization"); farcooler_core::DomainError::CutoverHeld };
     let lock = super::owners::share(db).map_err(refused)?;
     ordinary_admission(db).map_err(refused)?;
     Ok(lock)
