@@ -25,6 +25,7 @@ fn released() -> Released {
     c.unwrap();
     store.conn().execute("INSERT INTO check_in_occurrences (id, workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, due_at, state, reason)
         SELECT x'01010101010101010101010101010101', workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, next_due, 'claimed', 'fixture' FROM check_in_schedules", []).unwrap();
+    store.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,pushed_sha,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'02020202020202020202020202020202',?1,2,'push','main','exact-sha','pushed',2,'t',0,'user',1,7)", [ws.id.as_bytes().as_slice()]).unwrap();
     drop(store);
     let store = Store::open(&path).unwrap();
     let plan = preflight(&store.conn()).unwrap();
@@ -83,4 +84,27 @@ fn released_board_still_fences_the_card_the_engine_owns() {
     assert!(s.put_on_line(r.owned, &NewTicketLine { reason: "x".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, Actor::User).is_err());
     assert!(s.set_block(r.owned, r.other, None).is_err(), "its dependencies are the engine's");
     assert!(s.create_terminal_for_task(r.tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.owned)).is_err());
+}
+
+#[test]
+fn released_holds_still_let_go_and_ci_chips_no_longer_move_landings() {
+    use crate::board_ci::{CiRead, CiStatus};
+    let r = released();
+    let s = &r.store;
+    assert!(!s.legacy_authority(), "the daemon can tell the loops to stop");
+    // A hold whose time came: the free card lets go with no legacy wake. A card the
+    // engine owns is left alone (its fence is lifted here only to seed the hold).
+    let past = crate::tasks::now_millis() - 1;
+    s.conn().execute_batch("DROP TRIGGER engine_task_execution_fence").unwrap();
+    s.conn().execute("UPDATE tasks SET wait_kind='until', wait_until=?1 WHERE id IN (?2,?3)", rusqlite::params![past, r.other.as_bytes().as_slice(), r.owned.as_bytes().as_slice()]).unwrap();
+    let released = s.release_due_holds(crate::tasks::now_millis()).unwrap();
+    assert_eq!(released.iter().map(|(t, _)| t.id).collect::<Vec<_>>(), vec![r.other], "only the unowned card");
+    assert_eq!(s.conn().query_row("SELECT count(*) FROM hold_wakes", [], |x| x.get::<_, i64>(0)).unwrap(), 0, "no fenced wake queued");
+    assert_eq!(s.next_hold_due().unwrap(), None, "the owned card's hold is not ours to wait for");
+    // A CI read moves the chip and only the chip: the pushed landing stays where it was.
+    let read = CiRead { subject: crate::board_ci::sha_subject("exact-sha"), sha: "exact-sha".into(), status: CiStatus::Passed, url: String::new(),
+        jobs: Vec::new(), fetched_at: 5, changed_at: 5, asked_at: 5 };
+    assert!(s.record_ci(r.ws, &read).unwrap().landings_moved.is_empty());
+    assert_eq!(s.conn().query_row("SELECT state FROM landings", [], |x| x.get::<_, String>(0)).unwrap(), "pushed");
+    assert_eq!(s.conn().query_row("SELECT status FROM board_ci", [], |x| x.get::<_, String>(0)).unwrap(), "passed");
 }

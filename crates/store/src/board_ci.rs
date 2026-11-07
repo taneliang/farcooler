@@ -263,9 +263,12 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
-        let landings_moved = crate::landings::follow_ci(&tx, workspace, &read.subject, read.status)?;
+        // Following a landing is legacy authority; after release the chip is the
+        // whole write (ov-947).
+        let legacy = crate::engine_cutover::legacy_authority(&tx);
+        let landings_moved = if legacy { crate::landings::follow_ci(&tx, workspace, &read.subject, read.status)? } else { Vec::new() };
         // Main turning from red may be what the collecting landing was waiting for.
-        let departed = if read.subject == MAIN_SUBJECT && read.status != CiStatus::Failed {
+        let departed = if legacy && read.subject == MAIN_SUBJECT && read.status != CiStatus::Failed {
             crate::collecting::depart(&tx, workspace, Actor::Runner)?.is_some()
         } else {
             false

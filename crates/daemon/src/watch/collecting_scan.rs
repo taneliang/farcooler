@@ -34,6 +34,9 @@ impl Watcher {
     /// orchestrator of any that left. The boards that changed.
     pub(crate) fn collect_ready_tickets(&self) -> Vec<uuid::Uuid> {
         let store = &self.service.store;
+        // Collecting is legacy landing authority: after release its tables are
+        // fenced and the engine lands (ov-947).
+        if !store.legacy_authority() { return Vec::new(); }
         let mut changed = Vec::new();
         for workspace in store.workspaces_to_collect().unwrap_or_default() {
             match store.collect_ready_tickets(workspace, Actor::Runner) {
@@ -56,6 +59,7 @@ impl Watcher {
     /// not sent and not recorded, so it is told once there is someone to tell.
     pub(crate) fn tell_departures(&self) {
         let store = &self.service.store;
+        if !store.legacy_authority() { return; }
         for workspace in store.workspaces_with_gating_landings().unwrap_or_default() {
             let Ok(untold) = store.departures_untold(workspace) else { continue };
             for departed in untold {
@@ -112,5 +116,26 @@ mod tests {
         // Nothing was ahead, so the landing it joined left for its checks at once.
         assert_eq!(landing.state, farcooler_store::landings::LandingState::Gating);
         assert!(watcher.collect_ready_tickets().is_empty());
+    }
+
+    /// After release the scan joins nothing, so the fenced landing tables are never touched.
+    #[tokio::test]
+    async fn the_scan_does_nothing_once_the_engine_is_released() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let main = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let task = svc.store.create_task(main, "stranded", Actor::Manager).unwrap();
+        svc.store.put_on_line(task.id, &NewTicketLine::default(), Actor::Manager).unwrap();
+        farcooler_store::testing::strand_in_landing(&svc.store, task.id);
+        farcooler_store::testing::exec_for_tests(&svc.store, "UPDATE engine_cutover_authority SET phase='released'");
+        // Lift the landing fences so only the gate, not the fence, can keep the scan out.
+        for table in ["landings", "landing_tickets"] {
+            for suffix in ["i", "u", "d"] {
+                farcooler_store::testing::exec_for_tests(&svc.store, &format!("DROP TRIGGER engine_fence_{table}_{suffix}"));
+            }
+        }
+        let watcher = Watcher::new(svc.clone());
+        assert!(watcher.collect_ready_tickets().is_empty());
+        assert!(svc.store.landing_of(task.id).unwrap().is_none(), "nothing joined a landing");
+        assert!(crate::green_landing::land_green_landings(&svc, &watcher).await.is_empty());
     }
 }

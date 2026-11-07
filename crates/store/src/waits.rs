@@ -553,7 +553,8 @@ impl Store {
     pub fn next_hold_due(&self) -> Result<Option<i64>> {
         self.conn()
             .query_row(
-                "SELECT min(wait_until) FROM tasks WHERE wait_kind = 'until' AND status = 'backlog'",
+                "SELECT min(wait_until) FROM tasks WHERE wait_kind = 'until' AND status = 'backlog'
+                    AND NOT EXISTS (SELECT 1 FROM workflow_owned_items o WHERE o.task_id = tasks.id)",
                 [],
                 |r| r.get(0),
             )
@@ -573,6 +574,7 @@ impl Store {
                     .prepare(
                         "SELECT id, wait_until FROM tasks
                           WHERE wait_kind = 'until' AND status = 'backlog' AND wait_until <= ?1
+                            AND NOT EXISTS (SELECT 1 FROM workflow_owned_items o WHERE o.task_id = tasks.id)
                           ORDER BY wait_until, rowid",
                     )
                     .map_err(map_err)?;
@@ -580,17 +582,22 @@ impl Store {
                 rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
             };
             let mut released = Vec::with_capacity(due.len());
+            // After release the hold still lets go (a board fact), but telling
+            // the orchestrator is the engine's: the legacy queue is fenced (ov-947).
+            let queue = crate::engine_cutover::legacy_authority(&tx);
             for (id, until) in due {
                 write_wait(&tx, id, None, None, now)?;
                 let body =
                     format!("Held until {}. That time has come.", farcooler_core::local_time::moment(until));
                 let extra = json!({ "wait": "none", "was": "until", "until": until });
                 let note = insert_note(&tx, id, NoteKind::Wait, Actor::Runner, &body, &extra, None)?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO hold_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
-                    params![uuid_blob(note.id), uuid_blob(id), now],
-                )
-                .map_err(map_err)?;
+                if queue {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO hold_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
+                        params![uuid_blob(note.id), uuid_blob(id), now],
+                    )
+                    .map_err(map_err)?;
+                }
                 released.push((id, note));
             }
             tx.commit().map_err(map_err)?;

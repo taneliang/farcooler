@@ -82,6 +82,8 @@ async fn reached_base(svc: &Service, landing: &Landing, tree: &Path) -> bool {
 /// Land every green landing that is on its base branch, and announce each
 /// board it changed. The landings landed, by id.
 pub async fn land_green_landings(svc: &Service, watcher: &Watcher) -> Vec<Uuid> {
+    // Landing is the engine's after release, and the landing tables are fenced (ov-947).
+    if !svc.store.legacy_authority() { return Vec::new(); }
     let green: Vec<Landing> =
         svc.store.landings_following_ci().unwrap_or_default().into_iter().filter(|l| l.state == LandingState::Green).collect();
     let mut landed = Vec::new();

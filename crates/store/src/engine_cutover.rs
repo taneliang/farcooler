@@ -91,6 +91,17 @@ impl Quiescence {
     }
 }
 
+/// True until the engine takes over. After release the daemon's legacy loops
+/// (collecting, landing on green, landing follow-up of CI) must not run: their
+/// writes are fenced and would only abort (ov-947). An unreadable phase counts
+/// as released, the side that does nothing.
+pub fn legacy_authority(conn: &Connection) -> bool {
+    authority(conn).is_ok_and(|a| a.phase == "legacy")
+}
+impl Store {
+    /// `legacy_authority` for the daemon's loops.
+    pub fn legacy_authority(&self) -> bool { legacy_authority(&self.conn()) }
+}
 pub fn authority(conn: &Connection) -> Result<Authority> {
     Ok(conn.query_row("SELECT phase,incarnation,manifest FROM engine_cutover_authority WHERE singleton=1", [],
         |r| Ok(Authority { phase:r.get(0)?, incarnation:r.get(1)?, manifest:r.get(2)? }))?)
