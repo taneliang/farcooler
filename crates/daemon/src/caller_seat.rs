@@ -152,13 +152,27 @@ pub fn recovery_seat(pid: i32) -> Seat {
     let Some(table) = crate::proc_table::snapshot() else { return Seat::Unreadable };
     let procs = procs(&table);
     let servers = procs.keys().copied().filter(|&p| crate::proc_table::name_of(p).is_some_and(|name| name.contains("tmux"))).collect();
-    let (panes, ttys) = (Panes::default(), HashSet::new());
-    let runner = Runner { panes: &panes, servers: &servers, ttys: &ttys };
     let agent = |pid: i32| crate::proc_table::command_of(pid).map(|(exe, args)| {
         crate::watch::answer_wake::agent_of_process(if exe.is_empty() { args.split_whitespace().next().unwrap_or_default() } else { &exe }, &args).is_some()
     });
     let app = own_app();
-    seat_in(pid, &procs, &runner, &agent, &|pid| vouches_for_a_person(pid, app.as_deref()))
+    recovery_seat_in(pid, &procs, &servers, &agent, &|pid| vouches_for_a_person(pid, app.as_deref()))
+}
+
+/// `recovery_seat` on a table already read. A pane's terminal is the one its
+/// tmux server's children hold; a caller on it that no walk ties to a pane
+/// (an orphan its parent left to pid 1) is `Unreadable`, as in `seat_in`.
+pub(crate) fn recovery_seat_in(
+    pid: i32,
+    procs: &HashMap<i32, Proc>,
+    servers: &HashSet<i32>,
+    agent: &dyn Fn(i32) -> Option<bool>,
+    vouches: &dyn Fn(i32) -> bool,
+) -> Seat {
+    let panes = Panes::default();
+    let ttys: HashSet<String> = procs.values().filter(|row| servers.contains(&row.ppid) && row.tty != "??").map(|row| row.tty.clone()).collect();
+    let runner = Runner { panes: &panes, servers, ttys: &ttys };
+    seat_in(pid, procs, &runner, agent, vouches)
 }
 
 /// What the walk reads of the runner and the host, at one moment.

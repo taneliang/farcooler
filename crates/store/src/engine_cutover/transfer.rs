@@ -79,6 +79,8 @@ fn create_artifacts(dir: &Path) -> Result<()> {
 /// instead of ordinary service. Nothing is captured here; that needs a process
 /// with no writers, which is what the restart makes.
 pub fn hold(db: &Path, attempt: &str) -> Result<()> {
+    // No authority table is a source below 67; a database past legacy has nothing to hold.
+    if startup::read_authority(db)?.is_some_and(|a| a.phase != "legacy") { return refuse("only a legacy database can be held for cutover"); }
     let dir = artifact_dir(db);
     create_artifacts(&dir)?;
     publish(&dir, HOLD, &serde_json::to_vec(&Hold { attempt: attempt.into() })?)?;
@@ -213,6 +215,10 @@ pub fn recover(db: &Path, owners: JoinedOwners) -> Result<Recovered> {
     if fs::symlink_metadata(&dir).is_err() { return refuse("no attempt to recover"); }
     // Before any byte moves: a journal left beside restored bytes would replay.
     clear_inert_journal(db)?;
+    // A hold alone moved nothing, in whatever phase the database has since reached.
+    if fs::symlink_metadata(dir.join(BASELINE)).is_err() && fs::symlink_metadata(dir.join(INTENT)).is_err() {
+        return Ok(Recovered { restored: false, evidence: retire(db, "abandoned")? });
+    }
     match startup::read_authority(db)?.map(|a| a.phase).as_deref() {
         None | Some("legacy") => Ok(Recovered { restored: false, evidence: retire(db, "abandoned")? }),
         Some("quiesced") => {

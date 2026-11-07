@@ -110,3 +110,14 @@ fn the_app_is_the_bundle_the_daemon_ships_in() {
     assert_eq!(app("/Users/me/dev/target/debug/farcoolerd"), None);
     assert_eq!(app("/tmp/x.app/farcoolerd"), None, "not in its Contents");
 }
+
+#[test]
+fn recovery_takes_an_orphan_on_a_pane_terminal_for_nobody() {
+    // A pane's command whose parent exited: pid 1 above it, its pane's tty on it.
+    let rows = [(SERVER, 1, "??"), (ROOT, SERVER, "ttys001"), (40, 1, "ttys001"), (50, 1, "ttys009")];
+    let table = table(&rows);
+    let servers = HashSet::from([SERVER]);
+    let (agent, vouches) = (|_: i32| Some(false), |_: i32| false);
+    assert_eq!(recovery_seat_in(40, &table, &servers, &agent, &vouches), Seat::Unreadable, "the pane's terminal marks it");
+    assert_eq!(recovery_seat_in(50, &table, &servers, &agent, &vouches), Seat::Person, "a terminal no pane holds is a person's");
+}

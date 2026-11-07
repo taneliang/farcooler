@@ -237,3 +237,17 @@ fn hot_journal_never_lands_on_restored_bytes() {
     assert_eq!(bytes(&path), original);
     assert!(!tmp.path().join("db.sqlite-journal").exists());
 }
+#[test]
+fn hold_refuses_a_database_that_is_not_legacy_and_recover_retires_a_stranded_hold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("db.sqlite");
+    drop(Store::open(&path).unwrap());
+    Connection::open(&path).unwrap().execute("UPDATE engine_cutover_authority SET phase='released'", []).unwrap();
+    assert!(transfer::hold(&path, "held").is_err(), "a released database is not held");
+    assert!(!artifact_dir(&path).exists(), "a refused hold leaves no mark");
+    // A hold already written before the phase moved on is still an exit.
+    std::fs::create_dir(artifact_dir(&path)).unwrap();
+    std::fs::write(artifact_dir(&path).join("hold.json"), br#"{"attempt":"held"}"#).unwrap();
+    assert!(!transfer::recover(&path, join_db(&path, "out")).unwrap().restored);
+    assert!(!artifact_dir(&path).exists());
+}
