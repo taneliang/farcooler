@@ -7,11 +7,17 @@ import org.junit.Test
 import java.io.File
 
 class WorkflowSessionTest {
+    /** A fixture the Rust client writes, found from the repo root, since Gradle runs tests in `app/`. */
+    private fun shared(name: String): File {
+        val root = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
+            .first { File(it, "crates/client/src/testdata/$name").exists() }
+        return File(root, "crates/client/src/testdata/$name")
+    }
     @Test fun reasonedReworkValidationAndRestoredRetry() = runBlocking {
         val root = kotlin.io.path.createTempDirectory("ov939-journal").toFile()
-        val shared = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-rework.json").readText()).jsonObject
+        val shared = Json.parseToJsonElement(shared("workflow-rework.json").readText()).jsonObject
         val reason = shared.getValue("reason").jsonPrimitive.content
-        var fixture = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-presentation.json").readText()).jsonArray[0]
+        var fixture = Json.parseToJsonElement(shared("workflow-presentation.json").readText()).jsonArray[0]
             .jsonObject.getValue("response").jsonObject.getValue("card").jsonObject
         val runs=fixture.getValue("runs").jsonArray.toMutableList()
         val bAction=buildJsonObject{put("kind","RequestRework");put("label","Request Rework");put("guard","b-guard")}
@@ -50,7 +56,7 @@ class WorkflowSessionTest {
     @Test fun retainedBytesSurviveRestorationAndCurrentSessionChange() = runBlocking {
         val root = kotlin.io.path.createTempDirectory("ov930-journal").toFile()
         try {
-            val fixture = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-presentation.json").readText()).jsonArray[0]
+            val fixture = Json.parseToJsonElement(shared("workflow-presentation.json").readText()).jsonArray[0]
                 .jsonObject.getValue("response").jsonObject.getValue("card").jsonObject
             val view = JsonObject(fixture + mapOf("revision" to Json.parseToJsonElement("18446744073709551614"), "epoch" to Json.parseToJsonElement("18446744073709551615")))
             val workspace = view.getValue("workspace").jsonPrimitive.content
@@ -101,7 +107,7 @@ class WorkflowSessionTest {
     @Test fun lostPrepareRecoveryAndCorruptionRefuseImplicitMutation() = runBlocking {
         val root = kotlin.io.path.createTempDirectory("ov930-recovery").toFile()
         try {
-            val card = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-presentation.json").readText()).jsonArray[0]
+            val card = Json.parseToJsonElement(shared("workflow-presentation.json").readText()).jsonArray[0]
                 .jsonObject.getValue("response").jsonObject.getValue("card").jsonObject
             val workspace = card.getValue("workspace").jsonPrimitive.content
             val run = WorkflowPresentation.decode(card.toString(), workspace).runs.first()
