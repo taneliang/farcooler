@@ -225,6 +225,35 @@ fn hot_journal_is_rolled_back_by_ordinary_admission_and_only_reported_by_inspect
     let rows: i64 = store.conn().query_row("SELECT count(*) FROM meta", [], |r| r.get(0)).unwrap();
     assert_eq!(rows, committed, "the crashed transaction is gone");
 }
+/// The one destructive line (`clear_inert_journal`): SQLite must settle a hot
+/// journal, with its header, before anything is deleted. A mutant that deletes
+/// any journal leaves the half-written pages of a killed writer in the database.
+#[test]
+fn a_hot_journal_is_rolled_back_by_sqlite_before_clearing_deletes_anything() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (path, committed) = crashed(tmp.path());
+    let journal = tmp.path().join("db.sqlite-journal");
+    let mut header = [0u8; 8];
+    std::io::Read::read_exact(&mut std::fs::File::open(&journal).unwrap(), &mut header).unwrap();
+    assert_ne!(header[0], 0, "a real hot journal has its header");
+    assert!(startup::crash_journal(&path));
+    // What SQLite alone makes of the same crash image: the exact bytes to match.
+    let other = tmp.path().join("reference");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::copy(&path, other.join("db.sqlite")).unwrap();
+    std::fs::copy(&journal, other.join("db.sqlite-journal")).unwrap();
+    startup::settle_journal(&other.join("db.sqlite")).unwrap();
+    let reference = bytes(&other.join("db.sqlite"));
+    assert!(reference.len() < bytes(&path).len(), "the crashed transaction had grown the file");
+    transfer::clear_inert_journal(&path).unwrap();
+    assert!(bytes(&path) == reference, "exactly the bytes SQLite's own rollback leaves");
+    assert!(!journal.exists(), "settled, then gone");
+    let conn = Connection::open(&path).unwrap();
+    let rows: i64 = conn.query_row("SELECT count(*) FROM meta", [], |r| r.get(0)).unwrap();
+    assert_eq!(rows, committed, "the crashed transaction was rolled back, not kept");
+    let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(check, "ok");
+}
 #[test]
 fn hot_journal_never_lands_on_restored_bytes() {
     let tmp = tempfile::tempdir().unwrap();
