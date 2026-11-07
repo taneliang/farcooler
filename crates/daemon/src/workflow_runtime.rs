@@ -451,8 +451,7 @@ impl Runtime {
                     if let Err(error) = selected {
                         tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
                         if stored.dispatch_state != "uncertain" {
-                            self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)?;
-                            *count += 1;
+                            if self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)? { *count += 1; }
                         }
                         continue;
                     }
@@ -473,8 +472,7 @@ impl Runtime {
                         }
                     };
                     if stored.dispatch_state == "uncertain" && outcome == Outcome::Uncertain { continue; }
-                    self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)?;
-                    *count += 1;
+                    if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)? { *count += 1; }
                     continue;
                 }
                 if !matches!(item.phase, Phase::Running | Phase::Cancelling) { continue; }
@@ -518,8 +516,7 @@ impl Runtime {
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
                             } else { Outcome::SafeFailure };
-                            self.observe(workspace, &effect, outcome, false, now_ms)?;
-                            *count += 1;
+                            if self.observe(workspace, &effect, outcome, false, now_ms)? { *count += 1; }
                         }
                         continue;
                     }
@@ -541,9 +538,29 @@ impl Runtime {
         }
         Ok(())
     }
-    fn observe(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64) -> Result<()> {
+    /// Write what an effect found. The engine may refuse the result (evidence for another policy, a
+    /// label the step does not declare, a quarantined resource). That must fail the one item, never
+    /// end the service for every workspace: a refused result settles the item as `Uncertain`, which
+    /// always fits, and a refusal that cannot even be settled is left for a person. True when something was written.
+    fn observe(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64) -> Result<bool> {
         #[cfg(test)]
         if !resolving && self.fail_observe.swap(false, std::sync::atomic::Ordering::SeqCst) { return Err(Error::Refused("injected write failure")); }
+        let uncertain = outcome == Outcome::Uncertain;
+        match self.write_result(workspace, effect, outcome, resolving, now_ms)? {
+            Ok(()) => Ok(true),
+            Err(reason) => {
+                tracing::warn!(effect = %effect.id, item = %effect.item, ?reason, "workflow result refused");
+                // A refused settlement of an unknown outcome has nothing further to say.
+                if resolving || uncertain { return Ok(false); }
+                Ok(self.write_result(workspace, effect, Outcome::Uncertain, false, now_ms)?.is_ok())
+            }
+        }
+    }
+    /// One result write: its refusal is an answer, not an error. Only a store failure is an error
+    /// (losing engine authority among them, which should stop the service).
+    fn write_result(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64)
+        -> Result<std::result::Result<(), Refusal>>
+    {
         let command = if resolving {
             Command::Resolve { item: effect.item.clone(), effect: effect.id.clone(), run: effect.run.clone(),
                 fence: effect.fence, outcome }
@@ -554,9 +571,7 @@ impl Runtime {
         let grant = if resolving { Grant::Controller } else {
             Grant::Operation { effect: effect.id.clone(), run: effect.run.clone(), fence: effect.fence }
         };
-        let receipt = self.internal(workspace, command, grant, now_ms)?;
-        if receipt.result.is_err() { return Err(Error::Refused("result admission refused")); }
-        Ok(())
+        Ok(self.internal(workspace, command, grant, now_ms)?.result.map(|_| ()))
     }
     async fn receive(&self, message: Inbox) {
         match message {
@@ -677,3 +692,5 @@ mod tests;
 mod coding_tests;
 #[cfg(test)]
 mod concurrency_tests;
+#[cfg(test)]
+mod observe_tests;

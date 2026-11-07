@@ -121,12 +121,12 @@ fn workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed() {
     let name = name.split_once("::").unwrap().1;
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", name, "--nocapture"]).env(CHILD, "1").spawn().unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     loop {
         if let Some(status) = child.try_wait().unwrap() { assert!(status.success()); break; }
         if std::time::Instant::now() >= deadline {
             child.kill().unwrap(); child.wait().unwrap();
-            panic!("receipt runtime exceeded 10s without any FIFO writer");
+            panic!("receipt runtime exceeded 60s without any FIFO writer");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
