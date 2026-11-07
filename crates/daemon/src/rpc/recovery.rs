@@ -35,7 +35,7 @@ impl RecoveryHandler {
     }
 
     fn run(&self, req: &Request) -> Result<serde_json::Value> {
-        if req.method != workflow_cutover::METHOD { return Err(DomainError::CapabilityUnsupported { needed: "an ordinary daemon; cutover recovery is in progress" }); }
+        if req.method != workflow_cutover::METHOD { return Err(DomainError::CutoverHeld); }
         if self.peer.client_id.is_some() || self.peer.scope != farcooler_protocol::v1::Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "owner" });
         }
@@ -45,7 +45,9 @@ impl RecoveryHandler {
         let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;
         crate::cutover_admin::recovery(&self.root, &op).map_err(|error| {
             tracing::warn!(%error, "workflow.cutover refused in recovery");
-            DomainError::OperationFailed
+            // `PageRefused` is the one error that carries a sentence over the
+            // wire; the owner needs the holders named to act on a refusal.
+            DomainError::PageRefused { said: error.said() }
         })
     }
 }

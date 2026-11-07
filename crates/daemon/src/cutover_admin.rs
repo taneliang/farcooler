@@ -11,6 +11,22 @@ use serde_json::{Value, json};
 #[derive(Debug)]
 pub struct Refused(pub String);
 impl std::fmt::Display for Refused { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
+impl Refused {
+    /// The refusal as a sentence for the person at the CLI: the named holders
+    /// when a process has the file open, which is what they can act on, and
+    /// otherwise a pointer to `inspect`. The raw text is internal prose and
+    /// stays in the daemon log.
+    pub fn said(&self) -> String {
+        if self.0.contains("has this database open") {
+            let named = self.0.split_once("process [").and_then(|(_, r)| r.split_once(']')).map(|(pids, _)| pids.trim().to_string()).filter(|p| !p.is_empty());
+            return match named {
+                Some(pids) => format!("Another process (pid {pids}) has this runner's database open. Close it, then try again."),
+                None => "Another process has this runner's database open. Close it, then try again.".into(),
+            };
+        }
+        "That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where the upgrade stands.".into()
+    }
+}
 fn refuse<E: std::fmt::Display>(e: E) -> Refused { Refused(e.to_string()) }
 
 pub fn database(root: &Path) -> PathBuf { root.join(crate::cutover_gate::DATABASE) }

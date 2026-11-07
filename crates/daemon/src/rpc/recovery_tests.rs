@@ -54,7 +54,7 @@ async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 /// The domain refusal: past the caller check, unlike the denial the seat test pins.
 fn failed() -> String {
-    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::OperationFailed).outcome)
+    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::PageRefused { said: "That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where the upgrade stands.".into() }).outcome)
 }
 const INSPECT: &str = r#"{"op":"Inspect"}"#;
 const PREPARE: &str = r#"{"op":"Prepare","attempt":"a-1"}"#;
@@ -79,7 +79,8 @@ async fn recovery_refuses_every_caller_but_a_person_outside_every_pane() {
     assert!(op(&unknown, INSPECT).await.is_err(), "a caller with no pid cannot be walked");
     let gone = RecoveryHandler::with_walk(root.clone(), local(), Some(7), |_| Seat::Person, |_| None);
     assert!(op(&gone, INSPECT).await.is_err(), "nor one whose process cannot be identified");
-    assert!(reply(owner.handle(ask("host.get", INSPECT)).await).is_err(), "no other method is served");
+    let held = format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::CutoverHeld).outcome);
+    assert_eq!(reply(owner.handle(ask("host.get", INSPECT)).await).unwrap_err(), held, "no other method is served, and the refusal says why");
     assert!(startup::artifact_dir(&db).join("hold.json").exists(), "and nothing moved");
 }
 #[tokio::test]
@@ -119,7 +120,8 @@ async fn recovery_prepare_refuses_while_any_process_has_the_database_open() {
     let db = crate::cutover_admin::database(&root);
     transfer::hold(&db, "a-1").unwrap();
     let held = JoinedOwners::acquire(&db, "other").unwrap();
-    assert!(op(&person(&root), PREPARE).await.is_err(), "another owner blocks; nothing is signaled");
+    let refused = op(&person(&root), PREPARE).await.unwrap_err();
+    assert!(refused.contains("Another process") && refused.contains("has this runner's database open. Close it") && !refused.contains("no proof issued"), "another owner blocks, named, in a sentence: {refused}");
     drop(held);
     assert!(prepare(&person(&root)).await.is_ok());
 }

@@ -153,7 +153,7 @@ async fn main_serves_only_recovery(runner: &Runner) {
     answering(&runner.socket()).await;
     let mut client = Client::connect(&runner.socket(), "matrix", "0").await.expect("recovery completes a hello");
     let refused = client.call(host()).await.expect_err("no ordinary method is served");
-    assert!(matches!(&refused, ClientError::Daemon { .. }), "{refused:?}");
+    assert!(matches!(&refused, ClientError::Daemon { message, .. } if *message == DomainError::CutoverHeld.to_string()), "{refused:?}");
     drop(client);
     terminate(&main);
     let status = tokio::time::timeout(Duration::from_secs(20), main.wait()).await.expect("recovery leaves when told").unwrap();
