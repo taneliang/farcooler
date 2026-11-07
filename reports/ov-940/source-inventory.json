@@ -1,0 +1,336 @@
+{
+  "phase": "SOURCE_PREP_ONLY",
+  "branch": "ov-940-cutover-integration-prep",
+  "pins": {
+    "base936": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+    "map935": "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf",
+    "source937": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+    "evidence937": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+    "queue938": "4c645bb788ec320fb19704ed042507adeccfd911",
+    "required939": "821194faedd23fec2b639667034b6a8ba979f827"
+  },
+  "corrected936_pin": null,
+  "corrected939_pin": null,
+  "composed_base": null,
+  "final_pin_binding": "Required before later product work; no allocation inferred",
+  "inputs": [
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/engine_cutover.rs",
+      "sha256": "b955a249cd76238642e125139cbba33a561705cdb686d5db3dd724da536f8cf6",
+      "bytes": 29805,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/engine_cutover/manifest.rs",
+      "sha256": "67abb5b87b939ad84c39733b846c23cda8fa3abb4c4a5c3db54c08d9d65abd51",
+      "bytes": 5522,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/engine_cutover/verify.rs",
+      "sha256": "4f73709a6de0c546d154371350da18313aa7e29dc5fcfd15bffc3804d8c4a2bd",
+      "bytes": 4739,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/engine_cutover/rehearsal.rs",
+      "sha256": "5716cae87b18a08f4b85e6efbd94d1e88b5d82b75784f4308a1992008bfa0083",
+      "bytes": 17160,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/store.rs",
+      "sha256": "84adfc1520c2a328a3debde1b0916fb1e0a6683c9de56774eeac97aee1d2bf45",
+      "bytes": 79070,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/migrate.rs",
+      "sha256": "f075f09f8788b95025c6cc563b0fae8ba32ed32814766101800ff0eb3b359c45",
+      "bytes": 89677,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/workflow.rs",
+      "sha256": "e4e1ce248a7cc01c23bb63d0d91f8d96369c41dbddb349e55a8130f940bebd75",
+      "bytes": 16984,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/workflow_effects.rs",
+      "sha256": "dd046be3702146de62db8af28edf3f22498d6f96991efcfef573a0faccb8ca95",
+      "bytes": 6956,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/workflow_notices.rs",
+      "sha256": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+      "bytes": 22988,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/messages.rs",
+      "sha256": "78d2d08d9fd7852c5367b7ad3255553fe8f1e008365ae319917cff45f2f741c7",
+      "bytes": 9646,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/store/src/plan_tests.rs",
+      "sha256": "11fe06f1f24e7a70d1aa428a7c50455d9f55f7983e20df8643efc9f39b132fc4",
+      "bytes": 17480,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/main.rs",
+      "sha256": "2dbeba719bace913a6672b8236ff2a16289bbfb3fd099dd5402a7067f33b47fc",
+      "bytes": 38714,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/service.rs",
+      "sha256": "d7747f4d82c366e051ed670b6decc5ed36416e4a9da64909f8709eedbb8aa12a",
+      "bytes": 562036,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch.rs",
+      "sha256": "37f68990def82d61806f64bca0306b4a648684e9cb85d14297e8f6c2e0e6939c",
+      "bytes": 446513,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch/workers.rs",
+      "sha256": "cbd8f91300915391ffae598981c09e43317bf8878ce23758275538c2f8802195",
+      "bytes": 10060,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch/agent_start.rs",
+      "sha256": "ce112dc7f1ab99dd7eba8b26e923c08fd3d1f182b0ebd02afb20b4d21173f597",
+      "bytes": 12250,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch/collecting_scan.rs",
+      "sha256": "7e107523d78e6e6c514ca6981ae430eca47c70175763a2b8f2f890bdcd75771e",
+      "bytes": 5835,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch/answer_wake.rs",
+      "sha256": "37081540efedbc31f6d1dbb87d7fd4b5978cafc80bbba333e7e4753a38cc322d",
+      "bytes": 61883,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/watch/answer_wake/check_in.rs",
+      "sha256": "bddb1fa40483f7a44a84ee05750b8571dfcb27780da71aaecac782295c5ef2cb",
+      "bytes": 14049,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/workflow_service.rs",
+      "sha256": "0ff0f546732f5616252bc02e4edddb288fdb5baaab45a314ec4849eb65e07323",
+      "bytes": 3463,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/workflow_runtime.rs",
+      "sha256": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+      "bytes": 28393,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "sha256": "cb905439ede3f4fea7267be3f087e3b0157c474c44cb979f510b6cdd544e1d8d",
+      "bytes": 8183,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/workflow_runtime/admission.rs",
+      "sha256": "78c5033ed4c24a6af371bbd73fe67502f7995a540858ae0a513e68993f1b4a69",
+      "bytes": 6868,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/effect_runner.rs",
+      "sha256": "521420af936d979ddb28fb739fbd66426aa6a991444b87eaa5c0c60caf5121df",
+      "bytes": 5140,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/hook_ingress.rs",
+      "sha256": "fa0cbfd9aacd7613b3d788000c6855e47afc5607f27d228b16407cf63cfd202e",
+      "bytes": 85679,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/landing_run.rs",
+      "sha256": "fa04c6a89a529d1bc03629832eda42271064ca0c42ccc946a9ad6c9c442e43bc",
+      "bytes": 9634,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/landing_job.rs",
+      "sha256": "0f6696516bb28d3ba5d1997b21c140583303e9c602086e8a67f7692b9fb984dd",
+      "bytes": 26466,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "crates/daemon/src/green_landing.rs",
+      "sha256": "ae936c9c60d022f69038dba32b1ac9093291c536a4b05b980e99bf59ca076370",
+      "bytes": 5275,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "reports/ov-936/implementation.md",
+      "sha256": "92b060b6bd705a08bb151287f531f995f84f2971c41c754fcbcb7b5a33c99194",
+      "bytes": 14206,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "path": "reports/ov-936/freeze.json",
+      "sha256": "9baf50104c32823615103ffdd113b20656db18d917af2316dba7010db43879f3",
+      "bytes": 198723,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf",
+      "path": "reports/ov-935/conservation-map.md",
+      "sha256": "ab3df24fc63fc46609849844f65d2c089592f7c1d9b9ac56a899d6177be8c711",
+      "bytes": 21808,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "reports/ov-937/startup-handoff.md",
+      "sha256": "c2f81dc22508f13cedd512739abe1b25477f02004197d1031bf7f558099af7e9",
+      "bytes": 4189,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "reports/ov-937/final-callers.md",
+      "sha256": "b93360e65b671f6bc09f9518a08f4c39ec55d1ba8e8a2cf2c060eaf06e5a373f",
+      "bytes": 6522,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "crates/daemon/src/paths.rs",
+      "sha256": "fe612b79719e637752737c20fc424fec882976ebca9f74176252844a574e3d4d",
+      "bytes": 13262,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "crates/daemon/src/runtime_selection.rs",
+      "sha256": "134284fdf9cf9980123c547bd8c1ed4820bb383dc89562179e4772d6dc209bce",
+      "bytes": 1905,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "crates/daemon/src/main.rs",
+      "sha256": "4cbfa54c59db517e16d289df5f0eb1bf1db1760a7a1ae9c42cb38fdfdc4c5730",
+      "bytes": 39001,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "f4020a91daeda03219dbcfeda2ff112e62a20764",
+      "path": "crates/daemon/src/service.rs",
+      "sha256": "e1366c4f42ef54a96876039d8c4210a04e1fda58156e0e535c0cde0162ffb4ae",
+      "bytes": 561465,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "4c645bb788ec320fb19704ed042507adeccfd911",
+      "path": "reports/ov-938/implementation.md",
+      "sha256": "2a82ba1e000726e97526128f9b4ef486553e8cb31d9629764f89d38fd915f036",
+      "bytes": 5646,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "4c645bb788ec320fb19704ed042507adeccfd911",
+      "path": "crates/daemon/src/effect_runner.rs",
+      "sha256": "c90dab8b28fdeafc7797815b7c98cfe683b0cae9574329f1cebac49788192f29",
+      "bytes": 6105,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "4c645bb788ec320fb19704ed042507adeccfd911",
+      "path": "crates/daemon/src/workflow_notices.rs",
+      "sha256": "9cdabb886b2a0af2294e3fe805d4d51382fe5e8d91073cdabeb1ad8840b99e0f",
+      "bytes": 11196,
+      "role": "immutable source input; not execution evidence"
+    },
+    {
+      "pin": "821194faedd23fec2b639667034b6a8ba979f827",
+      "path": "reports/ov-939/final-contract.md",
+      "sha256": "e1645af41741d04b2c35e04c14aa9ffa10f4e482a5d71c96882d57884ec8ee2d",
+      "bytes": 7194,
+      "role": "immutable source input; not execution evidence"
+    }
+  ],
+  "external_reviews": [
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-935/independent-review.md",
+      "sha256": "7c2d0509a51a5598075be70f59af728e0be168771de94de9b5425c7dfab214f8",
+      "bytes": 7145,
+      "role": "read external SAME review; not modified"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-936/independent-review.md",
+      "sha256": "6aae606bc40b9e0f20d47cb1874795101bd10c2cc5e879642cb18774dbef440f",
+      "bytes": 12356,
+      "role": "read external SAME review; not modified"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-937/independent-review.md",
+      "sha256": "b5c8fe56120dfa8f4396980bc63f40f15d87f0ff0e489d7a5d2216a5bd13a2e3",
+      "bytes": 10982,
+      "role": "read external SAME review; not modified"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-938/independent-review.md",
+      "sha256": "5a27cc36f68c1856dd197894459e480e1a7e6ced19eb68ffede064e933c6ce09",
+      "bytes": 5561,
+      "role": "read external SAME review; not modified"
+    }
+  ],
+  "limits": [
+    "Only immutable source and review reads plus administrative board/Git/report operations",
+    "No tests/builds/imports/SQL/DB or owner-resource actions",
+    "Hashes bind source input bytes, not live writer or execution proof"
+  ]
+}

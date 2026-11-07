@@ -1,0 +1,30 @@
+{
+  "state": "frozen_source_prep_for_review_only",
+  "base": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+  "files": {
+    "contract.md": {
+      "sha256": "8e6f990c7799a29aa300ab5c7ae221205dc7a062bf3056ccbdbf720da1c1c8b3",
+      "bytes": 12651
+    },
+    "handoff.md": {
+      "sha256": "930a93b27a5f5af467b06b6faa85aa31c6be1a22c930919e254727405773dff6",
+      "bytes": 2106
+    },
+    "ownership.md": {
+      "sha256": "c654239102deabf0e1e1fe31f89be6d4684d0304e663257d60ddd91510696bbf",
+      "bytes": 7607
+    },
+    "source-inventory.json": {
+      "sha256": "1be988ed2aa7ca3bdf524627593ae27a1481bd414481d2cbc576cfd52ed6a661",
+      "bytes": 13928
+    },
+    "verification.md": {
+      "sha256": "f19e6b00d5c8f80ea1a582b57a449678201858a3d451fd1a604f7e3a8eae98e7",
+      "bytes": 8832
+    }
+  },
+  "product_changes": 0,
+  "tests_or_builds_executed": false,
+  "corrected_composition_allocated": false,
+  "signature_binding": "Signed containing Git commit; seal excludes itself"
+}
