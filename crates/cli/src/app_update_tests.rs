@@ -263,6 +263,14 @@ async fn an_app_that_never_quit_is_not_said_to_have_quit() {
 }
 
 #[test]
+fn an_update_waits_for_a_runner_mid_upgrade() {
+    let said = refused_said("cutover-held", &canary());
+    assert!(said.contains("mid-upgrade"), "{said}");
+    assert!(said.contains("Finish the upgrade first"), "{said}");
+    assert!(!said.contains("couldn't install"), "{said}");
+}
+
+#[test]
 fn an_updater_that_didnt_start_isnt_blamed_on_a_working_tree() {
     let said = refused_said("updates-broken", &canary());
     assert!(said.starts_with("Far Cooler Canary's updater didn't start"), "{said}");

@@ -384,6 +384,8 @@ enum DaemonCmd {
     Ensure,
     /// Stop the local daemon. Terminals keep running — they belong to tmux.
     Stop,
+    /// Say whether an engine cutover is in flight here. While it is, this runner must not be updated.
+    Held,
 }
 
 /// Tiling, in tmux's vocabulary — because it IS tmux.
@@ -1371,6 +1373,15 @@ async fn daemon(runner: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
                 );
             } else {
                 println!("{} {build}", action.as_str());
+            }
+            Ok(())
+        }
+        DaemonCmd::Held => {
+            let held = daemon_link::cutover_held_local();
+            if json {
+                println!("{}", serde_json::json!({ "held": held }));
+            } else {
+                println!("{}", if held { "held" } else { "not held" });
             }
             Ok(())
         }

@@ -34,6 +34,11 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
     var isEnabled: Bool { updater != nil }
 
+    /// Whether this Mac's runner is mid-upgrade, which an update must wait for
+    /// (ov-963 M3). Refreshed before every check somebody asks for, and every
+    /// few minutes for the scheduled ones.
+    private let hold = UpdateHoldCache()
+
     /// This build has a feed, but Sparkle wouldn't start: a different
     /// refusal from a build with no feed at all (ov-302 F7).
     private var startFailed = false
@@ -56,14 +61,38 @@ final class Updates: NSObject, SPUUpdaterDelegate {
         }
         self.driver = driver
         self.updater = updater
+        Task { [hold] in
+            while true {
+                await hold.refresh()
+                try? await Task.sleep(for: .seconds(300))
+            }
+        }
+    }
+
+    /// Sparkle asks before every check, scheduled or not. A runner mid-upgrade
+    /// makes it wait, and the error's words are what a person sees.
+    nonisolated func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        try UpdateHold.check(cached: hold.value, probe: UpdateHold.probe)
     }
 
     func checkForUpdates() {
-        updater?.checkForUpdates()
+        Task {
+            await hold.refresh()
+            updater?.checkForUpdates()
+        }
     }
 
     /// Run the command line's update: check now, and let `errand` answer.
     func run(_ errand: UpdateErrand) {
+        guard updater != nil, driver != nil else { return errand.refuse(off) }
+        Task {
+            await hold.refresh()
+            if hold.value == true { return errand.refuse(UpdateHold.word) }
+            start(errand)
+        }
+    }
+
+    private func start(_ errand: UpdateErrand) {
         guard let updater, let driver else { return errand.refuse(off) }
         // An errand that finished is done with once its session is; Sparkle
         // doesn't promise to say so (`dismissUpdateInstallation`) every time.

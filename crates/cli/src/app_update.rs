@@ -332,6 +332,10 @@ pub(crate) fn refused_said(code: &str, names: &Names) -> String {
             "{app}'s updater didn't start, so it can't update itself. Quit and reopen {app}, and if this keeps \
              happening, download {app} again"
         ),
+        "cutover-held" => format!(
+            "{app} can't update yet: this runner is mid-upgrade, and updating now could leave it unable to finish. \
+             Finish the upgrade first, then try again"
+        ),
         "busy" => format!("{app} is already checking for or installing an update. Try again in a minute"),
         "check-failed" => format!("{app} couldn't read its update feed. Check your connection and try again"),
         "download-failed" => "the update didn't download. Check your connection and try again".into(),

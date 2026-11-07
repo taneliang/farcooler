@@ -90,8 +90,14 @@ pub async fn connect_to(target: Option<&str>) -> Result<Link, Box<dyn std::error
 /// Connect to the local daemon, starting it if nothing answers.
 pub async fn connect() -> Result<Link, Box<dyn std::error::Error>> {
     let socket = farcooler_daemon::paths::socket_path()?;
+    let database = farcooler_daemon::paths::database_path()?;
+    connect_in(&socket, &database).await
+}
 
-    match dial(&socket).await {
+/// `connect` against an explicit socket and database, so a test can point it
+/// at a runner of its own.
+async fn connect_in(socket: &std::path::Path, database: &std::path::Path) -> Result<Link, Box<dyn std::error::Error>> {
+    match dial(socket).await {
         Ok(link) => return Ok(link),
         Err(ClientError::Connect(_)) => {}
         // A failure for any reason OTHER than not reaching the socket is a real
@@ -100,8 +106,12 @@ pub async fn connect() -> Result<Link, Box<dyn std::error::Error>> {
         Err(other) => return Err(Box::new(other)),
     }
 
+    // Nothing answers, and a cutover is frozen at a schema this build cannot
+    // finish or undo: a daemon started here would refuse every call, and the
+    // runner would look broken rather than held (ov-963 M3).
+    if cutover_stranded_here(database) { return Err(CUTOVER_STRANDED.into()); }
     spawn_daemon()?;
-    wait_for(&socket).await
+    wait_for(socket).await
 }
 
 async fn dial(socket: &std::path::Path) -> Result<Link, ClientError> {
@@ -304,6 +314,21 @@ async fn ensure_in(
     Ok((Ensured::Replaced, build))
 }
 
+/// An engine cutover is in flight in `database`: an attempt's baseline is on
+/// disk and the authority has left `legacy`. While it is, nothing may replace
+/// the build on this runner, because only this one can finish or recover it
+/// (ov-963 M3). Read only; a file this cannot read is not called held.
+pub fn cutover_held_here(database: &std::path::Path) -> bool {
+    use farcooler_store::engine_cutover::startup;
+    startup::artifact_dir(database).join("baseline.json").exists()
+        && startup::read_authority(database).ok().flatten().is_some_and(|a| a.phase != "legacy")
+}
+
+/// [`cutover_held_here`] for this runner's own database.
+pub fn cutover_held_local() -> bool {
+    farcooler_daemon::paths::database_path().is_ok_and(|db| cutover_held_here(&db))
+}
+
 const CUTOVER_STRANDED: &str = "A cutover started on this runner by another build is unfinished, and this build can't finish or undo it. Reinstall the build that started it, then finish or recover there.";
 
 /// A cutover is frozen in `database` at a schema this build does not write:
@@ -311,11 +336,9 @@ const CUTOVER_STRANDED: &str = "A cutover started on this runner by another buil
 /// this build's registry, so neither Finish nor Recover can work here (ov-963 M3).
 /// Read only; a file this cannot read is not called stranded.
 fn cutover_stranded_here(database: &std::path::Path) -> bool {
-    use farcooler_store::engine_cutover::startup;
-    if !startup::artifact_dir(database).join("baseline.json").exists() { return false; }
+    if !cutover_held_here(database) { return false; }
     let Some(schema) = schema_of(database) else { return false };
     schema.version != farcooler_store::DatabaseSchema::here()
-        && startup::read_authority(database).ok().flatten().is_some_and(|a| a.phase != "legacy")
 }
 
 /// What `database` says about who may open it, or `None` where there's no
@@ -733,6 +756,29 @@ mod tests {
         assert_eq!(build, "the-build-that-froze-it");
         assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
         serving.abort();
+    }
+
+    /// `connect`, which every other command goes through, is the same.
+    #[tokio::test]
+    async fn connect_starts_no_daemon_for_a_cutover_this_build_cannot_finish() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let database = frozen_by_another_build(dir.path());
+        let err = connect_in(&socket, &database).await.err().expect("refused");
+        assert_eq!(err.to_string(), CUTOVER_STRANDED);
+        assert!(!socket.exists(), "nothing was started");
+    }
+
+    /// The gate the Mac updater and `runner install` ask about: held while an
+    /// attempt's baseline is on disk past `legacy`, and not otherwise.
+    #[test]
+    fn a_cutover_in_flight_is_held_and_nothing_else_is() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let held = frozen_by_another_build(dir.path());
+        assert!(cutover_held_here(&held));
+        std::fs::remove_file(farcooler_store::engine_cutover::startup::artifact_dir(&held).join("baseline.json")).expect("rm");
+        assert!(!cutover_held_here(&held), "no baseline, no attempt");
+        assert!(!cutover_held_here(&dir.path().join("absent.db")));
     }
 
     /// With nothing listening, starting this build would only refuse everyone.

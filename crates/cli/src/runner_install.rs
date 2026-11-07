@@ -166,12 +166,48 @@ WantedBy=default.target
 
 /// The running daemon's own account of itself on `target`, or `None` if it
 /// can't be had in reasonable time.
-async fn running_host(target: &str) -> Option<farcooler_protocol::v1::Host> {
+async fn running_host(target: &str) -> Running {
     let ask = async {
-        let mut link = crate::daemon_link::connect_to(Some(target)).await.ok()?;
-        crate::host_get(&mut link).await.ok()
+        let mut link = match crate::daemon_link::connect_to(Some(target)).await {
+            Ok(link) => link,
+            Err(e) => return if is_cutover_held(e.as_ref()) { Running::Held } else { Running::Unknown },
+        };
+        match crate::host_get(&mut link).await {
+            Ok(host) => Running::Host(host),
+            Err(e) if is_cutover_held(e.as_ref()) => Running::Held,
+            Err(_) => Running::Unknown,
+        }
     };
-    tokio::time::timeout(std::time::Duration::from_secs(20), ask).await.ok().flatten()
+    tokio::time::timeout(std::time::Duration::from_secs(20), ask).await.unwrap_or(Running::Unknown)
+}
+
+/// What the daemon on a runner said when asked.
+enum Running {
+    Host(farcooler_protocol::v1::Host),
+    /// It refused with `cutover_held`: an engine cutover is in flight there.
+    Held,
+    /// Unreachable, or too old to say.
+    Unknown,
+}
+
+/// Whether `error` is a runner saying its data is mid-upgrade.
+fn is_cutover_held(error: &(dyn std::error::Error + 'static)) -> bool {
+    matches!(
+        error.downcast_ref::<farcooler_transport::ClientError>(),
+        Some(farcooler_transport::ClientError::Daemon { what, .. }) if what == farcooler_core::DomainError::CutoverHeld.what()
+    )
+}
+
+/// Why installing on `target` must wait for its upgrade to finish, if it must
+/// (ov-963 M3). Restarting the service onto another build can leave the
+/// runner unable to finish the upgrade or undo it.
+fn held_refusal(target: &str, running: &Running) -> Option<String> {
+    matches!(running, Running::Held).then(|| {
+        format!(
+            "{target} is in the middle of an upgrade, and installing now could leave it unable to finish or undo it.\n\
+             Finish the upgrade on the runner, then install again."
+        )
+    })
 }
 
 /// Why installing this build on `target` would be a downgrade, if it would.
@@ -204,7 +240,15 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     // device until somebody reinstalled from a newer Mac. Asked of the
     // running daemon; one that can't be reached, or is too old to say, is
     // installed over as before.
-    if let Some(refusal) = downgrade_refusal(target, running_host(target).await.as_ref()) {
+    let running = running_host(target).await;
+    if let Some(refusal) = held_refusal(target, &running) {
+        return Err(refusal.into());
+    }
+    let host = match &running {
+        Running::Host(host) => Some(host),
+        _ => None,
+    };
+    if let Some(refusal) = downgrade_refusal(target, host) {
         return Err(refusal.into());
     }
 
@@ -1219,6 +1263,33 @@ mod tests {
         assert_eq!(Platform::Unsupported.dist_slug("x86_64"), None);
         // An architecture with no build here is not a directory to guess at.
         assert_eq!(Platform::Linux.dist_slug("riscv64"), None);
+    }
+
+    /// An install over a runner mid-upgrade is refused before anything is
+    /// uploaded (ov-963 M3); one that is merely unreachable goes ahead.
+    #[test]
+    fn installing_over_a_runner_mid_upgrade_is_refused() {
+        let held = farcooler_transport::ClientError::Daemon {
+            code: 0,
+            retryable: false,
+            message: farcooler_core::DomainError::CutoverHeld.to_string(),
+            what: farcooler_core::DomainError::CutoverHeld.what().to_string(),
+        };
+        assert!(is_cutover_held(&held));
+        let newer = farcooler_transport::ClientError::Daemon {
+            code: 0,
+            retryable: false,
+            message: String::new(),
+            what: farcooler_core::DomainError::NewerData.what().to_string(),
+        };
+        assert!(!is_cutover_held(&newer), "a newer runner is a different refusal");
+        assert!(!is_cutover_held(&std::io::Error::other("ssh: no route")));
+
+        let refusal = held_refusal("box", &Running::Held).expect("refused");
+        assert!(refusal.starts_with("box is in the middle of an upgrade"), "{refusal}");
+        assert!(refusal.contains("Finish the upgrade"), "{refusal}");
+        assert_eq!(held_refusal("box", &Running::Unknown), None);
+        assert_eq!(held_refusal("box", &Running::Host(Default::default())), None);
     }
 
     /// An install over a newer runner is refused before anything is uploaded
