@@ -69,8 +69,9 @@ trap cleanup EXIT
 # this went unnoticed until the check was first run on Linux. The daemon then
 # answers `FenceUnreadable` and never reaches the tunnel at all, and this
 # script would have been asserting nothing.
-mkdir -p "$ROOT/home/.ssh"
-chmod 700 "$ROOT/home" "$ROOT/home/.ssh"
+# Under FARCOOLER_HOME, where a daemon with an explicit root keeps it (ov-937).
+mkdir -p "$ROOT/ssh" "$ROOT/home"
+chmod 700 "$ROOT/home" "$ROOT/ssh"
 
 # Its existence is the whole feature flag — `Service::tailcat_key`. The contents
 # are not asserted on here: whatever the Go side makes of them, the outcome it
@@ -89,17 +90,16 @@ chmod 600 "$ROOT/tailcat.key"
 # options field carry a forced command with `--client` and a 43-character
 # `--node-key`. The key material below is the same obviously-synthetic pair
 # `crates/daemon/tests/an_empty_allowlist_starts_no_tunnel.rs` uses.
-cat > "$ROOT/home/.ssh/authorized_keys" <<'EOF'
+cat > "$ROOT/ssh/authorized_keys" <<'EOF'
 # BEGIN FAR COOLER — do not edit inside this block
 restrict,command="~/.local/bin/farcoolerd --stdio --client smoke --scope control --node-key 3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA smoke
 # END FAR COOLER
 EOF
-chmod 600 "$ROOT/home/.ssh/authorized_keys"
+chmod 600 "$ROOT/ssh/authorized_keys"
 
 echo "==> Starting $DAEMON against $ROOT"
-# HOME as well as FARCOOLER_HOME: the daemon finds `authorized_keys` through
-# the user's home directory, and a check that wrote into the real one would be
-# editing the file that holds this machine's SSH access.
+# HOME as well as FARCOOLER_HOME, so nothing here can reach the real home
+# directory, whose `~/.ssh` holds this machine's SSH access.
 HOME="$ROOT/home" FARCOOLER_HOME="$ROOT" RUST_LOG=info "$DAEMON" > "$OUT" 2>&1 &
 PID=$!
 
