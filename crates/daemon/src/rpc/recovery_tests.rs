@@ -104,9 +104,11 @@ async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit
     let owner = person(&root);
     op(&owner, PREPARE).await.unwrap();
     assert!(op(&owner, r#"{"op":"Verify"}"#).await.is_err(), "not committed");
-    let store = startup::open_recovery(&db, &JoinedOwners::acquire(&db, "a-1").unwrap()).unwrap();
-    farcooler_store::testing::exec_for_tests(&store, "UPDATE engine_cutover_authority SET phase='released', incarnation=1");
-    drop(store);
+    farcooler_store::testing::commit_for_tests(&db, "a-1");
+    assert!(op(&owner, r#"{"op":"Recover"}"#).await.is_err(), "committed recovers forward only");
+    assert!(op(&owner, r#"{"op":"Finish"}"#).await.is_err(), "not released");
+    assert_eq!(op(&owner, r#"{"op":"Verify"}"#).await.unwrap()["verified"], "a-1");
+    assert_eq!(op(&owner, r#"{"op":"Release"}"#).await.unwrap()["released"], "a-1");
     assert_eq!(op(&owner, r#"{"op":"Finish"}"#).await.unwrap()["evidence"].as_str().map(|p| p.contains("resolved-a-1")), Some(true));
     assert_eq!(op(&owner, INSPECT).await.unwrap()["ordinary_startup"], "Existing");
     assert!(op(&owner, r#"{"op":"Recover"}"#).await.is_err(), "nothing is left to recover");

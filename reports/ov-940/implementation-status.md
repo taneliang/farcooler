@@ -16,6 +16,7 @@ Current at the fix round for the review of e2ac7e783. Blockers B1-B6 and M1 are 
 ## Evidence (HEAD at the commit carrying this file)
 
 * Store 562 passed, 0 failed, 3 ignored. Protocol 72. CLI workflow 6. Daemon `recovery::` 7; wider affected filter 271 passed, 1 failed (below). Clippy on all four crates clean. File-size, migration and doc-comment checks ok.
+* `cutover_admin` Prepare, Recover, Verify, Release and Finish each have a success-path test through the recovery handler; the commit between them is `testing::commit_for_tests`, with no closed backup.
 * `fix-controls.py`: 21 mutants, each putting one reviewed defect back, all red; results in `fix-controls-results.json`. These are mutants of the finished code, not a chronological red-first history: the tests and the fix landed together because the API changed.
 * `old-reader-result.json`: the real registry-60 Store at d625aaeb opens a raw schema60 fixture and is refused `NewerData` on the file `begin` leaves.
 

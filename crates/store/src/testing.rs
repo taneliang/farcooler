@@ -161,6 +161,20 @@ pub fn released_transfer_for_tests(db: &std::path::Path, attempt: &str) {
     transfer::finish(db, &store, JoinedOwners::unit(attempt)).unwrap();
 }
 
+/// Fixture-only: commit a prepared attempt without the closed backup, which is
+/// the parent's to prove, so a daemon test can drive the stages after it.
+pub fn commit_for_tests(db: &std::path::Path, attempt: &str) {
+    use crate::engine_cutover::{JoinedOwners, Quiescence, REQUIRED_OWNERS, StoppedWriter, rehearsal::CommitPermit, startup, transfer};
+    let owners = JoinedOwners::acquire(db, attempt).unwrap();
+    let store = startup::open_recovery(db, &owners).unwrap();
+    let (_, plan) = transfer::bound_plan(db, &store).unwrap();
+    let protected = store.engine_protected_resources().unwrap();
+    let stopped = REQUIRED_OWNERS.iter().enumerate().map(|(n, identity)| StoppedWriter { identity: (*identity).into(), incarnation: "fixture".into(),
+        joined_receipt: "fixture".into(), resources: if n == 0 { protected.clone() } else { Default::default() } }).collect();
+    let evidence = Quiescence { inventory: REQUIRED_OWNERS.iter().map(|s| (*s).to_owned()).collect(), stopped, protected_resources: protected };
+    store.engine_commit(&plan, owners, &CommitPermit::unit(&plan, &evidence, attempt)).unwrap();
+}
+
 /// Fixture-only: the row count of `table`.
 pub fn count_rows_for_tests(store: &crate::Store, table: &str) -> i64 {
     store.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
