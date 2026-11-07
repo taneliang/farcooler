@@ -49,7 +49,7 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,native_slot:Default::default() },
+        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,native_slot:Default::default(),launched:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
             last_occupancy:None,inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
@@ -93,16 +93,25 @@ impl Runtime {
         // The admitted item's policy pin is immutable and also present in every
         // effect/receipt. Never consult the workspace's current selection here.
         let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
-        if bundle.definition != item.definition
+        // A group item runs the steps of one of the ticket bundle's groups.
+        let expected = match &item.group_of {
+            Some(group) => bundle.definition.group_definition(&group.name),
+            None => Some(bundle.definition.clone()),
+        };
+        let group_resource = bundle.adapter.as_ref().and_then(|AdapterConfiguration::Coding(c)| c.landing_resource());
+        if expected.as_ref() != Some(&item.definition)
             || (item.resource != Exec::item_resource(workspace, item_id)
-                && self.publication_resource(workspace,bundle.adapter.as_ref()) != item.resource) {
+                && self.publication_resource(workspace,bundle.adapter.as_ref()) != item.resource
+                && !(item.group_of.is_some() && group_resource.as_ref() == Some(&item.resource))) {
             return Err(Error::Refused("item configuration binding changed"));
         }
         // Bundle bytes, workspace/resource and operation pins remain mandatory
         // during recovery; launchable current files and resource locks do not.
-        match &bundle.adapter {
-            Some(AdapterConfiguration::Coding(config)) => config.validate_pinned_definition(&bundle.definition)?,
-            None => self.validate_publication(&bundle.definition, None)?,
+        match (&bundle.adapter, &expected) {
+            (Some(AdapterConfiguration::Coding(config)), Some(definition)) if item.group_of.is_some() =>
+                config.validate_pinned_group(definition)?,
+            (Some(AdapterConfiguration::Coding(config)), _) => config.validate_pinned_definition(&bundle.definition)?,
+            (None, _) => self.validate_publication(&bundle.definition, None)?,
         }
         self.coding = bundle.adapter.map(|AdapterConfiguration::Coding(config)| config);
         self.resource = item.resource.clone();
@@ -112,7 +121,9 @@ impl Runtime {
     pub(super) fn validate_item_launch(&mut self, workspace: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }
         if let Some(config) = &self.coding { self.validate_workspace_repository(workspace, config)?; }
-        self.validate_definition(&item.definition)?;
+        if let Some(config) = &self.coding { use super::coding::PinnedDefinition;
+            if item.group_of.is_some() { config.validate()?; config.validate_pinned_group(&item.definition)?; } else { self.validate_definition(&item.definition)?; } }
+        else { self.validate_definition(&item.definition)?; }
         self.validate_native_host()?;
         if let Some(config) = &self.coding {
             let mut paths = vec![config.repository.join(".git/farcooler-workflow.lock")];

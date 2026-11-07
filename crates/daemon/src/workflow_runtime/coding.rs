@@ -12,6 +12,10 @@ pub trait CodingConfigExt {
     fn definition(&self) -> Result<Definition>;
     fn stage(&self, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage;
     fn validate_definition(&self, definition: &Definition) -> Result<()>;
+    /// What every group holds while it works on the landing target: one group at a time, across boards.
+    fn landing_resource(&self) -> Option<String>;
+    /// A step that waits: how often it looks, and how long before it gives up (`timeout`).
+    fn wait_operation(&self, version: &str, argument: &str, every_ms: u64, patience_ms: u64) -> OperationSpec;
 }
 impl CommandValidation for CodingCommand {
     fn validate(&self) -> Result<()> {
@@ -29,7 +33,11 @@ impl CommandValidation for CodingCommand {
         Ok(())
     }
 }
-pub(super) trait PinnedDefinition { fn validate_pinned_definition(&self, definition: &Definition) -> Result<()>; }
+pub(super) trait PinnedDefinition {
+    fn validate_pinned_definition(&self, definition: &Definition) -> Result<()>;
+    /// The steps of a group item, which is a definition of its own.
+    fn validate_pinned_group(&self, definition: &Definition) -> Result<()>;
+}
 impl CodingConfigExt for CodingConfig {
     fn validate(&self) -> Result<()> {
         if self.repository.canonicalize()? != self.repository || (!self.repository.join(".git").is_dir() || self.repository.join(".git").canonicalize()? != self.repository.join(".git"))
@@ -104,31 +112,78 @@ impl CodingConfigExt for CodingConfig {
         self.validate()?;
         self.validate_pinned_definition(definition)
     }
+    fn landing_resource(&self) -> Option<String> {
+        self.landing.as_ref().map(|l| digest(&("landing-target/v1", &l.repository, &l.target)))
+    }
+    fn wait_operation(&self, version: &str, argument: &str, every_ms: u64, patience_ms: u64) -> OperationSpec {
+        OperationSpec { adapter_version: version.into(), environment: BTreeMap::new(),
+            arguments: vec![self.pin(), argument.into(), every_ms.to_string(), patience_ms.to_string()] }
+    }
+}
+/// How often a waiting step looks, and the longest it may wait.
+pub(super) const WAIT_EVERY_MS: std::ops::RangeInclusive<u64> = 10..=3_600_000;
+pub(super) const WAIT_PATIENCE_MS: std::ops::RangeInclusive<u64> = 10..=14 * 24 * 3_600_000;
+/// The poll interval and patience a waiting step pinned, if it pinned sound ones.
+pub(super) fn wait_times(operation: &OperationSpec) -> Option<(u64, u64)> {
+    let [_, _, every, patience] = operation.arguments.as_slice() else { return None };
+    let (every, patience) = (every.parse::<u64>().ok()?, patience.parse::<u64>().ok()?);
+    (WAIT_EVERY_MS.contains(&every) && WAIT_PATIENCE_MS.contains(&patience)).then_some((every, patience))
 }
 impl PinnedDefinition for CodingConfig {
-    fn validate_pinned_definition(&self, definition: &Definition) -> Result<()> {
-        definition.validate().map_err(|_| Error::Refused("invalid definition"))?;
-        let mut provisioned = false;
-        let mut built = false;
-        let mut landed = false;
+    fn validate_pinned_definition(&self, definition: &Definition) -> Result<()> { self.pinned(definition, false) }
+    fn validate_pinned_group(&self, definition: &Definition) -> Result<()> { self.pinned(definition, true) }
+}
+trait Pinned { fn pinned(&self, definition: &Definition, in_group: bool) -> Result<()>; }
+impl Pinned for CodingConfig {
+    fn pinned(&self, definition: &Definition, in_group: bool) -> Result<()> {
+        if in_group { definition.validate_group() } else { definition.validate() }
+            .map_err(|_| Error::Refused("invalid definition"))?;
+        let (mut provisioned, mut built, mut landed) = (false, false, false);
+        let (mut based, mut folded, mut pushed) = (false, false, false);
         for stage in &definition.stages {
-            let (version, argument) = match &stage.kind {
-                StageKind::Provision if !provisioned && !built => { provisioned = true; ("coding-worktree/v1", String::new()) },
-                StageKind::Build if provisioned && !landed => { built = true; ("coding-harness/v1", String::new()) },
-                StageKind::Check if built => {
-                    let index = stage.operation.arguments.get(1).and_then(|s| s.parse::<usize>().ok())
-                        .filter(|i| *i < self.checks.len()).ok_or(Error::Refused("unknown configured check"))?;
-                    ("coding-check/v1", index.to_string())
-                },
+            let gate_index = |i: Option<&String>| i.and_then(|s| s.parse::<usize>().ok()).filter(|i| *i < self.checks.len())
+                .ok_or(Error::Refused("unknown configured check"));
+            let landing = self.landing.as_ref().ok_or(Error::Refused("landing verbs need a landing identity"));
+            let expected = match &stage.kind {
+                StageKind::Provision if !provisioned && !built => { provisioned = true; self.operation("coding-worktree/v1", "") },
+                StageKind::Build if provisioned && !landed => { built = true; self.operation("coding-harness/v1", "") },
+                StageKind::Check if built => self.operation("coding-check/v1", &gate_index(stage.operation.arguments.get(1))?.to_string()),
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
-                    ("coding-review/v1", self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity.clone()),
-                StageKind::Land if built && !landed => { landed = true; ("coding-land/v1", self.landing_ref.clone()) },
-                StageKind::Ci if landed => ("coding-ci/v1", self.ci.repository.clone()),
+                    self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
+                StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },
+                StageKind::Ci if landed => self.operation("coding-ci/v1", &self.ci.repository),
+                StageKind::Join { group, .. } if built && !in_group => self.operation("coding-join/v1", group),
+                StageKind::AwaitBase if in_group && !based && !pushed => {
+                    based = true; landing?;
+                    let mode = stage.operation.arguments.get(1).filter(|m| matches!(m.as_str(), "any" | "green"))
+                        .ok_or(Error::Refused("unknown base wait"))?;
+                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                    self.wait_operation("coding-await-base/v1", mode, every, patience)
+                },
+                StageKind::Fold if in_group && based && !folded && !pushed => { folded = true; self.operation("coding-fold/v1", "") },
+                StageKind::Run if in_group && folded && !pushed => self.operation("coding-gate/v1", &gate_index(stage.operation.arguments.get(1))?.to_string()),
+                StageKind::Push if in_group && folded && !pushed => {
+                    pushed = true;
+                    self.operation("coding-push/v1", &landing?.target)
+                },
+                StageKind::AwaitCi if pushed => {
+                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                    self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience)
+                },
                 _ => return Err(Error::Refused("unsupported operation or unsafe prerequisites")),
             };
-            if stage.operation != self.operation(version, &argument) {
+            if stage.operation != expected {
                 return Err(Error::Refused("definition does not pin configured operations"));
             }
+        }
+        if in_group { return Ok(()); }
+        // Every group works on the one landing target, so they take turns for it.
+        for name in definition.groups.keys() {
+            let group = &definition.groups[name];
+            if self.landing_resource().as_ref() != Some(&group.exclusive) {
+                return Err(Error::Refused("group does not hold the landing target"));
+            }
+            self.pinned(&definition.group_definition(name).ok_or(Error::Refused("invalid definition"))?, true)?;
         }
         Ok(())
     }

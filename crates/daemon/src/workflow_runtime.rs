@@ -17,6 +17,7 @@ mod service_owner;
 mod coding_execute;
 mod coding_native;
 mod coding_landing;
+mod coding_verbs;
 pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
@@ -103,8 +104,18 @@ pub struct Exec {
     coding: Option<CodingConfig>,
     /// One native build at a time: they share one hook socket on this host (ov-952).
     native_slot: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
+    /// its patience on the same clock its effect was created on.
+    launched: Option<(i64, std::time::Instant)>,
 }
 impl Exec {
+    /// The sweep's clock, moved on by the time this effect has been running.
+    pub(super) fn clock_ms(&self) -> i64 {
+        match self.launched {
+            Some((at, started)) => at.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)),
+            None => now(),
+        }
+    }
     /// Each item holds its own resource, so items in one repository never wait on each other
     /// for it. What serializes work on the repository is its own refs, not this name (ov-952).
     pub(crate) fn item_resource(workspace: &str, item: &str) -> String {
@@ -113,6 +124,14 @@ impl Exec {
     /// Items enqueued before per-item resources hold the repository's resource instead.
     pub(crate) fn resource_matches(&self, workspace: &str, effect: &Effect) -> bool {
         effect.resource == self.resource || effect.resource == Self::item_resource(workspace, &effect.item)
+            // A group holds the landing target for everyone who lands on it.
+            || self.coding.as_ref().and_then(|c| c.landing_resource()).is_some_and(|r| r == effect.resource)
+    }
+    /// An item's definition against what the configuration pins: a group item runs the group's steps.
+    pub(super) fn validate_item_definition(&self, item: &Item) -> Result<()> {
+        use coding::PinnedDefinition;
+        let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
+        if item.group_of.is_some() { config.validate_pinned_group(&item.definition) } else { config.validate_pinned_definition(&item.definition) }
     }
     pub fn state(&self, workspace: &str) -> Result<Option<State>> {
         Ok(self.store.workflow_state(workspace)?)
@@ -237,7 +256,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, native_slot: Default::default() },
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, native_slot: Default::default(), launched: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -390,6 +409,8 @@ impl Runtime {
                 Event::Message(message) => {
                     if let Some(message) = message {
                         self.receive(message).await;
+                        // A command may have started work, and a long wait must not hold it back.
+                        scan = scan || self.continuous;
                         for job in running.iter() {
                             if self.state(&job.workspace)?.is_some_and(|s| s.items.get(&job.effect.item)
                                 .is_some_and(|i| i.phase == Phase::Cancelling)) {
@@ -486,7 +507,9 @@ impl Runtime {
                     && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }));
                 if native && running.iter().any(|j| j.native) { continue; }
                 // A stop must always get through; everything else waits for a free slot.
-                if !matches!(effect.kind, EffectKind::Stop { .. }) && running.len() >= self.effect_cap { continue; }
+                let wait = matches!(effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi));
+                if !matches!(effect.kind, EffectKind::Stop { .. }) && !wait
+                    && running.iter().filter(|j| !j.wait).count() >= self.effect_cap { continue; }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
                     now_ms, now_ms.saturating_add(30_000))? else {
@@ -527,13 +550,14 @@ impl Runtime {
                 let (cancel, cancelled) = tokio::sync::watch::channel(false);
                 // This effect runs on its own copy of the item's configuration, so the next
                 // item's selection cannot change what it sees.
-                let exec = self.exec.clone();
+                let mut exec = self.exec.clone();
+                exec.launched = Some((now_ms, std::time::Instant::now()));
                 let (run_workspace, run_binding) = (workspace.clone(), binding.clone());
                 futures.push(Some(Box::pin(async move {
                     if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, native });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, native, wait });
             }
         }
         Ok(())
@@ -651,6 +675,8 @@ struct Running {
     cancel: tokio::sync::watch::Sender<bool>,
     /// Holds the shared native hook socket.
     native: bool,
+    /// Waits for something else (the base, CI) and does no work of its own, so the cap leaves it out.
+    wait: bool,
 }
 enum Event {
     Finished(usize, Result<Outcome>),
@@ -694,3 +720,5 @@ mod coding_tests;
 mod concurrency_tests;
 #[cfg(test)]
 mod observe_tests;
+#[cfg(test)]
+mod coding_verbs_tests;

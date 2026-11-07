@@ -1,6 +1,6 @@
 //! Configured execution and fact-based reconciliation. Nothing here grants wire authority.
 use super::*;
-use super::coding::{FileValidation, PinnedDefinition};
+use super::coding::FileValidation;
 use super::coding::sha;
 use farcooler_store::board_ci::CiStatus;
 
@@ -98,14 +98,18 @@ impl Exec {
                     command
                 }
             },
-            StageKind::Check => config.checks.get(operation.arguments.get(1)
+            StageKind::Check | StageKind::Run => config.checks.get(operation.arguments.get(1)
                 .and_then(|s| s.parse::<usize>().ok()).ok_or(Error::Refused("missing check index"))?)
                 .ok_or(Error::Refused("foreign check"))?.clone(),
             StageKind::Review(_) => config.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.command.clone(),
             StageKind::Ci => config.ci.command.clone(),
             _ => return Err(Error::Refused("not a process operation")),
         };
-        // Context wins over command environment and is pinned in the process fact.
+        self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
+        Ok(command)
+    }
+    /// Context wins over command environment and is pinned in the process fact.
+    pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) {
         let effect = &binding.effect;
         for (key, value) in [
             ("FARCOOLER_OPERATION_BINDING", digest(binding)),
@@ -114,12 +118,11 @@ impl Exec {
             ("FARCOOLER_RESOURCE_GENERATION", binding.generation.to_string()),
             ("FARCOOLER_DEFINITION_PIN", effect.definition_pin.clone()),
             ("FARCOOLER_POLICY_PIN", effect.policy_pin.clone()),
-            ("FARCOOLER_CANDIDATE", effect.candidate.clone().unwrap_or_default()),
+            ("FARCOOLER_CANDIDATE", candidate.to_string()),
             ("FARCOOLER_BASE", binding.base.clone()),
             ("FARCOOLER_ITERATION", binding.iteration.to_string()),
-            ("FARCOOLER_RECEIPT", self.provider_path(binding).to_string_lossy().into_owned()),
+            ("FARCOOLER_RECEIPT", receipt.to_string_lossy().into_owned()),
         ] { command.environment.insert(key.into(), value); }
-        Ok(command)
     }
     async fn run_coding(&self, binding: &Binding, command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
@@ -144,8 +147,7 @@ impl Exec {
         }
         let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
         let item = state.items.get(&binding.effect.item).ok_or(Error::Refused("missing item"))?;
-        let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
-        config.validate_pinned_definition(&item.definition)?;
+        self.validate_item_definition(item)?;
         if let EffectKind::Execute(_) = &binding.effect.kind {
             if !item.definition.stages.iter().any(|s| s.operation == binding.effect.operation) {
                 return Err(Error::Refused("foreign coding operation"));
@@ -186,7 +188,8 @@ impl Exec {
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         self.check_binding(workspace, binding)?;
         if let EffectKind::Stop { operation } = &binding.effect.kind { return self.stop_coding(binding, operation).await; }
-        self.validate_definition(&self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?.items[&binding.effect.item].definition)?;
+        self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.validate()?;
+        self.validate_item_definition(&self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?.items[&binding.effect.item])?;
         let tree = self.tree(binding);
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
         match kind {
@@ -195,7 +198,9 @@ impl Exec {
                 crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
                     .map_err(|_| Error::Refused("configured worktree provisioning uncertain"))?;
             }
-            StageKind::Build | StageKind::Check | StageKind::Review(_) | StageKind::Ci => {
+            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi =>
+                return self.execute_verb(binding, kind, cancel).await,
+            StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
                 self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
@@ -216,7 +221,7 @@ impl Exec {
         }
         self.reconcile_coding(binding).await
     }
-    async fn verify_tree(&self, binding: &Binding) -> Result<String> {
+    pub(super) async fn verify_tree(&self, binding: &Binding) -> Result<String> {
         let tree = self.tree(binding);
         let common = self.git_recorded(binding, &tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
         if Path::new(&common).canonicalize()? != self.repository().join(".git").canonicalize()? {
@@ -249,6 +254,7 @@ impl Exec {
         self.check_binding(&binding.workspace, binding)?;
         if let EffectKind::Stop { operation } = &binding.effect.kind { return self.stop_coding(binding, operation).await; }
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
+        if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
         let mut facts = Vec::new();
         if matches!(kind, StageKind::Provision | StageKind::Land) {
             let raw = self.bytes(&self.git_settlement(binding))?;
@@ -256,7 +262,7 @@ impl Exec {
             if settlement.binding != *binding { return Err(Error::Refused("foreign Git settlement")); }
             facts.extend(raw);
         }
-        if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Review(_) | StageKind::Ci) {
+        if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci) {
             let raw = self.bytes(&self.fact_path(binding))?;
             let fact: ProcessFact = serde_json::from_slice(&raw)?;
             let command = self.bound_command(binding, false)?;
@@ -286,7 +292,7 @@ impl Exec {
                 }
                 facts = receipt.into_bytes();
             }
-            StageKind::Build | StageKind::Check | StageKind::Review(_) | StageKind::Ci => {
+            StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
                 if matches!(kind, StageKind::Build) {
                     if candidate == binding.base || binding.effect.candidate.as_ref() == Some(&candidate) {
                         return Err(Error::Refused("harness did not produce a new candidate commit"));

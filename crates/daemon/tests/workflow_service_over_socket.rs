@@ -234,7 +234,8 @@ async fn workflow_service_shutdown_reaps_active_command_and_restart_does_not_rel
     accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"active".into(),pin}).await);
     let started=dir.path().join("started");
     tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        while !started.exists() {tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
+        // The file exists before the script has written its pid into it.
+        while std::fs::read_to_string(&started).map_or(true, |t| t.is_empty()) {tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
     }).await.unwrap();
     let pid:i32=std::fs::read_to_string(&started).unwrap().parse().unwrap();
     let modified=std::fs::metadata(&started).unwrap().modified().unwrap();

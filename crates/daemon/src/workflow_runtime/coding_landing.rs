@@ -13,8 +13,22 @@ impl Exec {
     fn remote_fact(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.landing.json", digest(&binding.effect)))
     }
-    fn remote_log(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn remote_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.push.output", digest(&binding.effect)))
+    }
+    /// The git program and the whole environment a push or fetch runs with: nothing inherited,
+    /// the repository's guard pins, and no global or system configuration.
+    pub(super) async fn git_environment(&self) -> Result<(String, std::collections::BTreeMap<String, String>)> {
+        let git = crate::git_launch::git_launch().map_err(|_| Error::Refused("git unavailable"))?;
+        let mut command = std::process::Command::new(&git.program);
+        command.env_clear();
+        let mut pins = crate::git::guard_pins(&self.repository()).await.map_err(|_| Error::Refused("landing guard pins unavailable"))?;
+        pins.push(("protocol.file.allow".into(), "always".into()));
+        crate::git_guard::apply(&mut command, &pins);
+        command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", "/dev/null");
+        let environment = command.get_envs().filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
+            .collect();
+        Ok((git.program.to_string_lossy().into_owned(), environment))
     }
     pub(super) async fn land_remote(&self, binding: &Binding, cancelled: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(()) };
@@ -33,17 +47,9 @@ impl Exec {
         if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
             return Err(Error::Refused("local landing config redirects transport"));
         }
-        let git = crate::git_launch::git_launch().map_err(|_| Error::Refused("git unavailable"))?;
-        let mut command = std::process::Command::new(&git.program);
-        command.env_clear();
-        let mut pins = crate::git::guard_pins(&self.repository()).await.map_err(|_| Error::Refused("landing guard pins unavailable"))?;
-        pins.push(("protocol.file.allow".into(), "always".into()));
-        crate::git_guard::apply(&mut command, &pins);
-        command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", "/dev/null");
-        let environment = command.get_envs().filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
-            .collect();
+        let (program, environment) = self.git_environment().await?;
         let target = crate::landing_job::push_target(candidate, &identity.target);
-        let argv = vec![git.program.to_string_lossy().into_owned(), "push".into(), "--porcelain".into(),
+        let argv = vec![program, "push".into(), "--porcelain".into(),
             // Local push policy must not expand this one-ref operation to tags,
             // submodule remotes or signing machinery outside its pinned identity.
             "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
