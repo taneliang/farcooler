@@ -1,0 +1,28 @@
+reports/ov-939-cli-fix/red-to-fix.diff:40: trailing whitespace.
++ 
+reports/ov-939-cli-fix/rust-red.log:23: trailing whitespace.
++test workflow::tests::workflow_retry_help_states_unsupported_recovery ... 
+reports/ov-939-cli-fix/rust-red.log:31: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:34: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:41: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:44: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:48: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:52: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:55: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:64: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:67: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:70: trailing whitespace.
++          
+reports/ov-939-cli-fix/rust-red.log:77: trailing whitespace.
++test workflow::tests::workflow_retry_local_refuses_before_connector ... 
+reports/ov-939-cli-fix/rust-red.log:83: trailing whitespace.
++test workflow::tests::workflow_retry_remote_refuses_before_connector ... 

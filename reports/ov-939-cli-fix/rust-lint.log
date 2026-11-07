@@ -1,0 +1,35 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/reports/ov-939-cli-fix/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'clippy', '--offline', '--locked', '-p', 'farcooler-cli', '--all-targets', '--', '-D', 'warnings']
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/protocol)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/workflow)
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/ffi-guard)
+    Checking rustix v1.1.4
+    Checking regex-syntax v0.8.11
+    Checking rusqlite v0.32.1
+    Checking serde_urlencoded v0.7.1
+    Checking tower-http v0.6.11
+    Checking russh-cryptovec v0.62.0
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/tailcat)
+    Checking notify-types v2.1.0
+    Checking regex-automata v0.4.16
+    Checking farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/agent-core)
+    Checking russh v0.62.4
+    Checking notify v8.2.0
+    Checking reqwest v0.12.28
+    Checking farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/agent-hooks)
+    Checking tempfile v3.27.0
+    Checking matchers v0.2.0
+    Checking tracing-subscriber v0.3.23
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/transport)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/store)
+    Checking farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/tmux)
+    Checking farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/review)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/client)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/daemon)
+    Checking farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/cli)
+    Finished `dev` profile [unoptimized] target(s) in 14.43s
+
+EXIT 0 stopped=None

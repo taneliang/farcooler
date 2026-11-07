@@ -1,0 +1,28 @@
+{
+  "product-whitespace": {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "crates/cli/src/workflow.rs"
+    ],
+    "exit": 0
+  },
+  "size-budget": {
+    "command": [
+      "/usr/bin/python3",
+      "scripts/file-size-budget.py"
+    ],
+    "exit": 0
+  },
+  "doc-comments": {
+    "command": [
+      "/usr/bin/python3",
+      "scripts/doc-comment-check.py",
+      "--base",
+      "821194faedd23fec2b639667034b6a8ba979f827"
+    ],
+    "exit": 0
+  }
+}

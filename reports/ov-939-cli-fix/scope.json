@@ -1,0 +1,160 @@
+{
+  "base": "821194faedd23fec2b639667034b6a8ba979f827",
+  "product_files": [
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt",
+      "base_sha256": "331a4601b3d6e60419fc3afec7e34f2907866af342dceaf9d468bad5c0980458",
+      "sha256": "331a4601b3d6e60419fc3afec7e34f2907866af342dceaf9d468bad5c0980458",
+      "unchanged": true
+    },
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowRunsView.kt",
+      "base_sha256": "b9777fd235a7722eed4fcafa882d9aa494c224eceae792493cc33c987028c41b",
+      "sha256": "b9777fd235a7722eed4fcafa882d9aa494c224eceae792493cc33c987028c41b",
+      "unchanged": true
+    },
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowSession.kt",
+      "base_sha256": "23c485b5a19e190c65819273c4afdb6e727f756fc2db26fe19241bfdacbc1f50",
+      "sha256": "23c485b5a19e190c65819273c4afdb6e727f756fc2db26fe19241bfdacbc1f50",
+      "unchanged": true
+    },
+    {
+      "path": "apps/android/app/src/test/java/com/farcooler/ui/WorkflowSessionTest.kt",
+      "base_sha256": "38077facfacfd22210804ccc429c60c5b187e0f7ad6aa14514a9540ec4fbde40",
+      "sha256": "38077facfacfd22210804ccc429c60c5b187e0f7ad6aa14514a9540ec4fbde40",
+      "unchanged": true
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift",
+      "base_sha256": "a1087d85c4bdc0ca3998d5762110143b60ffd206930907f8b744484b6ba89e34",
+      "sha256": "a1087d85c4bdc0ca3998d5762110143b60ffd206930907f8b744484b6ba89e34",
+      "unchanged": true
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift",
+      "base_sha256": "e01f3aa5342181011b9a6816d5cc785416417a5b8066939e272899ae0ba7e09a",
+      "sha256": "e01f3aa5342181011b9a6816d5cc785416417a5b8066939e272899ae0ba7e09a",
+      "unchanged": true
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift",
+      "base_sha256": "6c13eb108b810955a8bb7384c837ad72c1f5a6a6be91752c146809f453692ee5",
+      "sha256": "6c13eb108b810955a8bb7384c837ad72c1f5a6a6be91752c146809f453692ee5",
+      "unchanged": true
+    },
+    {
+      "path": "crates/cli/src/workflow.rs",
+      "base_sha256": "73930cbf86c3acb672856a2dabf497a7d80984d809996b38c8f24aa27fa81317",
+      "sha256": "e1417e7295cc2da8113b53cad9bca94c92c558be319912a5a88e8837c75c8ed6",
+      "unchanged": false
+    },
+    {
+      "path": "crates/client/src/session/workflow.rs",
+      "base_sha256": "684c8076b1991a8a2bff8893bde62f35e11b9fbb62b060e5b8a67ff9820a51a9",
+      "sha256": "684c8076b1991a8a2bff8893bde62f35e11b9fbb62b060e5b8a67ff9820a51a9",
+      "unchanged": true
+    },
+    {
+      "path": "crates/client/src/session/workflow/tests.rs",
+      "base_sha256": "5fe7f0b85eb31348f8dbeb64e28f7a28e7dde336dcf67d6e03f05cf011d0dd12",
+      "sha256": "5fe7f0b85eb31348f8dbeb64e28f7a28e7dde336dcf67d6e03f05cf011d0dd12",
+      "unchanged": true
+    },
+    {
+      "path": "crates/client/src/session/workflow/tests/socket.rs",
+      "base_sha256": "814681a27ae21f1f05278b08732cae7866cf6ac141d60096ca988c4c2ffcc0c2",
+      "sha256": "814681a27ae21f1f05278b08732cae7866cf6ac141d60096ca988c4c2ffcc0c2",
+      "unchanged": true
+    },
+    {
+      "path": "crates/client/src/testdata/workflow-rework.json",
+      "base_sha256": "fa5ffbb8fd3698089d47e0de0435a3130e381996402da38d9ef9de2446779cce",
+      "sha256": "fa5ffbb8fd3698089d47e0de0435a3130e381996402da38d9ef9de2446779cce",
+      "unchanged": true
+    },
+    {
+      "path": "crates/client/src/workflow_presentation.rs",
+      "base_sha256": "1b8143f1faf79c8af652100fa7b66cd2a925bbc0c500b378b295231ced0fe0f1",
+      "sha256": "1b8143f1faf79c8af652100fa7b66cd2a925bbc0c500b378b295231ced0fe0f1",
+      "unchanged": true
+    },
+    {
+      "path": "crates/client/src/workflow_presentation/tests.rs",
+      "base_sha256": "2ada36011d9cac13e92746fbad6d111497a86467c5b8d15e4f3c0b85cb2e2680",
+      "sha256": "2ada36011d9cac13e92746fbad6d111497a86467c5b8d15e4f3c0b85cb2e2680",
+      "unchanged": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/tests.rs",
+      "base_sha256": "cdde12693d2a2e7af7d6b8f372bcd7f6cda8c07310e3506540dd1cca3fd061da",
+      "sha256": "cdde12693d2a2e7af7d6b8f372bcd7f6cda8c07310e3506540dd1cca3fd061da",
+      "unchanged": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/wire_commands.rs",
+      "base_sha256": "a60f794462c9294b0d7be58befe121963d93cc41fc26f9e5c1a0ec270e98ae8b",
+      "sha256": "a60f794462c9294b0d7be58befe121963d93cc41fc26f9e5c1a0ec270e98ae8b",
+      "unchanged": true
+    },
+    {
+      "path": "crates/protocol/src/workflow_commands.rs",
+      "base_sha256": "78521668ea21d856c8c1d3e33c9e60e166e39afa3dd9cfe3b8253c6b34f29e59",
+      "sha256": "78521668ea21d856c8c1d3e33c9e60e166e39afa3dd9cfe3b8253c6b34f29e59",
+      "unchanged": true
+    },
+    {
+      "path": "crates/workflow/src/reducer.rs",
+      "base_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+      "sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+      "unchanged": true
+    },
+    {
+      "path": "crates/workflow/src/state.rs",
+      "base_sha256": "ef042ed69fb2137b2b5880014b30ea6afd81cc25c8e488db732fa15c414581a7",
+      "sha256": "ef042ed69fb2137b2b5880014b30ea6afd81cc25c8e488db732fa15c414581a7",
+      "unchanged": true
+    },
+    {
+      "path": "crates/workflow/tests/workflow.rs",
+      "base_sha256": "33a8d6113b129927969aa9464a1a2e53d7fbf2c9be18399c08eb9c88201c2cac",
+      "sha256": "33a8d6113b129927969aa9464a1a2e53d7fbf2c9be18399c08eb9c88201c2cac",
+      "unchanged": true
+    },
+    {
+      "path": "services/web/src/client/workflow-session.ts",
+      "base_sha256": "83d4beb1def12e5a7a3567fb6f06d2026e41e5e08de305ec7939ce38b8f5bcec",
+      "sha256": "83d4beb1def12e5a7a3567fb6f06d2026e41e5e08de305ec7939ce38b8f5bcec",
+      "unchanged": true
+    },
+    {
+      "path": "services/web/src/client/workflow-view.ts",
+      "base_sha256": "e5e1d7f54199b3f423298b19285cf8f659e4d46ebfb724d6e5e7b98053f38868",
+      "sha256": "e5e1d7f54199b3f423298b19285cf8f659e4d46ebfb724d6e5e7b98053f38868",
+      "unchanged": true
+    },
+    {
+      "path": "services/web/src/client/workflow.ts",
+      "base_sha256": "0a563ac5abff487c61d81d2f1066787ac3ed225267b4faed9838ec22c0b1a710",
+      "sha256": "0a563ac5abff487c61d81d2f1066787ac3ed225267b4faed9838ec22c0b1a710",
+      "unchanged": true
+    },
+    {
+      "path": "services/web/test/workflow-session.test.mjs",
+      "base_sha256": "a527e67975935901bd54f12a0494746a20bb8781a889c38cc76e5970028d4529",
+      "sha256": "a527e67975935901bd54f12a0494746a20bb8781a889c38cc76e5970028d4529",
+      "unchanged": true
+    },
+    {
+      "path": "services/web/test/workflow.test.mjs",
+      "base_sha256": "c5db61bf27888d95fe2854befe49cd28bd2d501f14052d123cf8811be5d422de",
+      "sha256": "c5db61bf27888d95fe2854befe49cd28bd2d501f14052d123cf8811be5d422de",
+      "unchanged": true
+    }
+  ],
+  "only_changed_product": "crates/cli/src/workflow.rs",
+  "original_report_files_verified_unchanged": 89,
+  "tracked_changed_paths": [
+    "crates/cli/src/workflow.rs"
+  ]
+}

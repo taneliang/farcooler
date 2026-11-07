@@ -1,0 +1,101 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/reports/ov-939-cli-fix/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-cli', '--bin', 'farcooler', 'workflow_retry_', '--', '--nocapture']
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/agent-core)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/daemon)
+   Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-cli-retry-binding/crates/cli)
+    Finished `test` profile [unoptimized] target(s) in 22.93s
+     Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler-62003bc98479d959)
+
+running 3 tests
+test workflow::tests::workflow_retry_help_states_unsupported_recovery ... 
+thread 'workflow::tests::workflow_retry_help_states_unsupported_recovery' (830212333) panicked at crates/cli/src/workflow.rs:205:13:
+Request bounded rework with a reason tied to the exact inspected evidence
+
+Usage: farcooler workflow rework [OPTIONS] --run <RUN> --pin <PIN> --evidence <EVIDENCE> --reason <REASON> --prepared-file <PREPARED_FILE> --command-id <COMMAND_ID> --revision <REVISION> --epoch <EPOCH> --sequence <SEQUENCE> <WORKSPACE> <ITEM>
+
+Arguments:
+  <WORKSPACE>
+          
+
+  <ITEM>
+          
+
+Options:
+      --json
+          Emit machine-readable JSON. The Mac app consumes this rather than scraping human output
+
+      --run <RUN>
+          
+
+      --pin <PIN>
+          
+
+      --runner <TARGET>
+          Operate on another runner, as `user@host` or an ssh config alias.
+          
+          Runs the same protocol over ssh, so this flag reaches a runner exactly as your own ssh does: one ssh can't reach, this can't either. A runner's tunnel is the apps' route into it, and is not what this flag uses.
+
+      --evidence <EVIDENCE>
+          
+
+      --reason <REASON>
+          
+
+      --prepared-file <PREPARED_FILE>
+          Save immutable retry bytes here before submitting; must be a new file
+
+      --command-id <COMMAND_ID>
+          Keep this identity and every argument unchanged when retrying a lost reply
+
+      --revision <REVISION>
+          
+
+      --epoch <EPOCH>
+          
+
+      --sequence <SEQUENCE>
+          
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow::tests::workflow_retry_local_refuses_before_connector ... 
+thread 'workflow::tests::workflow_retry_local_refuses_before_connector' (830212334) panicked at crates/cli/src/workflow.rs:188:13:
+assertion `left == right` failed: retry reached connector for None
+  left: 1
+ right: 0
+FAILED
+test workflow::tests::workflow_retry_remote_refuses_before_connector ... 
+thread 'workflow::tests::workflow_retry_remote_refuses_before_connector' (830212335) panicked at crates/cli/src/workflow.rs:188:13:
+assertion `left == right` failed: retry reached connector for Some("other-cloned-runner")
+  left: 1
+ right: 0
+FAILED
+
+failures:
+
+failures:
+    workflow::tests::workflow_retry_help_states_unsupported_recovery
+    workflow::tests::workflow_retry_local_refuses_before_connector
+    workflow::tests::workflow_retry_remote_refuses_before_connector
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 598 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p farcooler-cli --bin farcooler`
+
+EXIT 101 stopped=None

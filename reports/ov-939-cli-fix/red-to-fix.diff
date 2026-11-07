@@ -1,0 +1,56 @@
+--- old-retry-with-private-seam
++++ corrected-source
+@@ -1,4 +1,4 @@
+-//! File publication and explicit identity retries over the ordinary daemon link.
++//! File publication and refusal of unbound retained retries over the ordinary daemon link.
+ use std::io::Read;
+ use clap::{Args, Subcommand};
+ use farcooler_protocol::{capability, workflow_commands::{Action, Mutation, MAX_BYTES}, v1::{self as pb, request, result}};
+@@ -53,11 +53,17 @@
+     /// Accept a semantic review or request rework using the inspected evidence JSON file.
+     Review { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long)] evidence:std::path::PathBuf,#[arg(long)] passed:bool,#[command(flatten)] identity:Identity },
+     /// Request bounded rework with a reason tied to the exact inspected evidence.
++    ///
++    /// Durable CLI retry is unsupported: the saved file cannot verify its original recipient.
++    /// If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.
+     Rework { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+         #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,
+-        /// Save immutable retry bytes here before submitting; must be a new file.
++        /// Save immutable command bytes before the first attempt; must be a new file. Durable CLI retry is unsupported.
+         #[arg(long)] prepared_file:std::path::PathBuf,#[command(flatten)] identity:Identity },
+-    /// Retry retained prepared bytes without preparing or reading a new reason.
++    /// Refuse an unbound retained command without connecting or sending.
++    ///
++    /// Durable CLI retry is unsupported: the saved file cannot verify its original recipient.
++    /// If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.
+     Retry { #[arg(long)] prepared_file:std::path::PathBuf },
+     /// Request cancellation of the inspected run.
+     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+@@ -121,6 +127,7 @@
+     std::fs::File::open(parent)?.sync_all()?;
+     Ok(())
+ }
++#[cfg(test)]
+ fn load_prepared(path:&std::path::Path) -> Result<PreparedWorkflowAction,Box<dyn std::error::Error>> {
+     let prepared:PreparedWorkflowAction=serde_json::from_slice(&read_file(path)?)?;
+     prepared.validate()?;Ok(prepared)
+@@ -145,16 +152,15 @@
+ async fn workflow_with_connect<F, C>(cmd:WorkflowCmd,json:bool,connect:C) -> Fallible
+ where F:std::future::Future<Output=Result<crate::Link,Box<dyn std::error::Error>>>, C:FnOnce()->F {
+ 
+-    if let WorkflowCmd::Retry{prepared_file}=cmd {
+-        let prepared=load_prepared(&prepared_file)?;
+-        let mut link=connect().await?;
+-        return send_prepared(&mut link,&prepared,json).await;
++    if matches!(cmd,WorkflowCmd::Retry{..}) {
++        return Err("This CLI connection cannot verify the original recipient of this retained command; retry was not sent. Durable CLI retry is unsupported (ov-941). If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.".into());
+     }
+     let saved=match &cmd{WorkflowCmd::Rework{prepared_file,..}=>Some(prepared_file.clone()),_=>None};
+     let (workspace,action) = cmd.action()?;
+     if let Some(path)=saved {
+         let prepared=PreparedWorkflowAction{schema:1,workspace,json:serde_json::to_string(&action)?};
+         save_prepared(&path,&prepared)?;
++        eprintln!("Saved immutable command bytes. Durable CLI retry is unsupported (ov-941): this file cannot verify its original recipient. If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.");
+         let mut link=connect().await?;
+         return send_prepared(&mut link,&prepared,json).await;
+     }

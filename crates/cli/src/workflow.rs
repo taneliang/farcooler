@@ -1,4 +1,4 @@
-//! File publication and explicit identity retries over the ordinary daemon link.
+//! File publication and refusal of unbound retained retries over the ordinary daemon link.
 use std::io::Read;
 use clap::{Args, Subcommand};
 use farcooler_protocol::{capability, workflow_commands::{Action, Mutation, MAX_BYTES}, v1::{self as pb, request, result}};
@@ -53,11 +53,17 @@ pub enum WorkflowCmd {
     /// Accept a semantic review or request rework using the inspected evidence JSON file.
     Review { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long)] evidence:std::path::PathBuf,#[arg(long)] passed:bool,#[command(flatten)] identity:Identity },
     /// Request bounded rework with a reason tied to the exact inspected evidence.
+    ///
+    /// Durable CLI retry is unsupported: the saved file cannot verify its original recipient.
+    /// If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.
     Rework { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,
-        /// Save immutable retry bytes here before submitting; must be a new file.
+        /// Save immutable command bytes before the first attempt; must be a new file. Durable CLI retry is unsupported.
         #[arg(long)] prepared_file:std::path::PathBuf,#[command(flatten)] identity:Identity },
-    /// Retry retained prepared bytes without preparing or reading a new reason.
+    /// Refuse an unbound retained command without connecting or sending.
+    ///
+    /// Durable CLI retry is unsupported: the saved file cannot verify its original recipient.
+    /// If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.
     Retry { #[arg(long)] prepared_file:std::path::PathBuf },
     /// Request cancellation of the inspected run.
     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
@@ -121,6 +127,7 @@ fn save_prepared(path:&std::path::Path, prepared:&PreparedWorkflowAction) -> Res
     std::fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
+#[cfg(test)]
 fn load_prepared(path:&std::path::Path) -> Result<PreparedWorkflowAction,Box<dyn std::error::Error>> {
     let prepared:PreparedWorkflowAction=serde_json::from_slice(&read_file(path)?)?;
     prepared.validate()?;Ok(prepared)
@@ -140,20 +147,24 @@ async fn send_prepared(link:&mut crate::Link,prepared:&PreparedWorkflowAction,js
     if value.pointer("/receipt/result/Err").is_some(){return Err("workflow command refused; receipt shown above".into());}Ok(())
 }
 pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible {
-    if let WorkflowCmd::Retry{prepared_file}=cmd {
-        let prepared=load_prepared(&prepared_file)?;
-        let mut link=crate::connect_to(runner).await?;
-        return send_prepared(&mut link,&prepared,json).await;
+    workflow_with_connect(cmd,json,||crate::connect_to(runner)).await
+}
+async fn workflow_with_connect<F, C>(cmd:WorkflowCmd,json:bool,connect:C) -> Fallible
+where F:std::future::Future<Output=Result<crate::Link,Box<dyn std::error::Error>>>, C:FnOnce()->F {
+
+    if matches!(cmd,WorkflowCmd::Retry{..}) {
+        return Err("This CLI connection cannot verify the original recipient of this retained command; retry was not sent. Durable CLI retry is unsupported (ov-941). If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.".into());
     }
     let saved=match &cmd{WorkflowCmd::Rework{prepared_file,..}=>Some(prepared_file.clone()),_=>None};
     let (workspace,action) = cmd.action()?;
     if let Some(path)=saved {
         let prepared=PreparedWorkflowAction{schema:1,workspace,json:serde_json::to_string(&action)?};
         save_prepared(&path,&prepared)?;
-        let mut link=crate::connect_to(runner).await?;
+        eprintln!("Saved immutable command bytes. Durable CLI retry is unsupported (ov-941): this file cannot verify its original recipient. If the outcome is uncertain, inspect the original runner state; do not issue a fresh command.");
+        let mut link=connect().await?;
         return send_prepared(&mut link,&prepared,json).await;
     }
-    let mut link = crate::connect_to(runner).await?;
+    let mut link = connect().await?;
     send(&mut link,workspace,action,json).await
 }
 
@@ -161,6 +172,47 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
 mod tests {
     use super::*;
     use clap::Parser;
+    async fn assert_retry_does_not_connect(runner:Option<&str>) {
+        use std::cell::Cell;
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("retained.json");
+        // Same workspace/action can exist at another runtime; freshness is not destination proof.
+        let action=Action::Review{mutation:Mutation{id:"retained-id".into(),revision:4,epoch:1,sequence:2},
+            item:"a".into(),run:"same-cloned-run".into(),pin:"same-pin".into(),passed:false,
+            evidence:serde_json::from_str(r#"{"candidate":"c","manifest":"m","receipt":"r","policy_pin":"p"}"#).unwrap(),
+            reason:Some("  修复\n ".into())};
+        let prepared=PreparedWorkflowAction{schema:1,workspace:Uuid::nil(),json:format!("  {} ",serde_json::to_string(&action).unwrap())};
+        for bytes in [serde_json::to_vec(&prepared).unwrap(),b"malformed".to_vec(),
+            br#"{"schema":99,"runner":"alias","host":"install-id"}"#.to_vec()] {
+            std::fs::write(&path,&bytes).unwrap();
+            let connections=Cell::new(0);
+            let error=workflow_with_connect(WorkflowCmd::Retry{prepared_file:path.clone()},false,||async {
+                connections.set(connections.get()+1);
+                // Never call a real connector or construct a Link: no sender can be reached.
+                Err(format!("private connector reached for {runner:?}; no mutation sent").into())
+            }).await.unwrap_err();
+            assert_eq!(std::fs::read(&path).unwrap(),bytes,"retained bytes changed");
+            assert_eq!(connections.get(),0,"retry reached connector for {runner:?}");
+            assert!(error.to_string().contains("retry was not sent"));
+        }
+        let absent=dir.path().join("absent.json");
+        let error=workflow_with_connect(WorkflowCmd::Retry{prepared_file:absent.clone()},false,||async {
+            panic!("missing-file retry reached connector")
+        }).await.unwrap_err();
+        assert!(!absent.exists());assert!(error.to_string().contains("retry was not sent"));
+    }
+    #[tokio::test]
+    async fn workflow_retry_local_refuses_before_connector() { assert_retry_does_not_connect(None).await; }
+    #[tokio::test]
+    async fn workflow_retry_remote_refuses_before_connector() { assert_retry_does_not_connect(Some("other-cloned-runner")).await; }
+    #[test]
+    fn workflow_retry_help_states_unsupported_recovery() {
+        for command in ["rework","retry"] {
+            let help=crate::Cli::try_parse_from(["farcooler","workflow",command,"--help"]).err().unwrap().to_string();
+            assert!(help.contains("Durable CLI retry is unsupported"),"{help}");
+            assert!(help.contains("If the outcome is uncertain"),"{help}");
+            assert!(help.contains("do not issue a fresh command"),"{help}");
+        }
+    }
     #[test]
     fn workflow_reasoned_cli_keeps_reason_and_identity() {
         let dir=tempfile::tempdir().unwrap();let path=dir.path().join("evidence.json");

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--cached",
+    "--check"
+  ],
+  "exit": 2,
+  "raw_log": "raw-staged-whitespace.log",
+  "product_check_exit": 0,
+  "interpretation": "Original raw test stdout and source/diff witnesses preserved verbatim; no blanket full-diff-green claim."
+}

@@ -1,0 +1,14 @@
+{
+  "base": "821194faedd23fec2b639667034b6a8ba979f827",
+  "old_sha256": "6391b8c922929512ca9271b631d15835b2bf3cc788167a0f8f1893f4ccadc923",
+  "corrected_sha256": "e1417e7295cc2da8113b53cad9bca94c92c558be319912a5a88e8837c75c8ed6",
+  "old_restored_exact_before_correction": true,
+  "red_expected_exit": 101,
+  "red_actual_exit": 101,
+  "red_expected_failures": [
+    "local connector count 1 != 0",
+    "remote connector count 1 != 0",
+    "unsupported recovery help missing"
+  ],
+  "network_or_daemon_calls": 0
+}
