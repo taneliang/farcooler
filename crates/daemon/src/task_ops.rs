@@ -55,7 +55,7 @@ pub(crate) fn pb_status(status: TaskStatus) -> i32 {
 /// reads it as "every status", which is the store's own `Option<TaskStatus>`.
 /// Where it is a value, `set_status` refuses it rather than defaulting; see
 /// that function.
-fn status_from_wire(raw: i32) -> Option<TaskStatus> {
+pub(crate) fn status_from_wire(raw: i32) -> Option<TaskStatus> {
     match pb::TaskStatus::try_from(raw).ok()? {
         pb::TaskStatus::Unspecified => None,
         pb::TaskStatus::Backlog => Some(TaskStatus::Backlog),

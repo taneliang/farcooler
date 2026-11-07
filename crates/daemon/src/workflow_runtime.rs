@@ -68,6 +68,8 @@ enum Inbox {
     Wire(Box<Admission>, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<serde_json::Value>>),
     /// Bring cards under the engine with no run: (workspace, item, column).
     Track(Vec<(String, String, String)>, oneshot::Sender<Result<usize>>),
+    /// Move a tracker-only ticket to a column: (workspace, item, column).
+    MoveTicket(String, String, String, oneshot::Sender<Result<bool>>),
     Reconcile,
 }
 impl CommandHandle {
@@ -87,6 +89,14 @@ impl CommandHandle {
     pub async fn state(&self, workspace: &str) -> Result<Option<State>> {
         let (send, receive) = oneshot::channel();
         self.send.send(Inbox::State(workspace.into(), send)).await
+            .map_err(|_| Error::Refused("runtime inbox closed"))?;
+        receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
+    }
+    /// Move a tracker-only ticket to `column` on the orchestrator's say. False when the item is not a ticket
+    /// at rest (a run owns it), so the caller can say so.
+    pub async fn move_ticket(&self, workspace: &str, item: &str, column: &str) -> Result<bool> {
+        let (send, receive) = oneshot::channel();
+        self.send.send(Inbox::MoveTicket(workspace.into(), item.into(), column.into(), send)).await
             .map_err(|_| Error::Refused("runtime inbox closed"))?;
         receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
     }
@@ -636,8 +646,16 @@ impl Runtime {
                 let _ = reply.send(result);
             }
             Inbox::Track(tickets, reply) => { let _ = reply.send(self.track_tickets(&tickets)); }
+            Inbox::MoveTicket(workspace, item, column, reply) => { let _ = reply.send(self.move_ticket_now(&workspace, &item, &column)); }
             Inbox::Reconcile => {}
         }
+    }
+    fn move_ticket_now(&self, workspace: &str, item: &str, column: &str) -> Result<bool> {
+        let Some(state) = self.state(workspace)? else { return Ok(false) };
+        if !state.items.get(item).is_some_and(|i| i.definition.is_ticket()) { return Ok(false); }
+        let receipt = self.internal(workspace, Command::Move { item: item.into(), to: column.into() }, Grant::Controller, now())?;
+        // Moving a card to the column it is in changes nothing, and that is not a failure.
+        Ok(receipt.result.is_ok() || receipt.result == Err(Refusal::Invalid))
     }
     /// A card the engine refuses (a live worker or landing owns it) stays out and is not an error.
     fn track_tickets(&self, tickets: &[(String, String, String)]) -> Result<usize> {
