@@ -397,6 +397,8 @@ async fn a_create_that_hangs_after_it_worked_is_judged_by_the_lookup_not_the_tim
     let mut definition = per_ticket_pull_request(&runtime, false, 200);
     definition.stages[5] = route(route(waiting(&c, "merged", StageKind::AwaitPr, "coding-await-pr/v1", "", 200), "closed", Target::Fail, 0), "timeout", Target::Done, 0);
     definition.stages.truncate(6);
+    // One attempt only: a retry would find the pull request by itself and hide the fault.
+    definition.stages[4].max_attempts = 1;
     enqueue_item(&mut runtime, "w", "one", definition);
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
     assert_eq!((prs(&f).len(), count(&f, "create")), (1, 1));
