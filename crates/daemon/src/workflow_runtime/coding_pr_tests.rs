@@ -392,7 +392,7 @@ async fn a_change_requested_and_then_approved_by_the_same_reviewer_is_not_a_chan
 
 #[tokio::test]
 async fn a_create_that_hangs_after_it_worked_is_judged_by_the_lookup_not_the_timeout() {
-    let (_dir, mut runtime, f) = hub_with("pass", "create-hangs", 500).await;
+    let (_dir, mut runtime, f) = hub_with("pass", "create-hangs", 1500).await;
     let c = runtime.coding.clone().unwrap();
     let mut definition = per_ticket_pull_request(&runtime, false, 200);
     definition.stages[5] = route(route(waiting(&c, "merged", StageKind::AwaitPr, "coding-await-pr/v1", "", 200), "closed", Target::Fail, 0), "timeout", Target::Done, 0);
