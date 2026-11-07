@@ -17,11 +17,24 @@ pub(crate) fn is_owned(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<
         [task.as_bytes().as_slice()], |r| r.get(0))
 }
 
+/// Whether the engine holds this card as a tracker-only ticket at rest: no run, only a column. What a
+/// card's own notes (a wait) can change without touching the run's say over its column (ov-962).
+pub(crate) fn is_ticket(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<bool> {
+    let held: Option<(String, String)> = conn.query_row("SELECT workspace, item FROM workflow_owned_items WHERE task_id=?1",
+        [task.as_bytes().as_slice()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    let Some((workspace, item)) = held else { return Ok(false) };
+    let raw: Option<String> = conn.query_row("SELECT state FROM workflow_states WHERE workspace=?1", [&workspace], |r| r.get(0)).optional()?;
+    Ok(raw.and_then(|s| serde_json::from_str::<State>(&s).ok())
+        .is_some_and(|state| state.items.get(&item).is_some_and(|i| i.definition.is_ticket() && i.phase == Phase::WaitingApproval)))
+}
+
 /// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
+/// A rep's desk card is a person's thread, not work, so it is never one (ov-962).
 pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Result<Vec<(uuid::Uuid, String, TaskStatus)>> {
     let mut statement = conn.prepare("SELECT t.workspace_id, t.key, t.status FROM tasks t
         WHERE t.status NOT IN ('done','cancelled') AND (?1 IS NULL OR t.id=?1)
-        AND NOT EXISTS(SELECT 1 FROM workflow_owned_items o WHERE o.task_id=t.id) ORDER BY t.created_at, t.rowid")?;
+        AND NOT EXISTS(SELECT 1 FROM workflow_owned_items o WHERE o.task_id=t.id)
+        AND NOT EXISTS(SELECT 1 FROM rep_desks d WHERE d.task_id=t.id) ORDER BY t.created_at, t.rowid")?;
     let rows = statement.query_map([only.map(|u| u.as_bytes().to_vec())], |r| {
         let workspace: Vec<u8> = r.get(0)?; let status: String = r.get(2)?;
         Ok((uuid::Uuid::from_slice(&workspace).ok(), r.get::<_, String>(1)?, TaskStatus::parse(&status)))

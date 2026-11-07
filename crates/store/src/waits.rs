@@ -482,12 +482,15 @@ impl Store {
         {
             let mut conn = self.conn();
             let tx = conn.transaction().map_err(map_err)?;
-            crate::workflow_projection::refuse_if_owned(&tx, task)?;
+            // A wait is the card's own note, so a ticket the engine holds with no run keeps its say over the
+            // column but not over this; a card with a run of its own still refuses it (ov-962).
+            let ticket = crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)?;
+            if !ticket { crate::workflow_projection::refuse_if_owned(&tx, task)?; }
             let (status, _, before, since) = stored_wait(&tx, task)?;
             if wait.is_some() && !matches!(status, TaskStatus::Backlog | TaskStatus::Todo) {
                 return Err(DomainError::InvalidArgument { what: "wait_status" });
             }
-            if wait.is_some() && status == TaskStatus::Todo {
+            if wait.is_some() && status == TaskStatus::Todo && !ticket {
                 crate::tasks::move_in(&tx, task, TaskStatus::Todo, TaskStatus::Backlog, actor, now)?;
             }
             let since = if before == wait { since.unwrap_or(now) } else { now };

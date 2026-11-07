@@ -191,3 +191,32 @@ fn a_started_ticket_follows_its_run_from_the_column_it_was_in() {
     pass(&b, 1); pass(&b, 2); pass(&b, 3);
     assert_eq!(seen(&b), ("in_review".into(), Some("reviewing".into())));
 }
+
+/// A tracked ticket keeps its wait: a hold is the card's own note, so tracking every card must not make a
+/// waiting card unmanageable (ov-962). The column stays the engine's, so a held Todo card stays in Todo.
+#[test]
+fn a_tracked_ticket_can_be_held_and_released_but_a_run_still_refuses() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    b.store.set_task_status(b.task.id, TaskStatus::Backlog, Actor::User).expect_err("its column is the engine's");
+    let held = b.store.set_wait(b.task.id, Some(Wait::Parked), Actor::User).expect("a ticket may be parked");
+    assert_eq!(held.status, TaskStatus::Backlog);
+    assert!(b.store.set_wait(b.task.id, None, Actor::User).is_ok(), "and released");
+    // Once a run owns it, the wait is refused as ever.
+    let b = board();
+    enqueue(&b, Definition::coding());
+    let e = b.store.set_wait(b.task.id, Some(Wait::Parked), Actor::User).expect_err("a run owns it");
+    assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned" }), "{e:?}");
+}
+
+/// A rep's desk card is a person's thread, not work: tracking skips it.
+#[test]
+fn a_reps_desk_card_is_never_tracked() {
+    let b = board();
+    let handle = "alice";
+    b.store.conn().execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+    b.store.conn().execute("INSERT INTO rep_desks(workspace_id, handle, task_id) VALUES(?1,?2,?3)",
+        rusqlite::params![b.ws.as_bytes().as_slice(), handle, b.task.id.as_bytes().as_slice()]).unwrap();
+    let tracked: Vec<String> = b.store.untracked_tickets(None).unwrap().into_iter().map(|(_, k, _)| k).collect();
+    assert_eq!(tracked, vec![b.other.key.clone()], "only the real card is tracked");
+}
