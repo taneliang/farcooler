@@ -312,6 +312,80 @@ fn a_member_of_a_group_in_flight_cannot_leave_by_any_route() {
     assert!(log.try_run(Command::Retry { item: "a".into() }, Grant::Controller).is_err());
 }
 #[test]
+fn a_failed_group_cannot_be_retried() {
+    // Its members already took their rejected routes; a revived group would land them anyway.
+    let mut log = Log::new();
+    log.to_join("a"); log.queue("a");
+    let group = log.group_of("a");
+    pass_group(&mut log, &group, 2);
+    log.reject(&group);
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+    assert!(log.try_run(Command::Retry { item: group.clone() }, Grant::Controller).is_err());
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+}
+/// Fill the workspace with plain tickets until it holds exactly `total` items.
+fn fill(log: &mut Log, total: usize) {
+    // Cloning one real ticket keeps the fixture honest and a thousand protocol steps out of the test.
+    log.enqueue("filler-0", ticket());
+    let template = log.state.items["filler-0"].clone();
+    let mut n = 1;
+    while log.state.items.len() < total {
+        let mut item = template.clone(); item.resource = format!("res-filler-{n}");
+        log.state.items.insert(format!("filler-{n}"), item); n += 1;
+    }
+}
+#[test]
+fn queueing_that_would_open_a_group_past_the_item_cap_is_refused_and_nothing_is_bricked() {
+    let mut log = Log::new();
+    log.to_join("a");
+    fill(&mut log, 1024);
+    assert_eq!(log.try_run(Command::Queue { item: "a".into() }, Grant::Controller).unwrap_err(), Refusal::Limit);
+    // The workspace still takes commands.
+    log.run(Command::Cancel { item: "filler-0".into() }, Grant::Controller);
+}
+#[test]
+fn a_split_that_would_pass_the_item_cap_is_refused_whole() {
+    let mut log = Log::new();
+    for t in ["x", "a", "b"] { log.to_join(t); }
+    log.queue("x");
+    let ahead = log.group_of("x");
+    log.queue("a"); log.queue("b");
+    let pair = log.group_of("a");
+    pass_group(&mut log, &ahead, 3);
+    pass_group(&mut log, &pair, 2);
+    fill(&mut log, 1024);
+    let e = log.evidence(&pair);
+    let (effect, run, fence) = {
+        let i = &log.state.items[&pair]; (i.pending.clone().unwrap(), i.run.clone(), i.fence)
+    };
+    let result = log.try_run(Command::Observe { item: pair.clone(), effect: effect.clone(), run: run.clone(), fence,
+        outcome: Outcome::Rejected(e) }, Grant::Operation { effect, run, fence });
+    assert_eq!(result.unwrap_err(), Refusal::Limit);
+    assert_eq!(log.state.items[&pair].members.len(), 2, "no half a split");
+}
+#[test]
+fn a_caller_cannot_enqueue_an_id_a_group_will_use() {
+    let mut log = Log::new();
+    let result = log.try_run(Command::Enqueue { item: format!("group-{:020}-landing", 1), definition: ticket(),
+        policy_pin: "policy-1".into(), resource: "res".into(), dependencies: BTreeSet::new(), initial_candidate: None },
+        Grant::Controller);
+    assert_eq!(result.unwrap_err(), Refusal::Invalid);
+}
+#[test]
+fn a_split_cannot_follow_a_landing_in_a_group() {
+    // The first half would land, then the second half would re-run what already landed.
+    let land_first = |d: &mut Definition| {
+        let steps = &mut d.groups.get_mut("landing").unwrap().steps;
+        steps[1].kind = StageKind::Land; steps[1].routes.clear(); steps[1].limit = 0;
+    };
+    // Landing with the gate's split pointing back across it is refused; the same group without the split is fine.
+    assert!(invalid(land_first));
+    let mut d = ticket(); land_first(&mut d);
+    d.groups.get_mut("landing").unwrap().steps[2].routes.clear();
+    d.groups.get_mut("landing").unwrap().steps[2].limit = 0;
+    assert_eq!(d.validate(), Ok(()));
+}
+#[test]
 fn group_runs_replay_to_the_same_state() {
     let mut log = Log::new();
     for t in ["x", "a", "b"] { log.to_join(t); }

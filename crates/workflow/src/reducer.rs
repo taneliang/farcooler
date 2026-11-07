@@ -5,7 +5,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     if !valid_state(state) { return Err(Refusal::Invalid); }
     if input.schema != 1 || state.schema != 1 || !valid_id(&input.id)
         || !valid_id(&input.source) || !valid_id(&input.workspace)
-        || input.source_sequence == 0 || state.items.len() > 1024
+        || input.source_sequence == 0 || state.items.len() > MAX_ITEMS
         || input.busy_resources.len() > 1024 || input.busy_resources.iter().any(|r| !valid_id(r))
         || request_size(input)? > 65536
     { return Err(Refusal::Invalid); }
@@ -25,7 +25,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             controller(input)?;
             definition.validate()?;
             if !valid_id(item) || !valid_id(resource) || !valid_id(policy_pin)
-                || next.items.contains_key(item) || next.archive.contains_key(item) || next.items.len() >= 1024
+                || item.starts_with("group-") || next.items.contains_key(item) || next.archive.contains_key(item) || next.items.len() >= MAX_ITEMS
                 || dependencies.len() > 128
             { return Err(Refusal::Invalid); }
             let tracker = matches!(definition.stages[0].kind, StageKind::Tracker);
@@ -177,12 +177,14 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     let limit = usize::from(item.definition.groups.get(name).ok_or(Refusal::Definition)?.limit);
                     // The first open group of this definition and policy with room, oldest first.
                     let open = next.items.iter().find(|(_, g)| g.phase == Phase::Blocked
-                        && g.members.len() < limit && g.policy_pin == item.policy_pin
+                        && g.members.len() < limit && g.stage == 0 && g.candidate.is_none() && g.policy_pin == item.policy_pin
                         && g.group_of.as_ref().is_some_and(|o| &o.name == name && o.pin == item.pin))
                         .map(|(gid, _)| gid.clone());
                     let gid = match open {
                         Some(gid) => gid,
                         None => {
+                            // The ticket is out of the map while it is worked on, so count it.
+                            if next.items.len() + 1 >= MAX_ITEMS { return Err(Refusal::Limit); }
                             let gid = group_id(state, name);
                             let definition = item.definition.group_definition(name).ok_or(Refusal::Definition)?;
                             let resource = item.definition.groups[name].exclusive.clone();
@@ -208,7 +210,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 Command::Retry { .. } => {
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
-                    if item.phase != Phase::Failed { return Err(Refusal::Phase); }
+                    if item.phase != Phase::Failed || item.group_of.is_some() { return Err(Refusal::Phase); }
                     if item.retries >= MAX_RETRIES { return Err(Refusal::Limit); }
                     item.retries += 1;
                     item.attempt = 1;
@@ -222,6 +224,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 let mut rest = next.items.get(&from).ok_or(Refusal::Missing)?.clone();
                 let name = rest.group_of.as_ref().ok_or(Refusal::Invalid)?.name.clone();
                 let gid = group_id(state, &name);
+                if next.items.len() >= MAX_ITEMS || next.items.contains_key(&gid) { return Err(Refusal::Limit); }
                 for m in &members {
                     next.items.get_mut(&m.item).ok_or(Refusal::Missing)?.grouped_in = Some(gid.clone());
                 }
@@ -482,7 +485,7 @@ fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
 }
 
 fn valid_state(state: &State) -> bool {
-    valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= 1024
+    valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= MAX_ITEMS
         && state.archive.iter().all(|(id, a)| valid_id(id) && !state.items.contains_key(id)
             && matches!(a.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
             && a.candidate.as_deref().is_none_or(valid_id))

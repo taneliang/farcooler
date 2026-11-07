@@ -55,6 +55,8 @@ pub struct GroupOf { pub name: String, pub pin: String }
 fn is_zero(n: &u8) -> bool { *n == 0 }
 /// A failed item can be retried this many times, so a bad step cannot loop forever.
 pub const MAX_RETRIES: u8 = 3;
+/// Live items a workspace holds; every way of adding one refuses at this count, so a step never commits past it.
+pub const MAX_ITEMS: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     pub schema: u32,
