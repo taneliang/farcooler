@@ -1,6 +1,6 @@
 {
-  "phase": "SOURCE_PREP_ONLY",
-  "branch": "ov-940-cutover-integration-prep",
+  "phase": "C1_CORRECTION_GIT_ONLY_SOURCE_REVIEW",
+  "branch": "ov-940-cutover-barrier-contract",
   "pins": {
     "base936": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
     "map935": "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf",
@@ -9,10 +9,10 @@
     "queue938": "4c645bb788ec320fb19704ed042507adeccfd911",
     "required939": "821194faedd23fec2b639667034b6a8ba979f827"
   },
-  "corrected936_pin": null,
-  "corrected939_pin": null,
-  "composed_base": null,
-  "final_pin_binding": "Required before later product work; no allocation inferred",
+  "corrected936_pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+  "corrected939_pin": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+  "composed_base": "896fe58359191314192f9e68646d1e92dc1c0ed8",
+  "final_pin_binding": "Exact Git-only replay in composition.json; containing signed reports-only correction requires SAME C1-only closure before product-region/resource allocation",
   "inputs": [
     {
       "pin": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
@@ -302,7 +302,13 @@
       "role": "immutable source input; not execution evidence"
     }
   ],
-  "external_reviews": [
+  "limits": [
+    "Only immutable source and review reads plus administrative board/Git/report operations",
+    "No tests/builds/imports/SQL/DB or owner-resource actions",
+    "Hashes bind source input bytes, not live writer or execution proof"
+  ],
+  "historical_prep_pin": "9fb244a216947cf17c623424025658eecb5d7c11",
+  "historical_external_reviews": [
     {
       "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-935/independent-review.md",
       "sha256": "7c2d0509a51a5598075be70f59af728e0be168771de94de9b5425c7dfab214f8",
@@ -328,9 +334,111 @@
       "role": "read external SAME review; not modified"
     }
   ],
-  "limits": [
-    "Only immutable source and review reads plus administrative board/Git/report operations",
-    "No tests/builds/imports/SQL/DB or owner-resource actions",
-    "Hashes bind source input bytes, not live writer or execution proof"
-  ]
+  "external_reviews": [
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-935/independent-review.md",
+      "sha256": "7c2d0509a51a5598075be70f59af728e0be168771de94de9b5425c7dfab214f8",
+      "bytes": 7145,
+      "role": "external SAME review source, unchanged",
+      "disposition": "historical map approval reused"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-936/independent-review.md",
+      "sha256": "f1f4a3a05d74fd5885200fa36fe5e7cb93584cea03abcc18335f88caaa6c67d7",
+      "bytes": 18602,
+      "role": "external SAME review source, unchanged",
+      "disposition": "appended SAME93eb S1/S2 CLOSED; remaining integration gates open"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-937/independent-review.md",
+      "sha256": "b5c8fe56120dfa8f4396980bc63f40f15d87f0ff0e489d7a5d2216a5bd13a2e3",
+      "bytes": 10982,
+      "role": "external SAME review source, unchanged",
+      "disposition": "accepted root-source/focused evidence limits reused"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-938/independent-review.md",
+      "sha256": "5a27cc36f68c1856dd197894459e480e1a7e6ced19eb68ffede064e933c6ce09",
+      "bytes": 5561,
+      "role": "external SAME review source, unchanged",
+      "disposition": "accepted queue-only ownership limits reused"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-939/independent-review.md",
+      "sha256": "987d29d8396779d9df9f89ce2ebd351298777982ea3874c2253a775709fea2c2",
+      "bytes": 21324,
+      "role": "external SAME review source, unchanged",
+      "disposition": "d43 unsafe Retry finding CLOSED by refusal;941 durable retry OPEN"
+    },
+    {
+      "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-940/contract-security-review.md",
+      "sha256": "ceeb3e2f768d3b6dc216d750ed72332b550ccb127af1fe523297732829127c64",
+      "bytes": 12760,
+      "role": "external SAME review source, unchanged",
+      "disposition": "one C1 correction; this signed correction not yet SAME reviewed"
+    }
+  ],
+  "c1_inputs": [
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/engine_cutover.rs",
+      "sha256": "551ccf323bf776915373c8aeeb3bf7c515029b071f4a494073593b05c96d3d5c",
+      "bytes": 31762,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/engine_cutover/rehearsal.rs",
+      "sha256": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+      "bytes": 17961,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/migrate.rs",
+      "sha256": "f075f09f8788b95025c6cc563b0fae8ba32ed32814766101800ff0eb3b359c45",
+      "bytes": 89677,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/compat.rs",
+      "sha256": "756e54ca87c3345ea56fc63e302726f66a7daf8230ee856342cafb9258bf1940",
+      "bytes": 19887,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/store.rs",
+      "sha256": "84adfc1520c2a328a3debde1b0916fb1e0a6683c9de56774eeac97aee1d2bf45",
+      "bytes": 79070,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "path": "crates/store/src/workflow_effects.rs",
+      "sha256": "ba66d4dff50a803fab9ba649f35cb2d7d3de55f776a29d981e44190b870c4ac1",
+      "bytes": 9246,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+      "path": "crates/cli/src/workflow.rs",
+      "sha256": "e1417e7295cc2da8113b53cad9bca94c92c558be319912a5a88e8837c75c8ed6",
+      "bytes": 22214,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    },
+    {
+      "pin": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+      "path": "crates/workflow/src/state.rs",
+      "sha256": "ef042ed69fb2137b2b5880014b30ea6afd81cc25c8e488db732fa15c414581a7",
+      "bytes": 4993,
+      "role": "C1 ordering or accepted union source; not runtime evidence"
+    }
+  ],
+  "review_dispositions": {
+    "936": "S1/S2 CLOSED only; raw60/manual/join integration OPEN",
+    "939": "reason/history retained; d43 R-94 refusal accepted;941 durable CLI retry OPEN",
+    "940": "C1-only correction submitted; product allocation/execution still gated"
+  }
 }

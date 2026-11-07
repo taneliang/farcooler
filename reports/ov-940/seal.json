@@ -1,30 +1,36 @@
 {
-  "state": "frozen_source_prep_for_review_only",
-  "base": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+  "state": "C1_source_correction_for_SAME_review_only",
+  "base": "896fe58359191314192f9e68646d1e92dc1c0ed8",
+  "approved_base": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
   "files": {
+    "composition.json": {
+      "sha256": "f8c53d3044ebce70976d886fa666df223ce207cf5da3ac6d23e83f51b9f36bc3",
+      "bytes": 6493
+    },
     "contract.md": {
-      "sha256": "8e6f990c7799a29aa300ab5c7ae221205dc7a062bf3056ccbdbf720da1c1c8b3",
-      "bytes": 12651
+      "sha256": "04388ddaa764d9dd0271e3991eea1be8e9aad9c2ccfe6047cd295cf0dd5bed75",
+      "bytes": 21163
     },
     "handoff.md": {
-      "sha256": "930a93b27a5f5af467b06b6faa85aa31c6be1a22c930919e254727405773dff6",
-      "bytes": 2106
+      "sha256": "97168221bbf92362e99d17fc3d12d0098894212348118e2bad03f949493bdfc5",
+      "bytes": 2963
     },
     "ownership.md": {
-      "sha256": "c654239102deabf0e1e1fe31f89be6d4684d0304e663257d60ddd91510696bbf",
-      "bytes": 7607
+      "sha256": "d9207b84b80029e0b6b705f0e9b684fa51a12622b5509aeec2b4152db0793574",
+      "bytes": 7752
     },
     "source-inventory.json": {
-      "sha256": "1be988ed2aa7ca3bdf524627593ae27a1481bd414481d2cbc576cfd52ed6a661",
-      "bytes": 13928
+      "sha256": "282b968539c63e475445ed124c03fe075de3e8fee79211e1bbf311ebc963ea26",
+      "bytes": 19057
     },
     "verification.md": {
-      "sha256": "f19e6b00d5c8f80ea1a582b57a449678201858a3d451fd1a604f7e3a8eae98e7",
-      "bytes": 8832
+      "sha256": "4e00edd12a715e6b142eadd283d453d7ac5ceaaadf8bd2f2b3b174c5a0af4559",
+      "bytes": 11819
     }
   },
-  "product_changes": 0,
+  "product_changes_in_correction": 0,
   "tests_or_builds_executed": false,
-  "corrected_composition_allocated": false,
+  "git_only_composition_allocated": true,
+  "product_regions_or_execution_allocated": false,
   "signature_binding": "Signed containing Git commit; seal excludes itself"
 }

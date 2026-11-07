@@ -1,33 +1,45 @@
-# Signed source-preparation handoff
+# Signed C1-only correction handoff
 
-The signed commit containing this file is the phase1 handoff pin, sole parent
-e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba. Only reports/ov-940 changes.
+The signed containing commit is the C1 source-review pin, sole parent
+`896fe58359191314192f9e68646d1e92dc1c0ed8`. The correction changes only
+reports/ov-940. Original9fb preparation and e853/93eb/d43 remain immutable.
 Inherited untracked .codex/ and .cursor/ are untouched and excluded.
 
-- contract.md: exact reviewed pins, existing APIs versus required opaque
-  issuance, all bootstrap paths/call order, retained manual/native/activity
-  routes, no backlog replay, reason/history preservation and remaining gates.
-- ownership.md: concrete writer/source/handle/resource inventory and proposed
-  one-writer boundaries; source counterexamples remain visible.
-- verification.md: finite trusted raw60 and composed private checks, meaningful
-  failure oracles, narrow notice/plan invariant correction and resource bounds.
-- source-inventory.json: immutable source and external SAME review byte binding.
-- seal.json: report SHA-256/lengths; this file does not self-certify runtime work.
+`composition.json` binds the conflict-free prescribed replay from approved d43,
+three equal stable patch IDs, exact parent graph, full 5627-entry tracked union
+and all changed nonreport source hashes. `source-inventory.json` retains all41
+original source bindings and historical review prefixes, and adds current
+corrected sources/reviews and exact composition. `seal.json` binds every report
+except itself; the containing signed commit binds the seal.
 
-Validation is source/anchor reconciliation, report hash binding and Git
-whitespace/scope review only. No product changes, tests, builds, product imports,
-SQL/DB actions, target probes, owner paths, provider/network, app/GUI/OS capability
-actions or process signals. Normal signing/commit-message hook is administrative
-Git work, not a product verification gate.
+C1 fixes the real migration-commit/late-floor-stamp gap: actual admission close,
+owner join and held resource exclusion; recoverable original raw60 backup plus
+typed catalog/ledger durably published before nonreplaceable fsynced intent;
+candidate early gate on every bootstrap path; atomic registry/version/refusing
+floor/frozen-attempt commit; original baseline recovery and a before/after crash
+oracle for every durable boundary. An external marker cannot fence old binaries
+or open descriptors. Old60-reader refusal must be tested independently at the
+upgrade commit boundary. The explicit fresh-install branch and inconsistent
+marker/floor recovery refuse ordinary normalization fallback. Existing later
+closed quiesced backup/independent restore/CommitPermit remains required.
 
-Acceptance1 source-prep deliverable is supplied, with final corrected936/939
-union binding explicitly **pending**. Acceptance2-5 implementation/execution and
-SAME composed review remain open. No synthetic proof is claimed as actual writer
-joining; no retained messaging gap is marked solved.936 S1/S2 and939 CLI binding
-stay with their allocated fresh fixers. Real main/app/platform/provider/owner
-copy/backup/installed cutover and full gates/mainCI remain932/parent.
+Accepted opaque owner proof,938 owned-group semantics extended at effect_runner,
+manual-delivery bridge, native notice eligibility/no backlog replay and unresolved
+conversation/activity capability limits remain required. No implemented API,
+schema/tag reservation or live writer proof is asserted. Corrected936 S1/S2 PASS
+and required939 reason/history plus d43 R-94 refusal stand; authenticated durable
+CLI retry remains OPEN under941, outside940.
 
-Stop at this signed reports-only pin and submit in_review. The next orchestrator
-allocation must name the SAME-approved corrected936 base, required939 correction,
-resolved source union and exact product regions before implementation. No owner
-product-choice questionnaire or broad planning cycle is needed for this handoff.
+Validation here is source hashes/seals/anchors, Git graph/patch IDs/exact union,
+scope/whitespace and normal signature verification only. No product edits,
+tests/builds/imports, SQL/DB opens, target/cache/owner probes, process signals,
+network/SSH/provider/app/GUI/OS capability actions or cleanup. Administrative
+Far Cooler board calls and normal Git hooks/signing are the authorized workflow.
+No private check in verification.md was executed or counted as a pass.
+
+Stop at signed pin for the SAME C1-only source review. Product code and resources
+need literal allocation after closure. Acceptance1 remains a source contract,
+not actual all-writer joining; acceptance2-5 implementation/private evidence and
+SAME composition audit remain OPEN. Real main/app/platform/provider/owner-copy/
+backup/installed cutover/full gates/mainCI remain932/parent. No broader planning
+cycle, owner product-choice questionnaire or dependency on full941 is introduced.

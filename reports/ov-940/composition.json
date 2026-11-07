@@ -1,0 +1,147 @@
+{
+  "scope": "Git/source-only union verification; no execution approval",
+  "base": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+  "composed_head": "896fe58359191314192f9e68646d1e92dc1c0ed8",
+  "composed_tree": "99684a58951c123e945c3db34d675dc5c0d22cc8",
+  "replays": [
+    {
+      "original": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "original_parent": "fae3f30d0c3d1c475f9dc4463243f293fd88b007",
+      "replay": "51fd5f82fe2233da43bab7da897b21e5604383a3",
+      "replay_parent": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+      "stable_patch_id": "cf5691656c7e9238d8c6fe0236d89b3a74b0f83b",
+      "changed_paths": 721
+    },
+    {
+      "original": "93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e",
+      "original_parent": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "replay": "9410dfaae6615bbd3cb1a56d7e21167d4a385fa8",
+      "replay_parent": "51fd5f82fe2233da43bab7da897b21e5604383a3",
+      "stable_patch_id": "cf0e64af203d6e56560cf098dace3263a90f7f4f",
+      "changed_paths": 50
+    },
+    {
+      "original": "9fb244a216947cf17c623424025658eecb5d7c11",
+      "original_parent": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+      "replay": "896fe58359191314192f9e68646d1e92dc1c0ed8",
+      "replay_parent": "9410dfaae6615bbd3cb1a56d7e21167d4a385fa8",
+      "stable_patch_id": "eb11f94f9424ef106cc029a1177f275819025df9",
+      "changed_paths": 6
+    }
+  ],
+  "exact_all_tracked_path_union": true,
+  "tracked_entries": 5627,
+  "all_tracked_entries_sha256": "ef0f816b7839916701d328e3980337d8437eea6c45c47fa1430330cfa983ff26",
+  "changed_nonreport_paths": {
+    "Cargo.lock": {
+      "git_entry": "100644 blob f716e37dd4c4fd6b3d20db82e603c0d473cbae4b",
+      "sha256": "3a21b6a3fe01d79241d4d1c0450f8d4779f3523d341795ab5f9d71196717d102",
+      "bytes": 108357
+    },
+    "crates/store/Cargo.toml": {
+      "git_entry": "100644 blob 156ae64e3566bf3a12655576e35dca8d22ef40c8",
+      "sha256": "ec00257356b49bd6a996299d93b8d8cc40da2a5570cf61810c804593b6bb12e0",
+      "bytes": 757
+    },
+    "crates/store/examples/engine_cutover_rehearsal.rs": {
+      "git_entry": "100644 blob 67740405be8ff85ef4623e34f041facde256aba6",
+      "sha256": "8f43950971f2b625c070c2a275204c22fc650b2311b38a57fd1200359eec62d1",
+      "bytes": 2970
+    },
+    "crates/store/fixtures/engine_cutover_all_columns.sql": {
+      "git_entry": "100644 blob 0d0420e02c89197fbe38e12dde44ba2bbc2e1757",
+      "sha256": "4cb3d4b0d4df3ae6dce1e329fe831289195695265bdb04382a66374d45d755a9",
+      "bytes": 18085
+    },
+    "crates/store/src/engine_cutover.rs": {
+      "git_entry": "100644 blob 8063c156405f1b79d129ee6d24b19f1fb17de55f",
+      "sha256": "551ccf323bf776915373c8aeeb3bf7c515029b071f4a494073593b05c96d3d5c",
+      "bytes": 31762
+    },
+    "crates/store/src/engine_cutover/manifest.rs": {
+      "git_entry": "100644 blob c32400d600d2442bb4605c20d627205e94bc7fdc",
+      "sha256": "67abb5b87b939ad84c39733b846c23cda8fa3abb4c4a5c3db54c08d9d65abd51",
+      "bytes": 5522
+    },
+    "crates/store/src/engine_cutover/rehearsal.rs": {
+      "git_entry": "100644 blob bac86f716de02c43d1cad5c93ca48a1774407b20",
+      "sha256": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+      "bytes": 17961
+    },
+    "crates/store/src/engine_cutover/tests.rs": {
+      "git_entry": "100644 blob 61f7bf29ab043ad6ff41f09d3d4c476ef2d3cac1",
+      "sha256": "617d7fdf16372b6635f4be2b21712257295d58c7f9aca31c93c9b85738f58875",
+      "bytes": 12240
+    },
+    "crates/store/src/engine_cutover/tests/cases.rs": {
+      "git_entry": "100644 blob b45fc18b38e79d5bcba563d9927175af479832b4",
+      "sha256": "240bd2599b553212ae8beb2ccc611c13f387f0e7ad2ec8f98967ba84238efef5",
+      "bytes": 40122
+    },
+    "crates/store/src/engine_cutover/tests/storage_safety.rs": {
+      "git_entry": "100644 blob 00899ad3169637906bb710671233e2f5e336edc7",
+      "sha256": "9f6244edf3d19645cf9c03143cd5ca2b4d20b6783779816282a225f27800702a",
+      "bytes": 11362
+    },
+    "crates/store/src/engine_cutover/verify.rs": {
+      "git_entry": "100644 blob 4f9828572511e9b650c3125ae68d72b66a2ce533",
+      "sha256": "4f73709a6de0c546d154371350da18313aa7e29dc5fcfd15bffc3804d8c4a2bd",
+      "bytes": 4739
+    },
+    "crates/store/src/lib.rs": {
+      "git_entry": "100644 blob 344facd7b63d4aa939eca24b1e58567a5e7211e6",
+      "sha256": "6ba3aebe7867cbca54da56e816443c66cddafe9a2d3c39b815a7eae501934a64",
+      "bytes": 2866
+    },
+    "crates/store/src/migrate.rs": {
+      "git_entry": "100644 blob 63e7380cc79bff0e075b4e05264184a8e600674e",
+      "sha256": "f075f09f8788b95025c6cc563b0fae8ba32ed32814766101800ff0eb3b359c45",
+      "bytes": 89677
+    },
+    "crates/store/src/store.rs": {
+      "git_entry": "100644 blob 086dd072329e6ef2e9e08cd08e471b518b1f2c0d",
+      "sha256": "84adfc1520c2a328a3debde1b0916fb1e0a6683c9de56774eeac97aee1d2bf45",
+      "bytes": 79070
+    },
+    "crates/store/src/workflow.rs": {
+      "git_entry": "100644 blob f085d7e1e814d40ca7d00c390770f171ae4c1f1c",
+      "sha256": "e4e1ce248a7cc01c23bb63d0d91f8d96369c41dbddb349e55a8130f940bebd75",
+      "bytes": 16984
+    },
+    "crates/store/src/workflow_effects.rs": {
+      "git_entry": "100644 blob a58216c423bdd43bd9bb320dc53b6b9509504dba",
+      "sha256": "ba66d4dff50a803fab9ba649f35cb2d7d3de55f776a29d981e44190b870c4ac1",
+      "bytes": 9246
+    },
+    "crates/store/src/workflow_ownership.rs": {
+      "git_entry": "100644 blob 6946be163190bb146b519f966e5b199482653e35",
+      "sha256": "c474d57822fed166f23dc9e48cac9b27666033e588349a0ac0e20765feaf33a0",
+      "bytes": 11725
+    },
+    "crates/store/src/workflow_publication.rs": {
+      "git_entry": "100644 blob 42f85f780efc9c10ed7aa87fc5409e8364327af0",
+      "sha256": "f5ee8bf754ee0872f36b6b7bda75bd1b9a008ce4795bfb5e8c871de5d91b785f",
+      "bytes": 13301
+    }
+  },
+  "original_41_source_anchors_verified": 41,
+  "original_report_seals_verified": 5,
+  "historical_review_prefixes_verified": 4,
+  "no_product_execution": true,
+  "approved_input_signature_verification": {
+    "pins": [
+      "d43e8f99",
+      "e853d9c4",
+      "93eb86c4",
+      "9fb244a2"
+    ],
+    "exit": 0,
+    "result": "Good signatures; signing-key trust unknown/uncertified; normal local GPG, no settings changed",
+    "initial_sandbox_attempt": "trustdb access denied; successful normal verification after authorized Git escalation"
+  },
+  "base_ancestry_verified": [
+    "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+    "4c645bb788ec320fb19704ed042507adeccfd911",
+    "821194faedd23fec2b639667034b6a8ba979f827"
+  ]
+}

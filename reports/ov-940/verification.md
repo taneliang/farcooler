@@ -1,6 +1,8 @@
 # Finite private verification contract — not executed
 
-Every row below is future work after literal corrected immutable-base allocation.
+Every execution row below remains future work after SAME C1-only closure and
+literal product-region/resource allocation. Git-only composition is now bound
+in composition.json; it grants no execution permission.
 Original936 full-suite failures and historical receipts stay immutable; no prep
 tests, builds, imports, SQL, DB creation/open or target/cache probes occurred.
 
@@ -43,18 +45,55 @@ state/outbox fields remain blocked; correction of S2 cannot drop that guard.
 
 | Case | Finite fixture/action | Required evidence / no broader claim |
 | --- | --- | --- |
-| V01 corrected source union | Exact936 SAME S1/S2 closure +937/938 + required939 types/destination fix | Signed graph, hashes, review dispositions and overlap ownership before execution; no inferred final base |
+| V01 corrected source union | Exact d43 + e853 + approved93eb + reports9fb replay in composition.json | Source-only graph/patch-ID/exact tree verification supplied; SAME C1 closure and literal product overlap ownership still required before execution |
 | V02 all startup paths | Synthetic empty/private root and finite raw60/frozen/committed fixtures, normal-selection/shared Service/stream/standalone/relay/direct Store seams | Spy counters prove no normalization, install/inventory/registry/workflow/watch/sshd child effect before admission. Test actual shared callsites, not only pure selector. No real main/app launch credit |
 | V03 owner freeze/join | Real private owned child + same-group descendant and independent sentinel; blocked landing/compose/hook/collect task at admission barrier | Freeze excludes new admission; join waits active writer; late write after join is impossible; handles/resources match old incarnation. Sentinel survives. EPERM/unreaped descendant/escaped owner/abort/panic/missing handle blocks proof. No recycled-PID signals |
 | V04 stale handles/races | Two synthetic Store connections and retained claimed/admitted operation; barriers before admission and after awaited authorization | Old incarnation cannot mutate/claim/admit; final native prepare and spawn checks fail while frozen; one actual fake invocation if race won before freeze, zero if freeze won; admitted/unknown retained exactly |
-| V05 crash/reopen | Owned bounded helper interrupted before freeze/after freeze/before commit/after atomic commit/before release | DB+journal truth picks frozen vs forward recovery even with stale outer text; partial workspace switch impossible; old normal readers refuse; changed incarnation cannot reuse proof |
+| V05 C1 crash/reopen | Owned bounded helper interrupted immediately before AND after every durable boundary in contract.md: baseline file/publication/parent sync, intent file/publication/parent sync, upgrade transaction commit, quiesce, later backup/restore/permit, mapping commit, verify/release/terminal journal | Exact original raw60 hashes/ledger survive; no candidate normalization/helper admission; in-transaction failure rolls back catalog/version/floor/frozen attempt together; committed upgraded catalog NEVER exposes old permissive floor; DB+journal determine frozen/forward recovery; no reused join proof |
 | V06 raw60 mapping | The single trusted registry60 fixture above, plus existing65 all-column fixture | Full typed ledger/rowids/allocator/relations/policy/history dispositions; deliberate corruption fails; no owner data or pre58 substitution |
 | V07 restored external effects | Closed synthetic resources, post-backup fake effect record, replace/reopen in a new destination | Restore freezes before admission; counters outside replaced DB never increment twice; pending/admitted/uncertain/settled distinctions and exact operation/request/resource/incarnation survive |
 | V08 S1/S2 reuse + union | Reuse SAME-corrected936 accepted controls; add only union-specific regressions | Malformed FIFO/symlink/journal promptly refuse without outside reads/import; pending/claimed unknown executable payload cannot dispatch. Do not rerun unrelated accepted suites or count setup errors as red |
 | V09 retained manual send | Explicit authenticated fresh manual sends through existing API, note+delivery atomicity, fresh current target; old pending/claimed/pasted/done rows present | Fresh message/conversation succeeds once after release; crash/lost-reply remains safe; old queue bytes unchanged and no old sends/Enter/backlog. Forged actor/extra/new timestamp cannot bypass legacy fence |
 | V10 no ended flood/activity | Old ended/no-report/collecting histories, multiple ticks/reopens; supported activity/log/conversation read seams | Zero automatic runner notices and no legacy progression; retained native notices preserve attempts/targets and Unknown. Observation/conversation reads still work; blocked compose/native capability is a release blocker |
-| V11 reason-history union | Reviewed939 reasoned decision in synthetic real state/events/receipts, plus legacy reasonless decision | Exact reason bytes/ID/principal/run/policy/evidence/revision/iteration and receipt bytes survive cutover/reopen/restore; no fabricated reason, duplicate retry returns original receipt; CLI destination evidence remains939's separate closure |
+| V11 reason-history union | Reviewed939 reasoned decision in synthetic real state/events/receipts, plus legacy reasonless decision | Exact reason bytes/ID/principal/run/policy/evidence/revision/iteration and receipt bytes survive cutover/reopen/restore; no fabricated reason, duplicate retry returns original receipt; d43 Retry refusal remains accepted; durable CLI retry stays OPEN under941 |
 | V12 migration invariants | Named notice migration test and plan invariant at exact final registry | Pin pre-notice fixture to actual schema64 (notice entry65), assert absent then present and idempotent reopen. Scope plan-layer assertion to its historical migration boundary or exact pinned ownership/cutover trigger allowlist with shape tests; unrelated layer-column/trigger regression still fails. Never remove production guard or blanket exempt all triggers |
+
+## C1 finite boundary controls — required, not executed
+
+Use the single trusted schema60 synthetic fixture above with distinguishable
+invalid wait/order/allocator bytes. Pin its actual historical schema60 Store
+reader source and reader artifact in future execution receipts; if that exact
+reader cannot be bound, report missing evidence, never substitute schema64/65
+receipts. The fixture prefix is from this composed registry, not owner data.
+
+For each before/after durable boundary in contract.md, reopen through actual
+ordinary main admission, shared Service/open_in, stream, standalone stdio and
+direct Store seams. Assert zero migrate/stamp/sweep/install/inventory/watch/job/
+workflow/helper admissions while intent/freeze is unresolved, including the
+upgraded-but-not-yet-quiesced checkpoint. Relay stays forwarding-only. Admin
+recovery must remain authenticated and reference the original source60 backup,
+catalog and full typed ledger, never capture normalized current bytes as source.
+
+At immediately after upgrade commit/before the old separate stamp location,
+invoke the pinned actual old60 reader. It must see unchanged60 under the held
+owner barrier OR upgraded catalog with rejecting floor atomically present;
+assert NewerData/refusal in the latter case without relying on candidate marker
+code. Test inside-transaction interruption for wholly rolled-back catalog,
+version, floor and attempt. No externally committed partial-migration oracle.
+Prove held old owners/FDs cannot write during this interval through actual join
+and exclusion, separately from old-reader compatibility refusal. A deliberately
+unjoined descriptor/unknown owner must block the transfer, not be signaled by a
+recorded PID or treated as harmless because a marker exists.
+
+Finite malformed-state variants: truncated/changed intent; lost/changed baseline;
+orphan baseline with no complete intent; intent with legacy/no authority; frozen
+attempt with lost intent; upgraded schema with missing/permissive floor; mismatch
+of root/DB/resource/attempt/source identities. Every variant refuses ordinary
+admission without migration/sweep or automatic repair. Recovery validates known
+original artifacts or stays quarantined. Explicit fresh install gets a separate
+absent-DB/no-artifact control and negative existing-empty/unknown/orphan controls.
+Preserve prior closed quiesced backup/independent restore/CommitPermit controls;
+the new pre-upgrade raw backup cannot count twice as their proof.
 
 ## Evidence, checks and stop
 
@@ -81,8 +120,8 @@ into a claimed union pass. Publish signed frozen implementation/API/evidence
 for SAME scoped security/data review of the actual composition.
 
 Phase1 deliverable status: source contract/ownership/finite checks are complete;
-typed production proof, corrected base, runtime joining, raw60 implementation,
-manual bridge and all execution/review acceptance remain open. Final main CI,
+typed production proof, C1 review/literal code allocation, runtime joining,
+raw60 implementation, manual bridge and all execution/review acceptance remain open. Final main CI,
 real roots/native app/provider/device exercises, owner-copy/backup, installed
 writer inventory and cutover authorization remain932/parent, never certified
 by these finite private cases.

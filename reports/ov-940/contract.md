@@ -5,29 +5,33 @@ commit containing this package is the handoff pin; `source-inventory.json` binds
 immutable inputs and `seal.json` binds report bytes. No candidate code, test,
 build, SQL, DB, target/cache, app, provider or owner-data action was run.
 
-## Composition inputs and hard hold
+## C1 correction and exact Git-only composition
 
-| Input | Exact pin / disposition |
+This correction supersedes only the stale prep bindings/order below the original
+9fb handoff; the original signed objects and evidence remain immutable.
+`composition.json` verifies the literal replay on isolated
+`ov-940-cutover-barrier-contract`: approved base
+`d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3` -> e853 replay
+`51fd5f82fe2233da43bab7da897b21e5604383a3` -> approved93eb replay
+`9410dfaae6615bbd3cb1a56d7e21167d4a385fa8` -> reports9fb replay
+`896fe58359191314192f9e68646d1e92dc1c0ed8`. All stable patch IDs and
+all tracked path/mode/blob entries equal the prescribed base-plus-deltas union.
+
+| Input | Exact pin / accepted disposition |
 | --- | --- |
-| This isolated branch/base | `ov-940-cutover-integration-prep`, `e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba` |
-| Store candidate936 | e853 above; SAME review REQUEST CHANGES: S1 unsafe JSON/journal reads, S2 permissive executable outbox JSON. Preserve its source and failures. Fresh936 fixer owns correction. |
-| Approved935 map | `bdff40f0b2944173c2be5b5fa906dcd2af88f7bf`; report-only PASS, schema64 historical map, not current schema evidence |
-| Approved937 source | `e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2`; focused execution closure at reports-only child `f4020a91daeda03219dbcfeda2ff112e62a20764` |
-| Approved938 queue ownership | `4c645bb788ec320fb19704ed042507adeccfd911`; SAME933 P2 closed, bounded queue ownership only |
-| Required939 reason state | `821194faedd23fec2b639667034b6a8ba979f827`; required shared reason/history source, CLI destination fix pending; no adoption as fully approved composition |
+| Store baseline936 | `e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba`; original failures preserved |
+| Corrected936 | `93eb86c4c25f2f569ddb7d45a7e9026be9a6a67e`; SAME S1/S2 CLOSED, scoped storage only |
+| Approved935 map | `bdff40f0b2944173c2be5b5fa906dcd2af88f7bf`; historical schema64 map |
+| Approved937 source/evidence | `e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2` / `f4020a91daeda03219dbcfeda2ff112e62a20764` |
+| Approved938 queue | `4c645bb788ec320fb19704ed042507adeccfd911`; queue-only owned-group semantics |
+| Required939 reason/history | `821194faedd23fec2b639667034b6a8ba979f827`; included in approved d43 ancestry |
+| R-94 CLI disposition | `d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3`; SAME unsafe Retry finding CLOSED by refusal before connect; durable CLI retry remains OPEN under941 |
 
-Read all four exact SAME936/935/937/938 reports at
-`/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-NNN/independent-review.md`.
-Their byte hashes are in the inventory. They are external source-only inputs,
-not files assumed present in this checkout. No reviewer verdict is widened.
-
-**No final corrected936 pin or union exists in this allocation.** Before product
-work, the orchestrator must supply the SAME-approved corrected936 immutable pin,
-corrected939 destination disposition/pin, explicit region ownership and an exact
-composed base. Record parent graph, registry/catalog hashes, resolved overlap
-blobs and review hashes in a new signed binding before execution. Never silently
-replace this e853 base, dirty-cherry-pick siblings or count union-by-prose as
-composition. Source preparation can finish while those gates remain open.
+Current external SAME936/939/C1 review bytes and immutable source bindings are
+in source-inventory.json. Earlier936 review prefix remains historical evidence,
+not a pending S1/S2 finding. This allocation permits Git replay and C1 reports
+only. SAME C1-only source review must close before literal product-region and
+resource allocation; no product work or execution approval follows from union.
 
 ## Existing APIs, not an implemented lifecycle
 
@@ -100,20 +104,121 @@ an explicit admin path, never automatic conversion on ordinary startup.
    sweeps. All production opens must refuse/route raw60 and frozen/committed
    recovery before those operations. `open_for_cutover` must be the explicit
    authorized existing-file path, never a fallback to ordinary open.
-6. For explicit transfer: close new RPC/job/hook/delivery admission; drain/join
-   the inventory in ownership.md; retain active-effect truth; capture raw closed
-   source; perform finite upgrade mapping; enter quiesced freeze with bound
-   proof; close Store/resources; closed backup + independent restore + external
-   journal; reacquire/revalidate exact DB and resources; mint CommitPermit;
-   atomic commit; verify; release only resolved resources. Required source60
-   migration protocol must define durable interruption between raw capture and
-   Store upgrade; no ordinary-open sweep in that interval.
+6. Explicit transfer follows the C1 durable protocol below: close admission,
+   actually join old owners, hold resource exclusion, capture and durably bind
+   the original raw source before any upgrade write, then atomically commit the
+   upgrade/version/refusing floor/frozen attempt. The existing later closed
+   quiesced backup + independent restore + external journal + CommitPermit,
+   revalidation, atomic mapping commit, verify and bounded release still apply.
+   The early baseline cannot substitute for that later backup/restore proof.
 7. Reopen frozen/quiesced/committed state through admin recovery without ordinary
    watcher/scheduler dispatch. Precommit remains frozen; committed uses forward
    recovery. Restored DB gets a fresh incarnation and post-backup external facts
    before any admission; pending restoration never authorizes replay. Keep
    authenticated inspect/recovery reachable when ordinary Service refuses;
    implement the minimal existing admin cutover entry seam, not a new transport.
+
+## C1 durable pre-upgrade barrier and crash protocol
+
+This is a required future ordering change, not an existing API or reserved
+schema/tag. Source at corrected93eb engine_cutover.rs:412-419 still preflights,
+then calls migrate, then stamps the floor separately. migrate.rs:129-146 commits
+all remaining DDL and schema_version together; engine_cutover::migration seeds
+legacy/incarnation0. Thus a real observable gap exposes upgraded66/oldfloor60
+and legacy authority. A pinned old60 Store reader can accept it through
+compat::open_newer without knowing any new marker. There is no externally
+committed per-migration partial catalog to recover in the current transaction.
+
+The following names denote contract states/artifacts, not invented APIs:
+
+1. **Admission closed / actual owners joined.** Candidate normal main (before
+   logging/helpers), shared Service/open_in, stream, standalone stdio and direct
+   Store check for an existing intent before any migrate/stamp/sweep or helper.
+   Recheck under held root/DB/resource exclusion. Authenticated admin inspection
+   and recovery use a non-normalizing seam. Close RPC/job/hook/manual admission,
+   drain every actual owner in ownership.md without holding its needed Store
+   mutex, retain owned group identities through final effects, and join. No
+   missing handle, generic Unknown, leader exit or stored PID proves this.
+   Unowned/open writable descriptors and uncertain owners block/quarantine;
+   no marker, floor or SQLite fence revokes them. Hold directly owned resource
+   exclusion through capture, upgrade and later revalidation. After a crash,
+   reacquire exclusion and freshly prove owners; serialized proof never revives.
+2. **Original raw baseline durable.** With writers closed/joined and resources
+   stable, capture the trusted registry60 typed catalog/ledger before ordinary
+   Store normalization. Produce a recoverable closed original DB/resource backup
+   plus typed raw manifest, not just hashes of data that cannot be restored.
+   Validate finite artifact kinds/identities under the selected private journal
+   discipline; reject residual WAL/SHM/journal rather than silently copying an
+   incomplete DB. Bind selected root, actual DB/resource identity/generations,
+   attempt, exact source60 schema/floor/catalog/typed bytes/rowids/allocator and
+   actual joined-owner identity receipts. Sync complete backup/manifest files,
+   their publication and containing directories before publishing transfer
+   intent. Publication is exclusive/nonreplaceable, never overwrite or recapture
+   the source. No registry, stamp, mapping or normalization write is allowed yet.
+3. **Intent durable before first upgrade write.** Publish an exclusive attempt
+   intent referencing that verified baseline and binding the same DB/resources,
+   source hash/catalog, owner receipts and root. Sync file and parent boundary
+   before proceeding. All candidate gates give it precedence even with absent
+   authority table or legacy phase. Missing/truncated/changed referenced artifact,
+   invalid intent or ambiguous partial publication refuses without mutation.
+   Reserved incomplete artifacts also block automatic ordinary startup; absence
+   of a complete marker is never sufficient to classify an existing DB as fresh.
+   No automatic cleanup/replacement or ordinary-Store fallback. Admin re-entry
+   validates the original baseline; it never recaptures upgraded rows as raw60.
+4. **Atomic upgrade and freeze.** Under revalidated held ownership/exclusion,
+   the explicit cutover entry performs all remaining registry DDL, schema_version,
+   the registry-derived refusing compatible_down_to (66 in this pinned union,
+   greater than60), and bound frozen authority/attempt/source truth in ONE
+   transaction. Initial legacy/incarnation0 from migration must not be externally
+   committed for this transfer entry. No post-migrate stamp or later quiesce is
+   allowed to supply the missing barrier. Keep the external intent unresolved.
+   Crash inside this transaction rolls back catalog/version/floor/frozen truth
+   together. An old60 open immediately after commit must refuse from the floor
+   independently of the candidate intent guard. Before commit source60 is still
+   unchanged, protected by the actual old-owner admission/resource barrier.
+5. **Quiesced mapping and later transfer.** Retain the same attempt and original
+   raw ledger through quiesced freeze, close, closed quiesced backup, independent
+   restore validation, external CommitPermit journal and exact revalidation.
+   Atomic engine commit retains required939 state/events/receipts and resource
+   fences; verify before explicit resource release. Append/sync terminal journal
+   disposition only after DB truth confirms it, never clear the intent merely
+   because registry upgrade succeeded. Recovery always reconciles DB phase,
+   incarnation, attempt/source binding and journal; mismatches refuse/quarantine.
+   Precommit recovery remains frozen. Committed state uses forward recovery;
+   restoring the original source is an explicit authenticated closed-resource
+   operation with new incarnation and external-effect reconciliation, never an
+   automatic rollback that authorizes replay. Completion cannot silently reopen
+   legacy progression or bypass retained capability release blockers.
+
+| Durable boundary / interruption | Required reopen oracle |
+| --- | --- |
+| Before baseline publication; no DB mutation | Source60 unchanged. Incomplete reserved artifacts refuse; admin resolves with fresh join proof. No automatic transfer or fresh-install inference. |
+| Backup/manifest durable, intent not yet durable | Original source remains unchanged; orphan/partial attempt blocks ordinary startup. Admin validates existing baseline and exclusive attempt, never replaces it. |
+| Intent durable, before upgrade transaction | Every candidate seam refuses ordinary admission; admin validates original raw60 baseline and reacquires owner/resource proof. Old readers require actual held exclusion. |
+| During upgrade transaction | Rollback leaves complete source60 catalog/version/floor; durable intent still refuses candidate startup. No invented partially committed DDL state. |
+| Immediately after upgrade commit, before former separate stamp/quiesce | Upgraded catalog, refusing floor and frozen attempt are atomic. Old60 reader refuses; candidate intent/freeze gate refuses. Admin still uses the ORIGINAL raw60 ledger. |
+| After quiesce; before/after later backup/restore/permit publication | Frozen DB plus exact journals; missing permit/backup never authorizes commit. No proof reuse after reopen. |
+| During mapping commit / after commit before journal terminal record | DB transaction rolls back wholly or commits wholly. DB attempt/incarnation and external journal distinguish frozen from forward recovery; stale outer text cannot reverse committed truth. |
+| After verify; before/after release or final intent disposition | Only verified resolved resources may admit new engine/manual work. Lost/truncated marker, permissive/missing floor, absent/mismatched frozen attempt or baseline refuses/quarantines, even if phase text says legacy/released. |
+
+A missing/low floor on an upgraded DB is inconsistent state, not permission to
+stamp it during ordinary open. A missing intent with frozen/committed attempt
+likewise routes to admin. A surviving intent with absent/legacy authority takes
+precedence. Admin may repair only from validated baseline+journal+DB truth under
+fresh ownership proof; unrecoverable missing artifacts remain blocked. This
+covers partial marker/floor combinations without relying on a new old-binary
+protocol. The pinned old reader test must run the actual immutable schema60
+Store entry, not a simulated opens_here comparison.
+
+**Fresh install is explicit.** Only proven absent DB and no transfer artifacts,
+under the selected root's exclusive admission boundary, may enter a new-install
+branch. An empty/unknown existing file, schema0, missing authority/floor, errors
+or orphan artifacts are not that proof. New-install initialization commits its
+current catalog/version/refusing floor and the existing migration-defined
+legacy/incarnation0 together, explicitly identifying a new empty installation.
+That branch supplies no transferred/released engine authority or raw60 history;
+engine release still needs its explicit verified admission path. It cannot be
+the upgrade fallback. Unknown/conflicting state stays admin-reachable.
 
 Private future fixtures additionally require literal absolute nonempty private
 CLAUDE_CONFIG_DIR, FARCOOLER_CONFIG and TMUX_TMPDIR as well as FARCOOLER_HOME.
@@ -179,5 +284,6 @@ data: exact reason bytes, principal/revision/run/evidence/policy/iteration/ID,
 events and receipts survive commit/restore/reopen. Its default-empty history
 preserves old encoding; never synthesize historical reasons. Reconcile936's
 lossless state/outbox checks against the reviewed939 type graph; otherwise valid
-reason history might be quarantined as unknown or erased. CLI retry destination
-binding remains939's fresh fixer, not a bootstrap or mapper workaround.
+reason history might be quarantined as unknown or erased. R-94's d43 refusal
+is accepted; durable authenticated CLI retry stays OPEN under941 and is not a
+bootstrap or mapper workaround.
