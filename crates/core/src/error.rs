@@ -184,6 +184,9 @@ pub enum DomainError {
 }
 
 impl DomainError {
+    /// A refusal that carries its sentence over the wire, for callers outside the board.
+    pub fn refused(said: String) -> DomainError { DomainError::PageRefused { said } }
+
     /// A retired method's refusal, saying what took its place: lanes' and
     /// trains' (ov-872), or chat mode's (ov-377).
     pub fn retired(method: &str) -> DomainError {

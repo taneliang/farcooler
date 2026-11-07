@@ -422,9 +422,7 @@ impl Store {
         }
         // After release landing history is kept, and the delete would cascade into it.
         if !crate::engine_cutover::legacy_authority(&tx) {
-            let kept: bool = tx
-                .query_row("SELECT EXISTS(SELECT 1 FROM landings WHERE workspace_id = ?1)", params![uuid_blob(id)], |r| r.get(0))
-                .map_err(map_err)?;
+            let kept = crate::landings::has_history(&tx, id)?;
             if kept { return Err(DomainError::InvalidArgument { what: "landing_history" }); }
         }
         tx.execute("DELETE FROM workspaces WHERE id = ?1", params![uuid_blob(id)]).map_err(|e| {

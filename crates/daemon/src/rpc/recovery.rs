@@ -55,9 +55,9 @@ impl RecoveryHandler {
         let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;
         crate::cutover_admin::recovery(&self.root, &op, &self.caller_note()).map_err(|error| {
             tracing::warn!(%error, "workflow.cutover refused in recovery");
-            // `PageRefused` is the one error that carries a sentence over the
+            // `refused` is the one error that carries a sentence over the
             // wire; the owner needs the holders named to act on a refusal.
-            DomainError::PageRefused { said: error.said() }
+            DomainError::refused(error.said())
         })
     }
 }

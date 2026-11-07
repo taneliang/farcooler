@@ -531,7 +531,7 @@ fn transport_env(remote: &str) -> std::collections::BTreeMap<String, String> {
 }
 fn ls_remote(remote: &str) -> std::process::Output {
     std::process::Command::new("/usr/bin/git").args(["ls-remote", "--refs", remote, "refs/heads/trunk"]).env_clear().envs(transport_env(remote))
-        .current_dir(std::env::temp_dir()).output().unwrap()
+        .current_dir(std::env::temp_dir()).output().unwrap() // leak-exempt: a working directory for a read-only ls-remote; nothing is written
 }
 
 #[test]
@@ -552,7 +552,7 @@ fn an_https_remote_is_allowed_https_and_an_ssh_remote_ssh_and_a_path_nothing() {
 
 #[test]
 fn a_transport_the_remote_does_not_use_stays_refused() {
-    let marker = std::env::temp_dir().join(format!("ext-ran-{}", std::process::id()));
+    let marker = std::env::temp_dir().join(format!("ext-ran-{}", std::process::id())); // leak-exempt: a path for a marker the test requires to stay absent; nothing is written
     let _ = std::fs::remove_file(&marker);
     for remote in [format!("ext::sh -c 'touch {}'", marker.display()), "git://127.0.0.1:1/x.git".into(), "ssh://127.0.0.1:1/x.git".into()] {
         // The environment of an https remote, pointed at another transport.

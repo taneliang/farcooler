@@ -54,7 +54,7 @@ async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 /// The domain refusal: past the caller check, unlike the denial the seat test pins.
 fn failed() -> String {
-    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::PageRefused { said: "That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where the upgrade stands.".into() }).outcome)
+    format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::refused("That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where the upgrade stands.".into())).outcome)
 }
 const INSPECT: &str = r#"{"op":"Inspect"}"#;
 const PREPARE: &str = r#"{"op":"Prepare","attempt":"a-1"}"#;

@@ -184,7 +184,7 @@ fn save_json(label:&str,value:&serde_json::Value) {save_bytes(label,"json",&serd
 fn save_db(label:&str,path:&std::path::Path) {
     assert!(std::fs::symlink_metadata(path).unwrap().file_type().is_file());
     let canonical=path.canonicalize().unwrap();
-    assert!(canonical.starts_with(std::env::temp_dir().canonicalize().unwrap()) || canonical.starts_with("/private/tmp"));
+    assert!(canonical.starts_with(std::env::temp_dir().canonicalize().unwrap()) || canonical.starts_with("/private/tmp")); // leak-exempt: compares a path prefix; nothing is written
     save_bytes(label,"sqlite",&std::fs::read(path).unwrap());
 }
 

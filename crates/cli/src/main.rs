@@ -60,6 +60,7 @@ mod page;
 mod page_text;
 mod ci_words;
 mod plan;
+mod tracked;
 mod message;
 mod needs_you;
 use needs_you::needs_you;

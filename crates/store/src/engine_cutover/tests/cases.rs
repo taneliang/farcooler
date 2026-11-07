@@ -271,7 +271,7 @@ fn engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corru
 #[ignore = "owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries"]
 fn engine_cutover_process_child() {
     let directory=std::env::var("OV936_CRASH_ROOT").unwrap();let directory=std::path::Path::new(&directory);
-    assert!(directory.starts_with(std::env::temp_dir()));
+    assert!(directory.starts_with(std::env::temp_dir())); // leak-exempt: compares a path prefix; nothing is written
     let store=Store::open_fixture(directory.join("db.sqlite")).unwrap();
     let repo=store.register_repository_for_test("Crash boundary");let ws=store.ensure_main_workspace(repo).unwrap();store.create_task(ws.id,"preserve on kill",Actor::User).unwrap();
     let plan=preflight(&store.conn()).unwrap();

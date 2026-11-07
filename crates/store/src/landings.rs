@@ -26,6 +26,13 @@ use crate::store::Store;
 use crate::tasks::now_millis;
 use crate::ticket_lines::{LineSubject, Stage, check_tickets, line_event, line_in, move_stage, task_key};
 
+/// Whether any landing was recorded for this workspace, so the board can refuse a delete that
+/// would cascade into landing history without naming the landings table itself (ov-268).
+pub(crate) fn has_history(conn: &Connection, workspace: Uuid) -> Result<bool> {
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM landings WHERE workspace_id = ?1)", params![uuid_blob(workspace)], |r| r.get(0))
+        .map_err(map_err)
+}
+
 const BASE_MAX: usize = 200;
 const TITLE_MAX: usize = 80;
 
