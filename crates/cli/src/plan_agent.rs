@@ -54,6 +54,8 @@ pub(super) const NEEDS_STOP: &str = "This runner needs an update to stop an agen
 
 #[path = "plan_agent_dispatch.rs"]
 mod dispatch;
+#[path = "plan_agent_start.rs"]
+mod start;
 
 /// `farcooler agent`.
 #[derive(Debug, Clone, Args)]

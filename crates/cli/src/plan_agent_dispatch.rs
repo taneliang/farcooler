@@ -80,6 +80,11 @@ pub(super) async fn dispatch<L: DispatchLink>(
         }
     }
     let Some((first, rest)) = tickets.split_first() else { return Err("Name a ticket with --ticket.".into()) };
+    // A ticket the engine tracks is started by the engine (ov-962); only the rest open a pane.
+    let role_name = super::role_word(args.role.wire() as i32);
+    if let Some(said) = super::start::through_engine(link, &tickets, args.role.wire() == pb::AgentRole::Builder, &role_name.to_lowercase(), json).await? {
+        return Ok(said);
+    }
     let worktree = match (args.worktree, args.new, args.branch) {
         (Some(named), _, _) => Lane::Existing(named),
         (None, Some(name), Some(branch)) => Lane::New { name, branch, base: args.base },

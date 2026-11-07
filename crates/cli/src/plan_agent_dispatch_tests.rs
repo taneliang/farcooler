@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use farcooler_transport::ClientError;
+use serde_json::json;
 use uuid::Uuid;
 
 use super::super::{AgentCmd, Session, run_in};
@@ -33,11 +34,15 @@ struct Runner {
     /// What the opened pane's agent reads as, and asks.
     activity: pb::AgentActivity,
     question: Option<String>,
+    /// What the engine holds, as `workflow get` answers it: `None` is a runner with no engine.
+    engine: Option<serde_json::Value>,
+    /// The engine's answer to a start: `None` accepts it.
+    refuse_start: Option<&'static str>,
 }
 
 fn runner() -> Runner {
     let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_LINE, capability::TERMINAL_TASK];
-    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None }
+    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None }
 }
 
 fn items() -> Vec<pb::Task> {
@@ -60,6 +65,18 @@ impl DispatchLink for Runner {
             ..Default::default()
         };
         let value = match (method.as_str(), payload) {
+            ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
+                schema: 1,
+                json: self.engine.clone().expect("the engine was asked about").to_string(),
+            }),
+            ("workflow.start", _) => result::Value::WorkflowReply(pb::WorkflowReply {
+                schema: 1,
+                json: match self.refuse_start {
+                    Some(why) => json!({"schema":1,"receipt":{"result":{"Err":why}}}),
+                    None => json!({"schema":1,"receipt":{"result":{"Ok":null}}}),
+                }
+                .to_string(),
+            }),
             ("task.list", _) => result::Value::TaskList(pb::TaskList { items: items(), reads: None }),
             ("worktree.list", _) => result::Value::WorktreeList(pb::WorktreeList {
                 items: vec![pb::Worktree { id: id_bytes(WORKTREE), repository_id: id_bytes(REPO), task_name: "lane".into(), ..Default::default() }],
@@ -222,4 +239,88 @@ fn runner_idle() -> Runner {
 async fn say_json(link: &mut Runner, args: &str) -> serde_json::Value {
     let said = run_in(link, &the_board(), parsed(args), "manager", true, &Session::default()).await.unwrap();
     serde_json::from_str(&said).unwrap()
+}
+
+/// What `workflow get` says of a board whose cards are `held` (key, source, phase).
+fn engine(held: &[(&str, &str, &str)]) -> serde_json::Value {
+    let items: serde_json::Map<String, serde_json::Value> = held
+        .iter()
+        .map(|(key, source, phase)| {
+            (key.to_string(), json!({"definition": {"source": source}, "phase": phase, "run": format!("run-{key}"), "pin": format!("pin-{key}")}))
+        })
+        .collect();
+    json!({"schema":1,"configuration":{"pin":"wf1:published"},"state":{"revision":7,"epoch":1,"items":items}})
+}
+
+fn with_engine(held: &[(&str, &str, &str)]) -> Runner {
+    let mut link = runner();
+    link.capabilities.push(capability::WORKFLOW_COMMANDS.into());
+    link.engine = Some(engine(held));
+    link
+}
+
+fn starts(link: &Runner) -> Vec<serde_json::Value> {
+    link.sent
+        .iter()
+        .filter(|r| r.method == "workflow.start")
+        .map(|r| {
+            let Some(farcooler_protocol::v1::request::Payload::WorkflowCommand(c)) = &r.payload else { panic!("no payload") };
+            serde_json::from_str(&c.json).unwrap()
+        })
+        .collect()
+}
+
+/// A builder on tracked tickets is a Start on each, under the published pin and the item's own run and
+/// pin. No worktree is made and no pane is opened: the engine hands a ticket to a worker.
+#[tokio::test]
+async fn a_builder_on_tracked_tickets_goes_through_start() {
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")]);
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --worktree lane").await.unwrap();
+    let sent = starts(&link);
+    assert_eq!(sent.len(), 2, "{:?}", link.methods());
+    assert_eq!((sent[0]["item"].as_str(), sent[0]["run"].as_str(), sent[0]["pin"].as_str(), sent[0]["start_pin"].as_str()), (Some("ov-2"), Some("run-ov-2"), Some("pin-ov-2"), Some("wf1:published")));
+    assert_eq!((sent[0]["mutation"]["revision"].as_u64(), sent[0]["mutation"]["epoch"].as_u64()), (Some(7), Some(1)));
+    assert_eq!(sent[1]["item"].as_str(), Some("ov-3"));
+    for method in ["terminal.create", "worktree.create", "task.update", "task.set_status"] {
+        assert!(!link.methods().contains(&method), "{method} was sent: {:?}", link.methods());
+    }
+    assert!(said.starts_with("The engine is starting ov-2, then ov-3."), "{said}");
+}
+
+/// A board with no engine, or no tracked ticket, dispatches a pane exactly as before.
+#[tokio::test]
+async fn untracked_tickets_still_open_a_pane() {
+    let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
+    say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap();
+    assert!(starts(&link).is_empty() && link.methods().contains(&"terminal.create"), "{:?}", link.methods());
+}
+
+/// Nothing starts when any ticket can't: a mix, a ticket with a run, a closed one, a reviewer, no
+/// published workflow, and the engine's own refusal (which names what already started).
+#[tokio::test]
+async fn nothing_starts_that_the_engine_cannot_take() {
+    let mixed = [("ov-2", "ticket/v1", "WaitingApproval")];
+    let mut link = with_engine(&mixed);
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-3 isn't tracked by the engine"), "{said}");
+    let mut link = with_engine(&[("ov-2", "configured-coding/v1", "Running")]);
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-2 already has a run under the engine"), "{said}");
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "Done")]);
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-2 has closed under the engine"), "{said}");
+    let mut link = with_engine(&mixed);
+    let said = say(&mut link, "--role reviewer --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("A reviewer can't be dispatched on a tracked ticket"), "{said}");
+    let mut link = with_engine(&mixed);
+    link.engine.as_mut().unwrap()["configuration"] = serde_json::Value::Null;
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("This board has no published workflow"), "{said}");
+    let mut link = with_engine(&mixed);
+    link.refuse_start = Some("Resource");
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("The engine didn't start ov-2: Resource."), "{said}");
+    for m in ["terminal.create", "worktree.create"] {
+        assert!(!link.methods().contains(&m), "{:?}", link.methods());
+    }
 }
