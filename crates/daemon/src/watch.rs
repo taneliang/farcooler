@@ -651,7 +651,7 @@ struct TraceLevel {
 
 /// The daemon's live view of what every agent is doing.
 pub struct Watcher {
-    service: Arc<Service>,
+    pub(crate) service: Arc<Service>,
     /// One client for the life of the daemon, so a night of notifications
     /// reuses a connection rather than opening one per agent.
     push: reqwest::Client,
@@ -2755,6 +2755,11 @@ impl Watcher {
             }
         });
         crate::claude_login_renewal::listen_for_auth_failures(&watcher.service, &watcher);
+        // The engine moved cards inside a committed `workflow_apply` (ov-948).
+        let weak = Arc::downgrade(&watcher);
+        watcher.service.store.set_workflow_board_listener(Some(Arc::new(move |moves| {
+            if let Some(watcher) = weak.upgrade() { watcher.announce_engine_moves(moves); }
+        })));
         // A cursor pane's turn ends: its `stop` hook takes a message waiting
         // for it (`answer_wake::followup`).
         let weak = Arc::downgrade(&watcher);

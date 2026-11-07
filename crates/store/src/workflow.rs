@@ -56,8 +56,11 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
-        let receipt = apply_in(&tx, input, &payload)?;
+        let mut moved = Vec::new();
+        let receipt = apply_in(&tx, input, &payload, &mut moved)?;
         tx.commit()?;
+        drop(conn);
+        self.announce_board_moves(&moved);
         Ok(receipt)
     }
 
@@ -152,7 +155,7 @@ pub(crate) fn migration_workflow(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Result<Receipt> {
+pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved: &mut Vec<crate::workflow_projection::BoardMove>) -> Result<Receipt> {
         let previous: Option<(String, String)> = tx.query_row(
             "SELECT payload, receipt FROM workflow_receipts WHERE workspace = ?1 AND id = ?2",
             params![input.workspace, input.id], |r| Ok((r.get(0)?, r.get(1)?)),
@@ -242,7 +245,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
                     params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
                 )?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
-                crate::workflow_projection::project(tx, &input.workspace, &transition.state)?;
+                moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state)?);
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;

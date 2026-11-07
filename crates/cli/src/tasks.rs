@@ -1861,7 +1861,8 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "task_ids" => "name at least one task to move",
         "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was recorded. run it from outside Far Cooler's panes, or answer in the app",
         "landing_history" => "this workspace has landing history that is kept, so it can't be deleted",
-        "engine_owned" => "this ticket is running in a workflow, so its column follows the run. cancel the run to take it off the workflow",
+        "engine_owned" => "a workflow runs this ticket, so its column follows the run and can't be moved by hand. ask the orchestrator",
+        "engine_owned_ended" => "a workflow ran this ticket and its column is final, so it can't be moved by hand",
         // `terminal.agent_answer`'s conflicts (no command here sends `pr.thread_reply`, ov-647).
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",

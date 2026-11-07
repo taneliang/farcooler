@@ -89,9 +89,45 @@ fn a_hand_move_on_an_owned_card_is_refused_in_plain_words_and_changes_nothing() 
     for r in results {
         let e = r.expect("refused");
         assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned" }), "{e:?}");
-        assert!(e.to_string().contains("workflow"), "plain words, not a Rust error: {e}");
+        assert!(e.to_string().contains("workflow") && !e.to_string().to_lowercase().contains("cancel"), "plain words that promise nothing: {e}");
     }
     assert_eq!(seen(&b), before, "the card did not move");
     // Outside a run the hand still moves it.
     assert!(b.store.set_task_status(b.other.id, TaskStatus::InProgress, user).is_ok());
+}
+
+#[test]
+fn an_engine_move_is_told_once_after_the_commit_and_a_replay_tells_nothing() {
+    use std::sync::{Arc, Mutex};
+    let b = board();
+    let told: Arc<Mutex<Vec<crate::BoardMove>>> = Default::default();
+    let sink = told.clone();
+    b.store.set_workflow_board_listener(Some(Arc::new(move |m| sink.lock().unwrap().extend_from_slice(m))));
+    let c = Command::Enqueue { item: b.task.key.clone(), policy_pin: "policy-1".into(), resource: "own".into(),
+        dependencies: BTreeSet::new(), initial_candidate: None, definition: Definition::coding() };
+    let i = input(&b, "enqueue", 0, Grant::Controller, c);
+    b.store.workflow_apply(&i).unwrap();
+    {
+        let told = told.lock().unwrap();
+        assert_eq!(told.len(), 1, "one card moved: {told:?}");
+        assert_eq!((told[0].task, told[0].from, told[0].to), (b.task.id, Some(TaskStatus::Backlog), TaskStatus::InProgress));
+    }
+    b.store.workflow_apply(&i).unwrap();
+    assert_eq!(told.lock().unwrap().len(), 1, "a replay moves nothing, so tells nothing");
+    // A refused command projects nothing.
+    let again = input(&b, "dup", 1, Grant::Controller, Command::Cancel { item: "no-such".into() });
+    let _ = b.store.workflow_apply(&again);
+    assert_eq!(told.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn an_ended_run_refuses_a_hand_move_without_promising_the_card_comes_free() {
+    let b = board();
+    enqueue(&b, Definition::tracker("owner"));
+    b.store.workflow_apply(&input(&b, "cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() })).unwrap();
+    let e = b.store.set_task_status(b.task.id, TaskStatus::InProgress, Actor::User).unwrap_err();
+    assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
+    assert!(!e.to_string().to_lowercase().contains("cancel"), "cancelling is what ended it: {e}");
+    let live = b.store.set_task_status(b.other.id, TaskStatus::InProgress, Actor::User);
+    assert!(live.is_ok());
 }

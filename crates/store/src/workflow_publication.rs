@@ -51,8 +51,9 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
+        let mut moved = Vec::new();
         let receipt = match write {
-            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?)?,
+            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?, &mut moved)?,
             Write::Refuse(reason) => Receipt { id: id.into(), result: Err(reason), effects: vec![] },
             Write::Publish { notifications, expected_pin, definition, adapter, revision } => {
                 let current: Option<String> = tx.query_row("SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
@@ -73,6 +74,8 @@ impl Store {
         };
         tx.execute("INSERT INTO workflow_wire_receipts(workspace,id,payload,receipt) VALUES(?1,?2,?3,?4)", params![workspace,id,payload,serde_json::to_string(&receipt)?])?;
         tx.commit()?;
+        drop(conn);
+        self.announce_board_moves(&moved);
         Ok(receipt)
     }
 }

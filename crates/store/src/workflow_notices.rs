@@ -192,6 +192,16 @@ fn target_generation_triggers(tx:&Transaction<'_>) -> rusqlite::Result<()> {
 }
 
 impl Store {
+    /// The daemon's hook for engine moves: called after the commit with every
+    /// card the engine just moved, so open boards re-read (ov-948).
+    pub fn set_workflow_board_listener(&self, listener: Option<std::sync::Arc<dyn Fn(&[crate::workflow_projection::BoardMove]) + Send + Sync>>) {
+        *self.workflow_board_listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
+    }
+    pub(crate) fn announce_board_moves(&self, moved: &[crate::workflow_projection::BoardMove]) {
+        if moved.is_empty() { return; }
+        let listener = self.workflow_board_listener.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(listener) = listener { listener(moved); }
+    }
     /// Dedicated wake for this outbox, registered only by the exclusive owner.
     /// It carries no notices/results/authority and never waits for an ACK.
     pub fn set_workflow_notice_waker(&self, wake:Option<std::sync::Arc<dyn Fn()+Send+Sync>>) {

@@ -212,3 +212,13 @@ async fn ending_with_no_id_on_the_wire_ends_every_open_one() {
     let task = worker(&svc, &watcher, &ask, None).unwrap();
     assert_eq!(task.workers[0].state, pb::TaskWorkerState::Finished as i32);
 }
+
+/// ov-948: a card the engine moved is told to open boards, as a hand move is.
+/// Without it the database says Done while every open board shows the old column.
+#[tokio::test]
+async fn a_card_the_engine_moved_is_told_to_open_boards() {
+    let (_dir, svc, watcher, mut events, t) = runner(1).await;
+    svc.store.set_task_status(t[0].id, TaskStatus::Done, Actor::Runner).unwrap();
+    watcher.announce_engine_moves(&[farcooler_store::BoardMove { task: t[0].id, from: Some(TaskStatus::InReview), to: TaskStatus::Done }]);
+    assert_eq!(changed(&mut events), vec![t[0].id], "the board re-reads the one card");
+}

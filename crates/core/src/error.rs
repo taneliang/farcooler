@@ -371,7 +371,11 @@ const SENTENCES: &[(&str, &str)] = &[
     // A hand move on a card a workflow run owns (ov-948): the run moves it.
     (
         "engine_owned",
-        "This ticket is running in a workflow, so its column follows the run. Cancel the run to take it off the workflow.",
+        "A workflow runs this ticket, so its column follows the run and can't be moved by hand. Ask the orchestrator.",
+    ),
+    (
+        "engine_owned_ended",
+        "A workflow ran this ticket and its column is final, so it can't be moved by hand.",
     ),
     ("landing_history", "This workspace has landing history that is kept, so it can't be deleted."),
     ("not_lost", "That terminal isn't lost anymore."),

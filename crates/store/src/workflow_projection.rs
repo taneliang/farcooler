@@ -20,8 +20,13 @@ pub(crate) fn is_owned(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<
 /// A hand move (column, hold, line edit) on a card the engine owns: refused
 /// in any phase, because the next step of the run would overwrite it.
 pub(crate) fn refuse_if_owned(conn: &Connection, task: uuid::Uuid) -> DomainResult<()> {
-    if is_owned(conn, task).map_err(crate::error::map_err)? { return Err(DomainError::Conflict { what: "engine_owned" }); }
-    Ok(())
+    if !is_owned(conn, task).map_err(crate::error::map_err)? { return Ok(()); }
+    // Ownership is permanent, so no word here may promise the card comes free.
+    // A run that ended says so; the column it left is final.
+    let status: Option<String> = conn.query_row("SELECT status FROM tasks WHERE id=?1", [task.as_bytes().as_slice()], |r| r.get(0))
+        .optional().map_err(crate::error::map_err)?;
+    let ended = status.as_deref().and_then(TaskStatus::parse).is_some_and(|s| matches!(s, TaskStatus::Done | TaskStatus::Cancelled));
+    Err(DomainError::Conflict { what: if ended { "engine_owned_ended" } else { "engine_owned" } })
 }
 
 /// Where a run puts its card: the column and the line stage.
@@ -54,7 +59,9 @@ const GUARDS: [&str; 3] = ["engine_task_execution_fence", "workflow_excludes_tic
 /// Project every owned card of `state` onto the board. Only a card whose
 /// column or stage differs is touched, so a command that moves no card writes
 /// nothing.
-pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> Result<()> {
+///
+/// Returns the cards it moved, for the announce after the commit.
+pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> Result<Vec<BoardMove>> {
     let mut moves = Vec::new();
     for (name, item) in &state.items {
         let task: Option<Vec<u8>> = tx.query_row("SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2",
@@ -65,7 +72,9 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
         let line: Option<String> = tx.query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [&task], |r| r.get(0)).optional()?;
         if have.as_deref() != Some(status.as_str()) || line.as_deref() != Some(stage.as_str()) { moves.push((task, status, stage, have, line)); }
     }
-    if moves.is_empty() { return Ok(()); }
+    if moves.is_empty() { return Ok(Vec::new()); }
+    let moved = moves.iter().filter_map(|(task, to, _, from, _)| Some(BoardMove {
+        task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
         let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (?1,?2,?3) ORDER BY name")?;
         statement.query_map(params![GUARDS[0], GUARDS[1], GUARDS[2]], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
@@ -73,8 +82,12 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
     for name in GUARDS { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))?; }
     let written = write(tx, moves);
     for sql in &saved { tx.execute_batch(sql)?; }
-    written
+    written?;
+    Ok(moved)
 }
+/// A card the engine moved: what the board must tell its open clients.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
 /// A card to move: its id, where the run puts it, and what the board has now.
 type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>);
 fn write(tx: &Transaction<'_>, moves: Vec<Move>) -> Result<()> {

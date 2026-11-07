@@ -133,6 +133,7 @@ pub mod survey_read;
 pub(crate) mod board_reads_ops;
 pub(crate) mod lfs_ops;
 pub mod task_ops;
+mod engine_moves;
 pub mod task_starts;
 pub mod usage;
 #[cfg(test)]

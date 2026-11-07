@@ -323,3 +323,37 @@ async fn a_hold_that_ended_goes_by_the_mailbox() {
     assert_eq!(b.progress(), ["Told the orchestrator the hold ended"]);
     assert!(!si.log().contains("PASTE"), "{}", si.log());
 }
+
+/// ov-949 on a released store: an ended hold and an answer reach the
+/// orchestrator through the engine's binding, once each, and the pass does not
+/// tell them again. The cutover is the one `messages_tests` drives.
+#[tokio::test]
+async fn a_hold_and_an_answer_after_cutover_are_each_told_once() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let Board { dir, svc, watcher, lane, task } = b;
+    drop(watcher);
+    let root = svc.root_dir().to_path_buf();
+    svc.drain_writers().await.unwrap();
+    drop(svc);
+    farcooler_store::testing::released_transfer_for_tests(&root.join("farcooler.db"), "worker-e2e");
+    let svc = Arc::new(Service::open_in(root).await.expect("released engine is admitted by the gate"));
+    let b = Board { dir, watcher: Watcher::new(svc.clone()), svc, lane, task };
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.hold_ended();
+    assert_eq!(b.holds().len(), 1, "the hold is queued through the engine");
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
+    assert!(b.holds().is_empty());
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.answer("Ship it");
+    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
+    b.pump().await;
+    si.submits(2).await;
+    assert_eq!(si.submitted(), [b.hold_told(), b.told("Ship it")], "{}", si.log());
+    b.pump().await;
+    assert_eq!(si.submitted().len(), 2, "each told once");
+}

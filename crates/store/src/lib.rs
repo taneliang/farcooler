@@ -94,3 +94,4 @@ pub mod workflow_notices;
 
 mod workflow_ownership;
 mod workflow_projection;
+pub use workflow_projection::BoardMove;
