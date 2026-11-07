@@ -38,6 +38,8 @@ pub enum Error {
     #[error("runtime refused: {0}")]
     Refused(&'static str),
 }
+/// How many effects may run at once. Waiting on a person or on CI is not an effect.
+pub const DEFAULT_EFFECT_CAP: usize = 4;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Never serialized or accepted from a request body. Authority is local to one open.
@@ -101,6 +103,15 @@ pub struct Exec {
     coding: Option<CodingConfig>,
 }
 impl Exec {
+    /// Each item holds its own resource, so items in one repository never wait on each other
+    /// for it. What serializes work on the repository is its own refs, not this name (ov-952).
+    pub(crate) fn item_resource(workspace: &str, item: &str) -> String {
+        digest(&("workflow-item/v1", workspace, item))
+    }
+    /// Items enqueued before per-item resources hold the repository's resource instead.
+    pub(crate) fn resource_matches(&self, workspace: &str, effect: &Effect) -> bool {
+        effect.resource == self.resource || effect.resource == Self::item_resource(workspace, &effect.item)
+    }
     pub fn state(&self, workspace: &str) -> Result<Option<State>> {
         Ok(self.store.workflow_state(workspace)?)
     }
@@ -118,6 +129,8 @@ pub struct Runtime {
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
+    effect_cap: usize,
+    continuous: bool,
     #[cfg(test)]
     sweeps: usize,
     // Kept after all state/process owners; dropping the runtime releases ownership.
@@ -215,7 +228,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None,
+        let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
@@ -223,6 +236,8 @@ impl Runtime {
         runtime.validate_native_host()?;
         Ok(runtime)
     }
+    /// Most effects (builds, checks, reviews, CI) that run at once across all workspaces.
+    pub fn set_effect_cap(&mut self, cap: usize) { self.effect_cap = cap.max(1); }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
         self.authorize(controller.instance)?;
         Ok(CommandHandle { send: self.send.clone() })
@@ -249,7 +264,10 @@ impl Runtime {
         self.authorize(controller.instance)?;
         match &request.command {
             Command::Enqueue { definition, resource, .. } => {
-                if resource != &self.resource { return Err(Error::Refused("noncanonical resource")); }
+                let item = match &request.command { Command::Enqueue { item, .. } => item, _ => unreachable!() };
+                if resource != &self.resource && resource != &Exec::item_resource(&request.workspace, item) {
+                    return Err(Error::Refused("noncanonical resource"));
+                }
                 self.validate_definition(definition)?;
             }
             Command::Cancel { .. } => {}
@@ -281,9 +299,19 @@ impl Runtime {
             expected_revision: state.revision, sequence, command }, "runtime", grant, now_ms)
     }
     /// One owned sweep. This API has no delivery cursor, informational ACK or controller dependency.
+    /// Effects run concurrently, at most `effect_cap` at a time. A plain sweep starts what is
+    /// ready now and waits for it; the service loop also starts follow-on effects as each ends.
     pub async fn pump(&mut self, now_ms: i64) -> Result<usize> {
         #[cfg(test)] { self.sweeps += 1; }
         self.next_lease = None;
+        // The inbox is read while effects run, so cancels and decisions are never held up.
+        let (_, placeholder) = mpsc::channel(1);
+        let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
+        let result = self.sweep(now_ms, &mut inbox).await;
+        self.inbox = inbox;
+        result
+    }
+    async fn sweep(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>) -> Result<usize> {
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();
@@ -297,32 +325,110 @@ impl Runtime {
         let fingerprint = digest(&occupancy);
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
         self.last_occupancy = Some(fingerprint);
-        for workspace in workspaces {
-            let state = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
+        for workspace in &workspaces {
+            let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
             if released_or_recovered && state.items.values().any(|i| i.phase == Phase::Blocked) {
                 // Store stamps actual cross-workspace occupancy in the same transaction.
-                self.internal(&workspace, Command::Advance, Grant::Controller, now_ms)?;
+                self.internal(workspace, Command::Advance, Grant::Controller, now_ms)?;
             }
-            for stored in self.store.workflow_outbox(&workspace)? {
-                if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(count); }
+        }
+        let mut running: Vec<Running> = Vec::new();
+        let mut futures: Vec<Slot> = Vec::new();
+        let mut stopping = false;
+        let mut scan = true;
+        loop {
+            if scan {
+                scan = self.continuous;
+                self.launch_ready(&workspaces, now_ms, &mut running, &mut futures, &mut count).await?;
+            }
+            if running.is_empty() { break; }
+            let mut shutdown = self.shutdown.clone();
+            let event = tokio::select! {
+                (index, result) = next_finished(&mut futures) => Event::Finished(index, result),
+                _ = async {
+                    match &mut shutdown {
+                        Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } },
+                        None => std::future::pending::<()>().await,
+                    }
+                }, if !stopping => Event::Shutdown,
+                message = inbox.recv() => Event::Message(message),
+            };
+            match event {
+                Event::Shutdown => {
+                    stopping = true;
+                    for job in &running { job.cancel.send_replace(true); }
+                }
+                Event::Message(message) => {
+                    if let Some(message) = message {
+                        self.receive(message).await;
+                        for job in &running {
+                            if self.state(&job.workspace)?.is_some_and(|s| s.items.get(&job.effect.item)
+                                .is_some_and(|i| i.phase == Phase::Cancelling)) {
+                                job.cancel.send_replace(true);
+                            }
+                        }
+                    }
+                }
+                Event::Finished(index, result) => {
+                    let job = running.remove(index);
+                    futures.remove(index);
+                    let (workspace, effect, binding) = (job.workspace, job.effect, job.binding);
+                    let outcome = match result {
+                        Ok(outcome) => {
+                            match self.write_journal(&Journal { binding, outcome: outcome.clone() }) {
+                                Ok(()) => outcome,
+                                Err(error) => {
+                                    tracing::warn!(effect = %effect.id, %error, "workflow settlement could not be retained");
+                                    Outcome::Uncertain
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(effect = %effect.id, %error, "workflow effect requires reconciliation");
+                            Outcome::Uncertain
+                        }
+                    };
+                    // A cancel fences the original Observe; its private settlement
+                    // remains available for the Stop effect's quiescence check.
+                    let current = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
+                    if current.items[&effect.item].pending.as_ref() == Some(&effect.id) {
+                        self.observe(&workspace, &effect, outcome, false, now_ms)?;
+                    }
+                    count += 1;
+                    scan = scan || self.continuous;
+                    if stopping { scan = false; }
+                }
+            }
+        }
+        Ok(count)
+    }
+    /// Recover or start every effect that is ready and not already running, within the cap.
+    async fn launch_ready(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
+        futures: &mut Vec<Slot>,
+        count: &mut usize) -> Result<()>
+    {
+        for workspace in workspaces {
+            for stored in self.store.workflow_outbox(workspace)? {
+                if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
                 if !stored.active { continue; }
                 let effect = stored.effect;
-                let state = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
+                if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
+                let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
                 let item = &state.items[&effect.item];
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
-                let selected = self.select_item_configuration(&workspace, item);
+                let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     if let Err(error) = selected {
                         tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
                         if stored.dispatch_state != "uncertain" {
-                            self.observe(&workspace, &effect, Outcome::Uncertain, false, now_ms)?;
-                            count += 1;
+                            self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)?;
+                            *count += 1;
                         }
                         continue;
                     }
                     let recovered = async {
-                        let binding = Binding::new(&workspace, &effect, stored.resource_generation
-                            .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
+                        let binding = Binding::new(workspace, &effect, stored.resource_generation
+                            .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(workspace, &effect)?);
                         if self.coding.is_some() {
                             self.reconcile_coding(&binding).await.map(Some)
                         } else {
@@ -337,12 +443,14 @@ impl Runtime {
                         }
                     };
                     if stored.dispatch_state == "uncertain" && outcome == Outcome::Uncertain { continue; }
-                    self.observe(&workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)?;
-                    count += 1;
+                    self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)?;
+                    *count += 1;
                     continue;
                 }
                 if !matches!(item.phase, Phase::Running | Phase::Cancelling) { continue; }
-                let Some(claim) = self.store.workflow_claim_effect(&workspace, &effect.id,
+                // A stop must always get through; everything else waits for a free slot.
+                if !matches!(effect.kind, EffectKind::Stop { .. }) && running.len() >= self.effect_cap { continue; }
+                let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
                     now_ms, now_ms.saturating_add(30_000))? else {
                     if let Some(deadline) = stored.lease_until.filter(|t| *t > now_ms) {
@@ -355,10 +463,10 @@ impl Runtime {
                 let prepared = async {
                     selected?;
                     if matches!(effect.kind, EffectKind::Stop { .. }) {
-                        return self.item_base(&workspace, &effect);
+                        return self.item_base(workspace, &effect);
                     }
-                    self.validate_item_launch(&workspace, item)?;
-                    self.pin_base(&workspace, &effect).await
+                    self.validate_item_launch(workspace, item)?;
+                    self.pin_base(workspace, &effect).await
                 }.await;
                 let base = match prepared {
                     Ok(base) => base,
@@ -371,75 +479,28 @@ impl Runtime {
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
                             } else { Outcome::SafeFailure };
-                            self.observe(&workspace, &effect, outcome, false, now_ms)?;
-                            count += 1;
+                            self.observe(workspace, &effect, outcome, false, now_ms)?;
+                            *count += 1;
                         }
                         continue;
                     }
                 };
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
-                let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &base);
+                let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
                 let (cancel, cancelled) = tokio::sync::watch::channel(false);
-                // Move only the receiver, leaving the immutable execution context
-                // available while commands (especially Cancel) are admitted.
-                let (_, placeholder) = mpsc::channel(1);
-                let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
-                let mut shutdown = self.shutdown.clone();
-                let mut stopping = false;
-                let result = {
-                    let execution = async {
-                        if self.coding.is_some() { self.execute_coding(&workspace, &binding, cancelled).await }
-                        else { self.execute(&workspace, &binding).await }
-                    };
-                    tokio::pin!(execution);
-                    loop {
-                        tokio::select! {
-                            result = &mut execution => break result,
-                            _ = async {
-                                match &mut shutdown {
-                                    Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } },
-                                    None => std::future::pending::<()>().await,
-                                }
-                            }, if !stopping => { stopping = true; cancel.send_replace(true); },
-                            message = inbox.recv() => {
-                                if let Some(message) = message {
-                                    self.receive(message).await;
-                                    if self.state(&workspace)?.is_some_and(|s| s.items.get(&effect.item)
-                                        .is_some_and(|i| i.phase == Phase::Cancelling)) {
-                                        cancel.send_replace(true);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                };
-                self.inbox = inbox;
-                let outcome = match result {
-                    Ok(outcome) => {
-                        match self.write_journal(&Journal { binding, outcome: outcome.clone() }) {
-                            Ok(()) => outcome,
-                            Err(error) => {
-                                tracing::warn!(effect = %effect.id, %error, "workflow settlement could not be retained");
-                                Outcome::Uncertain
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(effect = %effect.id, %error, "workflow effect requires reconciliation");
-                        Outcome::Uncertain
-                    }
-                };
-                // A cancel fences the original Observe; its private settlement
-                // remains available for the Stop effect's quiescence check.
-                let current = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
-                if current.items[&effect.item].pending.as_ref() == Some(&effect.id) {
-                    self.observe(&workspace, &effect, outcome, false, now_ms)?;
-                }
-                count += 1;
+                // This effect runs on its own copy of the item's configuration, so the next
+                // item's selection cannot change what it sees.
+                let exec = self.exec.clone();
+                let (run_workspace, run_binding) = (workspace.clone(), binding.clone());
+                futures.push(Some(Box::pin(async move {
+                    if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
+                    else { exec.execute(&run_workspace, &run_binding).await }
+                })));
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel });
             }
         }
-        Ok(count)
+        Ok(())
     }
     fn observe(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64) -> Result<()> {
         let command = if resolving {
@@ -492,6 +553,7 @@ impl Runtime {
     }
     pub async fn run(&mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         self.shutdown = Some(shutdown.clone());
+        self.continuous = true;
         loop {
             if *shutdown.borrow() { return Ok(()); }
             // Bounded drain prevents a busy sender from starving effects/shutdown.
@@ -524,6 +586,34 @@ impl Runtime {
         }
     }
 }
+type Slot = Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<Outcome>> + Send>>>;
+/// An effect that has been admitted and is executing.
+struct Running {
+    workspace: String,
+    effect: Effect,
+    binding: Binding,
+    cancel: tokio::sync::watch::Sender<bool>,
+}
+enum Event {
+    Finished(usize, Result<Outcome>),
+    Shutdown,
+    Message(Option<Inbox>),
+}
+/// Resolves with the first finished future and its position, without the `futures` crate.
+async fn next_finished(futures: &mut [Slot])
+    -> (usize, Result<Outcome>)
+{
+    std::future::poll_fn(|cx| {
+        for (index, slot) in futures.iter_mut().enumerate() {
+            if let Some(future) = slot {
+                if let std::task::Poll::Ready(result) = future.as_mut().poll(cx) {
+                    return std::task::Poll::Ready((index, result));
+                }
+            }
+        }
+        std::task::Poll::Pending
+    }).await
+}
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_millis().min(i64::MAX as u128) as i64
@@ -542,3 +632,5 @@ mod tests;
 
 #[cfg(test)]
 mod coding_tests;
+#[cfg(test)]
+mod concurrency_tests;

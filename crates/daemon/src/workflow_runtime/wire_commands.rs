@@ -60,7 +60,7 @@ impl Runtime {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| pin.clone());
                             let input = input(Command::Enqueue { item:item.clone(),definition:configuration.definition,
-                                policy_pin:pin.clone(),resource:self.publication_resource(workspace, configuration.adapter.as_ref()),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
+                                policy_pin:pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
                             self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                         }
                     }

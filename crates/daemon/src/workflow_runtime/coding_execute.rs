@@ -138,7 +138,7 @@ impl Exec {
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
     fn check_binding(&self, workspace: &str, binding: &Binding) -> Result<()> {
-        if binding.workspace != workspace || binding.effect.resource != self.resource
+        if binding.workspace != workspace || !self.resource_matches(workspace, &binding.effect)
             || binding.base != self.item_base(workspace, &binding.effect)? {
             return Err(Error::Refused("foreign coding binding"));
         }

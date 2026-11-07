@@ -52,7 +52,7 @@ impl Runtime {
         Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
-            last_occupancy:None,inbox,send,next_lease:None,
+            last_occupancy:None,inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
             #[cfg(test)] sweeps:0,
             _writer:writer,_repository_writer:None,_landing_writer:None })
     }
@@ -88,12 +88,14 @@ impl Runtime {
             None => self.validate_definition(definition),
         }
     }
-    pub(super) fn select_item_configuration(&mut self, workspace: &str, item: &Item) -> Result<()> {
+    pub(super) fn select_item_configuration(&mut self, workspace: &str, item_id: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }
         // The admitted item's policy pin is immutable and also present in every
         // effect/receipt. Never consult the workspace's current selection here.
         let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
-        if bundle.definition != item.definition || self.publication_resource(workspace,bundle.adapter.as_ref()) != item.resource {
+        if bundle.definition != item.definition
+            || (item.resource != Exec::item_resource(workspace, item_id)
+                && self.publication_resource(workspace,bundle.adapter.as_ref()) != item.resource) {
             return Err(Error::Refused("item configuration binding changed"));
         }
         // Bundle bytes, workspace/resource and operation pins remain mandatory

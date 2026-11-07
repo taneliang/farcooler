@@ -149,7 +149,7 @@ impl Exec {
     }
     pub(super) async fn execute(&self, workspace: &str, binding: &Binding) -> Result<Outcome> {
         let effect = &binding.effect;
-        if effect.resource != self.resource || binding.base != self.item_base(workspace, effect)? || binding.workspace != workspace {
+        if !self.resource_matches(workspace, effect) || binding.base != self.item_base(workspace, effect)? || binding.workspace != workspace {
             return Err(Error::Refused("foreign execution binding"));
         }
         if let EffectKind::Stop { operation } = &effect.kind {
