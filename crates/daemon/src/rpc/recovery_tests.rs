@@ -16,11 +16,40 @@ fn reply(r: Response) -> std::result::Result<serde_json::Value, String> {
 }
 fn person(root: &std::path::Path) -> RecoveryHandler { RecoveryHandler::with_walk(root.into(), local(), Some(7), |_| Seat::Person, |_| Some(1)) }
 async fn op(handler: &RecoveryHandler, json: &str) -> std::result::Result<serde_json::Value, String> { reply(handler.handle(ask("workflow.cutover", json)).await) }
+/// Wait until nothing holds the database. Dropping a `Service` does not close
+/// it: its background tasks hold the store, and with it the shared lock, until
+/// they next run, which on a loaded machine is after the test's first Prepare
+/// (ov-944: 13 of 160 runs refused "another process has this database open").
+async fn released(root: &std::path::Path) {
+    let db = crate::cutover_admin::database(root);
+    let start = std::time::Instant::now();
+    loop {
+        match JoinedOwners::acquire(&db, "released") {
+            Ok(free) => { drop(free); return; }
+            Err(_) if start.elapsed() < std::time::Duration::from_secs(30) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            Err(e) => panic!("the dropped service never released the database: {e}"),
+        }
+    }
+}
+/// A Prepare that is expected to succeed. The database lock is released when
+/// the last copy of its descriptor closes, and a test beside this one that
+/// forks a child holds a copy until the child's exec, a few milliseconds
+/// (ov-944: about 1 refusal in 300 runs). So ask again, for a while, until the
+/// lock is free. A Prepare that fails changes nothing, so asking again is safe.
+async fn prepare(handler: &RecoveryHandler) -> std::result::Result<serde_json::Value, String> {
+    let start = std::time::Instant::now();
+    loop {
+        let said = op(handler, PREPARE).await;
+        if said.is_ok() || start.elapsed() > std::time::Duration::from_secs(10) { return said; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
 async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
     let root = service.root_dir().to_path_buf();
     drop(service);
+    released(&root).await;
     (dir, root)
 }
 /// The domain refusal, or the parser's for a word outside the vocabulary: either
@@ -73,7 +102,7 @@ async fn recovery_prepares_then_recovers_a_real_database_back_to_ordinary_servic
     transfer::hold(&db, "a-1").unwrap();
     assert!(crate::service::Service::open_in(root.clone()).await.is_err(), "ordinary startup is refused");
     let owner = person(&root);
-    assert_eq!(op(&owner, PREPARE).await.unwrap()["phase"], "quiesced");
+    assert_eq!(prepare(&owner).await.unwrap()["phase"], "quiesced");
     let inspected = op(&owner, INSPECT).await.unwrap();
     assert_eq!(inspected["authority"]["phase"], "quiesced");
     assert!(inspected["ordinary_startup"].as_str().unwrap().starts_with("refused"));
@@ -94,7 +123,7 @@ async fn recovery_prepare_refuses_while_any_process_has_the_database_open() {
     let held = JoinedOwners::acquire(&db, "other").unwrap();
     assert!(op(&person(&root), PREPARE).await.is_err(), "another owner blocks; nothing is signaled");
     drop(held);
-    assert!(op(&person(&root), PREPARE).await.is_ok());
+    assert!(prepare(&person(&root)).await.is_ok());
 }
 #[tokio::test]
 async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit() {
@@ -102,7 +131,7 @@ async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit
     let db = crate::cutover_admin::database(&root);
     transfer::hold(&db, "a-1").unwrap();
     let owner = person(&root);
-    op(&owner, PREPARE).await.unwrap();
+    prepare(&owner).await.unwrap();
     assert!(op(&owner, r#"{"op":"Verify"}"#).await.is_err(), "not committed");
     farcooler_store::testing::commit_for_tests(&db, "a-1");
     assert!(op(&owner, r#"{"op":"Recover"}"#).await.is_err(), "committed recovers forward only");
@@ -129,8 +158,9 @@ async fn live_hold_drains_marks_the_attempt_and_a_caller_lost_during_the_drain_m
     assert!(startup::artifact_dir(&db).join("hold.json").exists());
     let root = service.root_dir().to_path_buf();
     drop(service);
+    released(&root).await;
     assert!(crate::service::Service::open_in(root.clone()).await.is_err(), "the next start is not ordinary");
-    assert_eq!(op(&person(&root), PREPARE).await.unwrap()["phase"], "quiesced");
+    assert_eq!(prepare(&person(&root)).await.unwrap()["phase"], "quiesced");
 }
 #[tokio::test]
 async fn live_prepare_refuses_an_agent_pane_and_holds_and_stops_for_a_person() {
