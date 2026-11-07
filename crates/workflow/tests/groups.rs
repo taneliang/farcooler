@@ -170,6 +170,24 @@ fn a_finished_group_fans_out_and_a_member_adopts_the_result() {
     assert_eq!(log.state.items[&group].members, vec![]);
 }
 #[test]
+fn a_member_whose_resource_was_taken_while_it_waited_queues_for_it() {
+    let mut log = Log::new();
+    log.to_join("a"); log.queue("a");
+    // While `a` is in the group its resource is free; another ticket takes it.
+    log.run(Command::Enqueue { item: "other".into(), definition: ticket(), policy_pin: "policy-1".into(),
+        resource: "res-a".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
+    let group = log.group_of("a");
+    finish_with(&mut log, &group, "folded");
+    assert_eq!(log.state.items["a"].phase, Phase::Blocked);
+    assert_eq!(log.state.items["a"].pending, None);
+    assert_eq!(log.stage("a"), "tidy");
+    // It goes when the resource frees: drive `other` to its end of life.
+    log.run(Command::Cancel { item: "other".into() }, Grant::Controller);
+    let stop = log.state.items["other"].stopping.clone().unwrap();
+    log.outcome("other", Outcome::Stopped { operation: stop, receipt: "quiet".into() });
+    assert_eq!(log.state.items["a"].phase, Phase::Running);
+}
+#[test]
 fn a_member_that_does_not_adopt_keeps_its_own_candidate() {
     let mut log = Log::new();
     let mut d = ticket(); d.stages[3].kind = StageKind::Join { group: "landing".into(), adopt: false };
@@ -345,7 +363,7 @@ fn the_validator_rejects_bad_groups() {
         ("join waits for approval", Box::new(|d| {
             d.stages[3].progression = Progression::AwaitApproval { principal: "owner".into() }; })),
         ("custom label on a join", Box::new(|d| { d.stages[3].routes.insert("odd".into(), Target::Done); })),
-        ("dropped label on a check", Box::new(|d| { d.stages[2].routes.insert("dropped".into(), Target::Fail); })),
+        ("dropped label on a build", Box::new(|d| { d.stages[1].routes.insert("dropped".into(), Target::Fail); })),
         ("groups on schema 1", Box::new(|d| { d.schema = 1; d.stages[3].routes.clear(); d.stages[3].limit = 0; d.stages[2].routes.clear(); d.stages[2].limit = 0; })),
         ("join before a candidate", Box::new(|d| { d.stages.swap(1, 3); })),
     ];

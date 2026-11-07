@@ -1,5 +1,5 @@
 use crate::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     if !valid_state(state) { return Err(Refusal::Invalid); }
@@ -16,6 +16,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     { return Err(Refusal::Stale); }
     let mut next = state.clone();
     let mut effects = Vec::new();
+    // Halves a group split off this step: (group it came from, members that form the new group).
+    let mut spawn: Vec<(String, Vec<Member>)> = Vec::new();
     let mut notices = Vec::new();
     match &input.command {
         Command::Advance => { controller(input)?; }
@@ -89,7 +91,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             iteration: item.iteration, reason: reason.clone(),
                         });
                     }
-                    finish(&mut item, id, input, *passed, evidence, &mut effects)?;
+                    finish(&mut item, id, input, *passed, evidence, &mut effects, &mut spawn)?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
                 | Command::Resolve { effect, run, fence, outcome, .. } => {
@@ -128,12 +130,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 return Err(Refusal::Evidence);
                             }
                             evidence_matches(&item, evidence)?;
-                            route(&mut item, id, input, label, evidence, &mut effects)?;
+                            route(&mut item, id, input, label, Some(evidence), &mut effects, &mut spawn)?;
                         }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
-                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, &mut effects)?;
+                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, &mut effects, &mut spawn)?;
                         }
                         Outcome::SafeFailure => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
@@ -150,6 +152,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 }
                 Command::Cancel { .. } => {
                     controller(input)?;
+                    // A queued ticket can be cancelled only while its group still waits.
+                    if item.phase == Phase::Joined { detach(&mut next, id, &mut item)?; }
                     // A failed run is closed by cancelling it: that is the controller's way off the needs-you list.
                     if matches!(item.phase, Phase::Done | Phase::Cancelled) { return Err(Refusal::Phase); }
                     if item.phase == Phase::Cancelling || item.run.starts_with("cancel:") {
@@ -163,7 +167,44 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { item.phase = Phase::Cancelled; }
                 }
-                Command::Queue { .. } | Command::Leave { .. } => { return Err(Refusal::Phase); }
+                Command::Queue { .. } => {
+                    controller(input)?;
+                    let StageKind::Join { group: name, .. } = &item.definition.stages[item.stage].kind.clone() else {
+                        return Err(Refusal::Phase);
+                    };
+                    if item.phase != Phase::WaitingJoin { return Err(Refusal::Phase); }
+                    let candidate = item.candidate.clone().ok_or(Refusal::Invalid)?;
+                    let limit = usize::from(item.definition.groups.get(name).ok_or(Refusal::Definition)?.limit);
+                    // The first open group of this definition and policy with room, oldest first.
+                    let open = next.items.iter().find(|(_, g)| g.phase == Phase::Blocked
+                        && g.members.len() < limit && g.policy_pin == item.policy_pin
+                        && g.group_of.as_ref().is_some_and(|o| &o.name == name && o.pin == item.pin))
+                        .map(|(gid, _)| gid.clone());
+                    let gid = match open {
+                        Some(gid) => gid,
+                        None => {
+                            let gid = group_id(state, name);
+                            let definition = item.definition.group_definition(name).ok_or(Refusal::Definition)?;
+                            let resource = item.definition.groups[name].exclusive.clone();
+                            next.items.insert(gid.clone(), Item { pin: definition.pin(), definition,
+                                policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
+                                stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
+                                run: String::new(), pending: None, candidate: None, last_evidence: None,
+                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0,
+                                members: Vec::new(),
+                                group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
+                                grouped_in: None });
+                            gid
+                        }
+                    };
+                    next.items.get_mut(&gid).ok_or(Refusal::Missing)?.members.push(Member { item: id.clone(), candidate });
+                    item.grouped_in = Some(gid);
+                    item.phase = Phase::Joined;
+                }
+                Command::Leave { .. } => {
+                    controller(input)?;
+                    detach(&mut next, id, &mut item)?;
+                }
                 Command::Retry { .. } => {
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
@@ -177,6 +218,20 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }
             next.items.insert(id.clone(), item);
+            for (from, members) in spawn.drain(..) {
+                let mut rest = next.items.get(&from).ok_or(Refusal::Missing)?.clone();
+                let name = rest.group_of.as_ref().ok_or(Refusal::Invalid)?.name.clone();
+                let gid = group_id(state, &name);
+                for m in &members {
+                    next.items.get_mut(&m.item).ok_or(Refusal::Missing)?.grouped_in = Some(gid.clone());
+                }
+                // The second half starts from nothing, behind whatever holds the resource.
+                rest.members = members; rest.stage = 0; rest.iteration = 0; rest.attempt = 1; rest.fence = 1;
+                rest.phase = Phase::Blocked; rest.run = String::new(); rest.pending = None; rest.candidate = None;
+                rest.last_evidence = None; rest.stopping = None; rest.rework_history = Vec::new();
+                rest.back_edges = BTreeMap::new(); rest.retries = 0;
+                next.items.insert(gid, rest);
+            }
         }
     }
     // A failed run stays: cancelling it is the controller's way off the needs-you list.
@@ -187,6 +242,23 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     for id in finished {
         if let Some(item) = next.items.remove(&id) {
             next.archive.insert(id, Archived { phase: item.phase, candidate: item.candidate });
+        }
+    }
+    // A group that ended hands each member its result, through the member's own join routes.
+    let ended: Vec<String> = next.items.iter().filter(|(_, g)| g.group_of.is_some() && !g.members.is_empty()
+        && matches!(g.phase, Phase::Done | Phase::Failed | Phase::Cancelled)).map(|(gid, _)| gid.clone()).collect();
+    for gid in ended {
+        let group = next.items.get_mut(&gid).ok_or(Refusal::Missing)?;
+        let label = match group.phase { Phase::Done => "passed", Phase::Failed => "rejected", _ => "dropped" };
+        let (members, result) = (std::mem::take(&mut group.members), group.candidate.clone());
+        for member in members {
+            let mut ticket = next.items.remove(&member.item).ok_or(Refusal::Missing)?;
+            ticket.grouped_in = None;
+            if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
+                if label == "passed" && result.is_some() { ticket.candidate = result.clone(); }
+            }
+            route(&mut ticket, &member.item, input, label, None, &mut effects, &mut spawn)?;
+            next.items.insert(member.item, ticket);
         }
     }
     // Completion of a prerequisite can release blocked work without another controller command.
@@ -211,7 +283,24 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
 }
 
 pub fn owns_resource(item: &Item) -> bool {
-    !matches!(item.phase, Phase::Blocked | Phase::Done | Phase::Failed | Phase::Cancelled)
+    !matches!(item.phase, Phase::Blocked | Phase::Done | Phase::Failed | Phase::Cancelled
+        | Phase::WaitingJoin | Phase::Joined)
+}
+/// A new group's id: the revision it opens at, zero-padded, so ids sort in the order groups opened.
+fn group_id(state: &State, name: &str) -> String { format!("group-{:020}-{name}", state.revision) }
+/// Take a queued ticket out of a group that has not left yet; an empty group is cancelled.
+fn detach(next: &mut State, id: &str, item: &mut Item) -> Result<(), Refusal> {
+    if item.phase != Phase::Joined { return Err(Refusal::Phase); }
+    let gid = item.grouped_in.clone().ok_or(Refusal::Invalid)?;
+    let group = next.items.get_mut(&gid).ok_or(Refusal::Missing)?;
+    if group.phase != Phase::Blocked { return Err(Refusal::Phase); }
+    let before = group.members.len();
+    group.members.retain(|m| m.item != id);
+    if group.members.len() == before { return Err(Refusal::Invalid); }
+    if group.members.is_empty() { group.phase = Phase::Cancelled; }
+    item.grouped_in = None;
+    item.phase = Phase::WaitingJoin;
+    Ok(())
 }
 fn ready(state: &State, item: &Item, input: &Input) -> bool {
     if input.busy_resources.contains(&item.resource) { return false; }
@@ -242,7 +331,10 @@ fn enter(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) ->
 }
 fn launch(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -> Result<(), Refusal> {
     let kind = item.definition.stages[item.stage].kind.clone();
-    if matches!(kind, StageKind::Review(Reviewer::Person(_) | Reviewer::Orchestrator(_))) {
+    if matches!(kind, StageKind::Join { .. }) {
+        // Waits, holding nothing, for the orchestrator to queue it.
+        item.phase = Phase::WaitingJoin;
+    } else if matches!(kind, StageKind::Review(Reviewer::Person(_) | Reviewer::Orchestrator(_))) {
         item.phase = Phase::WaitingReview;
     } else {
         item.phase = Phase::Running;
@@ -270,10 +362,10 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     Ok(())
 }
 fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence,
-    effects: &mut Vec<Effect>) -> Result<(), Refusal>
+    effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
 {
     if item.definition.schema == 2 {
-        return route(item, id, input, if passed { "passed" } else { "rejected" }, evidence, effects);
+        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), effects, spawn);
     }
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
@@ -324,14 +416,28 @@ fn rework_room(item: &Item, label: &str) -> Result<(), Refusal> {
     Ok(())
 }
 /// Schema 2: take the route a label names. A back edge past its limit fails the run instead.
-fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: &Evidence,
-    effects: &mut Vec<Effect>) -> Result<(), Refusal>
+/// A split keeps the first half of a group here and hands the rest to `spawn`.
+fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>,
+    effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
 {
     item.pending = None;
-    item.last_evidence = Some(evidence.clone());
     let stage = &item.definition.stages[item.stage];
-    if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
-    let target = target_of(item, label);
+    let (key, limit) = (stage.id.clone(), stage.limit);
+    let from_join = matches!(stage.kind, StageKind::Join { .. });
+    if let Some(evidence) = evidence {
+        item.last_evidence = Some(evidence.clone());
+        if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
+    }
+    let mut target = target_of(item, label);
+    let taken = item.back_edges.get(&key).copied().unwrap_or(0);
+    if let Target::Split { step, otherwise } = target {
+        // Two or more members and room to go back: split. Otherwise the fallback decides.
+        target = if item.members.len() >= 2 && taken < limit {
+            let rest = item.members.split_off(item.members.len().div_ceil(2));
+            spawn.push((id.to_string(), rest));
+            Target::Step(step)
+        } else { *otherwise };
+    }
     let to = match &target {
         Target::Fail | Target::Split { .. } => { item.phase = Phase::Failed; return Ok(()); }
         Target::Done => {
@@ -342,8 +448,6 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: &Evide
         Target::Step(to) => item.definition.stages.iter().position(|s| &s.id == to).ok_or(Refusal::Definition)?,
     };
     if is_back_edge(item, &target) {
-        let (key, limit) = (stage.id.clone(), stage.limit);
-        let taken = item.back_edges.get(&key).copied().unwrap_or(0);
         if taken >= limit { item.phase = Phase::Failed; return Ok(()); }
         item.back_edges.insert(key, taken + 1);
         item.iteration = item.iteration.checked_add(1).ok_or(Refusal::Limit)?;
@@ -352,7 +456,29 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: &Evide
     item.stage = to;
     item.attempt = 1;
     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+    if from_join {
+        // A ticket that waited in a group holds no resource: it queues for it like new work.
+        item.phase = Phase::Blocked;
+        return Ok(());
+    }
     enter(item, id, input, effects)
+}
+
+/// Groups and the tickets queued into them agree with each other, in both directions.
+fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
+    let queued_ok = match (&item.grouped_in, &item.phase) {
+        (Some(gid), Phase::Joined) => state.items.get(gid).is_some_and(|g| g.group_of.is_some()
+            && g.members.iter().any(|m| m.item == id)),
+        (None, Phase::Joined) | (Some(_), _) => false,
+        (None, _) => true,
+    };
+    let group_ok = item.members.is_empty() || (item.group_of.is_some()
+        && item.members.len() <= usize::from(MAX_GROUP_MEMBERS)
+        && item.members.iter().all(|m| valid_id(&m.candidate)
+            && state.items.get(&m.item).is_some_and(|t| t.phase == Phase::Joined && t.grouped_in.as_deref() == Some(id))));
+    let waiting_ok = item.phase != Phase::WaitingJoin
+        || matches!(item.definition.stages.get(item.stage).map(|s| &s.kind), Some(StageKind::Join { .. }));
+    queued_ok && group_ok && waiting_ok
 }
 
 fn valid_state(state: &State) -> bool {
@@ -361,7 +487,9 @@ fn valid_state(state: &State) -> bool {
             && matches!(a.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
             && a.candidate.as_deref().is_none_or(valid_id))
         && state.items.iter().all(|(id, item)| {
-            valid_id(id) && item.definition.validate().is_ok() && item.pin == item.definition.pin()
+            valid_id(id) && item.pin == item.definition.pin()
+                && if item.group_of.is_some() { item.definition.validate_group() } else { item.definition.validate() }.is_ok()
+                && valid_membership(state, id, item)
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)
                 && if item.definition.schema == 2 {
                     usize::from(item.iteration) == item.back_edges.values().map(|n| usize::from(*n)).sum::<usize>()

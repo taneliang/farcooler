@@ -67,7 +67,16 @@ pub struct Definition {
     pub groups: BTreeMap<String, GroupDef>,
 }
 impl Definition {
-    pub fn validate(&self) -> Result<(), Refusal> {
+    pub fn validate(&self) -> Result<(), Refusal> { self.check(false) }
+    /// A group's steps, which may split the group and may not join another.
+    pub fn validate_group(&self) -> Result<(), Refusal> { self.check(true) }
+    /// The definition a group item runs: the group's steps, as a definition of their own.
+    pub fn group_definition(&self, name: &str) -> Option<Definition> {
+        let group = self.groups.get(name)?;
+        Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
+            max_reworks: 0, rework_target: None, groups: BTreeMap::new() })
+    }
+    fn check(&self, in_group: bool) -> Result<(), Refusal> {
         let mut ids = BTreeSet::new();
         if !matches!(self.schema, 1 | 2) || self.source.is_empty() || self.source.len() > 256
             || self.stages.is_empty() || self.stages.len() > 16 || self.max_reworks > 2
@@ -99,12 +108,22 @@ impl Definition {
             if let StageKind::Action(binding) | StageKind::Evaluate(binding) = &stage.kind {
                 if !valid_id(binding) { return Err(Refusal::Definition); }
             }
+            if let StageKind::Join { group, .. } = &stage.kind {
+                if !valid_id(group) || group.len() > 64 || stage.progression != Progression::Automatic {
+                    return Err(Refusal::Definition);
+                }
+            }
             if let StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) = &stage.kind {
                 if !valid_id(p) { return Err(Refusal::Definition); }
             }
         }
-        if self.schema == 2 { return self.validate_routes(); }
-        if self.stages.iter().any(|s| !s.routes.is_empty() || s.limit != 0) { return Err(Refusal::Definition); }
+        if self.schema == 2 {
+            self.validate_routes(in_group)?;
+            return if in_group { Ok(()) } else { self.validate_groups() };
+        }
+        if !self.groups.is_empty() || self.stages.iter().any(|s| !s.routes.is_empty() || s.limit != 0
+            || matches!(s.kind, StageKind::Join { .. }))
+        { return Err(Refusal::Definition); }
         // Sequence order is definition policy, not a global coding/reviewer policy.
         let target = self.rework_target.as_ref().map(|id| self.stages.iter().position(|s| &s.id == id));
         if self.max_reworks == 0 {
@@ -122,8 +141,23 @@ impl Definition {
         }
         Ok(())
     }
+    /// Every join names a group, every group has a join, and each group's steps are sound.
+    fn validate_groups(&self) -> Result<(), Refusal> {
+        let joined: BTreeSet<&str> = self.stages.iter().filter_map(|s| match &s.kind {
+            StageKind::Join { group, .. } => Some(group.as_str()), _ => None }).collect();
+        // Every join names a group, and every group has a join: nothing is declared and left unused.
+        if joined.len() != self.groups.len() || !self.groups.keys().all(|g| joined.contains(g.as_str())) {
+            return Err(Refusal::Definition);
+        }
+        for name in self.groups.keys() {
+            let group = &self.groups[name];
+            if !(1..=MAX_GROUP_MEMBERS).contains(&group.limit) || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
+            self.group_definition(name).ok_or(Refusal::Definition)?.validate_group()?;
+        }
+        Ok(())
+    }
     /// Schema 2: labels route, back edges are bounded, and every step is reachable and safe.
-    fn validate_routes(&self) -> Result<(), Refusal> {
+    fn validate_routes(&self, in_group: bool) -> Result<(), Refusal> {
         if self.max_reworks != 0 || self.rework_target.is_some() { return Err(Refusal::Definition); }
         let n = self.stages.len();
         let index: BTreeMap<&str, usize> = self.stages.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
@@ -132,27 +166,54 @@ impl Definition {
         let mut done_reachable_from: Vec<usize> = Vec::new();
         for (i, stage) in self.stages.iter().enumerate() {
             if stage.limit > MAX_BACK_EDGE_LIMIT || stage.routes.len() > 8 { return Err(Refusal::Definition); }
+            if in_group && matches!(stage.kind, StageKind::Join { .. }) { return Err(Refusal::Definition); }
             let mut back = false;
             let mut labels: Vec<&str> = vec!["passed", "rejected"];
+            if matches!(stage.kind, StageKind::Join { .. }) { labels.push("dropped"); }
             for (label, target) in &stage.routes {
                 if !valid_id(label) || !can_emit(&stage.kind, label) { return Err(Refusal::Definition); }
                 if !labels.contains(&label.as_str()) { labels.push(label); }
-                if let Target::Step(id) = target {
-                    let &to = index.get(id.as_str()).ok_or(Refusal::Definition)?;
-                    back |= to <= i;
+                match target {
+                    Target::Step(id) => {
+                        let &to = index.get(id.as_str()).ok_or(Refusal::Definition)?;
+                        back |= to <= i;
+                    }
+                    Target::Split { step, otherwise } => {
+                        // A split restarts the group at an earlier step, so it is a back edge, and
+                        // its fallback is a plain place to go: splits do not nest.
+                        let &to = index.get(step.as_str()).ok_or(Refusal::Definition)?;
+                        if !in_group || to > i { return Err(Refusal::Definition); }
+                        match &**otherwise {
+                            Target::Step(id) if !index.contains_key(id.as_str()) => return Err(Refusal::Definition),
+                            Target::Split { .. } => return Err(Refusal::Definition),
+                            _ => {}
+                        }
+                        back = true;
+                    }
+                    Target::Done | Target::Fail => {}
                 }
             }
             if back != (stage.limit > 0) { return Err(Refusal::Definition); }
             for label in labels {
-                let to = match stage.routes.get(label) {
-                    Some(Target::Step(id)) => Some(index[id.as_str()]),
-                    Some(Target::Done) => { done_reachable_from.push(i); None }
-                    Some(Target::Fail | Target::Split { .. }) => None,
-                    None if label == "passed" && i + 1 < n => Some(i + 1),
-                    None if label == "passed" => { done_reachable_from.push(i); None }
+                let target = match stage.routes.get(label) {
+                    Some(target) => Some(target.clone()),
+                    None if label == "passed" && i + 1 < n => Some(Target::Step(self.stages[i + 1].id.clone())),
+                    None if label == "passed" => Some(Target::Done),
                     None => None,
                 };
-                edges.push((i, label, to));
+                let ends: Vec<Target> = match target {
+                    Some(Target::Split { step, otherwise }) => vec![Target::Step(step), *otherwise],
+                    Some(other) => vec![other],
+                    None => vec![],
+                };
+                if ends.is_empty() { edges.push((i, label, None)); }
+                for end in ends {
+                    match end {
+                        Target::Step(id) => edges.push((i, label, Some(index[id.as_str()]))),
+                        Target::Done => { done_reachable_from.push(i); edges.push((i, label, None)); }
+                        _ => edges.push((i, label, None)),
+                    }
+                }
             }
         }
         // A landing moves the base, so no edge may go back to or across one.
@@ -212,15 +273,18 @@ impl Definition {
 }
 /// Back edges per step are capped so a loop cannot be a polite spelling of forever.
 pub const MAX_BACK_EDGE_LIMIT: u8 = 3;
+/// A group holds at most this many tickets.
+pub const MAX_GROUP_MEMBERS: u8 = 32;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a
 /// definition's own is only for steps whose binding or command the definition chose.
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {
     matches!(label, "passed" | "rejected")
+        || (label == "dropped" && matches!(kind, StageKind::Join { .. }))
         || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_))
 }
 fn needs_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
-        | StageKind::Tracker | StageKind::Evaluate(_))
+        | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. })
 }
 pub fn makes_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::Tracker)
