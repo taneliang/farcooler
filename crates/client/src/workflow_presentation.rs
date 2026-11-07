@@ -51,6 +51,27 @@ pub struct GateCard {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasonCard { pub kind: Reason, pub label: String, pub text: String }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionForm {
+    pub action: ActionKind,
+    pub label: String,
+    pub help: String,
+    pub submit_label: String,
+    pub max_bytes: usize,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputError { pub code: String, pub text: String }
+/// Validation is shared with every port; renderers forward text without policy.
+pub fn validate_input(kind: &ActionKind, reason: Option<&str>) -> Result<(), InputError> {
+    let text = if *kind == ActionKind::RequestRework {
+        if reason.is_some_and(farcooler_workflow::valid_rework_reason) { return Ok(()); }
+        "Enter a nonblank rework reason of at most 4096 UTF-8 bytes, without control characters except tabs and line breaks."
+    } else {
+        if reason.is_none() { return Ok(()); }
+        "This action does not accept a rework reason."
+    };
+    Err(InputError { code: "workflow_reason".into(), text: text.into() })
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunCard {
     pub label: String,
     pub phase_label: String,
@@ -72,6 +93,10 @@ pub struct RunCard {
     pub fence: u64,
     pub reasons: Vec<ReasonCard>,
     pub actions: Vec<Action>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forms: Vec<ActionForm>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rework_history: Vec<farcooler_workflow::ReworkDecision>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Presentation {
@@ -82,7 +107,7 @@ pub struct Presentation {
     pub runs: Vec<RunCard>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Error { Invalid, Unauthorized, Missing, Stale, Unavailable }
+pub enum Error { Invalid, Unauthorized, Missing, Stale, Unavailable, ReasonRequired }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
     InspectLatestEvidence { evidence: Evidence },
@@ -161,6 +186,12 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
             latest_evidence: item.last_evidence.clone(), pending_effect: item.pending.clone(),
             iteration: item.iteration, reworks_remaining: item.definition.max_reworks - item.iteration,
             attempt: item.attempt, fence: item.fence,
+            forms: if kinds.contains(&ActionKind::RequestRework) { vec![ActionForm {
+                action: ActionKind::RequestRework, label: "Rework Reason".into(),
+                help: "Explain what needs to change. This text is retained with your decision.".into(),
+                submit_label: "Request Rework".into(), max_bytes: farcooler_workflow::MAX_REWORK_REASON_BYTES,
+            }] } else { Vec::new() },
+            rework_history: item.rework_history.clone(),
             reasons: reasons.into_iter().map(display::reason_card).collect(),
             actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind).into(), kind, guard: guard.clone() }).collect() });
     }
@@ -171,10 +202,16 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
 /// Reproject against the latest snapshot AND current authenticated context on every click.
 /// The resulting command is only an intent; it cannot bypass reducer/store authorization.
 pub fn action(state: &State, auth: &Capabilities, item: &str, requested: &Action) -> Result<Intent, Error> {
+    action_with_reason(state, auth, item, requested, None)
+}
+pub fn action_with_reason(state: &State, auth: &Capabilities, item: &str, requested: &Action,
+    reason: Option<&str>) -> Result<Intent, Error>
+{
     let view = project(state, auth)?;
     let card = view.runs.iter().find(|c| c.item == item).ok_or(Error::Missing)?;
     if requested.guard != digest(&(digest(&("workflow-presentation/v2", state, auth)), item)) { return Err(Error::Stale); }
     if !card.actions.contains(requested) { return Err(Error::Unavailable); }
+    validate_input(&requested.kind, reason).map_err(|_| Error::ReasonRequired)?;
     Ok(match requested.kind {
         ActionKind::InspectLatestEvidence => Intent::InspectLatestEvidence {
             evidence: card.latest_evidence.clone().ok_or(Error::Unavailable)? },
@@ -184,7 +221,7 @@ pub fn action(state: &State, auth: &Capabilities, item: &str, requested: &Action
             pin: card.definition_pin.clone(), candidate: card.candidate.clone() }),
         ActionKind::AcceptReview | ActionKind::RequestRework | ActionKind::RejectReview => Intent::Command(Command::Review {
             item: item.into(), run: card.run.clone(), evidence: card.latest_evidence.clone().ok_or(Error::Unavailable)?,
-            passed: requested.kind == ActionKind::AcceptReview }),
+            passed: requested.kind == ActionKind::AcceptReview, reason: reason.map(str::to_owned) }),
         ActionKind::Cancel => Intent::Command(Command::Cancel { item: item.into() }),
     })
 }
@@ -200,7 +237,8 @@ pub struct Request {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Selection { pub item: String, pub action: Action }
+pub struct Selection { pub item: String, pub action: Action,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub reason: Option<String> }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Response {
     pub schema: u32,
@@ -217,7 +255,7 @@ pub fn json(request: &str) -> String {
         if request.schema != SCHEMA { return Err(Error::Invalid); }
         let card = project(&request.snapshot, &request.capabilities)?;
         let intent = request.selection.as_ref().map(|s|
-            action(&request.snapshot, &request.capabilities, &s.item, &s.action)).transpose()?;
+            action_with_reason(&request.snapshot, &request.capabilities, &s.item, &s.action, s.reason.as_deref())).transpose()?;
         Ok((card, intent))
     })();
     let response = match result {

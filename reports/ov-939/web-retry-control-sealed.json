@@ -1,0 +1,8 @@
+{
+  "red_exit": 1,
+  "meaningful": true,
+  "restored_exit": 0,
+  "original_sha256": "aec28eb4a6a6a8e2b77eb004f733d5985966fa9e9b63863b1afa711422a0b997",
+  "mutant_sha256": "4a3a8ae49e9deabb31668f8d48e2bf66ec0e06ebd51bbd0984e29d14346673c5",
+  "matches_original": true
+}

@@ -1,0 +1,20 @@
+COMMAND ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov939-ports/swift-cache', '-j6', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift', '-DWORKFLOW_STANDALONE', 'apps/shared/AgentKit/Tests/AgentKitTests/WorkflowLifecycleChecks.swift', 'reports/ov-939/swift-check.swift', '-o', '/private/tmp/ov939-ports/swift-check']
+reports/ov-939/swift-check.swift:41:27: warning: expression of type 'UInt64?' is unused [#NoUsage]
+ 39 |             while resume == nil { await Task.yield() }
+ 40 |             model.disconnect(); resume!.resume(returning: json)
+ 41 |             await reading.value; precondition(!model.ready)
+    |                           `- warning: expression of type 'UInt64?' is unused [#NoUsage]
+ 42 |             do { try await workflowLifecycleChecks(json: json) }
+ 43 |             catch { print("FAIL lifecycle regression: \(error)"); exit(1) }
+
+reports/ov-939/swift-check.swift:167:55: error: cannot call value of non-function type 'Bool'
+165 |     port=adapter.port(host:"host")!;_ = try await port.read("host","workspace")
+166 |     let invalid=try await port.dispatch("host","workspace",run.item,action.selectionJSON(reason:""))
+167 |     precondition(invalid=="shared Rust error" && sent.isEmpty())
+    |                                                       `- error: cannot call value of non-function type 'Bool'
+168 |     validation=false
+169 |     do {_ = try await port.dispatch("host","workspace",run.item,action.selectionJSON(reason:reason));preconditionFailure()}catch{}
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+
+EXIT 1

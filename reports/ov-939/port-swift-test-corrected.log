@@ -1,0 +1,11 @@
+COMMAND ['/private/tmp/ov939-ports/swift-check', 'crates/client/src/testdata/workflow-presentation.json']
+ok automatic shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok approval shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok rework shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok uncertain shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok invalidated shared copy/whole action/disconnect/reconnect + lifecycle regressions
+ok durable Swift Prepared, max-u64 observation, current-session retry, process restoration, account isolation, bounded explicit invocations, preparing recovery and corrupt-journal refusal
+ok B shared form, validation/no-submit, exact text, edit refusal and restored immutable retry
+5 Rust golden cases and pending seam passed; SwiftUI typechecked, no app launch
+
+EXIT 0

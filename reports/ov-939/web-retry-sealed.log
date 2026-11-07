@@ -1,0 +1,3 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', 'reports/ov-939/web-negative.py', 'sealed']
+
+EXIT 0 stopped=None

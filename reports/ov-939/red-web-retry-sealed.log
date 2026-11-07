@@ -1,0 +1,35 @@
+COMMAND ['/opt/homebrew/bin/node', 'services/web/test/workflow-session.test.mjs', '/private/tmp/ov939-ports/web']
+PASS lossless max-u64 snapshot/identity, whole Action, persisted-before-submit, discarded reply, process restoration, current-session retry, one-submit invocation bound and later identical retry, account isolation, storage refusal, no lifecycle replay
+PASS actual-host alias reassignment and prepare-answer loss do not reuse or reprepare an old intent
+PASS explicit preparing-only reinspection, no implicit prepare/submit, corrupt journal refuses reset
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
+  {
++   json: 'changed reason',
+-   json: '{"action":"Review","reason":"  请修复 <script> $(never execute)\\n\\tretain spaces  ","mutation":{"id":"immutable"}}',
+    schema: 1,
+    workspace: 'workspace'
+  }
+
+    at Object.workflow_call (file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/services/web/test/workflow-session.test.mjs:114:76)
+    at WorkflowSessionPort.submit (/private/tmp/ov939-ports/web/workflow-session.js:214:42)
+    at async WorkflowSessionPort.retryLocked (/private/tmp/ov939-ports/web/workflow-session.js:199:20)
+    at async file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/services/web/test/workflow-session.test.mjs:129:12 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: { schema: 1, workspace: 'workspace', json: 'changed reason' },
+  expected: {
+    schema: 1,
+    workspace: 'workspace',
+    json: '{"action":"Review","reason":"  请修复 <script> $(never execute)\\n\\tretain spaces  ","mutation":{"id":"immutable"}}'
+  },
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.0

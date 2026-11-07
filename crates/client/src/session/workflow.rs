@@ -30,9 +30,21 @@ pub struct PreparedWorkflowAction { pub schema: u32, pub workspace: Uuid, pub js
 #[serde(tag = "kind")]
 pub enum PreparedWorkflowResult {
     Inspection { intent: Intent },
+    Validation { error: cards::InputError },
     Mutation { prepared: PreparedWorkflowAction },
 }
 fn invalid(message: impl Into<String>) -> SessionError { SessionError::Protocol(message.into()) }
+impl PreparedWorkflowAction {
+    /// Validate the retained envelope without changing its identity or JSON bytes.
+    pub fn validate(&self) -> Result<wire::Action, SessionError> {
+        if self.schema != 1 { return Err(invalid("unsupported prepared workflow schema")); }
+        let action = wire::parse(&self.json).map_err(invalid)?;
+        match action {
+            wire::Action::Approve { .. } | wire::Action::Review { .. } | wire::Action::Cancel { .. } => Ok(action),
+            _ => Err(invalid("invalid prepared workflow action")),
+        }
+    }
+}
 fn stale() -> SessionError {
     SessionError::Refused { code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
         retryable: false, message: "Workflow action is stale; inspect a fresh snapshot".into(), what: "workflow_stale".into() }
@@ -47,7 +59,7 @@ fn project(state: &State, context: &WorkflowContext) -> Result<Presentation, Ses
     Ok(view)
 }
 fn selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
-    revision: u64, epoch: u64) -> Result<(Intent, cards::RunCard), SessionError>
+    revision: u64, epoch: u64, reason: Option<&str>) -> Result<(Intent, cards::RunCard), SessionError>
 {
     if snapshot.state.workspace != workspace.to_string() || revision != snapshot.state.revision
         || epoch != snapshot.state.epoch { return Err(stale()); }
@@ -57,7 +69,7 @@ fn selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected:
     let pure = cards::project(&snapshot.state, &snapshot.context.capabilities).map_err(|_| stale())?;
     let original = pure.runs.iter().find(|c| c.item == item).and_then(|c|
         c.actions.iter().find(|a| a.kind == selected.kind && a.label == selected.label)).ok_or_else(stale)?;
-    let intent = cards::action(&snapshot.state, &snapshot.context.capabilities, item, original).map_err(|_| stale())?;
+    let intent = cards::action_with_reason(&snapshot.state, &snapshot.context.capabilities, item, original, reason).map_err(|_| stale())?;
     Ok((intent, card.clone()))
 }
 fn mutation(workspace: Uuid, command: Command, card: cards::RunCard,
@@ -68,8 +80,8 @@ fn mutation(workspace: Uuid, command: Command, card: cards::RunCard,
     // The single finite Intent -> wire mapping for every transport binding.
     let action = match command {
         Command::Approve { item, run, pin, candidate } => wire::Action::Approve { mutation, item, run, pin, candidate },
-        Command::Review { item, run, evidence, passed } => wire::Action::Review {
-            mutation, item, run, pin: card.definition_pin.clone(), evidence, passed },
+        Command::Review { item, run, evidence, passed, reason } => wire::Action::Review {
+            mutation, item, run, pin: card.definition_pin.clone(), evidence, passed, reason },
         Command::Cancel { item } => wire::Action::Cancel { mutation, item, run: card.run.clone(), pin: card.definition_pin.clone() },
         _ => return Err(invalid("unsupported workflow intent")),
     };
@@ -80,7 +92,7 @@ fn mutation(workspace: Uuid, command: Command, card: cards::RunCard,
 fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
     identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
 {
-    let (intent, card) = selection(snapshot, workspace, item, selected, identity.revision, identity.epoch)?;
+    let (intent, card) = selection(snapshot, workspace, item, selected, identity.revision, identity.epoch, None)?;
     match intent {
         Intent::Command(command) => mutation(workspace, command, card, identity),
         intent => Ok(PreparedWorkflowResult::Inspection { intent }),
@@ -92,7 +104,19 @@ fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: A
 fn prepare_selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
     revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
 {
-    let (intent, card) = selection(snapshot, workspace, item, selected, revision, epoch)?;
+    prepare_selection_with_reason(snapshot, workspace, item, selected, revision, epoch, None)
+}
+fn prepare_selection_with_reason(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
+    revision: u64, epoch: u64, reason: Option<&str>) -> Result<PreparedWorkflowResult, SessionError>
+{
+    // Validate observation first, even for malformed text: never bless an old form.
+    let view = project(&snapshot.state, &snapshot.context)?;
+    if snapshot.state.workspace != workspace.to_string() || revision != snapshot.state.revision || epoch != snapshot.state.epoch
+        || !view.runs.iter().any(|r| r.item == item && r.actions.contains(&selected)) { return Err(stale()); }
+    if let Err(error) = cards::validate_input(&selected.kind, reason) {
+        return Ok(PreparedWorkflowResult::Validation { error });
+    }
+    let (intent, card) = selection(snapshot, workspace, item, selected, revision, epoch, reason)?;
     let Intent::Command(command) = intent else { return Ok(PreparedWorkflowResult::Inspection { intent }); };
     let principal = snapshot.context.capabilities.decision_principal.as_deref()
         .filter(|p| matches!(*p, "owner" | "orchestrator")).ok_or_else(|| invalid("missing workflow caller source"))?;
@@ -140,11 +164,7 @@ impl Session {
     }
     /// Send retained canonical mutation bytes; reconnect retries must reuse this envelope.
     pub async fn workflow_submit_action(&self, prepared: &PreparedWorkflowAction) -> Result<serde_json::Value, SessionError> {
-        if prepared.schema != 1 { return Err(invalid("invalid prepared workflow schema")); }
-        match wire::parse(&prepared.json).map_err(invalid)? {
-            wire::Action::Approve { .. } | wire::Action::Review { .. } | wire::Action::Cancel { .. } => {},
-            _ => return Err(invalid("invalid prepared workflow action")),
-        }
+        prepared.validate()?;
         self.workflow_wire(prepared.workspace, prepared.json.clone()).await
     }
     /// Shared JSON route for C/JNI/WASM. No caller-supplied snapshot or capability context.
@@ -155,6 +175,7 @@ impl Session {
         }
         #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Selection {
             workspace: Uuid, item: String, action: Action, revision: String, epoch: String,
+            #[serde(default)] reason: Option<String>,
         }
         #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Submit { prepared: PreparedWorkflowAction }
         let value = match method {
@@ -167,8 +188,8 @@ impl Session {
                     if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) { return Err(invalid("invalid workflow observation")); }
                     s.parse().map_err(|_| invalid("invalid workflow observation"))
                 };
-                serde_json::to_value(self.workflow_prepare_selection(a.workspace, &a.item, a.action,
-                    decimal(&a.revision)?, decimal(&a.epoch)?).await?) },
+                serde_json::to_value(prepare_selection_with_reason(&self.workflow_snapshot(a.workspace).await?, a.workspace, &a.item, a.action,
+                    decimal(&a.revision)?, decimal(&a.epoch)?, a.reason.as_deref())?) },
             "workflow.submit_action" => { let a: Submit = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
                 return self.workflow_submit_action(&a.prepared).await; },
             _ => return Err(invalid("unknown workflow Session method")),

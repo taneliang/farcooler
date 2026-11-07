@@ -94,3 +94,38 @@ lostData.set(corruptKey,corruptValue.replace('preparing','abandoned'))
 await assert.rejects(lostPort.pending(fixture.workspace),/integrity/)
 await assert.rejects(lostPort.retry(fixture.workspace,recovery.id),/integrity/)
 console.log('PASS explicit preparing-only reinspection, no implicit prepare/submit, corrupt journal refuses reset')
+
+// Feature B shares Rust's finite form/text fixture; semantic validation remains Rust-owned.
+const rework = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
+const b = structuredClone(fixture), action = {kind:'RequestRework',label:rework.form.submit_label,guard:'reasoned-guard'}
+b.runs[0].actions = [action]; b.runs[0].forms = [rework.form]
+const bdata = new Map(), bstorage = {getItem:k=>bdata.get(k)??null,setItem:(k,v)=>bdata.set(k,v)}
+let bp = 0, bs = 0, validation = true, lost = true
+const exact = {schema:1,workspace:b.workspace,json:JSON.stringify({action:'Review',reason:rework.reason,mutation:{id:'immutable'}})}
+const sent = []
+const bsession = {async workflow_call(method,raw) {
+  const args = JSON.parse(raw)
+  if (method === 'workflow.snapshot') return JSON.stringify({host:'b-host',presentation:b})
+  if (method === 'workflow.prepare_selection') {
+    bp++;assert.deepEqual(args.action,action)
+    if (validation) {assert.equal(args.reason,'');return JSON.stringify({kind:'Validation',error:{code:'workflow_reason',text:'shared Rust error'}})}
+    assert.equal(args.reason,rework.reason); return JSON.stringify({kind:'Mutation',prepared:exact})
+  }
+  assert.equal(method,'workflow.submit_action');bs++;sent.push(raw);assert.deepEqual(args.prepared,exact)
+  if (lost) throw Error('accepted answer lost')
+  return '{"receipt":{"result":{"Ok":9}}}'
+}}
+const bcurrent = () => ({account:'b-account',host:'b-alias',session:bsession})
+let bport = new WorkflowSessionPort(bcurrent,bstorage,exclusive)
+await bport.read(b.workspace)
+assert.equal(await bport.dispatch(b.workspace,b.runs[0].item,action,''),'shared Rust error')
+assert.equal(bs,0);assert.equal((await bport.pending(b.workspace)).length,0)
+validation=false
+await assert.rejects(bport.dispatch(b.workspace,b.runs[0].item,action,rework.reason))
+assert.equal(bp,2);assert.equal(bs,1)
+await assert.rejects(bport.dispatch(b.workspace,b.runs[0].item,action,'edited reason'))
+assert.equal(bp,2,'editing a draft cannot replace retained prepared bytes')
+bport=new WorkflowSessionPort(bcurrent,bstorage,exclusive);await bport.read(b.workspace)
+lost=false;await bport.retry(b.workspace,(await bport.pending(b.workspace))[0].id)
+assert.equal(bp,2);assert.equal(bs,2);assert.equal(sent[0],sent[1])
+console.log('PASS B shared form, validation/no submit, exact borrowed text, edit refusal, restored immutable retry')

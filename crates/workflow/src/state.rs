@@ -26,6 +26,8 @@ pub struct Item {
     pub candidate: Option<String>,
     pub last_evidence: Option<Evidence>,
     pub stopping: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rework_history: Vec<ReworkDecision>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
@@ -73,7 +75,8 @@ pub enum Command {
     Enqueue { item: String, definition: Definition, policy_pin: String,
         resource: String, dependencies: BTreeSet<String>, initial_candidate: Option<String> },
     Approve { item: String, run: String, pin: String, candidate: Option<String> },
-    Review { item: String, run: String, evidence: Evidence, passed: bool },
+    Review { item: String, run: String, evidence: Evidence, passed: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Observe { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
     Cancel { item: String },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
@@ -110,4 +113,22 @@ pub struct Transition {
     pub effects: Vec<Effect>,
     /// Delivery metadata never participates in eligibility or approval.
     pub notices: Vec<String>,
+}
+
+/// Accepted borrowed text and the exact authenticated observation it describes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReworkDecision {
+    pub id: String,
+    pub principal: String,
+    pub revision: u64,
+    pub run: String,
+    pub definition_pin: String,
+    pub evidence: Evidence,
+    pub iteration: u8,
+    pub reason: String,
+}
+pub const MAX_REWORK_REASON_BYTES: usize = 4096;
+pub fn valid_rework_reason(reason: &str) -> bool {
+    !reason.trim().is_empty() && reason.len() <= MAX_REWORK_REASON_BYTES
+        && !reason.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\r' | '\n'))
 }

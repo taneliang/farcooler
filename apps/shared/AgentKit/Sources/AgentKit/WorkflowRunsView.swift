@@ -111,12 +111,36 @@ public struct WorkflowRunsView: View {
             ForEach(Array(run.reasons.enumerated()), id: \.offset) { _, reason in
                 Text(reason.label).font(.headline); Text(reason.text)
             }
+            ForEach(Array((run.rework_history ?? []).enumerated()), id: \.offset) { _, history in
+                Text("\(history.principal) · \(history.iteration)")
+                Text(history.reason).textSelection(.enabled)
+            }
             ForEach(Array(run.actions.enumerated()), id: \.offset) { _, action in
-                Button(action.label) { Task { await model.perform(item: run.item, action: action, port: port) } }
-                    .disabled(!model.ready || model.busy || port == nil)
+                if let form = run.forms?.first(where: { $0.action == action.kind }) {
+                    WorkflowReasonForm(form: form, enabled: model.ready && !model.busy && port != nil) { reason in
+                        Task { await model.perform(item: run.item, action: action, port: port, reason: reason) }
+                    }.id("\(run.item)/\(run.run)/\(action.guardValue)")
+                } else {
+                    Button(action.label) { Task { await model.perform(item: run.item, action: action, port: port) } }
+                        .disabled(!model.ready || model.busy || port == nil)
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+private struct WorkflowReasonForm: View {
+    let form: WorkflowForm
+    let enabled: Bool
+    let submit: (String) -> Void
+    @State private var draft = ""
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(form.label).font(.headline)
+            TextEditor(text: $draft).frame(minHeight: 100).accessibilityLabel(form.label).disabled(!enabled)
+            Text(form.help)
+            Button(form.submit_label) { submit(draft) }.disabled(!enabled)
+        }
     }
 }
 #endif

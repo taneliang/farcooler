@@ -170,3 +170,31 @@ await test('stable focus survives run entry, busy completion, copy changes, fail
   assert(root.contains(document.activeElement)); assert(!document.activeElement.disabled)
 })
 console.log(`${count} workflow fixture/controller/DOM tests passed; simulated DOM only`)
+
+await test('Feature B finite form retains draft/caret/focus and renders borrowed text safely', async () => {
+  const shared = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
+  const p = clone(fixtures[0].response.card), run=p.runs[0]
+  run.actions=[{kind:'RequestRework',label:shared.form.submit_label,guard:'b'}];run.forms=[shared.form]
+  run.rework_history=[{principal:'owner',iteration:0,reason:shared.reason}]
+  const sent=[];let view;const root=new Element('div')
+  // Extend only native textarea mechanics in this DOM fixture.
+  Element.prototype.setSelectionRange=function(start,end){this.selectionStart=start;this.selectionEnd=end}
+  const oldFocus=Element.prototype.focus
+  Element.prototype.focus=function(){oldFocus.call(this);this.onfocus?.()}
+  const wait=deferred()
+  const port={read:async()=>p,dispatch:async(...args)=>{sent.push(args);await wait.promise;return 'shared Rust error'}}
+  const board=new WorkflowBoard(p.workspace,()=>port,v=>{view=v;renderWorkflow(root,v,board)})
+  await board.refresh();board.select(run.item)
+  let input=root.querySelectorAll('textarea')[0];assert(input)
+  input.value=shared.reason;input.selectionStart=3;input.selectionEnd=9;input.oninput();input.focus()
+  input=root.querySelectorAll('textarea')[0]
+  const submitting=board.dispatch(run.item,run.actions[0],input.value)
+  assert.equal(root.querySelectorAll('textarea')[0].disabled,true)
+  wait.resolve();await submitting
+  input=root.querySelectorAll('textarea')[0]
+  assert.equal(input.value,shared.reason);assert.equal(document.activeElement,input)
+  assert.equal(input.selectionStart,3);assert.equal(input.selectionEnd,9)
+  assert.equal(view.inspection,'shared Rust error');assert.equal(sent[0][3],shared.reason)
+  assert.equal(root.querySelectorAll('script').length,0);assert(allText(root).includes(shared.reason))
+  board.disconnect();assert.equal(root.querySelectorAll('textarea')[0].disabled,true)
+})

@@ -7,6 +7,46 @@ import org.junit.Test
 import java.io.File
 
 class WorkflowSessionTest {
+    @Test fun reasonedReworkValidationAndRestoredRetry() = runBlocking {
+        val root = kotlin.io.path.createTempDirectory("ov939-journal").toFile()
+        val shared = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-rework.json").readText()).jsonObject
+        val reason = shared.getValue("reason").jsonPrimitive.content
+        var fixture = Json.parseToJsonElement(File("crates/client/src/testdata/workflow-presentation.json").readText()).jsonArray[0]
+            .jsonObject.getValue("response").jsonObject.getValue("card").jsonObject
+        val runs=fixture.getValue("runs").jsonArray.toMutableList()
+        val bAction=buildJsonObject{put("kind","RequestRework");put("label","Request Rework");put("guard","b-guard")}
+        runs[0]=JsonObject(runs[0].jsonObject+mapOf("actions" to JsonArray(listOf(bAction)),"forms" to JsonArray(listOf(shared.getValue("form")))))
+        fixture=JsonObject(fixture+("runs" to JsonArray(runs)))
+        val run = WorkflowPresentation.decode(fixture.toString(), "workspace").runs.first()
+        val action = run.actions.first().descriptor
+        var prepares = 0; var validation = true; var lost = true
+        val sent = mutableListOf<String>()
+        val prepared = buildJsonObject { put("schema",1);put("workspace","workspace");put("json",buildJsonObject{put("reason",reason)}.toString()) }
+        val getter: (String) -> WorkflowSessionPort.Current? = {
+            WorkflowSessionPort.Current("b-account","actual-host") { method,args ->
+                when(method) {
+                    "workflow.snapshot" -> buildJsonObject{put("host","actual-host");put("presentation",fixture)}
+                    "workflow.prepare_selection" -> {
+                        prepares++;assertEquals(action,args["action"])
+                        if(validation) buildJsonObject{put("kind","Validation");put("error",buildJsonObject{put("code","workflow_reason");put("text","shared Rust error")})}
+                        else {assertEquals(reason,args.getValue("reason").jsonPrimitive.content);buildJsonObject{put("kind","Mutation");put("prepared",prepared)}}
+                    }
+                    else -> {sent.add(args.toString());assertEquals(prepared,args["prepared"]);if(lost) error("accepted answer lost");buildJsonObject{put("receipt","same")}}
+                }
+            }
+        }
+        var port=WorkflowSessionPort(root,getter);port.read("host","workspace")
+        fun selection(text:String)=buildJsonObject{put("action",action);put("reason",text)}.toString()
+        assertEquals("shared Rust error",port.dispatch("host","workspace",run.item,selection("")))
+        assertTrue(sent.isEmpty());assertTrue(port.pending("host","workspace").isEmpty());validation=false
+        try{port.dispatch("host","workspace",run.item,selection(reason));fail()}catch(_:IllegalStateException){}
+        try{port.dispatch("host","workspace",run.item,selection("edited"));fail()}catch(_:IllegalStateException){}
+        assertEquals(2,prepares)
+        port=WorkflowSessionPort(root,getter);port.read("host","workspace");lost=false
+        port.retry("host","workspace",port.pending("host","workspace").single().id)
+        assertEquals(2,prepares);assertEquals(2,sent.size);assertEquals(sent[0],sent[1])
+    }
+
     @Test fun retainedBytesSurviveRestorationAndCurrentSessionChange() = runBlocking {
         val root = kotlin.io.path.createTempDirectory("ov930-journal").toFile()
         try {

@@ -76,23 +76,32 @@ class WorkflowSessionPort(
     override suspend fun dispatch(host: String, workspace: String, item: String, actionJson: String): String = mutex.withLock {
         val (c, scope) = scope(host, workspace)
         val entries = load(scope)
-        val action = Json.parseToJsonElement(actionJson).jsonObject
+        val selection = Json.parseToJsonElement(actionJson).jsonObject
+        val action = selection["action"]?.jsonObject ?: selection
+        val reason = selection["reason"]
         entries.firstOrNull { it["phase"]?.jsonPrimitive?.content != "abandoned" && it["item"]?.jsonPrimitive?.content == item && it["action"] == action }?.let { prior ->
+            check(prior["reason"] == reason) { "Inspect or retry the retained decision before changing its reason" }
             return@withLock prior["result"]?.jsonPrimitive?.content ?: error("Use Retry Retained Action")
         }
         val observation = requireNotNull(observed[key(scope, item, action.toString())])
         val entry = buildJsonObject {
             put("phase", "preparing"); put("id", UUID.randomUUID().toString()); put("item", item); put("run", observation.run)
             put("label", action.getValue("label")); put("action", action); put("attempts", 0)
+            if (reason != null) put("reason", reason)
         }
         entries.add(entry); val index = entries.lastIndex
         save(scope, entries) // preparing marker before prepare, no implicit retry
         val reply = c.call("workflow.prepare_selection", buildJsonObject {
             put("workspace", workspace); put("item", item); put("action", action)
+            if (reason != null) put("reason", reason)
             put("revision", observation.revision); put("epoch", observation.epoch)
         })
         check(scope(host, workspace).second == scope)
-        if (reply["kind"]?.jsonPrimitive?.content == "Inspection") {
+        if (reply["kind"]?.jsonPrimitive?.content == "Validation") {
+            val text = reply.getValue("error").jsonObject.getValue("text").jsonPrimitive.content
+            entries[index] = JsonObject(entry + ("phase" to JsonPrimitive("abandoned"))); save(scope, entries)
+            text
+        } else if (reply["kind"]?.jsonPrimitive?.content == "Inspection") {
             val result = reply.getValue("intent").toString()
             entries[index] = JsonObject(entry + mapOf("phase" to JsonPrimitive("complete"), "result" to JsonPrimitive(result))); save(scope, entries)
             result

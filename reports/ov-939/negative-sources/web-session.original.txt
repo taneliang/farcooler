@@ -1,0 +1,224 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WorkflowSessionPort = void 0;
+exports.workflowJSON = workflowJSON;
+// Preserve integer tokens BEFORE JSON.parse can round them. Strings/escapes are
+// copied as tokens, so numeric-looking text is never rewritten.
+function workflowJSON(raw) {
+    const tokens = raw.replace(/"(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/g, token => {
+        if (token[0] === '"' || /[.eE]/.test(token))
+            return token;
+        const integer = BigInt(token);
+        return integer > BigInt(Number.MAX_SAFE_INTEGER) || integer < BigInt(Number.MIN_SAFE_INTEGER) ? JSON.stringify(token) : token;
+    });
+    return JSON.parse(tokens);
+}
+const keyOf = (value) => JSON.stringify(value);
+// App/origin storage is injected for private-profile tests. setItem is
+// synchronous and must succeed before any mutation is sent.
+class WorkflowSessionPort {
+    current;
+    storage;
+    exclusive;
+    observed = new Map();
+    busy = new Set();
+    hosts = new Map();
+    constructor(current, storage, exclusive = async (key, body) => await navigator.locks.request(key, body)) {
+        this.current = current;
+        this.storage = storage;
+        this.exclusive = exclusive;
+    }
+    scope(workspace) {
+        const current = this.current();
+        if (!current || !current.account || !current.host)
+            throw new Error('Workflow session unavailable');
+        const identity = this.hosts.get(keyOf([current.account, current.host]));
+        if (!identity || identity.session !== current.session)
+            throw new Error('Refresh workflow host identity');
+        return { ...current, key: 'workflow.intent.v1.' + keyOf([current.account, identity.host, workspace]) };
+    }
+    async checksum(payload) {
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+        return [...new Uint8Array(bytes)].map(n => n.toString(16).padStart(2, '0')).join('');
+    }
+    async load(key) {
+        const raw = this.storage.getItem(key);
+        if (raw === null)
+            return { entries: [] };
+        const envelope = JSON.parse(raw);
+        if (envelope.schema !== 1 || typeof envelope.payload !== 'string' ||
+            await this.checksum(envelope.payload) !== envelope.checksum)
+            throw new Error('Workflow journal integrity failure');
+        const journal = JSON.parse(envelope.payload);
+        if (!Array.isArray(journal.entries))
+            throw new Error('Invalid workflow journal');
+        for (const e of journal.entries) {
+            if (![e.id, e.item, e.run, e.label].every(v => typeof v === 'string') || !e.action ||
+                !Number.isSafeInteger(e.attempts) || e.attempts < 0 ||
+                !['preparing', 'prepared', 'complete', 'abandoned'].includes(e.phase))
+                throw new Error('Ambiguous workflow journal');
+            if ((e.phase === 'preparing' || e.phase === 'abandoned') && (e.prepared !== undefined || e.attempts !== 0 || e.result !== undefined))
+                throw new Error('Ambiguous workflow journal');
+            if (e.phase === 'prepared' && (!e.prepared || e.result !== undefined))
+                throw new Error('Ambiguous workflow journal');
+            if (e.phase === 'complete' && typeof e.result !== 'string')
+                throw new Error('Ambiguous workflow journal');
+        }
+        return journal;
+    }
+    async save(key, journal) {
+        const payload = JSON.stringify(journal);
+        this.storage.setItem(key, JSON.stringify({ schema: 1, payload, checksum: await this.checksum(payload) }));
+    }
+    async read(workspace) {
+        const current = this.current();
+        if (!current || !current.account || !current.host)
+            throw new Error('Workflow session unavailable');
+        const snapshot = workflowJSON(await current.session.workflow_call('workflow.snapshot', keyOf({ workspace })));
+        const now = this.current();
+        if (!now || now.account !== current.account || now.host !== current.host || now.session !== current.session)
+            throw new Error('Workflow session changed');
+        if (typeof snapshot.host !== 'string' || !snapshot.host)
+            throw new Error('Invalid workflow host identity');
+        this.hosts.set(keyOf([current.account, current.host]), { session: current.session, host: snapshot.host });
+        const scope = this.scope(workspace);
+        const view = snapshot.presentation;
+        if (view.schema !== 2 || view.workspace !== workspace)
+            throw new Error('Invalid workflow presentation');
+        for (const run of view.runs)
+            for (const action of run.actions)
+                this.observed.set(keyOf([scope.key, run.item, action]), {
+                    revision: String(view.revision), epoch: String(view.epoch), run: run.run,
+                });
+        return view;
+    }
+    async pending(workspace) {
+        const scope = this.scope(workspace);
+        const journal = await this.load(scope.key);
+        if (this.scope(workspace).key !== scope.key)
+            throw new Error('Workflow account changed');
+        return journal.entries.filter(e => e.phase === 'prepared' || e.phase === 'preparing')
+            .map(({ id, item, run, label, phase }) => ({ id, item, run, label, reinspect: phase === 'preparing' }));
+    }
+    async dispatch(workspace, item, action, reason) {
+        const key = this.scope(workspace).key;
+        return this.exclusive(key, () => {
+            if (this.scope(workspace).key !== key)
+                throw new Error('Workflow account changed');
+            return this.dispatchLocked(workspace, item, action, reason);
+        });
+    }
+    async dispatchLocked(workspace, item, action, reason) {
+        const scope = this.scope(workspace);
+        if (this.busy.has(scope.key))
+            throw new Error('Workflow action already in progress');
+        this.busy.add(scope.key);
+        try {
+            const journal = await this.load(scope.key);
+            if (this.scope(workspace).key !== scope.key)
+                throw new Error('Workflow account changed');
+            // Repeated press on the same observation is the same intent, even after
+            // a process restart or an unconfirmed response. Never prepare it twice.
+            const prior = journal.entries.find(e => e.phase !== 'abandoned' && e.item === item && keyOf(e.action) === keyOf(action));
+            if (prior && prior.reason !== reason)
+                throw new Error('Inspect the refreshed run or retry the retained decision before changing its reason');
+            if (prior?.result)
+                return prior.result;
+            if (prior)
+                throw new Error('Use Retry Retained Action for the existing intent');
+            const observation = this.observed.get(keyOf([scope.key, item, action]));
+            if (!observation)
+                throw new Error('Refresh before selecting an action');
+            const entry = { phase: 'preparing', id: crypto.randomUUID(), item, run: observation.run, label: action.label, action, ...(reason === undefined ? {} : { reason }), attempts: 0 };
+            journal.entries.push(entry);
+            await this.save(scope.key, journal);
+            const current = this.scope(workspace);
+            if (current.key !== scope.key)
+                throw new Error('Workflow account changed');
+            const reply = workflowJSON(await current.session.workflow_call('workflow.prepare_selection', keyOf({
+                workspace, item, action, ...(reason === undefined ? {} : { reason }), revision: observation.revision, epoch: observation.epoch,
+            })));
+            if (this.scope(workspace).key !== scope.key)
+                throw new Error('Workflow account changed');
+            if (reply.kind === 'Validation') {
+                if (typeof reply.error?.text !== 'string')
+                    throw new Error('Invalid workflow validation');
+                entry.phase = 'abandoned';
+                await this.save(scope.key, journal);
+                return reply.error.text;
+            }
+            if (reply.kind === 'Inspection') {
+                entry.phase = 'complete';
+                entry.result = keyOf(reply.intent);
+                await this.save(scope.key, journal);
+                return entry.result;
+            }
+            if (reply.kind !== 'Mutation' || !reply.prepared)
+                throw new Error('Invalid workflow prepare result');
+            entry.phase = 'prepared';
+            entry.prepared = reply.prepared;
+            await this.save(scope.key, journal);
+            return await this.submit(workspace, scope.key, journal, entry);
+        }
+        finally {
+            this.busy.delete(scope.key);
+        }
+    }
+    async retry(workspace, id) {
+        const key = this.scope(workspace).key;
+        return this.exclusive(key, () => {
+            if (this.scope(workspace).key !== key)
+                throw new Error('Workflow account changed');
+            return this.retryLocked(workspace, id);
+        });
+    }
+    async retryLocked(workspace, id) {
+        const scope = this.scope(workspace);
+        if (this.busy.has(scope.key))
+            throw new Error('Workflow action already in progress');
+        this.busy.add(scope.key);
+        try {
+            const journal = await this.load(scope.key);
+            if (this.scope(workspace).key !== scope.key)
+                throw new Error('Workflow account changed');
+            const entry = journal.entries.find(e => e.id === id);
+            if (!entry)
+                throw new Error('No retained attempt available');
+            if (entry.phase === 'preparing' && !entry.prepared && entry.attempts === 0 && entry.result === undefined) {
+                // Explicit reset is permitted only for a valid durable never-submitted
+                // marker, after a fresh authenticated inspection. It sends no mutation.
+                await this.read(workspace);
+                if (this.scope(workspace).key !== scope.key)
+                    throw new Error('Workflow account changed');
+                entry.phase = 'abandoned';
+                await this.save(scope.key, journal);
+                return 'No action was submitted. Inspect the refreshed run and choose an action.';
+            }
+            if (entry.phase !== 'prepared' || !entry.prepared || entry.result)
+                throw new Error('No retained attempt available');
+            return await this.submit(workspace, scope.key, journal, entry);
+        }
+        finally {
+            this.busy.delete(scope.key);
+        }
+    }
+    async submit(workspace, key, journal, entry) {
+        const current = this.scope(workspace);
+        if (current.key !== key || !entry.prepared || entry.attempts >= Number.MAX_SAFE_INTEGER)
+            throw new Error('Workflow session changed');
+        ++entry.attempts;
+        await this.save(key, journal);
+        const latest = this.scope(workspace);
+        if (latest.key !== key)
+            throw new Error('Workflow account changed');
+        const raw = await latest.session.workflow_call('workflow.submit_action', keyOf({ prepared: entry.prepared }));
+        // Retain the original response as text, without lossy number conversion.
+        entry.phase = 'complete';
+        entry.result = raw;
+        await this.save(key, journal);
+        if (this.scope(workspace).key !== key)
+            throw new Error('Workflow account changed');
+        return raw;
+    }
+}
+exports.WorkflowSessionPort = WorkflowSessionPort;

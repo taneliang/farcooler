@@ -1,0 +1,43 @@
+COMMAND ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc', '-swift-version', '6', '-target', 'arm64-apple-macosx26.0', '-sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk', '-module-cache-path', '/private/tmp/ov939-ports/swift-cache', '-j6', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift', 'apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift', '-DWORKFLOW_STANDALONE', 'apps/shared/AgentKit/Tests/AgentKitTests/WorkflowLifecycleChecks.swift', 'reports/ov-939/swift-check.swift', '-o', '/private/tmp/ov939-ports/swift-check']
+reports/ov-939/swift-check.swift:108:13: warning: 'account' mutated after capture by sendable closure
+ 67 |     let view = try WorkflowPresentation.decode(String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self), workspace: workspace)
+ 68 |     let run = view.runs[0], action = run.actions[0]
+ 69 |     var account = "account", connection = "first", prepareCount = 0, submissions: [String] = [], connections: [String] = []
+    |         `- note: variable defined here
+ 70 |     let current: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+    |                                                                           `- note: variable captured by sendable closure
+ 71 |         let capturedConnection = connection
+ 72 |         return WorkflowSessionAdapter.Current(account: account, host: "actual-host", connection: connection) { method, args in
+    |                                                        `- note: capturing use
+ 73 |             if method == "workflow.snapshot" { return raw }
+ 74 |             if method == "workflow.prepare_selection" {
+    :
+106 |     precondition(submissions.count == 4 && Set(submissions).count == 1)
+107 |     account = "other-account"; let isolated = try await port.pending("host", workspace); precondition(isolated.isEmpty)
+108 |     account = "account"
+    |             `- warning: 'account' mutated after capture by sendable closure
+109 |     let path = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)[0]
+110 |     try Data("corrupt journal".utf8).write(to: path)
+
+reports/ov-939/swift-check.swift:99:116: warning: 'connection' mutated after capture by sendable closure
+ 67 |     let view = try WorkflowPresentation.decode(String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self), workspace: workspace)
+ 68 |     let run = view.runs[0], action = run.actions[0]
+ 69 |     var account = "account", connection = "first", prepareCount = 0, submissions: [String] = [], connections: [String] = []
+    |                              `- note: variable defined here
+ 70 |     let current: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+    |                                                                           `- note: variable captured by sendable closure
+ 71 |         let capturedConnection = connection
+    |                                  `- note: capturing use
+ 72 |         return WorkflowSessionAdapter.Current(account: account, host: "actual-host", connection: connection) { method, args in
+    |                                                                                                  `- note: capturing use
+ 73 |             if method == "workflow.snapshot" { return raw }
+ 74 |             if method == "workflow.prepare_selection" {
+    :
+ 97 |     _ = try await port.read("host", workspace); precondition(submissions.count == 1)
+ 98 |     do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+ 99 |     adapter = WorkflowSessionAdapter(root: root, current: current); port = adapter.port(host: "host")!; connection = "restored"
+    |                                                                                                                    `- warning: 'connection' mutated after capture by sendable closure
+100 |     _ = try await port.read("host", workspace)
+101 |     do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+
+EXIT 0

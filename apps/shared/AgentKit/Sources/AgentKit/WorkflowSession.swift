@@ -122,19 +122,38 @@ public final class WorkflowSessionAdapter {
         defer { busy.remove(scope) }
         var entries = try load(scope)
         let canonical = try WorkflowActionJSON.canonical(action)
+        guard let value = try JSONSerialization.jsonObject(with: Data(canonical.utf8)) as? [String: Any] else { throw WorkflowDisplayError.invalid }
+        let descriptor = value["action"] ?? value
+        let descriptorJSON = String(decoding: try JSONSerialization.data(withJSONObject: descriptor, options: .sortedKeys), as: UTF8.self)
+        let reasonJSON = try value["reason"].map { value in
+            guard let reason = value as? String else { throw WorkflowDisplayError.invalid }
+            return try json(reason)
+        }
+        if let prior = try entries.first(where: { entry in
+            guard entry.phase != .abandoned, entry.retained.item == item else { return false }
+            guard let value = try JSONSerialization.jsonObject(with: Data(entry.action.utf8)) as? [String: Any] else { throw WorkflowDisplayError.invalid }
+            let descriptor = value["action"] ?? value
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: descriptor, options: .sortedKeys), as: UTF8.self)
+            return raw == descriptorJSON
+        }), prior.action != canonical { throw WorkflowDisplayError.pending }
         if let prior = entries.first(where: { $0.phase != .abandoned && $0.retained.item == item && $0.action == canonical }) {
             if let result = prior.result { return result }
             throw WorkflowDisplayError.pending
         }
-        guard let observed = observations[try key([scope, item, canonical])] else { throw WorkflowDisplayError.pending }
+        guard let observed = observations[try key([scope, item, descriptorJSON])] else { throw WorkflowDisplayError.pending }
         entries.append(Entry(retained: RetainedWorkflow(id: UUID().uuidString, item: item, run: observed.run,
-            label: try JSONDecoder().decode(WorkflowAction.self, from: Data(action.utf8)).label), action: canonical))
+            label: try JSONDecoder().decode(WorkflowAction.self, from: Data(descriptorJSON.utf8)).label), action: canonical))
         let index = entries.count - 1
         try save(scope, entries) // preparing marker survives loss of prepare reply
-        let args = "{\"workspace\":\(try json(workspace)),\"item\":\(try json(item)),\"action\":\(canonical),\"revision\":\(try json(String(observed.revision))),\"epoch\":\(try json(String(observed.epoch)))}"
+        var args = "{\"workspace\":\(try json(workspace)),\"item\":\(try json(item)),\"action\":\(descriptorJSON),\"revision\":\(try json(String(observed.revision))),\"epoch\":\(try json(String(observed.epoch)))}"
+        if let reasonJSON { args.removeLast(); args += ",\"reason\":\(reasonJSON)}" }
         let raw = try await c.call("workflow.prepare_selection", args)
         guard try self.scope(host, workspace).1 == scope else { throw WorkflowDisplayError.pending }
         guard let reply = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw WorkflowDisplayError.invalid }
+        if reply["kind"] as? String == "Validation" {
+            guard let error = reply["error"] as? [String: Any], let text = error["text"] as? String else { throw WorkflowDisplayError.invalid }
+            entries[index].phase = .abandoned; try save(scope, entries); return text
+        }
         if reply["kind"] as? String == "Inspection", let intent = reply["intent"] {
             let result = String(decoding: try JSONSerialization.data(withJSONObject: intent), as: UTF8.self)
             entries[index].phase = .complete; entries[index].result = result; try save(scope, entries); return result

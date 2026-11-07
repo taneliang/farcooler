@@ -1,0 +1,10 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/reports/ov-939/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/python3', 'reports/ov-939/negatives.py']
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+RED reason 101 meaningful True
+RED authority 101 meaningful True
+RED evidence 101 meaningful True
+RED budget 101 meaningful True
+RED revision 101 meaningful True
+RED duplicate 101 meaningful True
+
+EXIT 0 stopped=None

@@ -159,7 +159,7 @@ fn workflow_reviewer_person_and_rework_exhaustion() {
         assert_eq!(state.items["item"].iteration, iteration);
         let i = &state.items["item"];
         let event = input(&state, Command::Review { item: "item".into(), run: i.run.clone(),
-            evidence: evidence(i), passed: false }, Grant::Decision { principal: "owner".into() });
+            evidence: evidence(i), passed: false, reason: None }, Grant::Decision { principal: "owner".into() });
         state = step(&state, &event).unwrap().state;
     }
     assert_eq!(state.items["item"].phase, Phase::Failed);
@@ -368,4 +368,82 @@ fn workflow_definition_rejects_missing_candidate_paths() {
     let mut definition = Definition::coding();
     definition.rework_target = Some(definition.stages[2].id.clone());
     assert_eq!(definition.validate(), Err(Refusal::Definition));
+}
+
+fn reasoned_review(state: &State, reason: &str) -> Input {
+    let i = &state.items["item"];
+    input(state, Command::Review { item: "item".into(), run: i.run.clone(),
+        evidence: i.last_evidence.clone().unwrap(), passed: false, reason: Some(reason.into()) },
+        Grant::Decision { principal: "owner".into() })
+}
+fn human_review() -> State {
+    let mut d = Definition::coding();
+    d.stages[3].kind = StageKind::Review(Reviewer::Person("owner".into()));
+    let mut s = start(d);
+    while s.items["item"].phase == Phase::Running {
+        s = step(&s, &observe(&s, Outcome::Passed(evidence(&s.items["item"])))).unwrap().state;
+    }
+    s
+}
+#[test]
+fn workflow_reasoned_rework_fences_and_exact_retention() {
+    let s = human_review();
+    let reason = "  请修复 <script> $(touch /never)\n\tretain spaces  ";
+    let accepted = reasoned_review(&s, reason);
+    let next = step(&s, &accepted).unwrap().state;
+    let record = &next.items["item"].rework_history[0];
+    assert_eq!(record.reason, reason);
+    assert_eq!(record.principal, "owner"); assert_eq!(record.run, s.items["item"].run);
+    assert_eq!(record.evidence, s.items["item"].last_evidence.clone().unwrap());
+    assert_eq!(record.revision, s.revision); assert_eq!(record.iteration, 0);
+    assert_eq!(next.items["item"].iteration, 1);
+    assert_eq!(step(&next, &accepted), Err(Refusal::Duplicate));
+    for (label, refusal) in [("principal",Refusal::Unauthorized),("revision",Refusal::Stale),
+        ("epoch",Refusal::Stale),("sequence",Refusal::Stale),("run",Refusal::Phase),
+        ("evidence",Refusal::Evidence),("candidate",Refusal::Evidence),("policy",Refusal::Evidence),
+        ("passed",Refusal::Invalid),("budget",Refusal::Limit)] {
+        let mut state = s.clone(); let mut bad = accepted.clone();
+        match label {
+            "principal" => bad.grant = Grant::Controller,
+            "revision" => bad.expected_revision += 1,
+            "epoch" => bad.epoch += 1,
+            "sequence" => bad.source_sequence -= 1,
+            "candidate" => state.items.get_mut("item").unwrap().candidate = Some("replacement".into()),
+            "policy" => state.items.get_mut("item").unwrap().policy_pin = "replacement".into(),
+            "budget" => state.items.get_mut("item").unwrap().iteration = 2,
+            _ => if let Command::Review { run, evidence, passed, .. } = &mut bad.command {
+                match label { "run" => *run = "old".into(), "evidence" => evidence.receipt = "unseen".into(),
+                    "passed" => *passed = true, _ => unreachable!() }
+            },
+        }
+        let bytes = serde_json::to_vec(&state).unwrap();
+        assert_eq!(step(&state, &bad), Err(refusal), "{label}");
+        assert_eq!(bytes, serde_json::to_vec(&state).unwrap(), "{label} mutated state");
+    }
+}
+#[test]
+fn workflow_reasoned_rework_bounds_budget_and_legacy_bytes() {
+    let mut s = human_review();
+    for reason in ["", " \n\t\u{2003}", "bad\0", "bad\u{7f}", "bad\u{85}", &"界".repeat(1366)] {
+        assert_eq!(step(&s, &reasoned_review(&s, reason)), Err(Refusal::Invalid));
+    }
+    assert!(valid_rework_reason(&"x".repeat(4096)));
+    assert!(!valid_rework_reason(&"x".repeat(4097)));
+    for n in 0..2 {
+        s = step(&s, &reasoned_review(&s, &format!("reason-{n}"))).unwrap().state;
+        while s.items["item"].phase == Phase::Running {
+            s = step(&s, &observe(&s, Outcome::Passed(evidence(&s.items["item"])))).unwrap().state;
+        }
+    }
+    assert_eq!(s.items["item"].rework_history.len(), 2);
+    assert_eq!(step(&s, &reasoned_review(&s, "exhausted")), Err(Refusal::Limit));
+    let original = human_review();
+    let mut old = reasoned_review(&original, "unused");
+    if let Command::Review { reason, .. } = &mut old.command { *reason = None; }
+    let raw = serde_json::to_string(&old).unwrap();
+    assert!(!raw.contains("reason"));
+    assert_eq!(serde_json::to_string(&serde_json::from_str::<Input>(&raw).unwrap()).unwrap(), raw);
+    let legacy = step(&original, &old).unwrap().state;
+    assert_eq!(legacy.items["item"].iteration, 1);
+    assert!(!serde_json::to_string(&legacy).unwrap().contains("rework_history"));
 }

@@ -1,0 +1,147 @@
+{
+  "base": "82d6a878b3a34b9969d7e4b32bddc14a8a2cc45c",
+  "product_file_count": 25,
+  "final_rust_distinct_passes": 46,
+  "final_rust_existing_ignores": 1,
+  "coverage": {
+    "workflow": 18,
+    "client_workflow": 17,
+    "protocol_workflow": 2,
+    "daemon_wire_commands": 5,
+    "cli_workflow": 4,
+    "kotlin_junit": 10,
+    "web_simulated_dom": 16,
+    "swift_unchanged_golden_cases": 5
+  },
+  "red_controls": {
+    "engine": 6,
+    "web_immutable_retry": 1,
+    "all_intended_assertions_and_exact_restoration": true
+  },
+  "gates": {
+    "all_changed_packages_all_target_clippy": "exit0 -D warnings",
+    "size_budget": 0,
+    "doc_comments": 0,
+    "diff_check": {
+      "product_and_authored_source": 0,
+      "all_staged_including_preserved_raw_witnesses": 2
+    }
+  },
+  "supervised_receipts": [
+    {
+      "exit": 101,
+      "seconds": 25.171801416,
+      "minimum_free": 17629237248,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "compile.json"
+    },
+    {
+      "exit": 1,
+      "seconds": 5.719369458,
+      "minimum_free": 16954658816,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "ports-corrected.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 8.745049375,
+      "minimum_free": 16951648256,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "ports-kotlin.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 2.1676071670000003,
+      "minimum_free": 16943734784,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "ports-swift-final.json"
+    },
+    {
+      "exit": 1,
+      "seconds": 77.3376045,
+      "minimum_free": 16957353984,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "ports.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 105.329715584,
+      "minimum_free": 16719134720,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-cli-session.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 26.065339374999997,
+      "minimum_free": 16748945408,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-lint.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 9.253072416,
+      "minimum_free": 16938647552,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-negatives.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 75.349739,
+      "minimum_free": 16611774464,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-regressions.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 57.659775417,
+      "minimum_free": 16991834112,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-remaining.json"
+    },
+    {
+      "exit": 101,
+      "seconds": 52.525099374999996,
+      "minimum_free": 16996704256,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "rust-selected.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 1.1298148749999999,
+      "minimum_free": 16755257344,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "web-negative.json"
+    },
+    {
+      "exit": 0,
+      "seconds": 0.6031679170000002,
+      "minimum_free": 16751239168,
+      "reaped": true,
+      "source_unchanged": true,
+      "receipt": "web-retry-sealed.json"
+    }
+  ],
+  "minimum_free": 16611774464,
+  "max_seconds": 105.329715584,
+  "independent_review": "PENDING orchestrator allocation; no composition",
+  "unverified": [
+    "real app/root/current C/JNI/WASM navigation",
+    "real native keyboard/focus/accessibility/device/process lifecycle",
+    "both true real-app feature exercises",
+    "final ov-936 composition",
+    "owner-copy/backup/conservation/cutover",
+    "parent/main combined gates"
+  ]
+}

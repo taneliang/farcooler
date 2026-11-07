@@ -1,0 +1,178 @@
+import Foundation
+
+// Standalone compiled model/controller harness; no UI launch. The production
+// SwiftUI file is compiled in this executable too, so SwiftUI is typechecked.
+@main struct WorkflowCheck {
+    @MainActor static func main() async throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+        let fixtures = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+        var count = 0
+        for fixture in fixtures {
+            let card = (fixture["response"] as! [String: Any])["card"] as! [String: Any]
+            let json = String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self)
+            let presentation = try WorkflowPresentation.decode(json, workspace: "workspace")
+            let run = presentation.runs[0]
+            let model = WorkflowRunsModel(host: "runner", workspace: "workspace")
+            var sent: String?
+            let port = WorkflowPort(id: "fixture-session", read: { host, workspace in
+                precondition(host == "runner" && workspace == "workspace"); return json
+            }, dispatch: { host, workspace, item, action in
+                precondition(host == "runner" && workspace == "workspace" && item == run.item)
+                sent = action; return "retained evidence"
+            })
+            await model.refresh(port); precondition(model.ready)
+            for action in run.actions {
+                await model.perform(item: run.item, action: action, port: port)
+                let forwarded = try JSONSerialization.jsonObject(with: Data(sent!.utf8)) as! [String: String]
+                precondition(forwarded["guard"] == action.guardValue && forwarded["label"] == action.label && forwarded["kind"] == action.kind)
+            }
+            model.disconnect(); precondition(!model.ready)
+            sent = nil
+            await model.perform(item: run.item, action: run.actions[0], port: port); precondition(sent == nil)
+            await model.refresh(port); precondition(model.ready)
+            // A delayed read from a disconnected session must not re-enable actions.
+            var resume: CheckedContinuation<String, Never>?
+            let delayed = WorkflowPort(id: "old-session", read: { _, _ in
+                await withCheckedContinuation { resume = $0 }
+            }, dispatch: { _, _, _, _ in fatalError("must not submit") })
+            let reading = Task { await model.refresh(delayed) }
+            while resume == nil { await Task.yield() }
+            model.disconnect(); resume!.resume(returning: json)
+            await reading.value; precondition(!model.ready)
+            do { try await workflowLifecycleChecks(json: json) }
+            catch { print("FAIL lifecycle regression: \(error)"); exit(1) }
+            count += 1; print("ok \(fixture["name"]!) shared copy/whole action/disconnect/reconnect + lifecycle regressions")
+        }
+        try await journalChecks()
+        try await reasonedChecks()
+        let opaque = "{\"kind\":\"FutureAction\",\"guard\":\"exact\",\"label\":\"" + String(repeating: "Long shared label ", count: 100) + "\",\"extra\":\"preserved\"}"
+        let action = try JSONDecoder().decode(WorkflowAction.self, from: Data(opaque.utf8))
+        let roundtrip = try JSONSerialization.jsonObject(with: Data(action.json().utf8)) as! [String: String]
+        precondition(roundtrip["extra"] == "preserved" && action.label.count > 1000)
+        let pending = WorkflowRunsModel(host: "runner", workspace: "workspace")
+        await pending.refresh(nil); precondition(!pending.ready && pending.notice.contains("not connected"))
+        print("\(count) Rust golden cases and pending seam passed; SwiftUI typechecked, no app launch")
+    }
+}
+
+
+@MainActor private func journalChecks() async throws {
+    let root = URL(fileURLWithPath: "/private/tmp/ov939-swift-" + UUID().uuidString)
+    let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+    let fixtures = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+    var card = (fixtures[0]["response"] as! [String: Any])["card"] as! [String: Any]
+    card["revision"] = NSNumber(value: UInt64.max - 1); card["epoch"] = NSNumber(value: UInt64.max)
+    let workspace = card["workspace"] as! String
+    let raw = String(decoding: try JSONSerialization.data(withJSONObject: ["host": "actual-host", "presentation": card]), as: UTF8.self)
+    let view = try WorkflowPresentation.decode(String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self), workspace: workspace)
+    let run = view.runs[0], action = run.actions[0]
+    var account = "account", connection = "first", prepareCount = 0, submissions: [String] = [], connections: [String] = []
+    let current: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+        let capturedConnection = connection
+        return WorkflowSessionAdapter.Current(account: account, host: "actual-host", connection: connection) { method, args in
+            if method == "workflow.snapshot" { return raw }
+            if method == "workflow.prepare_selection" {
+                prepareCount += 1
+                let value = try JSONSerialization.jsonObject(with: Data(args.utf8)) as! [String: Any]
+                precondition(value["epoch"] as! String == String(UInt64.max))
+                precondition(value["revision"] as! String == String(UInt64.max - 1))
+                return "{\"kind\":\"Mutation\",\"prepared\":{\"schema\":1,\"workspace\":\"workspace\",\"json\":\"{\\\"epoch\\\":18446744073709551615}\"}}"
+            }
+            precondition(method == "workflow.submit_action")
+            precondition(try! FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).count == 1)
+            let submitted = try JSONSerialization.jsonObject(with: Data(args.utf8)) as! [String: Any]
+            precondition((submitted["prepared"] as! [String: Any])["json"] as! String == "{\"epoch\":18446744073709551615}")
+            connections.append(capturedConnection); submissions.append(args)
+            throw WorkflowDisplayError.pending // accepted result discarded by transport
+        }
+    }
+    var adapter = WorkflowSessionAdapter(root: root, current: current)
+    var port = adapter.port(host: "host")!
+    let presentation = try await port.read("host", workspace)
+    precondition(try! WorkflowPresentation.decode(presentation, workspace: workspace).epoch == UInt64.max)
+    do { _ = try await port.dispatch("host", workspace, run.item, action.json()); preconditionFailure() } catch { }
+    precondition(prepareCount == 1 && submissions.count == 1)
+    let pending = try await port.pending("host", workspace); precondition(pending.count == 1)
+    connection = "replacement"
+    _ = try await port.read("host", workspace); precondition(submissions.count == 1)
+    do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+    adapter = WorkflowSessionAdapter(root: root, current: current); port = adapter.port(host: "host")!; connection = "restored"
+    _ = try await port.read("host", workspace)
+    do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+    precondition(prepareCount == 1 && submissions.count == 3 && Set(submissions).count == 1)
+    precondition(connections == ["first", "replacement", "restored"])
+    let retained = try await port.pending("host", workspace); precondition(retained.count == 1)
+    do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+    precondition(submissions.count == 4 && Set(submissions).count == 1)
+    account = "other-account"; let isolated = try await port.pending("host", workspace); precondition(isolated.isEmpty)
+    account = "account"
+    let path = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)[0]
+    try Data("corrupt journal".utf8).write(to: path)
+    do { _ = try await port.retry("host", workspace, pending[0].id); preconditionFailure() } catch { }
+    let recoveryRoot = root.appendingPathComponent("recovery")
+    var lostPrepares = 0
+    let recoveryCurrent: @MainActor (String) -> WorkflowSessionAdapter.Current? = { _ in
+        WorkflowSessionAdapter.Current(account: "account", host: "actual-host", connection: "recovery") { method, _ in
+            if method == "workflow.snapshot" { return raw }
+            precondition(method == "workflow.prepare_selection"); lostPrepares += 1
+            throw WorkflowDisplayError.pending
+        }
+    }
+    let recoveryAdapter = WorkflowSessionAdapter(root: recoveryRoot, current: recoveryCurrent)
+    let recoveryPort = recoveryAdapter.port(host: "host")!
+    _ = try await recoveryPort.read("host", workspace)
+    do { _ = try await recoveryPort.dispatch("host", workspace, run.item, action.json()); preconditionFailure() } catch { }
+    let marker = try await recoveryPort.pending("host", workspace)[0]; precondition(marker.reinspect)
+    _ = try await recoveryPort.retry("host", workspace, marker.id); precondition(lostPrepares == 1)
+    let reset = try await recoveryPort.pending("host", workspace); precondition(reset.isEmpty)
+    do { _ = try await recoveryPort.dispatch("host", workspace, run.item, action.json()); preconditionFailure() } catch { }
+    precondition(lostPrepares == 2)
+    print("ok durable Swift Prepared, max-u64 observation, current-session retry, process restoration, account isolation, bounded explicit invocations, preparing recovery and corrupt-journal refusal")
+}
+
+@MainActor private func reasonedChecks() async throws {
+    let root=URL(fileURLWithPath:"/private/tmp/ov939-swift-"+UUID().uuidString)
+    let shared=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:"crates/client/src/testdata/workflow-rework.json"))) as! [String:Any]
+    let reason=shared["reason"] as! String
+    let fixtures=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))) as! [[String:Any]]
+    var card=(fixtures[0]["response"] as! [String:Any])["card"] as! [String:Any]
+    var runs=card["runs"] as! [[String:Any]];runs[0]["forms"]=[shared["form"]!];runs[0]["actions"]=[["kind":"RequestRework","label":"Request Rework","guard":"b-guard"]];card["runs"]=runs
+    let cardJSON=String(decoding:try JSONSerialization.data(withJSONObject:card),as:UTF8.self)
+    let view=try WorkflowPresentation.decode(cardJSON,workspace:"workspace")
+    precondition(view.runs[0].forms![0].max_bytes==4096)
+    let run=view.runs[0],action=run.actions[0]
+    let snapshot=String(decoding:try JSONSerialization.data(withJSONObject:["host":"actual-host","presentation":card]),as:UTF8.self)
+    var prepares=0,validation=true,lost=true
+    var sent:[String]=[]
+    let prepared:[String:Any]=["schema":1,"workspace":"workspace","json":String(decoding:try JSONSerialization.data(withJSONObject:["reason":reason]),as:UTF8.self)]
+    let current: @MainActor (String)->WorkflowSessionAdapter.Current? = { _ in
+        WorkflowSessionAdapter.Current(account:"b-account",host:"actual-host",connection:"b") { method,args in
+            if method=="workflow.snapshot" {return snapshot}
+            let value=try JSONSerialization.jsonObject(with:Data(args.utf8)) as! [String:Any]
+            if method=="workflow.prepare_selection" {
+                prepares += 1
+                precondition((value["action"] as! [String:String])["guard"]==action.guardValue)
+                if validation {return "{\"kind\":\"Validation\",\"error\":{\"code\":\"workflow_reason\",\"text\":\"shared Rust error\"}}"}
+                precondition(value["reason"] as! String==reason)
+                return String(decoding:try JSONSerialization.data(withJSONObject:["kind":"Mutation","prepared":prepared]),as:UTF8.self)
+            }
+            sent.append(args)
+            if lost {throw WorkflowDisplayError.pending}
+            return "{\"receipt\":\"same\"}"
+        }
+    }
+    var adapter=WorkflowSessionAdapter(root:root,current:current),port:WorkflowPort
+    port=adapter.port(host:"host")!;_ = try await port.read("host","workspace")
+    let invalid=try await port.dispatch("host","workspace",run.item,action.selectionJSON(reason:""))
+    precondition(invalid=="shared Rust error" && sent.isEmpty())
+    validation=false
+    do {_ = try await port.dispatch("host","workspace",run.item,action.selectionJSON(reason:reason));preconditionFailure()}catch{}
+    do {_ = try await port.dispatch("host","workspace",run.item,action.selectionJSON(reason:"edited"));preconditionFailure()}catch{}
+    precondition(prepares==2)
+    adapter=WorkflowSessionAdapter(root:root,current:current);port=adapter.port(host:"host")!
+    _ = try await port.read("host","workspace");lost=false
+    let pending=try await port.pending("host","workspace")
+    _ = try await port.retry("host","workspace",pending[0].id)
+    precondition(prepares==2 && sent.count==2 && sent[0]==sent[1])
+    print("ok B shared form, validation/no-submit, exact text, edit refusal and restored immutable retry")
+}

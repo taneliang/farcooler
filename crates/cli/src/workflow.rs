@@ -3,6 +3,7 @@ use std::io::Read;
 use clap::{Args, Subcommand};
 use farcooler_protocol::{capability, workflow_commands::{Action, Mutation, MAX_BYTES}, v1::{self as pb, request, result}};
 use uuid::Uuid;
+use farcooler_client::session::workflow::PreparedWorkflowAction;
 use crate::{Fallible, req_for, with, expect_value};
 
 #[derive(Args, Clone)]
@@ -51,18 +52,33 @@ pub enum WorkflowCmd {
     Approve { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long)] candidate:Option<String>,#[command(flatten)] identity:Identity },
     /// Accept a semantic review or request rework using the inspected evidence JSON file.
     Review { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long)] evidence:std::path::PathBuf,#[arg(long)] passed:bool,#[command(flatten)] identity:Identity },
+    /// Request bounded rework with a reason tied to the exact inspected evidence.
+    Rework { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,
+        /// Save immutable retry bytes here before submitting; must be a new file.
+        #[arg(long)] prepared_file:std::path::PathBuf,#[command(flatten)] identity:Identity },
+    /// Retry retained prepared bytes without preparing or reading a new reason.
+    Retry { #[arg(long)] prepared_file:std::path::PathBuf },
     /// Request cancellation of the inspected run.
     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
         Ok(match self {
+            Self::Retry { .. } => return Err("retry uses retained prepared bytes".into()),
             Self::Get { workspace } => (workspace,Action::Get),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
             Self::Review { workspace,item,run,pin,evidence,passed,identity } => {
                 let bytes=read_file(&evidence)?;
-                (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed })
+                (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed,reason:None })
+            }
+            Self::Rework { workspace,item,run,pin,evidence,reason,identity,.. } => {
+                if !farcooler_protocol::workflow_commands::valid_rework_reason(&reason) {
+                    return Err("invalid rework reason: nonblank, at most 4096 UTF-8 bytes, no control characters except tabs/line breaks".into());
+                }
+                let bytes=read_file(&evidence)?;
+                (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed:false,reason:Some(reason) })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
         })
@@ -93,8 +109,50 @@ pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:boo
     if value.pointer("/receipt/result/Err").is_some() { return Err("workflow command refused; receipt shown above".into()); }
     Ok(())
 }
+fn save_prepared(path:&std::path::Path, prepared:&PreparedWorkflowAction) -> Result<(),Box<dyn std::error::Error>> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    prepared.validate()?;
+    let bytes=serde_json::to_vec(prepared)?;
+    let mut file=std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW).open(path)?;
+    file.write_all(&bytes)?;file.sync_all()?;
+    let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+fn load_prepared(path:&std::path::Path) -> Result<PreparedWorkflowAction,Box<dyn std::error::Error>> {
+    let prepared:PreparedWorkflowAction=serde_json::from_slice(&read_file(path)?)?;
+    prepared.validate()?;Ok(prepared)
+}
+fn prepared_request(prepared:&PreparedWorkflowAction) -> Result<pb::Request,Box<dyn std::error::Error>> {
+    let action=prepared.validate()?;
+    let mut r=with(req_for(action.method(),prepared.workspace),request::Payload::WorkflowCommand(pb::WorkflowCommand{schema:1,json:prepared.json.clone()}));
+    r.required_capabilities.push(capability::WORKFLOW_COMMANDS.into());Ok(r)
+}
+async fn send_prepared(link:&mut crate::Link,prepared:&PreparedWorkflowAction,json:bool) -> Fallible {
+    if !link.daemon_capabilities().iter().any(|c|c==capability::WORKFLOW_COMMANDS){return Err("runner lacks workflow commands".into());}
+    let reply=link.call(prepared_request(prepared)?).await?;
+    let result::Value::WorkflowReply(reply)=expect_value(reply.value)? else {return Err("unexpected workflow reply".into())};
+    if reply.schema!=1{return Err("unsupported workflow reply schema".into());}
+    let value:serde_json::Value=serde_json::from_str(&reply.json)?;
+    if json{println!("{}",reply.json);}else{println!("{}",serde_json::to_string_pretty(&value)?);}
+    if value.pointer("/receipt/result/Err").is_some(){return Err("workflow command refused; receipt shown above".into());}Ok(())
+}
 pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible {
+    if let WorkflowCmd::Retry{prepared_file}=cmd {
+        let prepared=load_prepared(&prepared_file)?;
+        let mut link=crate::connect_to(runner).await?;
+        return send_prepared(&mut link,&prepared,json).await;
+    }
+    let saved=match &cmd{WorkflowCmd::Rework{prepared_file,..}=>Some(prepared_file.clone()),_=>None};
     let (workspace,action) = cmd.action()?;
+    if let Some(path)=saved {
+        let prepared=PreparedWorkflowAction{schema:1,workspace,json:serde_json::to_string(&action)?};
+        save_prepared(&path,&prepared)?;
+        let mut link=crate::connect_to(runner).await?;
+        return send_prepared(&mut link,&prepared,json).await;
+    }
     let mut link = crate::connect_to(runner).await?;
     send(&mut link,workspace,action,json).await
 }
@@ -103,6 +161,41 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
 mod tests {
     use super::*;
     use clap::Parser;
+    #[test]
+    fn workflow_reasoned_cli_keeps_reason_and_identity() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("evidence.json");
+        std::fs::write(&path,r#"{"candidate":"c","manifest":"m","receipt":"r","policy_pin":"p"}"#).unwrap();
+        let workspace=Uuid::nil().to_string();let evidence=path.to_str().unwrap();
+        for reason in ["  修复\n  "," ","bad\0"] {
+            let args=["farcooler","workflow","rework",&workspace,"a","--run","run","--pin","pin","--evidence",evidence,"--reason",reason,"--prepared-file",evidence,
+                "--command-id","stable","--revision","18446744073709551614","--epoch","1","--sequence","2"];
+            let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args).unwrap().command else {panic!()};
+            let result=cmd.action();
+            if farcooler_protocol::workflow_commands::valid_rework_reason(reason) {
+                let (_,action)=result.unwrap();let raw=serde_json::to_string(&action).unwrap();
+                assert_eq!(farcooler_protocol::workflow_commands::parse(&raw).unwrap(),action);
+                assert!(matches!(action,Action::Review{reason:Some(r),passed:false,mutation,..} if r==reason && mutation.revision==u64::MAX-1));
+            } else {assert!(result.is_err());}
+        }
+    }
+    #[test]
+    fn workflow_prepared_retry_uses_exact_retained_bytes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("prepared.json");
+        let action=Action::Review{mutation:Mutation{id:"same".into(),revision:4,epoch:1,sequence:2},item:"a".into(),run:"run".into(),pin:"pin".into(),
+            evidence:serde_json::from_str(r#"{"candidate":"c","manifest":"m","receipt":"r","policy_pin":"p"}"#).unwrap(),passed:false,reason:Some("  修复\n ".into())};
+        let prepared=PreparedWorkflowAction{schema:1,workspace:Uuid::nil(),json:format!("  {} ",serde_json::to_string(&action).unwrap())};
+        save_prepared(&path,&prepared).unwrap();assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o777,0o600);
+        let original=std::fs::read(&path).unwrap();assert!(save_prepared(&path,&prepared).is_err());
+        let restored=load_prepared(&path).unwrap();assert_eq!(restored,prepared);
+        let r=prepared_request(&restored).unwrap();let Some(request::Payload::WorkflowCommand(body))=r.payload else {panic!()};
+        assert_eq!(body.json,prepared.json);assert_eq!(std::fs::read(&path).unwrap(),original);
+        let args=["farcooler","workflow","retry","--prepared-file",path.to_str().unwrap()];
+        assert!(matches!(crate::Cli::try_parse_from(args).unwrap().command,crate::Command::Workflow(WorkflowCmd::Retry{..})));
+        let mut invalid=prepared;invalid.schema=99;std::fs::write(&path,serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(load_prepared(&path).is_err());
+        let symlink=dir.path().join("link");std::os::unix::fs::symlink(&path,&symlink).unwrap();assert!(load_prepared(&symlink).is_err());
+    }
     #[test]
     fn workflow_real_producer_parser_fixture_roundtrip_and_bounds() {
         let workspace=Uuid::now_v7();

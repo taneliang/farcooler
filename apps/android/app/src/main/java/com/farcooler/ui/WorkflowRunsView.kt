@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -84,9 +85,9 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
         if (selected != null) TextButton(onClick = { select(null) }) { Text("All Runs") }
         val run = view.presentation?.runs?.firstOrNull { it.item == selected }
         if (run != null) {
-            WorkflowRunCard(run, view.ready && !view.busy && port != null) { action ->
-                scope.launch { model.perform(run.item, action, port) }
-            }
+            WorkflowRunCard(run, view.ready && !view.busy && port != null, performReason = { action, reason ->
+                scope.launch { model.perform(run.item, action, port, reason) }
+            }) { action -> scope.launch { model.perform(run.item, action, port) } }
         } else {
             view.presentation?.runs?.forEach { card ->
                 TextButton(onClick = { select(card.item) }) { Text("${card.text("label")} · ${card.item} · ${card.text("phase_label")}") }
@@ -98,7 +99,7 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     }
 }
 @Composable
-fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, perform: (WorkflowAction) -> Unit) {
+fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
     // Finite identity slots. Values remain lossless JsonPrimitive strings,
     // including u64 fence values, and content wraps without ellipsis.
     SelectionContainer {
@@ -124,5 +125,21 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, perform: (WorkflowAction
             }
         }
     }
-    run.actions.forEach { action -> Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) } }
+    (run.value["rework_history"] as? JsonArray)?.forEach { history ->
+        Text(history.jsonObject.getValue("principal").jsonPrimitive.content)
+        SelectionContainer { Text(history.jsonObject.getValue("reason").jsonPrimitive.content) }
+    }
+    run.actions.forEach { action ->
+        val form = (run.value["forms"] as? JsonArray)?.firstOrNull {
+            it.jsonObject.getValue("action") == action.descriptor.getValue("kind")
+        }?.jsonObject
+        if (form == null) Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) }
+        else {
+            var draft by rememberSaveable(run.item, run.text("run"), action.descriptor.getValue("guard").jsonPrimitive.content) { mutableStateOf("") }
+            OutlinedTextField(value = draft, onValueChange = { draft = it }, enabled = enabled,
+                label = { Text(form.getValue("label").jsonPrimitive.content) })
+            Text(form.getValue("help").jsonPrimitive.content)
+            Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.getValue("submit_label").jsonPrimitive.content) }
+        }
+    }
 }

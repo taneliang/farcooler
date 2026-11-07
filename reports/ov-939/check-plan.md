@@ -70,3 +70,109 @@ known and before any heavy execution. All checks are pending. Unit/compiler/
 fixture proof does not establish real root/device navigation or full-app runtime.
 Signed frozen source/API and sealed evidence need independently allocated scoped
 security/ports review before composition; no acceptance item is checked here.
+
+## Concrete first invocation, after manager8fc7ffd6 handoff
++
++`/usr/bin/python3 reports/ov-939/check.py compile /Users/e-liang/.cargo/bin/cargo check --offline --locked -p farcooler-workflow -p farcooler-protocol -p farcooler-client -p farcooler-daemon -p farcooler-cli --all-targets`
++
++The owned supervisor enforces the published1800s/reserve/profile envelope and
++post-lock entry binds actual original923 Cargo holders and local roots. This is
++one compile pass to find all changed public-struct consumers before selected
++tests. No other source changes while it runs. Directly necessary fixture
++constructors outside Review admission are mechanical `reason: None` additions
++only; no bootstrap/Store/notice behavior changes.
++EOF
+/usr/bin/python3 reports/ov-939/check.py compile /Users/e-liang/.cargo/bin/cargo check --offline --locked -p farcooler-workflow -p farcooler-protocol -p farcooler-client -p farcooler-daemon -p farcooler-cli --all-targets
+The first compile exited101 solely at a baseline socket-test Publish constructor
+missing `notifications` (verified in approved82d6). Mechanical `notifications:None`
+restores that fixture, without publication/notice behavior changes. Original
+compile.log/json retained. Next checks select affected client/pure/protocol/CLI
+workflow tests and the exact daemon reasoned test; they also compile the correction.
+
+Concrete focused test group: `/usr/bin/python3 reports/ov-939/check.py rust-selected /usr/bin/python3 reports/ov-939/rust-selected.py`.
+It takes one normal FIFO lease with the same post-lock provenance gate, then
+runs three sequential Cargo commands (offline/locked): workflow integration
+`workflow_reasoned`, client/protocol/daemon lib `workflow_reasoned`, CLI bin
+`workflow_reasoned`. Stops first unexpected failure; no unrelated tests/retries.
+Native preflight found the recorded TS compiler, Kotlin2.4.10 compiler JAR/cache
+and SDK27 Swift compiler present. Matching cached classpath inputs and exact
+native argv are published in `ports.py` before those checks.
+
+Initial focused run: pure2/client1 pass. The new daemon test failed before its
+assertions because `coding_definition(false)` removes Review altogether; change
+its fixture argument to true. Remaining-only rerun selects daemon/protocol and
+CLI `workflow_reasoned`; it does not rerun the already-passed pure/client cases.
+
+Focused reasoned engine/client/protocol/CLI/daemon tests now pass (six distinct
+cases). A new authenticated socket test adds actual Session prepare_validation,
+accepted-before-answer-loss and replacement-Session exact receipt/bytes proof;
+this is a private fixture, not real app/root navigation. Native commands and161
+cached input hashes are frozen in ports-plan.json. Next invocation:
+`check.py ports /usr/bin/python3 reports/ov-939/ports.py` (TS, Node lifecycle and
+journal, Swift6/SDK27 shared views/model and harness, Kotlin model/JUnit/Compose;
+sequential, stop first failure, same1800s/FIFO/reserve).
+
+Concrete subsequent checks (each normal FIFO, separate labels, same bounds):
+
+* `check.py rust-regressions /usr/bin/python3 reports/ov-939/regressions.py`:
+  all18 pure workflow tests, client workflow/presentation/socket tests including
+  added B, protocol workflow tests, only daemon wire_commands tests, CLI workflow
+  producer tests. Existing golden files are compared unchanged, not regenerated.
+* `check.py rust-negatives /usr/bin/python3 reports/ov-939/negatives.py`:
+  six one-at-a-time reducer controls remove reason, authority, exact evidence,
+  budget, revision and duplicate fences. Raw source originals/mutants retained;
+  expected assertion101 required, exact source restoration including interruption,
+  then the two corresponding restored reasoned tests once. No mutated commit.
+* After these pass, one scoped all-target Clippy of changed Rust packages and
+  whitespace/doc-comment/file-size gates. Native compile failures, if any, stop
+  the group and are preserved; continue only corrected/unreached stages.
+
+Ports first run: TS compile0, Web session (legacy + B)0, all16 controller/DOM
+cases0. Swift stopped on a harness-only `Array.isEmpty()` typo, before Kotlin.
+Original harness saved as swift-check.initial.txt and raw compile log retained;
+corrected `isEmpty` property. Resume at Swift only via `ports.py swift corrected`,
+with new labels, followed by the unexecuted Swift/JUnit/Compose stages. Supervisor
+now also hashes its own helper/harness sources, in addition to product sources.
+
+Corrected Swift compile/harness pass, including B restored retry. Kotlin compile
+caught a newly introduced local `selection` payload shadowing its lifecycle
+selection counter. Rename the local payload `submitted`; save original source
+in kotlin-shadow.original.txt and retain raw failure log. Resume only Kotlin,
+JUnit and Compose via `ports.py kotlin corrected2`; no TS/Swift rerun needed.
+
+Kotlin compile/JUnit (10 cases)/Compose all pass. Final source inspection found
+new Swift local-wrapper object casts should refuse malformed arrays instead of
+force-casting; use guards and add the malformed-array no-prepare check. Only
+Swift compile/harness needs repeat for that delta, `ports.py swift final
+swift-test`; Kotlin/TS unchanged and not repeated. Then the planned Rust
+regression/red/restored and final applicable lint gates remain.
+
+CLI completion delta uses shared Session envelope validation and `--prepared-file`
+create-new0600 + file/parent sync before send. `workflow retry --prepared-file`
+reads only the retained envelope and forwards `json` verbatim. Focused tests
+exercise preserved whitespace/reason/ID bytes, no overwrite, mode, unchanged
+file after request construction, unsupported schema and symlink refusal. Next:
+`check.py rust-cli-session /usr/bin/python3 reports/ov-939/cli-session.py`, only
+changed client workflow/socket/envelope and CLI workflow tests. Pure/protocol/
+daemon and native compilers are unchanged and are not repeated.
+
+One additional immutable-retry red/restored control:
+`check.py web-negative /usr/bin/python3 reports/ov-939/web-negative.py` alters
+only owned compiled workflow-session.js, and only when prepared bytes contain a
+reason. The B journal test must raise AssertionError for changed retained bytes;
+source/mutant/hash/raw logs saved, exact compiled bytes restored in finally,
+then the corresponding Session test once. No app/browser or source mutation.
+
+Web retry red/restored assertions passed, but its inner result filename collided
+with the outer supervisor web-negative.json. Raw red/restored logs and outer
+source/reserve receipt are intact. Correct only the report filename and seal
+that one small Node control with distinct log/result/supervisor labels; no
+product/compiler rerun. Preserve the original helper in web-negative.initial.txt.
+Final client17+1ignored and CLI4 delta tests pass; combined final distinct Rust
+coverage is46 passes/1ignore. All app/root/device obligations stay unverified.
+
+Final scoped lint invocation:
+`check.py rust-lint /Users/e-liang/.cargo/bin/cargo clippy --offline --locked -p farcooler-workflow -p farcooler-protocol -p farcooler-client -p farcooler-daemon -p farcooler-cli --all-targets -- -D warnings`.
+This also supplies a final all-target compilation after mechanical baseline
+fixture correction and final CLI/shared-envelope delta. Then light existing
+file-size/doc-comment/diff rules, manifests and normal signed freeze only.

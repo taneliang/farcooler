@@ -1,0 +1,32 @@
+{
+  "form": {
+    "action": "RequestRework",
+    "label": "Rework Reason",
+    "help": "Explain what needs to change. This text is retained with your decision.",
+    "submit_label": "Request Rework",
+    "max_bytes": 4096
+  },
+  "reason": "  请修复 <script> $(never execute)\n\tretain spaces  ",
+  "errors": [
+    {
+      "reason": "",
+      "valid": false
+    },
+    {
+      "reason": " \n\t ",
+      "valid": false
+    },
+    {
+      "reason": "bad\u0000",
+      "valid": false
+    },
+    {
+      "reason": "bad",
+      "valid": false
+    },
+    {
+      "reason": "keep\n\t界  ",
+      "valid": true
+    }
+  ]
+}

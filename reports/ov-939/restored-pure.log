@@ -1,0 +1,11 @@
+COMMAND ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-workflow', '--test', 'workflow', 'workflow_reasoned', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 0.62s
+     Running tests/workflow.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 2 tests
+test workflow_reasoned_rework_bounds_budget_and_legacy_bytes ... ok
+test workflow_reasoned_rework_fences_and_exact_retention ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.01s
+

@@ -2,6 +2,7 @@
 // Session adapter owns reads, availability and latest-state action validation.
 export interface WorkflowAction { kind: string; label: string; guard: string; [key: string]: unknown }
 export interface WorkflowStage { id: string; label: string; progression_label: string }
+export interface WorkflowForm { action: string; label: string; help: string; submit_label: string; max_bytes: number }
 export interface WorkflowRun {
   label: string; phase_label: string; item: string; run: string
   definition_pin: string; policy_pin: string; candidate: string | null
@@ -9,6 +10,7 @@ export interface WorkflowRun {
   pending_effect: string | null; iteration: number; attempt: number; fence: number | bigint | string
   reworks_remaining: number; stages: WorkflowStage[]; stage: WorkflowStage | null
   gate: { label: string; text: string; principal: string } | null
+  forms?: WorkflowForm[]; rework_history?: { reason: string; principal: string; iteration: number }[]
   reasons: { kind: string; label: string; text: string }[]; actions: WorkflowAction[]
 }
 export interface WorkflowPresentation { schema: 2; workspace: string; epoch: number | bigint | string; revision: number | bigint | string; runs: WorkflowRun[] }
@@ -19,7 +21,7 @@ export interface WorkflowPort {
   read(workspace: string): Promise<WorkflowPresentation>
   // Forward the complete supplied descriptor. Rust must authenticate, re-read
   // State and validate the guard; no client-generated Grant or command.
-  dispatch(workspace: string, item: string, action: WorkflowAction): Promise<string>
+  dispatch(workspace: string, item: string, action: WorkflowAction, reason?: string): Promise<string>
 }
 export interface WorkflowView {
   retained?: RetainedWorkflow[]; presentation: WorkflowPresentation | null; selected: string | null
@@ -68,7 +70,7 @@ export class WorkflowBoard {
     this.draw()
     return generation === this.generation ? generation : null
   }
-  async dispatch(item: string, action: WorkflowAction): Promise<void> {
+  async dispatch(item: string, action: WorkflowAction, reason?: string): Promise<void> {
     const port = this.port()
     const card = this.view.presentation?.runs.find(r => r.item === item)
     if (!port || !this.view.ready || this.view.busy || !card?.actions.includes(action)) return
@@ -77,7 +79,7 @@ export class WorkflowBoard {
     this.view = { ...this.view, busy: true, inspection: '' }; this.draw()
     let failed = false
     try {
-      const inspection = await port.dispatch(this.workspace, item, action)
+      const inspection = await (reason === undefined ? port.dispatch(this.workspace, item, action) : port.dispatch(this.workspace, item, action, reason))
       if (generation === this.generation && selection === this.selection &&
         this.view.selected === item && this.view.presentation?.runs.some(r => r.item === item && r.run === card.run)) {
         this.view = { ...this.view, inspection }

@@ -1,0 +1,30 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--cached",
+    "--check",
+    "--",
+    "apps",
+    "crates",
+    "services/web",
+    "reports/ov-939/final-contract.md",
+    "reports/ov-939/check.py",
+    "reports/ov-939/source-contract.md",
+    "reports/ov-939/ports.py",
+    "reports/ov-939/regressions.py",
+    "reports/ov-939/check-plan.md",
+    "reports/ov-939/swift-check.swift",
+    "reports/ov-939/rust-selected.py",
+    "reports/ov-939/entry.py",
+    "reports/ov-939/negatives.py",
+    "reports/ov-939/web-negative.py",
+    "reports/ov-939/handoff.md",
+    "reports/ov-939/cli-session.py"
+  ],
+  "exit": 0,
+  "out": "",
+  "err": "",
+  "raw_evidence_staged_whitespace_exit": 2,
+  "raw_bytes_preserved": true
+}

@@ -12,7 +12,7 @@ export function workflowJSON(raw: string): any {
 }
 export interface WorkflowSession { workflow_call(method: string, args: string): Promise<string> }
 interface Observation { revision: string; epoch: string; run: string }
-interface Entry extends RetainedWorkflow { phase: 'preparing' | 'prepared' | 'complete' | 'abandoned'; action: WorkflowAction; prepared?: unknown; attempts: number; result?: string }
+interface Entry extends RetainedWorkflow { phase: 'preparing' | 'prepared' | 'complete' | 'abandoned'; action: WorkflowAction; reason?: string; prepared?: unknown; attempts: number; result?: string }
 interface Journal { entries: Entry[] }
 type Exclusive = <T>(key: string, body: () => Promise<T>) => Promise<T>
 const keyOf = (value: unknown): string => JSON.stringify(value)
@@ -82,14 +82,14 @@ export class WorkflowSessionPort implements WorkflowPort {
     return journal.entries.filter(e => e.phase === 'prepared' || e.phase === 'preparing')
       .map(({ id, item, run, label, phase }) => ({ id, item, run, label, reinspect: phase === 'preparing' }))
   }
-  async dispatch(workspace: string, item: string, action: WorkflowAction): Promise<string> {
+  async dispatch(workspace: string, item: string, action: WorkflowAction, reason?: string): Promise<string> {
     const key = this.scope(workspace).key
     return this.exclusive(key, () => {
       if (this.scope(workspace).key !== key) throw new Error('Workflow account changed')
-      return this.dispatchLocked(workspace, item, action)
+      return this.dispatchLocked(workspace, item, action, reason)
     })
   }
-  private async dispatchLocked(workspace: string, item: string, action: WorkflowAction): Promise<string> {
+  private async dispatchLocked(workspace: string, item: string, action: WorkflowAction, reason?: string): Promise<string> {
     const scope = this.scope(workspace)
     if (this.busy.has(scope.key)) throw new Error('Workflow action already in progress')
     this.busy.add(scope.key)
@@ -99,18 +99,23 @@ export class WorkflowSessionPort implements WorkflowPort {
       // Repeated press on the same observation is the same intent, even after
       // a process restart or an unconfirmed response. Never prepare it twice.
       const prior = journal.entries.find(e => e.phase !== 'abandoned' && e.item === item && keyOf(e.action) === keyOf(action))
+      if (prior && prior.reason !== reason) throw new Error('Inspect the refreshed run or retry the retained decision before changing its reason')
       if (prior?.result) return prior.result
       if (prior) throw new Error('Use Retry Retained Action for the existing intent')
       const observation = this.observed.get(keyOf([scope.key, item, action]))
       if (!observation) throw new Error('Refresh before selecting an action')
-      const entry: Entry = { phase: 'preparing', id: crypto.randomUUID(), item, run: observation.run, label: action.label, action, attempts: 0 }
+      const entry: Entry = { phase: 'preparing', id: crypto.randomUUID(), item, run: observation.run, label: action.label, action, ...(reason === undefined ? {} : { reason }), attempts: 0 }
       journal.entries.push(entry); await this.save(scope.key, journal)
       const current = this.scope(workspace)
       if (current.key !== scope.key) throw new Error('Workflow account changed')
       const reply = workflowJSON(await current.session.workflow_call('workflow.prepare_selection', keyOf({
-        workspace, item, action, revision: observation.revision, epoch: observation.epoch,
+        workspace, item, action, ...(reason === undefined ? {} : { reason }), revision: observation.revision, epoch: observation.epoch,
       })))
       if (this.scope(workspace).key !== scope.key) throw new Error('Workflow account changed')
+      if (reply.kind === 'Validation') {
+        if (typeof reply.error?.text !== 'string') throw new Error('Invalid workflow validation')
+        entry.phase = 'abandoned'; await this.save(scope.key, journal); return reply.error.text
+      }
       if (reply.kind === 'Inspection') {
         entry.phase = 'complete'; entry.result = keyOf(reply.intent); await this.save(scope.key, journal); return entry.result
       }

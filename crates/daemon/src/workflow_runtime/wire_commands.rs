@@ -69,11 +69,11 @@ impl Runtime {
                     let input = input(Command::Approve { item:item.clone(),run:run.clone(),pin:pin.clone(),candidate:candidate.clone() },Grant::Decision { principal:session.principal.clone() });
                     self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                 }
-                Action::Review { item, run, pin, evidence, passed, .. } => {
+                Action::Review { item, run, pin, evidence, passed, reason, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin && i.last_evidence.as_ref() == Some(evidence)) {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
                     } else {
-                        let input = input(Command::Review { item:item.clone(),run:run.clone(),evidence:evidence.clone(),passed:*passed },Grant::Decision { principal:session.principal.clone() });
+                        let input = input(Command::Review { item:item.clone(),run:run.clone(),evidence:evidence.clone(),passed:*passed,reason:reason.clone() },Grant::Decision { principal:session.principal.clone() });
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
@@ -191,7 +191,7 @@ mod semantic_review_tests {
             let state=runtime.state("ws").unwrap().unwrap();let item=&state.items["a"];
             assert_eq!(item.phase,Phase::WaitingReview);
             let evidence=item.last_evidence.clone().unwrap();
-            let review=|id:&str,sequence,run,pin,evidence| Action::Review { mutation:m(id,state.revision,sequence),item:"a".into(),run,pin,evidence,passed };
+            let review=|id:&str,sequence,run,pin,evidence| Action::Review { mutation:m(id,state.revision,sequence),item:"a".into(),run,pin,evidence,passed,reason:None };
             let wrong=runtime.wire_command("ws","orchestrator",review("wrong",1,item.run.clone(),pin.clone(),evidence.clone())).unwrap();
             assert!(wrong.to_string().contains("Unauthorized"),"{wrong}");
             let mut old=evidence.clone();old.receipt="unseen".into();
@@ -204,6 +204,69 @@ mod semantic_review_tests {
             let next=runtime.state("ws").unwrap().unwrap();
             assert_eq!(next.items["a"].iteration,if passed {0} else {1});
             assert_eq!(next.items["a"].stage,if passed {4} else {1});
+        }
+    }
+}
+
+#[cfg(test)]
+mod reasoned_tests {
+    use super::*;
+    use farcooler_protocol::workflow_commands::Mutation;
+    #[tokio::test]
+    async fn workflow_reasoned_wire_durable_replay_and_refusals() {
+        let dir=tempfile::tempdir().unwrap();let root=dir.path().join("fixture");
+        let mut runtime=Runtime::create(&root).await.unwrap();
+        let mut definition=coding_definition(true);
+        definition.stages.iter_mut().find(|s|matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
+        let pin=definition.pin();
+        let m=|id:&str,revision,sequence|Mutation{id:id.into(),revision,epoch:1,sequence};
+        runtime.wire_command("ws","owner",Action::Publish{notifications:None,adapter:None,mutation:m("p",0,1),expected_pin:None,definition}).unwrap();
+        runtime.wire_command("ws","owner",Action::Enqueue{mutation:m("e",0,1),item:"a".into(),pin:pin.clone()}).unwrap();
+        for t in 1..15 {runtime.pump(t).await.unwrap();if runtime.state("ws").unwrap().unwrap().items["a"].phase==Phase::WaitingReview {break;}}
+        let state=runtime.state("ws").unwrap().unwrap();let item=&state.items["a"];
+        assert_eq!(item.phase,Phase::WaitingReview);
+        let reason="  请修复 <script>\n $(never execute)  ";
+        let action=|id:&str,reason:&str|Action::Review{mutation:m(id,state.revision,2),item:"a".into(),run:item.run.clone(),pin:pin.clone(),evidence:item.last_evidence.clone().unwrap(),passed:false,reason:Some(reason.into())};
+        for (id,principal,text,expected) in [("bad","owner","\0","Invalid"),("blank","owner"," \n","Invalid"),("wrong","orchestrator",reason,"Unauthorized")] {
+            let request=action(id,text);let refused=runtime.wire_command("ws",principal,request.clone()).unwrap();
+            assert!(refused.to_string().contains(expected),"{refused}");
+            assert_eq!(runtime.wire_command("ws",principal,request).unwrap(),refused);
+        }
+        for field in ["revision","epoch","run","pin","evidence"] {
+            let mut request=action(field,reason);
+            if let Action::Review{mutation,run,pin,evidence,..}=&mut request {
+                match field {"revision"=>mutation.revision+=1,"epoch"=>mutation.epoch+=1,"run"=>*run="unseen".into(),
+                    "pin"=>*pin="unseen".into(),_=>evidence.receipt="unseen".into()}
+            }
+            assert!(runtime.wire_command("ws","owner",request).unwrap().to_string().contains("Stale"));
+        }
+        let request=action("accepted",reason);let receipt=runtime.wire_command("ws","owner",request.clone()).unwrap();
+        assert!(receipt.pointer("/receipt/result/Ok").is_some(),"{receipt}");
+        let next=runtime.state("ws").unwrap().unwrap();let events=runtime.events("ws").unwrap();
+        assert_eq!(next.items["a"].rework_history[0].reason,reason);
+        let mut replay=State::empty("ws".into(),1);
+        for e in &events {replay=step(&replay,e).unwrap().state;}
+        assert_eq!(replay,next);
+        drop(runtime);let mut runtime=Runtime::open(&root).unwrap();
+        assert_eq!(runtime.state("ws").unwrap().unwrap(),next);
+        assert_eq!(runtime.wire_command("ws","owner",request).unwrap(),receipt);
+        assert_eq!(runtime.events("ws").unwrap(),events);
+        assert!(runtime.wire_command("ws","owner",action("accepted","changed reason")).is_err());
+        for iteration in 1..=2 {
+            for t in 20..40 {runtime.pump(t).await.unwrap();if runtime.state("ws").unwrap().unwrap().items["a"].phase==Phase::WaitingReview {break;}}
+            let current=runtime.state("ws").unwrap().unwrap();let i=&current.items["a"];
+            assert_eq!(i.phase,Phase::WaitingReview);assert_eq!(i.iteration,iteration);
+            let request=Action::Review{mutation:m(&format!("rework-{iteration}"),current.revision,u64::from(iteration)+2),
+                item:"a".into(),run:i.run.clone(),pin:i.pin.clone(),evidence:i.last_evidence.clone().unwrap(),passed:false,reason:Some(reason.into())};
+            let reply=runtime.wire_command("ws","owner",request.clone()).unwrap();
+            if iteration==1 {assert!(reply.pointer("/receipt/result/Ok").is_some(),"{reply}");}
+            else {
+                assert_eq!(reply.pointer("/receipt/result/Err").and_then(|v|v.as_str()),Some("Limit"));
+                assert_eq!(runtime.state("ws").unwrap().unwrap(),current);
+                drop(runtime);runtime=Runtime::open(&root).unwrap();
+                assert_eq!(runtime.wire_command("ws","owner",request).unwrap(),reply);
+                assert_eq!(runtime.state("ws").unwrap().unwrap(),current);
+            }
         }
     }
 }

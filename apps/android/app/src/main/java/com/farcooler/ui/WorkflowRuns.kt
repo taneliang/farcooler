@@ -80,7 +80,7 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
         }
         return if (ticket == generation) ticket else null
     }
-    suspend fun perform(item: String, action: WorkflowAction, port: WorkflowPort?) {
+    suspend fun perform(item: String, action: WorkflowAction, port: WorkflowPort?, reason: String? = null) {
         val current = mutable.value
         if (port == null || !current.ready || current.busy ||
             current.presentation?.runs?.firstOrNull { it.item == item }?.actions?.contains(action) != true) return
@@ -90,7 +90,10 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
         mutable.value = current.copy(busy = true, inspection = "")
         var failed = false
         try {
-            val result = port.dispatch(host, workspace, item, action.descriptor.toString())
+            val submitted = if (reason == null) action.descriptor else kotlinx.serialization.json.buildJsonObject {
+                put("action", action.descriptor); put("reason", kotlinx.serialization.json.JsonPrimitive(reason))
+            }
+            val result = port.dispatch(host, workspace, item, submitted.toString())
             if (ticket == generation && display == selection &&
                 mutable.value.presentation?.runs?.any { it.item == item && it.text("run") == run } == true)
                 mutable.value = mutable.value.copy(inspection = result)

@@ -1,0 +1,22 @@
+COMMAND ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-workflow', '--test', 'workflow', 'workflow_reasoned_rework_fences_and_exact_retention', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 0.70s
+     Running tests/workflow.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 1 test
+test workflow_reasoned_rework_fences_and_exact_retention ... 
+thread 'workflow_reasoned_rework_fences_and_exact_retention' (829784813) panicked at crates/workflow/tests/workflow.rs:400:5:
+assertion `left == right` failed
+  left: Err(Stale)
+ right: Err(Duplicate)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    workflow_reasoned_rework_fences_and_exact_retention
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p farcooler-workflow --test workflow`

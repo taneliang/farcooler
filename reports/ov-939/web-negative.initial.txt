@@ -1,0 +1,33 @@
+#!/usr/bin/python3
+"""The B journal test must detect changed retained bytes; restore compiled output."""
+import hashlib,json,signal,subprocess
+from pathlib import Path
+root=Path(__file__).resolve().parents[2];report=root/'reports/ov-939'
+p=Path('/private/tmp/ov939-ports/web/workflow-session.js')
+original=p.read_bytes();text=original.decode()
+old='keyOf({ prepared: entry.prepared })'
+new='keyOf({ prepared: String(entry.prepared.json).includes(\'"reason"\') ? { ...entry.prepared, json: "changed reason" } : entry.prepared })'
+assert text.count(old)==1
+mutant=text.replace(old,new).encode()
+(report/'negative-sources/web-session.original.txt').write_bytes(original)
+(report/'negative-sources/web-retry.mutant.txt').write_bytes(mutant)
+def interrupted(sig,_):raise SystemExit(128+sig)
+for sig in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP]:signal.signal(sig,interrupted)
+cmd=['/opt/homebrew/bin/node','services/web/test/workflow-session.test.mjs',str(p.parent)]
+try:
+    p.write_bytes(mutant)
+    with (report/'red-web-retry.log').open('x') as log:
+        log.write('COMMAND '+repr(cmd)+'\n');log.flush()
+        code=subprocess.call(cmd,cwd=root,stdout=log,stderr=subprocess.STDOUT)
+finally:
+    p.write_bytes(original);assert p.read_bytes()==original
+raw=(report/'red-web-retry.log').read_text()
+meaningful=code!=0 and 'AssertionError' in raw and 'changed reason' in raw
+assert meaningful
+with (report/'restored-web-retry.log').open('x') as log:
+    log.write('COMMAND '+repr(cmd)+'\n');log.flush()
+    restored=subprocess.call(cmd,cwd=root,stdout=log,stderr=subprocess.STDOUT)
+result={'red_exit':code,'meaningful':meaningful,'restored_exit':restored,'original_sha256':hashlib.sha256(original).hexdigest(),
+        'mutant_sha256':hashlib.sha256(mutant).hexdigest(),'matches_original':p.read_bytes()==original}
+(report/'web-negative.json').write_text(json.dumps(result,indent=2)+'\n')
+assert restored==0

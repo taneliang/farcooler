@@ -1,0 +1,120 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/reports/ov-939/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/python3', 'reports/ov-939/regressions.py']
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+REGRESSION ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-workflow', '--test', 'workflow']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 1.25s
+     Running tests/workflow.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 18 tests
+test workflow_automatic_coding_replay_with_review_rework ... ok
+test workflow_blocked_shared_resource_does_not_reserve_and_releases_one_waiter ... ok
+test workflow_canonical_encoding_golden ... ok
+test workflow_definition_bounds_and_stage_order ... ok
+test workflow_definition_driven_no_review_multiple_checks_and_approvals ... ok
+test workflow_definition_rejects_missing_candidate_paths ... ok
+test workflow_dependencies_and_resource_conflict ... ok
+test workflow_every_stage_approval_and_informational_ack_exclusion ... ok
+test workflow_invalid_snapshot_and_pinned_operation_payload ... ok
+test workflow_no_git_checklist_pin_and_exact_decision ... ok
+test workflow_noncoding_named_actions_and_stable_rework_target ... ok
+test workflow_reasoned_rework_bounds_budget_and_legacy_bytes ... ok
+test workflow_reasoned_rework_fences_and_exact_retention ... ok
+test workflow_retry_limit_and_exact_candidate ... ok
+test workflow_reviewer_person_and_rework_exhaustion ... ok
+test workflow_seeded_adversarial_replay_properties ... ok
+test workflow_stale_revision_epoch_source_and_duplicate_refused ... ok
+test workflow_uncertainty_cancel_and_late_result_fences ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.72s
+
+REGRESSION ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-client', '--lib', 'workflow_', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/store)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/client)
+    Finished `test` profile [unoptimized] target(s) in 19.18s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_client-b39137e2332251d4)
+
+running 17 tests
+test session::workflow::tests::socket::workflow_host_browser_bridge ... ignored, owned browser harness only
+test session::workflow::tests::socket::workflow_reasoned_socket_selection_loss_and_reconnect ... B authenticated Session validation -> exact prepared reason -> accepted-before-answer-loss -> replacement Session identical receipt; request={"action":"Review","mutation":{"id":"01a1b40c-47d7-7cb3-9fc6-0ec16b0e24e2","revision":4,"epoch":1,"sequence":2},"item":"B","run":"wf1:6857e0f2d71cb18e0cd2d8484254f47393f5bb58857cebf3f9597ee092dcb820","pin":"wf1:b6348a8c0415901fc2320653bd8b986f772233b8d2fb6e6f0e0bb1f175b14613","evidence":{"candidate":"121188f4023ab8bba5d63b37e79fbd592651fa3d","manifest":"wf1:ba24b5e9c899beacfe8b62407020f1d9d30dbb100644ead0eeb4b5b8a3e6be29","receipt":"wf1:65acf5a39001b4b1415126527a75e5879517d45841598c852947d6bf7c7ab200","policy_pin":"wf1:b6348a8c0415901fc2320653bd8b986f772233b8d2fb6e6f0e0bb1f175b14613"},"passed":false,"reason":"  请修复 <script> $(never execute)\n\tretain spaces  "}; receipt={"receipt":{"effects":["wf1:f10d1b34fe7e6a8b3e5bf6410e9574694742b72b4c4115869c44cf13e4553385"],"id":"wire:owner:01a1b40c-47d7-7cb3-9fc6-0ec16b0e24e2","result":{"Ok":5}},"schema":1}
+ok
+test session::workflow::tests::socket::workflow_session_selection_route_stale_auth_and_retry ... FeatureA actual socket/shared selection -> persisted envelope -> submit -> replacement Session same receipt -> stale selection and revoked retry refused; bytes={"action":"Approve","mutation":{"id":"01a1b40c-4870-7c33-88c5-0b07298c6299","revision":1,"epoch":1,"sequence":2},"item":"FeatureA","run":"wf1:c35ab152b4670783c0c7810da670726820fd7a5d98849e5aee477504ac9e6432","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:5eadbe90eccaf4ed84e13cfcc8729717932a7de576a39c3f8627f3e1665bc494"],"id":"wire:owner:01a1b40c-4870-7c33-88c5-0b07298c6299","result":{"Ok":2}},"schema":1}
+ok
+test session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute ... effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision=7; request={"action":"Approve","mutation":{"id":"approve-effectful","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:426e1c4d8145fe2ff66acc9ea8b9bbe51af71288abdbf79340da13f329efac01","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86","candidate":null}; receipt={"receipt":{"effects":["wf1:47d91af159f54bdb064d1b2a07145f816be5136d22300b71b12a619c44548159"],"id":"wire:owner:approve-effectful","result":{"Ok":2}},"schema":1}
+ok
+test session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change ... trace=Session/C-JNI-dispatch -> authenticated getter -> schema2 -> opaque Cancel -> prepared bytes -> dropped answer -> reconnect durable receipt; stale/auth-context/withdrawal refused; prepared={"action":"Cancel","mutation":{"id":"cancel-a","revision":1,"epoch":1,"sequence":2},"item":"a","run":"wf1:1e8ee4e846a7068546da8b367e6af563c4f5c68d389c329d76adf44386036934","pin":"wf1:241677d12e1f71f22ec60f5161f4a752dcfe6829f1cc2a1bde67cf8d80a04e86"}; receipt={"receipt":{"effects":[],"id":"wire:owner:cancel-a","result":{"Ok":2}},"schema":1}
+ok
+test session::workflow::tests::workflow_reasoned_selection_validation_and_immutable_bytes ... ok
+test session::workflow::tests::workflow_selection_allocates_once_and_preserves_observation ... ok
+test session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion ... ok
+test session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes ... ok
+test session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence ... ok
+test session::workflow::tests::workflow_session_stale_observation_and_admission_binding ... ok
+test workflow_presentation::tests::workflow_presentation_errors_and_c_buffer ... ok
+test workflow_presentation::tests::workflow_presentation_generic_display_slots ... ok
+test workflow_presentation::tests::workflow_presentation_golden ... ok
+test workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework ... ok
+test workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval ... ok
+test workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries ... ok
+
+test result: ok. 16 passed; 0 failed; 1 ignored; 0 measured; 260 filtered out; finished in 1.26s
+
+REGRESSION ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-protocol', '--lib', 'workflow_']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 3.76s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_protocol-779e7337a25e3c31)
+
+running 2 tests
+test workflow_commands::tests::workflow_reasoned_wire_preserves_legacy_and_refuses_unknown_fields ... ok
+test workflow_commands::tests::workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in 0.00s
+
+REGRESSION ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-daemon', '--lib', 'workflow_runtime::wire_commands::', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 30.34s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 5 tests
+test workflow_runtime::wire_commands::reasoned_tests::workflow_reasoned_wire_durable_replay_and_refusals ... ok
+test workflow_runtime::wire_commands::semantic_review_tests::workflow_wire_semantic_review_requires_exact_observation_and_principal ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_approval_preserve_policy ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 2721 filtered out; finished in 2.25s
+
+REGRESSION ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-cli', '--bin', 'farcooler', 'workflow_']
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/client)
+   Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/cli)
+    Finished `test` profile [unoptimized] target(s) in 9.31s
+     Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler-62003bc98479d959)
+
+running 3 tests
+test workflow::bundle_tests::workflow_bundle_file_closed_schema_and_bounded_inputs ... ok
+test workflow::tests::workflow_real_producer_parser_fixture_roundtrip_and_bounds ... ok
+test workflow::tests::workflow_reasoned_cli_keeps_reason_and_identity ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 594 filtered out; finished in 0.01s
+
+
+EXIT 0 stopped=None

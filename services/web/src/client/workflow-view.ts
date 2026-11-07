@@ -9,7 +9,7 @@ const button = (title: string, act: () => void, disabled = false) => {
 // Retain intended focus across disabled busy renders. A user move to another
 // control replaces that intent; removed actions fall back to navigation.
 const focusMemory = new WeakMap<HTMLElement, { intended: string; fallback: string | null }>()
-function keyed(node: HTMLButtonElement, key: string): HTMLButtonElement {
+function keyed<T extends HTMLElement>(node: T, key: string): T {
   node.setAttribute('data-workflow-control', key); return node
 }
 export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: WorkflowBoard): void {
@@ -35,7 +35,7 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
   if (view.inspection) content.append(el('pre', view.inspection))
   root.replaceChildren(content)
   if (focused) {
-    const buttons = Array.from(root.querySelectorAll('button'))
+    const buttons: (HTMLButtonElement | HTMLTextAreaElement)[] = [...root.querySelectorAll('button'), ...root.querySelectorAll('textarea')]
     const intended = buttons.find(b => b.getAttribute('data-workflow-control') === focused)
     const target = intended && !intended.disabled ? intended :
       buttons.find(b => b.getAttribute('data-workflow-control') === 'all-runs' && !b.disabled) ?? buttons.find(b => !b.disabled)
@@ -44,6 +44,7 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
     else focusMemory.delete(root)
   } else focusMemory.delete(root)
 }
+const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
   const card = el('article'); card.append(el('h2', run.label), el('p', run.phase_label))
   const fields = el('dl')
@@ -60,7 +61,22 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
   for (const stage of run.stages) card.append(el('p', `${stage.id} · ${stage.label} · ${stage.progression_label}`))
   for (const reason of run.reasons) card.append(el('h3', reason.label), el('p', reason.text))
   const actions = el('div'); actions.className = 'actions'
-  for (const action of run.actions) actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), JSON.stringify(['action', run.item, run.run, action.kind, action.guard])))
+  for (const history of run.rework_history ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
+  for (const action of run.actions) {
+    const key = JSON.stringify(['action', run.item, run.run, action.kind, action.guard])
+    const form = run.forms?.find(f => f.action === action.kind)
+    if (form) {
+      let saved = drafts.get(board); if (!saved) { saved = new Map(); drafts.set(board, saved) }
+      const draft = saved.get(key) ?? { value: '', start: 0, end: 0 }; saved.set(key, draft)
+      const label = el('label', form.label), input = keyed(el('textarea'), key + ':input')
+      input.value = draft.value; input.disabled = !view.ready || view.busy
+      input.setAttribute('aria-label', form.label)
+      input.oninput = input.onselect = () => { draft.value = input.value; draft.start = input.selectionStart; draft.end = input.selectionEnd }
+      input.onfocus = () => input.setSelectionRange(draft.start, draft.end)
+      label.append(input); actions.append(label, el('p', form.help),
+        keyed(button(form.submit_label, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy), key))
+    } else actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), key))
+  }
   card.append(actions); return card
 }
 

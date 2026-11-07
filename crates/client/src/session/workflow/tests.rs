@@ -80,7 +80,8 @@ fn workflow_session_review_and_inspection_keep_exact_evidence() {
     let card=&review.presentation.runs[0];
     for kind in [cards::ActionKind::InspectLatestEvidence,cards::ActionKind::AcceptReview,cards::ActionKind::RequestRework] {
         let selected=card.actions.iter().find(|a|a.kind==kind).unwrap().clone();
-        let result=prepare(&review,Uuid::nil(),"item",selected.clone(),identity(&review)).unwrap();
+        let result=prepare_selection_with_reason(&review,Uuid::nil(),"item",selected.clone(),review.state.revision,review.state.epoch,
+            (kind==cards::ActionKind::RequestRework).then_some("Please fix the evidence.")).unwrap();
         match result {
             PreparedWorkflowResult::Inspection {intent:Intent::InspectLatestEvidence {evidence}} => assert_eq!(Some(evidence),card.latest_evidence),
             PreparedWorkflowResult::Mutation {prepared} => {
@@ -143,4 +144,42 @@ fn workflow_selection_readonly_ignores_all_sequence_exhaustion() {
     assert!(matches!(prepare_selection(&s, Uuid::nil(), "item", selected.clone(), s.state.revision, s.state.epoch).unwrap(),
         PreparedWorkflowResult::Inspection { .. }));
     assert!(prepare_selection(&s, Uuid::nil(), "item", selected, s.state.revision - 1, s.state.epoch).is_err());
+}
+
+#[test]
+fn workflow_reasoned_selection_validation_and_immutable_bytes() {
+    let initial=snapshot(); let i=&initial.state.items["item"];
+    let s=observed(&initial,Command::Approve {item:"item".into(),run:i.run.clone(),pin:i.pin.clone(),candidate:None},
+        Grant::Decision {principal:"owner".into()});
+    let s=finish(&finish(&finish(&s,"provision"),"candidate"),"candidate");
+    let card=&s.presentation.runs[0];
+    let a=card.actions.iter().find(|a|a.kind==cards::ActionKind::RequestRework).unwrap();
+    let fixture:serde_json::Value=serde_json::from_str(include_str!("../../testdata/workflow-rework.json")).unwrap();
+    assert_eq!(serde_json::to_value(&card.forms[0]).unwrap(),fixture["form"]);
+    for case in fixture["errors"].as_array().unwrap() {
+        assert_eq!(cards::validate_input(&a.kind,case["reason"].as_str()).is_ok(),case["valid"].as_bool().unwrap());
+    }
+    assert_eq!(card.forms[0].max_bytes,4096);
+    for reason in [None,Some(""),Some("\0"),Some(" \n")] {
+        let PreparedWorkflowResult::Validation {error}=prepare_selection_with_reason(&s,Uuid::nil(),"item",a.clone(),s.state.revision,s.state.epoch,reason).unwrap() else {panic!("must not prepare")};
+        assert_eq!(error.code,"workflow_reason"); assert!(!error.text.is_empty());
+    }
+    let reason="  reason with 界 <script>\n  ";
+    let PreparedWorkflowResult::Mutation {prepared}=prepare_selection_with_reason(&s,Uuid::nil(),"item",a.clone(),s.state.revision,s.state.epoch,Some(reason)).unwrap() else {panic!()};
+    let restored:PreparedWorkflowAction=serde_json::from_str(&serde_json::to_string(&prepared).unwrap()).unwrap();
+    assert_eq!(restored,prepared);
+    let wire::Action::Review {reason:actual,evidence,passed,..}=wire::parse(&restored.json).unwrap() else {panic!()};
+    assert_eq!(actual.as_deref(),Some(reason));assert!(!passed);assert_eq!(Some(evidence),card.latest_evidence);
+    let mut changed=s.clone();changed.context.binding.push('x');
+    assert!(prepare_selection_with_reason(&changed,Uuid::nil(),"item",a.clone(),s.state.revision,s.state.epoch,Some(reason)).is_err());
+    assert!(prepare_selection_with_reason(&s,Uuid::nil(),"item",a.clone(),s.state.revision-1,s.state.epoch,None).is_err());
+}
+
+#[test]
+fn workflow_prepared_validation_is_shared_and_preserves_bytes() {
+    let legacy=r#"{ "action":"Review", "mutation":{"id":"same","revision":1,"epoch":1,"sequence":2},"item":"a","run":"run","pin":"pin","evidence":{"candidate":"c","manifest":"m","receipt":"r","policy_pin":"p"},"passed":false }"#;
+    let mut p=PreparedWorkflowAction{schema:1,workspace:Uuid::nil(),json:legacy.into()};
+    assert!(p.validate().is_ok());assert_eq!(p.json,legacy);
+    p.schema=99;assert!(p.validate().is_err());assert_eq!(p.json,legacy);
+    p.schema=1;p.json=r#"{"action":"Get"}"#.into();assert!(p.validate().is_err());
 }

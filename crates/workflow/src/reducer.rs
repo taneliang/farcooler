@@ -42,7 +42,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None };
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new() };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -66,7 +66,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     decision(input, principal)?;
                     launch(&mut item, id, input, &mut effects)?;
                 }
-                Command::Review { run, evidence, passed, .. } => {
+                Command::Review { run, evidence, passed, reason, .. } => {
                     if item.phase != Phase::WaitingReview || run != &item.run {
                         return Err(Refusal::Phase);
                     }
@@ -74,6 +74,16 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         &item.definition.stages[item.stage].kind else { return Err(Refusal::Phase); };
                     decision(input, p)?;
                     evidence_matches(&item, evidence)?;
+                    if let Some(reason) = reason {
+                        if *passed || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                        if item.last_evidence.as_ref() != Some(evidence) { return Err(Refusal::Evidence); }
+                        if item.iteration >= item.definition.max_reworks { return Err(Refusal::Limit); }
+                        item.rework_history.push(ReworkDecision {
+                            id: input.id.clone(), principal: p.clone(), revision: input.expected_revision,
+                            run: item.run.clone(), definition_pin: item.pin.clone(), evidence: evidence.clone(),
+                            iteration: item.iteration, reason: reason.clone(),
+                        });
+                    }
                     finish(&mut item, id, input, *passed, evidence, &mut effects)?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
@@ -254,6 +264,13 @@ fn valid_state(state: &State) -> bool {
         && state.items.iter().all(|(id, item)| {
             valid_id(id) && item.definition.validate().is_ok() && item.pin == item.definition.pin()
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)
+                && item.iteration <= item.definition.max_reworks
+                && item.rework_history.len() <= usize::from(item.iteration)
+                && item.rework_history.iter().enumerate().all(|(index, r)|
+                    valid_id(&r.id) && valid_id(&r.principal) && valid_id(&r.run)
+                    && r.definition_pin == item.pin && r.evidence.policy_pin == item.policy_pin
+                    && valid_rework_reason(&r.reason) && r.iteration < item.iteration
+                    && (index == 0 || item.rework_history[index-1].iteration < r.iteration))
                 && if item.phase == Phase::Done { item.stage == item.definition.stages.len() }
                     else { item.stage < item.definition.stages.len() }
         })

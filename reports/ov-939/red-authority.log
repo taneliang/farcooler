@@ -1,0 +1,22 @@
+COMMAND ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '--locked', '-p', 'farcooler-workflow', '--test', 'workflow', 'workflow_reasoned_rework_fences_and_exact_retention', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-939-reasoned-rework/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 0.58s
+     Running tests/workflow.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow-695dd9b28bd61b2c)
+
+running 1 test
+test workflow_reasoned_rework_fences_and_exact_retention ... 
+thread 'workflow_reasoned_rework_fences_and_exact_retention' (829783635) panicked at crates/workflow/tests/workflow.rs:420:9:
+assertion `left == right` failed: principal
+  left: Ok(Transition { state: State { schema: 1, workspace: "workspace", revision: 5, epoch: 1, items: {"item": Item { definition: Definition { schema: 1, source: "coding/v1", stages: [Stage { id: "stage-0", kind: Provision, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-0"], environment: {} } }, Stage { id: "stage-1", kind: Build, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-1"], environment: {} } }, Stage { id: "stage-2", kind: Check, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["cargo", "test", "--locked"], environment: {} } }, Stage { id: "stage-3", kind: Review(Person("owner")), progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-3"], environment: {} } }, Stage { id: "stage-4", kind: Land, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-4"], environment: {} } }, Stage { id: "stage-5", kind: Ci, progression: Automatic, max_attempts: 2, operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-5"], environment: {} } }], max_reworks: 2, rework_target: Some("stage-1") }, pin: "wf1:4c0b9a317ec8b5033cd90effb8be7480002d8814c91953f868820f5ea018f1aa", policy_pin: "policy-1", dependencies: {}, resource: "repo/branch", stage: 1, iteration: 1, attempt: 1, fence: 5, phase: Running, run: "wf1:14fbbcca6ae03515457a5a6cb2d5929da61dd21919551a5b9320294004ef9649", pending: Some("wf1:ca3e6c0876b4d673ed9f130888904c063039e0a9df6d7ac95442a0409f9479c0"), candidate: None, last_evidence: Some(Evidence { candidate: "candidate-a", manifest: "sha256:manifest", receipt: "operation-receipt", policy_pin: "policy-1" }), stopping: None, rework_history: [ReworkDecision { id: "command-5", principal: "owner", revision: 4, run: "wf1:ad87274cdc83149f9cafbd0b48d4957c705216aea85d036cd192b94dcdd145a9", definition_pin: "wf1:4c0b9a317ec8b5033cd90effb8be7480002d8814c91953f868820f5ea018f1aa", evidence: Evidence { candidate: "candidate-a", manifest: "sha256:manifest", receipt: "operation-receipt", policy_pin: "policy-1" }, iteration: 0, reason: "  请修复 <script> $(touch /never)\n\tretain spaces  " }] }}, seen: {"command-1", "command-2", "command-3", "command-4", "command-5"}, source_sequences: {"fixture": 5} }, effects: [Effect { id: "wf1:ca3e6c0876b4d673ed9f130888904c063039e0a9df6d7ac95442a0409f9479c0", item: "item", run: "wf1:14fbbcca6ae03515457a5a6cb2d5929da61dd21919551a5b9320294004ef9649", epoch: 1, fence: 5, resource: "repo/branch", definition_pin: "wf1:4c0b9a317ec8b5033cd90effb8be7480002d8814c91953f868820f5ea018f1aa", policy_pin: "policy-1", candidate: None, kind: Execute(Build), operation: OperationSpec { adapter_version: "fixture/v1", arguments: ["coding-operation-1"], environment: {} }, created_ms: 1000 }], notices: ["item:Running"] })
+ right: Err(Unauthorized)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    workflow_reasoned_rework_fences_and_exact_retention
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p farcooler-workflow --test workflow`

@@ -1,0 +1,7 @@
+COMMAND ['/opt/homebrew/bin/node', 'services/web/test/workflow-session.test.mjs', '/private/tmp/ov939-ports/web']
+PASS lossless max-u64 snapshot/identity, whole Action, persisted-before-submit, discarded reply, process restoration, current-session retry, one-submit invocation bound and later identical retry, account isolation, storage refusal, no lifecycle replay
+PASS actual-host alias reassignment and prepare-answer loss do not reuse or reprepare an old intent
+PASS explicit preparing-only reinspection, no implicit prepare/submit, corrupt journal refuses reset
+PASS B shared form, validation/no submit, exact borrowed text, edit refusal, restored immutable retry
+
+EXIT 0

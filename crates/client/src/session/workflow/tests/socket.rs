@@ -35,7 +35,7 @@ async fn seed(session: &Session, h: &Harness, item: &str, revision: u64, sequenc
     if sequence == 1 {
         let mut definition=coding_definition(false);
         definition.stages[0].progression=Progression::AwaitApproval {principal:"owner".into()};
-        let a=wire::Action::Publish { adapter:None,mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
+        let a=wire::Action::Publish { notifications:None,adapter:None,mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
         let receipt=session.workflow_wire(h.workspace,serde_json::to_string(&a).unwrap()).await.unwrap();
     assert!(receipt.pointer("/receipt/result/Ok").is_some(),"seed {item} revision={revision} sequence={sequence}: {receipt}");
     }
@@ -243,4 +243,52 @@ async fn workflow_host_browser_bridge() {
     std::fs::write(output.join("result.json"),json!({"preparations":preparations,"submitted":submitted,"receipts":receipts,
         "lossless_stale_observations":lossless,"final_revision":final_state.state.revision,"phase":final_state.state.items["FeatureA"].phase}).to_string()).unwrap();
     eprintln!("actual browser -> host adapter -> shared Session/C-JNI dispatch -> Unix socket -> Runtime FeatureA Done; same prepared bytes/receipt after discarded answer, preparations={preparations}");
+}
+
+#[tokio::test]
+async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
+    let h=start().await;let session=Session::connect_local(&h.socket).await.unwrap();
+    let mut definition=coding_definition(true);
+    definition.stages.iter_mut().find(|s|matches!(s.kind,farcooler_workflow::StageKind::Review(_))).unwrap().kind=
+        farcooler_workflow::StageKind::Review(farcooler_workflow::Reviewer::Person("owner".into()));
+    let pin=definition.pin();
+    let mutation=|id:&str|Mutation{id:id.into(),revision:0,epoch:1,sequence:1};
+    session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Publish{notifications:None,adapter:None,mutation:mutation("b-publish"),expected_pin:None,definition}).unwrap()).await.unwrap();
+    session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Enqueue{mutation:mutation("b-enqueue"),item:"B".into(),pin}).unwrap()).await.unwrap();
+    let snapshot=tokio::time::timeout(std::time::Duration::from_secs(10),async {
+        loop {let s=session.workflow_snapshot(h.workspace).await.unwrap();
+            if s.state.items["B"].phase==farcooler_workflow::Phase::WaitingReview{break s;}
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
+    }).await.unwrap();
+    let card=&snapshot.presentation.runs[0];let action=card.actions.iter().find(|a|a.kind==cards::ActionKind::RequestRework).unwrap();
+    let fixture:serde_json::Value=serde_json::from_str(include_str!("../../../testdata/workflow-rework.json")).unwrap();
+    let reason=fixture["reason"].as_str().unwrap();
+    let mut args=json!({"workspace":h.workspace,"item":"B","action":action,"revision":snapshot.state.revision.to_string(),"epoch":snapshot.state.epoch.to_string(),"reason":""});
+    let invalid=call(&session,"workflow.prepare_selection",args.clone()).await;
+    assert_eq!(invalid["kind"],"Validation");assert!(invalid.get("prepared").is_none());
+    args["reason"]=json!(reason);
+    let prepared_reply=call(&session,"workflow.prepare_selection",args.clone()).await;
+    let prepared:PreparedWorkflowAction=serde_json::from_value(prepared_reply["prepared"].clone()).unwrap();
+    let bytes=prepared.json.clone();let parsed=wire::parse(&bytes).unwrap();
+    let lost=session.start(parsed.method(),Some(h.workspace),Some(request::Payload::WorkflowCommand(WorkflowCommand{schema:1,json:bytes.clone()})),vec![capability::WORKFLOW_COMMANDS.into()]).unwrap();
+    let observer=Session::connect_local(&h.socket).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10),async {
+        loop {let s=observer.workflow_snapshot(h.workspace).await.unwrap();
+            if !s.state.items["B"].rework_history.is_empty(){assert_eq!(s.state.items["B"].rework_history[0].reason,reason);break;}
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
+    }).await.unwrap();
+    drop(lost);drop(session);
+    let replacement=Session::connect_local(&h.socket).await.unwrap();
+    let restored:PreparedWorkflowAction=serde_json::from_str(&serde_json::to_string(&prepared).unwrap()).unwrap();
+    assert_eq!(restored.json,bytes);
+    let receipt=replacement.workflow_submit_action(&restored).await.unwrap();
+    assert!(receipt.pointer("/receipt/result/Ok").is_some(),"{receipt}");
+    assert_eq!(replacement.workflow_submit_action(&restored).await.unwrap(),receipt);
+    assert!(replacement.workflow_call("workflow.prepare_selection",args).await.is_err());
+    let mut changed=restored.clone();let mut payload:serde_json::Value=serde_json::from_str(&changed.json).unwrap();
+    payload["reason"]=json!("edited after acceptance");changed.json=payload.to_string();
+    assert!(replacement.workflow_submit_action(&changed).await.is_err());
+    let mut unsupported=restored;unsupported.schema=99;
+    assert!(replacement.workflow_submit_action(&unsupported).await.is_err());
+    eprintln!("B authenticated Session validation -> exact prepared reason -> accepted-before-answer-loss -> replacement Session identical receipt; request={bytes}; receipt={receipt}");
 }

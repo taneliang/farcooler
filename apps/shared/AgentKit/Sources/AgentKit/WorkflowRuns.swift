@@ -19,6 +19,11 @@ public struct WorkflowAction: Codable, Equatable, Sendable {
         var container = encoder.singleValueContainer()
         try container.encode(descriptor)
     }
+    public func selectionJSON(reason: String?) throws -> String {
+        guard let reason else { return try json() }
+        let object: [String: Any] = ["action": descriptor, "reason": reason]
+        return String(decoding: try JSONSerialization.data(withJSONObject: object, options: .sortedKeys), as: UTF8.self)
+    }
     public func json() throws -> String { String(decoding: try JSONEncoder().encode(self), as: UTF8.self) }
 }
 public struct WorkflowStage: Decodable, Sendable {
@@ -42,6 +47,18 @@ public struct WorkflowEvidence: Decodable, Sendable {
     public let receipt: String
     public let policy_pin: String
 }
+public struct WorkflowForm: Decodable, Sendable {
+    public let action: String
+    public let label: String
+    public let help: String
+    public let submit_label: String
+    public let max_bytes: Int
+}
+public struct WorkflowRework: Decodable, Sendable {
+    public let principal: String
+    public let iteration: UInt8
+    public let reason: String
+}
 public struct WorkflowRun: Decodable, Identifiable, Sendable {
     public var id: String { item }
     public let label: String
@@ -62,6 +79,8 @@ public struct WorkflowRun: Decodable, Identifiable, Sendable {
     public let gate: WorkflowGate?
     public let reasons: [WorkflowReason]
     public let actions: [WorkflowAction]
+    public let forms: [WorkflowForm]?
+    public let rework_history: [WorkflowRework]?
 }
 public struct WorkflowPresentation: Decodable, Sendable {
     public let schema: UInt32
@@ -139,7 +158,7 @@ public final class WorkflowRunsModel: ObservableObject {
         }
         return ticket == generation ? ticket : nil
     }
-    public func perform(item: String, action: WorkflowAction, port: WorkflowPort?) async {
+    public func perform(item: String, action: WorkflowAction, port: WorkflowPort?, reason: String? = nil) async {
         guard ready, !busy, let port,
             let card = presentation?.runs.first(where: { $0.item == item }),
             card.actions.contains(action) else { return }
@@ -148,7 +167,7 @@ public final class WorkflowRunsModel: ObservableObject {
         busy = true; inspection = ""
         var failed = false
         do {
-            let result = try await port.dispatch(host, workspace, item, action.json())
+            let result = try await port.dispatch(host, workspace, item, action.selectionJSON(reason: reason))
             if ticket == generation, display == selection,
                 presentation?.runs.contains(where: { $0.item == item && $0.run == card.run }) == true {
                 inspection = result

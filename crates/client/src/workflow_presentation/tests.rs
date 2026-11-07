@@ -124,7 +124,7 @@ fn workflow_presentation_invalidated_inspection_and_rework() {
     let state = finish(&finish(&finish(&state, "provision", true), "candidate", true), "candidate", true);
     let card = &project(&state, &auth()).unwrap().runs[0];
     let rework = card.actions.iter().find(|a| a.kind == ActionKind::RequestRework).unwrap();
-    let Intent::Command(command) = action(&state, &auth(), "item", rework).unwrap() else { panic!() };
+    let Intent::Command(command) = action_with_reason(&state, &auth(), "item", rework, Some("Please fix the evidence.")).unwrap() else { panic!() };
     let next = apply(&state, command, Grant::Decision { principal: "owner".into() });
     assert_eq!(next.items["item"].iteration, 1);
     let mut stale = state.clone();
@@ -217,7 +217,7 @@ fn workflow_presentation_generic_display_slots() {
     assert!(slots.contains(&label));
     let button = card.actions.iter().find(|a| a.label == label).unwrap();
     let request = Request { schema: SCHEMA, snapshot: state, capabilities: auth(),
-        selection: Some(Selection { item: card.item.clone(), action: button.clone() }) };
+        selection: Some(Selection { item: card.item.clone(), action: button.clone(), reason: None }) };
     let response: Response = serde_json::from_str(&json(&serde_json::to_string(&request).unwrap())).unwrap();
     assert_eq!(response.schema, 2);
     assert!(matches!(response.intent, Some(Intent::InspectLatestEvidence { .. })));

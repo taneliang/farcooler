@@ -3,8 +3,28 @@
 Base: `82d6a878b3a34b9969d7e4b32bddc14a8a2cc45c`.
 Branch: `ov-939-reasoned-rework`; one writer. This document is an implementation
 proposal and seam inventory, not implementation or verification evidence.
-No product source has changed. Protocol/daemon regions below require an exact
-manager handoff before edits. Store/cutover regions remain exclusively ov-936.
+Manager decision `8fc7ffd6` grants the exact Review DTO/admission regions and
+directly necessary focused tests. Store/cutover remains exclusively ov-936.
+
+## Granted compatible transport correction (supersedes proposal item 1)
+
+Implement within existing `Action::Review` and `Command::Review`: add optional
+`reason`, serde default/skip-if-none, so absent fields retain the exact historical
+encoding and accepted receipt bytes. A present reason means reasoned rework,
+requires `passed == false`, and applies all reason/evidence/budget checks below.
+Legacy absent-reason Review retains its existing semantics and creates no reason
+history. New RequestRework selections require a reason; no new variant, method,
+tag, capability or schema number is allocated. The proposed distinct variant
+below is historical planning only and will not be implemented.
+
+Form validation returns shared Rust `Validation { error: { code, text } }` data
+before mutation preparation. Ports mark that never-submitted journal attempt
+abandoned and render the supplied error text while retaining the draft. No
+prepared envelope exists in this case. Swift/Kotlin finite dispatch can carry
+an `{action, reason}` local selection wrapper, keeping their existing port
+signature; adapters separate the exact descriptor for observation lookup and
+retain the complete selection for intent deduplication. Web uses a separate
+optional argument. No renderer trims or validates the semantic text itself.
 
 ## Observed source and framing corrections
 
@@ -140,3 +160,16 @@ C/JNI/WASM navigation, accessibility/device/keyboard/lifecycle proof, both true
 feature exercises and composition with final ov-936 belong to ov-932/parent
 allocation. No app, simulator, owner DB/config, provider, network, live receipt
 or external-send action is authorized here.
+
+## Final CLI prepared-byte completion (before this edit)
++
++The new Rework CLI producer must durably save the same shared schema1
++PreparedWorkflowAction envelope before any send, to a caller-selected new0600
++regular file (`--prepared-file`); never overwrite an existing file. Add a finite
++Retry subcommand that reads that file, uses the shared Session envelope validator,
++and sends its retained JSON verbatim over the existing authenticated CLI Link.
++Retry does not read evidence/reason arguments, allocate an identity, reprepare or
++rewrite the file. This closes the earlier explicit-arguments-only retry limit.
++Factor envelope validation into the shared PreparedWorkflowAction type consumed
++by Session submit and CLI; no transport migration, RPC, Store or schema change.
++Old CLI commands and accepted legacy prepared payload bytes remain unchanged.

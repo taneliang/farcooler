@@ -1,0 +1,204 @@
+{
+  "base": "82d6a878b3a34b9969d7e4b32bddc14a8a2cc45c",
+  "product_files": [
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt",
+      "sha256": "331a4601b3d6e60419fc3afec7e34f2907866af342dceaf9d468bad5c0980458",
+      "git_blob": "4469608e40a08bfad3b8c1b404caf15f4c508df8",
+      "base_blob": "9a40ef1fdfb501381824285081f3b294cb82fcc6",
+      "rule": "Android finite form/journal and focused common-fixture checks"
+    },
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowRunsView.kt",
+      "sha256": "b9777fd235a7722eed4fcafa882d9aa494c224eceae792493cc33c987028c41b",
+      "git_blob": "0a8c55b387aec53276b44a6f69b64ebda4426281",
+      "base_blob": "268efe5823487278fa128bbc92ee68059b5f4549",
+      "rule": "Android finite form/journal and focused common-fixture checks"
+    },
+    {
+      "path": "apps/android/app/src/main/java/com/farcooler/ui/WorkflowSession.kt",
+      "sha256": "23c485b5a19e190c65819273c4afdb6e727f756fc2db26fe19241bfdacbc1f50",
+      "git_blob": "70a27bf12c07f02779215bde957fdd61ab3751c6",
+      "base_blob": "748fbca411371c5743d5599b4fce52ef3f793098",
+      "rule": "Android finite form/journal and focused common-fixture checks"
+    },
+    {
+      "path": "apps/android/app/src/test/java/com/farcooler/ui/WorkflowSessionTest.kt",
+      "sha256": "38077facfacfd22210804ccc429c60c5b187e0f7ad6aa14514a9540ec4fbde40",
+      "git_blob": "574d9462522251f0e781651e41a0e18a675cf6f9",
+      "base_blob": "b77ad909af2f983fbafcfd943bad4208f78eedf6",
+      "rule": "Android finite form/journal and focused common-fixture checks"
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowRuns.swift",
+      "sha256": "a1087d85c4bdc0ca3998d5762110143b60ffd206930907f8b744484b6ba89e34",
+      "git_blob": "756bbaa48578a5a7f98a01752d914238425b126c",
+      "base_blob": "eb2b50d0226d9da81f8796844edd177ace49cdec",
+      "rule": "shared Mac/iOS finite native form, original-action observations and retained selection journal"
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift",
+      "sha256": "e01f3aa5342181011b9a6816d5cc785416417a5b8066939e272899ae0ba7e09a",
+      "git_blob": "e2b6f1a8b96b0fc67ce051ea7495363ed77e905f",
+      "base_blob": "8612a71ee3161df66c31521c9a9f40827331ed23",
+      "rule": "shared Mac/iOS finite native form, original-action observations and retained selection journal"
+    },
+    {
+      "path": "apps/shared/AgentKit/Sources/AgentKit/WorkflowSession.swift",
+      "sha256": "6c13eb108b810955a8bb7384c837ad72c1f5a6a6be91752c146809f453692ee5",
+      "git_blob": "66e84fab6538764f9f5d32f5fcc62b2d592b9d12",
+      "base_blob": "cdbad329195c03111020ae3e6fb87f68b0115e5e",
+      "rule": "shared Mac/iOS finite native form, original-action observations and retained selection journal"
+    },
+    {
+      "path": "crates/cli/src/workflow.rs",
+      "sha256": "73930cbf86c3acb672856a2dabf497a7d80984d809996b38c8f24aa27fa81317",
+      "git_blob": "2771ddbce58340dcc7f29670000a633aec232075",
+      "base_blob": "486656ecb5f6e4288a1ff532601b2b3359b1b692",
+      "rule": "finite reasoned producer + shared prepared save/validate/verbatim retry; existing commands preserved"
+    },
+    {
+      "path": "crates/client/src/session/workflow.rs",
+      "sha256": "684c8076b1991a8a2bff8893bde62f35e11b9fbb62b060e5b8a67ff9820a51a9",
+      "git_blob": "113f25264868bffc1f2dc5d728bd0ddb709b1721",
+      "base_blob": "144911a80e3a0ed4bd0234f78e0702152595cb27",
+      "rule": "shared authenticated prepare/Validation/prepared validation; socket/legacy fixtures"
+    },
+    {
+      "path": "crates/client/src/session/workflow/tests.rs",
+      "sha256": "5fe7f0b85eb31348f8dbeb64e28f7a28e7dde336dcf67d6e03f05cf011d0dd12",
+      "git_blob": "915f754b4ec267e0620367b577f7214fc6f8802b",
+      "base_blob": "46e4b4a4fcd77f379a051a0b8599d25522ee45f0",
+      "rule": "shared authenticated prepare/Validation/prepared validation; socket/legacy fixtures"
+    },
+    {
+      "path": "crates/client/src/session/workflow/tests/socket.rs",
+      "sha256": "814681a27ae21f1f05278b08732cae7866cf6ac141d60096ca988c4c2ffcc0c2",
+      "git_blob": "d8c88a75c2a29214b7d32b8458f21aa6933c1dc6",
+      "base_blob": "553b19c68202e8864e7414e1e51ce93ae54a289a",
+      "rule": "shared authenticated prepare/Validation/prepared validation; socket/legacy fixtures"
+    },
+    {
+      "path": "crates/client/src/testdata/workflow-rework.json",
+      "sha256": "fa5ffbb8fd3698089d47e0de0435a3130e381996402da38d9ef9de2446779cce",
+      "git_blob": "1eae2510cc5b4e3c888d241f29e64d065872a711",
+      "base_blob": null,
+      "rule": "new common form/error/borrowed-text fixture; old golden unchanged"
+    },
+    {
+      "path": "crates/client/src/workflow_presentation.rs",
+      "sha256": "1b8143f1faf79c8af652100fa7b66cd2a925bbc0c500b378b295231ced0fe0f1",
+      "git_blob": "b3acc5c51490f9dff70d9ad939c8192bcfda0354",
+      "base_blob": "1d9db1f2103fbed267a7e1fbf9ec64a7bb6802c7",
+      "rule": "shared finite form/action/input/error/projection/history"
+    },
+    {
+      "path": "crates/client/src/workflow_presentation/tests.rs",
+      "sha256": "2ada36011d9cac13e92746fbad6d111497a86467c5b8d15e4f3c0b85cb2e2680",
+      "git_blob": "6054ae92dbe9bcacf7813a560434077e3e50e852",
+      "base_blob": "3cdbb01e4111807783356cf5e671541e3867a5c7",
+      "rule": "shared finite form/action/input/error/projection/history"
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/tests.rs",
+      "sha256": "cdde12693d2a2e7af7d6b8f372bcd7f6cda8c07310e3506540dd1cca3fd061da",
+      "git_blob": "cfeeb862945a752a85e388efff00087d6e654bd5",
+      "base_blob": "080c47cd697d725c1d65c3718e3b36250b5cc4c1",
+      "rule": "mechanical reason:None on existing Review fixture only"
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/wire_commands.rs",
+      "sha256": "a60f794462c9294b0d7be58befe121963d93cc41fc26f9e5c1a0ec270e98ae8b",
+      "git_blob": "92d6e5ba3b749662c60bde05d12edcd6051d2aeb",
+      "base_blob": "702178302820d050fbc68234267abb0f7537bfa0",
+      "rule": "8fc7ffd6 authenticated Review reason forwarding and focused durable fixtures"
+    },
+    {
+      "path": "crates/protocol/src/workflow_commands.rs",
+      "sha256": "78521668ea21d856c8c1d3e33c9e60e166e39afa3dd9cfe3b8253c6b34f29e59",
+      "git_blob": "f890ab6fdde25362922d026a024275804af82d64",
+      "base_blob": "837985dfc1ff486434dee1b20fb3b97c553af25e",
+      "rule": "8fc7ffd6 Review optional reason + strict parser; no method/tag/schema allocation"
+    },
+    {
+      "path": "crates/workflow/src/reducer.rs",
+      "sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+      "git_blob": "c5d2a1337e4d20928792143c44cd1512917e170a",
+      "base_blob": "6a7c3298081591258d2be13d4dfc3a9bfdc17c72",
+      "rule": "shared reducer reason/authority/evidence/budget/history; historical omission/replay"
+    },
+    {
+      "path": "crates/workflow/src/state.rs",
+      "sha256": "ef042ed69fb2137b2b5880014b30ea6afd81cc25c8e488db732fa15c414581a7",
+      "git_blob": "28af8abcb766badd39e22d12e115570eb9f9704e",
+      "base_blob": "2d5a23a25196e352c14b830cf50b187e0819fb5a",
+      "rule": "shared reducer reason/authority/evidence/budget/history; historical omission/replay"
+    },
+    {
+      "path": "crates/workflow/tests/workflow.rs",
+      "sha256": "33a8d6113b129927969aa9464a1a2e53d7fbf2c9be18399c08eb9c88201c2cac",
+      "git_blob": "82f489258cf69cf25de1f3265cf733a59ec57c69",
+      "base_blob": "aa05c6587f8084e068f32698463dd8ae1e2fa30a",
+      "rule": "shared reducer reason/authority/evidence/budget/history; historical omission/replay"
+    },
+    {
+      "path": "services/web/src/client/workflow-session.ts",
+      "sha256": "83d4beb1def12e5a7a3567fb6f06d2026e41e5e08de305ec7939ce38b8f5bcec",
+      "git_blob": "bcb2ffa5d3d8d9739dbeb4cf7d1971ffab9e6151",
+      "base_blob": "752f1a46737514cd3f8e0cd4cd55619ecdcdcb8c",
+      "rule": "Web finite form/draft/caret/focus/text-only/journal forwarding and fixtures"
+    },
+    {
+      "path": "services/web/src/client/workflow-view.ts",
+      "sha256": "e5e1d7f54199b3f423298b19285cf8f659e4d46ebfb724d6e5e7b98053f38868",
+      "git_blob": "91690514cbe03e16b460daa1c86c7fd5b0e64c01",
+      "base_blob": "513d944b62d09157f9e2fc415897a595cba80e9c",
+      "rule": "Web finite form/draft/caret/focus/text-only/journal forwarding and fixtures"
+    },
+    {
+      "path": "services/web/src/client/workflow.ts",
+      "sha256": "0a563ac5abff487c61d81d2f1066787ac3ed225267b4faed9838ec22c0b1a710",
+      "git_blob": "6a99ab08d7924cee14c70e7805c32b28af92ff7a",
+      "base_blob": "e5e1b92ae3bdc4a66aedae9635d3291996f73ce7",
+      "rule": "Web finite form/draft/caret/focus/text-only/journal forwarding and fixtures"
+    },
+    {
+      "path": "services/web/test/workflow-session.test.mjs",
+      "sha256": "a527e67975935901bd54f12a0494746a20bb8781a889c38cc76e5970028d4529",
+      "git_blob": "7964740a03465df40e85128203366ab189263584",
+      "base_blob": "fff6a8d9bccd25f49f17070fc1acca48b86a42c0",
+      "rule": "Web finite form/draft/caret/focus/text-only/journal forwarding and fixtures"
+    },
+    {
+      "path": "services/web/test/workflow.test.mjs",
+      "sha256": "c5db61bf27888d95fe2854befe49cd28bd2d501f14052d123cf8811be5d422de",
+      "git_blob": "fc720051e8e9921c4909120b3f3c9e2ae32ad0d5",
+      "base_blob": "b1c8252e64cf292041a2d633e302f5c4aa5719b2",
+      "rule": "Web finite form/draft/caret/focus/text-only/journal forwarding and fixtures"
+    }
+  ],
+  "unchanged_boundaries": {
+    "Cargo.lock": "81c37dacb61f249b83ca7aba7d07ec2e148d2d1cbd8e3c5e1a68277612b7494f",
+    "Cargo.toml": "a1b4ae4584e57387004cf2b440163b18d17ad78147ff488fe0b37f966486c2cc",
+    "crates/client/src/testdata/workflow-presentation.json": "5a7220dda0f7dcf1f9a32b3b98dd87282f4ee1a7667220cc78209e18fe3ced35",
+    "crates/client/src/ffi.rs": "49c05babd34d9b08717e8a969aa484fd9ad8f67d24a4c08f61c9ac11fa982666",
+    "crates/android/src/workflow.rs": "9d23e58ae8d1394fbc56a8f18fc946b4057ba34b165709358fbd2e045b78e230",
+    "crates/web/src/workflow.rs": "6b9eb94326e119b36e75902fbc31c510018ef54a6aee5e8bf982bca4a3d1d44f",
+    "crates/web/src/wire.rs": "ee4f2823f8844bb208e757f46ffd2e2f8a1fff4f1c8d448cb7a655c489d6b716",
+    "crates/web/src/js.rs": "103a806f24838b945294865084206454210462c36403fb2ea90d0e82b8c2c4cc"
+  },
+  "matched_final_lint": true,
+  "matched_port_receipts": {
+    "services/web/": "ports.json",
+    "apps/shared/": "ports-swift-final.json",
+    "apps/android/": "ports-kotlin.json"
+  },
+  "excluded_owners": [
+    "Store",
+    "migrations",
+    "cutover",
+    "bootstrap",
+    "notices",
+    "RPC/protobuf tags/capabilities"
+  ]
+}

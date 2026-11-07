@@ -1,0 +1,122 @@
+[
+  {
+    "label": "reason",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_bounds_budget_and_legacy_bytes",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "52aa6a19e1b49840e725b38081d322dd5412140fb0cd5a99933c6a5c31a8e262"
+  },
+  {
+    "label": "authority",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_fences_and_exact_retention",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "dd460e565ecd641cd611f4172a339c65b2f29ff62f655728b056f1c57ddc95a5"
+  },
+  {
+    "label": "evidence",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_fences_and_exact_retention",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "254e6df104d4173835c7e8f530c4d78897129dc8d754b7cb05072a29fb52ff80"
+  },
+  {
+    "label": "budget",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_fences_and_exact_retention",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "677aa8c0c540e08ed1f8b5d8f085dc45a24b81d50af74ef31a53607be7e63710"
+  },
+  {
+    "label": "revision",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_fences_and_exact_retention",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "703c1e798c2e3f51f11966b6f7f5e68491cd833d906f09fd8b366890f4c76ba3"
+  },
+  {
+    "label": "duplicate",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "farcooler-workflow",
+      "--test",
+      "workflow",
+      "workflow_reasoned_rework_fences_and_exact_retention",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "meaningful": true,
+    "original_sha256": "1fe880a992821460c4687e82f7fde45272c05624245cfcb47082de4e72a2feae",
+    "mutant_sha256": "f1b7c16e5b375963062b99e31c84d67b36966d74c86ed9d29a786b9b954fe25e"
+  }
+]

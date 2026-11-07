@@ -318,7 +318,7 @@ async fn workflow_runtime_semantic_review_and_corrupt_journal_are_not_success() 
     let evidence = Evidence { candidate: item.candidate.clone().unwrap(), manifest: "review:exact".into(),
         receipt: "human:decision".into(), policy_pin: item.policy_pin.clone() };
     assert!(runtime.decide(&owner, Request { id: "review".into(), workspace: "w".into(), expected_revision: state.revision,
-        sequence: 1, command: Command::Review { item: "coding".into(), run: item.run.clone(), evidence, passed: true } }, 8)
+        sequence: 1, command: Command::Review { item: "coding".into(), run: item.run.clone(), evidence, passed: true, reason: None } }, 8)
         .unwrap().result.is_ok());
     let (binding, claim) = claim(&runtime, "w", 9);
     assert!(runtime.store.workflow_admit_effect(&claim, 9).unwrap());

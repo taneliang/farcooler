@@ -1,5 +1,5 @@
 //! Closed command vocabulary, shared by the real CLI producer and daemon parser.
-pub use farcooler_workflow::Definition;
+pub use farcooler_workflow::{Definition, valid_rework_reason};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BYTES: usize = 60 * 1024;
@@ -18,7 +18,8 @@ pub enum Action {
     Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<crate::workflow_config::NotificationPolicy> },
     Enqueue { mutation: Mutation, item: String, pin: String },
     Approve { mutation: Mutation, item: String, run: String, pin: String, candidate: Option<String> },
-    Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool },
+    Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Cancel { mutation: Mutation, item: String, run: String, pin: String },
 }
 impl Action {
@@ -46,6 +47,18 @@ pub fn parse(raw: &str) -> Result<Action, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workflow_reasoned_wire_preserves_legacy_and_refuses_unknown_fields() {
+        let legacy = r#"{"action":"Review","mutation":{"id":"same","revision":5,"epoch":1,"sequence":2},"item":"a","run":"run","pin":"pin","evidence":{"candidate":"c","manifest":"m","receipt":"r","policy_pin":"p"},"passed":false}"#;
+        assert_eq!(serde_json::to_string(&parse(legacy).unwrap()).unwrap(),legacy);
+        let mut value:serde_json::Value=serde_json::from_str(legacy).unwrap();
+        value["reason"]=serde_json::json!("  修复 ");
+        let parsed=parse(&value.to_string()).unwrap();
+        assert!(matches!(parsed,Action::Review{reason:Some(ref r),..} if r=="  修复 "));
+        value["reason"]=serde_json::json!({"grant":"Controller"});assert!(parse(&value.to_string()).is_err());
+        value["reason"]=serde_json::Value::Null;assert!(parse(&value.to_string()).is_err());
+        value.as_object_mut().unwrap().remove("reason");value["authority"]=serde_json::json!("owner");assert!(parse(&value.to_string()).is_err());
+    }
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {
         let action = Action::Publish { notifications:None, adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
