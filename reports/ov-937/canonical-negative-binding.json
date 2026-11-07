@@ -1,0 +1,8 @@
+{
+  "mode": "binding",
+  "source": "crates/daemon/src/runtime_selection.rs",
+  "before": "134284fdf9cf9980123c547bd8c1ed4820bb383dc89562179e4772d6dc209bce",
+  "mutant": "21361c797f2706c07a35339f2848e1bc4d6a9b8d8ae58b172a16aca3661cbf84",
+  "exit": 101,
+  "restored": true
+}

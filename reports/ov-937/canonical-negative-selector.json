@@ -1,0 +1,8 @@
+{
+  "mode": "selector",
+  "source": "crates/daemon/src/paths.rs",
+  "before": "fe612b79719e637752737c20fc424fec882976ebca9f74176252844a574e3d4d",
+  "mutant": "06fb4ab5a24207734fcc9183880e752f9f49bb3eb7bbe8694b40d49e98b240db",
+  "exit": 101,
+  "restored": true
+}

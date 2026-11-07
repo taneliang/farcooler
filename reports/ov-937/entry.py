@@ -8,12 +8,17 @@ assert os.environ.get('HEAVY_LOCK_HELD')=='1'
 prior=json.loads((root/'reports/ov-928/security-green.json').read_text())
 assert Path(prior['target'])==target and prior['exit']==0 and prior['source_unchanged']
 probes={}
+profile_env={key:os.environ.get(key) for key in ['CARGO_PROFILE_DEV_DEBUG','CARGO_PROFILE_TEST_DEBUG','CARGO_INCREMENTAL','CARGO_BUILD_JOBS']}
+assert profile_env=={'CARGO_PROFILE_DEV_DEBUG':'0','CARGO_PROFILE_TEST_DEBUG':'0','CARGO_INCREMENTAL':'0','CARGO_BUILD_JOBS':'6'}
+
 for profile in ['debug','release','aarch64-linux-android/debug','wasm32-unknown-unknown/debug']:
     lock=target/profile/'.cargo-lock'
     if not lock.exists(): continue
     result=subprocess.run(['/usr/sbin/lsof','-t',str(lock)],capture_output=True,text=True)
-    assert result.returncode==1 and not result.stdout.strip() and not result.stderr.strip(), 'cargo cache occupied or probe failed'
     probes[profile]={'exit':result.returncode,'out':result.stdout,'err':result.stderr}
+with (root/'reports/ov-937/preflight.jsonl').open('a') as out:
+    out.write(json.dumps({'time':time.time(),'target':str(target),'canonical_fifo':str(Path(tempfile.gettempdir())/'lane-gate.lock'),'python':sys.executable,'machine':platform.machine(),'profiles':probes,'profile_env':profile_env,'load':os.getloadavg()})+'\n')
+assert probes and all(v['exit']==1 and not v['out'].strip() and not v['err'].strip() for v in probes.values()), 'cargo cache occupied or probe failed'
 probe=result
 assert os.getloadavg()[1]<20
 # Relative dep-info in a shared target can otherwise accept a newer library

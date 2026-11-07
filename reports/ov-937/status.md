@@ -1,3 +1,19 @@
+# ov-937 ready for SAME security/ports review
+
+Product source remains signed e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2 on frozen fae3f30d0c3d1c475f9dc4463243f293fd88b007. This evidence-only continuation makes no product edits. See source-contract.md, final-callers.md, startup-handoff.md and seal.json.
+
+Corrected canonical-FIFO validation is complete: daemon/CLI all-target compile0; old unconditional-binding and invalid-selector controls each intended assertion exit101, exact bytes restored; 16 restored selected case executions / 14 distinct tests pass; daemon/CLI all-target clippy with -D warnings0; file-size budget and diff check pass. validation-summary.json verifies expected exits, source-before/after equality, restoration hashes, native arm64 preflights, original923 actual empty Cargo holders/profile000/jobs6/offline/load5<20/10GiB reserve/1800s supervised bounds. Logs show normal waiting behind936/938, with no preemption or alternate target. No automatic retry, cleanup, owner data or main/app/provider startup.
+
+Coverage: pure explicit/default/non-Unicode/malformed selection; invalid refusal before socket-directory effects; normal private Service credential/account/home/login/log bindings; direct private fence migration/caps/empty allowlist/revocation/session closure; unchanged installed path and log-root precedence; current CLI shared-selector API parity. CLI main and installed matched binaries were not launched. cli_binary retains sibling-candidate search and existing channel-command fallback; no fake sibling was supplied.
+
+Current acceptance: implementation and finite private evidence for items1–3 are ready for independent review. Item4's affected compile/tests/clippy/size and signed source/evidence are supplied; SAME independent ports/security review is pending. Task goes to in_review, with no composition or actual-main approval. Source reservation handoff for936 is documented, including stream and standalone-stdio Service callers that bypass a normal-run-only guard; no cutoverguard implemented here.
+
+Mandatory private FARCOOLER_CONFIG and CLAUDE_CONFIG_DIR, physical canonical/owned/fresh0700/no-symlink root preconditions, and no-terminal/provider limits remain. FARCOOLER_HOME alone is not confinement proof. Parent still owes reviewed933/938 correction composition, exact rebuilt binaries/native links, complete private launch procedure, real platform proof and owner cutover gates.
+
+---
+
+## Preserved initial signed handoff and failed setup history
+
 # ov-937 signed source handoff — validation allocation pending
 
 Frozen base fae3f30d0c3d1c475f9dc4463243f293fd88b007; isolated branch ov-937-explicit-runtime-root. Runtime selection/path binding only; notice code, inventory, Store schema and auth ceilings unchanged. See source-contract.md and callers.md.

@@ -28,3 +28,11 @@ See `callers.md` for exact file:line API/caller/effect anchors. `compile.log/jso
 ## Validation harness correction
 
 The initial harness wrongly exported TMPDIR=/private/tmp before scripts/heavy. heavy_lock.py:179 resolves its machine-wide lock using tempfile.gettempdir(), so this forked the lock namespace. The later occupied-target refusal exposed the error. Prior compile/test/mutation outputs are preserved historical execution evidence, **not credited as normal exclusive FIFO evidence or sandbox capability proof**. No foreign process was killed and no cache was cleaned. The corrected harness preserves native TMPDIR; socket fixtures use explicit canonical short TempDirs under /tmp. Orchestrator authorization is pending before any corrected pass. No automatic retry.
+
+## Exact unchanged CLI fallback
+
+`service.rs:52-64 cli_binary(current_exe)` searches existing channel CLI candidates beside the current executable (and the existing test-stub harness rule where applicable), then falls back to the existing channel command name if no sibling exists. Both normal selected branches call this unchanged function. It does not guarantee an absolute existing binary in a library test harness. This delta neither creates a fake sibling nor proves the parent's future rebuilt binary identity; parent still owes exact sibling binaries/native links. The private CLI parity test exercises the shared selector API without spawning CLI/main.
+
+## Corrected validation completion
+
+Manager note9e4e8d56 confirms the existing private allocation stands; no further grant was required. All corrected canonical-FIFO compile, two safe controls, restored tests, clippy and size checks completed with their expected exits and unchanged source. See validation-summary.json and canonical-* logs/JSON. Historical pending/refused states above are retained as history, not current claims. SAME independent review and all parent integration/platform/launch gates remain open. Product bytes are unchanged from signed e1203d8c6.

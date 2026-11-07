@@ -1,0 +1,81 @@
+{
+  "source_pin": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+  "product_unchanged_from_source_pin": true,
+  "canonical_fifo": "/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/lane-gate.lock",
+  "results": {
+    "canonical-compile": {
+      "exit": 0,
+      "seconds": 34.382680792,
+      "minimum_free": 23750635520,
+      "head": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+      "source_unchanged": true
+    },
+    "canonical-red-binding": {
+      "exit": 101,
+      "seconds": 58.567638583,
+      "minimum_free": 23600828416,
+      "head": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+      "source_unchanged": true
+    },
+    "canonical-red-selector": {
+      "exit": 101,
+      "seconds": 60.592452583000004,
+      "minimum_free": 23609167872,
+      "head": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+      "source_unchanged": true
+    },
+    "canonical-restored": {
+      "exit": 0,
+      "seconds": 126.9726795,
+      "minimum_free": 23596556288,
+      "head": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+      "source_unchanged": true
+    },
+    "canonical-lint": {
+      "exit": 0,
+      "seconds": 58.546233209,
+      "minimum_free": 23712899072,
+      "head": "e1203d8c6bbeb4bf7eaecb51a08fd0ab2c6884e2",
+      "source_unchanged": true
+    }
+  },
+  "mutations": {
+    "binding": {
+      "mode": "binding",
+      "source": "crates/daemon/src/runtime_selection.rs",
+      "before": "134284fdf9cf9980123c547bd8c1ed4820bb383dc89562179e4772d6dc209bce",
+      "mutant": "21361c797f2706c07a35339f2848e1bc4d6a9b8d8ae58b172a16aca3661cbf84",
+      "exit": 101,
+      "restored": true
+    },
+    "selector": {
+      "mode": "selector",
+      "source": "crates/daemon/src/paths.rs",
+      "before": "fe612b79719e637752737c20fc424fec882976ebca9f74176252844a574e3d4d",
+      "mutant": "06fb4ab5a24207734fcc9183880e752f9f49bb3eb7bbe8694b40d49e98b240db",
+      "exit": 101,
+      "restored": true
+    }
+  },
+  "test_executions": 16,
+  "distinct_tests": [
+    "log_watch::tests::a_codex_home_elsewhere_is_a_root",
+    "log_watch::tests::the_runners_claude_dir_is_the_claude_root",
+    "paths::tests::a_channel_directory_is_a_sibling_never_a_child",
+    "paths::tests::a_different_install_gets_a_different_id",
+    "paths::tests::an_empty_install_id_file_is_regenerated",
+    "paths::tests::each_channel_gets_its_own_runtime_directory",
+    "paths::tests::install_id_is_stable_across_calls",
+    "paths::tests::runtime_selection_explicit_default_and_pre_effect_refusal",
+    "paths::tests::runtime_selection_refuses_before_socket_directory_effects",
+    "paths::tests::stable_keeps_the_directory_it_has_always_had",
+    "runtime_selection_tests::runtime_selection_cli_uses_the_shared_validated_capture",
+    "service::runtime_selection_tests::runtime_selection_default_binding_keeps_installed_precedence_without_opening_it",
+    "service::runtime_selection_tests::runtime_selection_normal_explicit_start_keeps_private_paths",
+    "service::runtime_selection_tests::runtime_selection_private_fence_migration_caps_allowlist_and_revoke"
+  ],
+  "file_size_budget": "passed in canonical-restored.log",
+  "diff_check_exit": 0,
+  "independent_review": "pending SAME ports/security reviewer",
+  "historical_execution": "initial forked-TMPDIR outputs retained but not credited as canonical FIFO or capability proof"
+}
