@@ -36,7 +36,7 @@ struct Oid { oid: String }
 struct Review {
     #[serde(default)] author: Option<Author>,
     state: String,
-    #[serde(rename = "submittedAt", default)] submitted: String,
+    #[serde(rename = "submittedAt", default)] submitted: Option<String>,
     #[serde(default)] commit: Option<Oid>,
 }
 #[derive(Clone, Debug, Deserialize)]

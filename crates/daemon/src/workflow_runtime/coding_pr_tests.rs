@@ -473,3 +473,15 @@ fn the_parser_reads_what_gh_really_prints() {
     assert!(!super::coding_pr::changes_requested_for_test(REAL, 14519, "61c9b23fa405a2c3f677ffa921d9bb32a4b3786f"));
     assert_eq!(prs.iter().filter(|p| p.2).count(), 2, "two come from forks");
 }
+
+#[test]
+fn a_pending_review_with_no_submission_time_does_not_blank_the_list() {
+    // gh prints `"submittedAt": null` for a review its author has begun and not sent.
+    let one = |reviews: &str| format!(r#"[{{"number":3,"state":"OPEN","isDraft":false,"headRefName":"farcooler/x","headRefOid":"{c}","mergeCommit":null,
+        "baseRefName":"main","isCrossRepository":false,"reviews":{reviews}}}]"#, c = "a".repeat(40));
+    let pending = r#"[{"author":{"login":"me"},"state":"PENDING","submittedAt":null,"commit":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+        {"author":{"login":"them"},"state":"CHANGES_REQUESTED","submittedAt":"2026-11-02T00:00:00Z","commit":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]"#;
+    let bytes = one(pending).into_bytes();
+    assert_eq!(super::coding_pr::parse_for_test(&bytes).map(|p| p.len()), Some(1), "the list still reads");
+    assert!(super::coding_pr::changes_requested_for_test(&bytes, 3, &"a".repeat(40)), "and the standing request still counts");
+}
