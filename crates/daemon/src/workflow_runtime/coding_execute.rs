@@ -93,7 +93,11 @@ impl Exec {
                     let mut command = process.clone();
                     command.argv = vec!["/bin/sh".into(), "-c".into(), launch];
                     #[cfg(test)]
-                    if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) { command.argv = argv; }
+                    if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) {
+                        command.argv = argv;
+                        // The fake agent reports what it was launched with, as a real one would, so the turn check can't drift.
+                        command.environment.insert("TEST_LAUNCHED_PROMPT".into(), Self::briefed(prompt, &binding.effect.item));
+                    }
                     command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());
                     command.environment.entry("COLORTERM".into()).or_insert_with(|| "truecolor".into());
                     command.environment.insert("FARCOOLER_NATIVE_SESSION".into(), Self::native_session(binding));
@@ -113,7 +117,7 @@ impl Exec {
     }
     /// The published prompt, led by the card this run is for. The card's own words are read by the agent
     /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
-    fn briefed(prompt: &str, item: &str) -> String {
+    pub(super) fn briefed(prompt: &str, item: &str) -> String {
         format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.\n\n{prompt}")
     }
     /// Context wins over command environment and is pinned in the process fact.

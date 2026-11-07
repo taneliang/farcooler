@@ -173,7 +173,8 @@ impl Exec {
             if session.as_ref() != Some(sid) { continue; }
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 let Some(CodingConfig { harness: CodingHarness::Native { prompt, .. }, .. }) = &self.coding else { unreachable!() };
-                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(prompt.as_str()) { prompted = true; }
+                // What the agent was launched with is the briefed prompt, so that is what its hook reports.
+                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(Self::briefed(prompt, &binding.effect.item).as_str()) { prompted = true; }
             }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
             hooks.push(line);
@@ -295,7 +296,7 @@ def hook(event, sid=session, cwd=os.getcwd(), **extra):
         s.sendall((json.dumps(dict(agent=agent, event=event, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
         assert s.recv(64).strip() == b'{}'
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
-hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt='implement the selected task')
+hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=os.environ['TEST_LAUNCHED_PROMPT'])
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
 if mode == 'barrier':
     d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
