@@ -425,7 +425,7 @@ async fn a_person_takes_a_real_runner_from_prepare_to_ordinary_service() {
     answering(&runner.socket()).await;
     as_a_person(&runner, r#"{"op":"Prepare","attempt":"real"}"#).await.expect("the live daemon holds and stops");
     let status = tokio::time::timeout(Duration::from_secs(20), live.wait()).await.expect("it stops").unwrap();
-    assert!(status.success(), "{status:?}");
+    assert_eq!(status.code(), Some(farcooler_daemon::rpc::recovery::RESTART_EXIT), "a supervisor restarts only a failure: {status:?}");
     assert!(runner.artifacts().join("hold.json").is_file());
 
     let mut recovery = runner.daemon().spawn().unwrap();

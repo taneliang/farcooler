@@ -494,7 +494,11 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     if let Err(error) = &workflow_stop { tracing::error!(%error, "workflow shutdown failed"); }
     service.end_sign_ins();
     let _ = std::fs::remove_file(&socket);
-    result.and(workflow_stop.map_err(|_| 1))
+    let result = result.and(workflow_stop.map_err(|_| 1));
+    if result.is_ok() && farcooler_daemon::cutover_admin::STOPPED_FOR_PREPARE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(farcooler_daemon::rpc::recovery::RESTART_EXIT);
+    }
+    result
 }
 
 /// Write one terminal's live output to stdout until the pane goes away.

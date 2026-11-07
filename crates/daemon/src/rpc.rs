@@ -805,6 +805,7 @@ impl Rpc {
                         let held = crate::cutover_admin::hold(svc, attempt, || admission.recheck_now()
                             .map_err(|_| crate::cutover_admin::Refused("the caller lost access during the drain".into()))).await;
                         let stop = self.stop.clone();
+                        crate::cutover_admin::STOPPED_FOR_PREPARE.store(true, std::sync::atomic::Ordering::SeqCst);
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                             stop.notify_one();

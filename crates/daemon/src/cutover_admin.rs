@@ -8,6 +8,12 @@ use farcooler_protocol::workflow_cutover::Cutover;
 use farcooler_store::engine_cutover::{JoinedOwners, boundary, closing, owners, startup, transfer};
 use serde_json::{Value, json};
 
+/// Set by a live Prepare, which stops the daemon whether or not it held the
+/// runner: launchd and systemd restart only a failure, so the stop exits with
+/// `rpc::recovery::RESTART_EXIT` and the supervisor starts what comes next
+/// (recovery after a hold, ordinary service after a refusal).
+pub static STOPPED_FOR_PREPARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug)]
 pub struct Refused(pub String);
 impl std::fmt::Display for Refused { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
