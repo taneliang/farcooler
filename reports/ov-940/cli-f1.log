@@ -1,0 +1,31 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/agent-core)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+   Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/cli)
+    Finished `test` profile [unoptimized] target(s) in 21.29s
+     Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler-1b8aef9ed6419893)
+
+running 7 tests
+test workflow::bundle_tests::workflow_bundle_file_closed_schema_and_bounded_inputs ... ok
+test workflow::tests::workflow_cli_emit_receipt_fixture ... ignored, requires private ov-941 seeded receipt fixture
+test workflow::tests::workflow_legacy_review_bytes_stay_unchanged ... ok
+test workflow::tests::workflow_real_producer_parser_fixture_roundtrip_and_bounds ... ok
+test workflow::tests::workflow_reasoned_cli_keeps_reason_and_identity ... ok
+test workflow::tests::workflow_removed_artifact_syntax_fails_at_parser ... ok
+test workflow_cutover::tests::cutover_cli_produces_only_the_closed_vocabulary ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 594 filtered out; finished in 0.02s
+
+
+exit=0, stopped=None

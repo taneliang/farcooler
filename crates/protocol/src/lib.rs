@@ -234,6 +234,7 @@ pub mod accepts {
 }
 
 pub mod workflow_commands;
+pub mod workflow_cutover;
 
 /// Named per user-visible FEATURE, not per method. A client asks "does this
 /// runner do stacks", never "does it implement stack.set_parent".
@@ -1031,6 +1032,7 @@ pub mod method {
         WorkflowApprove = "workflow.approve" => WORKFLOW_COMMANDS,
         WorkflowReview = "workflow.review" => WORKFLOW_COMMANDS,
         WorkflowCancel = "workflow.cancel" => WORKFLOW_COMMANDS,
+        WorkflowCutover = "workflow.cutover" => WORKFLOW_COMMANDS,
         LayoutViewport = "layout.viewport" => LAYOUT,
         LayoutPreset = "layout.preset" => LAYOUT,
         LayoutCycle = "layout.cycle" => LAYOUT,

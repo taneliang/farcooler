@@ -147,3 +147,11 @@ pub fn break_member_login_policy(store: &crate::Store) {
 pub fn break_revoked_marks(store: &crate::Store) {
     store.conn().execute_batch("DROP TABLE revoked_marks").unwrap();
 }
+
+/// Fixture-only: run one statement on the store's connection (no params).
+pub fn exec_for_tests(store: &crate::Store, sql: &str) { store.conn().execute(sql, []).unwrap(); }
+
+/// Fixture-only: the row count of `table`.
+pub fn count_rows_for_tests(store: &crate::Store, table: &str) -> i64 {
+    store.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+}

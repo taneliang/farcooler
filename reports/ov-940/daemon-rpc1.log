@@ -1,0 +1,47 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 32.76s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-2ab3a43642087497)
+
+running 24 tests
+test hook_ingress::tests::recovery_reports_every_refusal_the_quiet_covered ... ok
+test rpc::answer_tests::a_partial_answer_is_refused_by_name_and_the_question_stays_held ... ok
+test rpc::answer_tests::a_question_is_answered_over_the_rpc_with_its_answers ... ok
+test rpc::recovery::tests::recovery_daemon_answers_only_owner_cutover_ops_from_database_truth ... ok
+test rpc::revision_tests::a_moved_cursor_is_a_different_screen ... ok
+test rpc::revision_tests::different_contents_differ ... ok
+test rpc::revision_tests::the_same_screen_has_the_same_revision ... ok
+test rpc::revision_tests::zero_is_never_a_real_revision ... ok
+test rpc::terminal_task_tests::a_terminal_for_a_task_on_its_own_board_exports_the_key ... ok
+test rpc::terminal_task_tests::a_terminal_split_into_the_layout_for_a_task_exports_the_key ... ok
+test rpc::tests::a_lower_scope_cannot_reach_a_higher_method ... ok
+test rpc::tests::an_unknown_method_is_refused_rather_than_defaulted ... ok
+test rpc::tests::enrolling_a_device_requires_control_and_looking_does_not ... ok
+test rpc::tests::every_method_has_a_scope ... ok
+test rpc::tests::every_runner_setting_method_requires_host_admin ... ok
+test rpc::tests::reads_never_require_more_than_read ... ok
+test rpc::tests::scope_is_ordered_so_admin_can_do_everything ... ok
+test rpc::tests::the_board_reads_are_read_and_its_writes_are_control ... ok
+test rpc::tests::the_dangerous_methods_require_host_admin ... ok
+test rpc::tests::tiling_is_control_not_admin ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_inventory_recovery_without_store_write_and_unchanged_refresh_silence ... actual recovery-only native bytes, unchanged Store row: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpQbzLqH/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:1f197df0339e3025150849963f94d2a65374e85b36016a8d192a81b5a421747d\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:4b53e3299c94fb0bf8b310c3b856281dc315e2d3a2c9387ad598a3fd7f358fb4\",\"stage\":0,\"workspace\":\"01a1b566-96ce-70a0-84f9-937c16fce358\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test workflow_runtime::coding_native::recovery_tests::workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch ... ok
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 2710 filtered out; finished in 6.47s
+
+
+exit=0, stopped=None

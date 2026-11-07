@@ -1,0 +1,84 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+    Finished `test` profile [unoptimized] target(s) in 4.09s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_protocol-779e7337a25e3c31)
+
+running 72 tests
+test board_reads_tests::an_older_client_ignores_the_new_fields ... ok
+test board_reads_tests::read_state_holds_its_tags ... ok
+test board_reads_tests::read_state_is_one_advertised_capability_owning_its_write ... ok
+test build_identity::tests::a_dirty_tree_is_not_the_clean_commit ... ok
+test build_identity::tests::a_string_without_a_commit_matches_only_itself ... ok
+test build_identity::tests::different_commits_are_different_builds ... ok
+test build_identity::tests::one_commit_in_every_spelling_is_one_build ... ok
+test capability_tests::a_retired_capability_is_never_advertised_again ... ok
+test capability_tests::bring_here_is_served_behind_its_own_word ... ok
+test capability_tests::capability_names_are_unique ... ok
+test capability_tests::chat_modes_methods_are_retired ... ok
+test capability_tests::compose_is_served_and_says_what_it_takes ... ok
+test capability_tests::every_capability_a_method_names_is_one_this_build_advertises ... ok
+test capability_tests::every_method_round_trips_through_its_wire_name ... ok
+test capability_tests::passkey_keys_is_withheld_until_offered ... ok
+test capability_tests::the_interrupt_is_served_behind_its_own_word ... ok
+test cost_wire_tests::a_plan_with_cost_reads_the_same_to_an_older_app ... ok
+test cost_wire_tests::cost_holds_its_tags ... ok
+test cost_wire_tests::cost_is_an_advertised_capability_with_no_method_of_its_own ... ok
+test framing::tests::malformed_body_rejected ... ok
+test framing::tests::oversized_prefix_rejected_without_allocating ... ok
+test framing::tests::partial_frame_yields_none_and_keeps_bytes ... ok
+test framing::tests::round_trip ... ok
+test framing::tests::two_frames_in_one_buffer ... ok
+test framing::tests::zero_length_rejected ... ok
+test ids::tests::ids_are_time_ordered ... ok
+test ids::tests::round_trip ... ok
+test ids::tests::short_ids_distinguish_same_millisecond_ids ... ok
+test ids::tests::wrong_length_rejected ... ok
+test line_wire_tests::a_plan_with_the_line_reads_back_whole ... ok
+test line_wire_tests::the_line_holds_its_tags ... ok
+test line_wire_tests::the_line_is_one_advertised_capability_owning_every_method ... ok
+test page_wire_tests::a_whole_list_with_documents_fits_one_envelope ... ok
+test page_wire_tests::builds_before_pages_ignore_them ... ok
+test page_wire_tests::no_task_or_plan_message_carries_a_page ... ok
+test page_wire_tests::pages_are_one_advertised_capability_owning_every_method ... ok
+test page_wire_tests::pages_hold_their_tags ... ok
+test plan_layer_tests::builds_before_the_layer_ignore_it ... ok
+test plan_layer_tests::no_task_message_carries_the_layer ... ok
+test plan_layer_tests::the_layer_holds_its_tags ... ok
+test plan_layer_tests::the_layer_is_one_advertised_capability_owning_every_method ... ok
+test ruling_wire_tests::a_plan_with_rulings_reads_the_same_to_an_older_app ... ok
+test ruling_wire_tests::no_task_message_carries_a_ruling ... ok
+test ruling_wire_tests::rulings_are_one_advertised_capability ... ok
+test ruling_wire_tests::rulings_hold_their_tags ... ok
+test ruling_wire_tests::the_new_fields_are_skipped_by_older_readers ... ok
+test ruling_wire_tests::the_owner_s_marks_are_their_own_capability ... ok
+test ruling_wire_tests::the_owner_s_marks_hold_their_tags ... ok
+test task_starts_tests::waits_and_workers_are_two_advertised_capabilities ... ok
+test task_starts_tests::waits_and_workers_hold_their_tags ... ok
+test tests::a_channel_round_trips_through_its_name ... ok
+test tests::a_lookup_prefers_this_channels_name_over_the_bare_one ... ok
+test tests::an_absent_block_reason_is_absent_on_the_wire_and_an_empty_one_is_not ... ok
+test tests::an_unknown_channel_is_local_not_stable ... ok
+test tests::an_unknown_method_names_no_capability ... ok
+test tests::each_channel_has_its_own_binary_name ... ok
+test tests::every_channel_also_answers_to_the_name_cargo_gives_it ... ok
+test tests::needs_you_list_is_gated_on_its_own_advertised_capability ... ok
+test tests::needs_you_takes_fresh_tags ... ok
+test tests::notice_task_is_advertised ... ok
+test tests::release_binaries_keep_their_bare_names ... ok
+test tests::renamed_messages_keep_their_field_numbers ... ok
+test tests::report_takes_fresh_tags ... ok
+test tests::stable_looks_for_exactly_one_name ... ok
+test tests::terminal_names_and_ports_take_fresh_tags ... ok
+test tests::the_floor_capabilities_are_always_present ... ok
+test tests::the_stamped_channel_is_one_of_the_four ... ok
+test tests::workspace_additions_take_fresh_tags ... ok
+test tests::workstreams_is_not_the_frozen_worktrees_word ... ok
+test workflow_commands::tests::workflow_reasoned_wire_preserves_legacy_and_refuses_unknown_fields ... ok
+test workflow_commands::tests::workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields ... ok
+test workflow_cutover::tests::cutover_vocabulary_is_closed_and_carries_no_authority ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+
+exit=0, stopped=None

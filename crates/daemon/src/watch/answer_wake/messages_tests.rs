@@ -339,3 +339,42 @@ async fn no_message_is_tagged_as_the_owners() {
     si.submits(1).await;
     assert_eq!(si.submitted(), ["[from the terminal] Hello"], "{}", si.log());
 }
+
+/// End to end across a cutover: a message queued before it stays inert history,
+/// and a fresh manual message sent after restart is told exactly once.
+///
+/// The released phase is set by SQL on the frozen file, standing in for the
+/// store's commit and release (covered by the store's own cutover tests); the
+/// join, the atomic transfer, the gate and the delivery pump are the real ones.
+#[tokio::test]
+async fn a_manual_message_after_cutover_is_told_once_and_the_old_queue_stays_inert() {
+    let b = board().await;
+    let orchestrator = b.orchestrator().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let agent = b.agent("Agent 2", "claude").await;
+    b.send(&agent_actor(&agent), "orchestrator", "queued before cutover").await.unwrap();
+    assert_eq!(b.messages().len(), 1);
+    let db = b.svc.root_dir().join("farcooler.db");
+    let protected = b.svc.store.engine_protected_resources().unwrap();
+    let owners = b.svc.join_writers("e2e", &db, &protected).await.unwrap();
+    let (frozen, _plan) = farcooler_store::engine_cutover::transfer::begin(&db, &owners).unwrap();
+    farcooler_store::testing::exec_for_tests(&frozen, "UPDATE engine_cutover_authority SET phase='released', incarnation=1");
+    farcooler_store::engine_cutover::transfer::finish(&db, &frozen).unwrap();
+    drop(frozen);
+    let Board { dir, svc, watcher, lane, task } = b;
+    drop(watcher);
+    let root = svc.root_dir().to_path_buf();
+    drop(svc);
+    let svc = Arc::new(Service::open_in(root).await.expect("released engine is admitted by the gate"));
+    let b = Board { dir, watcher: Watcher::new(svc.clone()), svc, lane, task };
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    assert!(b.messages().is_empty(), "the pre-cutover message is not pending");
+    b.pump().await;
+    assert!(si.submitted().is_empty(), "and is never told: {}", si.log());
+    b.send(&agent_actor(&agent), "orchestrator", "fresh manual").await.unwrap();
+    b.pump_until_submits(&si, 1).await;
+    b.pump().await;
+    assert_eq!(si.submitted(), [format!("[from {}] fresh manual", b.task.key)], "{}", si.log());
+    let rows: i64 = farcooler_store::testing::count_rows_for_tests(&b.svc.store, "message_wakes");
+    assert_eq!(rows, 2, "the old row is retained beside the fresh one");
+}

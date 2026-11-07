@@ -96,3 +96,31 @@ pub fn begin(db: &Path, owners: &JoinedOwners) -> Result<(Store, Preflight)> {
     let store = Store::from_engine_cutover_connection(conn).map_err(|e| Error::Refused(e.to_string()))?;
     Ok((store, plan))
 }
+
+/// Terminal disposition: only after DB truth shows this attempt's baseline was
+/// verified and released does the intent stop blocking ordinary startup. The
+/// evidence directory is renamed, never deleted, and never reused.
+pub fn finish(db: &Path, store: &Store) -> Result<PathBuf> {
+    let (baseline, _) = validate_artifacts(db)?;
+    let authority = store.engine_authority()?;
+    if authority.phase != "released" || authority.manifest.as_deref() != Some(baseline.raw_hash.as_str()) {
+        return refuse("attempt is not verified and released against its baseline");
+    }
+    let dir = artifact_dir(db);
+    let mut done = dir.as_os_str().to_owned();
+    done.push(format!("-resolved-{}", baseline.attempt));
+    let done = PathBuf::from(done);
+    fs::rename(&dir, &done)?;
+    if let Some(parent) = db.parent() { sync_dir(parent)?; }
+    Ok(done)
+}
+
+/// The plan recomputed from the ORIGINAL baseline copy, after validating the
+/// artifacts; recovery never recaptures upgraded rows as the raw source.
+pub fn baseline_plan(db: &Path) -> Result<(Baseline, Preflight)> {
+    let (baseline, _) = validate_artifacts(db)?;
+    let ro = Connection::open_with_flags(artifact_dir(db).join(BASELINE_DB), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let plan = preflight(&ro)?;
+    if plan.raw.hash() != baseline.raw_hash { return refuse("baseline no longer matches its recorded raw hash"); }
+    Ok((baseline, plan))
+}

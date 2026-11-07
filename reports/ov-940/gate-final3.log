@@ -1,0 +1,25 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 8.18s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 11 tests
+test engine_cutover::tests::manual_delivery::manual_binding_cannot_be_forged_for_a_stale_incarnation_or_before_release ... ok
+test engine_cutover::tests::manual_delivery::manual_delivery_is_fresh_bound_and_never_revives_old_queue_rows ... ok
+test engine_cutover::tests::manual_delivery::notice_eligibility_floor_keeps_retained_pending_history_out_of_the_consumer ... ok
+test engine_cutover::tests::startup_gate::owner_join_issues_nothing_for_a_stuck_or_missing_owner ... ok
+test engine_cutover::tests::startup_gate::startup_gate_fresh_requires_proven_absence_and_empty_files_are_not_fresh ... ok
+test engine_cutover::tests::startup_gate::startup_gate_refuses_missing_floor_and_frozen_authority_but_recovery_reaches_them ... ok
+test engine_cutover::tests::startup_gate::startup_gate_refuses_pre_cutover_schema_without_writing_a_byte ... ok
+test engine_cutover::tests::startup_gate::transfer_baseline_tamper_and_foreign_proof_are_refused ... ok
+test engine_cutover::tests::startup_gate::transfer_finish_needs_a_released_attempt_and_keeps_the_evidence ... ok
+test engine_cutover::tests::startup_gate::transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_atomically ... ok
+test engine_cutover::tests::startup_gate::transfer_upgrade_failure_rolls_back_whole_and_keeps_the_intent ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 538 filtered out; finished in 2.33s
+
+
+exit=0, stopped=None

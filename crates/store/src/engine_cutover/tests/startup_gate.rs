@@ -129,3 +129,17 @@ fn old_reader_fixture_writes_source_and_begun_databases() {
     drop(transfer::begin(&path, &join_db(&path, "old-reader")).unwrap());
     std::fs::rename(&path, out.join("begun.sqlite")).unwrap();
 }
+
+#[test]
+fn transfer_finish_needs_a_released_attempt_and_keeps_the_evidence() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = source65(tmp.path());
+    let (store, _plan) = transfer::begin(&path, &join_db(&path, "fin")).unwrap();
+    assert!(transfer::finish(&path, &store).is_err(), "quiesced is not released");
+    store.conn().execute("UPDATE engine_cutover_authority SET phase='released'", []).unwrap();
+    let kept = transfer::finish(&path, &store).unwrap();
+    assert!(kept.join("baseline.db").exists() && !artifact_dir(&path).exists());
+    assert!(ordinary_admission(&path).is_ok());
+    let (store2, _) = (open_recovery(&path).unwrap(), ());
+    assert!(transfer::finish(&path, &store2).is_err(), "no second disposition");
+}

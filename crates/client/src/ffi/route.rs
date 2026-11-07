@@ -17,7 +17,7 @@ use farcooler_protocol::method::Method;
 /// allowed; forgetting is not. `every_route_has_an_arm` then calls each name.
 pub(super) fn route(method: Method) -> Option<&'static str> {
     match method {
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowReview => None,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowCutover | Method::WorkflowReview => None,
         // An arm under its own wire name.
         Method::HostHealth
         | Method::DaemonVersion

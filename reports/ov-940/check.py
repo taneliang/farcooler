@@ -11,7 +11,7 @@ args = {
     'verified': [],
     'controls': [],
     'notices': ['test','--offline','-p','farcooler-daemon','--lib','workflow_notice','--','--nocapture'],
-    'lint-both': ['clippy','--offline','-p','farcooler-store','-p','farcooler-daemon','--all-targets','--','-D','warnings'],
+    'lint-both': ['clippy','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-protocol','-p','farcooler-cli','--all-targets','--','-D','warnings'],
     'old-reader': [],
     'cli': [],
     'final': [],
@@ -29,6 +29,8 @@ args = {
     'compile-all': ['check','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-cli','--all-targets'],
     'daemon': ['test','--offline','-p','farcooler-daemon','--lib'],
     'daemon-f': ['test','--offline','-p','farcooler-daemon','--lib','--',*os.environ.get('OV940_FILTERS','').split(),'--nocapture'],
+    'protocol': ['test','--offline','-p','farcooler-protocol','--lib'],
+    'cli-f': ['test','--offline','-p','farcooler-cli','--bin','farcooler','--','workflow'],
     'lint': ['clippy','--offline','-p','farcooler-store','--all-targets','--','-D','warnings'],
 }[mode]
 env = {**os.environ, 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Users/e-liang/.cargo/bin',

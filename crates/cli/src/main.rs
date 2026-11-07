@@ -87,6 +87,7 @@ mod tasks;
 mod workspaces;
 mod workspace_settings;
 mod workflow;
+mod workflow_cutover;
 mod repo_landing;
 mod repo_survey;
 mod worktree_lfs;
@@ -190,6 +191,9 @@ enum Command {
     /// Control an explicitly configured workflow.
     #[command(subcommand)]
     Workflow(workflow::WorkflowCmd),
+    /// Engine authority cutover steps (owner only; see `workflow-cutover --help`).
+    #[command(subcommand)]
+    WorkflowCutover(workflow_cutover::CutoverCmd),
     /// What a worktree changed.
     #[command(subcommand)]
     Changes(changes::ChangesCmd),
@@ -1252,6 +1256,7 @@ async fn run() -> Fallible {
         Command::Settings(c) => settings(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
         Command::Workflow(c) => workflow::workflow(runner, c, cli.json).await,
+        Command::WorkflowCutover(cmd) => workflow_cutover::run(runner, cmd, cli.json).await,
         Command::Workspace(c) => workspaces::workspace(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
         Command::Files(c) => files::files(runner, c, cli.json).await,

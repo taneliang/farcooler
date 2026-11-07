@@ -19,6 +19,19 @@ impl OwnedWriter for Joined {
     fn close_and_join(&mut self) -> Result<String, String> { Ok(self.receipt.clone()) }
 }
 
+/// Proof for a recovery process that started no writer of its own and holds the
+/// daemon lock. It says nothing about processes outside this one.
+pub(crate) fn recovery_proof(attempt: &str, db: &std::path::Path, protected: &BTreeSet<String>) -> Result<JoinedOwners, String> {
+    let incarnation = format!("recovery:{}", std::process::id());
+    let mut join = OwnerJoin::new(attempt);
+    for identity in farcooler_store::engine_cutover::REQUIRED_OWNERS {
+        let resources = if identity == "workflow-owner" { protected.clone() } else { BTreeSet::new() };
+        join.retain(Box::new(Joined { identity, incarnation: incarnation.clone(), resources,
+            receipt: format!("{identity}: recovery process started no writer") }));
+    }
+    join.join(db, protected).map_err(|e| e.to_string())
+}
+
 impl Service {
     /// Admission for a writer spawned outside this crate's library (the binary's helpers).
     pub fn admit_writer(&self, identity: &'static str) -> Result<crate::writer_gate::Ticket, crate::writer_gate::Closed> { self.writers.admit(identity) }
