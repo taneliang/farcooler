@@ -25,6 +25,7 @@ args = {
     'groups': ['test','--offline','-p','farcooler-daemon','--lib','workflow_runtime_','--','--nocapture'],
     'compile': ['check','--offline','-p','farcooler-store','--all-targets'],
     'affected': ['test','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-cli','workflow_','--','--nocapture'],
+    'gate': ['test','--offline','-p','farcooler-store','--lib','--','startup_gate_','transfer_','owner_join_','--nocapture'],
     'lint': ['clippy','--offline','-p','farcooler-store','--all-targets','--','-D','warnings'],
 }[mode]
 env = {**os.environ, 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Users/e-liang/.cargo/bin',

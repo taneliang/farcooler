@@ -1,7 +1,14 @@
 //! Explicit fresh PRIVATE synthetic admin workflow; no installed-path fallback.
 use std::collections::BTreeSet;
 use farcooler_store::{Store, Actor};
-use farcooler_store::engine_cutover::{preflight, Quiescence, StoppedWriter};
+use farcooler_store::engine_cutover::{preflight, OwnedWriter, OwnerJoin, Quiescence, StoppedWriter};
+struct Unstarted(String);
+impl OwnedWriter for Unstarted {
+    fn identity(&self)->String {self.0.clone()}
+    fn incarnation(&self)->String {"synthetic-not-started".into()}
+    fn resources(&self)->BTreeSet<String> {BTreeSet::new()}
+    fn close_and_join(&mut self)->Result<String,String> {Ok("owned executable never started any writer child".into())}
+}
 use farcooler_store::engine_cutover::rehearsal::{PrivateRehearsal, JournalEntry};
 
 fn main() -> Result<(),Box<dyn std::error::Error>> {
@@ -23,11 +30,13 @@ fn main() -> Result<(),Box<dyn std::error::Error>> {
     let inventory:BTreeSet<String>=["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"].into_iter().map(str::to_owned).collect();
     let proof=Quiescence {stopped:inventory.iter().map(|identity|StoppedWriter {identity:identity.clone(),incarnation:"synthetic-not-started".into(),joined_receipt:"owned executable never started any writer child".into(),resources:BTreeSet::new()}).collect(),inventory,protected_resources:BTreeSet::new()};
     private.record(0,&JournalEntry {attempt:"cli".into(),stage:"prepared".into(),evidence:plan.raw.hash()})?;
-    store.engine_quiesce(&proof)?;drop(store);
+    let mut join=OwnerJoin::new("cli");for name in &proof.inventory {join.retain(Box::new(Unstarted(name.clone())));}
+    let owners=join.join(&path,&BTreeSet::new())?;
+    store.engine_quiesce(&owners)?;drop(store);
     let backup=private.backup("baseline")?;
     let permit=private.commit_permit(&plan,&proof,"cli","baseline",&backup,1)?;
-    let store=Store::open(&path)?;
-    let authority=store.engine_commit(&plan,&proof,&permit)?;store.engine_verify(&plan)?;
+    let store=farcooler_store::engine_cutover::startup::open_recovery(&path)?;
+    let authority=store.engine_commit(&plan,&owners,&permit)?;store.engine_verify(&plan)?;
     private.record(2,&JournalEntry {attempt:"cli".into(),stage:"verified".into(),evidence:serde_json::to_string(&authority)?})?;
     drop(store);
     let restored=private.restore("baseline","independent-restore",&backup)?;

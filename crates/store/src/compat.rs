@@ -274,7 +274,7 @@ mod tests {
             tx.commit().unwrap();
         }
 
-        let store = Store::open(&path).expect("main's newest schema opens here");
+        let store = Store::open_fixture(&path).expect("main's newest schema opens here");
         drop(store);
         let conn = Connection::open(&path).unwrap();
         assert_eq!(read_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION, "migrated on past ov-212's waits");
@@ -297,7 +297,7 @@ mod tests {
         let dir = farcooler_core::scratch::dir("newer");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("store.db");
-        drop(Store::open(&path).unwrap());
+        drop(Store::open_fixture(&path).unwrap());
         let conn = Connection::open(&path).unwrap();
         conn.execute("UPDATE meta SET value = ?1 WHERE key = 'schema_version'", [schema.to_string()])
             .unwrap();
@@ -320,7 +320,7 @@ mod tests {
         let newer = CURRENT_SCHEMA_VERSION + 1;
         let path = database_left_by_a_newer_build(newer, None);
 
-        let err = Store::open(&path).err().expect("a newer schema must not open");
+        let err = Store::open_fixture(&path).err().expect("a newer schema must not open");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(
             err.redacted_message(),
@@ -339,7 +339,7 @@ mod tests {
         let current = CURRENT_SCHEMA_VERSION;
         let path = database_left_by_a_newer_build(current + 2, Some(current));
 
-        Store::open(&path).expect("a newer schema compatible down to this build opens");
+        Store::open_fixture(&path).expect("a newer schema compatible down to this build opens");
         let conn = Connection::open(&path).unwrap();
         assert_eq!(read_schema_version(&conn).unwrap(), current + 2);
         assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(current));
@@ -352,7 +352,7 @@ mod tests {
         let current = CURRENT_SCHEMA_VERSION;
         let path = database_left_by_a_newer_build(current + 2, Some(current + 1));
 
-        let err = Store::open(&path).err().expect("refused");
+        let err = Store::open_fixture(&path).err().expect("refused");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
@@ -368,7 +368,7 @@ mod tests {
             assert_eq!(read_compatible_down_to(&conn).unwrap(), None);
         }
 
-        drop(Store::open(&path).unwrap());
+        drop(Store::open_fixture(&path).unwrap());
         let conn = Connection::open(&path).unwrap();
         assert_eq!(
             read_compatible_down_to(&conn).unwrap(),

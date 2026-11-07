@@ -58,9 +58,10 @@ impl Store {
     pub fn engine_verify(&self,plan:&Preflight) -> Result<()> { check(plan,&self.conn()) }
     /// Explicit private-admin release after bootstrap has supplied joined-writer
     /// proof. Scoped unknown effects stay quarantined; unknown schema blocks all.
-    pub fn engine_release(&self,plan:&Preflight,proof:&Quiescence) -> Result<()> {
-        proof.validate()?;
+    pub fn engine_release(&self,plan:&Preflight,owners:&super::JoinedOwners) -> Result<()> {
+        owners.evidence().validate()?;
         let mut conn=self.conn();
+        owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if authority(&tx)?.phase!="committed" { return refuse("not a committed authority"); }
         check(plan,&tx)?;

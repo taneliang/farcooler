@@ -3006,7 +3006,7 @@ mod prefixless_boards {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("db.sqlite3");
         schema_11_database(&path);
-        let store = Store::open(&path).expect("a schema-11 board opens");
+        let store = Store::open_fixture(&path).expect("a schema-11 board opens");
         (dir, store)
     }
 
@@ -3163,7 +3163,7 @@ mod boards_from_before_card_times {
             ))
             .unwrap();
         }
-        let store = Store::open(&path).expect("a schema-12 board opens");
+        let store = Store::open_fixture(&path).expect("a schema-12 board opens");
         (dir, store)
     }
 

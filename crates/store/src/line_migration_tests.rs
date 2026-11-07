@@ -59,7 +59,7 @@ fn realistic_board_with<T>(before: impl FnOnce(&Connection) -> T) -> (Board, T) 
             stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, uuid(r.get(1)?)))).unwrap().map(|r| r.unwrap()).collect();
         (seen, main, orchestrator, pane, lanes, theme)
     };
-    let store = Store::open(&path).unwrap();
+    let store = Store::open_fixture(&path).unwrap();
     let t: Vec<Task> = (1..=11).map(|n| store.tasks_with_key(None, &format!("ov-{n}")).unwrap().remove(0)).collect();
     (Board { store, main, t, orchestrator, pane, lanes, theme }, seen)
 }

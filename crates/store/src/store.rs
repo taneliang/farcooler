@@ -62,6 +62,19 @@ impl Store {
     /// a checksummed backup written next to it before anything is touched.
     pub fn open(path: impl AsRef<Path>) -> Result<Store> {
         let path = path.as_ref();
+        crate::engine_cutover::startup::ordinary_admission(path).map_err(|e| {
+            tracing::warn!(error=%e, "ordinary open refused before normalization");
+            DomainError::OperationFailed
+        })?;
+        Self::open_normalizing(path)
+    }
+
+    /// Test-only: the pre-gate open, for fixtures that deliberately start from
+    /// legacy, frozen or committed state. Production has no such entry.
+    #[cfg(test)]
+    pub(crate) fn open_fixture(path: impl AsRef<Path>) -> Result<Store> { Self::open_normalizing(path.as_ref()) }
+
+    fn open_normalizing(path: &Path) -> Result<Store> {
         let existed = path.exists();
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;

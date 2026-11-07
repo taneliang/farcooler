@@ -132,8 +132,17 @@ pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_cor
     }
 
     let tx = conn.transaction().map_err(map_err)?;
+    apply_remaining(&tx, from_version)?;
+    tx.commit().map_err(map_err)?;
+    Ok(())
+}
+
+/// Every remaining migration plus the version row, inside the caller's
+/// transaction. The cutover entry adds the refusing floor and frozen authority
+/// to the SAME transaction so no upgraded-but-permissive state is ever visible.
+pub(crate) fn apply_remaining(tx: &Transaction, from_version: u32) -> farcooler_core::Result<()> {
     for (m, _) in &MIGRATIONS[from_version as usize..] {
-        m(&tx).map_err(map_err)?;
+        m(tx).map_err(map_err)?;
     }
     tx.execute(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)
@@ -141,7 +150,6 @@ pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_cor
         [CURRENT_SCHEMA_VERSION.to_string()],
     )
     .map_err(map_err)?;
-    tx.commit().map_err(map_err)?;
     Ok(())
 }
 

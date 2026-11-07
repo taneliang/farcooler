@@ -7,9 +7,14 @@ use serde::{Deserialize, Serialize};
 use crate::Store;
 pub mod manifest;
 pub mod rehearsal;
+pub mod startup;
+pub mod owners;
+pub mod transfer;
 mod verify;
 use manifest::{Cell, Manifest};
 use rehearsal::CommitPermit;
+pub use owners::{JoinedOwners, OwnedWriter, OwnerJoin};
+pub(crate) const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"];
 
 pub const SOURCE_PIN: &str = "fae3f30d0c3d1c475f9dc4463243f293fd88b007";
 pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4193f5f92726d37b7286a52a5e2d";
@@ -69,10 +74,10 @@ pub struct Quiescence {
     pub protected_resources: BTreeSet<String>,
 }
 impl Quiescence {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let identities: BTreeSet<_> = self.stopped.iter().map(|s| s.identity.clone()).collect();
         let resources: BTreeSet<_> = self.stopped.iter().flat_map(|s| s.resources.iter().cloned()).collect();
-        let required:BTreeSet<String>=["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"].into_iter().map(str::to_owned).collect();
+        let required:BTreeSet<String>=REQUIRED_OWNERS.into_iter().map(str::to_owned).collect();
         if !required.is_subset(&self.inventory) || identities != self.inventory || identities.len() != self.stopped.len()
             || resources != self.protected_resources || self.stopped.iter().any(|s|
                 s.identity.is_empty() || s.incarnation.is_empty() || s.joined_receipt.is_empty()) {
@@ -337,24 +342,33 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
 
 impl Store {
     pub fn engine_authority(&self) -> Result<Authority> { authority(&self.conn()) }
-    pub fn engine_quiesce(&self, proof: &Quiescence) -> Result<()> {
+    pub fn engine_quiesce(&self, owners: &JoinedOwners) -> Result<()> {
+        let proof=owners.evidence();
         proof.validate()?;
         let mut conn=self.conn();
+        owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if required_resources(&tx)?!=proof.protected_resources { return refuse("protected resource inventory incomplete"); }
-        if authority(&tx)?.phase!="legacy" { return refuse("authority is not legacy"); }
+        match authority(&tx)?.phase.as_str() {
+            "quiesced" => return Ok(()), // transfer::begin already froze it atomically with the upgrade
+            "legacy" => {}
+            _ => return refuse("authority is not legacy"),
+        }
         tx.execute("UPDATE engine_cutover_authority SET phase='quiesced' WHERE singleton=1",[])?;
         tx.commit()?;
         Ok(())
     }
     /// Transaction truth is the recovery oracle. No workspace routing switch,
     /// no legacy row deletion, and no external operation occurs in this boundary.
-    pub fn engine_commit(&self, plan: &Preflight, proof: &Quiescence, permit: &CommitPermit) -> Result<Authority> {
+    pub fn engine_commit(&self, plan: &Preflight, owners: &JoinedOwners, permit: &CommitPermit) -> Result<Authority> {
+        let proof=owners.evidence();
         proof.validate()?;
         permit.validate(plan,proof)?;
         let attempt=permit.attempt();
+        if owners.attempt()!=attempt { return refuse("join proof belongs to another attempt"); }
         if attempt.is_empty() || plan.source_pin!=SOURCE_PIN || plan.map_pin!=MAP_PIN { return refuse("unbound cutover identity"); }
         let mut conn=self.conn();
+        owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if required_resources(&tx)?!=proof.protected_resources { return refuse("protected resource inventory changed"); }
         if authority(&tx)?.phase!="quiesced" { return refuse("cutover not quiesced"); }
@@ -407,18 +421,6 @@ impl Store {
 #[cfg(test)]
 mod tests;
 
-/// Open only an explicit existing file for admin mapping. Capture raw source
-/// before registry upgrade; unlike ordinary open, do not normalize legacy waits.
-pub fn open_for_cutover(path: &std::path::Path) -> Result<(Store, Preflight)> {
-    let mut conn=Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON;")?;
-    let plan=preflight(&conn)?;
-    crate::migrate::migrate(&mut conn,plan.registry).map_err(|e|Error::Refused(e.to_string()))?;
-    crate::compat::stamp_compatible_down_to(&conn).map_err(|e|Error::Refused(e.to_string()))?;
-    let store=Store::from_engine_cutover_connection(conn).map_err(|e|Error::Refused(e.to_string()))?;
-    Ok((store,plan))
-}
-
 fn required_resources(conn:&Connection) -> Result<BTreeSet<String>> {
     let mut resources:BTreeSet<String>=conn.prepare("SELECT resource FROM workflow_resources")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
     for table in ["terminals","worktrees"] {
@@ -436,6 +438,6 @@ impl Store {
     // Unit boundary tests intentionally do not claim closed file backup proof.
     // The public API has no unchecked permit constructor; CLI uses real backup.
     fn engine_commit_for_test(&self,plan:&Preflight,proof:&Quiescence,attempt:&str) -> Result<Authority> {
-        self.engine_commit(plan,proof,&CommitPermit::unit(plan,proof,attempt))
+        self.engine_commit(plan,&JoinedOwners::unit(proof.clone(),attempt),&CommitPermit::unit(plan,proof,attempt))
     }
 }

@@ -9,6 +9,24 @@ fn proof(store:&Store) -> Quiescence {
     let stopped=inventory.iter().enumerate().map(|(n,identity)|StoppedWriter {identity:identity.clone(),incarnation:format!("fake-pid{n}-start2-tty3"),joined_receipt:"synthetic joined owner; no writable handles".into(),resources:if n==0 {resources.clone()} else {BTreeSet::new()}}).collect();
     Quiescence {inventory,stopped,protected_resources:resources}
 }
+pub(super) fn joined(store:&Store) -> JoinedOwners { JoinedOwners::unit(proof(store),"unit") }
+struct TestWriter(String, BTreeSet<String>);
+impl OwnedWriter for TestWriter {
+    fn identity(&self) -> String { self.0.clone() }
+    fn incarnation(&self) -> String { "test-owner".into() }
+    fn resources(&self) -> BTreeSet<String> { self.1.clone() }
+    fn close_and_join(&mut self) -> std::result::Result<String, String> { Ok("test owner joined".into()) }
+}
+/// Real `OwnerJoin` driven over synthetic owners for a private file.
+pub(super) fn join_db(path:&std::path::Path,attempt:&str) -> JoinedOwners {
+    let conn=Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let resources=required_resources(&conn).unwrap();
+    let mut join=OwnerJoin::new(attempt);
+    for (n,name) in REQUIRED_OWNERS.iter().enumerate() {
+        join.retain(Box::new(TestWriter((*name).into(),if n==0 {resources.clone()} else {BTreeSet::new()})));
+    }
+    join.join(path,&resources).unwrap()
+}
 fn fixture() -> Store {
     let store=Store::open_in_memory().unwrap();
     let repo=store.register_repository_for_test("Conservation");
@@ -33,7 +51,7 @@ fn engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage() {
     let order:Vec<_>=store.notes_for(task.id,None).unwrap().iter().map(|n|n.id).collect();
     let plan=preflight(&store.conn()).unwrap();
     assert_eq!(plan.bindings.len(),2);
-    store.engine_quiesce(&proof(&store)).unwrap();
+    store.engine_quiesce(&joined(&store)).unwrap();
     let result=store.engine_commit_for_test(&plan,&proof(&store),"f01").unwrap();
     assert_eq!(result.phase,"committed");
     assert_eq!(result.incarnation,1);
@@ -65,7 +83,7 @@ fn engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines(
     let plan=preflight(&store.conn()).unwrap();
     assert_eq!(plan.bindings.iter().filter(|b|b.disposition=="quarantined").count(),2);
     assert!(plan.quarantines.len()>=3);
-    store.engine_quiesce(&proof(&store)).unwrap();
+    store.engine_quiesce(&joined(&store)).unwrap();
     store.engine_commit_for_test(&plan,&proof(&store),"f10").unwrap();
     assert!(plan.raw.conserved_by(&Manifest::capture(&store.conn()).unwrap()));
 }
@@ -73,7 +91,7 @@ fn engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines(
 fn engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts() {
     let tmp=tempfile::tempdir().unwrap();
     let private=PrivateRehearsal::create(tmp.path(),"f12").unwrap();
-    let store=Store::open(private.live().join("db.sqlite")).unwrap();
+    let store=Store::open_fixture(private.live().join("db.sqlite")).unwrap();
     let repo=store.register_repository_for_test("Restore");
     store.ensure_main_workspace(repo).unwrap();
     drop(store);
@@ -108,7 +126,7 @@ fn engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved() {
     let plan=preflight(&conn).unwrap();
     crate::migrate::migrate(&mut conn,65).unwrap();
     let store=Store::from_engine_cutover_connection(conn).unwrap();
-    store.engine_quiesce(&proof(&store)).unwrap();
+    store.engine_quiesce(&joined(&store)).unwrap();
     store.engine_commit_for_test(&plan,&proof(&store),"f08").unwrap();
     // Existing resource generations are the sole documented non-meta field delta.
     let mut after=Manifest::capture(&store.conn()).unwrap();
@@ -139,7 +157,7 @@ fn all_fixture_schedule(schedule:&str) -> Store {
 fn conserved(store:&Store, label:&str) -> Preflight {
     let plan=preflight(&store.conn()).unwrap();
     let evidence=proof(store);
-    store.engine_quiesce(&evidence).unwrap();
+    store.engine_quiesce(&JoinedOwners::unit(evidence.clone(),"unit")).unwrap();
     store.engine_commit_for_test(&plan,&evidence,label).unwrap();
     store.engine_verify(&plan).unwrap();
     record_fixture(label,&plan,store);
@@ -186,3 +204,4 @@ fn save_db(label:&str,path:&std::path::Path) {
 }
 
 mod storage_safety;
+mod startup_gate;

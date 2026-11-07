@@ -115,7 +115,7 @@ fn engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit(
             let plan=preflight(&store.conn()).unwrap();
             assert!(plan.quarantines.iter().any(|q|q.resource==format!("workspace:{}",command.workspace)),"preflight must quarantine {dispatch}/{mutation}");
             assert!(plan.quarantines.iter().any(|q|q.resource=="resource"));
-            store.engine_quiesce(&proof(&store)).unwrap();store.engine_commit_for_test(&plan,&proof(&store),"storage").unwrap();store.engine_release(&plan,&proof(&store)).unwrap();drop(store);
+            store.engine_quiesce(&joined(&store)).unwrap();store.engine_commit_for_test(&plan,&proof(&store),"storage").unwrap();store.engine_release(&plan,&joined(&store)).unwrap();drop(store);
             let store=Store::open(&path).unwrap();
             assert!(store.workflow_claim_effect(&command.workspace,id,"new",1,7,300,400).unwrap().is_none());
             assert!(!store.workflow_admit_effect(&claim,102).unwrap());
