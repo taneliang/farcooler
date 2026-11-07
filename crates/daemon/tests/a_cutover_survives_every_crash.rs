@@ -258,6 +258,13 @@ fn check_row(runner: &Runner, name: &str, source: Source) {
     for file in row.torn {
         assert!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(dir.join(file)).unwrap()).is_err(), "{name}: {file} must be torn");
     }
+    // Present is not enough: a file that exists at its boundary must already be whole.
+    if row.has.contains(&"baseline.db") || found.frozen.is_some() {
+        assert!(std::fs::read(dir.join("baseline.db")).unwrap() == runner.original, "{name}: the baseline is the exact source");
+    }
+    if row.has.contains(&"closed-1/db") {
+        assert!(std::fs::read(dir.join("closed-1/db")).unwrap() == found.bytes, "{name}: the closed backup is the frozen file");
+    }
     let phase = row.phase.or(if source == Source::Legacy { Some("legacy") } else { None });
     assert_eq!(found.phase.as_deref(), phase, "{name}");
     if row.upgraded {

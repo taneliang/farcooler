@@ -1,0 +1,478 @@
+{
+ "hold-moves-first": {
+  "want": [
+   "hold.before"
+  ],
+  "red": [
+   "hold.before"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "gate-needs-a-complete-intent": {
+  "want": [
+   "hold.torn",
+   "hold.after",
+   "begin.before-baseline-db",
+   "begin.after-baseline-db",
+   "begin.torn-baseline",
+   "begin.before-intent"
+  ],
+  "red": [
+   "begin.after-baseline-db",
+   "begin.before-baseline-db",
+   "begin.before-intent",
+   "begin.torn-baseline",
+   "hold.after",
+   "hold.torn"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "gate-ignores-artifacts": {
+  "want": [
+   "begin.torn-intent",
+   "begin.after-intent",
+   "begin.in-upgrade",
+   "release.after",
+   "finish.before-rename",
+   "recover.after-rename"
+  ],
+  "red": [
+   "begin.after-intent",
+   "begin.in-upgrade",
+   "begin.torn-intent",
+   "finish.before-rename",
+   "recover.after-rename",
+   "release.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "publish-is-not-torn": {
+  "want": [
+   "hold.torn",
+   "begin.torn-baseline",
+   "begin.torn-intent",
+   "commit.torn-snapshot",
+   "journal.torn"
+  ],
+  "red": [
+   "begin.torn-baseline",
+   "begin.torn-intent",
+   "commit.torn-snapshot",
+   "hold.torn",
+   "journal.torn"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "baseline-copy-after-its-record": {
+  "want": [
+   "begin.after-baseline-db"
+  ],
+  "red": [
+   "begin.after-baseline-db"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "intent-before-baseline": {
+  "want": [
+   "begin.before-intent",
+   "begin.torn-intent"
+  ],
+  "red": [
+   "begin.before-intent",
+   "begin.torn-intent"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "upgrade-before-intent": {
+  "want": [
+   "begin.torn-baseline",
+   "begin.before-intent",
+   "begin.after-intent"
+  ],
+  "red": [
+   "begin.after-intent",
+   "begin.before-intent",
+   "begin.torn-baseline"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "upgrade-commits-early": {
+  "want": [
+   "begin.in-upgrade"
+  ],
+  "red": [
+   "begin.in-upgrade"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "floor-after-the-commit": {
+  "want": [
+   "begin.after-upgrade"
+  ],
+  "red": [
+   "begin.after-upgrade"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "frozen-attempt-after-the-commit": {
+  "want": [
+   "begin.after-upgrade"
+  ],
+  "red": [
+   "begin.after-upgrade"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "killed-journal-stays": {
+  "want": [
+   "begin.in-upgrade"
+  ],
+  "red": [
+   "begin.in-upgrade"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "backup-number-is-fixed": {
+  "want": [
+   "commit.before-copy",
+   "commit.after-copy",
+   "commit.torn-snapshot",
+   "commit.after-snapshot",
+   "commit.after-restore",
+   "journal.torn",
+   "commit.after-permit"
+  ],
+  "red": [
+   "commit.after-copy",
+   "commit.after-permit",
+   "commit.after-restore",
+   "commit.after-snapshot",
+   "commit.before-copy",
+   "commit.torn-snapshot",
+   "journal.torn"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "copy-before-its-boundary": {
+  "want": [
+   "commit.before-copy"
+  ],
+  "red": [
+   "commit.before-copy"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "snapshot-before-the-copy": {
+  "want": [
+   "commit.after-copy"
+  ],
+  "red": [
+   "commit.after-copy"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "no-snapshot": {
+  "want": [
+   "commit.torn-snapshot",
+   "commit.after-snapshot",
+   "commit.after-restore"
+  ],
+  "red": [
+   "commit.after-restore",
+   "commit.after-snapshot",
+   "commit.torn-snapshot"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "restore-copy-left-behind": {
+  "want": [
+   "commit.after-restore"
+  ],
+  "red": [
+   "commit.after-restore"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "permit-not-journaled": {
+  "want": [
+   "journal.torn",
+   "commit.after-permit",
+   "commit.in-mapping",
+   "commit.after-mapping"
+  ],
+  "red": [
+   "commit.after-mapping",
+   "commit.after-permit",
+   "commit.in-mapping",
+   "journal.torn"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "mapping-commits-early": {
+  "want": [
+   "commit.in-mapping"
+  ],
+  "red": [
+   "commit.in-mapping"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "committed-journal-first": {
+  "want": [
+   "commit.in-mapping",
+   "commit.after-mapping"
+  ],
+  "red": [
+   "commit.after-mapping",
+   "commit.in-mapping"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "commit-does-not-resume": {
+  "want": [
+   "commit.after-mapping",
+   "commit.after-journal",
+   "verify.after"
+  ],
+  "red": [
+   "commit.after-journal",
+   "commit.after-mapping",
+   "verify.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "recover-rewinds-a-commit": {
+  "want": [
+   "commit.after-mapping",
+   "commit.after-journal",
+   "verify.after",
+   "release.in-transaction"
+  ],
+  "red": [
+   "commit.after-journal",
+   "commit.after-mapping",
+   "release.in-transaction",
+   "verify.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "verified-journal-first": {
+  "want": [
+   "verify.after"
+  ],
+  "red": [
+   "verify.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "release-commits-early": {
+  "want": [
+   "release.in-transaction"
+  ],
+  "red": [
+   "release.in-transaction"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "released-journal-first": {
+  "want": [
+   "release.in-transaction",
+   "release.after"
+  ],
+  "red": [
+   "release.after",
+   "release.in-transaction"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "finish-keeps-no-journal": {
+  "want": [
+   "finish.before-rename"
+  ],
+  "red": [
+   "finish.before-rename"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "gate-refuses-released": {
+  "want": [
+   "finish.after-rename"
+  ],
+  "red": [
+   "finish.after-rename"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "restore-overwrites-in-place": {
+  "want": [
+   "recover.before-rename"
+  ],
+  "red": [
+   "recover.before-rename"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "recover-drops-the-baseline": {
+  "want": [
+   "recover.after-rename"
+  ],
+  "red": [
+   "recover.after-rename"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "recover-keeps-the-artifacts": {
+  "want": [
+   "recover.after-retire"
+  ],
+  "red": [
+   "recover.after-retire"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "stdio-says-nothing": {
+  "want": [
+   "hold.after"
+  ],
+  "red": [
+   "hold.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "main-skips-the-gate": {
+  "want": [
+   "hold.after"
+  ],
+  "red": [
+   "hold.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "store-skips-the-gate": {
+  "want": [
+   "hold.after"
+  ],
+  "red": [
+   "hold.after"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "scan-sees-no-one": {
+  "want": "an_old_build_cannot_lose_its_writes_across_recover",
+  "red": [
+   "an_old_build_cannot_lose_its_writes_across_recover"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "recovery-never-ends": {
+  "want": "a_person_takes_a_real_runner",
+  "red": [
+   "a_person_takes_a_real_runner_from_prepare_to_ordinary_service"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "no-verify-inside-commit": {
+  "want": [
+   "store",
+   "commit_that_could_not_verify"
+  ],
+  "red": [
+   "engine_cutover::tests::commit_closed::commit_that_could_not_verify_rolls_back_whole_and_recover_still_works"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "unknown-schema-commits": {
+  "want": [
+   "store",
+   "commit_a_schema_release_would_refuse"
+  ],
+  "red": [
+   "engine_cutover::tests::commit_closed::commit_a_schema_release_would_refuse_stays_frozen_where_recover_still_works"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "lost-backup-passes": {
+  "want": [
+   "store",
+   "verify_and_release_need_the_backup"
+  ],
+  "red": [
+   "engine_cutover::tests::commit_closed::verify_and_release_need_the_backup_the_commit_named"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ }
+}
