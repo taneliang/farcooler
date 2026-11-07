@@ -83,7 +83,8 @@ pub(crate) async fn dispatch(
                 && svc.store.task_is_engine_owned(id)?
             {
                 let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
-                if let Some(task) = crate::ticket_moves::move_through_engine(svc, seat, id, &p).await? {
+                let person = crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane)?;
+                if let Some(task) = crate::ticket_moves::move_through_engine(svc, seat, &person, id, &p).await? {
                     return Ok(result::Value::Task(task));
                 }
             }
