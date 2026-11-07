@@ -62,7 +62,7 @@ pub(crate) async fn dispatch(
             };
             let task = crate::task_ops::create(svc, watcher, &p)?;
             // A new card is an engine item at once, in its column, with no run (ov-951).
-            if crate::ticket_moves::tracking_on() && let Ok(id) = crate::task_ops::required_id(&task.id) { svc.track_tickets(Some(id)).await; }
+            if let Ok(id) = crate::task_ops::required_id(&task.id) { svc.track_tickets(Some(id)).await; }
             Ok(result::Value::Task(task))
         }
 

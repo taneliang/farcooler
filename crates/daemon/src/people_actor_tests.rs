@@ -136,6 +136,11 @@ fn field(line: &str) -> Option<(String, String)> {
     (eq == "=").then(|| (ty.to_string(), name.to_string()))
 }
 
+/// A message body's fields, one to a line or several to a line: `message Tight { bytes id = 1; string actor = 2; }`.
+fn fields(body: &str) -> impl Iterator<Item = (String, String)> + '_ {
+    body.split(['\n', ';']).filter_map(field)
+}
+
 /// Whether message `name` has an `actor` field, itself or on a message it
 /// holds; `seen` stops a message that holds itself.
 fn carries_actor(proto: &str, name: &str, seen: &mut std::collections::HashSet<String>) -> bool {
@@ -143,7 +148,7 @@ fn carries_actor(proto: &str, name: &str, seen: &mut std::collections::HashSet<S
         return false;
     }
     let Some(body) = message_body(proto, name) else { return false };
-    body.lines().filter_map(field).any(|(ty, field_name)| field_name == "actor" || carries_actor(proto, &ty, seen))
+    fields(body).any(|(ty, field_name)| field_name == "actor" || carries_actor(proto, &ty, seen))
 }
 
 /// The payload's message name, as its variant is named after it but for one.
@@ -171,12 +176,12 @@ fn every_write_that_names_an_actor_is_listed() {
 /// a message a payload holds.
 #[test]
 fn the_proto_reader_finds_every_way_to_write_an_actor() {
-    let proto = "\nmessage Request {\n  oneof payload {\n    Plain plain = 1;\n    Maybe maybe = 2;\n    Outer outer = 3;\n    Bare bare = 4;\n  }\n}\n\
+    let proto = "\nmessage Request {\n  oneof payload {\n    Plain plain = 1;\n    Maybe maybe = 2;\n    Outer outer = 3;\n    Bare bare = 4;\n    Tight tight = 5;\n  }\n}\n\
         \nmessage Plain {\n  string actor = 1;\n}\n\nmessage Maybe {\n  optional string actor = 1;\n}\n\
         \nmessage Outer {\n  repeated Inner items = 1;\n}\n\nmessage Inner {\n  string actor = 2;\n}\n\
-        \nmessage Bare {\n  string title = 1;\n  Bare again = 2;\n}\n";
+        \nmessage Bare {\n  string title = 1;\n  Bare again = 2;\n}\n\nmessage Tight { bytes id = 1; string actor = 2; }\n";
     let found: Vec<String> = proto_writes_with_an_actor(proto).into_iter().collect();
-    assert_eq!(found, ["Maybe", "Outer", "Plain"]);
+    assert_eq!(found, ["Maybe", "Outer", "Plain", "Tight"], "a message written on one line is read field by field");
 }
 
 /// A member's device, and a released one, claiming the orchestrator or a

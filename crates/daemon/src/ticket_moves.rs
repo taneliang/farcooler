@@ -6,11 +6,6 @@ use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::TaskStatus;
 
-/// Whether new and existing cards are brought under the engine on their own (`FARCOOLER_TRACK_TICKETS=1`).
-/// Off until a worker can be put on a tracked ticket by `Start`: an engine-owned card refuses a hand-linked
-/// pane (`workflow_excludes_terminals_*`), and today's dispatch links panes by hand.
-pub fn tracking_on() -> bool { std::env::var("FARCOOLER_TRACK_TICKETS").is_ok_and(|v| v == "1") }
-
 /// The engine column a status names.
 pub(crate) fn column(status: TaskStatus) -> &'static str {
     match status {
@@ -45,8 +40,9 @@ fn admit(svc: &Service, seat: crate::caller_seat::Seat, person: &crate::people::
 pub(crate) async fn move_through_engine(svc: &Service, seat: crate::caller_seat::Seat, person: &crate::people::Person, task: uuid::Uuid, req: &pb::TaskSetStatus) -> Result<Option<pb::Task>> {
     let Some(status) = crate::task_ops::status_from_wire(req.status) else { return Ok(None) };
     let Some(handle) = svc.workflow_handle() else { return Ok(None) };
-    // A card the engine does not hold never waits on it, so a status write there works as it always did.
-    if !svc.store.task_is_engine_owned(task)? { return Ok(None); }
+    // Only a ticket at rest is moved here. A card the engine does not hold works as it always did, and a card
+    // with a run (or a closed one) falls to the store, whose plain sentence says the engine owns it, whoever asks.
+    if !svc.store.task_is_tracked_ticket(task)? { return Ok(None); }
     let card = svc.store.get_task(task)?;
     admit(svc, seat, person, &card, status)?;
     let moved = handle.move_ticket(&card.workspace_id.to_string(), &card.key, column(status)).await
@@ -164,6 +160,45 @@ mod tests {
         let card = svc.store.create_task(board.id, "mine", Actor::User).unwrap();
         let (orchestrator, _) = panes(&svc, repo, board.id, card.id);
         let r = admit(&svc, Seat::Agent(Some(orchestrator)), &Person::Member("bob".into()), &card, TaskStatus::Done);
+        assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
+    }
+
+    /// N1: a card with a run of its own is not this module's. Whoever asks, it falls to the store, which says
+    /// in plain words that the engine owns it, rather than turning a person away with a scope error.
+    #[tokio::test]
+    async fn a_card_with_a_run_is_left_to_the_stores_plain_refusal() {
+        use farcooler_workflow::{Command, Definition, Grant, Input};
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap();
+        let card = svc.store.create_task(board.id, "running", Actor::User).unwrap();
+        let definition = Definition::tracker("owner");
+        let input = Input { schema: 1, id: "e".into(), workspace: board.id.to_string(), expected_revision: 0, epoch: 1,
+            source: "controller".into(), source_sequence: 1, now_ms: 0, grant: Grant::Controller, busy_resources: Default::default(),
+            command: Command::Enqueue { item: card.key.clone(), policy_pin: definition.pin(), resource: "own".into(),
+                dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
+        assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+        svc.start_workflows().unwrap();
+        for seat in [Seat::Person, Seat::Agent(None), Seat::Unreadable] {
+            let r = move_through_engine(&svc, seat, &Person::Owner, card.id, &set(card.id, TaskStatus::Todo)).await;
+            assert!(matches!(r, Ok(None)), "{seat:?}: {r:?}");
+        }
+        let e = svc.store.set_task_status(card.id, TaskStatus::Todo, Actor::User).unwrap_err();
+        assert!(matches!(e, DomainError::Conflict { what: "engine_owned" }), "{e:?}");
+        svc.stop_workflows().await.unwrap();
+    }
+
+    /// N3: the lead of one board does not move another board's tickets.
+    #[tokio::test]
+    async fn another_boards_orchestrator_moves_nothing_here() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap();
+        let card = svc.store.create_task(board.id, "mine", Actor::User).unwrap();
+        let (orchestrator, _) = panes(&svc, repo, board.id, card.id);
+        let elsewhere = svc.store.create_workspace(repo, "elsewhere", "el").unwrap();
+        let foreign = svc.store.create_task(elsewhere.id, "theirs", Actor::User).unwrap();
+        let lead = Seat::Agent(Some(orchestrator));
+        assert!(admit(&svc, lead, &Person::Owner, &card, TaskStatus::Todo).is_ok());
+        let r = admit(&svc, lead, &Person::Owner, &foreign, TaskStatus::Todo);
         assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
     }
 }
