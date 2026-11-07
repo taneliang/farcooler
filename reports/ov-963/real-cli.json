@@ -1,0 +1,10 @@
+{
+ "inspect-live": "{\"artifacts\":false,\"authority\":{\"incarnation\":0,\"manifest\":null,\"phase\":\"legacy\"},\"baseline\":null,\"crash_journal\":false,\"open_elsewhere\":[],\"ordinary_startup\":\"Existing\",\"schema\":1}\n\nEXIT 0\n",
+ "prepare-live": "{\"held\":\"real\",\"next\":\"run prepare again once the daemon has restarted into recovery\",\"schema\":1}\n\nEXIT 0\n",
+ "prepare": "{\"phase\":\"quiesced\",\"prepared\":\"real\",\"raw_hash\":\"wf1:f1bb3db27027fdf150cd3d927865cd732b408d3e44f7b25f7d2b36f0ed165180\",\"schema\":1}\n\nEXIT 0\n",
+ "commit": "{\"backup\":\"/tmp/fc963clihnq26gc1/h/farcooler.db.cutover/closed-1\",\"committed\":\"real\",\"resumed\":false,\"schema\":1}\n\nEXIT 0\n",
+ "verify": "{\"schema\":1,\"verified\":\"real\"}\n\nEXIT 0\n",
+ "release": "{\"released\":\"real\",\"schema\":1}\n\nEXIT 0\n",
+ "finish": "{\"evidence\":\"/tmp/fc963clihnq26gc1/h/farcooler.db.cutover-resolved-real\",\"schema\":1}\n\nEXIT 0\n",
+ "inspect-after": "{\"artifacts\":false,\"authority\":{\"incarnation\":1,\"manifest\":\"wf1:f1bb3db27027fdf150cd3d927865cd732b408d3e44f7b25f7d2b36f0ed165180\",\"phase\":\"released\"},\"baseline\":null,\"crash_journal\":false,\"open_elsewhere\":[],\"ordinary_startup\":\"Existing\",\"schema\":1}\n\nEXIT 0\n"
+}

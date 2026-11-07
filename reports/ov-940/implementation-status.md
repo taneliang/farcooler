@@ -22,6 +22,8 @@ Current at the fix round for the review of e2ac7e783. Blockers B1-B6 and M1 are 
 
 ## Open, not claimed
 
+The release blocker, the boundary matrix and M6 below are closed by ov-963 (`reports/ov-963/result.md`). The rest stands.
+
 * **Release blocker:** Commit over RPC is parent-owned, so an existing install reaches recovery and Prepare but cannot return to ordinary service on this build. Recover plus the previous build is the only way out. Verify, Release and Finish have no production path to `committed`.
 * Fences and fresh phase are untouched pending ov-945; fresh installs stay legacy.
 * A process from a build before this lock is invisible to it. Its write is refused during capture and caught afterward by Recover and Verify, not prevented.

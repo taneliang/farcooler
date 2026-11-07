@@ -18,9 +18,8 @@ fn ledger(path: &std::path::Path) -> i64 {
 /// A process that has the file open and takes no owner lock, as a build from
 /// before the lock does: a real child, so the kernel has a real holder to name.
 fn holder(path: &std::path::Path) -> std::process::Child {
-    let child = std::process::Command::new("/bin/sh").arg("-c").arg("exec 3<>\"$0\"; echo open; exec sleep 60").arg(path)
-        .stdout(std::process::Stdio::piped()).spawn().unwrap();
-    child
+    std::process::Command::new("/bin/sh").arg("-c").arg("exec 3<>\"$0\"; echo open; exec sleep 60").arg(path)
+        .stdout(std::process::Stdio::piped()).spawn().unwrap()
 }
 fn opened(child: &mut std::process::Child) {
     use std::io::Read;

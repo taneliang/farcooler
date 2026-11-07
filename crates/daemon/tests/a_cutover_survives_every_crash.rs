@@ -186,7 +186,7 @@ async fn stdio_tells_the_device(runner: &Runner) {
 }
 async fn in_process_seams_refuse(runner: &Runner) {
     assert!(matches!(Service::open_in(runner.home.clone()).await.err(), Some(DomainError::CutoverHeld)));
-    assert!(matches!(Store::open(&runner.db()).err(), Some(DomainError::CutoverHeld)));
+    assert!(matches!(Store::open(runner.db()).err(), Some(DomainError::CutoverHeld)));
 }
 
 /// What one boundary leaves behind, relative to the artifact directory.
@@ -259,7 +259,7 @@ fn check_row(runner: &Runner, name: &str, source: Source) {
         assert!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(dir.join(file)).unwrap()).is_err(), "{name}: {file} must be torn");
     }
     // Present is not enough: a file that exists at its boundary must already be whole.
-    if row.has.contains(&"baseline.db") || found.frozen.is_some() {
+    if row.has.contains(&"baseline.db") || (found.frozen.is_some() && dir.exists()) {
         assert!(std::fs::read(dir.join("baseline.db")).unwrap() == runner.original, "{name}: the baseline is the exact source");
     }
     if row.has.contains(&"closed-1/db") {

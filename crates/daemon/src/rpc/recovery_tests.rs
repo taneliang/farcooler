@@ -53,7 +53,7 @@ async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
     (dir, root)
 }
 /// The domain refusal: past the caller check, unlike the denial the seat test pins.
-fn failed(json: &str) -> String {
+fn failed() -> String {
     format!("{:?}", error_response(bytes::Bytes::from_static(b"r"), DomainError::OperationFailed).outcome)
 }
 const INSPECT: &str = r#"{"op":"Inspect"}"#;
@@ -106,7 +106,7 @@ async fn recovery_prepares_then_recovers_a_real_database_back_to_ordinary_servic
     assert!(inspected["ordinary_startup"].as_str().unwrap().starts_with("refused"));
     assert_eq!(inspected["baseline"]["attempt"], "a-1");
     for refused in [r#"{"op":"Verify"}"#, r#"{"op":"Release"}"#, r#"{"op":"Finish"}"#, PREPARE] {
-        assert_eq!(op(&owner, refused).await.unwrap_err(), failed(refused), "{refused} is refused before a commit");
+        assert_eq!(op(&owner, refused).await.unwrap_err(), failed(), "{refused} is refused before a commit");
     }
     assert_eq!(op(&owner, r#"{"op":"Recover"}"#).await.unwrap()["restored"], true);
     assert_eq!(std::fs::read(&db).unwrap(), original);

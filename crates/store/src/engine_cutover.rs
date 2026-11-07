@@ -469,7 +469,9 @@ impl Store {
 }
 
 #[cfg(test)]
-thread_local! { pub(crate) static BEFORE_SEAL: std::cell::RefCell<Option<Box<dyn FnOnce(&Connection)>>> = const { std::cell::RefCell::new(None) }; }
+type SealHook=Box<dyn FnOnce(&Connection)>;
+#[cfg(test)]
+thread_local! { pub(crate) static BEFORE_SEAL: std::cell::RefCell<Option<SealHook>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 mod tests;
 
