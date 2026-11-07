@@ -271,7 +271,11 @@ async fn a_shell_that_hangs_is_killed_with_its_group() {
     let path = dir.path().join("hangs");
     std::fs::write(&path, format!("#!/bin/sh\nsleep 60 &\necho $! > '{}'\nwait\n", pidfile.display())).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(ask_within(path.to_str().unwrap(), Duration::from_millis(500)).await, Vec::<String>::new());
+    // The shell must be up and have written its pid before the timeout falls,
+    // or there is no pid to look for. The first run of a script just written
+    // takes over half a second on a loaded Mac (ov-944: 500 ms failed every
+    // run there), so give it far more than that; the timeout still fires.
+    assert_eq!(ask_within(path.to_str().unwrap(), Duration::from_secs(5)).await, Vec::<String>::new());
     let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
     let alive = || std::process::Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();
     for _ in 0..100 {

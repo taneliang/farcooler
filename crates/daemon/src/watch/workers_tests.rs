@@ -30,7 +30,7 @@ async fn runner(n: usize) -> Runner {
     let dir = tempfile::tempdir().unwrap();
     let (repository, first) = (Uuid::now_v7(), Uuid::now_v7());
     farcooler_store::testing::write_prefixless_board_at_schema_11(&dir.path().join("farcooler.db"), repository, first);
-    let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+    let svc = Arc::new(Service::open_in_legacy_fixture(dir.path().to_path_buf()).await.unwrap());
     let main = svc.store.ensure_main_workspace(repository).unwrap().id;
     let tasks = (0..n).map(|i| svc.store.create_task(main, &format!("task {i}"), Actor::Manager).unwrap()).collect();
     let watcher = Watcher::new(svc.clone());

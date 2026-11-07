@@ -117,6 +117,12 @@ fn proto_writes_with_an_actor(proto: &str) -> std::collections::BTreeSet<String>
 /// A message's body in `proto`, between its braces.
 fn message_body<'a>(proto: &'a str, name: &str) -> Option<&'a str> {
     let body = proto.split(&format!("\nmessage {name} {{")).nth(1)?;
+    // A message written on one line (`message A { uint32 x = 1; }`) ends on it;
+    // reading on to the next line's `}` would borrow the next message's fields.
+    let first_line = body.split('\n').next().unwrap_or("");
+    if let Some(end) = first_line.find('}') {
+        return Some(&body[..end]);
+    }
     Some(&body[..body.find("\n}").unwrap_or(body.len())])
 }
 
