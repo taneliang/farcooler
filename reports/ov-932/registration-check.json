@@ -1,0 +1,108 @@
+{
+  "script_sha256": "b5c57dbfce6cca658501db40b03d1daefe0d3d72ea3ed87acef5b5d1c8043c6f",
+  "checks": 14,
+  "syntax_exit": 0,
+  "records": [
+    {
+      "test": "actual-blocks",
+      "value": null,
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "recorded_arguments": "-f\n/private/tmp/ov932-registration-ja9_yjua/private-build\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "0",
+      "exit": 0,
+      "stdout": "Skipping Launch Services registration (FARCOOLER_REGISTER_APP=0)\n",
+      "stderr": "",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-blocks",
+      "value": "1",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "recorded_arguments": "-f\n/private/tmp/ov932-registration-ja9_yjua/private-build\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-script-refuses-before-build",
+      "value": "",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "false",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-script-refuses-before-build",
+      "value": "false",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "no",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-script-refuses-before-build",
+      "value": "no",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "2",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-script-refuses-before-build",
+      "value": "2",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n"
+    },
+    {
+      "test": "actual-blocks",
+      "value": "-1",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n",
+      "recorded_arguments": ""
+    },
+    {
+      "test": "actual-script-refuses-before-build",
+      "value": "-1",
+      "exit": 2,
+      "stdout": "",
+      "stderr": "FARCOOLER_REGISTER_APP must be 0 or 1\n"
+    }
+  ],
+  "scratch": "/private/tmp/ov932-registration-ja9_yjua",
+  "boundary": "Only extracted actual registration blocks used a private recorder. Actual full script ran for invalid values only; no real registry operation, build or app creation."
+}

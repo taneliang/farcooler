@@ -8,6 +8,14 @@
 # makes it an actual application.
 set -euo pipefail
 
+# Private verification builds must not register with the user's Launch Services.
+# Validate before any build; an empty or mistyped value must never opt in.
+REGISTER_APP="${FARCOOLER_REGISTER_APP-1}"
+case "$REGISTER_APP" in
+  0|1) ;;
+  *) echo "FARCOOLER_REGISTER_APP must be 0 or 1" >&2; exit 2 ;;
+esac
+
 cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
@@ -412,7 +420,11 @@ codesign --force --deep --sign - \
 
 # Refresh Launch Services so the Dock picks up the icon and identifier.
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-[ -x "$LSREG" ] && "$LSREG" -f "$APP" 2>/dev/null || true
+if [ "$REGISTER_APP" = "1" ]; then
+  [ -x "$LSREG" ] && "$LSREG" -f "$APP" 2>/dev/null || true
+else
+  echo "Skipping Launch Services registration (FARCOOLER_REGISTER_APP=0)"
+fi
 
 echo
 echo "Built $APP"

@@ -1,0 +1,42 @@
+{
+  "/private/tmp/ov932-apps/web-wasm/farcooler_web.wasm": {
+    "bytes": 1851887,
+    "sha256": "36fd37c9326b3db0b4d8b8e8bec0a9f21afbbcb88116b6a3adddb1ff0fce4f92"
+  },
+  "/private/tmp/ov932-apps/web-wasm/wasm_exec.js": {
+    "bytes": 16992,
+    "sha256": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14"
+  },
+  "/private/tmp/ov932-apps/web-wasm/farcooler_web.js": {
+    "bytes": 49566,
+    "sha256": "14aed49f5e12e6238f5ba2cff99daf22796c7363166066b38649ad80bc250265"
+  },
+  "/private/tmp/ov932-apps/web-wasm/tailcat.wasm": {
+    "bytes": 26880746,
+    "sha256": "252437da99d25dac6d3f64a3a195a86ed857f68198aeac5a7939455efd51a11b"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/version.json": {
+    "bytes": 312,
+    "sha256": "c11591336e52a4e4fa4247f6ce75b305f1e6e0aa323a42bce06ec298eff76835"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/index.html": {
+    "bytes": 6230,
+    "sha256": "634a66deffc1145f9a955685b10a1f1e45e3948eb8c4576447bd8d5e4908de1f"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/a/tailcat.252437da99d25dac.wasm.br": {
+    "bytes": 4395323,
+    "sha256": "21ebd2c3719009ed1a321bfa0ff7533e42c816357443ee46ca9daff89514bca9"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/a/farcooler_web.36fd37c9326b3db0.wasm.br": {
+    "bytes": 527449,
+    "sha256": "966f42124409628d3cb4b1bcf4c5b75f1e6c0a00d30f0c7373df36ffb4ffd90d"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/a/app.75cfcd78e772d8dc.js": {
+    "bytes": 687057,
+    "sha256": "75cfcd78e772d8dc499d3b0ea1d175e506da903ad17afe49e0c97d5882804efd"
+  },
+  "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/services/web/dist/a/app.3939fc9a8b63f7fd.css": {
+    "bytes": 38253,
+    "sha256": "3939fc9a8b63f7fdb2487a54fa86c1885e7adb569184b24725f05469284c1437"
+  }
+}

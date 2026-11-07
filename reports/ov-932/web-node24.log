@@ -1,0 +1,7 @@
+COMMAND ['/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/scripts/heavy', '--load-limit', '20', '--', '/usr/bin/python3', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py', '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target', '/usr/bin/env', 'PATH=/Users/e-liang/.nvm/versions/node/v24.21.0/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', 'WEB_WASM_DIR=/private/tmp/ov932-apps/web-wasm', '/bin/sh', '-c', 'node --version && node services/web/node_modules/typescript/bin/tsc --noEmit -p services/web/tsconfig.json && node services/web/node_modules/typescript/bin/tsc --noEmit -p services/web/tsconfig.client.json && services/web/build.sh --channel canary --build b902931182294b7438da9abd6fbe504278608e3e && node services/web/scripts/size-gate.mjs services/web/dist']
+FIFO allocated; reviewed ov-927 cache provenance verified; actual cargo holder empty
+v24.21.0
+built canary b902931182294b7438da9abd6fbe504278608e3e: /a/farcooler_web.36fd37c9326b3db0.wasm /a/tailcat.252437da99d25dac.wasm /a/app.75cfcd78e772d8dc.js /a/app.3939fc9a8b63f7fd.css
+size-gate: 5078320 bytes as brotli, within limits
+
+EXIT 0

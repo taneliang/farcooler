@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/usr/bin/sandbox-exec",
+    "-p",
+    "(version 1) (allow default) (deny process-exec (literal \"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister\"))",
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    "-h"
+  ],
+  "exit": 255,
+  "stdout": "",
+  "stderr": "lsregister: [OPTIONS] [ <path>... ]\n                      [ -apps <domain>[,domain]... ]\n                      [ -libs <domain>[,domain]... ]\n                      [ -all  <domain>[,domain]... ]\n\nPaths are searched for applications to register with the Launch Service database.\nValid domains are \"system\", \"local\", \"network\" and \"user\". Domains can also\nbe specified using only the first letter.\n\n  -delete       Delete the Launch Services database file. You must then reboot!\n  -seed         If database isn't seeded, scan default locations for applications and libraries to register\n  -lint         Print information about plist errors while registering bundles\n  -lazy n       Sleep for n seconds before registering/scanning\n  -r            Recursive directory scan, do not recurse into packages or invisible directories\n  -R            Recursive directory scan, descending into packages and invisible directories\n  -f            force-update registration even if mod date is unchanged\n  -u            unregister instead of register\n  -v            Display progress information\n  -gc           Garbage collect old data and compact the database\n  -dump [table] Display full database contents after registration ( and if a given <path> is a .csstore file, that file will be dumped instead of registered )\n  -h            Display this help\n",
+  "guard_enforced": false
+}
