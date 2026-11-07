@@ -120,6 +120,8 @@ impl Definition {
             }
             // A route reads a ticket's own change, which a group has no single answer for.
             if in_group && matches!(stage.kind, StageKind::Route) { return Err(Refusal::Definition); }
+            // A pull request belongs to one ticket's branch, so these are not steps of a batch.
+            if in_group && is_pr_verb(&stage.kind) { return Err(Refusal::Definition); }
             match stage.kind {
                 // Routed definitions check candidate availability along their edges instead.
                 _ if routed => {}
@@ -257,8 +259,10 @@ impl Definition {
         // push the remote refused (`base_moved`): nothing landed, so it goes back to start from the new base.
         for &(from, label, to) in &edges {
             let Some(to) = to else { continue };
-            let refused_push = label == "base_moved" && matches!(self.stages[from].kind, StageKind::Push);
-            if to <= from && (to..=from).any(|l| lands(&self.stages[l].kind) && !(refused_push && l == from)) {
+            // A push the remote refused landed nothing; a change requested on a pull request means it is not merged.
+            let unlanded = (label == "base_moved" && matches!(self.stages[from].kind, StageKind::Push))
+                || (label == "changes_requested" && matches!(self.stages[from].kind, StageKind::AwaitPr));
+            if to <= from && (to..=from).any(|l| lands(&self.stages[l].kind) && !(unlanded && l == from)) {
                 return Err(Refusal::Definition);
             }
         }
@@ -279,6 +283,21 @@ impl Definition {
         }
         for (p, stage) in self.stages.iter().enumerate() {
             if matches!(stage.kind, StageKind::Push) && !judged[p] { return Err(Refusal::Definition); }
+        }
+        // A pull request needs its branch pushed, and waiting on one or readying it needs it opened.
+        for (p, stage) in self.stages.iter().enumerate() {
+            let needs = match stage.kind {
+                StageKind::OpenPr => StageKind::PushBranch,
+                StageKind::PrReady | StageKind::AwaitPr => StageKind::OpenPr,
+                _ => continue,
+            };
+            if !self.stages[..p].iter().any(|s| s.kind == needs) { return Err(Refusal::Definition); }
+        }
+        // A requested change is answered by making a new candidate, not by pushing the old one again.
+        for stage in self.stages.iter().filter(|s| matches!(s.kind, StageKind::AwaitPr)) {
+            if let Some(Target::Step(to)) = stage.routes.get("changes_requested") {
+                if !makes_candidate_anew(&self.stages[index[to.as_str()]].kind) { return Err(Refusal::Definition); }
+            }
         }
         // Reachability from the first step, and a way to Done.
         let mut seen = vec![false; n];
@@ -355,22 +374,32 @@ pub fn emits_unrouted(kind: &StageKind, label: &str) -> bool {
         || (label == "base_moved" && matches!(kind, StageKind::Push))
         || (label == "timeout" && matches!(kind, StageKind::AwaitBase | StageKind::AwaitCi))
         || (label == "cancelled" && matches!(kind, StageKind::AwaitCi))
+        || (label == "timeout" && matches!(kind, StageKind::AwaitPr))
+        || (label == "changes_requested" && matches!(kind, StageKind::AwaitPr))
+        || (label == "closed" && matches!(kind, StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr))
 }
 /// The landing verbs: all of them need routes, so they are for schema 2.
 fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route) || is_pr_verb(kind)
 }
-/// Steps that move the base. Nothing after one may run its group over again.
-pub fn lands(kind: &StageKind) -> bool { matches!(kind, StageKind::Land | StageKind::Push) }
+/// The pull request verbs: they act on one ticket's head branch.
+fn is_pr_verb(kind: &StageKind) -> bool {
+    matches!(kind, StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)
+}
+/// Steps that move the base. Nothing after one may run its group over again. A merge moves the
+/// base too, and it is a person's act on GitHub, so what waits for one is a landing.
+pub fn lands(kind: &StageKind) -> bool { matches!(kind, StageKind::Land | StageKind::Push | StageKind::AwaitPr) }
 fn needs_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
         | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. }
-        | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
+        | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route
+        | StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)
 }
 /// What a step's result becomes the item's candidate. Waiting for the base takes the base as the
 /// candidate, which the fold then builds on and replaces.
 pub fn makes_candidate(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::Tracker | StageKind::AwaitBase | StageKind::Fold)
+    matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::Tracker | StageKind::AwaitBase | StageKind::Fold
+        | StageKind::AwaitPr)
 }
 /// Entering these discards the old candidate, because they are about to make a new one.
 pub fn makes_candidate_anew(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::AwaitBase) }

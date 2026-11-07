@@ -14,7 +14,7 @@ fn steps() -> Vec<Stage> {
     vec![step("build", StageKind::Action("build".into())),
         step("branch", StageKind::PushBranch),
         step("pr", StageKind::OpenPr),
-        route(route(step("merged", StageKind::AwaitPr), "changes_requested", Target::Step("build".into()), 2), "closed", Target::Fail, 0),
+        route(route(step("merged", StageKind::AwaitPr), "closed", Target::Fail, 0), "changes_requested", Target::Step("build".into()), 2),
         step("ci", StageKind::AwaitCi)]
 }
 fn definition(stages: Vec<Stage>) -> Definition {
