@@ -189,5 +189,5 @@ mod tests {
 }
 
 pub mod workflow_service;
-mod ticket_moves;
+pub mod ticket_moves;
 mod workflow_notices;

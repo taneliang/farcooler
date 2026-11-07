@@ -6,6 +6,11 @@ use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::TaskStatus;
 
+/// Whether new and existing cards are brought under the engine on their own (`FARCOOLER_TRACK_TICKETS=1`).
+/// Off until a worker can be put on a tracked ticket by `Start`: an engine-owned card refuses a hand-linked
+/// pane (`workflow_excludes_terminals_*`), and today's dispatch links panes by hand.
+pub fn tracking_on() -> bool { std::env::var("FARCOOLER_TRACK_TICKETS").is_ok_and(|v| v == "1") }
+
 /// The engine column a status names.
 pub(crate) fn column(status: TaskStatus) -> &'static str {
     match status {
