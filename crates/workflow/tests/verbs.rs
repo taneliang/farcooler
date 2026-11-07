@@ -84,3 +84,24 @@ fn a_fold_needs_the_base_a_step_before_it_and_a_split_restarts_at_the_wait_for_i
     // Fold with no await-base ahead has no base to fold onto.
     assert!(invalid(|s| { s.remove(0); s[0].routes.clear(); s[0].limit = 0; s[1].routes.clear(); s[1].limit = 0; s[2].routes.clear(); s[2].limit = 0; }));
 }
+
+#[test]
+fn no_route_reaches_a_push_without_a_passing_gate_after_the_last_change() {
+    // fold passed -> push: every ordinary fold would push unchecked.
+    assert!(invalid(|s| { s[1].routes.insert("passed".into(), Target::Step("push".into())); s[1].routes.insert("conflict".into(), Target::Step("gate".into())); s[1].limit = 0; }));
+    // The same through a route that is not a rejected gate: a conflict going to the push.
+    assert!(invalid(|s| { s[1].routes.insert("conflict".into(), Target::Step("push".into())); s[1].limit = 0; }));
+    // A gate whose rejection splits, with the fallback pushing or finishing, would push what failed.
+    for otherwise in [Target::Step("push".into()), Target::Done] {
+        assert!(invalid(|s| { s[2].routes.insert("rejected".into(), Target::Split { step: "base".into(), otherwise: Box::new(otherwise.clone()) }); }), "{otherwise:?}");
+    }
+    // Failing is still fine, and so is a gate that is passed on every path.
+    assert_eq!(definition(steps()).validate(), Ok(()));
+}
+#[test]
+fn a_gate_before_a_change_does_not_count() {
+    // run, then another fold-like change (await-base) before the push: the gate judged something else.
+    let s = vec![step("base", StageKind::AwaitBase), step("fold", StageKind::Fold), step("gate", StageKind::Run),
+        step("base2", StageKind::AwaitBase), step("push", StageKind::Push)];
+    assert_eq!(definition(s).validate(), Err(Refusal::Definition));
+}

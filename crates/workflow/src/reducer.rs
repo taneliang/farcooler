@@ -46,7 +46,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
-                back_edges: BTreeMap::new(), retries: 0,
+                back_edges: BTreeMap::new(), retries: 0, pushed: None,
                 members: Vec::new(), group_of: None, grouped_in: None };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
@@ -126,7 +126,9 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             let stage = &item.definition.stages[item.stage];
                             if item.definition.schema != 2 { return Err(Refusal::Invalid); }
-                            if !(matches!(label.as_str(), "passed" | "rejected") || stage.routes.contains_key(label)) {
+                            // Any label the step can emit is an answer, routed or not: an unrouted one fails the item
+                            // (`target_of`) instead of being refused, which would leave the item uncertain for good.
+                            if !(emits_unrouted(&stage.kind, label) || stage.routes.contains_key(label)) {
                                 return Err(Refusal::Evidence);
                             }
                             evidence_matches(&item, evidence)?;
@@ -140,10 +142,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         Outcome::SafeFailure => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             item.pending = None;
-                            if item.attempt >= item.definition.stages[item.stage].max_attempts {
+                            // A wait that was interrupted (a restart, a crash) only looks again: reading spends no attempt.
+                            let reads = matches!(item.definition.stages[item.stage].kind, StageKind::AwaitBase | StageKind::AwaitCi);
+                            if !reads && item.attempt >= item.definition.stages[item.stage].max_attempts {
                                 item.phase = Phase::Failed;
                             } else {
-                                item.attempt += 1;
+                                if !reads { item.attempt += 1; }
                                 item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                                 enter(&mut item, id, input, &mut effects)?;
                             }
@@ -157,6 +161,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     // A failed run is closed by cancelling it: that is the controller's way off the needs-you list.
                     if matches!(item.phase, Phase::Done | Phase::Cancelled) { return Err(Refusal::Phase); }
                     if item.phase == Phase::Cancelling || item.run.starts_with("cancel:") {
+                        return Err(Refusal::Phase);
+                    }
+                    // A group whose push may be in flight, or whose push landed, cannot be called back: its
+                    // members' commits are on the target. A person settles a lost push; CI decides the rest.
+                    if !item.members.is_empty() && (item.pushed.is_some()
+                        || matches!(item.definition.stages[item.stage].kind, StageKind::Push)) {
                         return Err(Refusal::Phase);
                     }
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
@@ -192,7 +202,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0,
+                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None,
                                 members: Vec::new(),
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None });
@@ -252,13 +262,21 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         && matches!(g.phase, Phase::Done | Phase::Failed | Phase::Cancelled)).map(|(gid, _)| gid.clone()).collect();
     for gid in ended {
         let group = next.items.get_mut(&gid).ok_or(Refusal::Missing)?;
-        let label = match group.phase { Phase::Done => "passed", Phase::Failed => "rejected", _ => "dropped" };
-        let (members, result) = (std::mem::take(&mut group.members), group.candidate.clone());
+        // Once the push landed the members' commits are on the target: the result is `landed`, never
+        // `rejected` or `dropped`, whatever ended the group after it.
+        let label = match (&group.phase, &group.pushed) {
+            (Phase::Done, _) => "passed",
+            (_, Some(_)) => "landed",
+            (Phase::Failed, None) => "rejected",
+            _ => "dropped",
+        };
+        let result = if label == "landed" { group.pushed.clone() } else { group.candidate.clone() };
+        let members = std::mem::take(&mut group.members);
         for member in members {
             let mut ticket = next.items.remove(&member.item).ok_or(Refusal::Missing)?;
             ticket.grouped_in = None;
             if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
-                if label == "passed" && result.is_some() { ticket.candidate = result.clone(); }
+                if matches!(label, "passed" | "landed") && result.is_some() { ticket.candidate = result.clone(); }
             }
             route(&mut ticket, &member.item, input, label, None, room(&next, &spawn), &mut effects, &mut spawn)?;
             next.items.insert(member.item, ticket);
@@ -439,6 +457,9 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
         item.last_evidence = Some(evidence.clone());
         if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
     }
+    if label == "passed" && matches!(stage.kind, StageKind::Push) {
+        item.pushed = evidence.map(|e| e.candidate.clone());
+    }
     let mut target = target_of(item, label);
     let taken = item.back_edges.get(&key).copied().unwrap_or(0);
     if let Target::Split { step, otherwise } = target {
@@ -501,6 +522,7 @@ fn valid_state(state: &State) -> bool {
             valid_id(id) && item.pin == item.definition.pin()
                 && if item.group_of.is_some() { item.definition.validate_group() } else { item.definition.validate() }.is_ok()
                 && valid_membership(state, id, item)
+                && (item.pushed.is_none() || (item.group_of.is_some() && item.pushed.as_deref().is_some_and(valid_id)))
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)
                 && if item.definition.schema == 2 {
                     usize::from(item.iteration) == item.back_edges.values().map(|n| usize::from(*n)).sum::<usize>()

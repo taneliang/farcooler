@@ -518,3 +518,110 @@ fn the_state_validator_refuses_forged_membership() {
     forged.items.get_mut(&group).unwrap().members.push(Member { item: "ghost".into(), candidate: "c".into() });
     assert_eq!(probe(&forged).unwrap_err(), Refusal::Invalid, "a member that does not exist");
 }
+
+// ov-956 review blockers: a verb's own label, a pushed group, and what a restart may spend.
+
+fn verb(id: &str, kind: StageKind) -> Stage { let mut s = action(id); s.kind = kind; s }
+/// The batched push as a group of verbs with no routes at all: every label but `passed` falls to `Fail`.
+fn verb_ticket() -> Definition {
+    let mut d = ticket();
+    let g = d.groups.get_mut("landing").unwrap();
+    g.steps = vec![verb("base", StageKind::AwaitBase), verb("fold", StageKind::Fold), verb("gate", StageKind::Run),
+        verb("push", StageKind::Push), verb("ci", StageKind::AwaitCi)];
+    d
+}
+fn verb_group(log: &mut Log, definition: Definition) -> String {
+    log.enqueue("a", definition);
+    while log.state.items["a"].phase != Phase::WaitingJoin { log.pass("a"); }
+    log.queue("a");
+    log.group_of("a")
+}
+/// Walk the group to the named step, passing every step before it.
+fn walk_to(log: &mut Log, group: &str, step: &str) {
+    while log.stage(group) != step {
+        let e = Evidence { candidate: "f".repeat(40), ..log.evidence(group) };
+        let kind = log.state.items[group].definition.stages[log.state.items[group].stage].kind.clone();
+        let e = if matches!(kind, StageKind::AwaitBase | StageKind::Fold) { e } else { log.evidence(group) };
+        log.outcome(group, Outcome::Passed(e));
+    }
+}
+
+#[test]
+fn a_verbs_own_label_with_no_route_fails_the_group_and_is_never_refused() {
+    for (step, label) in [("base", "timeout"), ("fold", "conflict"), ("push", "base_moved"), ("ci", "timeout"), ("ci", "cancelled")] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, verb_ticket());
+        walk_to(&mut log, &group, step);
+        let e = log.evidence(&group);
+        let (i, effect) = (&log.state.items[&group], log.state.items[&group].pending.clone().unwrap());
+        let input = log.input(Command::Observe { item: group.clone(), effect: effect.clone(), run: i.run.clone(), fence: i.fence,
+            outcome: Outcome::Labeled(label.into(), e) }, Grant::Operation { effect, run: i.run.clone(), fence: i.fence });
+        let next = step_of(&log, &input).unwrap_or_else(|r| panic!("{step}/{label} refused: {r:?}"));
+        assert_eq!(next.state.items[&group].phase, Phase::Failed, "{step}/{label}");
+    }
+}
+fn step_of(log: &Log, input: &Input) -> Result<Transition, Refusal> { step(&log.state, input) }
+
+#[test]
+fn a_group_that_pushed_hands_its_members_the_landed_commit_and_never_says_rejected() {
+    let mut definition = verb_ticket();
+    // The member routes `landed` forward, past the join, where `rejected` would send it back to rework.
+    definition.stages[3].routes.insert("landed".into(), Target::Step("tidy".into()));
+    let mut log = Log::new();
+    let group = verb_group(&mut log, definition);
+    walk_to(&mut log, &group, "ci");
+    let pushed = log.state.items[&group].pushed.clone();
+    assert_eq!(pushed.as_deref(), Some("f".repeat(40).as_str()), "recorded when the push passed");
+    // CI is red.
+    log.reject(&group);
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+    assert_eq!(log.stage("a"), "tidy", "landed, not rejected");
+    assert_eq!(log.state.items["a"].candidate, pushed, "it carries what landed");
+    assert_eq!(log.state.items["a"].back_edges.get("join"), None);
+}
+#[test]
+fn an_unrouted_landed_label_fails_the_member_with_the_landed_commit() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "ci");
+    let pushed = log.state.items[&group].pushed.clone();
+    log.reject(&group);
+    assert_eq!((log.state.items["a"].phase.clone(), log.stage("a")), (Phase::Failed, "join".to_string()));
+    assert_eq!(log.state.items["a"].candidate, pushed);
+}
+#[test]
+fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "push");
+    let cancel = Command::Cancel { item: group.clone() };
+    assert_eq!(log.try_run(cancel.clone(), Grant::Controller).unwrap_err(), Refusal::Phase, "the push may be in flight");
+    log.pass(&group);
+    assert_eq!(log.stage(&group), "ci");
+    assert_eq!(log.try_run(cancel, Grant::Controller).unwrap_err(), Refusal::Phase, "its commits are on the target");
+    // Before the push it is still allowed.
+    let mut early = Log::new();
+    let group = verb_group(&mut early, verb_ticket());
+    walk_to(&mut early, &group, "gate");
+    early.run(Command::Cancel { item: group }, Grant::Controller);
+}
+#[test]
+fn a_wait_that_a_restart_interrupted_looks_again_and_spends_no_attempt() {
+    for step in ["base", "ci"] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, verb_ticket());
+        walk_to(&mut log, &group, step);
+        let before = log.state.items[&group].clone();
+        let t = log.outcome(&group, Outcome::SafeFailure);
+        let after = &log.state.items[&group];
+        assert_eq!((after.phase.clone(), log.stage(&group), after.attempt), (Phase::Running, step.to_string(), before.attempt), "{step}");
+        assert!(after.fence > before.fence);
+        assert_eq!(t.effects.iter().filter(|e| e.item == group).count(), 1, "{step}: read again");
+    }
+    // A fold is made again and that does spend one: a step that keeps failing ends.
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "fold");
+    log.outcome(&group, Outcome::SafeFailure);
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+}

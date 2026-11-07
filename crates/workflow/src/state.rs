@@ -44,6 +44,10 @@ pub struct Item {
     /// A group item only: the join name and the pin of the definition whose tickets it holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_of: Option<GroupOf>,
+    /// A group item only: the commit its push put on the target. From here its members' commits are
+    /// landed, whatever CI says, so the group can no longer be cancelled and never ends as `rejected`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pushed: Option<String>,
     /// A joined ticket only: the group item it is queued into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_in: Option<String>,

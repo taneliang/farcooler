@@ -184,13 +184,13 @@ impl Definition {
             if in_group && matches!(stage.kind, StageKind::Join { .. }) { return Err(Refusal::Definition); }
             let mut back = false;
             let mut labels: Vec<&str> = vec!["passed", "rejected"];
-            if matches!(stage.kind, StageKind::Join { .. }) { labels.push("dropped"); }
+            if matches!(stage.kind, StageKind::Join { .. }) { labels.extend(["dropped", "landed"]); }
             for (label, target) in &stage.routes {
                 if !valid_id(label) || !can_emit(&stage.kind, label) { return Err(Refusal::Definition); }
                 // A rejected gate must stop, retry or split: falling forward or finishing would push or adopt what failed.
                 if label == "rejected" && matches!(stage.kind, StageKind::Run | StageKind::Check)
                     && self.stages.iter().any(|s| matches!(s.kind, StageKind::Push))
-                    && (matches!(target, Target::Done) || matches!(target, Target::Step(id) if index.get(id.as_str()).is_some_and(|&to| to > i)))
+                    && finishes_or_goes_on(target, &index, i)
                 { return Err(Refusal::Definition); }
                 if !labels.contains(&label.as_str()) { labels.push(label); }
                 match target {
@@ -249,13 +249,23 @@ impl Definition {
                 return Err(Refusal::Definition);
             }
         }
-        // A push needs a check after the last step that changed what it pushes.
-        for (p, stage) in self.stages.iter().enumerate().filter(|(_, s)| matches!(s.kind, StageKind::Push)) {
-            let changed = self.stages[..p].iter().rposition(|s| makes_candidate(&s.kind)).ok_or(Refusal::Definition)?;
-            let _ = stage;
-            if !self.stages[changed + 1..p].iter().any(|s| matches!(s.kind, StageKind::Run | StageKind::Check | StageKind::Evaluate(_))) {
-                return Err(Refusal::Definition);
+        // Every path into a push crosses a gate that passed after the last step that changed what the
+        // push sends. Walk the edges, not the list: a route can skip a gate that sits just above.
+        let mut judged = vec![true; n];
+        judged[0] = false;
+        loop {
+            let mut changed = false;
+            for &(from, label, to) in &edges {
+                let Some(to) = to else { continue };
+                let kind = &self.stages[from].kind;
+                let gate = matches!(kind, StageKind::Run | StageKind::Check | StageKind::Evaluate(_));
+                let out = if gate { label == "passed" } else if makes_candidate(kind) { false } else { judged[from] };
+                if judged[to] && !out { judged[to] = false; changed = true; }
             }
+            if !changed { break; }
+        }
+        for (p, stage) in self.stages.iter().enumerate() {
+            if matches!(stage.kind, StageKind::Push) && !judged[p] { return Err(Refusal::Definition); }
         }
         // Reachability from the first step, and a way to Done.
         let mut seen = vec![false; n];
@@ -305,6 +315,15 @@ impl Definition {
                     arguments: vec![], environment: BTreeMap::new() } }] }
     }
 }
+/// Whether a route ends the run or moves on: a split's fallback counts, because a split with one member takes it.
+fn finishes_or_goes_on(target: &Target, index: &BTreeMap<&str, usize>, from: usize) -> bool {
+    match target {
+        Target::Done => true,
+        Target::Step(id) => index.get(id.as_str()).is_some_and(|&to| to > from),
+        Target::Split { otherwise, .. } => finishes_or_goes_on(otherwise, index, from),
+        Target::Fail => false,
+    }
+}
 /// Back edges per step are capped so a loop cannot be a polite spelling of forever.
 pub const MAX_BACK_EDGE_LIMIT: u8 = 3;
 /// A group holds at most this many tickets.
@@ -312,13 +331,17 @@ pub const MAX_GROUP_MEMBERS: u8 = 32;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a
 /// definition's own is only for steps whose binding or command the definition chose.
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {
+    emits_unrouted(kind, label) || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_))
+}
+/// Labels a step's own kind produces, which need no route to be a valid answer: with none, they fail
+/// the item. A label of a definition's own (a check's or an action's) must be declared by a route.
+pub fn emits_unrouted(kind: &StageKind, label: &str) -> bool {
     matches!(label, "passed" | "rejected")
-        || (label == "dropped" && matches!(kind, StageKind::Join { .. }))
+        || (matches!(label, "dropped" | "landed") && matches!(kind, StageKind::Join { .. }))
         || (label == "conflict" && matches!(kind, StageKind::Fold))
         || (label == "base_moved" && matches!(kind, StageKind::Push))
         || (label == "timeout" && matches!(kind, StageKind::AwaitBase | StageKind::AwaitCi))
         || (label == "cancelled" && matches!(kind, StageKind::AwaitCi))
-        || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_))
 }
 /// The landing verbs: all of them need routes, so they are for schema 2.
 fn is_verb(kind: &StageKind) -> bool {
