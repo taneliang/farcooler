@@ -43,7 +43,7 @@ fn engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated() {
     assert_eq!(plan.raw.tables["landings"].rows.len(),5);
     assert_eq!(plan.raw.tables["line_events"].rows.len(),1);
     assert!(store.conn().execute("UPDATE landings SET state='landed'",[]).is_err());
-    assert!(store.conn().execute("UPDATE board_ci SET sha='new',status='green'",[]).is_err());
+    assert!(store.conn().execute("UPDATE board_ci SET sha='new',status='green'",[]).is_ok(),"CI chips are observation and stay live (ov-946)");
 }
 #[test]
 fn engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive() {
@@ -76,7 +76,7 @@ fn engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send(
     assert_eq!(plan.raw.tables["answer_wakes"].rows.len(),5);
     assert!(plan.quarantines.iter().any(|q|q.reason.contains("answer_wakes")));
     assert!(store.conn().execute("UPDATE message_wakes SET claimed_at=100 WHERE done_at IS NULL",[]).is_err());
-    for (kind,sql) in [("send","UPDATE message_wakes SET claimed_at=100 WHERE done_at IS NULL"),("push","UPDATE landings SET state='pushed'"),("enter","UPDATE check_in_occurrences SET state='enter_admitted'")] {
+    for (kind,sql) in [("send","UPDATE message_wakes SET claimed_at=100 WHERE done_at IS NULL"),("push","UPDATE landings SET state='pushed'")] {
         if store.conn().execute(sql,[]).is_ok() {
             private.fake_apply(kind,&ExternalFact {operation:format!("stale-{kind}"),request_hash:"original-operation".into(),resource:format!("{kind}-resource"),incarnation:"retired-owner".into(),receipt:None}).unwrap();
         }
@@ -93,9 +93,9 @@ fn engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive() {
         store.conn().execute("UPDATE check_in_occurrences SET state=?1,tty=NULL,process_incarnation=NULL",[state]).unwrap();
         let plan=conserved(&store,&format!("f07-{schedule}-{state}"));
         assert_eq!(plan.raw.tables["check_in_enter_fences"].rows.len(),1);
-        assert!(store.conn().execute("UPDATE check_in_schedules SET state='enabled'",[]).is_err());
-        assert!(store.conn().execute("DELETE FROM check_in_enter_fences",[]).is_err());
+        // Check-in is a timer, not workflow: it stays writable after release (ov-946).
         assert!(store.conn().execute("UPDATE owner_devices SET state='check'",[]).is_err());
+        assert!(store.conn().execute("DELETE FROM check_in_enter_fences",[]).is_ok());
     }
     }
 }
@@ -407,12 +407,14 @@ fn engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority() {
     let tree=store.create_worktree(repo,"topic","resources/private-worktree",false).unwrap();
     let terminal=store.create_terminal_for_task(tree.id,"worker","fake",farcooler_protocol::v1::TerminalIntent::Running,80,24,Some(task)).unwrap();
     let plan=conserved(&store,"identity-fences");
+    store.engine_verify(&plan).unwrap();
+    // Only a card the engine owns is fenced (ov-946): hand the engine this one.
+    store.conn().execute("INSERT INTO workflow_owned_items(workspace,item,task_id) VALUES(?1,'owned',?2)",params![ws.as_bytes().as_slice().to_vec(),task.as_bytes().as_slice()]).unwrap();
     assert!(store.conn().execute("UPDATE tasks SET workspace_id=X'11111111111111111111111111111111'",[]).is_err());
     assert!(store.conn().execute("UPDATE tasks SET former_key='new-alias'",[]).is_err());
     assert!(store.conn().execute("UPDATE terminals SET epoch=epoch+1 WHERE id=?1",[terminal.id.as_bytes().as_slice()]).is_err());
     assert!(store.create_terminal_for_task(tree.id,"late-hook","fake",farcooler_protocol::v1::TerminalIntent::Running,80,24,Some(task)).is_err());
     assert!(store.get_task(task).is_ok());assert!(store.get_terminal(terminal.id).is_ok());
-    store.engine_verify(&plan).unwrap();
 }
 
 #[test]

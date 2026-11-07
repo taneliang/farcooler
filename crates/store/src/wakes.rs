@@ -207,6 +207,14 @@ impl Store {
         };
         let Some(wakes) = wakes else { return Err(farcooler_core::DomainError::NotFound) };
         let note = insert_note(&tx, task, kind, actor, body, &extra, supersedes)?;
+        // After release the legacy answer queue is fenced and never read
+        // (engine_manual::VISIBLE_LEGACY): the answer lands as a note, and
+        // telling the orchestrator is the engine's (ov-945 ticket 4).
+        let wakes = wakes
+            && tx
+                .query_row("SELECT phase FROM engine_cutover_authority WHERE singleton=1", [], |r| r.get::<_, String>(0))
+                .map_err(map_err)?
+                == "legacy";
         if wakes {
             tx.execute(
                 "INSERT OR IGNORE INTO answer_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",

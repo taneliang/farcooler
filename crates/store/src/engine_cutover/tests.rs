@@ -192,4 +192,5 @@ mod storage_safety;
 mod startup_gate;
 mod manual_delivery;
 mod recovery;
+mod released_board;
 mod source60;

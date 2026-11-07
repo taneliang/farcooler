@@ -22,7 +22,7 @@ pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4
 /// every workflow table. Its tables and rows are conserved unchanged upward.
 pub const SOURCE60_SCHEMA_HASH: &str = "wf1:7e663d320ef00a1181410d4610e24f6b6ee8729ca14f558d25c70a873f39053e";
 pub const SOURCE_SCHEMA_HASH: &str = "wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09";
-pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:e0cf501b0e043034e27c05995ce8dea92913cb8181dcf20f2f7f7ba2281da704";
+pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:0e04b8601923e04b05ade7b253dd1f5918799d9c458899b2ee96fe918873b060";
 pub const MAP_PIN: &str = "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -116,24 +116,39 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         CREATE TRIGGER engine_ledger_no_delete BEFORE DELETE ON engine_cutover_ledger BEGIN SELECT RAISE(ABORT,'immutable conservation ledger'); END;
         CREATE TRIGGER engine_attempt_no_update BEFORE UPDATE ON engine_cutover_attempts BEGIN SELECT RAISE(ABORT,'immutable cutover attempt'); END;
         CREATE TRIGGER engine_attempt_no_delete BEFORE DELETE ON engine_cutover_attempts BEGIN SELECT RAISE(ABORT,'immutable cutover attempt'); END;")?;
-    // Preserve readers and history. Freeze execution-bearing legacy writes even
-    // through another SQLite connection or FK cascade. No dropping evidence.
-    for table in ["ticket_lines","ticket_work","landings","landing_tickets","board_ci","pr_nudges",
-        "answer_wakes","hold_wakes","message_wakes","compose_holds","compose_hold_images","compose_waits",
-        "check_in_schedules","check_in_occurrences","check_in_target_reservations","check_in_instance",
-        "check_in_cleanup_fence","check_in_enter_fences","task_blocks"] {
+    // Preserve readers and history. Legacy delivery and landing writes stay frozen
+    // everywhere, even through another SQLite connection or FK cascade: the engine
+    // has not taken those over yet (ov-945 tickets 4 and 5). Everything else is
+    // board data that works as before, fenced only for a task the engine owns
+    // (workflow_owned_items). No dropping evidence.
+    for table in ["landings","landing_tickets","answer_wakes","hold_wakes","message_wakes"] {
         for (suffix,event) in [("i","INSERT"),("u","UPDATE"),("d","DELETE")] {
             tx.execute_batch(&format!("CREATE TRIGGER engine_fence_{table}_{suffix} BEFORE {event} ON {table}
                 WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
                 BEGIN SELECT RAISE(ABORT,'legacy execution authority retired'); END;"))?;
         }
     }
-    tx.execute_batch("CREATE TRIGGER engine_task_execution_fence BEFORE UPDATE OF status,status_since,wait_kind,wait_line,wait_rank,wait_until,wait_event,wait_since ON tasks
-        WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+    let owned=|task:&str| format!("EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id={task})");
+    let (owned_old,owned_new,owned_old_task,owned_new_task)=(owned("OLD.id"),owned("NEW.id"),owned("OLD.task_id"),owned("NEW.task_id"));
+    // Insert and update of these are already refused for an owned task by
+    // workflow_excludes_*; deleting what the engine's card owns is refused here.
+    for table in ["ticket_lines","ticket_work","task_blocks"] {
+        tx.execute_batch(&format!("CREATE TRIGGER engine_fence_{table}_d BEFORE DELETE ON {table}
+            WHEN {owned_old_task} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+            BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END;"))?;
+    }
+    tx.execute_batch(&format!("CREATE TRIGGER engine_fence_task_blocks_i BEFORE INSERT ON task_blocks
+        WHEN {owned_new_task} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END;
+        CREATE TRIGGER engine_fence_task_blocks_u BEFORE UPDATE ON task_blocks
+        WHEN ({owned_old_task} OR {owned_new_task}) AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END;
+        CREATE TRIGGER engine_task_execution_fence BEFORE UPDATE OF status,status_since,wait_kind,wait_line,wait_rank,wait_until,wait_event,wait_since ON tasks
+        WHEN {owned_old} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
         BEGIN SELECT RAISE(ABORT,'legacy task execution authority retired'); END;
         CREATE TRIGGER engine_task_delete_fence BEFORE DELETE ON tasks
-        WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
-        BEGIN SELECT RAISE(ABORT,'retain migrated task identity'); END;")?;
+        WHEN {owned_old} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        BEGIN SELECT RAISE(ABORT,'retain migrated task identity'); END;"))?;
     for table in ["workflow_states","workflow_events","workflow_receipts","workflow_outbox","workflow_wire_receipts","workflow_definitions","workflow_configurations","workflow_bundles","workflow_bundle_selections"] {
         for (suffix,event) in [("i","INSERT"),("u","UPDATE"),("d","DELETE")] {
             tx.execute_batch(&format!("CREATE TRIGGER engine_freeze_{table}_{suffix} BEFORE {event} ON {table}
@@ -141,20 +156,20 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
                 BEGIN SELECT RAISE(ABORT,'engine dispatch frozen for cutover'); END;"))?;
         }
     }
-    tx.execute_batch("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,worktree_id ON tasks
-        WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+    tx.execute_batch(&format!("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,worktree_id ON tasks
+        WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy' AND {owned_old}
         AND NOT(OLD.id IS NEW.id AND OLD.workspace_id IS NEW.workspace_id AND OLD.repository_id IS NEW.repository_id AND OLD.key IS NEW.key AND OLD.former_key IS NEW.former_key AND OLD.worktree_id IS NEW.worktree_id)
         BEGIN SELECT RAISE(ABORT,'migrated task identity is fenced'); END;
         CREATE TRIGGER engine_terminal_task_insert_fence BEFORE INSERT ON terminals
-        WHEN NEW.task_id IS NOT NULL AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        WHEN {owned_new_task} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
         BEGIN SELECT RAISE(ABORT,'legacy task-bound terminal admission retired'); END;
         CREATE TRIGGER engine_terminal_task_delete_fence BEFORE DELETE ON terminals
-        WHEN OLD.task_id IS NOT NULL AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        WHEN {owned_old_task} AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
         BEGIN SELECT RAISE(ABORT,'retain migrated terminal evidence'); END;
         CREATE TRIGGER engine_terminal_task_update_fence BEFORE UPDATE OF task_id,worktree_id,workspace_id,command_preset,intent,runtime_confirmed,lease_generation,epoch,agent_session_id,role,pane_mode ON terminals
-        WHEN (OLD.task_id IS NOT NULL OR NEW.task_id IS NOT NULL) AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+        WHEN ({owned_old_task} OR {owned_new_task}) AND (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
         AND NOT(OLD.task_id IS NEW.task_id AND OLD.worktree_id IS NEW.worktree_id AND OLD.workspace_id IS NEW.workspace_id AND OLD.command_preset IS NEW.command_preset AND OLD.intent IS NEW.intent AND OLD.runtime_confirmed IS NEW.runtime_confirmed AND OLD.lease_generation IS NEW.lease_generation AND OLD.epoch IS NEW.epoch AND OLD.agent_session_id IS NEW.agent_session_id AND OLD.role IS NEW.role AND OLD.pane_mode IS NEW.pane_mode)
-        BEGIN SELECT RAISE(ABORT,'legacy task-bound terminal restart retired'); END;")?;
+        BEGIN SELECT RAISE(ABORT,'legacy task-bound terminal restart retired'); END;"))?;
     Ok(())
 }
 
