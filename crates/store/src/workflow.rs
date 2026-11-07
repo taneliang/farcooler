@@ -19,6 +19,8 @@ pub enum WorkflowError {
     Authority,
     #[error("workflow input exceeds the admission bound")]
     Oversized,
+    #[error("the board could not follow the run: {0}")]
+    Board(String),
 }
 pub type Result<T> = std::result::Result<T, WorkflowError>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,6 +242,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
                     params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
                 )?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
+                crate::workflow_projection::project(tx, &input.workspace, &transition.state)?;
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;

@@ -50,7 +50,8 @@ fn released_board_commands_all_work_on_a_card_the_engine_does_not_own() {
     let s = &r.store;
     let user = Actor::User;
     let line = NewTicketLine { reason: "plan".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None };
-    let steps: Vec<(&str, Box<dyn Fn() -> bool + '_>)> = vec![
+    type Step<'a> = (&'static str, Box<dyn Fn() -> bool + 'a>);
+    let steps: Vec<Step<'_>> = vec![
         ("status", Box::new(|| s.set_task_status(r.free, TaskStatus::InProgress, user).is_ok())),
         ("block", Box::new(|| s.set_block(r.free, r.other, Some("because")).is_ok())),
         ("unblock", Box::new(|| s.unblock(r.free, r.other).is_ok())),
@@ -80,8 +81,9 @@ fn released_board_commands_all_work_on_a_card_the_engine_does_not_own() {
 fn released_board_still_fences_the_card_the_engine_owns() {
     let r = released();
     let s = &r.store;
-    assert!(s.set_task_status(r.owned, TaskStatus::Done, Actor::User).is_err(), "status is the engine's");
-    assert!(s.set_wait(r.owned, Some(Wait::Parked), Actor::User).is_err(), "so is its wait");
+    let engine_owned = |e: farcooler_core::DomainError| matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned" });
+    assert!(s.set_task_status(r.owned, TaskStatus::Done, Actor::User).is_err_and(engine_owned), "status is the engine's");
+    assert!(s.set_wait(r.owned, Some(Wait::Parked), Actor::User).is_err_and(engine_owned), "so is its wait");
     assert!(s.put_on_line(r.owned, &NewTicketLine { reason: "x".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, Actor::User).is_err());
     assert!(s.set_block(r.owned, r.other, None).is_err(), "its dependencies are the engine's");
     assert!(s.create_terminal_for_task(r.tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.owned)).is_err());
@@ -180,7 +182,7 @@ fn hourly_check_ins_still_fire_after_release() {
     use rusqlite::params;
     let r = released();
     let s = &r.store;
-    let ws = uuid::Uuid::from(r.ws);
+    let ws = r.ws;
     s.recover_check_ins_after_exclusive_start().unwrap();
     // The cutover left a settled schedule; make one that is due now on a card the engine does not own.
     s.conn().execute("DELETE FROM check_in_occurrences", []).unwrap();
@@ -219,4 +221,29 @@ fn released_agents_work_panes_and_moves_on_an_unowned_card_all_work() {
     s.end_agent(agent.id, Verdict::Finished).expect("agent end");
     let other = s.create_workspace(s.get_workspace(r.ws).unwrap().repository_id, "Second", "sc").expect("a second board");
     s.move_tasks(&[r.free], other.id, user).expect("task move");
+}
+
+#[test]
+fn released_engine_moves_the_card_it_owns_and_leaves_the_catalog_as_it_was() {
+    let r = released();
+    let s = &r.store;
+    let catalog = || -> Vec<(String, Option<String>)> {
+        let conn = s.conn();
+        let mut q = conn.prepare("SELECT name, sql FROM sqlite_master ORDER BY type, name").unwrap();
+        q.query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<std::result::Result<_, rusqlite::Error>>().unwrap()
+    };
+    let status = |t: uuid::Uuid| s.get_task(t).unwrap().status;
+    // The tracker run waits on its owner, and `released()` has already enqueued it.
+    assert_eq!(status(r.owned), TaskStatus::NeedsDecision, "the engine moved the owned card after release");
+    assert_eq!(status(r.free), TaskStatus::Backlog, "and no other card");
+    let before = catalog();
+    let cancel = farcooler_workflow::Input { schema: 1, id: "c".into(), workspace: r.ws.to_string(), expected_revision: 1, epoch: 1,
+        source: "controller".into(), source_sequence: 2, now_ms: 1, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Cancel { item: s.get_task(r.owned).unwrap().key } };
+    assert!(s.workflow_apply(&cancel).unwrap().result.is_ok());
+    assert_eq!(status(r.owned), TaskStatus::Cancelled);
+    let stage: String = s.conn().query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [r.owned.as_bytes().as_slice()], |row| row.get(0)).unwrap();
+    assert_eq!(stage, "dropped");
+    assert_eq!(catalog(), before, "the fences the projection stepped past are back, word for word");
+    assert!(s.set_task_status(r.owned, TaskStatus::Todo, Actor::User).is_err(), "and still fence a hand");
 }

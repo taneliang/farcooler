@@ -140,7 +140,7 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         }
     }
     let owned=|task:&str| format!("EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id={task})");
-    let (owned_old,owned_new,owned_old_task,owned_new_task)=(owned("OLD.id"),owned("NEW.id"),owned("OLD.task_id"),owned("NEW.task_id"));
+    let (owned_old,owned_old_task,owned_new_task)=(owned("OLD.id"),owned("OLD.task_id"),owned("NEW.task_id"));
     // Insert and update of these are already refused for an owned task by
     // workflow_excludes_*; deleting what the engine's card owns is refused here.
     for table in ["ticket_lines","ticket_work","task_blocks"] {

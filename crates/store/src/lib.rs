@@ -93,3 +93,4 @@ pub mod workflow_publication;
 pub mod workflow_notices;
 
 mod workflow_ownership;
+mod workflow_projection;

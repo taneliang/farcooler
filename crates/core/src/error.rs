@@ -368,6 +368,11 @@ const SENTENCES: &[(&str, &str)] = &[
     ("not_delivered", "The answer didn't reach the agent. Try again."),
     // `terminal.dismiss_lost` on a terminal that is not lost (any more): it was
     // restarted or dismissed since the app drew it.
+    // A hand move on a card a workflow run owns (ov-948): the run moves it.
+    (
+        "engine_owned",
+        "This ticket is running in a workflow, so its column follows the run. Cancel the run to take it off the workflow.",
+    ),
     ("not_lost", "That terminal isn't lost anymore."),
     // A rep's pane, refused anything but reading the board, messaging and
     // commenting, and an answer or a decision (ov-494, ov-527).

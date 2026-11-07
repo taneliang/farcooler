@@ -116,7 +116,7 @@ impl Stage {
             )
     }
 
-    fn said(self) -> &'static str {
+    pub(crate) fn said(self) -> &'static str {
         match self {
             Stage::Waiting => "Waiting.",
             Stage::Building => "Building.",
@@ -403,6 +403,7 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         board_of(&tx, task)?;
+        crate::workflow_projection::refuse_if_owned(&tx, task)?;
         if line_in(&tx, task).is_ok() {
             return Err(invalid("on_the_line"));
         }
@@ -439,6 +440,7 @@ impl Store {
         let sha = update.landed_sha.as_deref().map(|v| clean(v, SHA_MAX, false, "sha")).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        crate::workflow_projection::refuse_if_owned(&tx, task)?;
         let before = line_in(&tx, task)?;
         if let Some(Some(parent)) = update.stack_parent {
             check_parent(&tx, task, parent)?;

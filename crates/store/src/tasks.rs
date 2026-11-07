@@ -638,6 +638,7 @@ impl Store {
     pub fn set_task_status(&self, task: Uuid, status: TaskStatus, actor: Actor) -> Result<Task> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        crate::workflow_projection::refuse_if_owned(&tx, task)?;
 
         let existing: Task = tx
             .query_row(

@@ -453,7 +453,9 @@ fn engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_i
     let store=Store::open_fixture(&path).unwrap();let command=input(ws.id.to_string(),task.key,"new-resource");
     assert_eq!(store.workflow_apply(&command).unwrap().result,Ok(1));
     assert_eq!(store.conn().query_row("SELECT count(*) FROM ticket_lines",[],|r|r.get::<_,usize>(0)).unwrap(),1);
-    assert_eq!(store.get_task(task.id).unwrap().status,crate::TaskStatus::Done,"legacy Done remains history, not new engine gates");
+    // Old Done and landed gate nothing, and a fresh run reopens the card it was asked to run (ov-948).
+    assert_eq!(store.get_task(task.id).unwrap().status,crate::TaskStatus::InProgress,"the card follows the new run");
+    assert_eq!(store.conn().query_row("SELECT stage FROM ticket_lines WHERE task_id=?1",[task.id.as_bytes().as_slice()],|r|r.get::<_,String>(0)).unwrap(),"building");
 }
 
 #[test]

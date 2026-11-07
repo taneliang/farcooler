@@ -482,6 +482,7 @@ impl Store {
         {
             let mut conn = self.conn();
             let tx = conn.transaction().map_err(map_err)?;
+            crate::workflow_projection::refuse_if_owned(&tx, task)?;
             let (status, _, before, since) = stored_wait(&tx, task)?;
             if wait.is_some() && !matches!(status, TaskStatus::Backlog | TaskStatus::Todo) {
                 return Err(DomainError::InvalidArgument { what: "wait_status" });
