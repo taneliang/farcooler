@@ -257,7 +257,7 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     })?;
 
     // Every open card is an engine item (ov-951, ov-962); a card made later is tracked when it is made.
-    service.track_tickets(None).await;
+    if farcooler_daemon::ticket_moves::auto_tracking() { service.track_tickets(None).await; }
 
     // This process holds the daemon lock. Claimed and submitted check-ins
     // cannot be replayed after a crash; admitted fences remain held until the

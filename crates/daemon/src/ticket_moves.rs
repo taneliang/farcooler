@@ -6,6 +6,11 @@ use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::TaskStatus;
 
+/// Whether this daemon tracks cards on its own: always, except under the integration tests' stub-agents
+/// switch (`service::test_stub_agents`), which a shipped install never sets. Those tests drive the hand
+/// flows (lines, pull request stages) on cards the engine would otherwise hold (ov-962).
+pub fn auto_tracking() -> bool { !crate::service::test_stub_agents() }
+
 /// The engine column a status names.
 pub(crate) fn column(status: TaskStatus) -> &'static str {
     match status {
