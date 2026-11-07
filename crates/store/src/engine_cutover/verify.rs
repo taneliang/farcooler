@@ -4,12 +4,22 @@ use super::*;
 pub(super) fn row_key(table:&manifest::Table,row:&[Cell]) -> String {
     manifest::identity(&table.columns,row)
 }
+/// A source at the registry keeps its exact catalog. A raw60 source grows into
+/// exactly the pinned later catalog, and every table it grew starts empty: the
+/// upgrade from 60 invents no row.
+pub(super) fn catalog_matches(plan:&Preflight, after:&manifest::Manifest) -> bool {
+    if plan.registry!=60 {
+        return plan.raw.tables.keys().eq(after.tables.keys()) && plan.raw.objects.keys().eq(after.objects.keys());
+    }
+    catalog_hash(after)==SOURCE_SCHEMA_HASH
+        && after.tables.iter().all(|(name,table)|plan.raw.tables.contains_key(name)||table.rows.is_empty())
+}
 fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
     let mut after=preflight(conn)?.raw;
     // These are named transfer deltas, checked for exact +1. Never ignore an
     // entire column or table; every other value in the row must match the source.
     for name in ["workflow_resources","workflow_resource_generations"] {
-        let before=&plan.raw.tables[name];
+        let Some(before)=plan.raw.tables.get(name) else { continue };
         let current=after.tables.get_mut(name).ok_or_else(||Error::Refused("resource table lost".into()))?;
         let generation=before.columns.iter().position(|c|c.name=="generation").ok_or_else(||Error::Refused("resource generation missing".into()))?;
         if before.rows.len()!=current.rows.len() { return refuse("resource set changed"); }
@@ -22,7 +32,7 @@ fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
         }
         current.rows.sort_by_cached_key(|row|serde_json::to_vec(row).expect("closed cells"));
     }
-    if !plan.raw.conserved_by(&after) || plan.raw.objects.keys().collect::<Vec<_>>()!=after.objects.keys().collect::<Vec<_>>() {
+    if !plan.raw.conserved_by(&after) || !catalog_matches(plan,&after) {
         return refuse("per-field/schema/relationship/allocator conservation failed");
     }
     let schema:String=conn.query_row("SELECT value FROM meta WHERE key='schema_version'",[],|r|r.get(0))?;
@@ -59,11 +69,11 @@ impl Store {
     pub fn engine_verify(&self,plan:&Preflight) -> Result<()> { check(plan,&self.conn()) }
     /// Explicit private-admin release after bootstrap has supplied joined-writer
     /// proof. Scoped unknown effects stay quarantined; unknown schema blocks all.
-    pub fn engine_release(&self,plan:&Preflight,owners:&super::JoinedOwners) -> Result<()> {
-        owners.evidence().validate()?;
+    pub fn engine_release(&self,plan:&Preflight,owners:super::JoinedOwners) -> Result<()> {
         let mut conn=self.conn();
         owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        frozen_by(&tx,owners.attempt())?;
         if authority(&tx)?.phase!="committed" { return refuse("not a committed authority"); }
         check(plan,&tx)?;
         let unknown:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='schema:unknown')",[],|r|r.get(0))?;

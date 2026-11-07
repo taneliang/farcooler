@@ -16,9 +16,9 @@ fn released_file() -> (tempfile::TempDir, std::path::PathBuf, uuid::Uuid, uuid::
     c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
     drop(c);
     let plan = preflight(&store.conn()).unwrap();
-    store.engine_quiesce(&joined(&store)).unwrap();
+    store.engine_quiesce(joined(&store)).unwrap();
     store.engine_commit_for_test(&plan, &proof(&store), "manual").unwrap();
-    store.engine_release(&plan, &joined(&store)).unwrap();
+    store.engine_release(&plan, joined(&store)).unwrap();
     drop(store);
     (tmp, path, ws.id, task.id)
 }

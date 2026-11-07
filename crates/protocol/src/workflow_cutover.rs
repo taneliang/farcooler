@@ -1,7 +1,8 @@
 //! Closed vocabulary of the single `workflow.cutover` method. No principal,
 //! grant, quiescence claim or actor appears here: the daemon decides who the
 //! caller is and proves quiescence itself. Commit is deliberately absent; it
-//! needs the closed-backup permit minted by the parent-owned rehearsal.
+//! needs the closed-backup permit minted by the parent-owned rehearsal, and
+//! `Recover` is the exit from an attempt until it exists.
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BYTES: usize = 1024;
@@ -10,8 +11,11 @@ pub const MAX_BYTES: usize = 1024;
 pub enum Cutover {
     /// Read-only: phase, incarnation, schema and artifact state.
     Inspect,
-    /// Join this daemon's writers, capture the baseline and intent, upgrade and freeze.
+    /// On a live daemon: drain, mark the attempt and stop. In recovery: capture
+    /// the baseline and intent, upgrade and freeze.
     Prepare { attempt: String },
+    /// End an uncommitted attempt, restoring the original database if it was upgraded.
+    Recover,
     /// Re-check a committed transfer against its original baseline.
     Verify,
     /// Release a verified committed transfer.
@@ -38,6 +42,7 @@ mod tests {
     #[test]
     fn cutover_vocabulary_is_closed_and_carries_no_authority() {
         assert_eq!(parse(r#"{"op":"Inspect"}"#).unwrap(), Cutover::Inspect);
+        assert_eq!(parse(r#"{"op":"Recover"}"#).unwrap(), Cutover::Recover);
         assert!(matches!(parse(r#"{"op":"Prepare","attempt":"a-1"}"#).unwrap(), Cutover::Prepare { .. }));
         for bad in [r#"{"op":"Commit"}"#, r#"{"op":"Inspect","quiescent":true}"#, r#"{"op":"Prepare","attempt":""}"#,
             r#"{"op":"Prepare","attempt":"a/b"}"#, r#"{"op":"Release","actor":"owner"}"#, "{}", "[]"] {

@@ -1,64 +1,65 @@
-//! Join proof for writer owners. `Quiescence` is serializable EVIDENCE only; the
-//! authority-bearing value is `JoinedOwners`, which has no public constructor,
-//! no `Clone`, and no serde. Only `OwnerJoin::join` issues it, and only after
-//! this module itself drove every retained owner's close-and-join to success.
-use std::collections::BTreeSet;
+//! Who owns a database file, proved by the kernel instead of by an inventory.
+//! Every ordinary `Store::open` holds a shared `flock` on `<db>.owners` for the
+//! Store's life. `JoinedOwners::acquire` takes it exclusively without blocking,
+//! so it succeeds only when every gated Store in every process (daemon, stream,
+//! standalone stdio) has closed, however it ended: the kernel drops the lock on
+//! exit and crash, so there is no stale record to disbelieve and no PID to
+//! signal. A holder blocks the proof; nothing is ever killed to get it. The
+//! proof owns the lock, has no other constructor and no `Clone` or serde, and
+//! each cutover stage consumes it, so a stage after a reopen must prove afresh.
+//! `Quiescence` remains evidence for the rehearsal's permit, never authority.
+//! A process that predates this lock is invisible here: capture and upgrade
+//! share one write transaction, and conservation catches its later writes.
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::os::unix::fs::MetadataExt;
-use super::{Quiescence, StoppedWriter, Result, refuse};
+use super::{Error, Result, refuse};
 
-/// A retained writer owner (task handle, owned child group, worker...). The
-/// implementor must have held the actual handle since admission; stored PID or
-/// PGID values are never an implementation.
-pub trait OwnedWriter: Send {
-    fn identity(&self) -> String;
-    fn incarnation(&self) -> String;
-    fn resources(&self) -> BTreeSet<String>;
-    /// Close admission for this owner, drain it through its final effect and
-    /// join it. Err on any unjoined, timed-out, panicked or unresolved owner.
-    fn close_and_join(&mut self) -> std::result::Result<String, String>;
+pub fn lock_path(db: &Path) -> PathBuf {
+    let mut name = db.as_os_str().to_owned();
+    name.push(".owners");
+    PathBuf::from(name)
+}
+fn open_lock(db: &Path) -> Result<File> {
+    Ok(OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW).open(lock_path(db))?)
+}
+/// `flock` without waiting; false when another holder conflicts.
+fn try_flock(file: &File, kind: i32) -> Result<bool> {
+    // SAFETY: `file` owns a descriptor open for the whole call.
+    if unsafe { libc::flock(file.as_raw_fd(), kind | libc::LOCK_NB) } == 0 { return Ok(true); }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::WouldBlock { Ok(false) } else { Err(Error::Files(error)) }
+}
+/// The shared hold of one ordinary Store; refused while recovery owns the file.
+pub(crate) fn share(db: &Path) -> Result<File> {
+    let file = open_lock(db)?;
+    if try_flock(&file, libc::LOCK_SH)? { Ok(file) } else { refuse("cutover recovery owns this database") }
 }
 
-pub struct OwnerJoin { attempt: String, writers: Vec<Box<dyn OwnedWriter>> }
-impl OwnerJoin {
-    pub fn new(attempt: &str) -> Self { Self { attempt: attempt.into(), writers: Vec::new() } }
-    pub fn retain(&mut self, writer: Box<dyn OwnedWriter>) { self.writers.push(writer); }
-    /// Joins every owner (all are attempted, none skipped on an earlier error)
-    /// and issues the proof only if all succeeded and the inventory is exactly
-    /// complete for `db`'s protected resources.
-    pub fn join(mut self, db: &Path, protected: &BTreeSet<String>) -> Result<JoinedOwners> {
-        if self.attempt.is_empty() { return refuse("empty attempt"); }
-        let required: BTreeSet<String> = super::REQUIRED_OWNERS.iter().map(|s| (*s).to_owned()).collect();
-        let mut stopped = Vec::new();
-        let mut failed = false;
-        for w in &mut self.writers {
-            match w.close_and_join() {
-                Ok(receipt) if !receipt.is_empty() => stopped.push(StoppedWriter {
-                    identity: w.identity(), incarnation: w.incarnation(), joined_receipt: receipt, resources: w.resources() }),
-                _ => failed = true,
-            }
-        }
-        if failed { return refuse("an owner did not join; no quiescence proof issued"); }
-        let inventory: BTreeSet<String> = stopped.iter().map(|s| s.identity.clone()).collect();
-        let evidence = Quiescence { inventory, stopped, protected_resources: protected.clone() };
-        if !required.is_subset(&evidence.inventory) { return refuse("writer inventory incomplete; unknown owners block"); }
-        evidence.validate()?;
-        let meta = std::fs::metadata(db)?;
-        Ok(JoinedOwners { attempt: self.attempt, db: db.to_path_buf(), identity: (meta.dev(), meta.ino()), evidence })
-    }
-}
-
-/// One-attempt opaque proof. Deliberately not Clone/Serialize/Deserialize.
+/// One stage's proof that nothing else has this database open.
 #[derive(Debug)]
-pub struct JoinedOwners { attempt: String, db: PathBuf, identity: (u64, u64), evidence: Quiescence }
+pub struct JoinedOwners { attempt: String, identity: Option<(u64, u64)>, lock: Option<File> }
 impl JoinedOwners {
+    pub fn acquire(db: &Path, attempt: &str) -> Result<Self> {
+        if attempt.is_empty() { return refuse("empty attempt"); }
+        let lock = open_lock(db)?;
+        if !try_flock(&lock, libc::LOCK_EX)? { return refuse("another process has this database open; no proof issued"); }
+        // Read under the lock, so this names the file the lock protects.
+        let meta = std::fs::metadata(db)?;
+        Ok(Self { attempt: attempt.into(), identity: Some((meta.dev(), meta.ino())), lock: Some(lock) })
+    }
     pub fn attempt(&self) -> &str { &self.attempt }
-    pub fn evidence(&self) -> &Quiescence { &self.evidence }
+    /// What this proof rests on, for the attempt's durable record.
+    pub(crate) fn receipt(&self) -> Result<String> {
+        let lock = self.lock.as_ref().map(|f| f.metadata().map(|m| (m.dev(), m.ino()))).transpose()?;
+        Ok(serde_json::to_string(&serde_json::json!({"attempt": self.attempt, "database": self.identity, "lock": lock, "process": std::process::id()}))?)
+    }
     /// The proof binds the exact database file it was issued for.
     pub(crate) fn binds(&self, db: &Path) -> bool {
-        #[cfg(test)]
-        if self.db == Path::new("unit") { return true; }
-        std::fs::metadata(db).map(|m| (m.dev(), m.ino()) == self.identity).unwrap_or(false) && !self.db.as_os_str().is_empty()
+        let Some(identity) = self.identity else { return true };
+        std::fs::metadata(db).map(|m| (m.dev(), m.ino()) == identity).unwrap_or(false)
     }
     /// File-backed stores must be the file this proof was issued for.
     pub(crate) fn check_store(&self, conn: &rusqlite::Connection) -> Result<()> {
@@ -67,8 +68,8 @@ impl JoinedOwners {
             _ => Ok(()),
         }
     }
-    #[cfg(test)]
-    pub(crate) fn unit(evidence: Quiescence, attempt: &str) -> Self {
-        Self { attempt: attempt.into(), db: PathBuf::from("unit"), identity: (0, 0), evidence }
-    }
+    pub(crate) fn into_lock(self) -> Option<File> { self.lock }
+    /// An in-memory fixture has no file to lock.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn unit(attempt: &str) -> Self { Self { attempt: attempt.into(), identity: None, lock: None } }
 }

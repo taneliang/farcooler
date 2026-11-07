@@ -140,6 +140,27 @@ pub fn walk_seat(svc: &crate::service::Service, pid: i32) -> Seat {
     view.seat(pid, own_app().as_deref(), &agent)
 }
 
+/// `caller_seat` for a recovery daemon, which has no Store, inventory or
+/// registry to read panes and logins from. Without them it cannot tell whose
+/// pane a caller is in, so it takes none: every tmux server ends the walk, which
+/// leaves `Unreadable` for anything in a pane, and an agent is an agent by its
+/// process. Only a person outside every pane comes back `Person`.
+pub fn recovery_seat(pid: i32) -> Seat {
+    if pid <= 0 {
+        return Seat::Unreadable;
+    }
+    let Some(table) = crate::proc_table::snapshot() else { return Seat::Unreadable };
+    let procs = procs(&table);
+    let servers = procs.keys().copied().filter(|&p| crate::proc_table::name_of(p).is_some_and(|name| name.contains("tmux"))).collect();
+    let (panes, ttys) = (Panes::default(), HashSet::new());
+    let runner = Runner { panes: &panes, servers: &servers, ttys: &ttys };
+    let agent = |pid: i32| crate::proc_table::command_of(pid).map(|(exe, args)| {
+        crate::watch::answer_wake::agent_of_process(if exe.is_empty() { args.split_whitespace().next().unwrap_or_default() } else { &exe }, &args).is_some()
+    });
+    let app = own_app();
+    seat_in(pid, &procs, &runner, &agent, &|pid| vouches_for_a_person(pid, app.as_deref()))
+}
+
 /// What the walk reads of the runner and the host, at one moment.
 struct View {
     panes: Panes,

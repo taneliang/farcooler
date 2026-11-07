@@ -151,6 +151,16 @@ pub fn break_revoked_marks(store: &crate::Store) {
 /// Fixture-only: run one statement on the store's connection (no params).
 pub fn exec_for_tests(store: &crate::Store, sql: &str) { store.conn().execute(sql, []).unwrap(); }
 
+/// Fixture-only: a transfer driven to a released engine, for a daemon fixture
+/// whose background tasks outlive its Service and so keep the owner lock. A
+/// test of what follows a cutover, not of who may start one.
+pub fn released_transfer_for_tests(db: &std::path::Path, attempt: &str) {
+    use crate::engine_cutover::{JoinedOwners, transfer};
+    let (store, _plan) = transfer::begin(db, JoinedOwners::unit(attempt)).unwrap();
+    exec_for_tests(&store, "UPDATE engine_cutover_authority SET phase='released', incarnation=1");
+    transfer::finish(db, &store, JoinedOwners::unit(attempt)).unwrap();
+}
+
 /// Fixture-only: the row count of `table`.
 pub fn count_rows_for_tests(store: &crate::Store, table: &str) -> i64 {
     store.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()

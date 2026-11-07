@@ -795,11 +795,23 @@ impl Rpc {
                 let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
                 if p.schema != 1 { return Err(DomainError::NotFound); }
                 let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;
-                // A live daemon has writers of its own: it may only inspect and
-                // prepare. Verify, release and finish need a recovery process.
+                // A live daemon has writers of its own: it may only inspect, or
+                // drain and stop so that the next start can do the rest.
                 let value = match &op {
-                    Cutover::Prepare { attempt } => crate::cutover_admin::prepare(svc, attempt).await,
-                    Cutover::Inspect => crate::cutover_admin::recovery(svc.root_dir(), &op),
+                    Cutover::Prepare { attempt } => {
+                        let admission = crate::workflow_runtime::Admission::capture(svc.clone(), self.peer.clone(), self.session.clone(),
+                            self.caller_pid, self.caller_pane.clone(), crate::workflow_runtime::Admission::HOST_WIDE).await?;
+                        admission.require_person()?;
+                        let held = crate::cutover_admin::hold(svc, attempt, || admission.recheck_now()
+                            .map_err(|_| crate::cutover_admin::Refused("the caller lost access during the drain".into()))).await;
+                        let stop = self.stop.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            stop.notify_one();
+                        });
+                        held
+                    }
+                    Cutover::Inspect => Ok(crate::cutover_admin::inspect(svc.root_dir())),
                     _ => Err(crate::cutover_admin::Refused("run this op in the recovery daemon after restart".into())),
                 }.map_err(|error| { tracing::warn!(%error, "workflow.cutover refused"); DomainError::OperationFailed })?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json: value.to_string() }))

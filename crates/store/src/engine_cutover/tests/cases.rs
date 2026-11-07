@@ -114,7 +114,7 @@ fn engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive
     old.conn().execute("UPDATE workflow_resource_generations SET generation=8",[]).unwrap();
     old.conn().execute("UPDATE workflow_resources SET generation=8",[]).unwrap();
     let plan=conserved(&old,"f09");
-    old.engine_release(&plan,&joined(&old)).unwrap();
+    old.engine_release(&plan,joined(&old)).unwrap();
     assert!(old.workflow_apply(&command).is_err(),"old Store handle cannot write after transfer");
     assert!(!old.workflow_admit_effect(&claim,101).unwrap());
     let new=Store::open_fixture(&path).unwrap();
@@ -168,7 +168,7 @@ fn engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push() {
     assert_eq!(store.conn().query_row("SELECT count(*) FROM engine_cutover_external",[],|r|r.get::<_,usize>(0)).unwrap(),2);
     let plan=preflight(&store.conn()).unwrap();
     store.engine_commit_for_test(&plan,&proof(&store),"restored-forward").unwrap();
-    store.engine_release(&plan,&joined(&store)).unwrap();drop(store);
+    store.engine_release(&plan,joined(&store)).unwrap();drop(store);
     let store=Store::open_fixture(restored.join("db.sqlite")).unwrap();
     if let Some(retry)=store.workflow_claim_effect(&command.workspace,&receipt.effects[0],"restored-new-owner",1,7,300,400).unwrap() {
         if store.workflow_admit_effect(&retry,301).unwrap() {let _=private.fake_apply("push",&fact);}
@@ -185,7 +185,7 @@ fn engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_l
     let store=fixture();
     let repo=store.register_repository_for_test("Second repo");
     let ws=store.ensure_main_workspace(repo).unwrap();store.create_task(ws.id,"second",Actor::User).unwrap();
-    let plan=preflight(&store.conn()).unwrap();store.engine_quiesce(&joined(&store)).unwrap();
+    let plan=preflight(&store.conn()).unwrap();store.engine_quiesce(joined(&store)).unwrap();
     store.conn().execute_batch("CREATE TRIGGER injected BEFORE INSERT ON engine_cutover_attempts BEGIN SELECT RAISE(ABORT,'cutover mid-map interruption'); END;").unwrap();
     assert!(store.engine_commit_for_test(&plan,&proof(&store),"interrupted").is_err());
     assert_eq!(store.engine_authority().unwrap().phase,"quiesced");
@@ -205,7 +205,7 @@ fn engine_cutover_interrupt_reopen_normalization_and_forward_recovery() {
     store.conn().execute("UPDATE tasks SET wait_kind='future-kind',wait_event=' raw invalid event ' WHERE id=?1",[task.id.as_bytes().as_slice()]).unwrap();
     let plan=preflight(&store.conn()).unwrap();
     private.record(0,&JournalEntry {attempt:"interrupt".into(),stage:"prepared".into(),evidence:plan.raw.hash()}).unwrap();
-    store.engine_quiesce(&joined(&store)).unwrap();drop(store); // interruption before commit
+    store.engine_quiesce(joined(&store)).unwrap();drop(store); // interruption before commit
     let store=Store::open_fixture(&path).unwrap();
     let conn=Connection::open(&path).unwrap();assert_eq!(private.recover(&conn,"interrupt",1).unwrap().phase,"quiesced");drop(conn);
     store.engine_commit_for_test(&plan,&proof(&store),"interrupt").unwrap();drop(store); // committed DB, stale journal
@@ -228,19 +228,19 @@ fn engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_rel
     store.conn().execute_batch("ALTER TABLE tasks ADD COLUMN future_field BLOB; UPDATE tasks SET future_field=X'ff00'; CREATE TABLE future_table(key BLOB PRIMARY KEY,value TEXT); INSERT INTO future_table VALUES(X'01','unknown raw');").unwrap();
     let plan=conserved(&store,"unknown");
     assert!(plan.quarantines.iter().any(|q|q.resource=="schema:unknown"));
-    assert!(store.engine_release(&plan,&joined(&store)).is_err());
+    assert!(store.engine_release(&plan,joined(&store)).is_err());
     assert!(plan.raw.tables.contains_key("future_table"));
 }
 #[test]
 fn engine_cutover_stale_source_and_per_field_corruption_refuse_release() {
     let store=fixture();let plan=preflight(&store.conn()).unwrap();
-    store.engine_quiesce(&joined(&store)).unwrap();
+    store.engine_quiesce(joined(&store)).unwrap();
     store.conn().execute("UPDATE tasks SET title='changed after preflight'",[]).unwrap();
     assert!(store.engine_commit_for_test(&plan,&proof(&store),"changed").is_err());
     let plan=preflight(&store.conn()).unwrap();
     store.engine_commit_for_test(&plan,&proof(&store),"fresh").unwrap();store.engine_verify(&plan).unwrap();
     store.conn().execute("UPDATE tasks SET title='same counts corrupted bytes'",[]).unwrap();
-    assert!(store.engine_verify(&plan).is_err());assert!(store.engine_release(&plan,&joined(&store)).is_err());
+    assert!(store.engine_verify(&plan).is_err());assert!(store.engine_release(&plan,joined(&store)).is_err());
 }
 #[test]
 fn engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case() {
@@ -278,7 +278,7 @@ fn engine_cutover_process_child() {
     let mut file=std::fs::File::create(directory.join("plan.json")).unwrap();
     use std::io::Write;
     file.write_all(&serde_json::to_vec(&plan).unwrap()).unwrap();file.sync_all().unwrap();
-    store.engine_quiesce(&joined(&store)).unwrap();
+    store.engine_quiesce(joined(&store)).unwrap();
     if std::env::var("OV936_CRASH_BOUNDARY").unwrap()=="after" {store.engine_commit_for_test(&plan,&proof(&store),"killed-after-commit").unwrap();}
     let marker=std::fs::File::create(directory.join("kill-now")).unwrap();marker.sync_all().unwrap();
     loop {std::thread::park();}
@@ -354,15 +354,15 @@ fn engine_cutover_all_field_closed_file_backup_public_permit_and_restore() {
     std::fs::create_dir(private.live().join("resources/empty-directory")).unwrap();
     std::fs::write(private.live().join("resources/private-pointer"),b"dirty worktree/ref/config/attachment fixture bytes\0\xff").unwrap();
     std::os::unix::fs::symlink("missing-target",private.live().join("resources/retained-link")).unwrap();
-    let (store,plan)=transfer::begin(&path,&join_db(&path,"full-file")).unwrap();assert_eq!(plan.raw,raw.raw);
+    let (store,plan)=transfer::begin(&path,join_db(&path,"full-file")).unwrap();assert_eq!(plan.raw,raw.raw);
     let evidence=proof(&store);
     private.record(0,&JournalEntry {attempt:"full-file".into(),stage:"prepared".into(),evidence:plan.raw.hash()}).unwrap();
-    store.engine_quiesce(&JoinedOwners::unit(evidence.clone(),"unit")).unwrap();drop(store);
+    store.engine_quiesce(JoinedOwners::unit("full-file")).unwrap();drop(store);
     std::fs::set_permissions(private.live(),std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
     let backup=private.backup("baseline").unwrap();
     assert_eq!(backup.root_mode,0o700);
     let permit=private.commit_permit(&plan,&evidence,"full-file","baseline",&backup,1).unwrap();
-    let store=Store::open_fixture(&path).unwrap();store.engine_commit(&plan,&JoinedOwners::unit(evidence.clone(),"full-file"),&permit).unwrap();store.engine_verify(&plan).unwrap();
+    let store=Store::open_fixture(&path).unwrap();store.engine_commit(&plan,JoinedOwners::unit("full-file"),&permit).unwrap();store.engine_verify(&plan).unwrap();
     record_fixture("closed-all-fields",&plan,&store);
     let first=Manifest::capture(&store.conn()).unwrap();drop(store);
     let store=Store::open_fixture(&path).unwrap();assert_eq!(first,Manifest::capture(&store.conn()).unwrap());drop(store);
@@ -391,7 +391,7 @@ fn engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release() {
     let store=Store::open_fixture(&path).unwrap();let repo=store.register_repository_for_test("Unknown engine");let ws=store.ensure_main_workspace(repo).unwrap();
     let mut command=input(ws.id.to_string(),"item".into(),"resource");store.workflow_apply(&command).unwrap();
     store.conn().execute("UPDATE workflow_states SET state=json_set(state,'$.future_authority','must-retain')",[]).unwrap();
-    let plan=conserved(&store,"unknown-engine");store.engine_release(&plan,&joined(&store)).unwrap();drop(store);
+    let plan=conserved(&store,"unknown-engine");store.engine_release(&plan,joined(&store)).unwrap();drop(store);
     let store=Store::open_fixture(&path).unwrap();let raw=Manifest::capture(&store.conn()).unwrap().tables["workflow_states"].clone();
     command.id="advance".into();command.expected_revision=1;command.source_sequence=2;command.command=Command::Advance;
     assert!(store.workflow_apply(&command).is_err());
@@ -419,7 +419,7 @@ fn engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority() {
 fn engine_cutover_old_sql_claims_and_engine_writes_are_frozen_before_commit() {
     let store=fixture();let ws=store.list_workspaces(None).unwrap()[0].id;
     let command=input(ws.to_string(),"standalone".into(),"before-commit-resource");store.workflow_apply(&command).unwrap();
-    store.engine_quiesce(&joined(&store)).unwrap();
+    store.engine_quiesce(joined(&store)).unwrap();
     assert!(store.conn().execute("UPDATE workflow_outbox SET dispatch_state='admitted'",[]).is_err());
     assert!(store.conn().execute("UPDATE workflow_states SET epoch=epoch+1",[]).is_err());
     assert!(store.workflow_claim_effect(&command.workspace,&store.workflow_outbox(&command.workspace).unwrap()[0].effect.id,"old",1,7,100,200).unwrap().is_none());
@@ -446,7 +446,7 @@ fn engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_i
     let landing=uuid::Uuid::now_v7();store.conn().execute("INSERT INTO landings(id,workspace_id,number,route,state,state_since,actor,created_at,resource_version) VALUES(?1,?2,1,'ask','landed',1,'user',1,1)",params![landing.as_bytes().as_slice(),ws.id.as_bytes().as_slice()]).unwrap();
     store.conn().execute("INSERT INTO landing_tickets VALUES(?1,?2,1)",params![landing.as_bytes().as_slice(),task.id.as_bytes().as_slice()]).unwrap();
     let plan=conserved(&store,"inert-history");assert_eq!(plan.bindings[0].disposition,"retained-intent");
-    store.engine_release(&plan,&joined(&store)).unwrap();drop(store);
+    store.engine_release(&plan,joined(&store)).unwrap();drop(store);
     let store=Store::open_fixture(&path).unwrap();let command=input(ws.id.to_string(),task.key,"new-resource");
     assert_eq!(store.workflow_apply(&command).unwrap().result,Ok(1));
     assert_eq!(store.conn().query_row("SELECT count(*) FROM ticket_lines",[],|r|r.get::<_,usize>(0)).unwrap(),1);

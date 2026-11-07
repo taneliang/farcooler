@@ -13,6 +13,7 @@ args = {
     'notices': ['test','--offline','-p','farcooler-daemon','--lib','workflow_notice','--','--nocapture'],
     'lint-both': ['clippy','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-protocol','-p','farcooler-cli','--all-targets','--','-D','warnings'],
     'old-reader': [],
+    'fix-controls': [],
     'cli': [],
     'final': [],
     'negatives': [],
@@ -29,6 +30,7 @@ args = {
     'compile-all': ['check','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-cli','--all-targets'],
     'daemon': ['test','--offline','-p','farcooler-daemon','--lib'],
     'daemon-f': ['test','--offline','-p','farcooler-daemon','--lib','--',*os.environ.get('OV940_FILTERS','').split(),'--nocapture'],
+    'store-f': ['test','--offline','-p','farcooler-store','--lib','--',*os.environ.get('OV940_FILTERS','').split(),'--nocapture'],
     'protocol': ['test','--offline','-p','farcooler-protocol','--lib'],
     'cli-f': ['test','--offline','-p','farcooler-cli','--bin','farcooler','--','workflow'],
     'lint': ['clippy','--offline','-p','farcooler-store','--all-targets','--','-D','warnings'],
@@ -47,7 +49,7 @@ paths=sorted(set(p for p in tracked if p and (root/p).is_file()) | {str(p.relati
 def hashes():
     return {p: hashlib.sha256((root/p).read_bytes()).hexdigest() for p in paths if (root/p).exists()}
 before = hashes()
-executable = ['/usr/bin/python3', str(root/f'reports/ov-940/{mode}.py')] if mode in ['verified','controls','old-reader','cli','final','negatives','verification','restored','seal','finish'] else ['/Users/e-liang/.cargo/bin/cargo', *args]
+executable = ['/usr/bin/python3', str(root/f'reports/ov-940/{mode}.py')] if mode in ['verified','controls','fix-controls','old-reader','cli','final','negatives','verification','restored','seal','finish'] else ['/Users/e-liang/.cargo/bin/cargo', *args]
 command = ['/usr/bin/python3', str(root/'scripts/heavy'), '--load-limit', '20', '--', '/usr/bin/python3', str(root/'reports/ov-940/entry.py'), str(target), *executable]
 
 def interrupted(signum, frame):

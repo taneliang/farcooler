@@ -2,7 +2,7 @@
 //! This API does not stop external processes: bootstrap must join them and supply
 //! exact incarnation/resource evidence before it can authorize a private rehearsal.
 use std::collections::{BTreeMap, BTreeSet};
-use rusqlite::{Connection, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use crate::Store;
 pub mod manifest;
@@ -13,11 +13,14 @@ pub mod transfer;
 mod verify;
 use manifest::{Cell, Manifest};
 use rehearsal::CommitPermit;
-pub use owners::{JoinedOwners, OwnedWriter, OwnerJoin};
+pub use owners::JoinedOwners;
 pub const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"];
 
 pub const SOURCE_PIN: &str = "fae3f30d0c3d1c475f9dc4463243f293fd88b007";
 pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4193f5f92726d37b7286a52a5e2d";
+/// The registry-60 catalog (entry 60 = check_in_destination), which predates
+/// every workflow table. Its tables and rows are conserved unchanged upward.
+pub const SOURCE60_SCHEMA_HASH: &str = "wf1:7e663d320ef00a1181410d4610e24f6b6ee8729ca14f558d25c70a873f39053e";
 pub const SOURCE_SCHEMA_HASH: &str = "wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09";
 pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:e0cf501b0e043034e27c05995ce8dea92913cb8181dcf20f2f7f7ba2281da704";
 pub const MAP_PIN: &str = "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf";
@@ -155,6 +158,17 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Store::init and historical fixture helpers have these two equivalent meta
+/// spellings. Recognize only these exact declarations, not arbitrary SQL.
+pub(crate) fn catalog_hash(raw:&Manifest) -> String {
+    let mut objects=raw.objects.clone();
+    if let Some((_,_,sql))=objects.get_mut("meta") {
+        if sql.as_deref()==Some("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)") {
+            *sql=Some("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)".into());
+        }
+    }
+    farcooler_workflow::digest(&objects)
+}
 fn field<'a>(table: &'a manifest::Table, row: &'a [Cell], name: &str) -> Result<&'a Cell> {
     table.columns.iter().position(|c| c.name==name).and_then(|i| row.get(i))
         .ok_or_else(|| Error::Refused(format!("missing source field {name}")))
@@ -166,8 +180,8 @@ fn uuid(value: &Cell) -> Result<String> {
 /// Capture before Store::open: no waits sweep or schema stamp can erase raw facts.
 pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let registry = crate::migrate::read_schema_version(conn).map_err(|e| Error::Refused(e.to_string()))?;
-    if !(65..=67).contains(&registry) { return refuse("expected exact composed schema65, cutover schema66 or manual schema67"); }
-    let unsafe_generation:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
+    if !matches!(registry,60|65..=67) { return refuse("expected exact raw schema60, composed schema65, cutover schema66 or manual schema67"); }
+    let unsafe_generation:bool=registry>=65 && conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
         OR EXISTS(SELECT 1 FROM workflow_resources r LEFT JOIN workflow_resource_generations g ON g.resource=r.resource WHERE g.resource IS NULL OR typeof(r.generation)!='integer' OR r.generation!=g.generation)",[],|r|r.get(0))?;
     if unsafe_generation {return refuse("resource generation is invalid, exhausted or inconsistent; no authority transfer");}
     let mut raw = Manifest::capture(conn)?;
@@ -183,15 +197,10 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
         raw, bindings:Vec::new(), quarantines:Vec::new(), workspaces:BTreeSet::new() };
     let workspaces = result.raw.tables.get("workspaces").ok_or_else(|| Error::Refused("missing workspaces".into()))?;
     for row in &workspaces.rows { result.workspaces.insert(uuid(field(workspaces,row,"id")?)?); }
-    let mut schema_objects=result.raw.objects.clone();
-    // Store::init and historical fixture helpers have these two equivalent meta
-    // spellings. Recognize only these exact declarations, not arbitrary SQL.
-    if let Some((_,_,sql))=schema_objects.get_mut("meta") {
-        if sql.as_deref()==Some("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)") {
-            *sql=Some("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)".into());
-        }
-    }
-    let schema_unknown=farcooler_workflow::digest(&schema_objects)!=SOURCE_SCHEMA_HASH;
+    let catalog=catalog_hash(&result.raw);
+    // The raw60 path reads no table until the catalog is the pinned one.
+    if registry==60 && catalog!=SOURCE60_SCHEMA_HASH { return Err(Error::Refused(format!("schema60 catalog differs from the pinned registry prefix: {catalog}"))); }
+    let schema_unknown=registry!=60 && catalog!=SOURCE_SCHEMA_HASH;
     if schema_unknown { result.quarantines.push(Quarantine {resource:"schema:unknown".into(),reason:"composed source schema differs from pinned schema65 catalog; retain every raw field, block release".into()}); }
     let tasks = &result.raw.tables["tasks"];
     let mut aliases: BTreeMap<(String,String),Vec<String>> = BTreeMap::new();
@@ -239,6 +248,7 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
             }
         }
     }
+    if registry>=65 {
     let states=&result.raw.tables["workflow_states"];
     for row in &states.rows {
         let workspace=field(states,row,"workspace")?.text().unwrap_or("");
@@ -278,6 +288,7 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
             }
             for binding in &mut result.bindings {if binding.workspace==workspace {binding.disposition="quarantined".into();}}
         }
+    }
     }
     // Unsupported legacy execution policies remain inert and explicitly block
     // conflicting fresh admission rather than being replaced by engine defaults.
@@ -345,13 +356,11 @@ impl Store {
     pub fn engine_authority(&self) -> Result<Authority> { authority(&self.conn()) }
     /// Resources a join proof must protect (workflow, terminal, worktree identities).
     pub fn engine_protected_resources(&self) -> Result<BTreeSet<String>> { required_resources(&self.conn()) }
-    pub fn engine_quiesce(&self, owners: &JoinedOwners) -> Result<()> {
-        let proof=owners.evidence();
-        proof.validate()?;
+    pub fn engine_quiesce(&self, owners: JoinedOwners) -> Result<()> {
         let mut conn=self.conn();
         owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if required_resources(&tx)?!=proof.protected_resources { return refuse("protected resource inventory incomplete"); }
+        frozen_by(&tx,owners.attempt())?;
         match authority(&tx)?.phase.as_str() {
             "quiesced" => return Ok(()), // transfer::begin already froze it atomically with the upgrade
             "legacy" => {}
@@ -363,16 +372,17 @@ impl Store {
     }
     /// Transaction truth is the recovery oracle. No workspace routing switch,
     /// no legacy row deletion, and no external operation occurs in this boundary.
-    pub fn engine_commit(&self, plan: &Preflight, owners: &JoinedOwners, permit: &CommitPermit) -> Result<Authority> {
-        let proof=owners.evidence();
+    pub fn engine_commit(&self, plan: &Preflight, owners: JoinedOwners, permit: &CommitPermit) -> Result<Authority> {
+        let proof=permit.evidence();
         proof.validate()?;
-        permit.validate(plan,proof)?;
+        permit.validate(plan)?;
         let attempt=permit.attempt();
         if owners.attempt()!=attempt { return refuse("join proof belongs to another attempt"); }
         if attempt.is_empty() || plan.source_pin!=SOURCE_PIN || plan.map_pin!=MAP_PIN { return refuse("unbound cutover identity"); }
         let mut conn=self.conn();
         owners.check_store(&conn)?;
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        frozen_by(&tx,attempt)?;
         if required_resources(&tx)?!=proof.protected_resources { return refuse("protected resource inventory changed"); }
         if authority(&tx)?.phase!="quiesced" { return refuse("cutover not quiesced"); }
         let current=Manifest::capture(&tx)?;
@@ -383,7 +393,7 @@ impl Store {
         // Plan fields are recomputed from raw rather than trusting caller supplied
         // bindings or quarantine edits, even though the entrypoint is admin-only.
         let derived=preflight(&tx)?;
-        if derived.raw.tables.keys().collect::<Vec<_>>()!=plan.raw.tables.keys().collect::<Vec<_>>() || derived.raw.objects.keys().collect::<Vec<_>>()!=plan.raw.objects.keys().collect::<Vec<_>>() || derived.bindings!=plan.bindings || derived.quarantines!=plan.quarantines { return refuse("mapper disposition changed"); }
+        if !verify::catalog_matches(plan,&derived.raw) || derived.bindings!=plan.bindings || derived.quarantines!=plan.quarantines { return refuse("mapper disposition changed"); }
         let incarnation=authority(&tx)?.incarnation.checked_add(1).ok_or_else(|| Error::Refused("incarnation exhausted".into()))?;
         for workspace in &plan.workspaces {
             let id=uuid::Uuid::parse_str(workspace).map_err(|_| Error::Refused("bad workspace".into()))?;
@@ -425,8 +435,33 @@ impl Store {
 #[cfg(test)]
 mod tests;
 
+/// A transfer's frozen attempt binds every later stage to it. A database with
+/// none was frozen outside a transfer, by the private rehearsal.
+fn frozen_by(conn:&Connection,attempt:&str) -> Result<()> {
+    let frozen:Option<String>=conn.query_row("SELECT id FROM engine_cutover_attempts WHERE id LIKE 'frozen:%'",[],|r|r.get(0)).optional()?;
+    if frozen.is_some_and(|id|id!=format!("frozen:{attempt}")) { return refuse("join proof belongs to another attempt"); }
+    Ok(())
+}
+fn has_table(conn:&Connection,name:&str) -> Result<bool> {
+    Ok(conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",[name],|_|Ok(())).optional()?.is_some())
+}
+/// Every protected resource and its generation, where the source has one.
+fn resource_generations(conn:&Connection) -> Result<BTreeMap<String,Option<i64>>> {
+    let mut resources:BTreeMap<String,Option<i64>>=required_resources(conn)?.into_iter().map(|r|(r,None)).collect();
+    if has_table(conn,"workflow_resource_generations")? {
+        let mut query=conn.prepare("SELECT resource,generation FROM workflow_resource_generations")?;
+        for row in query.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))? {
+            let (resource,generation)=row?;
+            resources.insert(resource,Some(generation));
+        }
+    }
+    Ok(resources)
+}
 fn required_resources(conn:&Connection) -> Result<BTreeSet<String>> {
-    let mut resources:BTreeSet<String>=conn.prepare("SELECT resource FROM workflow_resources")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut resources:BTreeSet<String>=BTreeSet::new();
+    if has_table(conn,"workflow_resources")? {
+        resources=conn.prepare("SELECT resource FROM workflow_resources")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    }
     for table in ["terminals","worktrees"] {
         let mut query=conn.prepare(&format!("SELECT id FROM {table}"))?;
         for row in query.query_map([],|r|r.get::<_,Vec<u8>>(0))? {
@@ -442,6 +477,6 @@ impl Store {
     // Unit boundary tests intentionally do not claim closed file backup proof.
     // The public API has no unchecked permit constructor; CLI uses real backup.
     fn engine_commit_for_test(&self,plan:&Preflight,proof:&Quiescence,attempt:&str) -> Result<Authority> {
-        self.engine_commit(plan,&JoinedOwners::unit(proof.clone(),attempt),&CommitPermit::unit(plan,proof,attempt))
+        self.engine_commit(plan,JoinedOwners::unit(attempt),&CommitPermit::unit(plan,proof,attempt))
     }
 }

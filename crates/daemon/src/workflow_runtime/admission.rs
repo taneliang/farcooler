@@ -24,6 +24,10 @@ pub(crate) struct Admission {
 }
 
 impl Admission {
+    /// The workspace of a command about the whole host, such as a cutover. No
+    /// orchestrator matches it, so only a person can be admitted to one.
+    pub(crate) const HOST_WIDE: Uuid = Uuid::nil();
+
     pub(crate) async fn capture(
         service: Arc<Service>, peer: Peer, session: Arc<Session>, caller_pid: Option<i32>,
         caller_pane: Arc<OnceLock<Uuid>>, workspace: Uuid,
@@ -74,6 +78,12 @@ impl Admission {
             "workspace":self.workspace.to_string(),"epoch":epoch,"inspect":true,
             "controller":true,"decision_principal":self.principal()}})
     }
+    /// For the commands an agent must not run on a person's behalf.
+    pub(crate) fn require_person(&self) -> Result<()> {
+        if self.seat != Seat::Person { return Err(DomainError::ScopeDenied { needed: "person" }); }
+        Ok(())
+    }
+    pub(crate) fn recheck_now(&self) -> Result<()> { self.recheck() }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
         if matches!(action, Action::Publish { .. }) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
@@ -106,7 +116,7 @@ impl Admission {
         {
             return Err(DomainError::AuthRequired);
         }
-        svc.store.get_workspace(self.workspace)?;
+        if self.workspace != Self::HOST_WIDE { svc.store.get_workspace(self.workspace)?; }
         let seat = match self.caller_pid {
             None => Seat::Person,
             Some(pid) => {

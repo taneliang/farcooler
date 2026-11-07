@@ -1,14 +1,14 @@
 use super::*;
 use startup::{Admission, artifact_dir, open_recovery, ordinary_admission};
 
-fn source65(dir: &std::path::Path) -> std::path::PathBuf {
+pub(super) fn source65(dir: &std::path::Path) -> std::path::PathBuf {
     let path = dir.join("db.sqlite");
     let mut conn = Connection::open(&path).unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut conn, 65);
     path
 }
-fn bytes(p: &std::path::Path) -> Vec<u8> { std::fs::read(p).unwrap() }
+pub(super) fn bytes(p: &std::path::Path) -> Vec<u8> { std::fs::read(p).unwrap() }
 
 #[test]
 fn startup_gate_refuses_pre_cutover_schema_without_writing_a_byte() {
@@ -46,7 +46,8 @@ fn startup_gate_refuses_missing_floor_and_frozen_authority_but_recovery_reaches_
     Connection::open(&path).unwrap().execute("INSERT INTO meta VALUES('compatible_down_to',?1)", [crate::compat::COMPATIBLE_DOWN_TO.to_string()]).unwrap();
     Connection::open(&path).unwrap().execute("UPDATE engine_cutover_authority SET phase='quiesced'", []).unwrap();
     assert!(Store::open(&path).is_err());
-    let store = open_recovery(&path).unwrap();
+    let owners = join_db(&path, "gate");
+    let store = open_recovery(&path, &owners).unwrap();
     assert_eq!(store.engine_authority().unwrap().phase, "quiesced");
 }
 #[test]
@@ -54,19 +55,18 @@ fn transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_ato
     let tmp = tempfile::tempdir().unwrap();
     let path = source65(tmp.path());
     let original = bytes(&path);
-    let (store, plan) = transfer::begin(&path, &join_db(&path, "att-1")).unwrap();
+    let (store, plan) = transfer::begin(&path, join_db(&path, "att-1")).unwrap();
     let authority = store.engine_authority().unwrap();
     assert_eq!((authority.phase.as_str(), authority.manifest.as_deref()), ("quiesced", Some(plan.raw.hash().as_str())));
     let schema = store.schema().unwrap();
     assert_eq!((schema.version, schema.compatible_down_to), (67, Some(67)), "refusing floor lands with the version");
-    assert!(!schema.opens_here() || schema.version == 67);
     assert_eq!(bytes(&artifact_dir(&path).join("baseline.db")), original, "baseline is the untouched original");
     let (baseline, intent) = transfer::validate_artifacts(&path).unwrap();
     assert_eq!((baseline.registry, baseline.raw_hash.as_str()), (65, plan.raw.hash().as_str()));
     assert_eq!(intent.attempt, "att-1");
     drop(store);
     assert!(Store::open(&path).is_err(), "intent and frozen authority both refuse ordinary startup");
-    assert!(transfer::begin(&path, &join_db(&path, "att-2")).is_err(), "no second transfer or recapture");
+    assert!(transfer::begin(&path, join_db(&path, "att-2")).is_err(), "no second transfer or recapture");
     assert_eq!(bytes(&artifact_dir(&path).join("baseline.db")), original);
 }
 #[test]
@@ -76,7 +76,7 @@ fn transfer_upgrade_failure_rolls_back_whole_and_keeps_the_intent() {
     // A colliding object makes the cutover migration fail inside the transaction.
     Connection::open(&path).unwrap().execute_batch("CREATE TABLE engine_cutover_workspaces(x)").unwrap();
     let before = bytes(&path);
-    assert!(transfer::begin(&path, &join_db(&path, "att")).is_err());
+    assert!(transfer::begin(&path, join_db(&path, "att")).is_err());
     assert_eq!(before, bytes(&path), "version, floor, catalog and authority rolled back together");
     assert!(transfer::validate_artifacts(&path).is_ok(), "durable intent survives for recovery");
     assert!(ordinary_admission(&path).is_err());
@@ -87,46 +87,25 @@ fn transfer_baseline_tamper_and_foreign_proof_are_refused() {
     let path = source65(tmp.path());
     let other = tmp.path().join("other.sqlite");
     std::fs::copy(&path, &other).unwrap();
-    assert!(transfer::begin(&path, &join_db(&other, "att")).is_err(), "proof issued for another file");
+    assert!(transfer::begin(&path, join_db(&other, "att")).is_err(), "proof issued for another file");
     assert!(!artifact_dir(&path).exists(), "refused before any artifact");
-    transfer::begin(&path, &join_db(&path, "att")).unwrap();
+    transfer::begin(&path, join_db(&path, "att")).unwrap();
     std::fs::OpenOptions::new().append(true).open(artifact_dir(&path).join("baseline.db")).unwrap().write_all(b"x").unwrap();
     assert!(transfer::validate_artifacts(&path).is_err());
 }
-struct Stuck;
-impl OwnedWriter for Stuck {
-    fn identity(&self) -> String { "workflow-owner".into() }
-    fn incarnation(&self) -> String { "i".into() }
-    fn resources(&self) -> BTreeSet<String> { BTreeSet::new() }
-    fn close_and_join(&mut self) -> std::result::Result<String, String> { Err("task still running".into()) }
-}
-#[test]
-fn owner_join_issues_nothing_for_a_stuck_or_missing_owner() {
-    let tmp = tempfile::tempdir().unwrap();
-    let path = source65(tmp.path());
-    let none = BTreeSet::new();
-    let mut stuck = OwnerJoin::new("a");
-    for name in REQUIRED_OWNERS.iter().filter(|n| **n != "workflow-owner") { stuck.retain(Box::new(TestWriter((*name).into(), BTreeSet::new()))); }
-    stuck.retain(Box::new(Stuck));
-    assert!(stuck.join(&path, &none).is_err());
-    let mut partial = OwnerJoin::new("a");
-    partial.retain(Box::new(TestWriter("delivery".into(), BTreeSet::new())));
-    assert!(partial.join(&path, &none).is_err(), "unknown owners block; a partial inventory is no proof");
-}
 use std::io::Write;
 
-/// Fixture writer for `reports/ov-940/old-reader.py`: only acts when the script
-/// names an explicit private directory, otherwise it is a no-op.
+/// Fixture writer for `reports/ov-940/old-reader.py`, which names the directory.
 #[test]
+#[ignore = "run by reports/ov-940/old-reader.py"]
 fn old_reader_fixture_writes_source_and_begun_databases() {
-    let Some(out) = std::env::var_os("OV940_OLD_READER_DIR") else { return };
-    let out = std::path::PathBuf::from(out);
-    let source = source65(&out);
-    std::fs::rename(&source, out.join("v65.sqlite")).unwrap();
+    let out = std::path::PathBuf::from(std::env::var_os("OV940_OLD_READER_DIR").expect("the script names a private directory"));
+    let source = super::source60::source60(&out);
+    std::fs::rename(&source, out.join("v60.sqlite")).unwrap();
     let begun = out.join("begun");
     std::fs::create_dir(&begun).unwrap();
-    let path = source65(&begun);
-    drop(transfer::begin(&path, &join_db(&path, "old-reader")).unwrap());
+    let path = super::source60::source60(&begun);
+    drop(transfer::begin(&path, join_db(&path, "old-reader")).unwrap());
     std::fs::rename(&path, out.join("begun.sqlite")).unwrap();
 }
 
@@ -134,12 +113,20 @@ fn old_reader_fixture_writes_source_and_begun_databases() {
 fn transfer_finish_needs_a_released_attempt_and_keeps_the_evidence() {
     let tmp = tempfile::tempdir().unwrap();
     let path = source65(tmp.path());
-    let (store, _plan) = transfer::begin(&path, &join_db(&path, "fin")).unwrap();
-    assert!(transfer::finish(&path, &store).is_err(), "quiesced is not released");
+    let (store, _plan) = transfer::begin(&path, join_db(&path, "fin")).unwrap();
+    drop(store);
+    let owners = join_db(&path, "fin");
+    let store = open_recovery(&path, &owners).unwrap();
+    assert!(transfer::finish(&path, &store, owners).is_err(), "quiesced is not released");
     store.conn().execute("UPDATE engine_cutover_authority SET phase='released'", []).unwrap();
-    let kept = transfer::finish(&path, &store).unwrap();
+    drop(store);
+    let owners = join_db(&path, "fin");
+    let store = open_recovery(&path, &owners).unwrap();
+    let kept = transfer::finish(&path, &store, owners).unwrap();
     assert!(kept.join("baseline.db").exists() && !artifact_dir(&path).exists());
+    drop(store);
     assert!(ordinary_admission(&path).is_ok());
-    let (store2, _) = (open_recovery(&path).unwrap(), ());
-    assert!(transfer::finish(&path, &store2).is_err(), "no second disposition");
+    let owners = join_db(&path, "fin");
+    let store = open_recovery(&path, &owners).unwrap();
+    assert!(transfer::finish(&path, &store, owners).is_err(), "no second disposition");
 }

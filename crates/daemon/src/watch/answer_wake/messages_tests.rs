@@ -352,19 +352,20 @@ async fn a_manual_message_after_cutover_is_told_once_and_the_old_queue_stays_ine
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     let agent = b.agent("Agent 2", "claude").await;
+    // The send's own pump finds the lock taken and gives up, so the message is
+    // still queued at the cutover.
+    let old_pump = b.watcher.wake_pump.try_lock().unwrap();
     b.send(&agent_actor(&agent), "orchestrator", "queued before cutover").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(old_pump);
     assert_eq!(b.messages().len(), 1);
-    let db = b.svc.root_dir().join("farcooler.db");
-    let protected = b.svc.store.engine_protected_resources().unwrap();
-    let owners = b.svc.join_writers("e2e", &db, &protected).await.unwrap();
-    let (frozen, _plan) = farcooler_store::engine_cutover::transfer::begin(&db, &owners).unwrap();
-    farcooler_store::testing::exec_for_tests(&frozen, "UPDATE engine_cutover_authority SET phase='released', incarnation=1");
-    farcooler_store::engine_cutover::transfer::finish(&db, &frozen).unwrap();
-    drop(frozen);
     let Board { dir, svc, watcher, lane, task } = b;
     drop(watcher);
     let root = svc.root_dir().to_path_buf();
+    let db = root.join("farcooler.db");
+    svc.drain_writers().await.unwrap();
     drop(svc);
+    farcooler_store::testing::released_transfer_for_tests(&db, "e2e");
     let svc = Arc::new(Service::open_in(root).await.expect("released engine is admitted by the gate"));
     let b = Board { dir, watcher: Watcher::new(svc.clone()), svc, lane, task };
     b.doing(orchestrator.id, AgentActivity::Idle).await;

@@ -9,8 +9,10 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 pub enum CutoverCmd {
     /// Read-only: phase, incarnation, schema and whether artifacts exist.
     Inspect,
-    /// Join the daemon's writers, capture the baseline and upgrade-and-freeze. Restart the daemon after.
+    /// On a running daemon: drain its writers and stop it, for the restart into recovery. In the recovery daemon: capture the baseline, then upgrade and freeze.
     Prepare { #[arg(long)] attempt: String },
+    /// In the recovery daemon: end an uncommitted attempt, restoring the original database if it was upgraded.
+    Recover,
     /// In the recovery daemon: re-check a committed transfer against its original baseline.
     Verify,
     /// In the recovery daemon: release a verified transfer.
@@ -23,6 +25,7 @@ impl CutoverCmd {
         match self {
             Self::Inspect => Cutover::Inspect,
             Self::Prepare { attempt } => Cutover::Prepare { attempt },
+            Self::Recover => Cutover::Recover,
             Self::Verify => Cutover::Verify,
             Self::Release => Cutover::Release,
             Self::Finish => Cutover::Finish,

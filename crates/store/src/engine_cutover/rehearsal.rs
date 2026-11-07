@@ -272,17 +272,18 @@ impl PrivateRehearsal {
 
 /// Non-wire capability minted only after a closed backup and independent restore
 /// compare. No public constructor or deserializer can fabricate this evidence.
-pub struct CommitPermit {baseline:String,proof:String,attempt:String,backup:String}
+pub struct CommitPermit {baseline:String,proof:String,attempt:String,backup:String,evidence:super::Quiescence}
 impl CommitPermit {
-    pub(super) fn validate(&self,plan:&super::Preflight,proof:&super::Quiescence) -> Result<()> {
-        if self.baseline!=plan.raw.hash() || self.proof!=farcooler_workflow::digest(proof) || self.attempt.is_empty() || self.backup.is_empty() {return refuse("commit permit does not bind baseline/quiescence/backup");}
+    pub(super) fn evidence(&self)->&super::Quiescence {&self.evidence}
+    pub(super) fn validate(&self,plan:&super::Preflight) -> Result<()> {
+        if self.baseline!=plan.raw.hash() || self.proof!=farcooler_workflow::digest(&self.evidence) || self.attempt.is_empty() || self.backup.is_empty() {return refuse("commit permit does not bind baseline/quiescence/backup");}
         Ok(())
     }
     pub(super) fn attempt(&self)->&str {&self.attempt}
     pub(super) fn backup_hash(&self)->&str {&self.backup}
     #[cfg(test)]
     pub(super) fn unit(plan:&super::Preflight,proof:&super::Quiescence,attempt:&str)->Self {
-        Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into()}
+        Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into(),evidence:proof.clone()}
     }
 }
 impl PrivateRehearsal {
@@ -298,7 +299,7 @@ impl PrivateRehearsal {
         let db=Connection::open_with_flags(backup.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let baseline=super::preflight(&db)?;
         if !plan.raw.conserved_by(&baseline.raw) || super::required_resources(&db)?!=proof.protected_resources {return refuse("backup baseline/resource binding differs from plan");}
-        let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot)};
+        let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot),evidence:proof.clone()};
         self.record(sequence,&JournalEntry {attempt:attempt.into(),stage:"backed_up".into(),evidence:serde_json::to_string(&(permit.baseline.clone(),permit.proof.clone(),permit.backup.clone()))?})?;
         Ok(permit)
     }
