@@ -177,7 +177,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
         // with the accepted event so replay needs no database/global state reads.
         let mut admitted = input.clone();
         let mut relevant: std::collections::BTreeSet<_> = state.items.values().map(|i| i.resource.clone()).collect();
-        if let farcooler_workflow::Command::Enqueue { resource, .. } = &input.command {
+        if let farcooler_workflow::Command::Enqueue { resource, .. } | farcooler_workflow::Command::Start { resource, .. } = &input.command {
             relevant.insert(resource.clone());
         }
         admitted.busy_resources = tx.prepare(
@@ -188,8 +188,8 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
         let blocked:std::collections::BTreeSet<String>=tx.prepare("SELECT resource FROM engine_cutover_quarantine")?
             .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let target=match &input.command {
-            Command::Enqueue {resource,..} => Some(resource.as_str()),
-            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Resolve {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+            Command::Enqueue {resource,..} | Command::Start {resource,..} => Some(resource.as_str()),
+            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance => None,
         };
         let quarantined=target.is_some_and(|resource|blocked.contains(resource));

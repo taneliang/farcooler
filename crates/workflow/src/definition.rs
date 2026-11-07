@@ -338,6 +338,20 @@ impl Definition {
                         else { vec![format!("coding-operation-{i}")] }, environment: BTreeMap::new() },
             }).collect() }
     }
+    /// The tracker-only template for a ticket with no run: one step per live column. The orchestrator
+    /// moves it with `Move`; `done` and `cancelled` close it. It starts a run with `Start`.
+    pub fn ticket() -> Self {
+        let stage = |id: &str| Stage { id: id.into(), kind: StageKind::Tracker,
+            progression: Progression::AwaitApproval { principal: "orchestrator".into() },
+            max_attempts: 1, routes: BTreeMap::new(), limit: 0,
+            operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
+        Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
+            stages: TICKET_COLUMNS.iter().map(|id| stage(id)).collect() }
+    }
+    /// Whether this is the tracker-only template: a ticket with no run, moved by column.
+    pub fn is_ticket(&self) -> bool {
+        self.source == TICKET_SOURCE && self.stages.iter().all(|s| s.kind == StageKind::Tracker)
+    }
     pub fn tracker(principal: &str) -> Self {
         Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
@@ -356,6 +370,9 @@ fn finishes_or_goes_on(target: &Target, index: &BTreeMap<&str, usize>, from: usi
         Target::Fail => false,
     }
 }
+/// The source of the tracker-only template, and its columns in order.
+pub const TICKET_SOURCE: &str = "ticket/v1";
+pub const TICKET_COLUMNS: [&str; 5] = ["backlog", "todo", "doing", "review", "decision"];
 /// Back edges per step are capped so a loop cannot be a polite spelling of forever.
 pub const MAX_BACK_EDGE_LIMIT: u8 = 3;
 /// A group holds at most this many tickets.

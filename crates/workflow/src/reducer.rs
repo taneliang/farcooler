@@ -56,6 +56,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 Command::Approve { item, .. } | Command::Review { item, .. }
                 | Command::Observe { item, .. } | Command::Cancel { item } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item }
+                | Command::Move { item, .. } | Command::Start { item, .. }
                 | Command::Resolve { item, .. } => item,
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             };
@@ -238,6 +239,46 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.attempt = 1;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked;
+                }
+                Command::Move { to, .. } => {
+                    controller(input)?;
+                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
+                    let (stage, phase) = match to.as_str() {
+                        "done" => (item.definition.stages.len(), Phase::Done),
+                        "cancelled" => (item.stage, Phase::Cancelled),
+                        column => (item.definition.stages.iter().position(|s| s.id == column).ok_or(Refusal::Invalid)?,
+                            Phase::WaitingApproval),
+                    };
+                    if phase == Phase::WaitingApproval && stage == item.stage { return Err(Refusal::Invalid); }
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    item.stage = stage; item.phase = phase; item.attempt = 1;
+                    // Each column is a run of its own, so a decision made in the last one cannot be replayed in this one.
+                    if item.phase == Phase::WaitingApproval { item.run = run_id(&item, id, input); }
+                }
+                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, .. } => {
+                    controller(input)?;
+                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
+                    definition.validate()?;
+                    if definition.is_ticket() { return Err(Refusal::Invalid); }
+                    if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
+                    if matches!(definition.stages[0].kind, StageKind::Tracker) != initial_candidate.is_some()
+                        || initial_candidate.as_ref().is_some_and(|c| !valid_id(c))
+                    { return Err(Refusal::Evidence); }
+                    for dep in dependencies {
+                        if !next.items.contains_key(dep) && !next.archive.contains_key(dep) { return Err(Refusal::Missing); }
+                    }
+                    if dependencies.iter().all(|d| dependency_done(&next, d))
+                        && (input.busy_resources.contains(resource)
+                            || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
+                        return Err(Refusal::Resource);
+                    }
+                    // The run begins from nothing, under the same name; the sweep below starts it once it is ready.
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    item.pin = definition.pin(); item.definition = definition.clone();
+                    item.policy_pin = policy_pin.clone(); item.resource = resource.clone(); item.dependencies = dependencies.clone();
+                    item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
+                    item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
+                    item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
                 }
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }

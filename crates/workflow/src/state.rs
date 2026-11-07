@@ -139,6 +139,11 @@ pub enum Command {
     Queue { item: String },
     /// The orchestrator pulls a queued ticket out of a group that has not left yet.
     Leave { item: String },
+    /// The orchestrator moves a tracker-only ticket to a column: one of its steps, or `done` or `cancelled`.
+    Move { item: String, to: String },
+    /// The orchestrator starts a run on a tracker-only ticket: the same item takes a real definition.
+    Start { item: String, definition: Definition, policy_pin: String, resource: String,
+        dependencies: BTreeSet<String>, initial_candidate: Option<String> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
