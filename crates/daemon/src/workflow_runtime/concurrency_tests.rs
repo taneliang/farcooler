@@ -33,6 +33,7 @@ async fn workflow_two_items_in_one_repository_build_at_once() {
     enqueue_item(&mut runtime, "w", "two", definition);
     let state = runtime.state("w").unwrap().unwrap();
     assert!(state.items.values().all(|i| i.phase == Phase::Running), "both start at once: {state:?}");
+    assert_ne!(state.items["one"].resource, state.items["two"].resource, "each item holds its own resource");
     for time in 2..4 { runtime.pump(time).await.unwrap(); }
     let state = runtime.state("w").unwrap().unwrap();
     for id in ["one", "two"] {
