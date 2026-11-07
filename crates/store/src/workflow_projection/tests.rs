@@ -244,3 +244,21 @@ fn tracking_a_card_leaves_its_line_rank_and_hold_alone() {
     enqueue(&b, Definition::ticket());
     assert_eq!(read(&b), before, "tracking rewrote the line");
 }
+
+/// A card the engine would refuse stays out of the tracking list, so asking each start doesn't write one
+/// permanent refusal receipt per card (ov-962).
+#[test]
+fn a_card_with_a_live_worker_is_not_offered_for_tracking() {
+    let store = Store::open_in_memory().unwrap();
+    let repo = store.register_repository_for_test("Projection");
+    let ws = store.ensure_main_workspace(repo).unwrap().id;
+    let working = store.create_task(ws, "has a pane", Actor::User).unwrap();
+    let free = store.create_task(ws, "free", Actor::User).unwrap();
+    let definition = Definition::tracker("owner");
+    store.workflow_wire_write(&ws.to_string(), "publish", "publish", crate::workflow_publication::Write::Publish {
+        expected_pin: None, definition: &definition, adapter: None, notifications: None, revision: 0 }).unwrap();
+    let tree = store.create_worktree(repo, "topic", "/isolated", false).unwrap().id;
+    store.create_terminal_for_task(tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(working.id)).unwrap();
+    let keys = |s: &Store| -> Vec<String> { s.untracked_tickets(None).unwrap().into_iter().map(|(_, k, _)| k).collect() };
+    assert_eq!(keys(&store), vec![free.key.clone()], "a live pane keeps its card out");
+}

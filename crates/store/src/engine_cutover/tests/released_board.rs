@@ -86,7 +86,9 @@ fn released_board_still_fences_the_card_the_engine_owns() {
     assert!(s.set_wait(r.owned, Some(Wait::Parked), Actor::User).is_err_and(engine_owned), "so is its wait");
     assert!(s.put_on_line(r.owned, &NewTicketLine { reason: "x".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, Actor::User).is_err());
     assert!(s.set_block(r.owned, r.other, None).is_err(), "its dependencies are the engine's");
-    assert!(s.create_terminal_for_task(r.tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.owned)).is_err());
+    let refused = s.create_terminal_for_task(r.tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.owned));
+    assert!(refused.is_err_and(engine_owned), "a trigger's refusal says the engine owns it, not that the caller should retry");
+    assert!(s.set_block(r.owned, r.other, None).is_err_and(engine_owned));
 }
 
 #[test]
@@ -262,11 +264,8 @@ fn released_empty_workspace_with_landing_history_says_why_it_stays() {
     assert!(matches!(err, farcooler_core::DomainError::InvalidArgument { what: "landing_history" }), "not the not-empty copy: {err:?}");
 }
 
-/// ov-962 B4: a ticket the engine holds with no run keeps its wait and its blocks after release, and a timed
-/// hold lets go. The fences stay for a card with a run, and are back, byte for byte, after each write.
-#[test]
-fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
-    let r = released();
+/// A new card the engine holds as a ticket with no run, on a released board.
+fn tracked_ticket(r: &Released) -> crate::models::Task {
     let s = &r.store;
     let card = s.create_task(r.ws, "ticket", Actor::User).unwrap();
     let definition = farcooler_workflow::Definition::ticket();
@@ -276,6 +275,31 @@ fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
         command: farcooler_workflow::Command::Enqueue { item: card.key.clone(), policy_pin, resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
     assert!(s.workflow_apply(&input).unwrap().result.is_ok(), "the engine tracks the ticket");
+    card
+}
+
+/// ov-962 M-g: a coordinator's subagent is recorded on a tracked ticket, and still refused on a card with a run.
+#[test]
+fn a_subagent_is_recorded_on_a_tracked_ticket_after_release() {
+    let r = released();
+    let s = &r.store;
+    let card = tracked_ticket(&r);
+    let record = |id: &str| WorkerRecord { harness: "claude".into(), agent_id: id.into(), session_id: None, session_cwd: None,
+        orchestrator_terminal: None, label: Some("review".into()), model: None, linked_by: crate::workers::LinkedBy::Orchestrator };
+    s.record_worker(card.id, &record("a1"), Actor::User).expect("a ticket takes its subagent");
+    s.record_worker(card.id, &record("a1"), Actor::User).expect("and a resumed one");
+    s.end_worker(card.id, "claude", Some("a1"), crate::workers::EndReason::Finished, Actor::User).expect("and sees it finish");
+    assert!(s.record_worker(r.owned, &record("a2"), Actor::User).is_err(), "a card with a run does not");
+    assert!(s.set_task_status(card.id, TaskStatus::Done, Actor::User).is_err(), "the fences are back");
+}
+
+/// ov-962 B4: a ticket the engine holds with no run keeps its wait and its blocks after release, and a timed
+/// hold lets go. The fences stay for a card with a run, and are back, byte for byte, after each write.
+#[test]
+fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
+    let r = released();
+    let s = &r.store;
+    let card = tracked_ticket(&r);
     assert!(s.task_is_tracked_ticket(card.id).unwrap());
     let triggers = || -> Vec<String> { let c = s.conn(); let mut q = c.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' ORDER BY name").unwrap();
         q.query_map([], |x| x.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap() };

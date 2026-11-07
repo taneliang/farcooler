@@ -316,10 +316,8 @@ mod tests {
         assert!(store.workflow_apply(&input).unwrap().result.is_ok());
         assert!(store.workflow_pending_notices(0).unwrap().is_empty(),"a ticket at rest asked for approval");
         // Moving it between columns says nothing either.
-        let item=store.workflow_state("ws").unwrap().unwrap().items["ov-1"].clone();
         let mut moved=enqueue("ws",2,&ticket.pin());
         moved.command=Command::Move {item:"ov-1".into(),to:"doing".into()};
-        let _=item;
         assert!(store.workflow_apply(&moved).unwrap().result.is_ok());
         assert!(store.workflow_pending_notices(0).unwrap().is_empty(),"a move wrote a notice");
     }

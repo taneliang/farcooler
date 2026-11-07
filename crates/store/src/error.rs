@@ -11,6 +11,10 @@
 use farcooler_core::DomainError;
 use rusqlite::ErrorCode;
 
+/// What the triggers that keep an owned card to the engine raise (`engine_cutover`, `workflow_ownership`).
+const ENGINE_FENCES: [&str; 4] = ["owned by workflow engine", "legacy task execution authority retired", "legacy task-bound terminal",
+    "retain migrated"];
+
 /// Map a low-level rusqlite error onto the domain's stable vocabulary.
 ///
 /// `QueryReturnedNoRows` is the one exact match (`NotFound`). A UNIQUE
@@ -22,6 +26,11 @@ use rusqlite::ErrorCode;
 pub(crate) fn map_err(err: rusqlite::Error) -> DomainError {
     match &err {
         rusqlite::Error::QueryReturnedNoRows => DomainError::NotFound,
+        // A fence that keeps a card to the engine says so, in the words `refuse_if_owned` uses. Retrying
+        // against current state, which is what a conflict tells the caller, would never succeed (ov-962).
+        rusqlite::Error::SqliteFailure(e, Some(message)) if e.code == ErrorCode::ConstraintViolation && ENGINE_FENCES.iter().any(|f| message.contains(f)) => {
+            DomainError::Conflict { what: "engine_owned" }
+        }
         rusqlite::Error::SqliteFailure(e, _) if e.code == ErrorCode::ConstraintViolation => {
             DomainError::ResourceConflict
         }

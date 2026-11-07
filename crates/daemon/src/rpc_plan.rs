@@ -245,6 +245,10 @@ fn start_card(svc: &Service, watcher: &Watcher, task: Uuid, role: WorkRole, acto
     if !matches!(role, WorkRole::Build | WorkRole::Fix) {
         return Ok(());
     }
+    // A tracked ticket's column is the engine's: the orchestrator moves it by saying the column (ov-962).
+    if svc.store.task_is_tracked_ticket(task)? {
+        return Ok(());
+    }
     if matches!(svc.store.get_task(task)?.status, TaskStatus::Backlog | TaskStatus::Todo) {
         let moved = svc.store.set_task_status(task, TaskStatus::InProgress, actor)?;
         watcher.announce_task_changed(&moved, None, actor);

@@ -29,12 +29,24 @@ pub(crate) fn is_ticket(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result
 }
 
 /// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
-/// A rep's desk card is a person's thread, not work, so it is never one (ov-962).
+/// A rep's desk card is a person's thread, not work, so it is never one (ov-962). Nor is a card the engine
+/// would refuse (a live worker or open landing, or what a migrated card keeps): it stays out, and asking the
+/// engine each start would write one permanent refusal receipt per card per start.
 pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Result<Vec<(uuid::Uuid, String, TaskStatus)>> {
     let mut statement = conn.prepare("SELECT t.workspace_id, t.key, t.status FROM tasks t
         WHERE t.status NOT IN ('done','cancelled') AND (?1 IS NULL OR t.id=?1)
         AND NOT EXISTS(SELECT 1 FROM workflow_owned_items o WHERE o.task_id=t.id)
-        AND NOT EXISTS(SELECT 1 FROM rep_desks d WHERE d.task_id=t.id) ORDER BY t.created_at, t.rowid")?;
+        AND NOT EXISTS(SELECT 1 FROM rep_desks d WHERE d.task_id=t.id)
+        AND NOT EXISTS(SELECT 1 FROM ticket_work w WHERE w.task_id=t.id AND w.ended_at IS NULL)
+        AND NOT EXISTS(SELECT 1 FROM terminals x WHERE x.task_id=t.id AND x.exit_code IS NULL AND x.exit_signal IS NULL)
+        AND NOT EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=t.id AND l.state NOT IN ('landed','dropped'))
+        AND COALESCE((SELECT c.disposition FROM engine_cutover_items c WHERE c.task=t.id),'retained-intent')='retained-intent'
+        AND (NOT EXISTS(SELECT 1 FROM engine_cutover_items c WHERE c.task=t.id) OR NOT (
+            EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=t.id AND stage NOT IN ('landed','dropped'))
+            OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=t.id)
+            OR t.wait_kind IS NOT NULL
+            OR EXISTS(SELECT 1 FROM check_in_schedules WHERE task_id=t.id AND state='enabled')))
+        ORDER BY t.created_at, t.rowid")?;
     let rows = statement.query_map([only.map(|u| u.as_bytes().to_vec())], |r| {
         let workspace: Vec<u8> = r.get(0)?; let status: String = r.get(2)?;
         Ok((uuid::Uuid::from_slice(&workspace).ok(), r.get::<_, String>(1)?, TaskStatus::parse(&status)))
