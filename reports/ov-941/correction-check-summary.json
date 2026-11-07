@@ -1,0 +1,51 @@
+{
+  "cli-focused": {
+    "exit": 0,
+    "seconds": 31.239782333,
+    "minimum_free": 15377805312,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "rust-receipt": {
+    "exit": 0,
+    "seconds": 58.555883167,
+    "minimum_free": 15232221184,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "old-source-parser": {
+    "exit": 101,
+    "seconds": 21.71618525,
+    "minimum_free": 15359184896,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "rust-identity-control": {
+    "exit": 1,
+    "seconds": 90.612596875,
+    "minimum_free": 15083175936,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "cli-restored": {
+    "exit": 0,
+    "seconds": 21.966759,
+    "minimum_free": 15205572608,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "rust-receipt-restored": {
+    "exit": 0,
+    "seconds": 85.02817645799999,
+    "minimum_free": 15236239360,
+    "source_unchanged": true,
+    "reaped": true
+  },
+  "rust-lint": {
+    "exit": 0,
+    "seconds": 24.16929975,
+    "minimum_free": 15411572736,
+    "source_unchanged": true,
+    "reaped": true
+  }
+}

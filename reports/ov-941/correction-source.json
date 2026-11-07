@@ -1,0 +1,13 @@
+{
+  "base": "54ad7d530cfb6a9f2abfcc2212bca481a61fec3d",
+  "tracked_changes": [
+    "crates/cli/src/workflow.rs",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs"
+  ],
+  "daemon_original_prefix_unchanged": true,
+  "daemon_original_prefix_sha256": "a60f794462c9294b0d7be58befe121963d93cc41fc26f9e5c1a0ec270e98ae8b",
+  "source_sha256": {
+    "crates/cli/src/workflow.rs": "a5ee65153cc5fcc7615a6520773c4a0f08d3392a6546cfcb86e6e6bdecfeb763",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "d64ec7ce1c85a6e982f71ae04ca9a4a0414ae71807297ace59cc99dcb22c42f4"
+  }
+}

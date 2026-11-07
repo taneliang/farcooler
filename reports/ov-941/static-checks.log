@@ -1,0 +1,10 @@
+Initial native python -m py_compile failed: system pycache path under /Users/e-liang/Library/Caches/com.apple.python is sandbox-denied; no source changes. Used AST parse without cache writes instead.
+AST OK reports/ov-941/check.py
+AST OK reports/ov-941/receipt-check.py
+AST OK reports/ov-941/entry.py
+git diff --check:0
+crates/cli/src/workflow.rs: 259 <=1500 lines
+crates/daemon/src/workflow_runtime/wire_commands.rs: 336 <=1500 lines
+Only allocated two Rust files changed. Existing daemon production/tests prefix byte-identical. Shared/Session/native/Web journals and other sources unchanged.
+Caller search: no CLI references to removed prepared helpers/Retry enum/prepared_file; removed syntax appears only in negative parser assertions.
+Staged full diff --check reports verbatim libtest trailing space at old-source-parser.log:28 and rust-identity-control.log:113. Preserve raw failed-control bytes. Scoped staged authored rs/py/md/json/jsonl diff --check:0.

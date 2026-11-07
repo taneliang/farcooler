@@ -1,0 +1,7 @@
+{
+  "base": "54ad7d530cfb6a9f2abfcc2212bca481a61fec3d",
+  "old_production_prefix_sha256": "88b1d1dd32a2cfedb81c30580bef7d30dcdba4636818d8e927c453dc42b74681",
+  "control_sha256": "25fbafc405ce929f5b7981d9e69eba1350e0bfe5820e8fb145cb1471334499b9",
+  "restore_sha256": "1806e00606e67989cd6d82ba14dc550cd6502c0114a133882dae95716f8cc97e",
+  "restored_exactly": true
+}

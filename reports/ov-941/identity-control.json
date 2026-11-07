@@ -1,0 +1,6 @@
+{
+  "change": "derive wire identity from freshly loaded revision, causing retransmission to miss original durable receipt",
+  "control_sha256": "6e0de8292e981244a6f258d1bfacffe6ead6d0bd969399caf1d8075088509fb7",
+  "restore_sha256": "d64ec7ce1c85a6e982f71ae04ca9a4a0414ae71807297ace59cc99dcb22c42f4",
+  "restored_exactly": true
+}

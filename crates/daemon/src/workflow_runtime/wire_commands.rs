@@ -270,3 +270,67 @@ mod reasoned_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod cli_payload_tests {
+    use super::*;
+    use farcooler_protocol::workflow_commands::Mutation;
+
+    #[tokio::test]
+    #[ignore = "requires private ov-941 production CLI payload fixture"]
+    async fn workflow_cli_payload_receipt_boundary() {
+        let root=std::path::PathBuf::from(std::env::var_os("FARCOOLER_OV941_FIXTURE").expect("private fixture root"));
+        let ws="00000000-0000-0000-0000-000000000941";
+        if std::env::var("FARCOOLER_OV941_PHASE").as_deref()==Ok("seed") {
+            let mut runtime=Runtime::create(&root.join("runtime")).await.unwrap();
+            let mut definition=coding_definition(true);
+            definition.stages.iter_mut().find(|s|matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
+            let pin=definition.pin();
+            let m=|id:&str| Mutation{id:id.into(),revision:0,epoch:1,sequence:1};
+            runtime.wire_command(ws,"owner",Action::Publish{notifications:None,adapter:None,mutation:m("p"),expected_pin:None,definition}).unwrap();
+            runtime.wire_command(ws,"owner",Action::Enqueue{mutation:m("e"),item:"a".into(),pin}).unwrap();
+            for t in 1..15 {runtime.pump(t).await.unwrap();if runtime.state(ws).unwrap().unwrap().items["a"].phase==Phase::WaitingReview {break;}}
+            let state=runtime.state(ws).unwrap().unwrap();let item=&state.items["a"];
+            assert_eq!(item.phase,Phase::WaitingReview);
+            std::fs::write(root.join("observed.json"),serde_json::to_vec(&serde_json::json!({
+                "workspace":ws,"revision":state.revision,"epoch":state.epoch,"run":item.run,"pin":item.pin})).unwrap()).unwrap();
+            std::fs::write(root.join("evidence.json"),serde_json::to_vec(item.last_evidence.as_ref().unwrap()).unwrap()).unwrap();
+            return;
+        }
+        assert_eq!(std::env::var("FARCOOLER_OV941_PHASE").as_deref(),Ok("consume"));
+        let bytes=std::fs::read(root.join("cli-payload.json")).unwrap();
+        let resubmitted=std::fs::read(root.join("cli-resubmitted.json")).unwrap();
+        assert_eq!(bytes,resubmitted);
+        let parse=|bytes:&[u8]|farcooler_protocol::workflow_commands::parse(std::str::from_utf8(bytes).unwrap()).unwrap();
+        let runtime=Runtime::open(&root.join("runtime")).unwrap();
+        let before=runtime.state(ws).unwrap().unwrap();let before_events=runtime.events(ws).unwrap();
+        // Discard the answer at the caller: retain it here solely as an assertion oracle.
+        let lost_answer=runtime.wire_command(ws,"owner",parse(&bytes)).unwrap();
+        let receipt:farcooler_store::workflow::Receipt=serde_json::from_value(lost_answer["receipt"].clone()).unwrap();
+        assert!(receipt.result.is_ok(),"{receipt:?}");
+        let after=runtime.state(ws).unwrap().unwrap();let events=runtime.events(ws).unwrap();
+        assert_eq!(events.len(),before_events.len()+1);
+        assert_eq!(after.items["a"].iteration,before.items["a"].iteration+1);
+        assert_eq!(after.items["a"].rework_history.len(),1);
+        assert_eq!(after.items["a"].rework_history[0].reason,"  请修复 <script>\n $(never execute)  ");
+        assert_eq!(runtime.wire_command(ws,"owner",parse(&resubmitted)).unwrap(),lost_answer);
+        drop(runtime);
+        let runtime=Runtime::open(&root.join("runtime")).unwrap();
+        assert_eq!(runtime.wire_command(ws,"owner",parse(&resubmitted)).unwrap(),lost_answer);
+        for field in ["reason","evidence","run","pin","revision","epoch","sequence"] {
+            let mut altered=parse(&bytes);
+            let Action::Review{mutation,reason,evidence,run,pin,..}=&mut altered else {panic!("review")};
+            match field {
+                "reason"=>*reason=Some("changed".into()),"evidence"=>evidence.receipt="changed".into(),
+                "run"=>*run="changed".into(),"pin"=>*pin="changed".into(),
+                "revision"=>mutation.revision+=1,"epoch"=>mutation.epoch+=1,_=>mutation.sequence+=1,
+            }
+            assert!(matches!(runtime.wire_command(ws,"owner",altered),Err(Error::Store(WorkflowError::IdentityConflict))),"same identity changed {field}");
+            assert_eq!(runtime.state(ws).unwrap().unwrap(),after);
+            assert_eq!(runtime.events(ws).unwrap(),events);
+        }
+        assert_eq!(runtime.events(ws).unwrap(),events);
+        assert_eq!(runtime.state(ws).unwrap().unwrap(),after);
+        std::fs::write(root.join("receipt.json"),serde_json::to_vec(&lost_answer).unwrap()).unwrap();
+    }
+}
