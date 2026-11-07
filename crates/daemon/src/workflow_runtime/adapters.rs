@@ -58,7 +58,7 @@ pub(super) async fn git(tree: &Path, args: &[&str]) -> Result<String> {
     if !output.ok { return Err(Error::Refused("git refused fixture operation")); }
     Ok(output.stdout.trim().into())
 }
-impl Runtime {
+impl Exec {
     fn base_path(&self, workspace: &str, effect: &Effect) -> PathBuf {
         self.root.join(format!("base-{}.json", digest(&(workspace, &effect.item))))
     }

@@ -166,6 +166,8 @@ impl Runtime {
     pub fn configured_definition(&self) -> Result<Definition> {
         self.coding.as_ref().ok_or(Error::Refused("not a configured runtime"))?.definition()
     }
+}
+impl Exec {
     pub(super) fn validate_definition(&self, definition: &Definition) -> Result<()> {
         match &self.coding {
             Some(config) => config.validate_definition(definition),

@@ -48,7 +48,7 @@ fn snapshot() -> Result<crate::foreground::Foreground> {
     Ok(crate::foreground::parse(&raw))
 }
 
-impl Runtime {
+impl Exec {
     pub(super) fn is_native_build(&self, binding: &Binding) -> bool {
         matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
             && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }))
@@ -307,12 +307,12 @@ else:
         let CodingHarness::Command(mut process) = runtime.coding.as_ref().unwrap().harness.clone() else { unreachable!() };
         process.argv.clear(); process.timeout_ms = if mode == "foreign-only" { 300 } else { 5000 };
         TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned(), mode.into(), agent.into()]));
+        let root = runtime.root.clone();
         let config = runtime.coding.as_mut().unwrap();
         let file = LaunchFile { path: hooks.canonicalize().unwrap(), digest: digest(&std::fs::read(hooks).unwrap()) };
         config.harness = CodingHarness::Native { preset: agent.into(), settings: (agent == "claude").then(|| file.clone()),
             project_hooks: (agent != "claude").then_some(file), plugin_dir: None, prompt: "implement the selected task".into(), process };
         // Persist private trusted config before enqueue, then exercise the public reopen path.
-        let root = runtime.root.clone();
         std::fs::write(root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
         drop(runtime);
         (dir, Runtime::open(&root).unwrap(), Fake)

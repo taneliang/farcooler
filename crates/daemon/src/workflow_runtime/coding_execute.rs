@@ -38,7 +38,7 @@ pub struct CodingCiReceipt {
     pub run: serde_json::Value,
 }
 
-impl Runtime {
+impl Exec {
     fn fact_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect)))
     }

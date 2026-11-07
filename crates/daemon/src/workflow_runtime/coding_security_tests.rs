@@ -67,9 +67,10 @@ async fn workflow_coding_security_push_conserves_submodule_destination() {
     git(&repo, &["remote", "add", "selected", remote.to_str().unwrap()]).await;
     git(&repo, &["config", "push.recurseSubmodules", "on-demand"]).await;
     let before = git(&secondary, &["for-each-ref", "--format=%(refname) %(objectname)"]).await;
+    let root = runtime.root.clone();
     let config = runtime.coding.as_mut().unwrap(); config.base = base;
-    std::fs::write(runtime.root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
-    let root = runtime.root.clone(); drop(runtime);
+    std::fs::write(root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
+    drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done);

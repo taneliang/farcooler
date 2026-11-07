@@ -9,7 +9,7 @@ struct LandingFact {
     candidate: String,
     log_digest: String,
 }
-impl Runtime {
+impl Exec {
     fn remote_fact(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.landing.json", digest(&binding.effect)))
     }
@@ -96,10 +96,11 @@ mod tests {
         let status = tokio::process::Command::new("/usr/bin/git").current_dir(&repo)
             .args(["-c", "core.hooksPath=/dev/null", "push", bare.to_str().unwrap(), "HEAD:refs/heads/main"])
             .status().await.unwrap(); assert!(status.success());
+        let root = runtime.root.clone();
         let config = runtime.coding.as_mut().unwrap();
         config.landing = Some(CodingLanding { job: "landing-928".into(), repository: bare.canonicalize().unwrap(),
             target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
-        let root = runtime.root.clone(); std::fs::write(root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
+        std::fs::write(root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
         drop(runtime);
         (dir, Runtime::open(&root).unwrap())
     }

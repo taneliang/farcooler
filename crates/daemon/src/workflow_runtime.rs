@@ -89,17 +89,31 @@ impl CommandHandle {
     }
 }
 
-pub struct Runtime {
+/// Everything one effect needs to run, and nothing a sweep owns. Cheap to clone, so each
+/// concurrent effect gets its own copy with its own item's configuration (ov-952).
+#[derive(Clone)]
+pub struct Exec {
     root: PathBuf,
     store: std::sync::Arc<Store>,
     service_mode: bool,
+    resource: String,
+    base: String,
+    coding: Option<CodingConfig>,
+}
+impl Exec {
+    pub fn state(&self, workspace: &str) -> Result<Option<State>> {
+        Ok(self.store.workflow_state(workspace)?)
+    }
+}
+impl std::ops::Deref for Runtime { type Target = Exec; fn deref(&self) -> &Exec { &self.exec } }
+impl std::ops::DerefMut for Runtime { fn deref_mut(&mut self) -> &mut Exec { &mut self.exec } }
+
+pub struct Runtime {
+    exec: Exec,
     pub(crate) notice_wake: Option<std::sync::Arc<tokio::sync::Notify>>,
     configuration_locks: std::collections::BTreeMap<PathBuf, File>,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     instance: Uuid,
-    resource: String,
-    base: String,
-    coding: Option<CodingConfig>,
     last_occupancy: Option<String>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
@@ -203,7 +217,8 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None,
             #[cfg(test)] sweeps: 0,
-            root, store: std::sync::Arc::new(store), service_mode: false, notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding },
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -221,9 +236,6 @@ impl Runtime {
     }
     fn authorize(&self, instance: Uuid) -> Result<()> {
         if instance == self.instance { Ok(()) } else { Err(Error::Refused("foreign local capability")) }
-    }
-    pub fn state(&self, workspace: &str) -> Result<Option<State>> {
-        Ok(self.store.workflow_state(workspace)?)
     }
     pub fn notices(&self, workspace: &str, after_revision: u64)
         -> Result<Vec<farcooler_store::workflow::WorkflowNotice>>
