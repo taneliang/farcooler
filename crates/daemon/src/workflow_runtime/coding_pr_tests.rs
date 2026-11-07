@@ -451,3 +451,23 @@ async fn restarts_during_the_wait_for_a_merge_spend_no_attempts() {
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(phase_of(&state, "one"), Some(Phase::Done), "the merge was seen after seven restarts");
 }
+
+/// Bytes `gh pr list --repo cli/cli --state all --json <FIELDS>` printed (gh 2.103.3, read-only, public repository),
+/// four pull requests with review bodies cut short. The parser is held to what GitHub really sends.
+const REAL: &[u8] = include_bytes!("fixtures/gh_pr_list_cli_cli.json");
+
+#[test]
+fn the_parser_reads_what_gh_really_prints() {
+    let prs = super::coding_pr::parse_for_test(REAL).expect("real gh output parses");
+    assert_eq!(prs.len(), 4);
+    let closed = prs.iter().find(|p| p.0 == 14440).unwrap();
+    // A standing change request of the head it was made on counts; of any other commit it does not.
+    assert!(super::coding_pr::changes_requested_for_test(REAL, 14440, &closed.1));
+    assert!(!super::coding_pr::changes_requested_for_test(REAL, 14440, &"a".repeat(40)));
+    // Changes requested, then approved by the same reviewer, is not a standing request.
+    let approved = prs.iter().find(|p| p.0 == 14519).unwrap();
+    assert!(!super::coding_pr::changes_requested_for_test(REAL, 14519, &approved.1));
+    // The request was of this commit, and the same reviewer approved a later one: it no longer stands.
+    assert!(!super::coding_pr::changes_requested_for_test(REAL, 14519, "61c9b23fa405a2c3f677ffa921d9bb32a4b3786f"));
+    assert_eq!(prs.iter().filter(|p| p.2).count(), 2, "two come from forks");
+}

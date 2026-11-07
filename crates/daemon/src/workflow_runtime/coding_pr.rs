@@ -287,3 +287,13 @@ impl Exec {
         unreachable!("the poll count is unbounded")
     }
 }
+
+/// (number, head sha, from a fork) of each pull request in real bytes.
+#[cfg(test)]
+pub(super) fn parse_for_test(out: &[u8]) -> Option<Vec<(u64, String, bool)>> {
+    parse(out).map(|all| all.into_iter().map(|p| (p.number, p.head_sha, p.cross)).collect())
+}
+#[cfg(test)]
+pub(super) fn changes_requested_for_test(out: &[u8], number: u64, candidate: &str) -> bool {
+    parse(out).and_then(|all| all.into_iter().find(|p| p.number == number)).is_some_and(|p| changes_requested_of(&p.reviews, candidate))
+}
