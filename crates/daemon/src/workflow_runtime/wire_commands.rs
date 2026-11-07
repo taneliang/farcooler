@@ -25,7 +25,8 @@ impl Runtime {
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
-            | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. } => mutation,
+            | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
+            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } => mutation,
             Action::Get => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -90,6 +91,16 @@ impl Runtime {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Retry { item:item.clone() },Grant::Controller);
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    }
+                }
+                Action::Queue { item, run, pin, .. } | Action::Leave { item, run, pin, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let command = if matches!(action, Action::Queue { .. }) { Command::Queue { item:item.clone() } }
+                            else { Command::Leave { item:item.clone() } };
+                        let input = input(command,Grant::Controller);
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
@@ -168,6 +179,12 @@ mod tests {
         let waiting = runtime.wire_command("ws","owner",retry("now",item.run.clone())).unwrap();
         assert!(waiting.to_string().contains("Phase"),"{waiting}");
         assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].retries,0);
+        // Queue and leave need a ticket at a join step or in a waiting group; this one is neither.
+        for (id,action) in [("queue",Action::Queue { mutation:m("queue",state.revision,3),item:"a".into(),run:item.run.clone(),pin:pin.clone() }),
+                            ("leave",Action::Leave { mutation:m("leave",state.revision,4),item:"a".into(),run:item.run.clone(),pin:pin.clone() })] {
+            let refused = runtime.wire_command("ws","owner",action).unwrap();
+            assert!(refused.to_string().contains("Phase"),"{id}: {refused}");
+        }
     }
     #[tokio::test]
     async fn workflow_wire_auto_and_every_stage_approval_preserve_policy() {

@@ -63,6 +63,10 @@ pub enum WorkflowCmd {
     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Run a failed item's step again. At most three retries per item.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Queue a ticket waiting at its join step into the open group for that step.
+    Queue { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Take a queued ticket out of a group that has not left yet.
+    Leave { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -82,6 +86,8 @@ impl WorkflowCmd {
                 (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed:false,reason:Some(reason) })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
+            Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
+            Self::Leave { workspace,item,run,pin,identity } => (workspace,Action::Leave { mutation:identity.mutation(),item,run,pin }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }

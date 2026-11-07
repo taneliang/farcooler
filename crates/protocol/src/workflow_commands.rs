@@ -23,6 +23,10 @@ pub enum Action {
     Cancel { mutation: Mutation, item: String, run: String, pin: String },
     /// Run a failed item's step again. A controller's command, like cancel.
     Retry { mutation: Mutation, item: String, run: String, pin: String },
+    /// Queue a ticket waiting at its join step into the open group. The orchestrator decides.
+    Queue { mutation: Mutation, item: String, run: String, pin: String },
+    /// Pull a queued ticket out of a group that has not left yet.
+    Leave { mutation: Mutation, item: String, run: String, pin: String },
 }
 impl Action {
     pub fn method(&self) -> &'static str {
@@ -34,6 +38,8 @@ impl Action {
             Self::Review { .. } => "workflow.review",
             Self::Cancel { .. } => "workflow.cancel",
             Self::Retry { .. } => "workflow.retry",
+            Self::Queue { .. } => "workflow.queue",
+            Self::Leave { .. } => "workflow.leave",
         }
     }
 }
@@ -68,6 +74,12 @@ mod tests {
         let raw = serde_json::to_string(&retry).unwrap();
         assert_eq!(parse(&raw).unwrap(),retry);
         assert_eq!(retry.method(),"workflow.retry");
+        for action in ["Queue","Leave"] {
+            let raw = format!(r#"{{"action":"{action}","mutation":{{"id":"q","revision":3,"epoch":1,"sequence":2}},"item":"a","run":"run","pin":"pin"}}"#);
+            let parsed = parse(&raw).unwrap();
+            assert_eq!(serde_json::to_string(&parsed).unwrap(),raw);
+            assert_eq!(parsed.method(),format!("workflow.{}",action.to_lowercase()));
+        }
         let mut definition = Definition::coding();
         definition.schema = 2; definition.max_reworks = 0; definition.rework_target = None;
         definition.stages[2].routes.insert("rejected".into(), farcooler_workflow::Target::Step("stage-1".into()));

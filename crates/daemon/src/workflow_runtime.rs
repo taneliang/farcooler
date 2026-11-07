@@ -277,7 +277,7 @@ impl Runtime {
                 }
                 self.validate_definition(definition)?;
             }
-            Command::Cancel { .. } | Command::Retry { .. } => {}
+            Command::Cancel { .. } | Command::Retry { .. } | Command::Queue { .. } | Command::Leave { .. } => {}
             _ => return Err(Error::Refused("not a controller command")),
         }
         self.apply(request, "controller", Grant::Controller, now_ms)
