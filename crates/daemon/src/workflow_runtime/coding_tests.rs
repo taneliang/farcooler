@@ -348,6 +348,9 @@ async fn workflow_coding_adapted_person_review_and_optional_archetype() {
     }
     definition.rework_target=Some("adapted-build".into());
     assert!(config.validate_definition(&definition).is_ok());
+    let preflight=definition.stages.remove(2);
+    definition.stages.insert(1,preflight);
+    assert!(config.validate_definition(&definition).is_err(),"approved pure engine requires a built candidate before Check");
     definition.stages[0].kind=StageKind::Land;
     assert!(config.validate_definition(&definition).is_err(),"landing without candidate prerequisites accepted");
 }

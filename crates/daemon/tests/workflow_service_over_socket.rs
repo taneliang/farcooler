@@ -2,8 +2,8 @@
 use std::{sync::Arc, path::Path};
 use farcooler_daemon::{service::Service, rpc::RpcFactory, watch::Watcher,
     workflow_runtime::{CodingConfigExt, CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi}};
-use farcooler_protocol::{v1::{self as pb, request, result, Scope}, workflow_commands::{Action,Mutation}, workflow_config::AdapterConfiguration};
-use farcooler_transport::{Client,Peer,HandshakeConfig,UnixListenerServer};
+use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action,Mutation}, workflow_config::AdapterConfiguration};
+use farcooler_transport::{Client,HandshakeConfig,UnixListenerServer};
 use farcooler_workflow::{Definition,Progression,Phase};
 use uuid::Uuid;
 async fn git(repo: &Path, args: &[&str]) -> Result<String, std::io::Error> {
@@ -103,8 +103,8 @@ impl Host {
         let (svc, end, rpc_stop) = (service.clone(),stop.clone(),stop.clone());
         let server = tokio::spawn(async move {
             tokio::select! {
-                result = listener.serve_with_pid(move |_,pid| Some((HandshakeConfig { daemon_version:"ordinary-service-test".into() },
-                    RpcFactory::new(svc.clone(),watcher.clone(),rpc_stop.clone(),Peer { client_id:None,scope:Scope::HostAdmin }).with_socket_caller(pid)))) => result.unwrap(),
+                result = listener.serve_with_pid(move |preamble,pid| Some((HandshakeConfig { daemon_version:"ordinary-service-test".into() },
+                    RpcFactory::new(svc.clone(),watcher.clone(),rpc_stop.clone(),farcooler_daemon::sessions::peer_from_preamble(preamble.as_ref())?).with_socket_caller(pid)))) => result.unwrap(),
                 _ = end.notified() => (),
             }
         });
@@ -137,7 +137,13 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
         // Archetype is optional: renamed stages, extra build, multiple checks and
         // a configured second build as rework destination all run through Service.
         let mut second=definition.stages[1].clone(); second.id="repair-candidate".into();
-        definition.stages.insert(2,second); definition.stages[0].id="allocate".into();
+        definition.stages.insert(2,second);
+        // A check can also run after landing: candidate verification, not the
+        // generated archetype's order, is the adapter safety prerequisite.
+        let late_check=definition.stages.remove(3);
+        let land=definition.stages.iter().position(|s| s.kind==farcooler_workflow::StageKind::Land).unwrap();
+        definition.stages.insert(land+1,late_check);
+        definition.stages[0].id="allocate".into();
         definition.stages[1].id="draft".into(); definition.rework_target=Some("repair-candidate".into());
         for (index,stage) in definition.stages.iter_mut().enumerate() {
             if index>2 { stage.id=format!("custom-{index}"); }
@@ -343,5 +349,53 @@ async fn workflow_service_fast_ship_without_checks_or_review() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert_eq!(get(&mut link,host.workspace).await["state"]["items"]["fast"]["phase"],"Done");
+    drop(link);host.close().await;
+}
+
+#[tokio::test]
+async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration() {
+    if person_terminal("workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration").await { return; }
+    let (dir,config)=configured(false,"ci-pending").await;
+    let host=Host::open(dir.path()).await;let workspace=host.workspace;let mut link=host.connect().await;
+    let definition=config.definition().unwrap();let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish {mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"recover".into(),pin:pin.clone()}).await);
+    let snapshot=tokio::time::timeout(std::time::Duration::from_secs(20),async {
+        loop {
+            let snapshot=get(&mut link,workspace).await;
+            if snapshot["state"]["items"]["recover"]["phase"]=="Uncertain" {break snapshot;}
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+    let mut other=config;other.base=snapshot["state"]["items"]["recover"]["candidate"].as_str().unwrap().into();
+    other.ci.workflow="different-ci-policy".into();
+    accepted(&call(&mut link,workspace,Action::Publish {mutation:mutation("b",snapshot["state"]["revision"].as_u64().unwrap(),2),
+        expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
+    let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
+    let ci=effects.iter().find(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))).unwrap();
+    assert_eq!(ci.dispatch_state,"uncertain");
+    let stem=farcooler_workflow::digest(&ci.effect);
+    let receipts=dir.path().join("state/workflow/receipts");
+    let fact=receipts.join(format!("{stem}.process.json"));
+    // Process facts use the original invocation identity throughout recovery.
+    let provider=receipts.join(format!("{stem}.provider.json"));
+    let before=std::fs::read(&fact).unwrap();
+    drop(link);host.close().await;
+    let host=Host::open(dir.path()).await;let mut link=host.connect().await;
+    let mut observed:serde_json::Value=serde_json::from_slice(&std::fs::read(&provider).unwrap()).unwrap();
+    observed["run"]["status"]="completed".into();
+    std::fs::write(provider,serde_json::to_vec(&observed).unwrap()).unwrap();
+    // A durable trusted receipt update is reconciled; no process relaunch.
+    for _ in 0..100 {
+        if get(&mut link,workspace).await["state"]["items"]["recover"]["phase"]=="Done" {break;}
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let snapshot=get(&mut link,workspace).await;
+    assert_eq!(snapshot["state"]["items"]["recover"]["phase"],"Done");
+    assert_eq!(snapshot["state"]["items"]["recover"]["policy_pin"],pin);
+    assert_eq!(std::fs::read(fact).unwrap(),before);
+    assert_eq!(host.service.store.workflow_outbox(&workspace.to_string()).unwrap().iter()
+        .filter(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))).count(),1);
     drop(link);host.close().await;
 }

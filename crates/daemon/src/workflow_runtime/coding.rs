@@ -108,12 +108,12 @@ impl CodingConfigExt for CodingConfig {
             let (version, argument) = match &stage.kind {
                 StageKind::Provision if !provisioned && !built => { provisioned = true; ("coding-worktree/v1", String::new()) },
                 StageKind::Build if provisioned && !landed => { built = true; ("coding-harness/v1", String::new()) },
-                StageKind::Check if built && !landed => {
+                StageKind::Check if built => {
                     let index = stage.operation.arguments.get(1).and_then(|s| s.parse::<usize>().ok())
                         .filter(|i| *i < self.checks.len()).ok_or(Error::Refused("unknown configured check"))?;
                     ("coding-check/v1", index.to_string())
                 },
-                StageKind::Review(_) if built && !landed =>
+                StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
                     ("coding-review/v1", self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity.clone()),
                 StageKind::Land if built && !landed => { landed = true; ("coding-land/v1", self.landing_ref.clone()) },
                 StageKind::Ci if landed => ("coding-ci/v1", self.ci.repository.clone()),
