@@ -62,10 +62,7 @@ impl Store {
     /// a checksummed backup written next to it before anything is touched.
     pub fn open(path: impl AsRef<Path>) -> Result<Store> {
         let path = path.as_ref();
-        crate::engine_cutover::startup::ordinary_admission(path).map_err(|e| {
-            tracing::warn!(error=%e, "ordinary open refused before normalization");
-            DomainError::OperationFailed
-        })?;
+        crate::engine_cutover::startup::admit_or_refuse(path)?;
         Self::open_normalizing(path)
     }
 

@@ -77,3 +77,8 @@ pub fn open_recovery(db: &Path) -> Result<crate::Store> {
     }
     crate::Store::from_engine_cutover_connection(conn).map_err(|e| Error::Refused(e.to_string()))
 }
+
+/// The ordinary Store open's gate, with a loud log and an opaque domain error.
+pub(crate) fn admit_or_refuse(db: &Path) -> farcooler_core::Result<Admission> {
+    ordinary_admission(db).map_err(|e| { tracing::warn!(error=%e, "ordinary open refused before normalization"); farcooler_core::DomainError::OperationFailed })
+}

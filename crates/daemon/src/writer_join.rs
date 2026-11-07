@@ -64,7 +64,7 @@ mod tests {
         drop(service);
         let (store, plan) = transfer::begin(&db, &owners).unwrap();
         assert_eq!(store.engine_authority().unwrap().phase, "quiesced");
-        assert_eq!(plan.registry, 66);
+        assert_eq!(plan.registry, 67);
         assert!(farcooler_store::Store::open(&db).is_err(), "the restarted daemon is refused by the gate");
     }
     #[tokio::test]
