@@ -29,6 +29,16 @@ fn opened(child: &mut std::process::Child) {
 }
 
 #[test]
+fn a_journal_with_no_header_is_inert() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("db.sqlite");
+    drop(Store::open(&path).unwrap());
+    let journal = tmp.path().join("db.sqlite-journal");
+    std::fs::write(&journal, vec![0u8; 4096]).unwrap();
+    transfer::clear_inert_journal(&path).unwrap();
+    assert!(!journal.exists(), "a process killed before any page moved leaves this");
+}
+#[test]
 fn commit_takes_a_closed_backup_of_the_frozen_file_then_maps_it() {
     let tmp = tempfile::tempdir().unwrap();
     let path = frozen(tmp.path(), "a");

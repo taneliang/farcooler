@@ -61,14 +61,20 @@ pub(super) fn refuse_sidecars(db: &Path) -> Result<()> {
     }
     Ok(())
 }
-/// An empty journal is not hot: SQLite neither replays nor removes it, and it
-/// would refuse the transfer forever. Under the proof, nothing else can own it.
+/// A journal with no header yet is not hot: its writer died before any page
+/// reached the database, as a process killed mid-transaction leaves it, whatever
+/// its length. SQLite neither replays nor removes one, and it would refuse the
+/// transfer forever. Under the proof, nothing else can own it.
 pub(super) fn clear_inert_journal(db: &Path) -> Result<()> {
     startup::settle_journal(db)?;
     let mut name = db.as_os_str().to_owned();
     name.push("-journal");
     let journal = PathBuf::from(name);
-    if fs::metadata(&journal).is_ok_and(|m| m.is_file() && m.len() == 0) { fs::remove_file(&journal)?; }
+    if fs::metadata(&journal).is_ok_and(|m| m.is_file()) {
+        let mut first = [0u8; 1];
+        let read = File::open(&journal)?.read(&mut first)?;
+        if read == 0 || first[0] == 0 { fs::remove_file(&journal)?; }
+    }
     refuse_sidecars(db)
 }
 fn frozen_id(attempt: &str) -> String { format!("frozen:{attempt}") }

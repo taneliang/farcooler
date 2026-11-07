@@ -307,7 +307,7 @@ impl CommitPermit {
     }
     pub(super) fn attempt(&self)->&str {&self.attempt}
     pub(super) fn backup_hash(&self)->&str {&self.backup}
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     pub(crate) fn unit(plan:&super::Preflight,proof:&super::Quiescence,attempt:&str)->Self {
         Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into(),evidence:Evidence::Rehearsal(proof.clone())}
     }
