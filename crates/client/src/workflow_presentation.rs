@@ -132,6 +132,9 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
             || (if item.phase == Phase::Done { item.stage != item.definition.stages.len() }
                 else { item.stage >= item.definition.stages.len() })
         { return Err(Error::Invalid); }
+        // A tracker-only ticket is a board card, not a run: it has no gate to approve and nothing to
+        // stop, and listing every open card as an awaiting-approval run would bury the real ones (ov-962).
+        if item.definition.is_ticket() { continue; }
         let stage = item.definition.stages.get(item.stage);
         let gate = match (&item.phase, stage) {
             (Phase::WaitingApproval, Some(s)) => match &s.progression {
@@ -175,8 +178,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
             if item.iteration < item.definition.max_reworks { kinds.push(ActionKind::RequestRework); }
             else { kinds.push(ActionKind::RejectReview); }
         }
-        // A tracker-only ticket has no run to stop, and a card is moved only through the orchestrator (ov-951).
-        if auth.controller && !item.definition.is_ticket() && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
+        if auth.controller && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
             && !item.run.starts_with("cancel:")
         { kinds.push(ActionKind::Cancel); }
         runs.push(RunCard { label: "Workflow Run".into(), phase_label: display::phase_label(&item.phase).into(),

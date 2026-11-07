@@ -65,6 +65,9 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
     for (id, item) in &new.items {
         let raw: Option<String> = tx.query_row("SELECT policy FROM workflow_notification_policies WHERE bundle_pin=?1", [&item.policy_pin], |r| r.get(0)).optional()?;
         let policy: NotificationPolicy = raw.map(|s| serde_json::from_str(&s)).transpose()?.unwrap_or_default();
+        // A tracker-only ticket is a board card, not a run: it has nobody to ask and nothing to report, so
+        // tracking every open card writes no notice (ov-962). The run that Start makes is another matter.
+        if item.definition.is_ticket() { continue; }
         let previous = old.items.get(id);
         let mut points = Vec::new();
         if previous.is_none_or(|i| i.phase != item.phase) {
@@ -301,6 +304,24 @@ mod tests {
         let mut old=serde_json::to_value(notice).unwrap();old.as_object_mut().unwrap().remove("verb");
         let read:Notice=serde_json::from_value(old.clone()).unwrap();
         assert_eq!(read.verb,None);assert_eq!(serde_json::to_value(&read).unwrap(),old);
+    }
+    /// Tracking every open card must not ask the orchestrator to approve each one (ov-962): a ticket at rest
+    /// writes no notice, at the default policy, which includes waiting-approval.
+    #[test]
+    fn a_tracker_only_ticket_writes_no_notice() {
+        let store=Store::open_in_memory().unwrap();
+        let ticket=Definition::ticket();
+        let mut input=enqueue("ws",1,&ticket.pin());
+        input.command=Command::Enqueue {item:"ov-1".into(),initial_candidate:Some(ticket.pin()),definition:ticket.clone(),policy_pin:ticket.pin(),resource:"r".into(),dependencies:Default::default()};
+        assert!(store.workflow_apply(&input).unwrap().result.is_ok());
+        assert!(store.workflow_pending_notices(0).unwrap().is_empty(),"a ticket at rest asked for approval");
+        // Moving it between columns says nothing either.
+        let item=store.workflow_state("ws").unwrap().unwrap().items["ov-1"].clone();
+        let mut moved=enqueue("ws",2,&ticket.pin());
+        moved.command=Command::Move {item:"ov-1".into(),to:"doing".into()};
+        let _=item;
+        assert!(store.workflow_apply(&moved).unwrap().result.is_ok());
+        assert!(store.workflow_pending_notices(0).unwrap().is_empty(),"a move wrote a notice");
     }
     #[test]
     fn workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission() {
