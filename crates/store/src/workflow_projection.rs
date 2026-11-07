@@ -31,6 +31,16 @@ pub(crate) fn refuse_if_owned(conn: &Connection, task: uuid::Uuid) -> DomainResu
 
 /// Where a run puts its card: the column and the line stage.
 pub(crate) fn place(item: &Item) -> (TaskStatus, Stage) {
+    if item.definition.is_ticket() && !matches!(item.phase, Phase::Done | Phase::Cancelled) {
+        // A ticket with no run sits where the orchestrator put it; nobody is asked for anything by the engine.
+        return match item.definition.stages.get(item.stage).map(|s| s.id.as_str()) {
+            Some("todo") => (TaskStatus::Todo, Stage::Waiting),
+            Some("doing") => (TaskStatus::InProgress, Stage::Building),
+            Some("review") => (TaskStatus::InReview, Stage::Reviewing),
+            Some("decision") => (TaskStatus::NeedsDecision, Stage::NeedsYou),
+            _ => (TaskStatus::Backlog, Stage::Waiting),
+        };
+    }
     match item.phase {
         Phase::Done => (TaskStatus::Done, Stage::Landed),
         Phase::Cancelled => (TaskStatus::Cancelled, Stage::Dropped),

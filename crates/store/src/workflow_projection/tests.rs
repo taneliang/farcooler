@@ -20,7 +20,7 @@ fn input(b: &Board, id: &str, revision: u64, grant: Grant, command: Command) -> 
         busy_resources: BTreeSet::new(), command }
 }
 fn enqueue(b: &Board, definition: Definition) -> u64 {
-    let tracker = definition.source.starts_with("tracker");
+    let tracker = definition.source.starts_with("tracker") || definition.is_ticket();
     let candidate = tracker.then(|| definition.pin());
     let c = Command::Enqueue { item: b.task.key.clone(), policy_pin: "policy-1".into(), resource: "own".into(),
         dependencies: BTreeSet::new(), initial_candidate: candidate, definition };
@@ -157,4 +157,37 @@ fn a_failed_run_is_on_the_needs_you_list_until_the_controller_cancels_it() {
     assert_eq!(seen(&b), ("cancelled".into(), Some("dropped".into())));
     let e = b.store.set_task_status(b.task.id, TaskStatus::Done, Actor::User).unwrap_err();
     assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
+}
+
+fn command(b: &Board, n: &str, command: Command) -> Result<u64, Refusal> {
+    let state = b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap();
+    b.store.workflow_apply(&input(b, n, state.revision, Grant::Controller, command)).unwrap().result
+}
+
+#[test]
+fn a_tracked_ticket_sits_in_the_column_the_orchestrator_put_it_in() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    assert_eq!(seen(&b), ("backlog".into(), Some("waiting".into())), "nothing is asked of anyone");
+    for (to, status, stage) in [("todo", "todo", "waiting"), ("doing", "in_progress", "building"),
+        ("review", "in_review", "reviewing"), ("decision", "needs_decision", "needs_you"), ("backlog", "backlog", "waiting")] {
+        command(&b, &format!("move-{to}"), Command::Move { item: b.task.key.clone(), to: to.into() }).unwrap();
+        assert_eq!(seen(&b), (status.into(), Some(stage.into())), "{to}");
+    }
+    command(&b, "close", Command::Move { item: b.task.key.clone(), to: "done".into() }).unwrap();
+    assert_eq!(seen(&b), ("done".into(), Some("landed".into())));
+    assert!(b.store.set_task_status(b.task.id, TaskStatus::Todo, Actor::User).is_err(), "the column is final");
+}
+
+#[test]
+fn a_started_ticket_follows_its_run_from_the_column_it_was_in() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    command(&b, "doing", Command::Move { item: b.task.key.clone(), to: "doing".into() }).unwrap();
+    let coding = Definition::coding();
+    command(&b, "start", Command::Start { item: b.task.key.clone(), policy_pin: "policy-1".into(), resource: "repo".into(),
+        dependencies: BTreeSet::new(), initial_candidate: None, definition: coding }).unwrap();
+    assert_eq!(seen(&b), ("in_progress".into(), Some("building".into())));
+    pass(&b, 1); pass(&b, 2); pass(&b, 3);
+    assert_eq!(seen(&b), ("in_review".into(), Some("reviewing".into())));
 }
