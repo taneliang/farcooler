@@ -134,13 +134,3 @@ suspend fun Connection.createTerminal(worktree: String, title: String, preset: S
     return data["id"]?.jsonPrimitive?.contentOrNull
         ?: throw com.farcooler.core.CoreException("The runner started a terminal but didn’t name it.")
 }
-
-/**
- * Send exact bytes to a terminal. [hex] must already be lowercase hex —
- * this does no encoding of its own, because the caller that exists needs
- * the sentence and the carriage return sent as two separate calls, not two
- * strings joined into one payload here.
- */
-suspend fun Connection.writeRaw(terminal: String, hex: String) {
-    core.call("terminal.write", Connection.args("terminal" to terminal, "hex" to hex))
-}

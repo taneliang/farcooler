@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -184,10 +183,8 @@ fun WorkspaceScreen(
     // is on top, and the app is in front: suppress its banners and mark its
     // finished turn seen, as a worktree's pane does.
     val live = seat as? OrchestratorSeat.Live
-    // The tree's New worktree and Name a new worktree (review 18).
-    var describing by remember(workspace.id) { mutableStateOf(false) }
+    // The tree's New worktree: the form that names one (review 18).
     var naming by remember(workspace.id) { mutableStateOf(false) }
-    if (describing) QuickTaskSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { describing = false })
     if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { naming = false })
 
     // The wide layout (ov-347) has the chat up whichever rail place is selected.
@@ -271,14 +268,11 @@ fun WorkspaceScreen(
                     },
                     actions = {
                         AuthenticatedWorkflowButton(model, route.hostId, route.workspaceId)
-                        // The tree is always up, so its two ways to make a
-                        // worktree are always here; so are the chat's controls.
+                        // The tree is always up, so its way to make a worktree
+                        // is always here; so are the chat's controls.
                         if (mayControl) {
-                            IconButton(onClick = { describing = true }, modifier = Modifier.testTag("new-worktree")) {
-                                Icon(Icons.Filled.AutoAwesome, contentDescription = "New worktree")
-                            }
-                            IconButton(onClick = { naming = true }) {
-                                Icon(Icons.Filled.Add, contentDescription = "Name a new worktree")
+                            IconButton(onClick = { naming = true }, modifier = Modifier.testTag("new-worktree")) {
+                                Icon(Icons.Filled.Add, contentDescription = "New worktree")
                             }
                         }
                         OrchestratorActions(
@@ -378,15 +372,12 @@ fun WorkspaceScreen(
                     },
                     actions = {
                         AuthenticatedWorkflowButton(model, route.hostId, route.workspaceId)
-                        // The tree's two ways to make a worktree, where the
-                        // Worktrees list had them: actions of the top app bar,
-                        // an icon each (ov-300 review 18).
+                        // The tree's way to make a worktree, where the Worktrees
+                        // list had it: an action of the top app bar (ov-300
+                        // review 18).
                         if (route.tab == WorkspaceTab.WORKTREES && !workspace.isImplicit && mayControl) {
-                            IconButton(onClick = { describing = true }, modifier = Modifier.testTag("new-worktree")) {
-                                Icon(Icons.Filled.AutoAwesome, contentDescription = "New worktree")
-                            }
-                            IconButton(onClick = { naming = true }) {
-                                Icon(Icons.Filled.Add, contentDescription = "Name a new worktree")
+                            IconButton(onClick = { naming = true }, modifier = Modifier.testTag("new-worktree")) {
+                                Icon(Icons.Filled.Add, contentDescription = "New worktree")
                             }
                         }
                         if (route.tab == WorkspaceTab.ORCHESTRATOR) {

@@ -93,7 +93,7 @@ import kotlinx.serialization.json.Json
 // ## What these are, as objects
 //
 // `ModalBottomSheet`, which is this app's own shape for "pick one of these and
-// come straight back" — `RunnerEditorSheet`, `QuickTaskSheet`, `NewWorktreeSheet`
+// come straight back" — `RunnerEditorSheet`, `NewWorktreeSheet`
 // and `NewTerminalSheet` are all one. iOS reaches for a `NavigationStack` in a
 // sheet with Cancel in the leading slot; the Android equivalent of that shape is
 // a bottom sheet, which also puts the content where the thumb already is rather
@@ -613,7 +613,7 @@ private fun HistoryRow(
  * That is a belt as well as braces. `imePadding` on the frame plus
  * `android:windowSoftInputMode="adjustResize"` in the manifest is what is
  * supposed to lift a sheet clear of the keyboard, and it is exactly what
- * `QuickTaskSheet` already relies on for a text field in a bottom sheet — so
+ * `NewWorktreeSheet` already relies on for a text field in a bottom sheet — so
  * this assumes no more than the app already ships. It has not been watched
  * happen, here or there.
  *

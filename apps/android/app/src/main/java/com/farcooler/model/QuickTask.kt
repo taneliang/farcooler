@@ -1,10 +1,10 @@
 package com.farcooler.model
 
-// Ported from the Mac's `QuickCreate.swift` (`Branch`) and `Composer.swift`
-// (`Agents`), by way of the iOS app's `QuickTask.swift`. Pure logic, no UI and
+// Ported from the Mac's `WorktreeNaming.swift` (`Branch`) and `Composer.swift`
+// (`Agents`), by way of the iOS app's `TaskSlug.swift`. Pure logic, no UI and
 // no host calls, so it is copied verbatim rather than re-derived: the whole
-// point is that a phone, a tablet and a Mac describing the same task land on
-// the same branch name and offer the same agents, and the only way to guarantee
+// point is that a phone, a tablet and a Mac naming the same worktree land on
+// the same branch and offer the same agents, and the only way to guarantee
 // that is to make the rules identical rather than merely similar.
 
 /**

@@ -31,7 +31,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Dns
@@ -249,7 +248,6 @@ internal fun WorktreeList(
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val coroutines = rememberCoroutineScope()
 
-    var showQuickTask by remember { mutableStateOf(false) }
     var showNewWorktree by remember { mutableStateOf(false) }
     var newTerminalIn by remember { mutableStateOf<Pair<Connection, Worktree>?>(null) }
     // The two phase-8 doors off a worktree row. Both hold a `Connection` as
@@ -313,17 +311,14 @@ internal fun WorktreeList(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Sparkles for "describe it", a plain plus for "name it
-                    // yourself" — the two flows the Mac keeps side by side.
-                    // Both claim the new worktree for this workspace.
-                    TextButton(onClick = { showQuickTask = true }) {
-                        Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp))
+                    // Naming a worktree yourself. A task is the orchestrator's to
+                    // start, so there is no describe-it door here. Claims the new
+                    // worktree for this workspace.
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { showNewWorktree = true }) {
+                        Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("New worktree")
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { showNewWorktree = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Name a new worktree")
                     }
                 }
             }
@@ -421,9 +416,6 @@ internal fun WorktreeList(
 
 
     val claim = (scope as? WorktreeScope.OfWorkspace)?.workspace
-    if (showQuickTask) {
-        QuickTaskSheet(model = model, workspace = claim, hostId = scope.hostId, onDismiss = { showQuickTask = false })
-    }
     if (showNewWorktree) {
         NewWorktreeSheet(model = model, workspace = claim, hostId = scope.hostId, onDismiss = { showNewWorktree = false })
     }
