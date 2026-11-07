@@ -91,7 +91,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             iteration: item.iteration, reason: reason.clone(),
                         });
                     }
-                    finish(&mut item, id, input, *passed, evidence, &mut effects, &mut spawn)?;
+                    finish(&mut item, id, input, *passed, evidence, room(&next, &spawn), &mut effects, &mut spawn)?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
                 | Command::Resolve { effect, run, fence, outcome, .. } => {
@@ -130,12 +130,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 return Err(Refusal::Evidence);
                             }
                             evidence_matches(&item, evidence)?;
-                            route(&mut item, id, input, label, Some(evidence), &mut effects, &mut spawn)?;
+                            route(&mut item, id, input, label, Some(evidence), room(&next, &spawn), &mut effects, &mut spawn)?;
                         }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
-                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, &mut effects, &mut spawn)?;
+                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, room(&next, &spawn), &mut effects, &mut spawn)?;
                         }
                         Outcome::SafeFailure => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
@@ -260,7 +260,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
                 if label == "passed" && result.is_some() { ticket.candidate = result.clone(); }
             }
-            route(&mut ticket, &member.item, input, label, None, &mut effects, &mut spawn)?;
+            route(&mut ticket, &member.item, input, label, None, room(&next, &spawn), &mut effects, &mut spawn)?;
             next.items.insert(member.item, ticket);
         }
     }
@@ -364,11 +364,11 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     { return Err(Refusal::Evidence); }
     Ok(())
 }
-fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence,
+fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence, room: bool,
     effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
 {
     if item.definition.schema == 2 {
-        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), effects, spawn);
+        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), room, effects, spawn);
     }
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
@@ -418,9 +418,12 @@ fn rework_room(item: &Item, label: &str) -> Result<(), Refusal> {
     if item.back_edges.get(&stage.id).copied().unwrap_or(0) >= stage.limit { return Err(Refusal::Limit); }
     Ok(())
 }
+/// Whether one more item fits. The item being worked on is out of the map, so it counts too.
+/// A split with no room takes its fallback: a refusal here would stop the service, not the item.
+fn room(next: &State, spawn: &[(String, Vec<Member>)]) -> bool { next.items.len() + 1 + spawn.len() < MAX_ITEMS }
 /// Schema 2: take the route a label names. A back edge past its limit fails the run instead.
 /// A split keeps the first half of a group here and hands the rest to `spawn`.
-fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>,
+fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, room: bool,
     effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
 {
     item.pending = None;
@@ -435,7 +438,7 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
     let taken = item.back_edges.get(&key).copied().unwrap_or(0);
     if let Target::Split { step, otherwise } = target {
         // Two or more members and room to go back: split. Otherwise the fallback decides.
-        target = if item.members.len() >= 2 && taken < limit {
+        target = if item.members.len() >= 2 && taken < limit && room {
             let rest = item.members.split_off(item.members.len().div_ceil(2));
             spawn.push((id.to_string(), rest));
             Target::Step(step)

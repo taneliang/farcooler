@@ -344,7 +344,7 @@ fn queueing_that_would_open_a_group_past_the_item_cap_is_refused_and_nothing_is_
     log.run(Command::Cancel { item: "filler-0".into() }, Grant::Controller);
 }
 #[test]
-fn a_split_that_would_pass_the_item_cap_is_refused_whole() {
+fn a_split_with_no_room_for_a_new_group_takes_its_fallback() {
     let mut log = Log::new();
     for t in ["x", "a", "b"] { log.to_join(t); }
     log.queue("x");
@@ -358,10 +358,13 @@ fn a_split_that_would_pass_the_item_cap_is_refused_whole() {
     let (effect, run, fence) = {
         let i = &log.state.items[&pair]; (i.pending.clone().unwrap(), i.run.clone(), i.fence)
     };
-    let result = log.try_run(Command::Observe { item: pair.clone(), effect: effect.clone(), run: run.clone(), fence,
-        outcome: Outcome::Rejected(e) }, Grant::Operation { effect, run, fence });
-    assert_eq!(result.unwrap_err(), Refusal::Limit);
-    assert_eq!(log.state.items[&pair].members.len(), 2, "no half a split");
+    // The cap never refuses an observation: with no room to split, the fallback route decides.
+    log.try_run(Command::Observe { item: pair.clone(), effect: effect.clone(), run: run.clone(), fence,
+        outcome: Outcome::Rejected(e) }, Grant::Operation { effect, run, fence }).unwrap();
+    assert!(log.state.items.len() <= 1024);
+    assert_eq!(log.state.items[&pair].phase, Phase::Failed, "the group took its fallback");
+    // Each member got the group's result through its own join route: back to rework, not half a split.
+    for t in ["a", "b"] { assert_eq!((log.stage(t), log.state.items[t].grouped_in.clone()), ("stage-1".to_string(), None)); }
 }
 #[test]
 fn a_caller_cannot_enqueue_an_id_a_group_will_use() {
@@ -383,6 +386,22 @@ fn a_split_cannot_follow_a_landing_in_a_group() {
     let mut d = ticket(); land_first(&mut d);
     d.groups.get_mut("landing").unwrap().steps[2].routes.clear();
     d.groups.get_mut("landing").unwrap().steps[2].limit = 0;
+    assert_eq!(d.validate(), Ok(()));
+}
+#[test]
+fn a_split_cannot_target_a_step_at_or_after_a_landing() {
+    // base, fold, land, ci: a red ci that splits back onto ci would land the second half twice.
+    let mut d = ticket();
+    let g = &mut d.groups.get_mut("landing").unwrap().steps;
+    g[1].routes.clear(); g[1].limit = 0;
+    g[2].kind = StageKind::Land; g[2].routes.clear(); g[2].limit = 0;
+    let mut ci = action("ci"); ci.kind = StageKind::Ci;
+    ci.routes.insert("rejected".into(), Target::Split { step: "ci".into(), otherwise: Box::new(Target::Fail) });
+    ci.limit = 1;
+    g.push(ci);
+    assert_eq!(d.validate(), Err(Refusal::Definition));
+    d.groups.get_mut("landing").unwrap().steps[3].routes.clear();
+    d.groups.get_mut("landing").unwrap().steps[3].limit = 0;
     assert_eq!(d.validate(), Ok(()));
 }
 #[test]
