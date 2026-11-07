@@ -413,7 +413,7 @@ fn work_role(role: AgentRole) -> WorkRole {
 }
 
 /// What keeps a hand-linked subagent off a card the engine owns.
-const WORK_GUARDS: [&str; 2] = ["workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
+pub(crate) const WORK_GUARDS: [&str; 2] = ["workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
 
 impl Store {
     /// Record a subagent working `task`, or fill in what's newly known about

@@ -103,7 +103,9 @@ fn kind(item: &Item) -> Option<&StageKind> { item.definition.stages.get(item.sta
 /// write, so for the length of this transaction they are dropped and put back
 /// from their own stored text: the catalog is byte-identical afterward, and a
 /// failure rolls the drops back with everything else.
-const GUARDS: [&str; 3] = ["engine_task_execution_fence", "workflow_excludes_ticket_lines_insert", "workflow_excludes_ticket_lines_update"];
+/// The `ticket_work` pair is here because closing a card closes its open subagents inside the move (ov-962).
+const GUARDS: [&str; 5] = ["engine_task_execution_fence", "workflow_excludes_ticket_lines_insert", "workflow_excludes_ticket_lines_update",
+    "workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
 
 /// What a tracked ticket's own notes touch: its wait (a column the status fence also covers) and its blocks.
 pub(crate) const TICKET_GUARDS: [&str; 4] = ["engine_task_execution_fence", "engine_fence_task_blocks_i", "engine_fence_task_blocks_u", "engine_fence_task_blocks_d"];
@@ -148,8 +150,8 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
     let moved = moves.iter().filter_map(|(task, to, _, from, _, _)| Some(BoardMove {
         task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
-        let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (?1,?2,?3) ORDER BY name")?;
-        statement.query_map(params![GUARDS[0], GUARDS[1], GUARDS[2]], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (?1,?2,?3,?4,?5) ORDER BY name")?;
+        statement.query_map(params![GUARDS[0], GUARDS[1], GUARDS[2], GUARDS[3], GUARDS[4]], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
     };
     for name in GUARDS { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))?; }
     let written = write(tx, moves);

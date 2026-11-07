@@ -262,3 +262,32 @@ fn a_card_with_a_live_worker_is_not_offered_for_tracking() {
     let keys = |s: &Store| -> Vec<String> { s.untracked_tickets(None).unwrap().into_iter().map(|(_, k, _)| k).collect() };
     assert_eq!(keys(&store), vec![free.key.clone()], "a live pane keeps its card out");
 }
+
+fn worker(agent: &str) -> crate::workers::WorkerRecord {
+    crate::workers::WorkerRecord { harness: "claude".into(), agent_id: agent.into(), session_id: Some("s1".into()), session_cwd: Some("/r".into()),
+        orchestrator_terminal: None, label: Some("a subagent".into()), model: None, linked_by: crate::workers::LinkedBy::Orchestrator }
+}
+
+/// Closing a card closes its open subagents inside the move, which the ticket_work fences would abort (ov-962).
+#[test]
+fn a_tracked_ticket_with_an_open_subagent_can_still_close() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    b.store.record_worker(b.task.id, &worker("a1"), Actor::Manager).unwrap();
+    command(&b, "close", Command::Move { item: b.task.key.clone(), to: "done".into() }).expect("the close goes through");
+    assert_eq!(seen(&b).0, "done");
+    let open: i64 = b.store.conn().query_row("SELECT count(*) FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL", [b.task.id.as_bytes().as_slice()], |r| r.get(0)).unwrap();
+    assert_eq!(open, 0, "its subagent closed with it");
+}
+
+/// Ending an agent ends its ticket_work rows too, and a tracked ticket's fences must let that through.
+#[test]
+fn ending_an_agent_on_a_tracked_ticket_closes_its_work() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    b.store.record_worker(b.task.id, &worker("a1"), Actor::Manager).unwrap();
+    let agent: Vec<u8> = b.store.conn().query_row("SELECT agent_id FROM ticket_work WHERE task_id=?1", [b.task.id.as_bytes().as_slice()], |r| r.get(0)).unwrap();
+    b.store.end_agent(uuid::Uuid::from_slice(&agent).unwrap(), crate::ticket_work::Verdict::Finished).expect("the agent ends");
+    let open: i64 = b.store.conn().query_row("SELECT count(*) FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL", [b.task.id.as_bytes().as_slice()], |r| r.get(0)).unwrap();
+    assert_eq!(open, 0);
+}

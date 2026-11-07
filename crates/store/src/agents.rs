@@ -379,12 +379,25 @@ impl Store {
                 params![uuid_blob(id), now, reason.as_str()],
             )
             .map_err(map_err)?;
-            tx.execute(
-                "UPDATE ticket_work SET ended_at = ?2, verdict = coalesce(verdict, ?3)
-                  WHERE agent_id = ?1 AND ended_at IS NULL",
-                params![uuid_blob(id), now, reason.as_str()],
-            )
-            .map_err(map_err)?;
+            // A tracked ticket's work rows are fenced against a hand write; ending its agent is the agent's own
+            // bookkeeping, so the fence is lifted for this statement and put back (ov-962).
+            let tickets: Vec<Uuid> = {
+                let mut rows = tx.prepare("SELECT DISTINCT task_id FROM ticket_work WHERE agent_id = ?1 AND ended_at IS NULL").map_err(map_err)?;
+                let ids = rows.query_map(params![uuid_blob(id)], |r| r.get::<_, Vec<u8>>(0)).map_err(map_err)?;
+                ids.filter_map(|r| r.ok().and_then(|b| Uuid::from_slice(&b).ok())).collect()
+            };
+            let mut guarded = false;
+            for task in tickets { guarded |= crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)?; }
+            let guards: &[&str] = if guarded { &crate::workers::WORK_GUARDS } else { &[] };
+            crate::workflow_projection::with_guards_down(&tx, guards, || {
+                tx.execute(
+                    "UPDATE ticket_work SET ended_at = ?2, verdict = coalesce(verdict, ?3)
+                      WHERE agent_id = ?1 AND ended_at IS NULL",
+                    params![uuid_blob(id), now, reason.as_str()],
+                )
+                .map_err(map_err)?;
+                Ok(())
+            })?;
         }
         let agent = agent_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
