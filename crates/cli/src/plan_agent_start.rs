@@ -189,3 +189,13 @@ pub(super) async fn through_engine<L: DispatchLink>(
         "The engine is starting {list}. Each run makes its own worktree and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`."
     )))
 }
+
+/// `task dispatch` opens a pane, which a tracked ticket refuses after any worktree is made. So it asks
+/// first, and sends the person to `agent dispatch`, which starts the ticket through the engine (ov-962).
+pub(crate) async fn refuse_tracked<L: DispatchLink>(link: &mut L, ticket: &pb::Task) -> Result<(), Failed> {
+    if !link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Ok(()); }
+    let Some(workspace) = Uuid::from_slice(&ticket.workspace_id).ok() else { return Ok(()) };
+    let Seen::Held(seen) = snapshot(link, workspace).await else { return Ok(()) };
+    if seen.hold(&ticket.key) == Hold::None { return Ok(()); }
+    Err(format!("{} is tracked by the engine, which refuses a pane. Start it with `farcooler agent dispatch --role builder --ticket {}`.", ticket.key, ticket.key).into())
+}

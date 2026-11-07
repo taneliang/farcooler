@@ -56,6 +56,7 @@ pub(super) const NEEDS_STOP: &str = "This runner needs an update to stop an agen
 mod dispatch;
 #[path = "plan_agent_start.rs"]
 mod start;
+pub(crate) use start::refuse_tracked;
 
 /// `farcooler agent`.
 #[derive(Debug, Clone, Args)]

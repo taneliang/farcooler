@@ -63,7 +63,7 @@ mod theme_move;
 #[path = "plan_ticket.rs"]
 mod ticket;
 #[path = "plan_agent.rs"]
-mod agent;
+pub(crate) mod agent;
 #[path = "plan_landing.rs"]
 mod landing;
 

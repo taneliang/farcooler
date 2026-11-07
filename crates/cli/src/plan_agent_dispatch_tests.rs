@@ -383,3 +383,14 @@ async fn an_unanswered_engine_is_said_when_the_pane_fails() {
     let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
     assert!(!said.contains("workspace owner"), "an answered engine adds nothing: {said}");
 }
+
+/// `task dispatch` asks the engine before it makes a worktree, and sends a tracked ticket to `agent dispatch`.
+#[tokio::test]
+async fn task_dispatch_turns_a_tracked_ticket_away_before_any_worktree() {
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval")]);
+    let said = super::super::start::refuse_tracked(&mut link, &items()[1]).await.unwrap_err().to_string();
+    assert!(said.contains("ov-2 is tracked by the engine") && said.contains("agent dispatch --role builder --ticket ov-2"), "{said}");
+    let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
+    super::super::start::refuse_tracked(&mut link, &items()[1]).await.unwrap();
+    assert!(link.methods().iter().all(|m| *m == "workflow.get"), "{:?}", link.methods());
+}
