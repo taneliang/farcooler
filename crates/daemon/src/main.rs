@@ -298,10 +298,12 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     // returns: a runtime waits for its blocking tasks when it's dropped.
     // `start_tunnel` already holds the same pool the same way.
     let homes = service.clone();
+    let homes_ticket = homes.admit_writer("delivery").ok();
     tokio::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || homes.prepare_workspace_homes()).await {
             tracing::error!(error = %e, "making workspace homes failed");
         }
+        if let Some(t) = homes_ticket { t.finish(); }
     });
 
     // Not fatal, ever. A runner that cannot start its tunnel is still a runner
@@ -374,7 +376,9 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     let sweeping = service.clone();
     tokio::spawn(async move {
         loop {
+            let Ok(ticket) = sweeping.admit_writer("delivery") else { return };
             farcooler_daemon::pastes::sweep(sweeping.root_dir()).await;
+            ticket.finish();
             tokio::time::sleep(farcooler_daemon::pastes::SWEEP_EVERY).await;
         }
     });

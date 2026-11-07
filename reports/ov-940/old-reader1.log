@@ -1,0 +1,26 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+
+running 1 test
+test engine_cutover::tests::startup_gate::old_reader_fixture_writes_source_and_begun_databases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 547 filtered out; finished in 0.39s
+
+    Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 9.00s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+    Compiling farcooler-store v0.1.0 (/private/tmp/ov940-oldreader-ysqq88oj/oldsrc/crates/store)
+    Finished `dev` profile [unoptimized] target(s) in 1.82s
+
+{
+  "old_commit": "d43e8f99cc00d81ec5f2ed4e606483e9352fe3a3",
+  "results": {
+    "v65.sqlite": "OPENED",
+    "begun.sqlite": "REFUSED NewerData"
+  }
+}
+
+exit=0, stopped=None

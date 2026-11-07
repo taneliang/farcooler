@@ -68,7 +68,9 @@ pub fn kick() {
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     let mut memo = Memo::default();
     loop {
+        let Ok(ticket) = svc.writers.admit("landing-jobs") else { return };
         let wait = read_all(&svc, &watcher, &mut memo).await;
+        ticket.finish();
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
             _ = kicked().notified() => {}

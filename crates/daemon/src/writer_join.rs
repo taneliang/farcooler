@@ -20,6 +20,9 @@ impl OwnedWriter for Joined {
 }
 
 impl Service {
+    /// Admission for a writer spawned outside this crate's library (the binary's helpers).
+    pub fn admit_writer(&self, identity: &'static str) -> Result<crate::writer_gate::Ticket, crate::writer_gate::Closed> { self.writers.admit(identity) }
+
     /// Close admission everywhere, stop and join the workflow owner, drain every
     /// ticket, then issue the one-attempt proof bound to `db`.
     pub async fn join_writers(&self, attempt: &str, db: &std::path::Path, protected: &BTreeSet<String>) -> Result<JoinedOwners, String> {

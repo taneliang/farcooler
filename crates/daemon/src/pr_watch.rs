@@ -213,7 +213,9 @@ impl Memo {
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     let mut memo = Memo::default();
     loop {
+        let Ok(ticket) = svc.writers.admit("landing-jobs") else { return };
         let wait = tick(&svc, &watcher, &mut memo, &take_forced()).await;
+        ticket.finish();
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
             _ = kicked().notified() => {}

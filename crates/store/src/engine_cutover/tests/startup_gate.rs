@@ -114,3 +114,18 @@ fn owner_join_issues_nothing_for_a_stuck_or_missing_owner() {
     assert!(partial.join(&path, &none).is_err(), "unknown owners block; a partial inventory is no proof");
 }
 use std::io::Write;
+
+/// Fixture writer for `reports/ov-940/old-reader.py`: only acts when the script
+/// names an explicit private directory, otherwise it is a no-op.
+#[test]
+fn old_reader_fixture_writes_source_and_begun_databases() {
+    let Some(out) = std::env::var_os("OV940_OLD_READER_DIR") else { return };
+    let out = std::path::PathBuf::from(out);
+    let source = source65(&out);
+    std::fs::rename(&source, out.join("v65.sqlite")).unwrap();
+    let begun = out.join("begun");
+    std::fs::create_dir(&begun).unwrap();
+    let path = source65(&begun);
+    drop(transfer::begin(&path, &join_db(&path, "old-reader")).unwrap());
+    std::fs::rename(&path, out.join("begun.sqlite")).unwrap();
+}

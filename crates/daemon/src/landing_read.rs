@@ -344,7 +344,9 @@ pub async fn look(svc: &Service, watcher: &Watcher) -> usize {
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     tokio::time::sleep(FIRST).await;
     loop {
+        let Ok(ticket) = svc.writers.admit("landing-jobs") else { return };
         look(&svc, &watcher).await;
+        ticket.finish();
         tokio::time::sleep(LOOK).await;
     }
 }
