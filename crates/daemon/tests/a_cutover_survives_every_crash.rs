@@ -312,7 +312,8 @@ async fn forward(runner: &Runner, source: Source, name: &str) {
             }
             None | Some("legacy") => { if source == Source::Legacy { runner.must("hold").await; } runner.must("prepare").await; }
             Some("quiesced") => runner.must("commit").await,
-            Some("committed") => { runner.must("verify").await; runner.must("release").await; }
+            // A repeat of Commit finishes its journal and changes nothing else.
+            Some("committed") => { runner.must("commit").await; runner.must("verify").await; runner.must("release").await; }
             Some("released") if exists => runner.must("finish").await,
             Some("released") => break,
             other => panic!("{name}: {other:?}"),
@@ -330,13 +331,17 @@ async fn forward(runner: &Runner, source: Source, name: &str) {
     if source == Source::Legacy { main_serves_ordinarily(runner).await; }
 }
 
+/// `CUTOVER_ONLY` narrows a run for `reports/ov-963/mutants.py`. Each case stands
+/// alone, and each red one is named, so a mutant can be held to its boundary.
 async fn whole_matrix(source: Source) {
+    let only = std::env::var("CUTOVER_ONLY").ok();
+    let wanted = |name: &str| only.as_deref().is_none_or(|list| list.split(',').any(|n| n == name));
     let room = Arc::new(tokio::sync::Semaphore::new(4));
-    let mut cases = tokio::task::JoinSet::new();
+    let mut cases = Vec::new();
     for &name in boundary::ALL {
-        if source == Source::Raw60 && stage_of(name) == "hold" { continue; }
+        if !wanted(name) || (source == Source::Raw60 && stage_of(name) == "hold") { continue; }
         let room = room.clone();
-        cases.spawn(async move {
+        cases.push((name, tokio::spawn(async move {
             let _seat = room.acquire().await.unwrap();
             let runner = crash(source, name).await;
             check_row(&runner, name, source);
@@ -345,9 +350,14 @@ async fn whole_matrix(source: Source) {
             back(&runner, source, name).await;
             let runner = crash(source, name).await;
             forward(&runner, source, name).await;
-        });
+        })));
     }
-    while let Some(case) = cases.join_next().await { case.unwrap(); }
+    assert!(!cases.is_empty());
+    let mut red = Vec::new();
+    for (name, case) in cases {
+        if case.await.is_err() { eprintln!("BOUNDARY-RED {name}"); red.push(name); }
+    }
+    assert!(red.is_empty(), "red at {red:?}");
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn a_raw_schema60_runner_survives_a_crash_at_every_boundary() { whole_matrix(Source::Raw60).await; }
