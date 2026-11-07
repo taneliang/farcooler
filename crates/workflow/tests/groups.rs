@@ -405,6 +405,24 @@ fn a_split_cannot_target_a_step_at_or_after_a_landing() {
     assert_eq!(d.validate(), Ok(()));
 }
 #[test]
+fn a_split_must_restart_at_a_step_that_makes_its_candidate_anew() {
+    // A Tracker only adopts a candidate, so a half restarting there would keep the one it had.
+    let mut d = ticket();
+    let g = &mut d.groups.get_mut("landing").unwrap().steps;
+    g[0].kind = StageKind::Tracker;
+    assert_eq!(d.validate(), Err(Refusal::Definition));
+}
+#[test]
+fn only_the_exact_shape_of_a_group_id_is_reserved() {
+    let mut log = Log::new();
+    log.enqueue("group-12", ticket());
+    log.enqueue("group-", ticket());
+    let result = log.try_run(Command::Enqueue { item: format!("group-{:020}-x", 7), definition: ticket(),
+        policy_pin: "policy-1".into(), resource: "r".into(), dependencies: BTreeSet::new(), initial_candidate: None },
+        Grant::Controller);
+    assert_eq!(result.unwrap_err(), Refusal::Invalid);
+}
+#[test]
 fn group_runs_replay_to_the_same_state() {
     let mut log = Log::new();
     for t in ["x", "a", "b"] { log.to_join(t); }

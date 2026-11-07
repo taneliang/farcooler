@@ -25,7 +25,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             controller(input)?;
             definition.validate()?;
             if !valid_id(item) || !valid_id(resource) || !valid_id(policy_pin)
-                || item.starts_with("group-") || next.items.contains_key(item) || next.archive.contains_key(item) || next.items.len() >= MAX_ITEMS
+                || reserved_id(item) || next.items.contains_key(item) || next.archive.contains_key(item) || next.items.len() >= MAX_ITEMS
                 || dependencies.len() > 128
             { return Err(Refusal::Invalid); }
             let tracker = matches!(definition.stages[0].kind, StageKind::Tracker);
@@ -291,6 +291,10 @@ pub fn owns_resource(item: &Item) -> bool {
 }
 /// A new group's id: the revision it opens at, zero-padded, so ids sort in the order groups opened.
 fn group_id(state: &State, name: &str) -> String { format!("group-{:020}-{name}", state.revision) }
+/// The shape `group_id` makes: `group-` and twenty digits and `-`. Nothing else is reserved.
+fn reserved_id(id: &str) -> bool {
+    id.strip_prefix("group-").is_some_and(|r| r.len() > 20 && r.as_bytes()[..20].iter().all(u8::is_ascii_digit) && r.as_bytes()[20] == b'-')
+}
 /// Take a queued ticket out of a group that has not left yet; an empty group is cancelled.
 fn detach(next: &mut State, id: &str, item: &mut Item) -> Result<(), Refusal> {
     if item.phase != Phase::Joined { return Err(Refusal::Phase); }

@@ -183,6 +183,8 @@ impl Definition {
                         // its fallback is a plain place to go: splits do not nest.
                         let &to = index.get(step.as_str()).ok_or(Refusal::Definition)?;
                         if !in_group || to > i { return Err(Refusal::Definition); }
+                        // Both halves start over, so the step must discard the candidate the group had.
+                        if !makes_candidate_anew(&self.stages[to].kind) { return Err(Refusal::Definition); }
                         // The second half would run again what the first already landed.
                         if self.stages[..=i].iter().any(|s| matches!(s.kind, StageKind::Land)) { return Err(Refusal::Definition); }
                         match &**otherwise {
