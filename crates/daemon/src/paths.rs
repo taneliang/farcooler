@@ -17,7 +17,7 @@ pub const MAX_SOCKET_PATH: usize = 103;
 /// `~/Library/Application Support/com.farcooler.FarCooler` on macOS, for a
 /// release build.
 pub fn runtime_dir() -> Result<PathBuf> {
-    runtime_dir_for(farcooler_protocol::CHANNEL)
+    Ok(selection()?.root.clone())
 }
 
 /// Where a given channel's install lives.
@@ -39,10 +39,53 @@ pub fn runtime_dir() -> Result<PathBuf> {
 /// tests and scratch daemons get an isolated home, and the channel is only
 /// consulted when nobody has named a directory outright.
 pub fn runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<PathBuf> {
-    if let Ok(over) = std::env::var("FARCOOLER_HOME") {
-        return Ok(PathBuf::from(over));
+    Ok(RuntimeSelection::from_override(channel, std::env::var_os("FARCOOLER_HOME"))?.root)
+}
+
+/// A validated runtime root and its provenance, captured before startup effects.
+#[derive(Clone, Debug)]
+pub struct RuntimeSelection {
+    root: PathBuf,
+    explicit: bool,
+}
+
+impl RuntimeSelection {
+    /// Pure explicit-input validation; default resolution only computes a path.
+    /// Ownership, symlinks and a fresh private root remain launcher preconditions.
+    pub fn from_override(channel: farcooler_protocol::Channel, value: Option<std::ffi::OsString>) -> Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self { root: default_runtime_dir_for(channel)?, explicit: false });
+        };
+        let text = value.to_str().ok_or(DomainError::OperationFailed)?;
+        let root = PathBuf::from(text);
+        let normalized: PathBuf = root.components().collect();
+        if text.is_empty() || text.chars().any(char::is_control) || !root.is_absolute()
+            || root.parent().is_none() || normalized.as_os_str() != value
+            || root.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir))
+            || root.join("farcoolerd.sock").as_os_str().len() > MAX_SOCKET_PATH
+        {
+            return Err(DomainError::OperationFailed);
+        }
+        Ok(Self { root, explicit: true })
     }
-    default_runtime_dir_for(channel)
+
+    pub fn root(&self) -> &std::path::Path { &self.root }
+    pub fn is_explicit(&self) -> bool { self.explicit }
+
+    pub fn ensure_dir(&self) -> Result<PathBuf> { ensure_dir_in(self.root.clone()) }
+
+    pub fn socket_path(&self) -> Result<PathBuf> {
+        Ok(self.ensure_dir()?.join("farcoolerd.sock"))
+    }
+}
+
+/// The process edge: both CLI and daemon hold the same validated selection.
+/// Failed explicit input is also retained, so it can never fall back later.
+pub fn selection() -> Result<&'static RuntimeSelection> {
+    static SELECTED: std::sync::OnceLock<std::result::Result<RuntimeSelection, ()>> = std::sync::OnceLock::new();
+    SELECTED.get_or_init(|| RuntimeSelection::from_override(
+        farcooler_protocol::CHANNEL, std::env::var_os("FARCOOLER_HOME"),
+    ).map_err(|_| ())).as_ref().map_err(|_| DomainError::OperationFailed)
 }
 
 /// Where a channel's install lives when nobody has named a directory: the
@@ -65,7 +108,10 @@ pub fn default_runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<P
 
 /// Create the runtime directory with user-only permissions (0700).
 pub fn ensure_runtime_dir() -> Result<PathBuf> {
-    let dir = runtime_dir()?;
+    selection()?.ensure_dir()
+}
+
+fn ensure_dir_in(dir: PathBuf) -> Result<PathBuf> {
     std::fs::create_dir_all(&dir).map_err(|e| {
         tracing::warn!(error = %e, "could not create runtime dir");
         DomainError::OperationFailed
@@ -161,6 +207,41 @@ mod tests {
     const ALL: [Channel; 4] =
         [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
 
+    #[test]
+    fn runtime_selection_explicit_default_and_pre_effect_refusal() {
+        let channel = Channel::Canary;
+        let default = RuntimeSelection::from_override(channel, None).unwrap();
+        assert!(!default.is_explicit());
+        assert_eq!(default.root(), default_runtime_dir_for(channel).unwrap());
+        let fixture = tempfile::Builder::new().prefix("ov937-").tempdir_in("/tmp").unwrap();
+        let root = fixture.path().canonicalize().unwrap().join("uncreated");
+        let selected = RuntimeSelection::from_override(channel, Some(root.clone().into_os_string())).unwrap();
+        assert!(selected.is_explicit());
+        assert_eq!(selected.root(), root);
+        assert_eq!(crate::daemon_log::log_dir_for(&selected), Some(root.join("logs")));
+        assert!(!root.exists(), "selection must have no filesystem effects");
+        for value in ["", "relative", "/", "/tmp/../bad", "/tmp/./bad", "/tmp//bad", "/tmp/bad/", "/tmp/bad\0", "/tmp/bad\n"] {
+            assert!(RuntimeSelection::from_override(channel, Some(value.into())).is_err(), "{value:?}");
+        }
+        assert!(RuntimeSelection::from_override(channel, Some(format!("/{}", "x".repeat(MAX_SOCKET_PATH)).into())).is_err());
+        #[cfg(unix)] {
+            use std::os::unix::ffi::OsStringExt;
+            assert!(RuntimeSelection::from_override(channel, Some(std::ffi::OsString::from_vec(vec![b'/', 255]))).is_err());
+        }
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn runtime_selection_refuses_before_socket_directory_effects() {
+        let parent = scratch("rs-effects");
+        let invalid = parent.join("new/../escape");
+        let result = RuntimeSelection::from_override(Channel::Canary, Some(invalid.into_os_string()))
+            .and_then(|selected| selected.socket_path());
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 0, "no root, log, socket, lock or Store effects");
+        std::fs::remove_dir(parent).unwrap();
+    }
+
     /// The isolation everything else rests on.
     ///
     /// These read no environment and touch no disk, so they are safe to run in
@@ -169,7 +250,7 @@ mod tests {
     /// ground under the ones running beside it.
     #[test]
     fn each_channel_gets_its_own_runtime_directory() {
-        let dirs: Vec<_> = ALL.iter().map(|c| runtime_dir_for(*c).unwrap()).collect();
+        let dirs: Vec<_> = ALL.iter().map(|c| default_runtime_dir_for(*c).unwrap()).collect();
         let unique: std::collections::BTreeSet<_> = dirs.iter().collect();
         assert_eq!(unique.len(), ALL.len(), "two channels would share a database: {dirs:?}");
     }
@@ -183,7 +264,7 @@ mod tests {
                 if a == b {
                     continue;
                 }
-                let (x, y) = (runtime_dir_for(a).unwrap(), runtime_dir_for(b).unwrap());
+                let (x, y) = (default_runtime_dir_for(a).unwrap(), default_runtime_dir_for(b).unwrap());
                 assert!(!x.starts_with(&y), "{x:?} must not sit inside {y:?}");
             }
         }
@@ -193,7 +274,7 @@ mod tests {
     fn stable_keeps_the_directory_it_has_always_had() {
         // An existing install must not move. If this ever changes, every
         // worktree and terminal a user already has disappears on upgrade.
-        let release = runtime_dir_for(Channel::Stable).unwrap();
+        let release = default_runtime_dir_for(Channel::Stable).unwrap();
         let historic = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
             .unwrap()
             .data_dir()

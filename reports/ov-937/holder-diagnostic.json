@@ -1,0 +1,29 @@
+{
+  "time": 1794018235.159693,
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+  "profiles": {
+    "debug": {
+      "exit": 0,
+      "out": "73969\n",
+      "err": ""
+    },
+    "release": {
+      "exit": 1,
+      "out": "",
+      "err": ""
+    },
+    "wasm32-unknown-unknown/debug": {
+      "exit": 1,
+      "out": "",
+      "err": ""
+    }
+  },
+  "observed_process": {
+    "pid": 73969,
+    "ppid": 73949,
+    "started": "2026-11-07 10:23:49 Asia/Shanghai",
+    "command": "/Users/e-liang/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo test --offline -p farcooler-daemon --lib workflow_notice_native_owned_descendant_ -- --nocapture",
+    "cwd": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership",
+    "source": "subsequent native ps and lsof read-only diagnostic"
+  }
+}

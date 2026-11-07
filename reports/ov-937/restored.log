@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/reports/ov-937/entry.py", line 15, in <module>
+    assert result.returncode==1 and not result.stdout.strip() and not result.stderr.strip(), 'cargo cache occupied or probe failed'
+AssertionError: cargo cache occupied or probe failed
+
+exit=1, stopped=None

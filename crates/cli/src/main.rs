@@ -1067,6 +1067,10 @@ enum TerminalCmd {
 
 #[tokio::main]
 async fn main() {
+    if let Err(e) = farcooler_daemon::paths::selection() {
+        eprintln!("invalid runtime root: {e}");
+        std::process::exit(1);
+    }
     // Logs go to stderr. stdout is the DATA channel.
     //
     // tracing_subscriber writes to stdout by default, which put warnings in the
@@ -3665,3 +3669,7 @@ mod worktree_json_tests;
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runtime_selection_tests.rs"]
+mod runtime_selection_tests;

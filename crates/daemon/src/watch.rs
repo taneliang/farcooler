@@ -2779,7 +2779,7 @@ impl Watcher {
     }
 
     fn build(service: Arc<Service>, events: broadcast::Sender<Event>) -> Arc<Self> {
-        let runner_claude = service.claude_logins.runner.clone();
+        let log_roots = service.log_roots();
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             host_walk: crate::hostwalk::HostWalk::default(),
@@ -2801,7 +2801,7 @@ impl Watcher {
             keys_pressed: std::sync::Mutex::new(HashMap::new()),
             brought: std::sync::Mutex::new(HashMap::new()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(
-                std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
+                service.log_home().unwrap_or_default(),
             )),
             #[cfg(test)]
             fail_sends: std::sync::atomic::AtomicBool::new(false),
@@ -2855,7 +2855,7 @@ impl Watcher {
             change_set_probing: std::sync::atomic::AtomicBool::new(false),
             needs_you_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             logs: std::sync::Mutex::new(HashMap::new()),
-            log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots(runner_claude.as_deref())),
+            log_watcher: crate::log_watch::LogWatcher::start(log_roots),
             // Registers nothing here on purpose: the fleet is not known yet,
             // and on a per-tree backend every registration restarts the event
             // stream. The two passes that already enumerate the fleet do the

@@ -84,7 +84,7 @@ pub fn roots(claude_dir: Option<&Path>) -> Vec<PathBuf> {
 /// `$CODEX_HOME` when that's set (ov-416), so the runner's own is watched
 /// as well as `~/.codex`: a codex started with another one in its pane still
 /// gets the backstop's join (`LOG_JOIN_BACKSTOP_MS`), never none.
-fn roots_in(home: Option<PathBuf>, codex_home: Option<PathBuf>, claude_dir: Option<&Path>) -> Vec<PathBuf> {
+pub(crate) fn roots_in(home: Option<PathBuf>, codex_home: Option<PathBuf>, claude_dir: Option<&Path>) -> Vec<PathBuf> {
     let Some(home) = home else { return Vec::new() };
     let mut roots = vec![
         claude_dir.map_or_else(|| home.join(".claude/projects"), |d| d.join("projects")),

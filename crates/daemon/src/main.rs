@@ -34,20 +34,24 @@ use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
+    let selected = match paths::selection() {
+        Ok(selected) => selected,
+        Err(e) => { eprintln!("invalid runtime root: {e}"); std::process::exit(1); }
+    };
     // stderr always: in --stdio mode stdout IS the wire, and one log line
     // on it would corrupt the first frame.
     let builder = tracing_subscriber::fmt().with_env_filter(
         tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| "farcooler=info,warn".into()),
     );
-    match kept_log() {
+    match kept_log(selected) {
         // The daemon proper keeps its log (ov-798): whoever started it handed
         // it `/dev/null`, so what it says would otherwise be said to no one.
         Some(log) => builder.with_writer(log).init(),
         None => builder.with_writer(std::io::stderr).init(),
     }
 
-    let ran = run().await;
+    let ran = run(selected).await;
     // A `--stdio` session that is over ends this process, now. Returning from
     // `main` instead drops the runtime, which waits for its blocking threads,
     // and `tokio::io::stdin()` keeps one parked in a `read` until the device's
@@ -65,19 +69,19 @@ async fn main() {
 /// The log file, for the one mode that is a daemon. The others are short-lived
 /// children of sshd or tmux whose stderr is somebody's pipe and is read.
 /// Failing to open it is not a reason to not run: stderr stays as it was.
-fn kept_log() -> Option<farcooler_daemon::daemon_log::RotatingLog> {
+fn kept_log(selected: &paths::RuntimeSelection) -> Option<farcooler_daemon::daemon_log::RotatingLog> {
     use farcooler_daemon::daemon_log as log;
     let modes = ["--stdio", "--stream", "--fanout", "--version", "-V"];
     if std::env::args().any(|a| modes.contains(&a.as_str())) {
         return None;
     }
-    let dir = log::log_dir()?;
+    let dir = log::log_dir_for(selected)?;
     log::RotatingLog::open(&dir, log::MAX_BYTES, log::KEEP, true, Some(log::SWEEP_EVERY))
         .inspect_err(|e| eprintln!("cannot keep a log in {}: {e}", dir.display()))
         .ok()
 }
 
-async fn run() -> Result<(), i32> {
+async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     // `farcoolerd --stdio` is the remote entry point.
     //
     // sshd launches it, and it speaks the identical framing over stdin and
@@ -162,7 +166,7 @@ async fn run() -> Result<(), i32> {
         });
     }
 
-    let socket = paths::socket_path().map_err(|e| {
+    let socket = selected.socket_path().map_err(|e| {
         eprintln!("cannot determine the socket path: {e}");
         1
     })?;
@@ -223,7 +227,7 @@ async fn run() -> Result<(), i32> {
     // never sets: if it is set, the log says so from the first line.
     let _ = farcooler_daemon::service::test_stub_agents();
 
-    let service = match Service::open().await {
+    let service = match Service::open_selected(selected).await {
         Ok(service) => Arc::new(service),
         // Up, but refusing: see `refusal` for why this doesn't exit. The lock
         // is still held, so a second start finds the socket and goes quietly.

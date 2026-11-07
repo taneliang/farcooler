@@ -1,0 +1,75 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+private test: ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'runtime_selection_', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/protocol)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 32.17s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 4 tests
+test paths::tests::runtime_selection_explicit_default_and_pre_effect_refusal ... ok
+test service::runtime_selection_tests::runtime_selection_default_binding_keeps_installed_precedence_without_opening_it ... ok
+test service::runtime_selection_tests::runtime_selection_normal_explicit_start_keeps_private_paths ... ok
+test service::runtime_selection_tests::runtime_selection_private_fence_migration_caps_allowlist_and_revoke ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2719 filtered out; finished in 0.17s
+
+private test: ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'log_watch::tests::a_codex_home_elsewhere_is_a_root', '--', '--nocapture']
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.66s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test log_watch::tests::a_codex_home_elsewhere_is_a_root ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2722 filtered out; finished in 0.00s
+
+private test: ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'log_watch::tests::the_runners_claude_dir_is_the_claude_root', '--', '--nocapture']
+    Finished `test` profile [unoptimized] target(s) in 0.29s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test log_watch::tests::the_runners_claude_dir_is_the_claude_root ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2722 filtered out; finished in 0.00s
+
+private test: ['/Users/e-liang/.cargo/bin/cargo', 'test', '--offline', '-p', 'farcooler-daemon', '--lib', 'paths::tests::', '--', '--nocapture']
+    Finished `test` profile [unoptimized] target(s) in 0.16s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 7 tests
+test paths::tests::a_channel_directory_is_a_sibling_never_a_child ... ok
+test paths::tests::a_different_install_gets_a_different_id ... ok
+test paths::tests::an_empty_install_id_file_is_regenerated ... ok
+test paths::tests::each_channel_gets_its_own_runtime_directory ... ok
+test paths::tests::install_id_is_stable_across_calls ... ok
+test paths::tests::runtime_selection_explicit_default_and_pre_effect_refusal ... ok
+test paths::tests::stable_keeps_the_directory_it_has_always_had ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 2716 filtered out; finished in 0.01s
+
+file-size-budget: ok. 2 grandfathered entries have room to lower; run ./scripts/file-size-budget.py --update and commit the manifest.
+
+exit=0, stopped=None

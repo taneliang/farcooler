@@ -1948,6 +1948,7 @@ pub struct Service {
     /// (`respawn_command`): this user's in `open`, and one under the root in a
     /// test's service, so a test never reads the suite runner's `~/.claude`.
     agent_home: Option<PathBuf>,
+    private_runtime: bool,
     /// The reps being resumed, one at a time each (`reps::Resumes`).
     pub(crate) rep_resumes: crate::reps::Resumes,
     /// Each workspace's orchestrator, seated one start at a time (`lead_change::Locks`).
@@ -2094,17 +2095,7 @@ impl TerminalView {
 impl Service {
     /// Open the service at the user's runtime directory.
     pub async fn open() -> Result<Self> {
-        let mut service = Self::open_in(paths::ensure_runtime_dir()?).await?;
-        // Here and not in `open_in`, so a test's service reads no folders
-        // from the config of whoever runs the suite, and never reads, creates
-        // or rewrites their `~/.ssh` (ov-506).
-        service.read_only_folders = crate::read_only_folders::load(&service.root);
-        service.authorized_keys = default_authorized_keys();
-        service.claude_config = crate::people::runner_claude_config();
-        service.agent_home = user_home();
-        service.claude_logins = crate::claude_logins::State::new(crate::claude_logins::runner_dir(std::env::var_os("CLAUDE_CONFIG_DIR"), service.agent_home.as_deref()));
-        service.rep_cli = Some(PathBuf::from(cli_binary(std::env::current_exe().ok().as_deref())));
-        Ok(service)
+        Self::open_selected(paths::selection()?).await
     }
 
     /// A test's service with these folders, as `open` would have read them.
@@ -2149,6 +2140,7 @@ impl Service {
             ssh_host_dir: PathBuf::from("/etc/ssh"),
             claude_config: root.join("claude").join(".claude.json"),
             agent_home: Some(root.join("home")),
+            private_runtime: true,
             rep_resumes: Default::default(),
             orchestrator_locks: Default::default(),
             claude_logins: crate::claude_logins::State::new(Some(root.join("home").join(".claude"))),
@@ -11483,3 +11475,10 @@ mod submodule_skill_tests;
 #[path = "service_terminal_names.rs"]
 mod terminal_names;
 
+
+#[cfg(test)]
+#[path = "runtime_selection_tests.rs"]
+mod runtime_selection_tests;
+
+#[path = "runtime_selection.rs"]
+mod runtime_selection;

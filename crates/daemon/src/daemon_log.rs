@@ -46,10 +46,12 @@ pub const KEEP: usize = 3;
 /// folder Console and `open ~/Library/Logs` already show, named for the
 /// channel's bundle id; elsewhere a `logs` folder in the runtime directory.
 pub fn log_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("FARCOOLER_HOME") {
-        return Some(PathBuf::from(home).join("logs"));
-    }
-    let runtime = crate::paths::default_runtime_dir_for(farcooler_protocol::CHANNEL).ok()?;
+    log_dir_for(crate::paths::selection().ok()?)
+}
+
+pub fn log_dir_for(selected: &crate::paths::RuntimeSelection) -> Option<PathBuf> {
+    if selected.is_explicit() { return Some(selected.root().join("logs")); }
+    let runtime = selected.root();
     if cfg!(target_os = "macos") {
         let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
         // `com.farcooler.FarCooler`, `...FarCoolerCanary`: the data folder's own name.
