@@ -76,7 +76,9 @@ impl Exec {
                 return Err(Error::Refused("foreign local landing settlement"));
             }
         }
-        if adapters::git(&identity.repository, &["rev-parse", &identity.target]).await? != candidate {
+        // Later landings by other items may sit on top; the candidate only has to be in history.
+        if !super::coding::sha(candidate) || adapters::git(&identity.repository, &["merge-base", "--is-ancestor", candidate, &identity.target])
+            .await.is_err() {
             return Err(Error::Refused("remote landing SHA changed"));
         }
         Ok(())

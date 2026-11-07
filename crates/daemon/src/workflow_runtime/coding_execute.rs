@@ -235,8 +235,11 @@ impl Exec {
     }
     async fn verify_landing(&self, binding: &Binding) -> Result<()> {
         self.verify_remote_landing(binding).await?;
-        if self.git_recorded(binding, &self.repository(), &["rev-parse", self.landing_ref()]).await?
-            != binding.effect.candidate.as_deref().unwrap_or("") {
+        // Another item may have landed on top since; this item's candidate only has to be in
+        // the ref's history, not be its tip.
+        let candidate = binding.effect.candidate.as_deref().unwrap_or("");
+        if !sha(candidate) || self.git_recorded(binding, &self.repository(),
+            &["merge-base", "--is-ancestor", candidate, self.landing_ref()]).await.is_err() {
             return Err(Error::Refused("landed SHA differs from CI candidate"));
         }
         Ok(())

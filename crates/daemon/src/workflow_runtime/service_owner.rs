@@ -49,11 +49,11 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None },
+        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,native_slot:Default::default() },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
             last_occupancy:None,inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
-            #[cfg(test)] sweeps:0,
+            #[cfg(test)] sweeps:0, #[cfg(test)] fail_observe:Default::default(), #[cfg(test)] drained:0,
             _writer:writer,_repository_writer:None,_landing_writer:None })
     }
     fn validate_workspace_repository(&self, workspace: &str, config: &CodingConfig) -> Result<()> {

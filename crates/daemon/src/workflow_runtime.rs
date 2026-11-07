@@ -101,6 +101,8 @@ pub struct Exec {
     resource: String,
     base: String,
     coding: Option<CodingConfig>,
+    /// One native build at a time: they share one hook socket on this host (ov-952).
+    native_slot: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 impl Exec {
     /// Each item holds its own resource, so items in one repository never wait on each other
@@ -133,6 +135,11 @@ pub struct Runtime {
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
+    /// Test hook: make the next result write fail, and count effects joined after a failed sweep.
+    #[cfg(test)]
+    fail_observe: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    drained: usize,
     // Kept after all state/process owners; dropping the runtime releases ownership.
     _writer: File,
     _repository_writer: Option<File>,
@@ -229,8 +236,8 @@ impl Runtime {
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
-            #[cfg(test)] sweeps: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding },
+            #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, native_slot: Default::default() },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -312,6 +319,30 @@ impl Runtime {
         result
     }
     async fn sweep(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>) -> Result<usize> {
+        let mut running: Vec<Running> = Vec::new();
+        let mut futures: Vec<Slot> = Vec::new();
+        let result = self.sweep_loop(now_ms, inbox, &mut running, &mut futures).await;
+        if result.is_err() {
+            // One failed write must not kill its siblings mid-effect: stop them, wait for
+            // each to end, and keep what each one learned so recovery can read it.
+            for job in &running { job.cancel.send_replace(true); }
+            while !running.is_empty() {
+                let (index, outcome) = next_finished(&mut futures).await;
+                let job = running.remove(index);
+                futures.remove(index);
+                #[cfg(test)] { self.drained += 1; }
+                if let Ok(outcome) = outcome {
+                    if let Err(error) = self.write_journal(&Journal { binding: job.binding, outcome }) {
+                        tracing::warn!(effect = %job.effect.id, %error, "workflow settlement could not be retained");
+                    }
+                }
+            }
+        }
+        result
+    }
+    async fn sweep_loop(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>,
+        running: &mut Vec<Running>, futures: &mut Vec<Slot>) -> Result<usize>
+    {
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();
@@ -332,19 +363,17 @@ impl Runtime {
                 self.internal(workspace, Command::Advance, Grant::Controller, now_ms)?;
             }
         }
-        let mut running: Vec<Running> = Vec::new();
-        let mut futures: Vec<Slot> = Vec::new();
         let mut stopping = false;
         let mut scan = true;
         loop {
             if scan {
                 scan = self.continuous;
-                self.launch_ready(&workspaces, now_ms, &mut running, &mut futures, &mut count).await?;
+                self.launch_ready(&workspaces, now_ms, running, futures, &mut count).await?;
             }
             if running.is_empty() { break; }
             let mut shutdown = self.shutdown.clone();
             let event = tokio::select! {
-                (index, result) = next_finished(&mut futures) => Event::Finished(index, result),
+                (index, result) = next_finished(futures) => Event::Finished(index, result),
                 _ = async {
                     match &mut shutdown {
                         Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } },
@@ -356,12 +385,12 @@ impl Runtime {
             match event {
                 Event::Shutdown => {
                     stopping = true;
-                    for job in &running { job.cancel.send_replace(true); }
+                    for job in running.iter() { job.cancel.send_replace(true); }
                 }
                 Event::Message(message) => {
                     if let Some(message) = message {
                         self.receive(message).await;
-                        for job in &running {
+                        for job in running.iter() {
                             if self.state(&job.workspace)?.is_some_and(|s| s.items.get(&job.effect.item)
                                 .is_some_and(|i| i.phase == Phase::Cancelling)) {
                                 job.cancel.send_replace(true);
@@ -449,6 +478,10 @@ impl Runtime {
                     continue;
                 }
                 if !matches!(item.phase, Phase::Running | Phase::Cancelling) { continue; }
+                // A stop waits for the effect it stops to end; they must not touch one pane at once.
+                if let EffectKind::Stop { operation } = &effect.kind {
+                    if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
+                }
                 // A stop must always get through; everything else waits for a free slot.
                 if !matches!(effect.kind, EffectKind::Stop { .. }) && running.len() >= self.effect_cap { continue; }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
@@ -504,6 +537,8 @@ impl Runtime {
         Ok(())
     }
     fn observe(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64) -> Result<()> {
+        #[cfg(test)]
+        if !resolving && self.fail_observe.swap(false, std::sync::atomic::Ordering::SeqCst) { return Err(Error::Refused("injected write failure")); }
         let command = if resolving {
             Command::Resolve { item: effect.item.clone(), effect: effect.id.clone(), run: effect.run.clone(),
                 fence: effect.fence, outcome }

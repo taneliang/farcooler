@@ -185,6 +185,12 @@ impl Exec {
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
         mut cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
         self.native_hooks()?;
+        // Native builds share one hook socket, so a second one waits here for the first to
+        // finish. Nothing exists yet to clean up if it is cancelled while it waits.
+        let _slot = tokio::select! {
+            slot = self.native_slot.lock() => slot,
+            _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => return Ok(None),
+        };
         let socket = self.root.join("h.sock");
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
         let listener = tokio::net::UnixListener::bind(&socket)?;
@@ -232,8 +238,8 @@ impl Exec {
         self.quiesce_native(&owner).await?;
         durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement {
             owner, hooks: Vec::new(), completed: None })?)?;
-        // This root has one workflow/repository writer and no living old host.
-        if self.root.join("h.sock").try_exists()? { std::fs::remove_file(self.root.join("h.sock"))?; }
+        // Another native build may hold the socket right now; only an idle host has a stale one.
+        if self.native_slot.try_lock().is_ok() && self.root.join("h.sock").try_exists()? { std::fs::remove_file(self.root.join("h.sock"))?; }
         Ok(())
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<()> {
@@ -327,6 +333,19 @@ else:
             let pid: i32 = std::fs::read_to_string(dir.path().join("started")).unwrap().parse().unwrap();
             assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "native TUI must be reaped before candidate success");
             assert!(!runtime.root.join("h.sock").exists());
+        }
+    }
+    #[tokio::test]
+    async fn workflow_native_builds_in_one_pump_take_turns_on_the_hook_socket() {
+        let (_dir, mut runtime, _fake) = native("pass").await;
+        let definition = runtime.configured_definition().unwrap();
+        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "one", definition.clone());
+        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "two", definition);
+        // Both get past Build (and its checks). Landing on one branch is a separate matter.
+        for time in 2..5 { runtime.pump(time).await.unwrap(); }
+        let state = runtime.state("w").unwrap().unwrap();
+        for id in ["one", "two"] {
+            assert!(state.items[id].stage >= 2 && state.items[id].phase == Phase::Running, "{id}: {state:?}");
         }
     }
     #[tokio::test]
