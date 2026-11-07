@@ -29,6 +29,7 @@ impl CommandValidation for CodingCommand {
         Ok(())
     }
 }
+pub(super) trait PinnedDefinition { fn validate_pinned_definition(&self, definition: &Definition) -> Result<()>; }
 impl CodingConfigExt for CodingConfig {
     fn validate(&self) -> Result<()> {
         if self.repository.canonicalize()? != self.repository || (!self.repository.join(".git").is_dir() || self.repository.join(".git").canonicalize()? != self.repository.join(".git"))
@@ -99,8 +100,13 @@ impl CodingConfigExt for CodingConfig {
             progression: Progression::Automatic, max_attempts: 1 }
     }
     fn validate_definition(&self, definition: &Definition) -> Result<()> {
-        definition.validate().map_err(|_| Error::Refused("invalid definition"))?;
         self.validate()?;
+        self.validate_pinned_definition(definition)
+    }
+}
+impl PinnedDefinition for CodingConfig {
+    fn validate_pinned_definition(&self, definition: &Definition) -> Result<()> {
+        definition.validate().map_err(|_| Error::Refused("invalid definition"))?;
         let mut provisioned = false;
         let mut built = false;
         let mut landed = false;

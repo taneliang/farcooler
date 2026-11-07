@@ -1,0 +1,17 @@
+{
+  "config": {
+    "file": "crates/daemon/src/workflow_runtime/service_owner.rs",
+    "original": "6f8000df6b2c00b253046fa755649dc67c74ecafe0c9dda45461f5980baada70",
+    "mutant": "8cf801202db7a32ab58b283a48623975d886faf6dcb452824f3c58fc496a4a75",
+    "restored": true,
+    "restored_sha256_before_lint": "6f8000df6b2c00b253046fa755649dc67c74ecafe0c9dda45461f5980baada70",
+    "post_restore_delta": "Equivalent Option::map conversion on a separate resolver assignment line; negative lookup seam restored unchanged."
+  },
+  "owner": {
+    "file": "crates/store/src/workflow.rs",
+    "original": "1cdef70c22a569eacd197d16df88af36b8713b7d08d633da08740d0247eea38c",
+    "mutant": "8c4b47e759f0a025769056914d01ba295e96fb8c156b00d6d2fd2ce320de5482",
+    "restored": true,
+    "restored_sha256_before_lint": "1cdef70c22a569eacd197d16df88af36b8713b7d08d633da08740d0247eea38c"
+  }
+}

@@ -1,0 +1,82 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 17.18s
+     Running tests/workflow_service_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_service_over_socket-bd201935ee5c5d8b)
+
+running 7 tests
+test workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration ... 
+running 1 test
+test workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.05s
+
+
+ok
+test workflow_service_child ... ignored
+test workflow_service_fast_ship_without_checks_or_review ... 
+running 1 test
+test workflow_service_fast_ship_without_checks_or_review ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.06s
+
+
+ok
+test workflow_service_no_git_bootstrap_shutdown_and_recovery ... 
+running 1 test
+test workflow_service_no_git_bootstrap_shutdown_and_recovery ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.25s
+
+
+ok
+test workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion ... 
+running 1 test
+test workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 6.15s
+
+
+ok
+test workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown ... 
+running 1 test
+test workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown ... 
+running 1 test
+test workflow_service_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.32s
+
+
+running 1 test
+test workflow_service_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.19s
+
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.57s
+
+
+ok
+test workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch ... 
+running 1 test
+test workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.42s
+
+
+ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.12s
+
+
+exit=0, stopped=None

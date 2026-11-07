@@ -1,0 +1,17 @@
+{
+  "kind": "recovery",
+  "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "before": {
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df"
+  },
+  "mutation": "e69 recovery binding/expected-command path requires launchable current settings and executable",
+  "mutated": {
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "ae60aace1e6e53f8a2008cccb386f40fdfbb380cc9bed9d72ff775fe4e12988b"
+  },
+  "exit": 101,
+  "behavioral_red": true,
+  "restored": {
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df"
+  },
+  "exact_restoration": true
+}

@@ -1,0 +1,20 @@
+{
+  "kind": "safety",
+  "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "before": {
+    "crates/daemon/src/workflow_runtime.rs": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "e9c54ebd82577fadd08ee4452528890f2c2936b40292bbe8bd7ffdf2feae6b4b"
+  },
+  "mutation": "e69 R2 behavior: publication lacks endpoint validation; mutable item configuration/resource errors propagate from pump and close receiver",
+  "mutated": {
+    "crates/daemon/src/workflow_runtime.rs": "6f5c62f0bf71e06d0bd56aee94d41e797a7d7263775b8c2d28c49ceef2da87f0",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "da3b7664b84a7780c6a42c29ee2af28935d369afe8d39d9e6bd47554594351a1"
+  },
+  "exit": 101,
+  "behavioral_red": true,
+  "restored": {
+    "crates/daemon/src/workflow_runtime.rs": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "e9c54ebd82577fadd08ee4452528890f2c2936b40292bbe8bd7ffdf2feae6b4b"
+  },
+  "exact_restoration": true
+}

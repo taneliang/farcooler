@@ -1,0 +1,21 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ffi-guard)
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tailcat)
+    Checking farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/agent-core)
+    Checking farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/vt)
+    Checking farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/agent-hooks)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/transport)
+    Checking farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/review)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+    Checking farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tmux)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/client)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/daemon)
+    Checking farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/cli)
+    Finished `dev` profile [unoptimized] target(s) in 22.82s
+
+exit=0, stopped=None

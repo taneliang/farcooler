@@ -1,5 +1,6 @@
 //! Ordinary daemon ownership and immutable per-item adapter resolution.
 use super::*;
+use super::coding::PinnedDefinition;
 use farcooler_protocol::workflow_config::AdapterConfiguration;
 
 impl Runtime {
@@ -15,6 +16,7 @@ impl Runtime {
         if state.epoch != mutation.epoch || state.revision != mutation.revision { return Ok(()); }
         self.validate_workspace_repository(workspace, config)?;
         config.validate_definition(definition)?;
+        self.validate_native_configuration(config)?;
         let check = async {
             adapters::git(&config.repository, &["cat-file", "-e", &format!("{}^{{commit}}", config.base)]).await?;
             if adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await? != config.base {
@@ -72,7 +74,10 @@ impl Runtime {
     }
     pub(super) fn validate_publication(&self, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> Result<()> {
         match adapter {
-            Some(AdapterConfiguration::Coding(config)) => config.validate_definition(definition),
+            Some(AdapterConfiguration::Coding(config)) => {
+                config.validate_definition(definition)?;
+                self.validate_native_configuration(config)
+            },
             None if self.service_mode => {
                 if definition.stages.iter().any(|s| s.kind != StageKind::Tracker) {
                     return Err(Error::Refused("coding definition requires versioned configuration"));
@@ -90,11 +95,22 @@ impl Runtime {
         if bundle.definition != item.definition || self.publication_resource(workspace,bundle.adapter.as_ref()) != item.resource {
             return Err(Error::Refused("item configuration binding changed"));
         }
-        if let Some(AdapterConfiguration::Coding(config)) = &bundle.adapter { self.validate_workspace_repository(workspace, config)?; }
-        self.validate_publication(&bundle.definition, bundle.adapter.as_ref())?;
-        self.coding = match bundle.adapter { Some(AdapterConfiguration::Coding(config)) => Some(config), None => None };
+        // Bundle bytes, workspace/resource and operation pins remain mandatory
+        // during recovery; launchable current files and resource locks do not.
+        match &bundle.adapter {
+            Some(AdapterConfiguration::Coding(config)) => config.validate_pinned_definition(&bundle.definition)?,
+            None => self.validate_publication(&bundle.definition, None)?,
+        }
+        self.coding = bundle.adapter.map(|AdapterConfiguration::Coding(config)| config);
         self.resource = item.resource.clone();
         self.base = self.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
+        Ok(())
+    }
+    pub(super) fn validate_item_launch(&mut self, workspace: &str, item: &Item) -> Result<()> {
+        if !self.service_mode { return Ok(()); }
+        if let Some(config) = &self.coding { self.validate_workspace_repository(workspace, config)?; }
+        self.validate_definition(&item.definition)?;
+        self.validate_native_host()?;
         if let Some(config) = &self.coding {
             let mut paths = vec![config.repository.join(".git/farcooler-workflow.lock")];
             if let Some(landing) = &config.landing { paths.push(landing.repository.join("farcooler-workflow.lock")); }

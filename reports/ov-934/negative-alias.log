@@ -1,0 +1,50 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 6.83s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-2255111212b00e32)
+
+running 5 tests
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_engine_first ... 
+thread 'workflow_ownership::alias_tests::workflow_ownership_aliases_current_engine_first' (827638031) panicked at crates/store/src/workflow_ownership.rs:129:21:
+engine alias must own the actual task UUID
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_legacy_first ... 
+thread 'workflow_ownership::alias_tests::workflow_ownership_aliases_current_legacy_first' (827638032) panicked at crates/store/src/workflow_ownership.rs:132:21:
+assertion `left == right` failed
+  left: Ok(1)
+ right: Err(Resource)
+FAILED
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_engine_first ... 
+thread 'workflow_ownership::alias_tests::workflow_ownership_aliases_former_engine_first' (827638033) panicked at crates/store/src/workflow_ownership.rs:129:21:
+engine alias must own the actual task UUID
+FAILED
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_legacy_first ... 
+thread 'workflow_ownership::alias_tests::workflow_ownership_aliases_former_legacy_first' (827638034) panicked at crates/store/src/workflow_ownership.rs:132:21:
+assertion `left == right` failed
+  left: Ok(1)
+ right: Err(Resource)
+FAILED
+test workflow_ownership::alias_tests::workflow_ownership_aliases_refuse_ambiguity_and_keep_workspace_boundary ... 
+thread 'workflow_ownership::alias_tests::workflow_ownership_aliases_refuse_ambiguity_and_keep_workspace_boundary' (827638035) panicked at crates/store/src/workflow_ownership.rs:154:9:
+assertion failed: matches!(store.workflow_apply(&input(workspace.id,"-COLLISION".into())),
+    Err(crate::workflow::WorkflowError::AmbiguousTask))
+FAILED
+
+failures:
+
+failures:
+    workflow_ownership::alias_tests::workflow_ownership_aliases_current_engine_first
+    workflow_ownership::alias_tests::workflow_ownership_aliases_current_legacy_first
+    workflow_ownership::alias_tests::workflow_ownership_aliases_former_engine_first
+    workflow_ownership::alias_tests::workflow_ownership_aliases_former_legacy_first
+    workflow_ownership::alias_tests::workflow_ownership_aliases_refuse_ambiguity_and_keep_workspace_boundary
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 490 filtered out; finished in 0.16s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

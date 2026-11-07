@@ -1,0 +1,17 @@
+{
+  "kind": "availability",
+  "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "before": {
+    "crates/daemon/src/workflow_service.rs": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7"
+  },
+  "mutation": "e69 Service availability returns a retained closed/failed owner handle",
+  "mutated": {
+    "crates/daemon/src/workflow_service.rs": "03f353dea854e6899dc80a754ff808e5d62f5f88dc3a9f65e7b65e805df34f6a"
+  },
+  "exit": 101,
+  "behavioral_red": true,
+  "restored": {
+    "crates/daemon/src/workflow_service.rs": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7"
+  },
+  "exact_restoration": true
+}

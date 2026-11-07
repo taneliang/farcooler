@@ -1,0 +1,17 @@
+{
+  "kind": "alias",
+  "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "before": {
+    "crates/store/src/workflow_ownership.rs": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a"
+  },
+  "mutation": "exact e69 task resolver (function-local OptionalExtension import only); retains new tests and error variant",
+  "mutated": {
+    "crates/store/src/workflow_ownership.rs": "ae62b99fa210ff10f680d0d7a0cd20263500cfecd4a86fdb2f9c22c2f44cd183"
+  },
+  "exit": 101,
+  "behavioral_red": true,
+  "restored": {
+    "crates/store/src/workflow_ownership.rs": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a"
+  },
+  "exact_restoration": true
+}

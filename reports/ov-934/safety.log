@@ -1,0 +1,184 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ffi-guard)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tailcat)
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/agent-core)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/vt)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/agent-hooks)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 16.43s
+     Running tests/workflow_service_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_service_over_socket-bd201935ee5c5d8b)
+
+running 4 tests
+test safety::workflow_service_executable_drift_is_local ... 
+running 1 test
+test safety::workflow_service_executable_drift_is_local ... 
+thread 'safety::workflow_service_executable_drift_is_local' (827604532) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_executable_drift_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.94s
+
+
+
+thread 'safety::workflow_service_executable_drift_is_local' (827604514) panicked at crates/daemon/tests/workflow_service_over_socket.rs:333:5:
+assertion `left == right` failed: 
+running 1 test
+test safety::workflow_service_executable_drift_is_local ... 
+thread 'safety::workflow_service_executable_drift_is_local' (827604532) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_executable_drift_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.94s
+
+
+  left: "101"
+ right: "0"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test safety::workflow_service_resource_refusal_is_local ... 
+running 1 test
+test safety::workflow_service_resource_refusal_is_local ... 
+thread 'safety::workflow_service_resource_refusal_is_local' (827605414) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_resource_refusal_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.97s
+
+
+
+thread 'safety::workflow_service_resource_refusal_is_local' (827605395) panicked at crates/daemon/tests/workflow_service_over_socket.rs:333:5:
+assertion `left == right` failed: 
+running 1 test
+test safety::workflow_service_resource_refusal_is_local ... 
+thread 'safety::workflow_service_resource_refusal_is_local' (827605414) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_resource_refusal_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.97s
+
+
+  left: "101"
+ right: "0"
+FAILED
+test safety::workflow_service_settings_drift_is_local ... 
+running 1 test
+test safety::workflow_service_settings_drift_is_local ... 
+thread 'safety::workflow_service_settings_drift_is_local' (827606362) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 14, retryable: false, message: "resource not found", what: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_settings_drift_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.11s
+
+
+
+thread 'safety::workflow_service_settings_drift_is_local' (827606334) panicked at crates/daemon/tests/workflow_service_over_socket.rs:333:5:
+assertion `left == right` failed: 
+running 1 test
+test safety::workflow_service_settings_drift_is_local ... 
+thread 'safety::workflow_service_settings_drift_is_local' (827606362) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 14, retryable: false, message: "resource not found", what: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_settings_drift_is_local
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.11s
+
+
+  left: "101"
+ right: "0"
+FAILED
+test safety::workflow_service_wrong_native_target_refused_before_publication ... 
+running 1 test
+test safety::workflow_service_wrong_native_target_refused_before_publication ... 
+thread 'safety::workflow_service_wrong_native_target_refused_before_publication' (827606478) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_wrong_native_target_refused_before_publication
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.76s
+
+
+
+thread 'safety::workflow_service_wrong_native_target_refused_before_publication' (827606457) panicked at crates/daemon/tests/workflow_service_over_socket.rs:333:5:
+assertion `left == right` failed: 
+running 1 test
+test safety::workflow_service_wrong_native_target_refused_before_publication ... 
+thread 'safety::workflow_service_wrong_native_target_refused_before_publication' (827606478) panicked at crates/daemon/tests/workflow_service/safety.rs:45:5:
+unaffected workspace stopped progressing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_wrong_native_target_refused_before_publication
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.76s
+
+
+  left: "101"
+ right: "0"
+FAILED
+
+failures:
+
+failures:
+    safety::workflow_service_executable_drift_is_local
+    safety::workflow_service_resource_refusal_is_local
+    safety::workflow_service_settings_drift_is_local
+    safety::workflow_service_wrong_native_target_refused_before_publication
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 7 filtered out; finished in 12.79s
+
+error: test failed, to rerun pass `-p farcooler-daemon --test workflow_service_over_socket`
+
+exit=101, stopped=None

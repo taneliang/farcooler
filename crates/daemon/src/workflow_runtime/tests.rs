@@ -524,9 +524,10 @@ async fn workflow_runtime_admitted_base_is_never_recreated() {
     std::fs::write(&path, b"").unwrap();
     drop(runtime);
     let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
-    assert!(runtime.pump(100).await.is_err());
+    runtime.pump(100).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["coding"].phase, Phase::Uncertain);
     assert!(runtime.pin_base("w", &binding.effect).await.is_err());
     assert!(std::fs::read(path).unwrap().is_empty());
-    assert_eq!(runtime.store.workflow_outbox("w").unwrap()[0].dispatch_state, "admitted");
+    assert_eq!(runtime.store.workflow_outbox("w").unwrap()[0].dispatch_state, "uncertain");
     assert!(!runtime.tree(&binding).exists());
 }

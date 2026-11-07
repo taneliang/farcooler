@@ -1,0 +1,32 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 29.78s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... 
+thread 'workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner' (827656219) panicked at crates/daemon/src/workflow_runtime/tests.rs:27:5:
+runtime failed to settle: Some(State { schema: 1, workspace: "01a1b373-a1f5-7523-96f8-045535c811d5", revision: 5, epoch: 1, items: {"one": Item { definition: Definition { schema: 1, source: "configured-coding/v1", stages: [Stage { id: "provision", kind: Provision, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-worktree/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", ""], environment: {} } }, Stage { id: "build", kind: Build, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-harness/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", ""], environment: {} } }, Stage { id: "check-0", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", "0"], environment: {} } }, Stage { id: "check-1", kind: Check, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-check/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", "1"], environment: {} } }, Stage { id: "land", kind: Land, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-land/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", "refs/heads/workflow-target"], environment: {} } }, Stage { id: "ci", kind: Ci, progression: Automatic, max_attempts: 1, operation: OperationSpec { adapter_version: "coding-ci/v1", arguments: ["wf1:e437b5e3e863a281abbb592dc4f67f1895f23027c56e1b024a634e54b705cff9", "offline/repository"], environment: {} } }], max_reworks: 0, rework_target: None }, pin: "wf1:15f1569c64dd56c19d025694484c48935e5c8f7154967236f30508c422c45126", policy_pin: "wf1:6f11de89cee24c297d111f25da8238d0bced6a0cbd3b4434182f1f6c4b5a4472", dependencies: {}, resource: "wf1:3bef5ddab441db1e7be2ebe730cd585d73c4ec3ee556cdd32106259920ae680b", stage: 1, iteration: 0, attempt: 1, fence: 3, phase: Uncertain, run: "cancel:wf1:ce809c74137cda1e3bb5350e08fff087d3981be1b7accce6036393f4519d7349", pending: Some("wf1:e31fd5f044c7eefa8d68088885545b7f5ae2dadc3248e7dc01f2ba8283afe533"), candidate: None, last_evidence: Some(Evidence { candidate: "8157e1ef2342048eab996f820422e8962d87e278", manifest: "wf1:ed415640a6a98a278b55fc1da6bef06be40eb3d3d05976188119cde33c0f1c8b", receipt: "wf1:43330d3349c17ab5a77a06316e006312eeedcec8c9a8531f0715d8747e391591", policy_pin: "wf1:6f11de89cee24c297d111f25da8238d0bced6a0cbd3b4434182f1f6c4b5a4472" }), stopping: Some("wf1:9a9894c6f89dad85e4c27a9235f28d513088609f1c3ac4b5ae2370e7fd97b003") }}, seen: {"cancel", "runtime:01a1b373-a28c-7fe2-b0b4-73b1214943f1", "runtime:01a1b373-a2b9-7c01-8367-08e825defda3", "runtime:01a1b373-a2c0-7483-96ff-b02bb7560a3b", "wire:owner:e"}, source_sequences: {"controller": 2, "runtime": 3, "wire:owner": 1} })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2711 filtered out; finished in 0.45s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

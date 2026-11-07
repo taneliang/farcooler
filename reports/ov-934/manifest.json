@@ -1,0 +1,621 @@
+{
+  "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "input_trees": {
+    "e69ec2bbad90561f33cb707e374495b0b949772d": "d5bfe96162827451d904ba444df84064b958c2b3",
+    "a39b32d21f1df4db176f868ca65c333c5e9b0027": "e2b985882b698d2013034b26033129c06dfa1f51",
+    "c40197486572a584f8c85ec2dde423587e0560e6": "3f3b2003f5ef116dd6a8be1baa4d5cf232e42385",
+    "4e01f8be46e28603a02e7464a984828ab07e54a4": "d103a630a35112843132a31888056ff237d77dc1",
+    "61ea01422a981797060d74c730c91978345fcca7": "426d1022b35233d9a55846fe2563ff3fdca0f564"
+  },
+  "source_delta": {
+    "crates/daemon/src/workflow_runtime.rs": {
+      "sha256": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+      "blob": "684e5b245ae913683acb3bb3ec0c24724b66337a"
+    },
+    "crates/daemon/src/workflow_runtime/coding.rs": {
+      "sha256": "a320cac6267d2b5e29cf4143867f818e0b049cfffaa86d9fad2525e6d7400b5b",
+      "blob": "5ec4351964731f26f93dc31cd49a642ec3c992c2"
+    },
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": {
+      "sha256": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df",
+      "blob": "48e417b27cf9fea69c481cb8d5f62390929aaa74"
+    },
+    "crates/daemon/src/workflow_runtime/coding_native.rs": {
+      "sha256": "6800b96649276accb2fd54c7d066dba132ced69747d48d27008169af21cc0690",
+      "blob": "c82a8d4dfd20db78da763039c2112534ab0b96ac"
+    },
+    "crates/daemon/src/workflow_runtime/service_owner.rs": {
+      "sha256": "7c64171486f175128eec88a91828a08a7577278604a20c142d95f828815dfc79",
+      "blob": "5af4d9f02df4e744c008b7281f155f85b389c426"
+    },
+    "crates/daemon/src/workflow_runtime/tests.rs": {
+      "sha256": "fe0a176e28dc8ee5605f2c68533587b87ab5217a5be59f979141f0a05a6eaed5",
+      "blob": "080c47cd697d725c1d65c3718e3b36250b5cc4c1"
+    },
+    "crates/daemon/src/workflow_service.rs": {
+      "sha256": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7",
+      "blob": "fe95e98e2d2fdfc63914b760609507a0dd6e52ba"
+    },
+    "crates/daemon/tests/workflow_service/safety.rs": {
+      "sha256": "c5f503069cebc29f98be3573d889bb8d1a8e1f1ba346652fa11f3d9e4ff25a29",
+      "blob": "bee83e314f2a57a4826fb82bf6e43698b2ef6d55"
+    },
+    "crates/daemon/tests/workflow_service_over_socket.rs": {
+      "sha256": "d88dd03ae442b004fe11bf6b4d25707c3ffe4cdd2694dc5dbdf375babfcd7d16",
+      "blob": "421f0753eda9add52a18a81b9b743acafa7a7d51"
+    },
+    "crates/store/src/workflow.rs": {
+      "sha256": "efa1dfde0476288a54c97aad697dd3430547355f05e6a2b2b5253a4aa6b76885",
+      "blob": "d7bf19f5f7af7372e2d62f06c12fc67de9c995be"
+    },
+    "crates/store/src/workflow_ownership.rs": {
+      "sha256": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a",
+      "blob": "86c38bd3ee4a9f19144a0cd55b0a2e03a1315d45"
+    },
+    "crates/store/src/workflow_publication.rs": {
+      "sha256": "06e023fa8b0270683bf6f5e042ea6fdf895cffbbc882466533d7fb4596983638",
+      "blob": "bd0a112ee2ab8a48097b31afff102d5d5e1acdcc"
+    }
+  },
+  "source_delta_sha256": "c1607db981642d278bf398834abef058319445dc108eb398afecd3e8114a3f94",
+  "signed_pin_transport": "signed commit containing this manifest; exact pin/tree/signature recorded on task ov-934",
+  "review_input": {
+    "path": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-931/independent-review.md",
+    "sha256": "b4f97da54dd1c377c58c10374266d0cabf2e6c014fcae6c03805fc828e19b17c"
+  },
+  "composition_manifest_sha256": "d1f76145b3cc602b37f5b6458bf854a8ba2576caba1ac25083ed04c6e133b517",
+  "later_original931_source_reconciliation": "sole e69\u21924e01 product delta is equivalent Option::map; applied directly, reports-only61ea imported exactly",
+  "affected_distinct_passes": {
+    "daemon_lib": 62,
+    "protocol_lib": 1,
+    "store_lib": 22,
+    "cli_bin": 2,
+    "ordinary_service_socket_process_shutdown": 10,
+    "command_socket": 2,
+    "total": 99
+  },
+  "resumed_gate_binding": {
+    "daemon_protocol_record": "affected-restored.json",
+    "final_tail_record": "affected-tail.json",
+    "only_later_source_delta": [
+      "crates/store/src/workflow_publication.rs"
+    ],
+    "delta_patch_sha256": "8220906bff3069fda284d7b538d2d0113e48c8ea0ce6727b219a7322aace78cb",
+    "non_test_store_prefix_unchanged": true,
+    "final_tail_and_lint_all_source_hashes_equal_final": true
+  },
+  "negative_controls": {
+    "alias": {
+      "kind": "alias",
+      "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+      "before": {
+        "crates/store/src/workflow_ownership.rs": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a"
+      },
+      "mutation": "exact e69 task resolver (function-local OptionalExtension import only); retains new tests and error variant",
+      "mutated": {
+        "crates/store/src/workflow_ownership.rs": "ae62b99fa210ff10f680d0d7a0cd20263500cfecd4a86fdb2f9c22c2f44cd183"
+      },
+      "exit": 101,
+      "behavioral_red": true,
+      "restored": {
+        "crates/store/src/workflow_ownership.rs": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a"
+      },
+      "exact_restoration": true
+    },
+    "safety": {
+      "kind": "safety",
+      "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+      "before": {
+        "crates/daemon/src/workflow_runtime.rs": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+        "crates/daemon/src/workflow_runtime/service_owner.rs": "e9c54ebd82577fadd08ee4452528890f2c2936b40292bbe8bd7ffdf2feae6b4b"
+      },
+      "mutation": "e69 R2 behavior: publication lacks endpoint validation; mutable item configuration/resource errors propagate from pump and close receiver",
+      "mutated": {
+        "crates/daemon/src/workflow_runtime.rs": "6f5c62f0bf71e06d0bd56aee94d41e797a7d7263775b8c2d28c49ceef2da87f0",
+        "crates/daemon/src/workflow_runtime/service_owner.rs": "da3b7664b84a7780c6a42c29ee2af28935d369afe8d39d9e6bd47554594351a1"
+      },
+      "exit": 101,
+      "behavioral_red": true,
+      "restored": {
+        "crates/daemon/src/workflow_runtime.rs": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+        "crates/daemon/src/workflow_runtime/service_owner.rs": "e9c54ebd82577fadd08ee4452528890f2c2936b40292bbe8bd7ffdf2feae6b4b"
+      },
+      "exact_restoration": true
+    },
+    "recovery": {
+      "kind": "recovery",
+      "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+      "before": {
+        "crates/daemon/src/workflow_runtime/coding_execute.rs": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df"
+      },
+      "mutation": "e69 recovery binding/expected-command path requires launchable current settings and executable",
+      "mutated": {
+        "crates/daemon/src/workflow_runtime/coding_execute.rs": "ae60aace1e6e53f8a2008cccb386f40fdfbb380cc9bed9d72ff775fe4e12988b"
+      },
+      "exit": 101,
+      "behavioral_red": true,
+      "restored": {
+        "crates/daemon/src/workflow_runtime/coding_execute.rs": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df"
+      },
+      "exact_restoration": true
+    },
+    "availability": {
+      "kind": "availability",
+      "parent": "e69ec2bbad90561f33cb707e374495b0b949772d",
+      "before": {
+        "crates/daemon/src/workflow_service.rs": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7"
+      },
+      "mutation": "e69 Service availability returns a retained closed/failed owner handle",
+      "mutated": {
+        "crates/daemon/src/workflow_service.rs": "03f353dea854e6899dc80a754ff808e5d62f5f88dc3a9f65e7b65e805df34f6a"
+      },
+      "exit": 101,
+      "behavioral_red": true,
+      "restored": {
+        "crates/daemon/src/workflow_service.rs": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7"
+      },
+      "exact_restoration": true
+    }
+  },
+  "phases": {
+    "affected-restored.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 118.8121125,
+      "minimum_free": 24344330240,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/affected.py"
+      ]
+    },
+    "affected-tail.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 70.558343541,
+      "minimum_free": 24478904320,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/affected-tail.py"
+      ]
+    },
+    "affected.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 112.746477458,
+      "minimum_free": 24372088832,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/affected.py"
+      ]
+    },
+    "alias.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 9.093993249999999,
+      "minimum_free": 24571555840,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "workflow_ownership_aliases",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "availability.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 31.31567025,
+      "minimum_free": 24394461184,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_service_availability_tracks_failed_owner_and_join_before_restart",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "compile.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 24.267662667,
+      "minimum_free": 24567640064,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "check",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "-p",
+        "farcooler-cli",
+        "--all-targets"
+      ]
+    },
+    "lint.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 24.250930541,
+      "minimum_free": 24509427712,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "clippy",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "-p",
+        "farcooler-cli",
+        "-p",
+        "farcooler-store",
+        "-p",
+        "farcooler-protocol",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ]
+    },
+    "negative-alias.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 9.099776042,
+      "minimum_free": 24550727680,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "workflow_ownership_aliases",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "negative-availability.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 32.31577375,
+      "minimum_free": 24341409792,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_service_availability_tracks_failed_owner_and_join_before_restart",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "negative-recovery.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 32.303672958,
+      "minimum_free": 24337444864,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_service_native_stop_ignores_launch_drift_with_original_owner",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "negative-safety.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 20.186320333,
+      "minimum_free": 24533204992,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_service_over_socket",
+        "safety::workflow_service_",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "recovery.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 33.315836917000006,
+      "minimum_free": 24393560064,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_service_native_stop_ignores_launch_drift_with_original_owner",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "safety-fixture-corrected.json": {
+      "exit": 0,
+      "stopped": null,
+      "seconds": 22.235684625,
+      "minimum_free": 24449236992,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_service_over_socket",
+        "safety::workflow_service_",
+        "--",
+        "--nocapture"
+      ]
+    },
+    "safety.json": {
+      "exit": 101,
+      "stopped": null,
+      "seconds": 31.270721583,
+      "minimum_free": 24544190464,
+      "source_unchanged": true,
+      "command": [
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/scripts/heavy",
+        "--load-limit",
+        "20",
+        "--",
+        "/usr/bin/python3",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/reports/ov-934/entry.py",
+        "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_service_over_socket",
+        "safety::workflow_service_",
+        "--",
+        "--nocapture"
+      ]
+    }
+  },
+  "original931_seal": {
+    "reports_pin": "61ea01422a981797060d74c730c91978345fcca7",
+    "product_source_pin": "4e01f8be46e28603a02e7464a984828ab07e54a4",
+    "rule": "reports-only import; sole later source Option::map reconciled directly in rewritten resolver",
+    "files": {
+      "reports/ov-931/affected.json": "0533a84ef4b8d7a4a424548e1e7eb5f08c2413333e35ae7d028d47b9b8d157fe",
+      "reports/ov-931/affected.log": "303c31ea522abb6ad2199974245108b77d08130117832c059f0738259a1baca4",
+      "reports/ov-931/affected.py": "0f79e6b421efa04a75e35ab9317f8675e9a43c82edfbd71a950f12dd51c4603d",
+      "reports/ov-931/bundle-api.md": "8cf93b8b17105a635d6597d65161e373e6358ad48fb8105a97a90464a06a9a80",
+      "reports/ov-931/cache-holders.jsonl": "3679ec996f5acd9a8de90fdd669e11aeda7e8f6b33531eac5cc677082fd79682",
+      "reports/ov-931/cache-investigation.json": "663d5511f70dcb948c98578cb211fb9ea117a06d9b34fd945e7fb834d0d3ab18",
+      "reports/ov-931/cache-investigation.md": "50252434375befbfb44402e1ba0a8047623869ae34fc88abff9a368600fd00cf",
+      "reports/ov-931/check.py": "2a84b0d2a5a98d069b8f1255dee696c8069c497ab9d004c539c92636a30365d2",
+      "reports/ov-931/compile-initial.json": "c4da1a9b7d7642985fbc951d6d0e3af868fb01c1dc4bf84dd75e0f38f595e1af",
+      "reports/ov-931/compile-initial.log": "78bb5c26d0627c9708d06d506e0a31a529475b9eec0e3402a4d5995b0a7138b2",
+      "reports/ov-931/compile.json": "1e844f27a6ad3668497e924e46c16866e112f0d1b387580fa4a2060a3e530853",
+      "reports/ov-931/compile.log": "1c438e779daf3d84c3c61843683339ad02ae8e6700c6b4738389076ec3591b1d",
+      "reports/ov-931/composition-overlap.patch": "ad59dacc026cada88132b6e9439567b154346d7dbd48b4a021a8d115acb06880",
+      "reports/ov-931/composition.json": "d1f76145b3cc602b37f5b6458bf854a8ba2576caba1ac25083ed04c6e133b517",
+      "reports/ov-931/contract.md": "2023e84b785e6232e761b5a4ac60561d2e7e65ff6ad49855dfc21d542c43c8e9",
+      "reports/ov-931/entry.py": "925fea3fbb86ddb599c41126ddefa768f226597c1a37999fb2f80ca21a6c98cf",
+      "reports/ov-931/evidence-sha256.json": "27d51b32a5541ff0d72f27b4911c5979d9927e7b7706cded75d5b148c02b31d8",
+      "reports/ov-931/fifo-isolated.json": "e10f12c0caf5c3122df6fbc4de1351a7e82b037d10035a57c96841a9bb07d384",
+      "reports/ov-931/fifo-isolated.log": "41b2df275d614a9971a2d4e2146c74e0e0203d50c2cd1abfa282a898a29a960c",
+      "reports/ov-931/freeze.json": "731b82c87abbbc4e2c01604f931075de7badbcd42e747534fd353838765f0952",
+      "reports/ov-931/handoff.md": "6220c11239d759dc9bf2c2cd04c6111930af4103d0c7fe7b6268864ea390f7f0",
+      "reports/ov-931/input-signatures.json": "debdc52c437f1383577ae2ca9a272b11eb3273b18701d4753795ae1798967a78",
+      "reports/ov-931/input-signatures.log": "aa26f9ea6fc3fd49784e82b2c17ed536b555ce61bec5e93a02132cb6f32c1a3e",
+      "reports/ov-931/lint-manual-map-red.json": "7e200fa7a272750ca031b90780483eddc87edadf70fe9c38b5afe3197e99f2b0",
+      "reports/ov-931/lint-manual-map-red.log": "d179a6c481e88bd84267921f2019b838ce4f257899af9e436bd55cbc55387d05",
+      "reports/ov-931/lint.json": "e161d32419631cd2d04f249ec369d5bc20837949c695ea57a9cc20d3b5aca2d8",
+      "reports/ov-931/lint.log": "2aed83d0a33a579e9a38f1b7d1da784501c1758d1f7054788907d2f3f7e20050",
+      "reports/ov-931/mutate.py": "ea9527c73c182503da5580d4f5f717f1c7a769a9014511158b6552992852e428",
+      "reports/ov-931/mutations.json": "1e2c25fb5e78f127ffe92d0cec4c0c9331d2e6d1e6fecf92fe4bcb004e10d6c6",
+      "reports/ov-931/negative-config.json": "0074772b3f1ff98469fa17ec44bd91eb211edd35e904dad18551a4ff0c1b5eb2",
+      "reports/ov-931/negative-config.log": "924c2752cd6ac071c91a76e31ea84ba19120977914578981eafc1dad44e1a8c5",
+      "reports/ov-931/negative-owner.json": "96a8a08e9d0d4507543d5cb0755e0e43a19e89c8371a448f8c995d97f2b7c056",
+      "reports/ov-931/negative-owner.log": "40fbbbb9b1139b22cc2a03ba6c02a55661cb7a2a933a575aded00165a4aff21a",
+      "reports/ov-931/preflight-assertion-red.json": "e42b47f72bd6f7c33cd2f2a22afa48e6a3dc110982a0baffac112f6309cd5ac9",
+      "reports/ov-931/preflight-assertion-red.log": "746619bdc39a4e4c27364761cd8ee2143b5418a903a1f1619246be37e823a377",
+      "reports/ov-931/product-diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/ov-931/size-budget.log": "35aa3cc850b0026abe636f4be3b01edc04ef012bd18ea38c52fbd5821be99f03",
+      "reports/ov-931/socket-control-shutdown-red.json": "1bab2f05ee6182359e610b538bc49ebdcc1cbc7804ce6a333cf75476007f6951",
+      "reports/ov-931/socket-control-shutdown-red.log": "1c51697968c5c0e84acea389179c4521c5995da11584f024cf320fe5b056c6d7",
+      "reports/ov-931/socket.json": "cbde2c58df454510f872f2dbed273f7764fd7c62fbabf3fae48b049be6e0efff",
+      "reports/ov-931/socket.log": "ad0f30a3b74f4f4b0b7ffdf01167f967572c6b47257cd425acca69166974b52f",
+      "reports/ov-931/suite-cache-red.json": "2a42e8b213985d27913050565d98ad91782453cab310fa1c2bae33216e23a941",
+      "reports/ov-931/suite-cache-red.log": "39c701579d4bb490bbbce05becd56e1459c19ef9da7d5dea20ceeb91564a131b",
+      "reports/ov-931/suite-caller-red.json": "667135e2c87566fcab4a8322a0853d7d90a63198a6bd15496dd309c08c083412",
+      "reports/ov-931/suite-caller-red.log": "dbabd91655872cafe84d43f42de560732acd47b8f18cd47613f03461a5ddf6dc",
+      "reports/ov-931/suite-migration-red.json": "a98d1534a8b0954b1fe8e5550a25cdf09b2a3608f545cf92f86da229089c8ab7",
+      "reports/ov-931/suite-migration-red.log": "588a39dceddaf7839076abc5c785fa6888d03c6b6481c6a5df634511441a511b",
+      "reports/ov-931/suite-parallel-red.json": "5f5ea1a2d0443bc747850428b59a9a6a95a10c1c54c22767d7e5d8055b2bed22",
+      "reports/ov-931/suite-parallel-red.log": "59e87c801ea28928aedf8fa96010e765cb31e51b553bd12e71c8d6a2f581fd44"
+    }
+  },
+  "limits": [
+    "private bounded R1/R2 proof only",
+    "SAME931 final source/evidence audit pending",
+    "no actual main executable/owner data/whole release/activation/provider network proof",
+    "prior parallel FIFO timeout retained; serial fixtures do not change the read bound"
+  ],
+  "evidence_sha256": {
+    "reports/ov-934/affected-restored.json": "97702b9c9431686901d46d4dbcac787c046710e964e2773db35c1182d30e4537",
+    "reports/ov-934/affected-restored.log": "4ebf01cade91b43b6ab734921da8ca05f91db93cafa9438c8c761bf04fb23545",
+    "reports/ov-934/affected-tail.json": "98d86d8299ce436d5ee06a8ae4bcb478c791f2c5092255f99cc0468efd52f0f0",
+    "reports/ov-934/affected-tail.log": "1daa23990403a2ec035ab29f0fefc97afd25f94502a79783b56516a8315f9e09",
+    "reports/ov-934/affected-tail.py": "82d12ab66de775ab5c26aeb542e6141cd4d7091b03c30b33759c74d45daa7fc0",
+    "reports/ov-934/affected.json": "b22c1697d407e95a51597e47cb94b4f18d6360627b5dfb8edd468e9ee04e6b8a",
+    "reports/ov-934/affected.log": "ef318887e8042a09d621e298351299da6118eb8068647cbc72622661042fc2ef",
+    "reports/ov-934/affected.py": "0f79e6b421efa04a75e35ab9317f8675e9a43c82edfbd71a950f12dd51c4603d",
+    "reports/ov-934/alias.json": "01844383ad06ea8240b9549349c954edd8e3d3f85021f1612c87a605c91443b7",
+    "reports/ov-934/alias.log": "27b0340ec3bd29eac78a6cd7a13c2c3266200a2c0a08127ea36897e3111aed85",
+    "reports/ov-934/availability.json": "598485a7a7511a771dfca22d721aea3e8d7bed4624518164fea3a025623fc933",
+    "reports/ov-934/availability.log": "fc755409f59c5bf61beaedb7c011bf263f1ea08a308891718a7aec01a045e4c0",
+    "reports/ov-934/cache-holders.jsonl": "b58964c04eee81923359e5a23d930cb835f4604d699337127bc73de559fa686c",
+    "reports/ov-934/check.py": "d528ac455338f4f77d4d58e79fc89060a9d978e7d701e0386c37e0d2f65920a0",
+    "reports/ov-934/compile.json": "48ee19af8620d7308ee86007dc7106f5feb70a10c324579241cc678e916289ba",
+    "reports/ov-934/compile.log": "77220a90d325f981d61e86fa455404dde46638817684cebacfa6d31ae0580600",
+    "reports/ov-934/entry.py": "aa25116f2b23c9620d05dd45b6b6c7f8c403deea1dac8b2bc8273fa3c819b09f",
+    "reports/ov-934/implementation.md": "5a6449d37a5c66aac93676e69dd6727b212790c3da9be4a53b4d1e7613a91871",
+    "reports/ov-934/lint.json": "744d0fc6e0c547ec9d7131246dd70af2b543cc71257e507dfe19ebddf59c3860",
+    "reports/ov-934/lint.log": "dbde9c271893ee2eeff110e181919726f6d21685d223e6b95af2c40bc850cf21",
+    "reports/ov-934/mutation-alias.json": "02c2ab8ef4958736f7bc9cfe4dfc33a79461fba86108024c3182c782b307757f",
+    "reports/ov-934/mutation-availability.json": "7dddd51f405ff547de150e5a53da0b5ca8a25789315ccf3f69267b203d4a3761",
+    "reports/ov-934/mutation-recovery.json": "ef01d8a421dd2230155ec60f033fe51a00fc950a8615f184fbf9a4fd20d471f1",
+    "reports/ov-934/mutation-safety.json": "37c66176411d56a1c631403d4058cd50b80890b9ce0f241689af66da986d263c",
+    "reports/ov-934/negative-alias.json": "a4f23d971f9f85cdb8a3a69b98d0b45509487c0af577dd37d6aee90747d28c29",
+    "reports/ov-934/negative-alias.log": "87f57c78a225c0bc8e4234ea2891ecc1131db9f27b22089d789c420376e464b2",
+    "reports/ov-934/negative-availability.json": "598a3a28af0abfde1432729b0bafba69fa2291615192c60da1f9c91dc652602d",
+    "reports/ov-934/negative-availability.log": "075ebc9271e6880cf7dc066c90dd54ded9dce88924d7b10c8539d08e2d53b8e4",
+    "reports/ov-934/negative-recovery.json": "bdc4550608ad3cdfcb48a0e1aacea32ad35ebc28394343e23c33b49846b0bb7e",
+    "reports/ov-934/negative-recovery.log": "63f99bca1ee9fbc4c7f8b6c92b79e7b1a3d6d1c7bd52f250a9f135fa673044b4",
+    "reports/ov-934/negative-safety.json": "85ce4974a8b58bee2348189a48aceb1b6d364412de4c2ea7fbc0b120926edd84",
+    "reports/ov-934/negative-safety.log": "e646f4d71a5aaf06c40e921e0236f3626341eda15073af868b315c7d9e9d41c6",
+    "reports/ov-934/negative.py": "86f2059a02cf9292cdefddc8658b7b0abbcd7df7fb14fc522cd1130ae12f2fcb",
+    "reports/ov-934/original931-seal.json": "7ccfe79d670defc136c5ebd61a6f495524b47c1289bd8f135ec1ee539404c35c",
+    "reports/ov-934/post-daemon-test-assertion.patch": "8220906bff3069fda284d7b538d2d0113e48c8ea0ce6727b219a7322aace78cb",
+    "reports/ov-934/product-diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reports/ov-934/recovery.json": "21bf98b8832032ca4d51e1943299e6bc3b8ebad05380b825c64da62d9ffbca21",
+    "reports/ov-934/recovery.log": "07854ce7a7cf3c9a0f7e6d9b2565b0c93f090553412401d84e96c1db39aa1a93",
+    "reports/ov-934/safety-fixture-corrected.json": "d0e2280bf9d29fd046c1e34163048b19ffe4e4da43ed9b92ae3f96ca16c35831",
+    "reports/ov-934/safety-fixture-corrected.log": "f5b17a7abdf724c824bb4e824af5906825e8ade2b8427992e069595fecf66e5d",
+    "reports/ov-934/safety.json": "bd0590437649cc1c8ec4b4775db4fb99f790ae7567f9e35805e4333fda8728e7",
+    "reports/ov-934/safety.log": "0b20a87abf5302d1a312cf211fd642d765594f96b5380c0c7c4748e7a7d0ad2d",
+    "reports/ov-934/seal.py": "8b56ed08a27c9bf3b006b52edc9c8cc79db02d3348f60f4a50d36522b6e981b8",
+    "reports/ov-934/size-budget.log": "35aa3cc850b0026abe636f4be3b01edc04ef012bd18ea38c52fbd5821be99f03"
+  }
+}

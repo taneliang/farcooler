@@ -64,6 +64,7 @@ enum Inbox {
     Reconcile,
 }
 impl CommandHandle {
+    pub(crate) fn is_closed(&self) -> bool { self.send.is_closed() }
     pub async fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
         self.apply(Authority::Controller(controller.instance), request, now_ms).await
     }
@@ -294,15 +295,25 @@ impl Runtime {
                 let state = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
                 let item = &state.items[&effect.item];
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
-                self.select_item_configuration(&workspace, item)?;
+                let selected = self.select_item_configuration(&workspace, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
-                    let binding = Binding::new(&workspace, &effect, stored.resource_generation
-                        .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
-                    let recovered = if self.coding.is_some() {
-                        self.reconcile_coding(&binding).await.map(Some)
-                    } else {
-                        self.read_journal(&binding).map(|journal| journal.map(|j| j.outcome))
-                    };
+                    if let Err(error) = selected {
+                        tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
+                        if stored.dispatch_state != "uncertain" {
+                            self.observe(&workspace, &effect, Outcome::Uncertain, false, now_ms)?;
+                            count += 1;
+                        }
+                        continue;
+                    }
+                    let recovered = async {
+                        let binding = Binding::new(&workspace, &effect, stored.resource_generation
+                            .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
+                        if self.coding.is_some() {
+                            self.reconcile_coding(&binding).await.map(Some)
+                        } else {
+                            self.read_journal(&binding).map(|journal| journal.map(|j| j.outcome))
+                        }
+                    }.await;
                     let outcome = match recovered {
                         Ok(outcome) => outcome.unwrap_or(Outcome::Uncertain),
                         Err(error) => {
@@ -324,8 +335,33 @@ impl Runtime {
                     }
                     continue;
                 };
-                // Persist the base while ownership is held, before any external admission.
-                let base = self.pin_base(&workspace, &effect).await?;
+                // Stop uses retained evidence and never needs current launch files
+                // or a new repository lock. A fresh launch still validates all of them.
+                let prepared = async {
+                    selected?;
+                    if matches!(effect.kind, EffectKind::Stop { .. }) {
+                        return self.item_base(&workspace, &effect);
+                    }
+                    self.validate_item_launch(&workspace, item)?;
+                    self.pin_base(&workspace, &effect).await
+                }.await;
+                let base = match prepared {
+                    Ok(base) => base,
+                    Err(error) => {
+                        tracing::warn!(effect = %effect.id, %error, "workflow item refused before external execution");
+                        // No external operation was invoked. Persist the refusal
+                        // through the normal admission/observation fence, so Get
+                        // exposes Failed rather than silently abandoning the item.
+                        if self.store.workflow_admit_effect(&claim, now_ms)? {
+                            let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
+                                Outcome::Uncertain
+                            } else { Outcome::SafeFailure };
+                            self.observe(&workspace, &effect, outcome, false, now_ms)?;
+                            count += 1;
+                        }
+                        continue;
+                    }
+                };
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
                 let binding = Binding::new(&workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
@@ -366,8 +402,13 @@ impl Runtime {
                 self.inbox = inbox;
                 let outcome = match result {
                     Ok(outcome) => {
-                        self.write_journal(&Journal { binding, outcome: outcome.clone() })?;
-                        outcome
+                        match self.write_journal(&Journal { binding, outcome: outcome.clone() }) {
+                            Ok(()) => outcome,
+                            Err(error) => {
+                                tracing::warn!(effect = %effect.id, %error, "workflow settlement could not be retained");
+                                Outcome::Uncertain
+                            }
+                        }
                     }
                     Err(error) => {
                         tracing::warn!(effect = %effect.id, %error, "workflow effect requires reconciliation");

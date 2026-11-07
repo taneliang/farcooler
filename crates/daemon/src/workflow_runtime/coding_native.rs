@@ -64,23 +64,31 @@ impl Runtime {
     }
     /// Pin the already-installed endpoint as well as its bytes. No hook writes.
     pub(super) fn validate_native_host(&self) -> Result<()> {
-        if matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. })) {
+        if let Some(config) = &self.coding { self.validate_native_configuration(config)?; }
+        Ok(())
+    }
+    pub(super) fn validate_native_configuration(&self, config: &CodingConfig) -> Result<()> {
+        if matches!(config.harness, CodingHarness::Native { .. }) {
             if self.root.join("h.sock").as_os_str().len() > 103 {
                 return Err(Error::Refused("native runtime needs a short private socket path"));
             }
-            self.native_hooks()?;
+            self.native_config_hooks(config)?;
         }
         Ok(())
     }
     fn native_hooks(&self) -> Result<()> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing native config"))?;
-        let CodingHarness::Native { settings, project_hooks, .. } = &config.harness else { return Ok(()) };
-        let file = if self.native_agent()? == Agent::Claude { settings } else { project_hooks }
+        self.native_config_hooks(config)
+    }
+    fn native_config_hooks(&self, config: &CodingConfig) -> Result<()> {
+        let CodingHarness::Native { preset, settings, project_hooks, .. } = &config.harness else { return Ok(()) };
+        let agent: Agent = preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))?;
+        let file = if agent == Agent::Claude { settings } else { project_hooks }
             .as_ref().ok_or(Error::Refused("missing native hooks"))?;
         file.verify()?;
         let text = String::from_utf8(self.bytes(&file.path)?).map_err(|_| Error::Refused("invalid hook text"))?;
         let socket = self.root.join("h.sock");
-        if !crate::hook_install::native_completion_targets(&text, self.native_agent()?.as_str(), &socket) {
+        if !crate::hook_install::native_completion_targets(&text, agent.as_str(), &socket) {
             return Err(Error::Refused("native hooks must already target this private host"));
         }
         Ok(())
@@ -403,4 +411,67 @@ mod recovery_tests {
         assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Cancelled);
         assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
     }
+    #[tokio::test]
+    async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner() {
+        use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+        for drift in ["changed-settings", "missing-settings", "missing-executable"] {
+            let (dir, mut runtime) = configured(false, "pass").await;
+            let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+            let repo_root = svc.store.create_repository_root(svc.host_id,dir.path().to_str().unwrap(),0).unwrap();
+            let repo = svc.store.create_repository(svc.host_id,repo_root.id,"private",
+                runtime.repository().join(".git").to_str().unwrap(),"").unwrap();
+            let workspace = svc.store.ensure_main_workspace(repo.id).unwrap().id.to_string();
+            runtime.store = svc.store.clone();
+            let settings = dir.path().join("settings.json");
+            std::fs::write(&settings,serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap()).unwrap();
+            let executable = dir.path().join("executable");
+            std::fs::copy("/bin/sh",&executable).unwrap();
+            std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
+            let config = runtime.coding.as_mut().unwrap();
+            config.checks[0].argv[0] = executable.to_string_lossy().into_owned();
+            let CodingHarness::Command(mut process) = config.harness.clone() else { unreachable!() };
+            process.argv.clear();
+            config.harness = CodingHarness::Native { preset:"claude".into(),
+                settings:Some(LaunchFile { path:settings.canonicalize().unwrap(),digest:digest(&std::fs::read(&settings).unwrap()) }),
+                project_hooks:None,plugin_dir:None,prompt:"unused".into(),process };
+            let config = config.clone(); let definition = config.definition().unwrap();
+            let adapter = Some(AdapterConfiguration::Coding(config.clone()));
+            let pin = farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+            let m = |id: &str, revision, sequence| Mutation { id:id.into(),revision,epoch:1,sequence };
+            runtime.wire_command(&workspace,"owner",Action::Publish { mutation:m("p",0,1),expected_pin:None,
+                definition,adapter:adapter.map(Box::new) }).unwrap();
+            runtime.wire_command(&workspace,"owner",Action::Enqueue { mutation:m("e",0,1),item:"one".into(),pin:pin.clone() }).unwrap();
+            runtime.pump(2).await.unwrap();
+            let state = runtime.state(&workspace).unwrap().unwrap();
+            let stored = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+            let claim = runtime.store.workflow_claim_effect(&workspace,&stored.effect.id,"crash-test",state.revision,state.epoch,10,100).unwrap().unwrap();
+            assert!(runtime.store.workflow_admit_effect(&claim,10).unwrap());
+            let binding = Binding::new(&workspace,&stored.effect,claim.resource_generation,0,&runtime.item_base(&workspace,&stored.effect).unwrap());
+            let root = runtime.root.clone();
+            let host = Host(server(&root,&binding)); let id = terminal(&binding);
+            let window = host.0.create_terminal_window(id,id,"crash fixture",runtime.tree(&binding).to_str().unwrap(),"/bin/sleep 30").await.unwrap();
+            let panes = host.0.list_tagged_panes().await.unwrap(); let pane = panes.iter().find(|p| p.pane_id==window.pane_id).unwrap();
+            let owner = NativeOwner { binding:binding.clone(),terminal:id,pane:pane.pane_id.clone(),tty:pane.tty.clone() };
+            durable(&runtime.native_path(&binding,"owner"),&serde_json::to_vec(&owner).unwrap()).unwrap();
+            drop(runtime);
+            match drift {
+                "changed-settings" => std::fs::write(&settings,"changed").unwrap(),
+                "missing-settings" => std::fs::remove_file(&settings).unwrap(),
+                _ => std::fs::remove_file(&executable).unwrap(),
+            }
+            assert!(config.validate().is_err(),"fresh launch must still refuse drift");
+            let mut runtime = Runtime::open_service(&root,svc.store.clone()).unwrap();
+            runtime.pump(200).await.unwrap();
+            let state = runtime.state(&workspace).unwrap().unwrap();
+            assert_eq!(state.items["one"].phase,Phase::Uncertain,"{drift}");
+            assert_eq!(host.0.pane_life(&owner.pane,id).await.unwrap(),farcooler_tmux::PaneLife::Live);
+            runtime.submit(&runtime.controller(),Request { id:"cancel".into(),workspace:workspace.clone(),
+                expected_revision:state.revision,sequence:2,command:Command::Cancel { item:"one".into() } },201).unwrap();
+            assert_eq!(finish(&mut runtime,&workspace).await.items["one"].phase,Phase::Cancelled,"{drift}");
+            assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(),Outcome::SafeFailure);
+            assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["one"].policy_pin,pin);
+            assert!(!dir.path().join("started").exists(),"recovery launched an adapter");
+        }
+    }
+
 }

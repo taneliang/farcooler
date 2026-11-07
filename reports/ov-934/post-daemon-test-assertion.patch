@@ -1,0 +1,11 @@
+--- daemon-gate/crates/store/src/workflow_publication.rs
++++ final/crates/store/src/workflow_publication.rs
+@@ -133,7 +133,7 @@
+         let current = serde_json::to_string(&("owner",Action::Publish { mutation,
+             expected_pin:None,definition:definition.clone(),adapter:None })).unwrap();
+         assert_eq!(old,current,"None must preserve original producer bytes, not add adapter:null");
+-        assert!(!old.contains("adapter"));
++        assert!(serde_json::from_str::<serde_json::Value>(&old).unwrap()[1].get("adapter").is_none());
+         let receipt = Receipt { id:"wire:owner:original".into(),result:Ok(0),effects:vec![] };
+         let raw_receipt = serde_json::to_string(&receipt).unwrap();
+         let mut conn = rusqlite::Connection::open_in_memory().unwrap();

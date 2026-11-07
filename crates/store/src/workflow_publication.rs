@@ -116,4 +116,44 @@ mod tests {
         let refusal=store.workflow_wire_write("ws","p2","payload2",Write::Publish { adapter:None, expected_pin:None,definition:&definition,revision:0 }).unwrap();
         assert_eq!(refusal.result,Err(Refusal::Stale));
     }
+    #[test]
+    fn workflow_publication_legacy_none_payload_and_prebundle_receipt_survive_migration() {
+        use farcooler_protocol::workflow_commands::{Action, Mutation};
+        // The c401 producer had no adapter field. Keep that producer shape
+        // independent of today's enum, rather than merely replaying new JSON.
+        #[derive(Serialize)]
+        #[serde(tag = "action")]
+        enum OriginalAction {
+            Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition },
+        }
+        let definition = Definition::tracker("owner"); let pin = definition.pin();
+        let mutation = Mutation { id:"original".into(),revision:0,epoch:1,sequence:1 };
+        let old = serde_json::to_string(&("owner",OriginalAction::Publish { mutation:mutation.clone(),
+            expected_pin:None,definition:definition.clone() })).unwrap();
+        let current = serde_json::to_string(&("owner",Action::Publish { mutation,
+            expected_pin:None,definition:definition.clone(),adapter:None })).unwrap();
+        assert_eq!(old,current,"None must preserve original producer bytes, not add adapter:null");
+        assert!(serde_json::from_str::<serde_json::Value>(&old).unwrap()[1].get("adapter").is_none());
+        let receipt = Receipt { id:"wire:owner:original".into(),result:Ok(0),effects:vec![] };
+        let raw_receipt = serde_json::to_string(&receipt).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap(); migration_publication(&tx).unwrap();
+        tx.execute("INSERT INTO workflow_definitions(pin,definition) VALUES(?1,?2)",
+            params![pin,serde_json::to_string(&definition).unwrap()]).unwrap();
+        tx.execute("INSERT INTO workflow_configurations(workspace,pin) VALUES('old',?1)",[&pin]).unwrap();
+        tx.execute("INSERT INTO workflow_wire_receipts(workspace,id,payload,receipt) VALUES('old',?1,?2,?3)",
+            params![receipt.id,old,raw_receipt]).unwrap();
+        tx.commit().unwrap();
+        let tx = conn.transaction().unwrap(); migration_bundles(&tx).unwrap(); tx.commit().unwrap();
+        let bundle: (String,String,String) = conn.query_row(
+            "SELECT b.pin,b.definition_pin,b.adapter FROM workflow_bundles b JOIN workflow_bundle_selections s ON s.pin=b.pin WHERE s.workspace='old'",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(bundle,(pin.clone(),pin,"null".into()));
+        assert_eq!(cached(&conn,"old",&receipt.id,&current).unwrap(),Some(receipt.clone()));
+        assert!(matches!(cached(&conn,"old",&receipt.id,&format!("{current} ")),Err(WorkflowError::IdentityConflict)));
+        let after: (String,String) = conn.query_row("SELECT payload,receipt FROM workflow_wire_receipts WHERE workspace='old'",[],
+            |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(after,(old,raw_receipt),"migration/replay must not rewrite original receipt bytes");
+    }
+
 }

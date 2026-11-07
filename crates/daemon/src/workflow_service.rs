@@ -10,7 +10,11 @@ pub(crate) struct Owner {
 impl Service {
     pub fn start_workflows(&self) -> Result<()> {
         let mut owner = self.workflow_owner.lock().map_err(|_| Error::Refused("workflow owner lock poisoned"))?;
-        if owner.is_some() { return Err(Error::Refused("workflow service already started")); }
+        if let Some(current) = owner.as_ref() {
+            return Err(Error::Refused(if current.task.is_finished() || current.handle.is_closed() {
+                "workflow service stopped; join failed owner before restart"
+            } else { "workflow service already started" }));
+        }
         let mut runtime = Runtime::open_service(&self.root_dir().join("workflow"), self.store.clone())?;
         let handle = runtime.command_handle(&runtime.controller())?;
         let (stop, signal) = watch::channel(false);
@@ -19,7 +23,8 @@ impl Service {
         Ok(())
     }
     pub(crate) fn workflow_handle(&self) -> Option<CommandHandle> {
-        self.workflow_owner.lock().ok()?.as_ref().map(|o| o.handle.clone())
+        self.workflow_owner.lock().ok()?.as_ref()
+            .filter(|o| !o.task.is_finished() && !o.handle.is_closed()).map(|o| o.handle.clone())
     }
     pub async fn stop_workflows(&self) -> Result<()> {
         let owner = self.workflow_owner.lock().map_err(|_| Error::Refused("workflow owner lock poisoned"))?.take();
@@ -28,5 +33,27 @@ impl Service {
             owner.task.await.map_err(|_| Error::Refused("workflow owner failed to join"))??;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn workflow_service_availability_tracks_failed_owner_and_join_before_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().join("state")).await.unwrap();
+        service.start_workflows().unwrap();
+        let retained = service.workflow_handle().unwrap();
+        service.workflow_owner.lock().unwrap().as_ref().unwrap().task.abort();
+        tokio::task::yield_now().await;
+        assert!(service.workflow_handle().is_none());
+        assert!(retained.state("any").await.is_err());
+        assert!(matches!(service.start_workflows(),Err(Error::Refused("workflow service stopped; join failed owner before restart"))));
+        assert!(service.stop_workflows().await.is_err(),"joining must report failure");
+        service.start_workflows().unwrap();
+        assert!(service.workflow_handle().unwrap().state("any").await.unwrap().is_none());
+        service.stop_workflows().await.unwrap();
+        assert!(service.workflow_handle().is_none());
     }
 }

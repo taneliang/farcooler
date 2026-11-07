@@ -3,15 +3,15 @@ affected phase: ['test', '--offline', '-p', 'farcooler-daemon', '-p', 'farcooler
    Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
    Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
    Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
-   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
    Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
    Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
    Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
    Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
-   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
    Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
    Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
-    Finished `test` profile [unoptimized] target(s) in 32.36s
+    Finished `test` profile [unoptimized] target(s) in 32.32s
      Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
 
 running 60 tests
@@ -45,38 +45,38 @@ orchestrator change=2
 orchestrator change=3
 orchestrator change=4
 ok
-test workflow_runtime::coding_landing::failure_tests::workflow_coding_remote_rejected_update_records_exit_without_acceptance ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp45Dams/private-remote.git
+test workflow_runtime::coding_landing::failure_tests::workflow_coding_remote_rejected_update_records_exit_without_acceptance ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp2VgXsK/private-remote.git
  * [new branch]      HEAD -> main
 ok
 test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... 
 running 1 test
 test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2709 filtered out; finished in 5.62s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2709 filtered out; finished in 5.49s
 
 ok
-test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpGufLr4/private-remote.git
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpmBTACf/private-remote.git
  * [new branch]      HEAD -> main
 ok
-test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpLFzGOa/private-remote.git
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpdjJbuN/private-remote.git
  * [new branch]      HEAD -> main
 ok
-test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpOQfJbK/private-remote.git
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpywery3/private-remote.git
  * [new branch]      HEAD -> main
 ok
 test workflow_runtime::coding_landing::security_tests::workflow_coding_security_receipt_file_identity_and_size ... ok
-test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpfY3NU4/private-remote.git
+test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp89xKik/private-remote.git
  * [new branch]      HEAD -> main
 ok
-test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpjp5j5q/private-remote.git
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp6djoJg/private-remote.git
  * [new branch]      HEAD -> main
 ok
-test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpZ3NS3K/private-remote.git
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp3g6IeK/private-remote.git
  * [new branch]      HEAD -> main
-To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpe1Xw9Q/private-remote.git
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpf7nzFp/private-remote.git
  * [new branch]      HEAD -> main
-To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpe1Xw9Q/private-remote.git
-   9025560..706fa28  706fa282aae23b4795f124f7413e803dfeed0644 -> main
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpf7nzFp/private-remote.git
+   b0c14df..59bd931  59bd9319985878e6164018986b3bd5e78eebb6c1 -> main
 ok
 test workflow_runtime::coding_native::recovery_tests::workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch ... ok
 test workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass ... ok
@@ -120,7 +120,7 @@ test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_
 test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
 test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
 
-test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 79.79s
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 77.74s
 
      Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_protocol-8a3ab00a0937e0f8)
 
@@ -150,25 +150,22 @@ test workflow_ownership::legacy_first_tests::workflow_ownership_existing_legacy_
 test workflow_ownership::tests::workflow_ownership_concurrent_engine_and_legacy_have_one_winner ... ok
 test workflow_publication::tests::workflow_publication_rolls_back_definition_config_and_receipt_together ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 474 filtered out; finished in 2.94s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 474 filtered out; finished in 2.83s
 
 affected phase: ['test', '--offline', '-p', 'farcooler-cli', '--bin', 'farcooler', 'workflow_', '--', '--nocapture']
    Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
    Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
-   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/agent-core)
-   Compiling russh v0.62.4
-   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/agent-hooks)
    Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
    Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
    Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
    Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
-   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
    Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
    Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
    Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
    Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
    Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/cli)
-    Finished `test` profile [unoptimized] target(s) in 21.09s
+    Finished `test` profile [unoptimized] target(s) in 20.31s
      Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler-62003bc98479d959)
 
 running 2 tests
@@ -188,16 +185,24 @@ affected phase: ['test', '--offline', '-p', 'farcooler-daemon', '--test', 'workf
    Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
    Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
    Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
-    Finished `test` profile [unoptimized] target(s) in 15.67s
+    Finished `test` profile [unoptimized] target(s) in 15.74s
      Running tests/workflow_service_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_service_over_socket-bd201935ee5c5d8b)
 
-running 6 tests
+running 7 tests
+test workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration ... 
+running 1 test
+test workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.96s
+
+
+ok
 test workflow_service_child ... ignored
 test workflow_service_fast_ship_without_checks_or_review ... 
 running 1 test
 test workflow_service_fast_ship_without_checks_or_review ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 1.28s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.11s
 
 
 ok
@@ -205,7 +210,7 @@ test workflow_service_no_git_bootstrap_shutdown_and_recovery ...
 running 1 test
 test workflow_service_no_git_bootstrap_shutdown_and_recovery ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.24s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.22s
 
 
 ok
@@ -213,7 +218,7 @@ test workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_com
 running 1 test
 test workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 6.70s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 6.18s
 
 
 ok
@@ -223,17 +228,17 @@ test workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdo
 running 1 test
 test workflow_service_child ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.30s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.30s
 
 
 running 1 test
 test workflow_service_child ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.22s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.22s
 
 ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.57s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.57s
 
 
 ok
@@ -241,23 +246,23 @@ test workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunc
 running 1 test
 test workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.43s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.42s
 
 
 ok
 
-test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.53s
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.94s
 
 affected phase: ['test', '--offline', '-p', 'farcooler-daemon', '--test', 'workflow_commands_over_socket', '--', '--nocapture']
    Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
-    Finished `test` profile [unoptimized] target(s) in 1.39s
+    Finished `test` profile [unoptimized] target(s) in 1.52s
      Running tests/workflow_commands_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_commands_over_socket-a0707957eb57a37b)
 
 running 2 tests
 test workflow_socket_publication_approve_cancel_and_reconnect_receipts ... ok
 test workflow_socket_scope_unknown_caller_disabled_runtime_and_forged_authority_refuse ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
 
 
 exit=0, stopped=None

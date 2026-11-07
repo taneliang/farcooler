@@ -1,0 +1,114 @@
+{
+  "source_pin": "4e01f8be46e28603a02e7464a984828ab07e54a4",
+  "source_tree": "d103a630a35112843132a31888056ff237d77dc1",
+  "previous_signed_freeze": "e69ec2bbad90561f33cb707e374495b0b949772d",
+  "post_freeze_source_delta": "one equivalent Option::map resolver assignment; clippy clean and six ordinary cases rechecked",
+  "composition_pin": "c40197486572a584f8c85ec2dde423587e0560e6",
+  "approved_input_manifest_sha256": "798b8509c5a36f78808f844b59e300c46e121abb120f3c0adba54a6c190050ac",
+  "source_sha256": {
+    "crates/cli/src/workflow.rs": "c373493dca241c263c49b8293784c585c2cdb6d84a6c6e8c798b748cd5bfcb89",
+    "crates/client/src/session/workflow/tests/socket.rs": "5664b5619a4436793cf58b5c7cf41c89a85246606f2e87709155d412235ecf77",
+    "crates/daemon/src/lib.rs": "84da6c17b7adb0ade510977e7432d1741771e78d45fddbcf945d87eab459ad84",
+    "crates/daemon/src/main.rs": "2dbeba719bace913a6672b8236ff2a16289bbfb3fd099dd5402a7067f33b47fc",
+    "crates/daemon/src/rpc.rs": "3af16cda635c5400afb32b8a4abef0f702585f006041c1c72bf33104b90a7674",
+    "crates/daemon/src/service.rs": "4b3a081557b33f88b4ab757234c31a88fcaf1a8340d9ff7f5e07a666bbe6a957",
+    "crates/daemon/src/workflow_runtime.rs": "e3273fd7f4e1aa71db707abf94697ce22fea5bc4742eeee86af0db6b27bafa4b",
+    "crates/daemon/src/workflow_runtime/adapters.rs": "8c75fbed5e2a1094797da8bb8d1443cee2565db5d3b7440edd33e5a7929dab68",
+    "crates/daemon/src/workflow_runtime/admission_tests.rs": "9fd3e45e3abcdbafaf48d4ebbbcfd24736dd2c189c341a27bbc69394cb815b32",
+    "crates/daemon/src/workflow_runtime/coding.rs": "de745b57371e2aa8bfc9d5ebb4a0b59a55b7235570b5fc77fcf5445e435daca5",
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "282037f0e0f7e4a2e414b5f519aabbffb8a9abab1fe7f7a22b7468d90e63bd3a",
+    "crates/daemon/src/workflow_runtime/coding_native.rs": "65abd671a72e4c1868a5549d89d6a5fdfd24ecd555a8ea45f9a88f24e18d8d5e",
+    "crates/daemon/src/workflow_runtime/coding_tests.rs": "560cb961ac467b89fb3569dceedbf40f66528e491f429eb86a74f616484292ac",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "e6d4fb0261b634a454f536283034c079f098719a3bdeecf7406bcc4d5723f1fd",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "e01eb1b33f8119814355d3c092f04563e87f859a47220d7d53d8baf95f04b977",
+    "crates/daemon/src/workflow_service.rs": "ddf76ecda274850ecdebf424a6bb84f93cb29a3cbe3d4b81649d2308c1de9c79",
+    "crates/daemon/tests/workflow_commands_over_socket.rs": "e1dd5f19b64c13a6e2e7a37cdbb962db0832a98eb96dde42181d6287bd1a9086",
+    "crates/daemon/tests/workflow_service_over_socket.rs": "a520ae9117851734bf2d0218529baf1a69541efa08db3e992380568592b263d8",
+    "crates/protocol/src/lib.rs": "33761d973e927c075e3faaedba799bf9bb7aedddf55156d9e2bc82a1f13f13c8",
+    "crates/protocol/src/workflow_commands.rs": "cf4a770d734c7e93603b285978ad8c3c1247d517924071545bfb34d5cb49aa76",
+    "crates/protocol/src/workflow_config.rs": "07d5ba2962276b361ae458fc2e97d32d9e961f1effd27bcd29fe767516f2a68b",
+    "crates/store/src/lib.rs": "2359cb7e4f2c7bbe597d43e4686cf70c5afd32db0ba8420c0a35e9cb2acef836",
+    "crates/store/src/migrate.rs": "da3179cc634f8cae53ea33d10ca95cff9fba1a96491e5858c87bbef190b8ac47",
+    "crates/store/src/workflow.rs": "1cdef70c22a569eacd197d16df88af36b8713b7d08d633da08740d0247eea38c",
+    "crates/store/src/workflow_ownership.rs": "aabb6624dab7c6ee640e0415b89fb82f25d2e1af816283cff7a97eabd146f985",
+    "crates/store/src/workflow_publication.rs": "c234db59bdf65bff594ba1d62e345c7208752dffd6cdee721992eb3165737eaf"
+  },
+  "verified_source_coverage": {
+    "crates/cli/src/workflow.rs": "affected.json",
+    "crates/daemon/src/lib.rs": "affected.json",
+    "crates/daemon/src/main.rs": "affected.json",
+    "crates/daemon/src/rpc.rs": "affected.json",
+    "crates/daemon/src/service.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/adapters.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/admission_tests.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/coding.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/coding_native.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/coding_tests.rs": "affected.json",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "socket.json (six post-lint ordinary cases)",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "affected.json",
+    "crates/daemon/src/workflow_service.rs": "affected.json",
+    "crates/daemon/tests/workflow_commands_over_socket.rs": "affected.json",
+    "crates/daemon/tests/workflow_service_over_socket.rs": "affected.json",
+    "crates/protocol/src/lib.rs": "affected.json",
+    "crates/protocol/src/workflow_commands.rs": "affected.json",
+    "crates/protocol/src/workflow_config.rs": "affected.json",
+    "crates/store/src/lib.rs": "affected.json",
+    "crates/store/src/migrate.rs": "affected.json",
+    "crates/store/src/workflow.rs": "affected.json",
+    "crates/store/src/workflow_ownership.rs": "affected.json",
+    "crates/store/src/workflow_publication.rs": "affected.json"
+  },
+  "covered_source_matches_freeze": true,
+  "outside_check_allocation": {
+    "paths": [
+      "crates/client/src/session/workflow/tests/socket.rs"
+    ],
+    "reason": "mechanical adapter:None client test fixture; no client/platform execution pass claimed"
+  },
+  "selected_cases": {
+    "daemon": 60,
+    "store": 16,
+    "protocol": 1,
+    "cli": 2,
+    "ordinary_socket_process": 6,
+    "legacy_socket": 2,
+    "total": 87,
+    "post_lint_ordinary_recheck": 6
+  },
+  "negative_expected_exits": {
+    "negative-config": 101,
+    "negative-owner": 101
+  },
+  "mutations": {
+    "config": {
+      "file": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "original": "6f8000df6b2c00b253046fa755649dc67c74ecafe0c9dda45461f5980baada70",
+      "mutant": "8cf801202db7a32ab58b283a48623975d886faf6dcb452824f3c58fc496a4a75",
+      "restored": true,
+      "restored_sha256_before_lint": "6f8000df6b2c00b253046fa755649dc67c74ecafe0c9dda45461f5980baada70",
+      "post_restore_delta": "Equivalent Option::map conversion on a separate resolver assignment line; negative lookup seam restored unchanged."
+    },
+    "owner": {
+      "file": "crates/store/src/workflow.rs",
+      "original": "1cdef70c22a569eacd197d16df88af36b8713b7d08d633da08740d0247eea38c",
+      "mutant": "8c4b47e759f0a025769056914d01ba295e96fb8c156b00d6d2fd2ce320de5482",
+      "restored": true,
+      "restored_sha256_before_lint": "1cdef70c22a569eacd197d16df88af36b8713b7d08d633da08740d0247eea38c"
+    }
+  },
+  "gates": {
+    "affected": "pass",
+    "ordinary_post_lint": "pass",
+    "clippy_all_targets_D_warnings": "pass",
+    "size_budget": "pass",
+    "product_diff_check": "pass"
+  },
+  "independent_security_review": "requested from orchestrator; pending",
+  "parent_obligations": [
+    "full platform gates/main CI",
+    "owner-data rehearsal",
+    "whole-app cutover"
+  ]
+}

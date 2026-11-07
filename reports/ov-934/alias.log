@@ -1,0 +1,20 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ffi-guard)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.34s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-2255111212b00e32)
+
+running 5 tests
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_engine_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_legacy_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_engine_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_legacy_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_refuse_ambiguity_and_keep_workspace_boundary ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 490 filtered out; finished in 0.16s
+
+
+exit=0, stopped=None

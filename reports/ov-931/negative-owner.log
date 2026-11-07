@@ -1,0 +1,27 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.57s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-2255111212b00e32)
+
+running 1 test
+test workflow_ownership::legacy_first_tests::workflow_ownership_existing_legacy_terminal_refuses_before_any_effect ... 
+thread 'workflow_ownership::legacy_first_tests::workflow_ownership_existing_legacy_terminal_refuses_before_any_effect' (827273827) panicked at crates/store/src/workflow_ownership.rs:93:59:
+assertion `left == right` failed
+  left: Ok(1)
+ right: Err(Resource)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    workflow_ownership::legacy_first_tests::workflow_ownership_existing_legacy_terminal_refuses_before_any_effect
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 489 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

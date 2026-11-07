@@ -399,3 +399,6 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
         .filter(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))).count(),1);
     drop(link);host.close().await;
 }
+
+#[path = "workflow_service/safety.rs"]
+mod safety;

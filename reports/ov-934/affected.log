@@ -1,0 +1,138 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+affected phase: ['test', '--offline', '-p', 'farcooler-daemon', '-p', 'farcooler-store', '-p', 'farcooler-protocol', '--lib', 'workflow_', '--', '--nocapture']
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-934-workflow-service-fixes/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 30.64s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 62 tests
+test ci_canary::tests::a_workflow_run_of_another_workflow_is_not_the_trains ... ok
+test ci_watch::tests::a_commit_s_runs_count_each_workflow_once ... ok
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test landing::tests::a_merge_queue_no_workflow_answers_warns_it_will_wait_forever ... ok
+test landing::tests::a_workflow_runs_on_merge_group_only_in_its_code ... ok
+test landing::tests::deployment_workflow_and_code_scanning_rules_lean_to_pull_requests ... ok
+test landing_read::tests::a_planted_workflow_without_merge_group_is_seen_and_one_with_it_is_too ... ok
+test landing_read::tests::a_workflow_in_a_subdirectory_does_not_run_so_it_does_not_count ... ok
+test landing_read::tests::a_workflow_that_cannot_be_read_leaves_the_answer_unread ... ok
+test workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes ... device change=0 publication=true
+device change=0 publication=false
+device change=1 publication=true
+device change=1 publication=false
+device change=2 publication=true
+device change=2 publication=false
+device change=3 publication=true
+device change=3 publication=false
+device change=4 publication=true
+device change=4 publication=false
+device change=5 publication=true
+device change=5 publication=false
+device change=6 publication=true
+device change=6 publication=false
+ok
+test workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes ... orchestrator change=0
+orchestrator change=1
+orchestrator change=2
+orchestrator change=3
+orchestrator change=4
+ok
+test workflow_runtime::coding_landing::failure_tests::workflow_coding_remote_rejected_update_records_exit_without_acceptance ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpfCHGky/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... 
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2711 filtered out; finished in 5.48s
+
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpT1YYN5/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpcYduvu/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpmajGAw/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_receipt_file_identity_and_size ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpzFHt3r/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpWx6Y3M/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpKSljq0/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmplZBZFH/private-remote.git
+ * [new branch]      HEAD -> main
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmplZBZFH/private-remote.git
+   23219b3..38702f6  38702f67f8927a2b2baf11178c9eb19e8be8cb48 -> main
+ok
+test workflow_runtime::coding_native::recovery_tests::workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch ... ok
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again ... ok
+test workflow_runtime::coding_tests::workflow_coding_adapted_person_review_and_optional_archetype ... ok
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+test workflow_runtime::coding_tests::workflow_coding_approval_is_exact_and_configuration_cannot_change_admitted_work ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_fact ... ok
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... ok
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... ok
+test workflow_runtime::coding_tests::workflow_coding_foreign_provider_binding_cannot_settle_success ... ok
+test workflow_runtime::coding_tests::workflow_coding_landing_cas_refuses_changed_base_and_retains_uncertainty ... ok
+test workflow_runtime::coding_tests::workflow_coding_native_launch_pins_existing_hooks_without_installing_or_launching ... ok
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... ok
+test workflow_runtime::coding_tests::workflow_coding_reviewer_rejection_has_bounded_rework ... ok
+test workflow_runtime::coding_tests::workflow_coding_visible_git_without_process_settlement_remains_uncertain ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated ... 
+thread 'workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated' (827697899) panicked at crates/daemon/src/workflow_runtime/tests.rs:527:5:
+assertion failed: runtime.pump(100).await.is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+ok
+test workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission ... ok
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::wire_commands::semantic_review_tests::workflow_wire_semantic_review_requires_exact_observation_and_principal ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_approval_preserve_policy ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
+test workflow_service::tests::workflow_service_availability_tracks_failed_owner_and_join_before_restart ... ok
+
+failures:
+
+failures:
+    workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated
+
+test result: FAILED. 61 passed; 1 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 79.99s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

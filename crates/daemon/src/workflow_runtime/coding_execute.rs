@@ -1,6 +1,6 @@
 //! Configured execution and fact-based reconciliation. Nothing here grants wire authority.
 use super::*;
-use super::coding::FileValidation;
+use super::coding::{FileValidation, PinnedDefinition};
 use super::coding::sha;
 use farcooler_store::board_ci::CiStatus;
 
@@ -65,6 +65,11 @@ impl Runtime {
         Ok(bytes)
     }
     pub(super) fn coding_command(&self, binding: &Binding) -> Result<CodingCommand> {
+        self.bound_command(binding, true)
+    }
+    // Reconstruct immutable expected argv/environment without reading mutable
+    // launch files. Only fresh execution validates those files.
+    fn bound_command(&self, binding: &Binding, launch: bool) -> Result<CodingCommand> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         let operation = &binding.effect.operation;
         let EffectKind::Execute(kind) = &binding.effect.kind else { return Err(Error::Refused("not an execution")); };
@@ -72,8 +77,8 @@ impl Runtime {
             StageKind::Build => match &config.harness {
                 CodingHarness::Command(command) => command.clone(),
                 CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
-                    if let Some(settings) = settings { settings.verify()?; }
-                    if let Some(hooks) = project_hooks {
+                    if let Some(settings) = settings.as_ref().filter(|_| launch) { settings.verify()?; }
+                    if let Some(hooks) = project_hooks.as_ref().filter(|_| launch) {
                         let relative = hooks.path.strip_prefix(&config.repository)
                             .map_err(|_| Error::Refused("foreign native project hooks"))?;
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
@@ -139,7 +144,8 @@ impl Runtime {
         }
         let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
         let item = state.items.get(&binding.effect.item).ok_or(Error::Refused("missing item"))?;
-        self.validate_definition(&item.definition)?;
+        let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
+        config.validate_pinned_definition(&item.definition)?;
         if let EffectKind::Execute(_) = &binding.effect.kind {
             if !item.definition.stages.iter().any(|s| s.operation == binding.effect.operation) {
                 return Err(Error::Refused("foreign coding operation"));
@@ -162,7 +168,7 @@ impl Runtime {
             binding.iteration, &binding.base);
         if self.is_native_build(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
             self.cancel_interrupted_native(&original_binding).await?;
-            let command = self.coding_command(&original_binding)?;
+            let command = self.bound_command(&original_binding, false)?;
             let fact = ProcessFact { binding: original_binding.clone(), argv: command.argv,
                 environment: command.environment, exit: None,
                 log_digest: digest(&self.bytes(&self.process_log(&original_binding))?) };
@@ -180,6 +186,7 @@ impl Runtime {
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         self.check_binding(workspace, binding)?;
         if let EffectKind::Stop { operation } = &binding.effect.kind { return self.stop_coding(binding, operation).await; }
+        self.validate_definition(&self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?.items[&binding.effect.item].definition)?;
         let tree = self.tree(binding);
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
         match kind {
@@ -249,7 +256,7 @@ impl Runtime {
         if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Review(_) | StageKind::Ci) {
             let raw = self.bytes(&self.fact_path(binding))?;
             let fact: ProcessFact = serde_json::from_slice(&raw)?;
-            let command = self.coding_command(binding)?;
+            let command = self.bound_command(binding, false)?;
             if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
                 || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
                 return Err(Error::Refused("configured process receipt mismatch"));

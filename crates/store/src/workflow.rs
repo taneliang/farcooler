@@ -13,6 +13,8 @@ pub enum WorkflowError {
     Encoding(#[from] serde_json::Error),
     #[error("command identity was reused with different content")]
     IdentityConflict,
+    #[error("workflow item matches multiple tasks in its workspace")]
+    AmbiguousTask,
     #[error("workflow input exceeds the admission bound")]
     Oversized,
 }
