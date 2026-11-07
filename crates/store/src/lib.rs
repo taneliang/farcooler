@@ -91,6 +91,7 @@ pub use workspaces::{Vacated, valid_prefix};
 
 pub mod workflow_publication;
 pub mod workflow_notices;
+pub mod workflow_overlay;
 
 mod workflow_ownership;
 mod workflow_projection;

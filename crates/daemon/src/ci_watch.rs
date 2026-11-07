@@ -400,6 +400,10 @@ pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
             wanted.entry(landing.workspace_id).or_default().insert(subject);
         }
     }
+    // A landing group's pushed commit, from the engine's state (ov-958).
+    for (workspace, subject) in svc.store.workflow_ci_subjects().unwrap_or_default() {
+        wanted.entry(workspace).or_default().insert(subject);
+    }
     // The pages' own file reads them, so nothing here names pages.
     for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {
         wanted.entry(workspace).or_default().insert(subject);

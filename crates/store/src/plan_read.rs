@@ -427,6 +427,23 @@ impl Store {
             });
         }
         let ci = ci_of(&conn, workspace)?;
+        // The engine's landing groups draw as landings too (ov-958); their tickets are named here.
+        drop(conn);
+        for group in self.workflow_groups(workspace)? {
+            let read = group.pushed_sha.as_deref().map(crate::board_ci::sha_subject).and_then(|s| ci.iter().find(|c| c.subject == s));
+            for task in &group.tickets {
+                if statuses.contains_key(task) {
+                    named.insert(*task, ());
+                }
+            }
+            let summary = group.tickets.iter().filter_map(|t| statuses.get(t)).map(|c| sentence(&c.title)).collect::<Vec<_>>().join("; ");
+            let landing = group.landing(workspace, read);
+            landings.push(LandingView {
+                title: landing_title(&landing), landing, summary, spend: Spend::default(),
+                phase: group.phase(read), phase_since: group.since,
+            });
+        }
+        let conn = self.conn();
         let mut board_counts = StatusCounts::default();
         for card in statuses.values() {
             board_counts.add(card.status);
