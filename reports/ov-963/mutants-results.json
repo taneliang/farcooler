@@ -586,5 +586,17 @@
   "built": true,
   "exit": 101,
   "pass": true
+ },
+ "inert-journal-deleted": {
+  "want": [
+   "store",
+   "engine_cutover::tests::safety_steps"
+  ],
+  "red": [
+   "engine_cutover::tests::safety_steps::an_inert_journal_is_moved_aside_whole_not_deleted"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
  }
 }

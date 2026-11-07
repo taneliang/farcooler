@@ -78,3 +78,25 @@ fn a_file_that_fails_its_integrity_check_is_never_backed_up_or_committed() {
     untouched_after_refusal(&path);
     assert_ne!(bytes(&path), bytes(&artifact_dir(&path).join("baseline.db")));
 }
+
+#[test]
+fn an_inert_journal_is_moved_aside_whole_not_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("db.sqlite");
+    drop(Store::open(&path).unwrap());
+    let journal = tmp.path().join("db.sqlite-journal");
+    let mut torn = vec![0u8; 512];
+    torn[100..108].copy_from_slice(b"evidence");
+    std::fs::write(&journal, &torn).unwrap();
+    transfer::clear_inert_journal(&path).unwrap();
+    assert!(!journal.exists(), "SQLite sees no journal beside the file");
+    let kept: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("db.sqlite-journal.inert-")).collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(bytes(&kept[0]), torn);
+    // A second one does not overwrite the first.
+    std::fs::write(&journal, &torn[..256]).unwrap();
+    transfer::clear_inert_journal(&path).unwrap();
+    let count = std::fs::read_dir(tmp.path()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("db.sqlite-journal.inert-")).count();
+    assert_eq!(count, 2);
+}

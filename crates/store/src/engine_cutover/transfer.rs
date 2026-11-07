@@ -69,7 +69,8 @@ pub(super) fn refuse_sidecars(db: &Path) -> Result<()> {
 /// A journal with no header yet is not hot: its writer died before any page
 /// reached the database, as a process killed mid-transaction leaves it, whatever
 /// its length. SQLite neither replays nor removes one, and it would refuse the
-/// transfer forever. Under the proof, nothing else can own it.
+/// transfer forever. Under the proof, nothing else can own it. It is kept beside
+/// the database as `-journal.inert-N`, a name SQLite ignores.
 pub(super) fn clear_inert_journal(db: &Path) -> Result<()> {
     startup::settle_journal(db)?;
     let mut name = db.as_os_str().to_owned();
@@ -78,7 +79,14 @@ pub(super) fn clear_inert_journal(db: &Path) -> Result<()> {
     if fs::metadata(&journal).is_ok_and(|m| m.is_file()) {
         let mut first = [0u8; 1];
         let read = File::open(&journal)?.read(&mut first)?;
-        if read == 0 || first[0] == 0 { fs::remove_file(&journal)?; }
+        if read == 0 || first[0] == 0 {
+            // Moved aside, not deleted: after a power cut with the drive cache out
+            // of order this is the only trace of what the writer was doing.
+            let kept = (1..).map(|n| { let mut name = db.as_os_str().to_owned(); name.push(format!("-journal.inert-{n}")); PathBuf::from(name) })
+                .find(|p| fs::symlink_metadata(p).is_err()).expect("an unused name");
+            fs::rename(&journal, &kept)?;
+            sync_parent(db)?;
+        }
     }
     refuse_sidecars(db)
 }

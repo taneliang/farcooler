@@ -74,6 +74,7 @@ MUTANTS = [
  ('no-restore-compare', [(C, '    if transfer::db_hash(&restore)? != snapshot.db_hash || restored != snapshot.manifest { return refuse("independent restore differs from the live database"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
  ('no-live-rehash', [(C, '    if transfer::db_hash(db)? != snapshot.db_hash { return refuse("database changed during the backup"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
  ('no-quick-check', [(C, '    if check != "ok" { return refuse("closed database integrity check failed"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
+ ('inert-journal-deleted', [(T, 'fs::rename(&journal, &kept)?;\n            sync_parent(db)?;', 'fs::remove_file(&journal)?; let _ = kept;')], ('store', 'engine_cutover::tests::safety_steps')),
 ]
 missing = [b for b in BOUNDARIES if not any(isinstance(m[2], list) and b in m[2] for m in MUTANTS)]
 assert not missing, f'boundaries with no mutant: {missing}'

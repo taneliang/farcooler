@@ -91,7 +91,9 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 // Test seam: damage a file at a named point of the backup, as a failing disk
 // would, so each safety step below is shown to refuse. Empty in a shipped build.
 #[cfg(test)]
-thread_local! { pub(super) static TAMPER: std::cell::RefCell<std::collections::HashMap<&'static str, Box<dyn FnOnce(&Path)>>> = Default::default(); }
+type Tamper = std::cell::RefCell<std::collections::HashMap<&'static str, Box<dyn FnOnce(&Path)>>>;
+#[cfg(test)]
+thread_local! { pub(super) static TAMPER: Tamper = Default::default(); }
 #[cfg(test)]
 fn tamper(point: &'static str, file: &Path) { if let Some(hook) = TAMPER.with(|h| h.borrow_mut().remove(point)) { hook(file); } }
 #[cfg(not(test))]
