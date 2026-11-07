@@ -187,6 +187,10 @@ pub enum Ensured {
     /// newer daemon, and `status --json`'s `runnerIsNewer` says why the
     /// builds differ.
     KeptNewer,
+    /// One was running from different source, and left running: a cutover
+    /// is unfinished on this runner and this build can neither finish nor
+    /// recover it. Only the build that froze the database can (ov-963 M3).
+    KeptHeld,
 }
 
 impl Ensured {
@@ -196,6 +200,7 @@ impl Ensured {
             Ensured::Started => "started",
             Ensured::Replaced => "replaced",
             Ensured::KeptNewer => "kept_newer",
+            Ensured::KeptHeld => "kept_held",
         }
     }
 }
@@ -228,6 +233,7 @@ async fn ensure_in(
     let mut link = match dial(socket).await {
         Ok(link) => link,
         Err(ClientError::Connect(_)) => {
+            if cutover_stranded_here(database) { return Err(CUTOVER_STRANDED.into()); }
             spawn_daemon()?;
             let started = wait_for(socket).await?;
             return Ok((Ensured::Started, started.daemon_build().to_string()));
@@ -240,7 +246,7 @@ async fn ensure_in(
         // it either, a replacement would only refuse again, and the refusal
         // is passed on as it is.
         Err(refused @ ClientError::Daemon { .. }) => {
-            if !schema_of(database).is_none_or(|s| s.opens_here()) {
+            if !schema_of(database).is_none_or(|s| s.opens_here()) || cutover_stranded_here(database) {
                 return Err(Box::new(refused));
             }
             let Some(pid) = peer_of(socket).await else {
@@ -266,6 +272,12 @@ async fn ensure_in(
     // replacing used to cost every agent transcript and then, where this
     // build can't open the database, start a daemon that refuses everyone.
     let running = link.daemon_build().to_string();
+    // The same question for an attempt in flight: the running daemon is the only
+    // one that can finish or recover it, so replacing it would strand the runner.
+    if cutover_stranded_here(database) {
+        tracing::info!(running, ours = farcooler_protocol::BUILD, "leaving the daemon that holds an unfinished cutover");
+        return Ok((Ensured::KeptHeld, running));
+    }
     if schema_of(database).is_some_and(|s| s.newer_than_here()) {
         tracing::info!(running, ours = farcooler_protocol::BUILD, "leaving a newer local daemon running");
         return Ok((Ensured::KeptNewer, running));
@@ -290,6 +302,20 @@ async fn ensure_in(
         .into());
     }
     Ok((Ensured::Replaced, build))
+}
+
+const CUTOVER_STRANDED: &str = "A cutover started on this runner by another build is unfinished, and this build can't finish or undo it. Reinstall the build that started it, then finish or recover there.";
+
+/// A cutover is frozen in `database` at a schema this build does not write:
+/// recovery opens only the current schema, and replaying the upgrade would run
+/// this build's registry, so neither Finish nor Recover can work here (ov-963 M3).
+/// Read only; a file this cannot read is not called stranded.
+fn cutover_stranded_here(database: &std::path::Path) -> bool {
+    use farcooler_store::engine_cutover::startup;
+    if !startup::artifact_dir(database).join("baseline.json").exists() { return false; }
+    let Some(schema) = schema_of(database) else { return false };
+    schema.version != farcooler_store::DatabaseSchema::here()
+        && startup::read_authority(database).ok().flatten().is_some_and(|a| a.phase != "legacy")
 }
 
 /// What `database` says about who may open it, or `None` where there's no
@@ -663,6 +689,64 @@ mod tests {
         assert_eq!(build, "a-newer-build");
         assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
         serving.abort();
+    }
+
+    /// A database frozen mid-cutover by a build whose schema this one does not
+    /// share: the attempt's artifacts, an authority past legacy, and a version
+    /// one behind this build's.
+    fn frozen_by_another_build(dir: &std::path::Path) -> PathBuf {
+        let path = dir.join("farcooler.db");
+        drop(farcooler_store::Store::open(&path).expect("store"));
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "UPDATE engine_cutover_authority SET phase = 'quiesced';
+             UPDATE meta SET value = CAST(value AS INTEGER) - 1 WHERE key = 'schema_version';",
+        )
+        .expect("freeze");
+        let artifacts = farcooler_store::engine_cutover::startup::artifact_dir(&path);
+        std::fs::create_dir(&artifacts).expect("artifacts");
+        std::fs::write(artifacts.join("baseline.json"), b"{}").expect("baseline");
+        path
+    }
+
+    /// M3 (ov-963): an update lands mid-attempt. This build cannot finish the
+    /// attempt or Recover it, so the recovery daemon that can is left running.
+    #[tokio::test]
+    async fn a_cutover_this_build_cannot_finish_keeps_the_daemon_that_can() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let database = frozen_by_another_build(dir.path());
+        let daemon = OtherBuild::default();
+        let server = farcooler_transport::UnixListenerServer::bind(&socket).expect("bind");
+        let serving = {
+            let daemon = daemon.clone();
+            tokio::spawn(async move {
+                server
+                    .serve(move |_| {
+                        Some((farcooler_transport::HandshakeConfig { daemon_version: "the-build-that-froze-it".into() }, daemon.clone()))
+                    })
+                    .await
+            })
+        };
+        let (ensured, build) = ensure_in(&socket, &database).await.expect("ensured");
+        assert_eq!(ensured, Ensured::KeptHeld);
+        assert_eq!(build, "the-build-that-froze-it");
+        assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
+        serving.abort();
+    }
+
+    /// With nothing listening, starting this build would only refuse everyone.
+    #[tokio::test]
+    async fn no_daemon_is_started_for_a_cutover_this_build_cannot_finish() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let database = frozen_by_another_build(dir.path());
+        let err = ensure_in(&socket, &database).await.expect_err("refused");
+        assert_eq!(
+            err.to_string(),
+            "A cutover started on this runner by another build is unfinished, and this build can't finish or undo it. Reinstall the build that started it, then finish or recover there."
+        );
+        assert!(!socket.exists(), "nothing was started");
     }
 
     /// And a refusing daemon on a database this build can't open either is
