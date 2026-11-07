@@ -15,6 +15,13 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
     Ok(found)
 }
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
+    // Start fences a ticket's subagent records and blocks (a run owns them), so it waits for the orchestrator to
+    // settle them: otherwise a stopped subagent could never end and a block could never clear (ov-965).
+    if let Command::Start { item, .. } = &input.command {
+        let Some(task) = task(tx,input,item)? else { return Ok(true) };
+        return Ok(!tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL)
+            OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=?1)", [task], |r| r.get::<_,bool>(0))?);
+    }
     let Command::Enqueue { item, definition, .. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
     // A migrated card must be retained-intent. Its history stays inert (a landed line, a settled

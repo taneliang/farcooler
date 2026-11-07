@@ -422,3 +422,26 @@ fn a_legacy_67_file_prepares_and_commits_through_the_real_path() {
     let (_, plan) = transfer::bound_plan(&path, &store).unwrap();
     store.engine_verify(&plan).unwrap();
 }
+
+/// ov-965 B1: Start would keep a ticket's open subagents and blocks and then fence them, so a stopped subagent
+/// could never end (the daemon read "Stopping" for good) and a block could never clear. Start is refused while
+/// either is open, as Enqueue is; once they are settled it goes through, and the run's own fences are intact.
+#[test]
+fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
+    for phase in PHASES {
+        let b = board(phase);
+        let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
+        let tracker = Definition::tracker("owner");
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone() }).result.is_ok();
+        s.record_worker(t, &worker("a1"), user).unwrap();
+        assert!(!start(&b, "start-1"), "{phase:?}: an open subagent holds Start back");
+        assert_eq!(b.resting(), vec![t], "{phase:?}: and the ticket stays at rest");
+        s.end_worker(t, "claude", Some("a1"), EndReason::Finished, user).unwrap_or_else(|e| panic!("{phase:?}: so it can still end: {e:?}"));
+        s.set_block(t, b.other, Some("because")).unwrap();
+        assert!(!start(&b, "start-2"), "{phase:?}: an open block holds Start back");
+        s.unblock(t, b.other).unwrap_or_else(|e| panic!("{phase:?}: so it can still clear: {e:?}"));
+        assert!(start(&b, "start-3"), "{phase:?}: settled, Start goes through");
+        assert!(s.record_worker(t, &worker("a2"), user).is_err(), "{phase:?}: and the run's records are fenced");
+    }
+}

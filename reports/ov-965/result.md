@@ -35,3 +35,11 @@ Waits, holds, blocks and subagent records already worked on a ticket at rest at 
 - **At `legacy`, `set_block` on a card with a run isn't refused.** The block fences are phase-gated, and `set_block` has no `refuse_if_owned`. This was already true before this card; the new raw-SQL test records it.
 - **A run started from a ticket keeps its open waits, blocks and subagents,** now under the run's fences.
 - Not run: the owner-copy rehearsal, the apps, Linux.
+
+## Fix round: Start settles a ticket's subagents and blocks first (B1)
+
+Review B1 was right: Start kept a ticket's open `ticket_work` and blocks and then fenced them, so `end_agent`/`end_worker` failed at both phases, `unblock` failed after release, and the daemon's stop hook left the agent at "Stopping".
+
+Decision: Start is refused (as Enqueue already is) while the ticket has an open subagent record or any block (`workflow_ownership::available`). The other option, leaving those rows writable on a run's card, would open the run's own `ticket_work` and `task_blocks` guards. Nothing is lost: the refusal leaves the ticket at rest, where both rows stay writable, so the orchestrator ends them and Start goes through.
+
+Test `start_waits_for_a_tickets_subagents_and_blocks_to_settle` (stage_only.rs) ran red at legacy first, and runs at legacy and released. Store `engine_cutover` (118) and `workflow` (51) filters pass. Not run: the daemon suite; the daemon path is unreachable now, since an agent can't be open when Start succeeds.
