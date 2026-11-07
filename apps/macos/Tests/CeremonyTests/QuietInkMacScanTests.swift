@@ -47,7 +47,6 @@ struct QuietInkMacScanTests {
         // Floating panels and popovers: Liquid Glass or the popover's material.
         "DaemonSkew": "the update card, in a popover",
         "NativeAgent/ComposerStyle": "the composer's marks, on its glass box; NativeComposerAppearanceTests measures them",
-        "QuickCreate": "the quick-create panel, a floating panel's glass",
         "TitleActivity": "the Spent Today popover",
         "TitleBarStatus": "toolbar items and the popover they open",
         "TitleConsole": "the title console's palette, a floating panel's glass",

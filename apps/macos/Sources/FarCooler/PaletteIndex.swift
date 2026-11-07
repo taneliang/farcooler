@@ -12,10 +12,9 @@ enum PaletteAction: Hashable {
     case openTerminal(worktree: String, terminal: String)
     case openWorktree(String)
     case newTerminal(worktree: String)
-    /// Carries what was typed, because in this panel the query IS the
-    /// description far more often than it is a search for one. Its title is
-    /// "New Worktree…": it makes a worktree and files no task.
-    case newWorktree(String)
+    /// "New Worktree…": opens the sheet that makes a worktree you name
+    /// yourself. It files no task, and starts none.
+    case newWorktree
     /// A workspace: its conversation beside its board.
     case openWorkspace(host: String, id: String)
     /// Go to Orchestrator: the workspace, with the keyboard in its
@@ -294,15 +293,15 @@ enum PaletteIndex {
                     symbol: "plus",
                     kind: "action"))
         }
-        let described = query.trimmingCharacters(in: .whitespacesAndNewlines)
         actions.append(
             PaletteEntry(
                 id: "new-task",
-                action: .newWorktree(described),
-                title: described.isEmpty ? "New Worktree…" : "New Worktree “\(described)”…",
-                detail: "Describe it and go",
-                symbol: "sparkle",
+                action: .newWorktree,
+                title: "New Worktree…",
+                detail: "Name it and pick a branch",
+                symbol: "plus",
                 kind: "action"))
+        let described = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Only where a runner has workspaces to make one on.
         if offersNewWorkspace {
             actions.append(

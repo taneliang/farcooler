@@ -80,7 +80,7 @@ struct PaletteWorkspaceTests {
         let go = PaletteIndex.matching("go to orch", in: [Self.lane], workspaces: [Self.billing])
         #expect(go.first?.action == .openOrchestrator(host: "", workspace: "ws-bil"))
         // And creation is still last, under anything to go to.
-        #expect(found.last?.action == .newWorktree("billing"))
+        #expect(found.last?.action == .newWorktree)
     }
 
     /// New Workspace… is offered, named what was typed, below everything
@@ -100,7 +100,7 @@ struct PaletteWorkspaceTests {
     @Test("Both creation items end in an ellipsis")
     func creationItemsEndInAnEllipsis() {
         let found = PaletteIndex.matching("billing", in: [Self.lane], workspaces: [Self.billing], offersNewWorkspace: true)
-        #expect(found.first { $0.id == "new-task" }?.title == "New Worktree “billing”…")
+        #expect(found.first { $0.id == "new-task" }?.title == "New Worktree…")
         #expect(found.first { $0.id == "new-workspace" }?.title == "New Workspace “billing”…")
     }
 

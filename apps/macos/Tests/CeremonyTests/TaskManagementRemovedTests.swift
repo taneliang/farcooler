@@ -35,7 +35,7 @@ struct TaskManagementRemovedTests {
         }
     }
 
-    private static func macSources() throws -> [(String, String)] {
+    static func macSources() throws -> [(String, String)] {
         let walker = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         return try walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }.map {
             ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8))

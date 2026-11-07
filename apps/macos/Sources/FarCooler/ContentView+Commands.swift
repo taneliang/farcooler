@@ -210,7 +210,7 @@ extension ContentView {
         let scene = selection.flatMap(workspaceScene)
         let terminals = allTerminals
         var focus = MainWindowFocus(
-            overlayOpen: showQuickCreate || console.console.isOpen, taskOpen: Self.taskOpen(selection),
+            overlayOpen: console.console.isOpen, taskOpen: Self.taskOpen(selection),
             hasNavigator: scene?.board != nil)
         focus.sidebarShown = !navigatorHidden
         focus.hasWorktree = currentWorktree != nil
@@ -303,13 +303,19 @@ extension ContentView {
             }
 
         case .newWorktree:
-            // Only reachable with a project registered; the panel has nothing
+            // Only reachable with a project registered; the sheet has nothing
             // to create into otherwise.
             if store.repositories.isEmpty {
                 showAddRepository = true
             } else {
+                newWorktreeIntent = NewWorktreeIntent()
+            }
+        case .resumeBranch:
+            if store.repositories.isEmpty {
+                showAddRepository = true
+            } else {
                 if lastProject.isEmpty, let id = defaultProjectID { lastProject = id }
-                showQuickCreate = true
+                showResumeBranch = true
             }
         case .addRepository: showAddRepository = true
         case .newWorkspace:
@@ -457,18 +463,12 @@ extension ContentView {
         case .newWorkspace(let name):
             newWorkspaceName = NewWorkspaceName(name: name)
 
-        case .newWorktree(let described):
+        case .newWorktree:
             if store.repositories.isEmpty {
                 showAddRepository = true
                 return
             }
-            if lastProject.isEmpty, let id = defaultProjectID { lastProject = id }
-            // What was typed into the palette carries over as the description,
-            // because in this panel it nearly always was one. It never
-            // overwrites a draft already in progress — that draft is often the
-            // thing someone opened the palette to go and look something up for.
-            if !described.isEmpty, taskDraft.isEmpty { taskDraft = described }
-            showQuickCreate = true
+            newWorktreeIntent = NewWorktreeIntent()
 
         case .openFile(let worktree, let path):
             guard let ws = store.fleet.worktrees.first(where: { $0.id == worktree }) else { return }

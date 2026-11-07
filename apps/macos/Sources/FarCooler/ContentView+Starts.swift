@@ -2,86 +2,19 @@ import AgentKit
 import AppKit
 import SwiftUI
 
-/// Starts: starting a task, resuming a branch, and opening a terminal or a shell.
+/// Starts: resuming a branch, and opening a terminal or a shell. Tasks are the
+/// orchestrator's to start; nothing here does it (ov-951).
 ///
 /// A pure move out of `ContentView.swift`, which had outgrown its size ceiling;
 /// nothing here changed when it moved.
 extension ContentView {
-    /// Start a task and go to it as soon as it exists.
-    ///
-    /// Selects the worktree and its agent's terminal the moment
-    /// `DaemonClient.startTask` has made them, which is before the agent has
-    /// booted: the description travels as the agent's launch argument, so
-    /// nothing is left to wait for. The point is to be looking at the thing
-    /// you asked for while it starts. (This comment said so from the start,
-    /// while `startTask` in fact waited up to a minute for the agent to look
-    /// idle before returning. It is true now.)
-    ///
-    /// `host` is handed in rather than re-derived from `project` here — see
-    /// `QuickCreate.chosen`, which resolves both together from the same
-    /// picker selection. A lookup repeated at this end, from `project`
-    /// alone, is exactly the shape that goes silently wrong: `project` can
-    /// name a repository that has since been removed, or one on a runner
-    /// whose `repositories` has not been re-read since a reconnect, and a
-    /// lookup that finds nothing has to be answered with a refusal, not a
-    /// fallback to this Mac.
-    func startTask(_ request: TaskRequest) async -> TaskSubmission.Outcome {
-        let host = request.host
-        if let client = store.clients[host], client.state == .notInstalled {
-            return .failed("Far Cooler isn’t installed on this runner, so the agent wasn’t started.")
-        }
-        guard store.refusal(for: host) == nil, let client = store.clients[host] else {
-            return .failed(
-                "Can’t reach this runner right now, so the agent wasn’t started. Try again once it’s back.")
-        }
-        let outcome = await client.startTask(
-            project: request.project,
-            description: request.description,
-            name: request.name,
-            agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset,
-            reusing: request.worktree,
-            // Claimed for the workspace the window is in, when the new
-            // worktree is going into that workspace's repository, and
-            // otherwise for that repository's Main.
-            workspace: Self.claim(
-                newWorktreeIn: request.project, on: host, from: selection, in: store.fleet),
-            // After the start has returned and the panel has let go of the
-            // draft, so it's said over the pane instead.
-            undelivered: { sentence in errorBanner = sentence })
-        switch outcome {
-        case .started(let worktree, let terminal, let name):
-            // By the ids the create calls returned, not by a later look at
-            // the fleet — which, this soon, may not have the terminal yet.
-            // A new worktree with no task yet is opened whole, under the
-            // workspace it was claimed for.
-            selection = arrival(host: host, worktree: worktree, terminal: terminal)
-            keyPane = PaneRef(host: host, worktree: worktree, terminal: terminal)
-            return .started(name: name)
-        case .failed(let sentence, let made):
-            if let made { reveal(made.id) }
-            // After the selection change, which clears the banner. The panel
-            // shows it when it is still open; this is for when it is not.
-            if !showQuickCreate { errorBanner = sentence }
-            // The worktree it made, so starting again goes on in it.
-            return .failed(
-                sentence,
-                left: made.map {
-                    TaskSubmission.Left(
-                        host: host, project: request.project, worktree: $0.id, name: $0.name)
-                })
-        }
-    }
-
     /// Pick up an existing branch and open an agent in it.
     ///
-    /// Same landing as starting a task, because it is the same act from the
-    /// user's side: there is now a worktree with an agent in it and you want to
-    /// be looking at it. The only difference is where the code came from.
-    ///
-    /// Routed the same way `startTask` is: `host` comes from the resume
-    /// sheet's own picker selection rather than a `project`-keyed lookup
-    /// repeated here — see `startTask`'s own doc comment for why that lookup
-    /// belongs where the selection was made, not downstream of it.
+    /// There is now a worktree with an agent in it and you want to be looking
+    /// at it. `host` comes from the resume sheet's own picker selection rather
+    /// than a `project`-keyed lookup repeated here: a repository removed since,
+    /// or on a runner not yet re-read after a reconnect, would otherwise be
+    /// answered with a fallback to this Mac instead of a refusal.
     func resume(branch: String, host: String, project: String, agent: String) {
         Task {
             let key = ActionKey(verb: .resumeBranch, host: host, target: "\(project) \(branch)")

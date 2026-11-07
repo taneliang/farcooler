@@ -449,8 +449,8 @@ struct WorktreeCallsTests {
         #expect(found == ["src/main.rs"])
     }
 
-    /// Every line those calls sent, worktree or not, and every line starting
-    /// a task sends, parses in the CLI this tree builds.
+    /// Every line those calls sent, worktree or not, and every line making
+    /// a manual worktree sends, parses in the CLI this tree builds.
     @Test func everyLineTheseCallsSendParsesInTheCLI() async throws {
         let cli = try #require(
             Self.cli,
@@ -459,25 +459,6 @@ struct WorktreeCallsTests {
             or cargo build --bin farcooler, or set FARCOOLER_BIN.
             """)
         var lines = await exercise().flatMap(\.sent)
-
-        // `startTask` builds its create from the runner's capabilities, so it
-        // runs against a runner that has all of them.
-        let runner = StartTaskTests.Runner(
-            capabilities: [
-                "workspaces", "terminals", "launch_prompt", "workspace_fork_only", "workstreams",
-            ])
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
-        client.commandRunnerForTesting = { args in runner.answer(args) }
-        client.copyToClipboard = { _ in }
-        _ = await client.startTask(
-            project: "repo", description: "Fix the flaky test", name: "fix-flaky", agent: "claude",
-            workspace: "0198f2c0-0000-7000-8000-0000000000dd")
-        #expect(
-            runner.calls.contains {
-                $0.contains("create") && $0.contains("--fork-only") && $0.contains("--workspace")
-            },
-            "startTask made its worktree: \(runner.calls)")
-        lines += runner.calls
 
         // "New Worktree in X…", claimed for a workspace.
         lines += await Self.madeWorktree(on: ["workspaces", "terminals", "workstreams"])

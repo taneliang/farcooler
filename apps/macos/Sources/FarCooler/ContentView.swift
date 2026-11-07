@@ -92,10 +92,6 @@ struct ContentView: View {
     /// The runner whose settings a Claude login line in Needs You opened,
     /// with the sign-in sheet up (ov-587).
     @State var signInRunner: RunnerChoice?
-    @State var showQuickCreate = false
-    /// The ⌘N panel's start in flight, kept here so it survives the panel
-    /// closing and reopening.
-    @StateObject private var taskSubmission = TaskSubmission()
     @AppStorage("tasks.lastProject") var lastProject = ""
     /// Where the window was when the app last closed, as a `Destination`'s
     /// encoding: the workspace and what's open in it, a task's tab and agent,
@@ -122,13 +118,10 @@ struct ContentView: View {
     @State var treeFold = TreeFoldRequest()
     @State var removeWorktree: Worktree?
     @State var removeRepository: RepositoryToRemove?
-    @State private var showResumeBranch = false
+    @State var showResumeBranch = false
     /// The title bar's field (ov-214, ov-264): ⌘K for the activity, ⌘P for
     /// find. It took the floating palette's place.
     @State var console = TitleConsoleModel()
-    /// Quick-create's draft, reachable from here so that what was typed into
-    /// the palette arrives in the panel that acts on it. See `perform`.
-    @AppStorage("tasks.draft") var taskDraft = ""
     /// One divider resize at a time. See `resizeDivider`.
     @State var resizingDivider = false
     /// What an editor said when it would not start.
@@ -432,7 +425,7 @@ struct ContentView: View {
                 }
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
                     let window = event.window, window === windowBox.window, window.attachedSheet == nil,
-                    !console.console.isOpen, !showQuickCreate, !jumpBar.active,
+                    !console.console.isOpen, !jumpBar.active,
                     EscapeBack.goesBack(
                         responder: window.firstResponder, selection: selection,
                         focusColumn: focusColumn,
@@ -688,35 +681,8 @@ struct ContentView: View {
                 }
             )
         }
-        // An overlay, not a sheet. A sheet dims the window and takes it over,
-        // which is the wrong weight for something you use several times in a
-        // row and want to see the results of behind.
-        .overlay(alignment: .top) {
-            if showQuickCreate {
-                QuickCreate(
-                    projects: store.repositories,
-                    project: $lastProject,
-                    onSubmit: { request in
-                        lastProject = request.project
-                        return await startTask(request)
-                    },
-                    onResume: {
-                        showQuickCreate = false
-                        showResumeBranch = true
-                    },
-                    onClose: { showQuickCreate = false },
-                    branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" },
-                    submission: taskSubmission
-                )
-                .padding(.top, 14)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.snappy(duration: 0.16), value: showQuickCreate)
-        // The same weight as quick-create, and for the same reason: an editor
-        // that would not start is something to read and act on, not a decision
-        // to be interrupted for. Below quick-create's padding so the two do not
-        // land on top of each other in the rare moment both are up.
+        // An overlay, not a sheet: an editor that would not start is something
+        // to read and act on, not a decision to be interrupted for.
         .overlay(alignment: .top) {
             if let editorError {
                 ErrorBanner(message: editorError) { self.editorError = nil }

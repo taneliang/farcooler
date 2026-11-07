@@ -14,6 +14,7 @@ enum AppCommand: String {
     case previousTerminal
     case nextAttention
     case newWorktree
+    case resumeBranch
     case addRepository
     case newWorkspace
     case showBoard
@@ -141,11 +142,13 @@ struct FarCoolerCommands: Commands {
                 .disabled(!(MainWindowFocus.isKey(mainWindow) && mainWindow?.hasWorktree == true))
             // ⌘N, the plainest shortcut in the app, for the thing it is for.
             //
-            // "New Worktree…" and not "New Task…": this makes a worktree and
-            // starts an agent in it, and puts nothing on the board, so "task"
-            // on this item would name the other thing.
+            // "New Worktree…" and not "New Task…": this makes a worktree you
+            // name yourself and puts nothing on the board, so "task" on this
+            // item would name the other thing. Tasks are the orchestrator's.
             Button("New Worktree…") { AppCommand.newWorktree.post() }
                 .keyboardShortcut("n", modifiers: .command)
+                .disabled(!MainWindowFocus.isKey(mainWindow))
+            Button("Resume Branch…") { AppCommand.resumeBranch.post() }
                 .disabled(!MainWindowFocus.isKey(mainWindow))
             Button("New Workspace…") { AppCommand.newWorkspace.post() }
                 .keyboardShortcut("n", modifiers: [.command, .option])
