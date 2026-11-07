@@ -185,12 +185,9 @@ impl Exec {
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
         mut cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
         self.native_hooks()?;
-        // Native builds share one hook socket, so a second one waits here for the first to
-        // finish. Nothing exists yet to clean up if it is cancelled while it waits.
-        let _slot = tokio::select! {
-            slot = self.native_slot.lock() => slot,
-            _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => return Ok(None),
-        };
+        // Native builds share one hook socket. launch_ready admits one at a time; this marks the
+        // socket as held so a Stop's stale-socket cleanup leaves it alone.
+        let _slot = self.native_slot.try_lock().map_err(|_| Error::Refused("native hook socket is busy"))?;
         let socket = self.root.join("h.sock");
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
         let listener = tokio::net::UnixListener::bind(&socket)?;
@@ -346,6 +343,29 @@ else:
         let state = runtime.state("w").unwrap().unwrap();
         for id in ["one", "two"] {
             assert!(state.items[id].stage >= 2 && state.items[id].phase == Phase::Running, "{id}: {state:?}");
+        }
+    }
+    #[tokio::test]
+    async fn workflow_native_build_queued_for_the_hook_socket_is_never_admitted_and_survives_shutdown() {
+        let (dir, mut runtime, _fake) = native("cancel").await;
+        let definition = runtime.configured_definition().unwrap();
+        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "one", definition.clone());
+        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "two", definition);
+        let (stop, receiver) = tokio::sync::watch::channel(false);
+        let started = dir.path().join("started");
+        let task = tokio::spawn(async move { runtime.run(receiver).await.unwrap(); runtime });
+        for _ in 0..500 {
+            if started.exists() { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(started.exists(), "the first native build did not start");
+        // The second build must be held back, not admitted and parked on the socket.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        stop.send(true).unwrap();
+        let runtime = tokio::time::timeout(Duration::from_secs(20), task).await.unwrap().unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        for id in ["one", "two"] {
+            assert_ne!(state.items[id].phase, Phase::Uncertain, "{id}: {state:?}");
         }
     }
     #[tokio::test]

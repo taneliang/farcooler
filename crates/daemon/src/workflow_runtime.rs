@@ -482,6 +482,11 @@ impl Runtime {
                 if let EffectKind::Stop { operation } = &effect.kind {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
                 }
+                // Native builds share one hook socket, so a second waits here, before it is claimed
+                // or admitted: a queued build owns nothing that a cancel or restart must reconcile.
+                let native = matches!(effect.kind, EffectKind::Execute(StageKind::Build))
+                    && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }));
+                if native && running.iter().any(|j| j.native) { continue; }
                 // A stop must always get through; everything else waits for a free slot.
                 if !matches!(effect.kind, EffectKind::Stop { .. }) && running.len() >= self.effect_cap { continue; }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
@@ -531,7 +536,7 @@ impl Runtime {
                     if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, native });
             }
         }
         Ok(())
@@ -629,6 +634,8 @@ struct Running {
     effect: Effect,
     binding: Binding,
     cancel: tokio::sync::watch::Sender<bool>,
+    /// Holds the shared native hook socket.
+    native: bool,
 }
 enum Event {
     Finished(usize, Result<Outcome>),
