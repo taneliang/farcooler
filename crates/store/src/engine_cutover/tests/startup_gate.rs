@@ -149,3 +149,58 @@ fn cutover_connections_sync_fully() {
     let reopened = open_recovery(&path, &owners).unwrap();
     assert_eq!(full(&reopened), (1, 1), "and every recovery open after it");
 }
+
+/// A database exactly as the build one migration back left it, at `phase`,
+/// with the floor that build stamped unless `floor` says otherwise.
+fn one_behind(dir: &std::path::Path, phase: &str, floor: Option<u32>) -> std::path::PathBuf {
+    let path = dir.join("db.sqlite");
+    let behind = crate::migrate::CURRENT_SCHEMA_VERSION - 1;
+    let mut conn = Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+    crate::migrate::migrate_only_to(&mut conn, behind);
+    if let Some(f) = floor { conn.execute("INSERT INTO meta(key,value) VALUES('compatible_down_to',?1)", [f.to_string()]).unwrap(); }
+    conn.execute("UPDATE engine_cutover_authority SET phase=?1 WHERE singleton=1", [phase]).unwrap();
+    path
+}
+fn behind_floor() -> u32 { crate::compat::floor_at(crate::migrate::CURRENT_SCHEMA_VERSION - 1) }
+
+#[test]
+fn a_released_database_one_migration_behind_goes_forward_and_keeps_its_authority() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = one_behind(tmp.path(), "released", Some(behind_floor()));
+    assert_eq!(ordinary_admission(&path).unwrap(), Admission::Existing);
+    let store = Store::open(&path).expect("a released install must migrate forward, not strand");
+    let conn = store.conn();
+    let version: String = conn.query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, crate::migrate::CURRENT_SCHEMA_VERSION.to_string());
+    let phase: String = conn.query_row("SELECT phase FROM engine_cutover_authority", [], |r| r.get(0)).unwrap();
+    assert_eq!(phase, "released");
+    let floor: String = conn.query_row("SELECT value FROM meta WHERE key='compatible_down_to'", [], |r| r.get(0)).unwrap();
+    assert_eq!(floor, crate::compat::COMPATIBLE_DOWN_TO.to_string());
+}
+#[test]
+fn a_database_one_migration_behind_that_is_not_released_or_has_a_wrong_floor_stays_refused_untouched() {
+    for (phase, floor) in [("legacy", Some(behind_floor())), ("quiesced", Some(behind_floor())), ("committed", Some(behind_floor())),
+        ("released", None), ("released", Some(behind_floor() + 1)), ("released", Some(behind_floor() - 1))] {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = one_behind(tmp.path(), phase, floor);
+        let before = bytes(&path);
+        assert!(ordinary_admission(&path).is_err(), "{phase} floor {floor:?} must stay refused");
+        assert!(Store::open(&path).is_err(), "{phase} floor {floor:?} must not open");
+        assert_eq!(before, bytes(&path), "{phase} floor {floor:?}: a refusal writes nothing");
+    }
+}
+#[test]
+fn a_build_with_a_later_migration_admits_released_installs_and_nothing_else() {
+    let next = crate::migrate::CURRENT_SCHEMA_VERSION + 1;
+    for (phase, admitted) in [("released", true), ("legacy", false), ("quiesced", false), ("committed", false)] {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db.sqlite");
+        drop(Store::open(&path).unwrap());
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("UPDATE engine_cutover_authority SET phase=?1", [phase]).unwrap();
+        assert_eq!(startup::inspect_against(&conn, next).is_ok(), admitted, "{phase} at current-1 of a build one migration on");
+        conn.execute("UPDATE meta SET value='1' WHERE key='compatible_down_to'", []).unwrap();
+        assert!(startup::inspect_against(&conn, next).is_err(), "{phase}: a lowered floor is refused");
+    }
+}

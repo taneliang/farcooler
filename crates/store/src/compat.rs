@@ -43,13 +43,19 @@ pub(crate) enum Older {
 /// Counted from the newest migration back, stopping at the first `Refused`
 /// one, rather than written as a number: a number set once for one
 /// compatible migration would go on vouching for whatever came after it.
-pub(crate) const COMPATIBLE_DOWN_TO: u32 = {
-    let mut v = MIGRATIONS.len();
+pub(crate) const COMPATIBLE_DOWN_TO: u32 = floor_at(MIGRATIONS.len() as u32);
+
+/// `COMPATIBLE_DOWN_TO` as a build that stopped at `version` stamped it: the
+/// same count, over only the migrations that build had. Startup holds an older
+/// released database to exactly this, so a missing or hand-lowered floor is
+/// still refused while the database waits to be migrated forward.
+pub(crate) const fn floor_at(version: u32) -> u32 {
+    let mut v = version as usize;
     while v > 0 && matches!(MIGRATIONS[v - 1].1, Older::Welcome) {
         v -= 1;
     }
     v as u32
-};
+}
 
 /// The `compatible_down_to` a newer build stamped, or `None` where no build
 /// did: every database written before the marker existed, which therefore

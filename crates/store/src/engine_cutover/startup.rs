@@ -76,6 +76,16 @@ pub fn read_authority(db: &Path) -> Result<Option<Authority>> {
 }
 
 pub(crate) fn inspect(conn: &Connection) -> Result<Admission> {
+    inspect_against(conn, CURRENT_SCHEMA_VERSION)
+}
+
+/// `inspect` for a build whose schema is `current`. A database below it is
+/// admitted only if it is a RELEASED install: past the cutover, stamped by the
+/// build that wrote it with exactly the floor that build owed it. Anything
+/// else below `current` (no authority table, a legacy, frozen or committed
+/// authority, a missing or hand-moved floor) still goes to the explicit
+/// cutover or recovery. Admission never migrates; `Store::open` does, after.
+pub(crate) fn inspect_against(conn: &Connection, current: u32) -> Result<Admission> {
     let has = |name: &str| -> Result<bool> {
         Ok(conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1", [name], |_| Ok(())).optional()?.is_some())
     };
@@ -85,14 +95,17 @@ pub(crate) fn inspect(conn: &Connection) -> Result<Admission> {
         Ok(raw.and_then(|s| s.parse().ok()))
     };
     let Some(version) = meta("schema_version")? else { return refuse("existing database has no schema version; not a fresh install") };
-    if version > CURRENT_SCHEMA_VERSION { return Ok(Admission::Newer); }
-    if version < CURRENT_SCHEMA_VERSION { return refuse("pre-cutover schema requires the explicit authenticated cutover"); }
-    if meta("compatible_down_to")? != Some(COMPATIBLE_DOWN_TO) { return refuse("compatibility floor is missing or permissive; recovery required"); }
+    if version > current { return Ok(Admission::Newer); }
+    let owed_floor = if version == current { COMPATIBLE_DOWN_TO } else { crate::compat::floor_at(version) };
+    if version < current && !has("engine_cutover_authority")? { return refuse("pre-cutover schema requires the explicit authenticated cutover"); }
+    if meta("compatible_down_to")? != Some(owed_floor) { return refuse("compatibility floor is missing or permissive; recovery required"); }
     if !has("engine_cutover_authority")? { return refuse("authority table missing at current schema"); }
     let phase: String = conn.query_row("SELECT phase FROM engine_cutover_authority WHERE singleton=1", [], |r| r.get(0))
         .map_err(|_| Error::Refused("authority row unreadable".into()))?;
     match phase.as_str() {
-        "legacy" | "released" => Ok(Admission::Existing),
+        "released" => Ok(Admission::Existing),
+        "legacy" if version == current => Ok(Admission::Existing),
+        "legacy" => refuse("pre-cutover schema requires the explicit authenticated cutover"),
         _ => refuse("cutover is frozen or committed; unverified authority is not admitted"),
     }
 }
