@@ -83,13 +83,17 @@ impl CodingConfigExt for CodingConfig {
             let sound_repository = pr.repository.split_once('/').is_some_and(|(owner, repo)| name(owner) && name(repo));
             // Pull requests are pushed to the landing transport, and `gh` is one program with no arguments of its own.
             if !sound_repository || !valid_id(&pr.base) || pr.base.starts_with('-') || pr.base.contains("..")
-                || self.landing.as_ref().is_none_or(|l| l.target != format!("refs/heads/{}", pr.base)) || pr.gh.argv.len() != 1
+                || self.landing.as_ref().is_none_or(|l| l.target != format!("refs/heads/{}", pr.base)) || pr.gh.argv.len() != 1 || pr.gh.argv[0].contains('\'')
             { return Err(Error::Refused("invalid pull request configuration")); }
             pr.gh.validate()?;
             if let Some(remote) = &pr.remote {
                 let url = remote.starts_with("https://") || remote.starts_with("ssh://");
                 let path = std::path::Path::new(remote).is_absolute();
-                if !(url || path) || remote.len() > 500 || remote.bytes().any(|b| b.is_ascii_control() || b == b' ') {
+                // A token in the URL would be written to receipts and process listings: credentials come from `gh`.
+                let authority = remote.split_once("//").map_or("", |(_, rest)| rest.split('/').next().unwrap_or(""));
+                let credentials = if remote.starts_with("https://") { authority.contains('@') }
+                    else if url { authority.split_once('@').is_some_and(|(user, _)| user.contains(':')) } else { false };
+                if !(url || path) || credentials || remote.len() > 500 || remote.bytes().any(|b| b.is_ascii_control() || b == b' ' || b == b'?' || b == b'#') {
                     return Err(Error::Refused("invalid pull request remote"));
                 }
             }

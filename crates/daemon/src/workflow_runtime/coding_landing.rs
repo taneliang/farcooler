@@ -19,15 +19,27 @@ impl Exec {
     /// The git program and the whole environment a push or fetch runs with: nothing inherited,
     /// the repository's guard pins, and no global or system configuration.
     pub(super) async fn git_environment(&self) -> Result<(String, std::collections::BTreeMap<String, String>)> {
+        self.git_environment_for(None).await
+    }
+    /// As `git_environment`, for a call that reaches `remote`: an `https://` or `ssh://` remote is allowed
+    /// that one transport, and the credentials it signs in with. Every other transport stays refused.
+    pub(super) async fn git_environment_for(&self, remote: Option<&str>) -> Result<(String, std::collections::BTreeMap<String, String>)> {
         let git = crate::git_launch::git_launch().map_err(|_| Error::Refused("git unavailable"))?;
         let mut command = std::process::Command::new(&git.program);
         command.env_clear();
         let mut pins = crate::git::guard_pins(&self.repository()).await.map_err(|_| Error::Refused("landing guard pins unavailable"))?;
         pins.push(("protocol.file.allow".into(), "always".into()));
+        let mut extra = std::collections::BTreeMap::new();
+        if let (Some(remote), Some(pr)) = (remote, self.coding.as_ref().and_then(|c| c.pull_request.as_ref())) {
+            let (more, env) = super::coding_pr::transport(remote, &pr.gh.argv[0], &pr.gh.environment, std::env::var("SSH_AUTH_SOCK").ok());
+            pins.extend(more.into_iter().map(|(k, v)| (k.into(), v.into())));
+            extra = env;
+        }
         crate::git_guard::apply(&mut command, &pins);
         command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", "/dev/null");
-        let environment = command.get_envs().filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
+        let mut environment: std::collections::BTreeMap<String, String> = command.get_envs().filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
             .collect();
+        environment.extend(extra);
         Ok((git.program.to_string_lossy().into_owned(), environment))
     }
     pub(super) async fn land_remote(&self, binding: &Binding, cancelled: tokio::sync::watch::Receiver<bool>) -> Result<()> {

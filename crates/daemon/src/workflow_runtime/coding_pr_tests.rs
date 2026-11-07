@@ -514,3 +514,77 @@ async fn the_pull_request_remote_is_a_path_or_an_https_or_ssh_url_and_nothing_el
         assert!(config.validate().is_err(), "{bad:?} must be refused");
     }
 }
+
+fn transport_env(remote: &str) -> std::collections::BTreeMap<String, String> {
+    let gh_env = [("GH_TOKEN".to_string(), "private-token".to_string()), ("HOME".into(), "/private/home".into()), ("GIT_ASKPASS".into(), "/bin/evil".into())].into_iter().collect();
+    let (pins, extra) = super::coding_pr::transport(remote, "/opt/gh", &gh_env, Some("/private/agent.sock".into()));
+    // The guard's fixed pins refuse every transport; the transport pins come after them.
+    let mut all: Vec<(String, String)> = vec![("protocol.allow".into(), "never".into()), ("protocol.file.allow".into(), "always".into())];
+    all.extend(pins.into_iter().map(|(k, v)| (k.to_string(), v)));
+    let mut env: std::collections::BTreeMap<String, String> = [("GIT_CONFIG_COUNT".to_string(), all.len().to_string()),
+        ("GIT_CONFIG_NOSYSTEM".into(), "1".into()), ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
+        ("GIT_TERMINAL_PROMPT".into(), "0".into()), ("PATH".into(), "/usr/bin:/bin".into())].into_iter().collect();
+    for (i, (k, v)) in all.iter().enumerate() { env.insert(format!("GIT_CONFIG_KEY_{i}"), k.clone()); env.insert(format!("GIT_CONFIG_VALUE_{i}"), v.clone()); }
+    env.extend(extra);
+    env
+}
+fn ls_remote(remote: &str) -> std::process::Output {
+    std::process::Command::new("/usr/bin/git").args(["ls-remote", "--refs", remote, "refs/heads/trunk"]).env_clear().envs(transport_env(remote))
+        .current_dir(std::env::temp_dir()).output().unwrap()
+}
+
+#[test]
+fn an_https_remote_is_allowed_https_and_an_ssh_remote_ssh_and_a_path_nothing() {
+    let has = |env: &std::collections::BTreeMap<String, String>, key: &str| env.iter().any(|(k, v)| k.starts_with("GIT_CONFIG_KEY_") && v == key);
+    let https = transport_env("https://github.com/private/fixture.git");
+    assert!(has(&https, "protocol.https.allow") && !has(&https, "protocol.ssh.allow"));
+    assert_eq!(https.get("GH_TOKEN").map(String::as_str), Some("private-token"), "the push signs in with gh's token");
+    assert!(!https.contains_key("GIT_ASKPASS"), "a GIT_ variable from the gh environment never reaches git");
+    assert!(https.iter().any(|(k, v)| k.starts_with("GIT_CONFIG_VALUE_") && v == "!'/opt/gh' auth git-credential"));
+    let ssh = transport_env("ssh://git@github.com/private/fixture.git");
+    assert!(has(&ssh, "protocol.ssh.allow") && !has(&ssh, "protocol.https.allow"));
+    assert_eq!(ssh.get("SSH_AUTH_SOCK").map(String::as_str), Some("/private/agent.sock"));
+    assert_eq!(ssh.get("GIT_SSH_COMMAND").map(String::as_str), Some("ssh -o BatchMode=yes"), "ssh never prompts");
+    let path = transport_env("/private/remote.git");
+    assert!(!has(&path, "protocol.https.allow") && !has(&path, "protocol.ssh.allow") && !path.contains_key("GH_TOKEN"));
+}
+
+#[test]
+fn a_transport_the_remote_does_not_use_stays_refused() {
+    let marker = std::env::temp_dir().join(format!("ext-ran-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    for remote in [format!("ext::sh -c 'touch {}'", marker.display()), "git://127.0.0.1:1/x.git".into(), "ssh://127.0.0.1:1/x.git".into()] {
+        // The environment of an https remote, pointed at another transport.
+        let out = std::process::Command::new("/usr/bin/git").args(["ls-remote", "--refs", &remote]).env_clear()
+            .envs(transport_env("https://github.com/private/fixture.git")).current_dir(std::env::temp_dir()).output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && stderr.contains("not allowed"), "{remote}: {stderr}");
+    }
+    assert!(!marker.exists(), "the ext transport never ran its command");
+    // And the ssh environment refuses https.
+    let out = std::process::Command::new("/usr/bin/git").args(["ls-remote", "--refs", "https://127.0.0.1:1/x.git"]).env_clear()
+        .envs(transport_env("ssh://git@github.com/private/fixture.git")).current_dir(std::env::temp_dir()).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not allowed"));
+}
+
+/// Reads a public repository over https with the environment the engine builds. Needs the network.
+#[test]
+#[ignore = "reads github.com"]
+fn the_https_environment_reads_a_public_repository() {
+    let out = ls_remote("https://github.com/cli/cli.git");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("refs/heads/trunk"));
+}
+
+#[tokio::test]
+async fn a_remote_url_with_credentials_is_refused() {
+    let (_dir, runtime, _f) = hub("pass", "merge").await;
+    let mut config = runtime.coding.clone().unwrap();
+    for bad in ["https://token@github.com/a/b.git", "https://user:pw@github.com/a/b.git", "ssh://git:pw@github.com/a/b.git",
+        "https://github.com/a/b.git?token=x", "https://github.com/a/b.git#x"] {
+        config.pull_request.as_mut().unwrap().remote = Some(bad.into());
+        assert!(config.validate().is_err(), "{bad:?} must be refused");
+    }
+    config.pull_request.as_mut().unwrap().remote = Some("ssh://git@github.com/a/b.git".into());
+    config.validate().unwrap();
+}

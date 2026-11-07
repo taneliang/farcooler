@@ -145,7 +145,7 @@ impl Exec {
     /// What the remote holds at the item's head branch, asked of the remote itself. A remote that did not
     /// answer is `Unknown` and never read as an empty branch: a lease on "absent" would be wrong.
     async fn head_on_remote(&self, binding: &Binding, tag: &str, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Seen> {
-        let (program, environment) = self.git_environment().await?;
+        let (program, environment) = self.git_environment_for(Some(&self.remote()?)).await?;
         let reference = format!("refs/heads/{}", self.head_branch(binding));
         let argv = vec![program, "ls-remote".into(), "--refs".into(), self.remote()?, reference.clone()];
         let log = self.root.join("receipts").join(format!("{}.remote-{tag}.output", digest(&binding.effect)));
@@ -199,7 +199,7 @@ impl Exec {
                 Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
-            let (program, environment) = self.git_environment().await?;
+            let (program, environment) = self.git_environment_for(Some(&remote)).await?;
             let argv = vec![program, "push".into(), "--porcelain".into(), "--no-follow-tags".into(),
                 "--recurse-submodules=no".into(), "--signed=false".into(),
                 // Only over what was seen: an empty expectation means the branch is not there yet.
@@ -329,6 +329,28 @@ impl Exec {
 #[cfg(test)]
 pub(super) fn parse_for_test(out: &[u8]) -> Option<Vec<(u64, String, bool)>> {
     parse(out).map(|all| all.into_iter().map(|p| (p.number, p.head_sha, p.cross)).collect())
+}
+/// What a git call to `remote` needs beyond the guard pins, which refuse every transport: the one transport
+/// the remote uses, and the credentials it signs in with, taken from the pinned `gh` (its token and home)
+/// and, for ssh, the agent socket. A path remote needs nothing. Nothing else is ever opened: not `ext::`,
+/// not `git://`, not `file:` through a URL.
+pub(super) fn transport(remote: &str, gh: &str, gh_environment: &std::collections::BTreeMap<String, String>, agent: Option<String>)
+    -> (Vec<(&'static str, String)>, std::collections::BTreeMap<String, String>)
+{
+    let signed_in = || gh_environment.iter().filter(|(k, _)| !k.starts_with("GIT_")).map(|(k, v)| (k.clone(), v.clone()));
+    if remote.starts_with("https://") {
+        // `gh auth git-credential` answers git's request for the token, so a push signs in as `gh` does.
+        (vec![("protocol.https.allow", "always".into()), ("credential.helper", String::new()),
+            ("credential.helper", format!("!'{gh}' auth git-credential"))], signed_in().collect())
+    } else if remote.starts_with("ssh://") {
+        let mut env: std::collections::BTreeMap<String, String> = signed_in().collect();
+        if let Some(socket) = env.get("SSH_AUTH_SOCK").cloned().or(agent) { env.insert("SSH_AUTH_SOCK".into(), socket); }
+        // Never a prompt: no one is there to answer it.
+        env.insert("GIT_SSH_COMMAND".into(), "ssh -o BatchMode=yes".into());
+        (vec![("protocol.ssh.allow", "always".into())], env)
+    } else {
+        (Vec::new(), Default::default())
+    }
 }
 #[cfg(test)]
 pub(super) fn changes_requested_for_test(out: &[u8], number: u64, candidate: &str) -> bool {
