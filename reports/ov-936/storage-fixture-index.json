@@ -1,0 +1,156 @@
+{
+  "reports/ov-936/fixtures/storage-green/dispatch-admitted-wf1-b309772bcc9dec43507adb5d01930071915ab3fa92f48ab5bec699e25412c9ee-wf1-3eb37333fabe12c09072462a54685d9ddb779322d92595f0c3786300a7661e02.json.gz": {
+    "raw": {
+      "sha256": "03c86dc9bef25df1409af2ab57074fcb0ceafda206515abbbd95266e4e788d6a",
+      "bytes": 1513173
+    },
+    "gzip": {
+      "sha256": "ad8c20e6f05a73b8199562e4208f6dca03902677ce3bef43995bf28353bb8dd1",
+      "bytes": 73296
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-admitted-wf1-b309772bcc9dec43507adb5d01930071915ab3fa92f48ab5bec699e25412c9ee-wf1-3eb37333fabe12c09072462a54685d9ddb779322d92595f0c3786300a7661e02.json"
+  },
+  "reports/ov-936/fixtures/storage-green/dispatch-claimed-wf1-c6f659592b819f2b18f08c4317ead596f60f4cf05a9ce5d1047e65fd4e25ec8e-wf1-ee1c18723164314d06a446bf66c5456bd768f611e64bad9d13b7a7fbc8c6f9ae.json.gz": {
+    "raw": {
+      "sha256": "28d6046502bb821c05c6a24c09b1429db2f8a9ab993b8c7701dbcf376765cba9",
+      "bytes": 1510655
+    },
+    "gzip": {
+      "sha256": "bb397ae94b80ccf4b0f37accd325c0fa5c4c229c25e776bacc352e9861205395",
+      "bytes": 73136
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-claimed-wf1-c6f659592b819f2b18f08c4317ead596f60f4cf05a9ce5d1047e65fd4e25ec8e-wf1-ee1c18723164314d06a446bf66c5456bd768f611e64bad9d13b7a7fbc8c6f9ae.json"
+  },
+  "reports/ov-936/fixtures/storage-green/dispatch-pending-wf1-8bdba5fcecaffcd80e32832c94e30014aaa0ee5686c4b5f7abff272f66ec472b-wf1-357c1451c79dd12b43e17aaa145c052f5f4c52e3612cde654f3db6a2910d5b93.json.gz": {
+    "raw": {
+      "sha256": "e61d62432be772f2be44b0e6d4c50e57cf30099c14333dade3a2a7f002f5d32f",
+      "bytes": 1510905
+    },
+    "gzip": {
+      "sha256": "1ee425cdf2ad21bc912289f4d41ed90ea067b9c2845596be9720bf3538175cd5",
+      "bytes": 73048
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-pending-wf1-8bdba5fcecaffcd80e32832c94e30014aaa0ee5686c4b5f7abff272f66ec472b-wf1-357c1451c79dd12b43e17aaa145c052f5f4c52e3612cde654f3db6a2910d5b93.json"
+  },
+  "reports/ov-936/fixtures/storage-green/dispatch-settled-wf1-c52ec57db7c992777c39c70a43a044d7e746bf89a96310ce9533007fb5031db7-wf1-9ec11a2c7c061de20b3fa193e3d753e17f6a9d56f3e25fc776cba097e903329c.json.gz": {
+    "raw": {
+      "sha256": "b1ac7a03a6cb36e8e05460e9052d2827b17a717a50bb9b36b05c68a377c4529f",
+      "bytes": 1510491
+    },
+    "gzip": {
+      "sha256": "80fdb5fe88cc5494c10151c8aa04536d88624296ed40275af6cf631767fe3baf",
+      "bytes": 72965
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-settled-wf1-c52ec57db7c992777c39c70a43a044d7e746bf89a96310ce9533007fb5031db7-wf1-9ec11a2c7c061de20b3fa193e3d753e17f6a9d56f3e25fc776cba097e903329c.json"
+  },
+  "reports/ov-936/fixtures/storage-green/dispatch-suppressed-wf1-ca9f5b8eb6b488c47f04b496da88ade1203a5fa500f07c1836de05dcea6e1974-wf1-9b463fc071e7ffc31532f442db331d00238a5a28a5d827a2eb263478c1fb3122.json.gz": {
+    "raw": {
+      "sha256": "0f23f404bfabb43429c113971047f84286736bf0566af40987cc10abc5a7690a",
+      "bytes": 1511606
+    },
+    "gzip": {
+      "sha256": "cfd68fe956c7927c3309c7d263923335d97c1c731c6c7f7dc14b2b07bd4aec7f",
+      "bytes": 73140
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-suppressed-wf1-ca9f5b8eb6b488c47f04b496da88ade1203a5fa500f07c1836de05dcea6e1974-wf1-9b463fc071e7ffc31532f442db331d00238a5a28a5d827a2eb263478c1fb3122.json"
+  },
+  "reports/ov-936/fixtures/storage-green/dispatch-uncertain-wf1-6f12903b4b443a61c8d551d9ebc64aa3c08fa30354902d7b38e5714eeac7f19f-wf1-39ce6c78d5699182f49b3b709ed944ed30d14b6d7471d7daa8892e7875e8dffb.json.gz": {
+    "raw": {
+      "sha256": "4e5263f2f19ccc8615ce20fac8b143439cacadbd3a3088f92f187acf5d263752",
+      "bytes": 1513287
+    },
+    "gzip": {
+      "sha256": "ddbd4bec432c1870c7b3fa69569bacfcec72eb524c36ee329f9095de527b6cc1",
+      "bytes": 73473
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/dispatch-uncertain-wf1-6f12903b4b443a61c8d551d9ebc64aa3c08fa30354902d7b38e5714eeac7f19f-wf1-39ce6c78d5699182f49b3b709ed944ed30d14b6d7471d7daa8892e7875e8dffb.json"
+  },
+  "reports/ov-936/fixtures/storage-green/f09-wf1-c5cbbd635dd748ac2d28b37c76327483d31d1b4a3649ab2793775c99779a948d-wf1-3623492c6c94edd10a9400cb559f42200454712edfac4cbf6311f5224dcbe036.json.gz": {
+    "raw": {
+      "sha256": "c054cf6997b8f2243b275ddc398c50f3d679eee29d4038964dafb4dfd0ff105a",
+      "bytes": 1472968
+    },
+    "gzip": {
+      "sha256": "f482429bb6d1a4ec24e6dd4540f2d3da08b1df5c2f500f53c0102dfc7311dc26",
+      "bytes": 70748
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-green/f09-wf1-c5cbbd635dd748ac2d28b37c76327483d31d1b4a3649ab2793775c99779a948d-wf1-3623492c6c94edd10a9400cb559f42200454712edfac4cbf6311f5224dcbe036.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-admitted-wf1-c5b1ae55aa772396fc9ac2a410e4e2e1cb3ee854d060f7be886ca8c3f07c6b6f-wf1-befe2d5c8c88c89d41c482e91ae5164ffa88a9b78bfa9c16318d8499b941c9bb.json.gz": {
+    "raw": {
+      "sha256": "e2f0b27e56d0f980dedd1f951278328823428c7619bf3352c2032cf72c600da5",
+      "bytes": 1513834
+    },
+    "gzip": {
+      "sha256": "b24670579c42e2ef86efa21fbf031a8309ebd45dc01a28b763a9d835bf894c88",
+      "bytes": 73315
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-admitted-wf1-c5b1ae55aa772396fc9ac2a410e4e2e1cb3ee854d060f7be886ca8c3f07c6b6f-wf1-befe2d5c8c88c89d41c482e91ae5164ffa88a9b78bfa9c16318d8499b941c9bb.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-claimed-wf1-4bd8dd6a88d2839b999af63cb716fdfde4f3ffe7d4fc235d6bb6a0dcb8e95f50-wf1-6c2b0ece487335ceaa8ab5483f0e530d3a526a1f726295ac6d3d07ad05f5b1ce.json.gz": {
+    "raw": {
+      "sha256": "17439b1cbf04bcb832e1c5981e3e89a3bf9a72c36f14daafc12e488bfdb232a8",
+      "bytes": 1511099
+    },
+    "gzip": {
+      "sha256": "316b20594fe78001dfe88191b726df9e386ae37aa08be8c61a4d89002bbdbaa7",
+      "bytes": 73040
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-claimed-wf1-4bd8dd6a88d2839b999af63cb716fdfde4f3ffe7d4fc235d6bb6a0dcb8e95f50-wf1-6c2b0ece487335ceaa8ab5483f0e530d3a526a1f726295ac6d3d07ad05f5b1ce.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-pending-wf1-826f388bd59ba4a86d79302bcf2921000397b769b1ff9c0f0a73b7194639f052-wf1-e965ebbed0dcaaf8ef3bfccde24bfff37a7034472902e15b807f3d803948adc4.json.gz": {
+    "raw": {
+      "sha256": "b40d1341fe3b93e82fbafa0478da3ed2d51aa4c1879d4c1fdca4b03ecf4345f4",
+      "bytes": 1510972
+    },
+    "gzip": {
+      "sha256": "29041e3700049ee5d675594c10aae30288ff44ec39a0b849931784f34a9ae15c",
+      "bytes": 73062
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-pending-wf1-826f388bd59ba4a86d79302bcf2921000397b769b1ff9c0f0a73b7194639f052-wf1-e965ebbed0dcaaf8ef3bfccde24bfff37a7034472902e15b807f3d803948adc4.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-settled-wf1-ff0af95b0bc6a338baf12bd647ed9e7bd4ea607c9aed3e7dca1cd6a3f8b21c50-wf1-9c79a6314ce40c7cbe1b8c24c10e28e5e588943b668b2b2ce0e9ab72fe5a56fb.json.gz": {
+    "raw": {
+      "sha256": "729b9976e8a337a194403e5dea4365c5db7df6de2dcb2eacb40b1fd601f658e8",
+      "bytes": 1510624
+    },
+    "gzip": {
+      "sha256": "7c1491f1175a27d969c7912632a5cba10f14647fd8f4edf7b30caeb603eae88b",
+      "bytes": 73125
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-settled-wf1-ff0af95b0bc6a338baf12bd647ed9e7bd4ea607c9aed3e7dca1cd6a3f8b21c50-wf1-9c79a6314ce40c7cbe1b8c24c10e28e5e588943b668b2b2ce0e9ab72fe5a56fb.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-suppressed-wf1-32b8979066b2e7c5723686be4eed3835a9a2d421ad5ef2e9f387dd70e1bc1be2-wf1-8f4072fd81d5893ba6f6642f93d94a586fac1f590c0060775af2acdfba76fa99.json.gz": {
+    "raw": {
+      "sha256": "fa6f03559c1d961448c850ac14867b9d08a6122292e89031e88132cee1dd2600",
+      "bytes": 1511118
+    },
+    "gzip": {
+      "sha256": "4425e9bb9caa508b79431f1b8c3ef11887c8895406c56ef44c8af57a207a084f",
+      "bytes": 73085
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-suppressed-wf1-32b8979066b2e7c5723686be4eed3835a9a2d421ad5ef2e9f387dd70e1bc1be2-wf1-8f4072fd81d5893ba6f6642f93d94a586fac1f590c0060775af2acdfba76fa99.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/dispatch-uncertain-wf1-5c076ba1c23d9df4718b781f7ca0378cfb1d34a84e47c64bb47961a085e59ffe-wf1-b399dfdc3af26d4918301f8e6a7d7af850480724763e62c57f01391203b97093.json.gz": {
+    "raw": {
+      "sha256": "7a43f50767a4ae2759a6e35176dce9a4400d8dfb0943614d75c82ac48038b3d4",
+      "bytes": 1513369
+    },
+    "gzip": {
+      "sha256": "5e950f0f7eddf3fa6714a4f6e11891d277a132729ac0184525966ec059bb21b3",
+      "bytes": 73489
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/dispatch-uncertain-wf1-5c076ba1c23d9df4718b781f7ca0378cfb1d34a84e47c64bb47961a085e59ffe-wf1-b399dfdc3af26d4918301f8e6a7d7af850480724763e62c57f01391203b97093.json"
+  },
+  "reports/ov-936/fixtures/storage-restored/f09-wf1-5b1ddc34014816246195d7bd2863bc312b227bd5a738e4d83fa004ba75159355-wf1-31792da2589916f313419d8b7cae9e28091368932800ed22ba3e4cc155bf7a6c.json.gz": {
+    "raw": {
+      "sha256": "81ef322bb4a42ae1c555a5cd5ba0b285f3116b197e6ea9aa95abc8c46cf745b2",
+      "bytes": 1472874
+    },
+    "gzip": {
+      "sha256": "d1861dfd1c1b1e3302efa626cabb4581182ad94565cfb8a938ec1bbe8dd29ac7",
+      "bytes": 70932
+    },
+    "raw_local": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/reports/ov-936/fixtures/storage-restored/f09-wf1-5b1ddc34014816246195d7bd2863bc312b227bd5a738e4d83fa004ba75159355-wf1-31792da2589916f313419d8b7cae9e28091368932800ed22ba3e4cc155bf7a6c.json"
+  }
+}

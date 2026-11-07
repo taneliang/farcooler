@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized] target(s) in 0.08s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 1 test
+test engine_cutover::tests::storage_safety::engine_cutover_storage_preflight_quarantines_pending_lossy_effect ... 
+thread 'engine_cutover::tests::storage_safety::engine_cutover_storage_preflight_quarantines_pending_lossy_effect' (830108816) panicked at crates/store/src/engine_cutover/tests/storage_safety.rs:140:5:
+lossy pending Effect requires workspace quarantine
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    engine_cutover::tests::storage_safety::engine_cutover_storage_preflight_quarantines_pending_lossy_effect
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`

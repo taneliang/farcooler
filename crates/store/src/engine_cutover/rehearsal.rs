@@ -85,7 +85,8 @@ impl PrivateRehearsal {
         private_dir(&self.root)?;
         let source=self.child_name(name)?;
         private_dir(&source)?;
-        let declared:Snapshot=serde_json::from_slice(&fs::read(source.join("SNAPSHOT.json"))?)?;
+        self.check_dir("journal")?;
+        let declared:Snapshot=serde_json::from_slice(&read_metadata(&source.join("SNAPSHOT.json"))?)?;
         if &declared!=expected { return refuse("backup manifest mismatch"); }
         let target=self.child_name(destination)?;
         fs::create_dir(&target)?;
@@ -101,7 +102,7 @@ impl PrivateRehearsal {
         for entry in fs::read_dir(self.root.join("journal"))? {
             let entry=entry?;
             if !entry.file_name().to_string_lossy().starts_with("effect-") { continue; }
-            let fact:ExternalFact=serde_json::from_slice(&read_regular(&entry.path())?)?;
+            let fact:ExternalFact=serde_json::from_slice(&read_metadata(&entry.path())?)?;
             tx.execute("INSERT INTO engine_cutover_external VALUES(?1,?2,?3,?4,'unreconciled')",rusqlite::params![fact.operation,fact.resource,fact.request_hash,serde_json::to_string(&fact)?])?;
             tx.execute("INSERT INTO engine_cutover_quarantine VALUES(?1,?2) ON CONFLICT(resource) DO NOTHING",rusqlite::params![fact.resource,"post-backup external effect; restored pending is not retry permission"])?;
         }
@@ -128,6 +129,20 @@ fn read_regular(path:&Path) -> Result<Vec<u8>> {
     if !metadata.is_file() || metadata.nlink()!=1 { return refuse("resource is not private regular single-link file"); }
     let mut bytes=Vec::new();
     file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+// Metadata is finite even when a malformed artifact claims an enormous length.
+// Open nonblocking before checking the descriptor, so a FIFO cannot hang here.
+const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
+fn read_metadata(path: &Path) -> Result<Vec<u8>> {
+    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_NONBLOCK).open(path)?;
+    let metadata=file.metadata()?;
+    if !metadata.is_file() || metadata.nlink()!=1 || metadata.len()>METADATA_LIMIT {
+        return refuse("metadata must be bounded regular single-link file");
+    }
+    let mut bytes=Vec::new();
+    file.take(METADATA_LIMIT+1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64>METADATA_LIMIT {return refuse("metadata exceeds bound");}
     Ok(bytes)
 }
 fn sync_dir(path: &Path) -> Result<()> { File::open(path)?.sync_all()?; Ok(()) }
@@ -228,7 +243,7 @@ impl PrivateRehearsal {
     pub fn reconcile(&self, fact: &ExternalFact, read_back: Option<&ExternalFact>) -> Result<bool> {
         self.check_dir("journal")?;
         let name=farcooler_workflow::digest(&(&fact.operation,&fact.resource));
-        let original:ExternalFact=serde_json::from_slice(&fs::read(self.root.join("journal").join(format!("effect-{}.json",name.replace(':',"-"))))?)?;
+        let original:ExternalFact=serde_json::from_slice(&read_metadata(&self.root.join("journal").join(format!("effect-{}.json",name.replace(':',"-"))))?)?;
         if original!=*fact { return refuse("post-backup effect identity changed"); }
         Ok(read_back.is_some_and(|observed|observed.operation==fact.operation && observed.request_hash==fact.request_hash
             && observed.resource==fact.resource && observed.incarnation==fact.incarnation && observed.receipt.is_some()))
@@ -276,7 +291,7 @@ impl PrivateRehearsal {
         private_dir(&self.root)?;
         let backup=self.child_name(name)?;
         private_dir(&backup)?;
-        let declared:Snapshot=serde_json::from_slice(&read_regular(&backup.join("SNAPSHOT.json"))?)?;
+        let declared:Snapshot=serde_json::from_slice(&read_metadata(&backup.join("SNAPSHOT.json"))?)?;
         if &declared!=snapshot {return refuse("closed backup identity mismatch");}
         let mut current=scan(&backup)?;current.files.remove(Path::new("SNAPSHOT.json"));
         if current!=*snapshot || scan(&self.root.join(format!("{name}-verified-restore")))?!=*snapshot {return refuse("closed backup/independent restore no longer matches");}

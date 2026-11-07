@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized] target(s) in 0.07s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 1 test
+test engine_cutover::tests::storage_safety::engine_cutover_storage_admit_rechecks_payload_after_valid_claim ... 
+thread 'engine_cutover::tests::storage_safety::engine_cutover_storage_admit_rechecks_payload_after_valid_claim' (830108946) panicked at crates/store/src/engine_cutover/tests/storage_safety.rs:149:5:
+admit must recheck immutable source payload
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    engine_cutover::tests::storage_safety::engine_cutover_storage_admit_rechecks_payload_after_valid_claim
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`

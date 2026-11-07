@@ -184,3 +184,5 @@ fn save_db(label:&str,path:&std::path::Path) {
     assert!(canonical.starts_with(std::env::temp_dir().canonicalize().unwrap()) || canonical.starts_with("/private/tmp"));
     save_bytes(label,"sqlite",&std::fs::read(path).unwrap());
 }
+
+mod storage_safety;

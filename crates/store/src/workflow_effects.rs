@@ -45,6 +45,29 @@ pub(crate) fn reserve(tx: &Transaction<'_>, state: &State) -> rusqlite::Result<(
     }
     Ok(())
 }
+/// Validate supported executable JSON without dropping unknown nested fields.
+/// The raw row remains evidence; this never rewrites it or creates a receipt.
+pub(crate) fn checked_effect(payload: &str, id: &str, hash: &str) -> Option<farcooler_workflow::Effect> {
+    let raw: serde_json::Value=serde_json::from_str(payload).ok()?;
+    let effect: farcooler_workflow::Effect=serde_json::from_value(raw.clone()).ok()?;
+    (serde_json::to_value(&effect).ok()?==raw && effect.id==id
+        && farcooler_workflow::digest(&effect)==hash).then_some(effect)
+}
+pub(crate) fn effect_binds(effect: &farcooler_workflow::Effect, state: &State, workspace: &str, revision: u64) -> bool {
+    state.workspace==workspace && state.schema==1 && revision<=state.revision && effect.epoch==state.epoch
+        && state.items.get(&effect.item).is_some_and(|item| item.pending.as_deref()==Some(effect.id.as_str())
+            && item.run==effect.run && item.resource==effect.resource && item.fence==effect.fence
+            && item.pin==effect.definition_pin && item.policy_pin==effect.policy_pin && item.candidate==effect.candidate)
+}
+fn executable_payload(tx: &Transaction<'_>, workspace: &str, id: &str) -> Result<bool> {
+    let row: Option<(String,String,u64,String)>=tx.query_row(
+        "SELECT o.payload,o.payload_hash,o.revision,s.state FROM workflow_outbox o JOIN workflow_states s ON s.workspace=o.workspace WHERE o.workspace=?1 AND o.id=?2",
+        params![workspace,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+    let Some((payload,hash,revision,raw_state))=row else {return Ok(false);};
+    let Some(effect)=checked_effect(&payload,id,&hash) else {return Ok(false);};
+    let Ok(state)=serde_json::from_str::<State>(&raw_state) else {return Ok(false);};
+    Ok(effect_binds(&effect,&state,workspace,revision))
+}
 impl Store {
     /// Runtime admission must authenticate lease_owner and supply time. A claim is
     /// never permission to execute: only a successful subsequent admission is.
@@ -58,7 +81,7 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Ok(None); }
         let blocked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine q JOIN workflow_outbox o ON q.resource=json_extract(o.payload,'$.resource') WHERE o.workspace=?1 AND o.id=?2) OR EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='workspace:'||?1)",params![workspace,effect],|r|r.get(0))?;
-        if blocked { return Ok(None); }
+        if blocked || !executable_payload(&tx,workspace,effect)? { return Ok(None); }
         let state: Option<String> = tx.query_row("SELECT state FROM workflow_states WHERE workspace = ?1",
             [workspace], |r| r.get(0)).optional()?;
         let Some(state) = state else { return Ok(None); };
@@ -95,6 +118,9 @@ impl Store {
         let mut conn=self.conn();
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if claim.authority_incarnation!=self.engine_incarnation || !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? { return Ok(false); }
+        if !executable_payload(&tx,&claim.workspace,&claim.effect)? {return Ok(false);}
+        let blocked: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='workspace:'||?1 OR resource=(SELECT json_extract(payload,'$.resource') FROM workflow_outbox WHERE workspace=?1 AND id=?2))",params![claim.workspace,claim.effect],|r|r.get(0))?;
+        if blocked {return Ok(false);}
         let n = tx.execute(
             "UPDATE workflow_outbox SET dispatch_state = 'admitted'
              WHERE workspace = ?1 AND id = ?2 AND active = 1 AND dispatch_state = 'claimed'

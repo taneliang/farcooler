@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/Users/e-liang/.cargo/bin/cargo",
+    "test",
+    "--offline",
+    "-p",
+    "farcooler-store",
+    "--lib",
+    "engine_cutover_storage_reconcile_refuses_outside_leaf_before_readback",
+    "--",
+    "--nocapture"
+  ],
+  "exit": 101,
+  "meaningful": true,
+  "old": "5716cae87b18a08f4b85e6efbd94d1e88b5d82b75784f4308a1992008bfa0083",
+  "fixed": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+  "restored": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+  "exact_restoration": true
+}

@@ -1,0 +1,226 @@
+{
+  "state": "frozen_S1_S2_delta_for_SAME_audit",
+  "base": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+  "branch": "ov-936-store-safety-fixes",
+  "products": {
+    "crates/store/src/engine_cutover.rs": {
+      "sha256": "551ccf323bf776915373c8aeeb3bf7c515029b071f4a494073593b05c96d3d5c",
+      "bytes": 31762
+    },
+    "crates/store/src/engine_cutover/rehearsal.rs": {
+      "sha256": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+      "bytes": 17961
+    },
+    "crates/store/src/engine_cutover/tests.rs": {
+      "sha256": "617d7fdf16372b6635f4be2b21712257295d58c7f9aca31c93c9b85738f58875",
+      "bytes": 12240
+    },
+    "crates/store/src/workflow_effects.rs": {
+      "sha256": "ba66d4dff50a803fab9ba649f35cb2d7d3de55f776a29d981e44190b870c4ac1",
+      "bytes": 9246
+    },
+    "crates/store/src/engine_cutover/tests/storage_safety.rs": {
+      "sha256": "9f6244edf3d19645cf9c03143cd5ca2b4d20b6783779816282a225f27800702a",
+      "bytes": 11362
+    }
+  },
+  "baseline_evidence_verified": 703,
+  "baseline_freeze": {
+    "sha256": "9baf50104c32823615103ffdd113b20656db18d917af2316dba7010db43879f3",
+    "bytes": 198723
+  },
+  "unchanged_baseline_products": 13,
+  "canonical_queue": "/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/lane-gate.lock",
+  "native_tmpdir_preserved": true,
+  "meaningful_old_source_controls": 6,
+  "new_storage_tests": 7,
+  "affected_workflow_tests": 13,
+  "existing_f09_tests": 2,
+  "normal_closed_restore_tests": 1,
+  "owned_group": {
+    "owned_pgid": 39762,
+    "leader_reaped": true,
+    "group_release": "ESRCH"
+  },
+  "fixture_copies": 14,
+  "evidence": {
+    "reports/ov-936/storage-boundary-steps.json": {
+      "sha256": "f27c16249528aab1649d3140f3ad8442dbfe8ad3817a254373b17435b92c0445",
+      "bytes": 1247
+    },
+    "reports/ov-936/storage-boundary.py": {
+      "sha256": "116b5f4c76c91ddfedf671ea5e54bb0b8bdcb0dc73a6e060be2889e9b8f7673a",
+      "bytes": 2274
+    },
+    "reports/ov-936/storage-cache-holders.jsonl": {
+      "sha256": "431f413e0c1f63aa29af38f99004301a545f5353a386596f7724583a511802fb",
+      "bytes": 76348
+    },
+    "reports/ov-936/storage-check.py": {
+      "sha256": "dbc90cec5092e912b6d0876e821cc928b7232217e4b279677dbd1e6f26ef6c1d",
+      "bytes": 4760
+    },
+    "reports/ov-936/storage-controls.json": {
+      "sha256": "0afaaa50eef3b6ffbb47ebe4d67f8d484a494cc4f39fba248328020aee249aca",
+      "bytes": 3316
+    },
+    "reports/ov-936/storage-controls.py": {
+      "sha256": "55272f71e8db598a1d8fbcfcee7ffd715c1413b6c1705fbddd59d3d766813b77",
+      "bytes": 2757
+    },
+    "reports/ov-936/storage-entry.py": {
+      "sha256": "16f2b2bb63673ae040e535112a0ec1e80926dcce5ccd8da958c56284ddae6f90",
+      "bytes": 2404
+    },
+    "reports/ov-936/storage-final.json": {
+      "sha256": "0ff05526c3689cc06612f60870c435b865a27d4a906876b45ff9dd86c06d0bc2",
+      "bytes": 290631
+    },
+    "reports/ov-936/storage-final.log": {
+      "sha256": "f5b6f2b9f7de786d8bfb2df5aa493a88fcc6e3f9e70eb228099f78dbb2b07112",
+      "bytes": 121407
+    },
+    "reports/ov-936/storage-first.json": {
+      "sha256": "d3d98c127b441caa7be8107c531a9f6927dd6963a3c97d2cb9bf319e22478826",
+      "bytes": 290555
+    },
+    "reports/ov-936/storage-first.log": {
+      "sha256": "cc2da485294bed1161eb629ee348fc0b18caeb221c7ddcccedfc07388084fd77",
+      "bytes": 486
+    },
+    "reports/ov-936/storage-fix-contract.md": {
+      "sha256": "293f1e4d600d090a05e74cd98c4cd72c0d8d042425cb421def3d4bae820540de",
+      "bytes": 2089
+    },
+    "reports/ov-936/storage-fixture-index.json": {
+      "sha256": "7042caca8f427e67fd5b5db6056b6629b1a6092b16853d3cd9aeee97b7dbfa6e",
+      "bytes": 11245
+    },
+    "reports/ov-936/storage-green.json": {
+      "sha256": "9862211602de5b2caf7d64780d3408e481ec19a0c794629142447fb579ed5939",
+      "bytes": 290549
+    },
+    "reports/ov-936/storage-green.log": {
+      "sha256": "e9a2f5cc7071192ddab94cfe5a6b4295901ab89f956529879ec12961cbef83b8",
+      "bytes": 7455
+    },
+    "reports/ov-936/storage-initial-steps.json": {
+      "sha256": "7b9a60c3423df905443334ea564267d021492518b113e897033713a4bab6843a",
+      "bytes": 970
+    },
+    "reports/ov-936/storage-owned-group-running.json": {
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    "reports/ov-936/storage-reconcile-control.json": {
+      "sha256": "b78089874601b6a9b6f2c24fa82e2e6a9fee42f2edf4166ea5b26918c58db93e",
+      "bytes": 546
+    },
+    "reports/ov-936/storage-red-admit.log": {
+      "sha256": "97e7f86d72a2c4f22bce66d0a6d95ea8efe8a8432150d68e3d0ee3c8f4a581ed",
+      "bytes": 1014
+    },
+    "reports/ov-936/storage-red-claim.log": {
+      "sha256": "817a86c8a8c7dd4ed51562a09b78ceacee1c354de2df33242006688c63cc5f84",
+      "bytes": 1043
+    },
+    "reports/ov-936/storage-red-journal.log": {
+      "sha256": "d6c9bbf6b4270b28dab1ceb834bc83c29b6f5f6e4a7367d09b25cb127c0be9ea",
+      "bytes": 1549
+    },
+    "reports/ov-936/storage-red-metadata.log": {
+      "sha256": "cde476de4848fed18a02924d2d011ff8748f49464585e81a619f2b4a5b7d7fd2",
+      "bytes": 1720
+    },
+    "reports/ov-936/storage-red-preflight.log": {
+      "sha256": "281f39c4a2ba9076a1d28847b5d1ce099b276f4c0286b472d6cc64272fb482f9",
+      "bytes": 1027
+    },
+    "reports/ov-936/storage-red-reconcile.log": {
+      "sha256": "f65b08b1b835bf337514680fb6b2eaf5d7e636e13bda007f204bef93f81522d9",
+      "bytes": 1713
+    },
+    "reports/ov-936/storage-restored.json": {
+      "sha256": "847e9f9d0ffd1982f1f2f59bc4d74639038308dc3f155ade04723c709c9fbe01",
+      "bytes": 290556
+    },
+    "reports/ov-936/storage-restored.log": {
+      "sha256": "0765b1b8ef8f1c425150da656e6fd85c99ce7514fb6bbb1b0f83b85392720340",
+      "bytes": 123297
+    },
+    "reports/ov-936/storage-result.md": {
+      "sha256": "40748cb01c1755be6a3a809397989ecc55e1332726855e72c55d1d0f47df387f",
+      "bytes": 4390
+    },
+    "reports/ov-936/storage-seal.py": {
+      "sha256": "a47fc1e15874d8f7aa650d06fce8fba4ecd381ad6b24abe370eee6dd5a28c854",
+      "bytes": 3832
+    },
+    "reports/ov-936/storage-steps.json": {
+      "sha256": "7989c3feb633a052d9bf5002cbad3db1b76a010c442353f68dba28d2fe4a2d79",
+      "bytes": 968
+    },
+    "reports/ov-936/storage.py": {
+      "sha256": "4e43f785c28b177d287e0a268d4c56f47fe6f504a24e86759dce329e7562a13b",
+      "bytes": 1037
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-admitted-wf1-b309772bcc9dec43507adb5d01930071915ab3fa92f48ab5bec699e25412c9ee-wf1-3eb37333fabe12c09072462a54685d9ddb779322d92595f0c3786300a7661e02.json.gz": {
+      "sha256": "ad8c20e6f05a73b8199562e4208f6dca03902677ce3bef43995bf28353bb8dd1",
+      "bytes": 73296
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-claimed-wf1-c6f659592b819f2b18f08c4317ead596f60f4cf05a9ce5d1047e65fd4e25ec8e-wf1-ee1c18723164314d06a446bf66c5456bd768f611e64bad9d13b7a7fbc8c6f9ae.json.gz": {
+      "sha256": "bb397ae94b80ccf4b0f37accd325c0fa5c4c229c25e776bacc352e9861205395",
+      "bytes": 73136
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-pending-wf1-8bdba5fcecaffcd80e32832c94e30014aaa0ee5686c4b5f7abff272f66ec472b-wf1-357c1451c79dd12b43e17aaa145c052f5f4c52e3612cde654f3db6a2910d5b93.json.gz": {
+      "sha256": "1ee425cdf2ad21bc912289f4d41ed90ea067b9c2845596be9720bf3538175cd5",
+      "bytes": 73048
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-settled-wf1-c52ec57db7c992777c39c70a43a044d7e746bf89a96310ce9533007fb5031db7-wf1-9ec11a2c7c061de20b3fa193e3d753e17f6a9d56f3e25fc776cba097e903329c.json.gz": {
+      "sha256": "80fdb5fe88cc5494c10151c8aa04536d88624296ed40275af6cf631767fe3baf",
+      "bytes": 72965
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-suppressed-wf1-ca9f5b8eb6b488c47f04b496da88ade1203a5fa500f07c1836de05dcea6e1974-wf1-9b463fc071e7ffc31532f442db331d00238a5a28a5d827a2eb263478c1fb3122.json.gz": {
+      "sha256": "cfd68fe956c7927c3309c7d263923335d97c1c731c6c7f7dc14b2b07bd4aec7f",
+      "bytes": 73140
+    },
+    "reports/ov-936/fixtures/storage-green/dispatch-uncertain-wf1-6f12903b4b443a61c8d551d9ebc64aa3c08fa30354902d7b38e5714eeac7f19f-wf1-39ce6c78d5699182f49b3b709ed944ed30d14b6d7471d7daa8892e7875e8dffb.json.gz": {
+      "sha256": "ddbd4bec432c1870c7b3fa69569bacfcec72eb524c36ee329f9095de527b6cc1",
+      "bytes": 73473
+    },
+    "reports/ov-936/fixtures/storage-green/f09-wf1-c5cbbd635dd748ac2d28b37c76327483d31d1b4a3649ab2793775c99779a948d-wf1-3623492c6c94edd10a9400cb559f42200454712edfac4cbf6311f5224dcbe036.json.gz": {
+      "sha256": "f482429bb6d1a4ec24e6dd4540f2d3da08b1df5c2f500f53c0102dfc7311dc26",
+      "bytes": 70748
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-admitted-wf1-c5b1ae55aa772396fc9ac2a410e4e2e1cb3ee854d060f7be886ca8c3f07c6b6f-wf1-befe2d5c8c88c89d41c482e91ae5164ffa88a9b78bfa9c16318d8499b941c9bb.json.gz": {
+      "sha256": "b24670579c42e2ef86efa21fbf031a8309ebd45dc01a28b763a9d835bf894c88",
+      "bytes": 73315
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-claimed-wf1-4bd8dd6a88d2839b999af63cb716fdfde4f3ffe7d4fc235d6bb6a0dcb8e95f50-wf1-6c2b0ece487335ceaa8ab5483f0e530d3a526a1f726295ac6d3d07ad05f5b1ce.json.gz": {
+      "sha256": "316b20594fe78001dfe88191b726df9e386ae37aa08be8c61a4d89002bbdbaa7",
+      "bytes": 73040
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-pending-wf1-826f388bd59ba4a86d79302bcf2921000397b769b1ff9c0f0a73b7194639f052-wf1-e965ebbed0dcaaf8ef3bfccde24bfff37a7034472902e15b807f3d803948adc4.json.gz": {
+      "sha256": "29041e3700049ee5d675594c10aae30288ff44ec39a0b849931784f34a9ae15c",
+      "bytes": 73062
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-settled-wf1-ff0af95b0bc6a338baf12bd647ed9e7bd4ea607c9aed3e7dca1cd6a3f8b21c50-wf1-9c79a6314ce40c7cbe1b8c24c10e28e5e588943b668b2b2ce0e9ab72fe5a56fb.json.gz": {
+      "sha256": "7c1491f1175a27d969c7912632a5cba10f14647fd8f4edf7b30caeb603eae88b",
+      "bytes": 73125
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-suppressed-wf1-32b8979066b2e7c5723686be4eed3835a9a2d421ad5ef2e9f387dd70e1bc1be2-wf1-8f4072fd81d5893ba6f6642f93d94a586fac1f590c0060775af2acdfba76fa99.json.gz": {
+      "sha256": "4425e9bb9caa508b79431f1b8c3ef11887c8895406c56ef44c8af57a207a084f",
+      "bytes": 73085
+    },
+    "reports/ov-936/fixtures/storage-restored/dispatch-uncertain-wf1-5c076ba1c23d9df4718b781f7ca0378cfb1d34a84e47c64bb47961a085e59ffe-wf1-b399dfdc3af26d4918301f8e6a7d7af850480724763e62c57f01391203b97093.json.gz": {
+      "sha256": "5e950f0f7eddf3fa6714a4f6e11891d277a132729ac0184525966ec059bb21b3",
+      "bytes": 73489
+    },
+    "reports/ov-936/fixtures/storage-restored/f09-wf1-5b1ddc34014816246195d7bd2863bc312b227bd5a738e4d83fa004ba75159355-wf1-31792da2589916f313419d8b7cae9e28091368932800ed22ba3e4cc155bf7a6c.json.gz": {
+      "sha256": "d1861dfd1c1b1e3302efa626cabb4581182ad94565cfb8a938ec1bbe8dd29ac7",
+      "bytes": 70932
+    }
+  },
+  "parent_blockers": "raw60, actual joined writers/resources,937/938 composition/manual messaging,2 full Store exclusions,CI/owner-copy/installed cutover",
+  "live_or_whole_release_approval": false
+}

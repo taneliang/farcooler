@@ -1,0 +1,22 @@
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.26s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 1 test
+test engine_cutover::tests::storage_safety::engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves ... 
+thread 'engine_cutover::tests::storage_safety::engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves' (830106699) panicked at crates/store/src/engine_cutover/tests/storage_safety.rs:43:9:
+restore must refuse symlink
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    engine_cutover::tests::storage_safety::engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 535 filtered out; finished in 0.69s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`

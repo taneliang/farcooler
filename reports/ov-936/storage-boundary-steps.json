@@ -1,0 +1,60 @@
+[
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_storage_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "clippy",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--all-targets",
+      "--features",
+      "testing",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/scripts/migration-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/scripts/file-size-budget.py"
+    ],
+    "exit": 0
+  }
+]

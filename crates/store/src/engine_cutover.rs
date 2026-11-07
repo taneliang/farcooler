@@ -247,6 +247,32 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
             for binding in &mut result.bindings {if binding.workspace==workspace {binding.disposition="quarantined".into();}}
         }
     }
+    let outbox=&result.raw.tables["workflow_outbox"];
+    for row in &outbox.rows {
+        if !matches!(field(outbox,row,"dispatch_state")?.text(),Some("pending"|"claimed"|"admitted")) {continue;}
+        let workspace=field(outbox,row,"workspace")?.text().unwrap_or("");
+        let payload=field(outbox,row,"payload")?.text().unwrap_or("");
+        let effect=crate::workflow_effects::checked_effect(payload,field(outbox,row,"id")?.text().unwrap_or(""),field(outbox,row,"payload_hash")?.text().unwrap_or(""));
+        let bound=effect.as_ref().is_some_and(|effect| {
+            if field(outbox,row,"active").ok()==Some(&Cell::Integer(0)) {return true;}
+            states.rows.iter().any(|state_row| {
+                field(states,state_row,"workspace").ok().and_then(Cell::text)==Some(workspace)
+                    && field(states,state_row,"state").ok().and_then(Cell::text)
+                        .and_then(|raw|serde_json::from_str::<farcooler_workflow::State>(raw).ok())
+                        .is_some_and(|state| match field(outbox,row,"revision") {
+                            Ok(Cell::Integer(revision)) if *revision>=0 => crate::workflow_effects::effect_binds(effect,&state,workspace,*revision as u64),
+                            _ => false,
+                        })
+            })
+        });
+        if !bound {
+            result.quarantines.push(Quarantine {resource:format!("workspace:{workspace}"),reason:"unknown/lossy or conflicting executable Effect; raw payload retained".into()});
+            if let Some(resource)=serde_json::from_str::<serde_json::Value>(payload).ok().and_then(|v|v.get("resource").and_then(|r|r.as_str()).map(str::to_owned)) {
+                result.quarantines.push(Quarantine {resource,reason:"uninterpretable executable Effect resource".into()});
+            }
+            for binding in &mut result.bindings {if binding.workspace==workspace {binding.disposition="quarantined".into();}}
+        }
+    }
     // Unsupported legacy execution policies remain inert and explicitly block
     // conflicting fresh admission rather than being replaced by engine defaults.
     for name in ["task_blocks","ticket_lines","plan_budgets","check_in_schedules","check_in_enter_fences"] {

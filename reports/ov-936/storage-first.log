@@ -1,0 +1,8 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+STORAGE ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_storage_", "--", "--nocapture"]
+error: failed to open: /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/.cargo-build-lock
+
+Caused by:
+  Operation not permitted (os error 1)
+
+exit=101, stopped=None

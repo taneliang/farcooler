@@ -1,0 +1,82 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+STORAGE ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_storage_", "--", "--nocapture"]
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/ffi-guard)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 10.02s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 6 tests
+test engine_cutover::tests::storage_safety::engine_cutover_storage_admit_rechecks_payload_after_valid_claim ... ok
+test engine_cutover::tests::storage_safety::engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves ... ok
+test engine_cutover::tests::storage_safety::engine_cutover_storage_preflight_quarantines_pending_lossy_effect ... ok
+test engine_cutover::tests::storage_safety::engine_cutover_storage_restore_refuses_replaced_journal_and_effect_leaves ... ok
+test engine_cutover::tests::storage_safety::engine_cutover_storage_settled_unknown_effect_remains_inert_history ... ok
+test engine_cutover::tests::storage_safety::engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 530 filtered out; finished in 7.03s
+
+STORAGE ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "workflow::tests::", "--", "--nocapture"]
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.84s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 13 tests
+test workflow::tests::workflow_atomic_reopen_duplicate_payload_and_replay ... ok
+test workflow::tests::workflow_blocked_shared_resource_reopen_and_generation_handoff ... ok
+test workflow::tests::workflow_claim_dispatch_crash_boundaries_and_generation ... ok
+test workflow::tests::workflow_complete_coding_trace_reopens_between_every_effect ... ok
+test workflow::tests::workflow_concurrent_resource_admission_across_connections ... ok
+test workflow::tests::workflow_concurrent_same_revision_and_duplicate_command ... ok
+test workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay ... ok
+test workflow::tests::workflow_immutable_history_and_refusing_registry ... ok
+test workflow::tests::workflow_migration_from_every_registered_source_schema ... migration source schemas tested=66
+ok
+test workflow::tests::workflow_refusals_deduplicated_without_revision ... ok
+test workflow::tests::workflow_sql_failure_rolls_back_every_boundary ... ok
+test workflow::tests::workflow_tracker_exact_approval_duplicate_and_reopen_done ... ok
+test workflow::tests::workflow_uncertain_boundary_reopen_and_cancellation_holds_resource ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 523 filtered out; finished in 3.36s
+
+STORAGE ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_f09_", "--", "--nocapture"]
+    Finished `test` profile [unoptimized] target(s) in 0.07s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 2 tests
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 534 filtered out; finished in 1.14s
+
+STORAGE ["/Users/e-liang/.cargo/bin/cargo", "clippy", "--offline", "-p", "farcooler-store", "--all-targets", "--features", "testing", "--", "-D", "warnings"]
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/protocol)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/workflow)
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/ffi-guard)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/core)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-store-safety-fixes/crates/store)
+error: the borrowed expression implements the required traits
+  --> crates/store/src/engine_cutover/tests/storage_safety.rs:36:31
+   |
+36 |         let store=Store::open(&private.live().join("db.sqlite")).unwrap();drop(store);
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `private.live().join("db.sqlite")`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_borrows_for_generic_args
+   = note: `-D clippy::needless-borrows-for-generic-args` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::needless_borrows_for_generic_args)]`
+
+error: the borrowed expression implements the required traits
+  --> crates/store/src/engine_cutover/tests/storage_safety.rs:59:26
+   |
+59 |         drop(Store::open(&private.live().join("db.sqlite")).unwrap());
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `private.live().join("db.sqlite")`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_borrows_for_generic_args
+
+error: could not compile `farcooler-store` (lib test) due to 2 previous errors
+
+exit=101, stopped=None

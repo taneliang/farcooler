@@ -1,0 +1,106 @@
+{
+  "base": "e853d9c4ee07fbc07ab8e6d8bc0ce7d1658c57ba",
+  "fixed": {
+    "crates/store/src/engine_cutover.rs": "551ccf323bf776915373c8aeeb3bf7c515029b071f4a494073593b05c96d3d5c",
+    "crates/store/src/engine_cutover/rehearsal.rs": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+    "crates/store/src/workflow_effects.rs": "ba66d4dff50a803fab9ba649f35cb2d7d3de55f776a29d981e44190b870c4ac1"
+  },
+  "old": {
+    "crates/store/src/engine_cutover.rs": "b955a249cd76238642e125139cbba33a561705cdb686d5db3dd724da536f8cf6",
+    "crates/store/src/engine_cutover/rehearsal.rs": "5716cae87b18a08f4b85e6efbd94d1e88b5d82b75784f4308a1992008bfa0083",
+    "crates/store/src/workflow_effects.rs": "dd046be3702146de62db8af28edf3f22498d6f96991efcfef573a0faccb8ca95"
+  },
+  "controls": [
+    {
+      "name": "metadata",
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves",
+        "--",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "assertion": "restore must refuse symlink",
+      "meaningful": true
+    },
+    {
+      "name": "journal",
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "engine_cutover_storage_restore_refuses_replaced_journal_and_effect_leaves",
+        "--",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "assertion": "restore journal must refuse journal",
+      "meaningful": true
+    },
+    {
+      "name": "preflight",
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "engine_cutover_storage_preflight_quarantines_pending_lossy_effect",
+        "--",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "assertion": "lossy pending Effect requires workspace quarantine",
+      "meaningful": true
+    },
+    {
+      "name": "claim",
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit",
+        "--",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "assertion": "claim must refuse pending/effect",
+      "meaningful": true
+    },
+    {
+      "name": "admit",
+      "command": [
+        "/Users/e-liang/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "engine_cutover_storage_admit_rechecks_payload_after_valid_claim",
+        "--",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "assertion": "admit must recheck immutable source payload",
+      "meaningful": true
+    }
+  ],
+  "restored": {
+    "crates/store/src/engine_cutover.rs": "551ccf323bf776915373c8aeeb3bf7c515029b071f4a494073593b05c96d3d5c",
+    "crates/store/src/engine_cutover/rehearsal.rs": "007d9074ae17a1be9f37af767ff454beab9a8abeae919c59be39cd1094787a68",
+    "crates/store/src/workflow_effects.rs": "ba66d4dff50a803fab9ba649f35cb2d7d3de55f776a29d981e44190b870c4ac1"
+  },
+  "exact_restoration": true
+}

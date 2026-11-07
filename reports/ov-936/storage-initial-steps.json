@@ -1,0 +1,60 @@
+[
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_storage_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "workflow::tests::",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f09_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "clippy",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--all-targets",
+      "--features",
+      "testing",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 101
+  }
+]
