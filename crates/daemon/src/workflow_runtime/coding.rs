@@ -77,6 +77,16 @@ impl CodingConfigExt for CodingConfig {
                 }
             }
         }
+        if let Some(pr) = &self.pull_request {
+            let name = |part: &str| !part.is_empty() && part.len() <= 100
+                && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+            let sound_repository = pr.repository.split_once('/').is_some_and(|(owner, repo)| name(owner) && name(repo));
+            // Pull requests are pushed to the landing transport, and `gh` is one program with no arguments of its own.
+            if !sound_repository || !valid_id(&pr.base) || pr.base.starts_with('-') || pr.base.contains("..")
+                || self.landing.is_none() || pr.gh.argv.len() != 1
+            { return Err(Error::Refused("invalid pull request configuration")); }
+            pr.gh.validate()?;
+        }
         for check in &self.checks { check.validate()?; }
         if let Some(reviewer) = &self.reviewer {
             if !valid_id(&reviewer.identity) { return Err(Error::Refused("invalid reviewer identity")); }
@@ -142,10 +152,12 @@ impl Pinned for CodingConfig {
             .map_err(|_| Error::Refused("invalid definition"))?;
         let (mut provisioned, mut built, mut landed) = (false, false, false);
         let (mut based, mut folded, mut pushed) = (false, false, false);
+        let (mut branched, mut opened, mut merged) = (false, false, false);
         for stage in &definition.stages {
             let gate_index = |i: Option<&String>| i.and_then(|s| s.parse::<usize>().ok()).filter(|i| *i < self.checks.len())
                 .ok_or(Error::Refused("unknown configured check"));
             let landing = self.landing.as_ref().ok_or(Error::Refused("landing verbs need a landing identity"));
+            let pull_request = self.pull_request.as_ref().ok_or(Error::Refused("pull request verbs need a pull request identity"));
             let expected = match &stage.kind {
                 StageKind::Provision if !provisioned && !built => { provisioned = true; self.operation("coding-worktree/v1", "") },
                 StageKind::Build if provisioned && !landed => { built = true; self.operation("coding-harness/v1", "") },
@@ -179,7 +191,23 @@ impl Pinned for CodingConfig {
                     pushed = true;
                     self.operation("coding-push/v1", &landing?.target)
                 },
-                StageKind::AwaitCi if pushed => {
+                StageKind::PushBranch if built && !in_group && !branched && !landed => {
+                    branched = true; landing?; pull_request?;
+                    self.operation("coding-push-branch/v1", "")
+                },
+                StageKind::OpenPr if branched && !opened => {
+                    opened = true;
+                    let mode = stage.operation.arguments.get(1).filter(|m| matches!(m.as_str(), "draft" | "ready"))
+                        .ok_or(Error::Refused("unknown pull request mode"))?;
+                    self.operation("coding-open-pr/v1", mode)
+                },
+                StageKind::PrReady if opened => self.operation("coding-pr-ready/v1", ""),
+                StageKind::AwaitPr if opened && !merged => {
+                    merged = true;
+                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                    self.wait_operation("coding-await-pr/v1", "", every, patience)
+                },
+                StageKind::AwaitCi if pushed || merged => {
                     let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
                     self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience)
                 },

@@ -19,7 +19,8 @@ mod coding_native;
 mod coding_landing;
 mod coding_verbs;
 mod coding_settle;
-pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
+mod coding_pr;
+pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
 mod admission;
@@ -501,7 +502,7 @@ impl Runtime {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
                 }
                 // A stop must always get through; everything else waits for a free slot.
-                let wait = matches!(effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi));
+                let wait = matches!(effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr));
                 if !matches!(effect.kind, EffectKind::Stop { .. }) && !wait
                     && running.iter().filter(|j| !j.wait).count() >= self.effect_cap { continue; }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
@@ -720,3 +721,6 @@ mod observe_tests;
 mod coding_verbs_tests;
 #[cfg(test)]
 mod landing_templates_tests;
+
+#[cfg(test)]
+mod coding_pr_tests;

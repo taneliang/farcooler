@@ -45,6 +45,18 @@ pub struct CodingLanding {
     pub config_digest: String,
 }
 
+/// Where the engine opens pull requests, and the `gh` it opens them with (ov-957). `gh` is one absolute
+/// path; the engine adds the arguments, and the environment is exactly what is written here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodingPullRequest {
+    /// `owner/name` on the host `gh` is signed in to.
+    pub repository: String,
+    /// The branch pull requests are opened against.
+    pub base: String,
+    pub gh: CodingCommand,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodingConfig {
@@ -53,6 +65,9 @@ pub struct CodingConfig {
     pub landing_ref: String,
     #[serde(default)]
     pub landing: Option<CodingLanding>,
+    /// Left out of the pinned bytes when absent, so configurations written before pull requests keep their pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<CodingPullRequest>,
     pub harness: CodingHarness,
     pub checks: Vec<CodingCommand>,
     pub reviewer: Option<CodingReviewer>,

@@ -42,6 +42,7 @@ pub(super) fn classify_push(exit: Option<i32>, porcelain: &str, remote_after: Op
 }
 pub(super) fn is_verb(kind: &StageKind) -> bool {
     matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
+        || super::coding_pr::is_pr_verb(kind)
 }
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
@@ -57,7 +58,7 @@ impl Exec {
     pub(super) fn landing(&self) -> Result<&CodingLanding> {
         self.coding.as_ref().and_then(|c| c.landing.as_ref()).ok_or(Error::Refused("landing verbs need a landing identity"))
     }
-    fn write_fact(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
+    pub(super) fn write_fact(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
         durable(&self.verb_path(binding), &serde_json::to_vec(&VerbFact {
             binding: binding.clone(), label: label.into(), candidate: candidate.into(), detail })?)
     }
@@ -395,7 +396,7 @@ pub(super) async fn on_remote(repository: &Path, target: &str, candidate: &str) 
 }
 
 /// Sleep `every` milliseconds. True when a cancel came first.
-async fn pause(every: u64, cancel: &tokio::sync::watch::Receiver<bool>) -> bool {
+pub(super) async fn pause(every: u64, cancel: &tokio::sync::watch::Receiver<bool>) -> bool {
     let mut watching = cancel.clone();
     tokio::select! {
         _ = tokio::time::sleep(Duration::from_millis(every)) => *cancel.borrow(),
