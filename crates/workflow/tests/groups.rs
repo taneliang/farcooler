@@ -350,7 +350,9 @@ fn the_validator_rejects_bad_groups() {
         ("bad resource", Box::new(|d| { d.groups.get_mut("landing").unwrap().exclusive = "has space".into(); })),
         ("no group steps", Box::new(|d| { d.groups.get_mut("landing").unwrap().steps.clear(); })),
         ("join inside a group", Box::new(|d| {
-            d.groups.get_mut("landing").unwrap().steps[1].kind = StageKind::Join { group: "landing".into(), adopt: false }; })),
+            let fold = &mut d.groups.get_mut("landing").unwrap().steps[1];
+            fold.kind = StageKind::Join { group: "landing".into(), adopt: false };
+            fold.routes.clear(); fold.limit = 0; })),
         ("split to a missing step", Box::new(|d| {
             d.groups.get_mut("landing").unwrap().steps[2].routes.insert("rejected".into(),
                 Target::Split { step: "nowhere".into(), otherwise: Box::new(Target::Fail) }); })),
