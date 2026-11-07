@@ -170,11 +170,9 @@ Optional defaults: `Base: main`, `Remote: origin`, `CI: github` (or none). An in
 {{cli}} landing start <key> <key> --repo <repo> --title "<what it carries>" --actor manager
 {{cli}} landing show <N> --repo <repo>
 ```
-**Landing as a definition.** Draft one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) for the owner
-to publish; you never publish, since a definition decides what runs as them. `import-landing` reads the charter's `## Landing` once
-(refused after any landing definition is published; path rules become a `route` step, `Gate: none` a gate that always passes).
-A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value` for its settings), an agent (`--agent-gate`) or the owner
-(`--person-gate owner`). `--route 'site/**=ask'` routes by changed paths. The PR templates' steps aren't live: don't publish them.
+**Landing as a definition.** Draft one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) for the owner to publish;
+you never publish. `import-landing` reads the charter's `## Landing` once (path rules become a `route` step, `Gate: none` a gate that passes). A gate
+is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent (`--agent-gate`) or the owner (`--person-gate owner`); `--route 'site/**=ask'` routes by changed paths. PR templates aren't live: don't publish them.
 ```
 {{cli}} workspace import-landing <workspace> --out landing.json
 {{cli}} workspace landing-template <workspace> batched-push --gate "scripts/landing-gate.sh" --person-gate owner --out landing.json
