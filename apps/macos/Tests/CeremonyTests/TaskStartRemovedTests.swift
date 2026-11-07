@@ -32,6 +32,26 @@ struct TaskStartRemovedTests {
         #expect(found.isEmpty, "a task start the orchestrator owns: \(found)")
     }
 
+    /// The phone has no unit-test target (see `InputHold.swift`'s header), so
+    /// its guard runs here, over the phone's own sources.
+    @Test("No iOS source offers a way to start a task from a description")
+    func noPhoneSourceStartsATask() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }  // CeremonyTests, Tests, macos, apps
+        let phone = root.appendingPathComponent("ios/FarCooler")
+        let walker = try #require(FileManager.default.enumerator(at: phone, includingPropertiesForKeys: nil))
+        let texts = try walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }.map {
+            ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8))
+        }
+        #expect(texts.count > 100, "found \(texts.count) sources under \(phone.path), so this proves nothing")
+        #expect(texts.contains { $0.1.contains("struct NewWorktreeView") }, "New Worktree moved")
+        let markers = ["TaskComposer", "QuickAgents", "QuickTaskView", "func writeRaw("]
+        let found = texts.flatMap { name, text in markers.filter { text.contains($0) }.map { "\($0) in \(name)" } }
+        #expect(found.isEmpty, "a task start the orchestrator owns: \(found)")
+        let generator = try String(contentsOf: root.appendingPathComponent("ios/generate-project.py"), encoding: .utf8)
+        #expect(!generator.contains("TaskComposer.swift"), "the project still lists the composer")
+    }
+
     @Test("A planted start is found")
     func aPlantedStartIsFound() {
         let texts = [

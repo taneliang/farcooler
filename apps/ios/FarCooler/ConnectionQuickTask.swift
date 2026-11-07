@@ -1,40 +1,13 @@
 import Foundation
 
-/// Quick Task's calls on a runner, and the worktree and repository calls
-/// beside them, moved out of `Connection.swift` (ov-818) as they were.
-///
-/// Three thin, throwing calls rather than one method that does the whole
-/// "describe it and an agent starts" flow, unlike the Mac's
-/// `DaemonClient.startTask`. That one method can afford to be silent about
-/// which step failed because it prints one banner; QuickTaskView has a
-/// progress row to keep honest ("creating worktree" vs. "starting agent"),
-/// and it cannot narrate steps it was never told about individually. The
-/// fire-and-refresh `createWorktree` in `Connection.swift` stays as it is, for
-/// the manual form next to it — that flow only needs the new row to show up.
+/// The terminal, worktree and repository calls moved out of `Connection.swift`
+/// (ov-818) as they were. Nothing here starts a task from a description
+/// (ov-951): that is the orchestrator's.
 extension Connection {
 
     private struct IdentifiedReply: Decodable { var id: String }
 
-    /// Create a worktree and hand back its id.
-    ///
-    /// Throws instead of swallowing the error, because the caller has nothing
-    /// to create a terminal in if this fails and needs to say so rather than
-    /// press on silently.
-    ///
-    /// `workspace` is the workspace whose screen it was made from, which it's
-    /// claimed for (ruling 8). Nil, as from anywhere else, is Main.
-    func createWorktree(
-        repository: String, name: String, branch: String, base: String, workspace: String? = nil
-    ) async throws -> String {
-        var args: [String: Any] = [
-            "repository": repository, "task": name, "branch": branch, "base": base,
-        ]
-        if let workspace { args["workspace"] = workspace }
-        let data = try await core.call("worktree.create", args)
-        return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
-    }
-
-    /// Create a terminal and hand back its id, the same way.
+    /// Create a terminal and hand back its id.
     func createTerminal(worktree: String, title: String, preset: String) async throws -> String {
         let data = try await core.call(
             "terminal.create", ["worktree": worktree, "title": title, "preset": preset])

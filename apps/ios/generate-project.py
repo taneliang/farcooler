@@ -25,7 +25,7 @@ SOURCES = [
     "ClientCore.swift",
     "Connection.swift",
     "ConnectionWorkflow.swift",
-    # Quick Task's calls, out of `Connection.swift` for its size budget (ov-818).
+    # Terminal and worktree calls, out of `Connection.swift` for its size budget (ov-818).
     "ConnectionQuickTask.swift",
     # Add Teammate's call to a runner (ov-854), out of `Connection.swift` for its size budget.
     "ConnectionTeammate.swift",
@@ -70,8 +70,8 @@ SOURCES = [
     "Settings.swift",
     "Store.swift",
     "Theme.swift",
-    "QuickTask.swift",
-    "TaskComposer.swift",
+    "TaskSlug.swift",
+    "PhoneMigration.swift",
     "VTCore.swift",
     "TerminalPasteMenu.swift",
     "TerminalSession.swift",

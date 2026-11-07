@@ -47,8 +47,7 @@ struct PadTreeColumn: View {
     @ObservedObject private var pageReads: PageReads
     @State private var filter: OneTreeFilter
     @State private var expansion: OneTreeExpansion
-    @State private var composing = false
-    @State private var fromBranch = false
+    @State private var making = false
     @State private var moveFailure: ActionFailure?
     @AccessibilityFocusState private var headerFocused: Bool
 
@@ -93,7 +92,7 @@ struct PadTreeColumn: View {
             if !outline.below.isEmpty {
                 Section { rows(outline.below, lit: lit) }
             }
-            TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
+            TreeWorktreeActions(connection: connection, making: $making)
         }
         .listStyle(.sidebar)
         .accessibilityIdentifier("pad-tree")
@@ -114,7 +113,7 @@ struct PadTreeColumn: View {
             if connection.keepsPlan { await connection.readPlan(summary) }
         }
         .actionFailureAlert($moveFailure)
-        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
+        .newWorktreeSheets(making: $making, connection: connection, summary: summary)
     }
 
     /// The work's header: what it is, and which cards it shows.
@@ -539,14 +538,11 @@ extension View {
         }
     }
 
-    /// New Worktree… and From a Branch…, as sheets.
+    /// New Worktree…, as a sheet.
     func newWorktreeSheets(
-        composing: Binding<Bool>, fromBranch: Binding<Bool>, connection: Connection, summary: WorkspaceSummary
+        making: Binding<Bool>, connection: Connection, summary: WorkspaceSummary
     ) -> some View {
-        sheet(isPresented: composing) {
-            TaskComposerView(connection: connection, workspace: summary)
-        }
-        .sheet(isPresented: fromBranch) {
+        sheet(isPresented: making) {
             NewWorktreeView(
                 repositories: connection.repositories.filter {
                     summary.repository == nil || $0.id == summary.repository

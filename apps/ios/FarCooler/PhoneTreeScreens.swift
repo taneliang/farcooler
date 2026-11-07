@@ -111,19 +111,18 @@ struct TreeWorkRows<Rows: View>: View {
     }
 }
 
-/// New Worktree… and From a Branch…, at the tree's foot. Not below a
-/// Control grant.
+/// New Worktree…, at the tree's foot: the form that names a worktree and its
+/// branch, or picks a branch to take over. Not below a Control grant.
+/// A task is the orchestrator's to start, so nothing here takes a description.
 struct TreeWorktreeActions: View {
     @ObservedObject var connection: Connection
-    @Binding var composing: Bool
-    @Binding var fromBranch: Bool
+    @Binding var making: Bool
 
     var body: some View {
         if connection.daemon?.mayAct ?? true {
             Section {
-                Button("New Worktree…") { composing = true }
+                Button("New Worktree…") { making = true }
                     .accessibilityIdentifier("new-worktree")
-                Button("From a Branch…") { fromBranch = true }
             }
         }
     }

@@ -2157,14 +2157,6 @@ final class Connection: ObservableObject {
         return .written(tunnel: reply?["connBlob"] as? String ?? "")
     }
 
-    /// Send exact bytes to a terminal. `hex` must already be lowercase hex —
-    /// this does no encoding of its own, because the one caller that exists
-    /// (QuickTaskView) needs the sentence and the carriage return sent as two
-    /// separate calls, not two strings joined into one payload here.
-    func writeRaw(terminal: String, hex: String) async throws {
-        _ = try await core.call("terminal.write", ["terminal": terminal, "hex": hex])
-    }
-
     func terminal(_ id: String, in worktree: String) -> Terminal? {
         fleet.worktrees.first { $0.id == worktree }?.terminals.first { $0.id == id }
     }

@@ -65,10 +65,10 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        let fromBranch = app.buttons["From a Branch…"]
+        let newWorktree = app.buttons["new-worktree"]
         XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.reveal(fromBranch), "no From a Branch…")
-        fromBranch.tap()
+        XCTAssertTrue(app.reveal(newWorktree), "no New Worktree…")
+        newWorktree.tap()
         // The repository picker is a menu; the harness has one repository.
         let picker = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Repository")).firstMatch

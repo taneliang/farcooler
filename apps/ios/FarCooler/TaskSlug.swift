@@ -1,11 +1,10 @@
 import Foundation
 
-// Ported from apps/macos/Sources/FarCooler/QuickCreate.swift (`Branch`) and
-// Composer.swift (`Agents`). Pure logic, no UI and no host calls, so it can be
-// copied verbatim rather than re-derived: the whole point is that a phone and
-// a Mac describing the same task land on the same branch name and offer the
-// same agents, and the only way to guarantee that is to make the rules
-// identical rather than merely similar.
+// Ported from apps/macos/Sources/FarCooler/WorktreeNaming.swift (`Branch`).
+// Pure logic, no UI and no host calls, so it can be copied verbatim rather
+// than re-derived: a phone and a Mac naming the same worktree land on the same
+// branch, and the only way to guarantee that is to make the rules identical
+// rather than merely similar.
 
 /// Turning a sentence into a branch name and a worktree name.
 ///
@@ -101,35 +100,5 @@ enum TaskSlug {
         }
         while out.hasSuffix("-") { out.removeLast() }
         return out
-    }
-}
-
-/// The agents Far Cooler knows how to launch, and the models worth offering.
-///
-/// A short curated list plus "Default", not an exhaustive one — see
-/// Composer.swift on the Mac for why. Named `QuickAgents` rather than `Agents`
-/// only so it cannot be mistaken for a type shared with the terminal work
-/// landing in this app at the same time; the list itself is copied verbatim
-/// from the Mac so the two pickers never disagree about what "codex" means.
-enum QuickAgents {
-    struct Agent: Identifiable, Hashable {
-        let id: String
-        let name: String
-        let models: [String]
-    }
-
-    static let all: [Agent] = [
-        Agent(id: "claude", name: "Claude Code", models: ["opus", "sonnet", "haiku"]),
-        Agent(id: "codex", name: "Codex", models: ["gpt-5.6-sol", "gpt-5.6-sol-high"]),
-        Agent(id: "cursor", name: "Cursor", models: ["auto", "sonnet-4.5", "gpt-5"]),
-    ]
-
-    static func agent(_ id: String) -> Agent {
-        all.first { $0.id == id } ?? all[0]
-    }
-
-    /// The preset string the host expects: `agent` or `agent:model`.
-    static func preset(agent: String, model: String) -> String {
-        model.isEmpty ? agent : "\(agent):\(model)"
     }
 }

@@ -25,8 +25,7 @@ struct PhonePlanColumn<Top: View>: View {
     @ObservedObject private var pageReads: PageReads
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var composing = false
-    @State private var fromBranch = false
+    @State private var making = false
     @State private var moveFailure: ActionFailure?
     /// The worktrees it last drew (ov-791): under a pushed screen it keeps
     /// them rather than building the tree on every board move.
@@ -69,7 +68,7 @@ struct PhonePlanColumn<Top: View>: View {
             if connection.keepsPages { await connection.readPages(summary) }
         }
         .actionFailureAlert($moveFailure)
-        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
+        .newWorktreeSheets(making: $making, connection: connection, summary: summary)
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
     }
 
@@ -179,7 +178,7 @@ struct PhonePlanColumn<Top: View>: View {
                 ForEach(below) { node in TreeRow(node: node, connection: connection, place: place, failure: $moveFailure) }
             }
         }
-        TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
+        TreeWorktreeActions(connection: connection, making: $making)
     }
 
     private var belowTree: [OneTreeNode] {

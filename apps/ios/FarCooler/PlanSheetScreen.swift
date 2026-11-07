@@ -93,8 +93,7 @@ struct PhonePlanList<Top: View>: View {
     @ObservedObject private var reads: PlanReads
     @ObservedObject private var pageReads: PageReads
     @State private var narrow: PlanFilter?
-    @State private var composing = false
-    @State private var fromBranch = false
+    @State private var making = false
     @State private var moveFailure: ActionFailure?
     /// The tree it last drew (ov-791): under a pushed screen it keeps that
     /// tree rather than building it again on every board move, a dropped
@@ -172,7 +171,7 @@ struct PhonePlanList<Top: View>: View {
                 }
             }
             if narrow == nil {
-                TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
+                TreeWorktreeActions(connection: connection, making: $making)
             }
         }
         .listStyle(.insetGrouped)
@@ -190,7 +189,7 @@ struct PhonePlanList<Top: View>: View {
             if connection.keepsPages { await connection.readPages(summary) }
         }
         .actionFailureAlert($moveFailure)
-        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
+        .newWorktreeSheets(making: $making, connection: connection, summary: summary)
         // The tree's and the plan's keys preview their tasks (ov-299).
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
     }
