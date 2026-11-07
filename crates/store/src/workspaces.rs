@@ -611,6 +611,7 @@ impl Store {
             .map_err(map_err)?;
             tx.commit().map_err(map_err)?;
         }
+        self.wake_workflow_notices();
         self.get_terminal(terminal)
     }
 
@@ -659,6 +660,7 @@ impl Store {
             .map_err(map_err)?;
             tx.commit().map_err(map_err)?;
         }
+        self.wake_workflow_notices();
         self.get_terminal(terminal)
     }
 
@@ -743,6 +745,7 @@ impl Store {
             .map_err(map_err)?;
             tx.commit().map_err(map_err)?;
         }
+        self.wake_workflow_notices();
         self.get_terminal(terminal)
     }
 }

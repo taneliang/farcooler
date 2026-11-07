@@ -1,0 +1,14 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+error: failed to load manifest for workspace member `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store`
+referenced by workspace at `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/Cargo.toml`
+
+Caused by:
+  failed to parse manifest at `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store/Cargo.toml`
+
+Caused by:
+  error inheriting `tempfile` from workspace root manifest's `workspace.dependencies.tempfile`
+
+Caused by:
+  `dependency.tempfile` was not found in `workspace.dependencies`
+
+exit=101, stopped=None

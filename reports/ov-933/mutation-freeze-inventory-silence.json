@@ -1,0 +1,9 @@
+{
+  "mode": "inventory-silence",
+  "label": "freeze-inventory-silence",
+  "path": "crates/tmux/src/inventory.rs",
+  "original": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+  "mutant": "5807bfc6e6b19a797e3ba12fa451ed33a50a3c9f653c48532bfd6d0ec11b6a85",
+  "negative_exit": 101,
+  "restored": true
+}

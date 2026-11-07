@@ -49,7 +49,7 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { root,store,service_mode:true,configuration_locks:Default::default(),shutdown:None,
+        Ok(Self { root,store,service_mode:true,notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),resource:String::new(),base:"0".repeat(40),coding:None,
             last_occupancy:None,inbox,send,next_lease:None,
             #[cfg(test)] sweeps:0,

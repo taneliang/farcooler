@@ -1,0 +1,9 @@
+{
+  "mode": "owner-closed",
+  "label": "freeze-owner-closed",
+  "path": "crates/daemon/src/workflow_notices.rs",
+  "original": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+  "mutant": "18197201c2795f5e113504c49490a209ba2200d203108362e84059dfd36e3818",
+  "negative_exit": 101,
+  "restored": true
+}

@@ -1,0 +1,51 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.42s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 7 tests
+test log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery ... actual private native argv bytes: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpfhAnsK/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:ff7c70dc7c66c4f81f996144d2c562d754a20c792686bfebde394c9f94901830\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:043b7a6f1b636a09bb85efe1502f2386718a1f1a9152c2b41a3d0da417fb8497\",\"stage\":0,\"workspace\":\"01a1b3b6-30b2-76e0-b997-d43721de2ce0\"},\"schema\":\"workflow-notice/v1\"}"]]
+["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpfhAnsK/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"second-phase-entry\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:aaa53ee6b9b81f2bd42bcd887810967f9241c3f4e55952b157b0a98f4943a916\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":3,\"run\":\"wf1:5b3484f1be0ee1008ea0966699a2bc76c4222108273ccb18875ee48642c6fa7b\",\"stage\":1,\"workspace\":\"01a1b3b6-30b2-76e0-b997-d43721de2ce0\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_cancel_and_timeout_reap_owned_child_and_keep_unknown ... owned native child pid=19811 cancel=false: reaped, exact delivery Unknown
+owned native child pid=20602 cancel=true: reaped, exact delivery Unknown
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_closed_owner_cannot_prepare_or_spawn ... 
+thread 'watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_closed_owner_cannot_prepare_or_spawn' (828579781) panicked at crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:216:9:
+assertion `left == right` failed: closed owner cannot admit another native attempt
+  left: "unknown"
+ right: "pending"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_inventory_recovery_without_store_write_and_unchanged_refresh_silence ... actual recovery-only native bytes, unchanged Store row: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpLw8ijM/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:5d704819253213c9289a1784554275b8d37ee539729afddb2fcbb97f8e2e159e\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:c87ad8f3f49c7efb3388ac47e6bc32b38e2dfaf61643735c5bd1d27efe26f14a\",\"stage\":0,\"workspace\":\"01a1b3b6-5926-7333-a462-a1d79c1f31ba\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_reconnect_wake_and_shutdown ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_reply_loss_and_nonzero_are_unknown_without_resend ... actual private native possibly-accepted bytes (lost_reply=false): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpKNpIsx/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:990aae8043b07ad5884e897087549355e3c2412c3d6742658171d609879eb7c7\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:50bf8e10c1ec9f3fb9bfdcb85c7eb9494bedc08979aa4ae646bcb4c437cfa659\",\"stage\":0,\"workspace\":\"01a1b3b6-653a-73e3-8676-559dba9c9100\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+actual private native possibly-accepted bytes (lost_reply=true): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpYFHRIb/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:7bc77112621c5a6777c07752ab6efd096bf5edc0e6fcfaccb5b0773af081852c\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:745911373096391f5872d668da54f96b833a6dc9adbbd22ef07d5a94283f9d33\",\"stage\":0,\"workspace\":\"01a1b3b6-6b46-76e2-9b19-6756785f877e\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+
+failures:
+
+failures:
+    watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_closed_owner_cannot_prepare_or_spawn
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 2712 filtered out; finished in 16.55s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

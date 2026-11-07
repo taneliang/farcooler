@@ -1,0 +1,9 @@
+{
+  "mode": "metadata",
+  "label": "final-metadata",
+  "path": "crates/daemon/src/log_join.rs",
+  "original": "041e46745797e07d00839075124fc2262b46cee6ad1d3378375a90650164571b",
+  "mutant": "b1c94bd92169abf9bb1edb70fb450e3ca210602af9c91fca496370dd5eae224d",
+  "negative_exit": 101,
+  "restored": true
+}

@@ -1,0 +1,8 @@
+{
+  "mode": "ack",
+  "path": "crates/daemon/src/workflow_runtime.rs",
+  "original": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+  "mutant": "6a59f149000d78bad8847b7edaeba469b9ab58f3c4167b790c83f6c064080c4c",
+  "negative_exit": 101,
+  "restored": true
+}

@@ -122,15 +122,15 @@ pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
 tokio::task_local! { static DISCOVERY_OWNER: std::sync::Arc<DiscoveryOwner>; }
 
 #[derive(Default)]
-pub(super) struct DiscoveryOwner {
+pub(crate) struct DiscoveryOwner {
     child: tokio::sync::Mutex<Option<tokio::process::Child>>,
 }
 
 impl DiscoveryOwner {
-    pub(super) async fn scope<F: std::future::Future>(self: std::sync::Arc<Self>, future: F) -> F::Output {
+    pub(crate) async fn scope<F: std::future::Future>(self: std::sync::Arc<Self>, future: F) -> F::Output {
         DISCOVERY_OWNER.scope(self, future).await
     }
-    pub(super) async fn stop_and_reap(&self) -> bool {
+    pub(crate) async fn stop_and_reap(&self) -> bool {
         let mut slot = self.child.lock().await;
         let Some(child) = slot.as_mut() else { return true };
         if let Ok(Some(_)) = child.try_wait() { *slot = None; return true }
@@ -146,7 +146,7 @@ tokio::task_local! { pub(super) static TEST_STALLED_DISCOVERY: std::path::PathBu
 #[cfg(test)]
 tokio::task_local! { pub(super) static TEST_DISCOVERY_PANIC: std::path::PathBuf; }
 
-pub(super) async fn discovery_output(program: &str, args: &[&str]) -> Option<String> {
+pub(crate) async fn discovery_output(program: &str, args: &[&str]) -> Option<String> {
     #[cfg(test)]
     if let Ok(path) = TEST_STALLED_DISCOVERY.try_with(Clone::clone) {
         let path = path.to_str()?;

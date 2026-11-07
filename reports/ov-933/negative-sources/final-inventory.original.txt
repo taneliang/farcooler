@@ -1,0 +1,232 @@
+//! The runtime inventory is a LIVE VIEW, not a timed cache.
+//!
+//! The distinction is load-bearing. A view aged by a clock would report a
+//! terminal as `running` because it used to be, which is precisely what the
+//! derivation design removed. A timer would have reintroduced that as a
+//! performance optimization nobody would think to question.
+//!
+//! So the view updates when tmux says something changed: pane exit, window
+//! close, session close. A low-frequency full reconcile runs as a backstop
+//! against a missed notification, and any divergence it finds is LOGGED AS A
+//! DEFECT rather than silently corrected, because silent correction would hide
+//! exactly the bug the backstop exists to catch.
+
+use std::sync::{Arc, RwLock};
+
+use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
+
+use crate::pane_read::PaneRead;
+use crate::server::TmuxServer;
+use crate::windows::UnfinishedOpen;
+
+#[derive(Clone)]
+pub struct LiveInventory {
+    server: TmuxServer,
+    view: Arc<RwLock<RuntimeSnapshot>>,
+    targets: tokio::sync::watch::Sender<u64>,
+    /// The panes an open never finished, from the read that made `view`. `None`
+    /// when that read failed: nothing is known, and nothing is swept.
+    unfinished: Arc<RwLock<Option<Vec<UnfinishedOpen>>>>,
+}
+
+impl LiveInventory {
+    pub fn new(server: TmuxServer) -> Self {
+        let (targets, _) = tokio::sync::watch::channel(0);
+        Self {
+            targets,
+            server,
+            // Until the first successful refresh we know nothing, and "nothing
+            // known" must never read as "alive".
+            view: Arc::new(RwLock::new(RuntimeSnapshot::unavailable())),
+            unfinished: Arc::default(),
+        }
+    }
+
+    pub fn server(&self) -> &TmuxServer {
+        &self.server
+    }
+
+    /// The panes an open started and never tagged, as the last `refresh` read
+    /// them: from the very `list-panes` that made the view, so asking is free.
+    /// `None` until a read succeeds, and again after one fails.
+    pub fn unfinished_opens(&self) -> Option<Vec<UnfinishedOpen>> {
+        self.unfinished.read().expect("unfinished lock").clone()
+    }
+
+    /// How long to wait before asking tmux a second time.
+    ///
+    /// Short, because this is not a backoff — nothing is overloaded. It is a
+    /// pause long enough for a single blocked write to have been given up on by
+    /// `TmuxServer::run`'s own deadline, so the retry is asking a server that is
+    /// listening again rather than re-joining the same queue.
+    const RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+
+    /// Re-inventory the private server and replace the view.
+    ///
+    /// Asked twice before giving up. tmux answers one request at a time per
+    /// server, so a pane whose program has stopped reading its stdin can block
+    /// a `send-keys` and stall every read queued behind it until the command
+    /// deadline fires. That is a lost race, not a broken server — but a single
+    /// failed attempt here marks the inventory unavailable, and an unavailable
+    /// inventory is every terminal on the runner reporting that it cannot be
+    /// accounted for.
+    ///
+    /// One retry costs nothing in the common case, where the first attempt
+    /// succeeds, and turns the great majority of those stalls into a hiccup
+    /// nobody sees. It does not fix the underlying serialization — see
+    /// `TmuxServer::run` — it stops one wedged pane from speaking for the whole
+    /// runner.
+    ///
+    /// Reads only. A retried write could be performed twice, and nothing here
+    /// needs one.
+    pub async fn refresh(&self) -> RuntimeSnapshot {
+        let mut last = match self.server.read_panes().await {
+            Ok(read) => return self.publish(read),
+            Err(e) => e,
+        };
+
+        tracing::debug!(error = %last, "tmux inventory read failed, asking once more");
+        tokio::time::sleep(Self::RETRY_PAUSE).await;
+
+        let snapshot = match self.server.read_panes().await {
+            Ok(read) => return self.publish(read),
+            Err(e) => {
+                last = e;
+                // Twice in a row is no longer a lost race. The daemon serves
+                // durable state with every terminal derived as `unknown` — not
+                // `lost`, which would claim a finding this never made — and
+                // reports the runtime as unhealthy so clients can say which
+                // runner stopped answering.
+                tracing::warn!(
+                    error = %last,
+                    "tmux inventory unavailable after a retry, deriving everything unknown"
+                );
+                RuntimeSnapshot::unavailable()
+            }
+        };
+        self.replace_view(snapshot, None)
+    }
+
+    /// Make a successful read the view, and its unfinished opens the sweep's.
+    fn publish(&self, read: PaneRead) -> RuntimeSnapshot {
+        let snapshot = RuntimeSnapshot::healthy(read.panes);
+        self.replace_view(snapshot, Some(read.unfinished))
+    }
+
+    /// A change hint only: no terminal/session/role authority or delivery ACK.
+    /// Subscribe before the initial read/drain; watch retains a concurrent change.
+    pub fn subscribe_targets(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.targets.subscribe()
+    }
+
+    fn replace_view(&self, snapshot: RuntimeSnapshot, unfinished: Option<Vec<UnfinishedOpen>>) -> RuntimeSnapshot {
+        let changed = {
+            let mut view = self.view.write().expect("inventory lock");
+            // TaggedPane Eq intentionally ignores stamp.pid. Output/geometry
+            // must be quiet while a real respawn/TTY/identity change must wake.
+            let changed = target_keys(&view) != target_keys(&snapshot);
+            *view = snapshot.clone();
+            changed
+        };
+        *self.unfinished.write().expect("unfinished lock") = unfinished;
+        // All inventory locks are released before waking any subscriber.
+        if changed { self.targets.send_modify(|v| *v = v.wrapping_add(1)); }
+        snapshot
+    }
+
+    /// Backstop reconcile. Divergence is a defect in the notification path, so
+    /// it is reported rather than quietly fixed.
+    pub async fn backstop_reconcile(&self) {
+        let before = self.snapshot();
+        let after = self.refresh().await;
+
+        if before.inventory_healthy && after.inventory_healthy && before != after {
+            tracing::error!(
+                before_panes = before.panes.len(),
+                after_panes = after.panes.len(),
+                "DEFECT: backstop reconcile found inventory divergence, a control-mode \
+                 notification was missed"
+            );
+        }
+    }
+}
+
+impl RuntimeInventory for LiveInventory {
+    fn snapshot(&self) -> RuntimeSnapshot {
+        self.view.read().expect("inventory lock").clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn an_unrefreshed_view_never_claims_life() {
+        let inv = LiveInventory::new(TmuxServer::in_dir("test-unused", Uuid::from_u128(1), &farcooler_core::scratch::dir("inventory")));
+        let snap = inv.snapshot();
+        assert!(
+            !snap.inventory_healthy,
+            "before the first refresh, nothing is proved alive"
+        );
+        assert!(snap.panes.is_empty());
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct TargetKey<'a> {
+    daemon: uuid::Uuid, worktree: uuid::Uuid, terminal: uuid::Uuid,
+    schema: u32, pane: &'a str, tty: &'a str, pid: u32, dead: bool, command: &'a str,
+}
+fn target_keys(snapshot: &RuntimeSnapshot) -> (bool, Vec<TargetKey<'_>>) {
+    let mut keys: Vec<_> = snapshot.panes.iter().map(|p| TargetKey {
+        daemon:p.daemon_id,worktree:p.worktree_id,terminal:p.terminal_id,schema:p.schema_version,
+        pane:&p.pane_id,tty:&p.tty,pid:p.stamp.pid,dead:p.dead,command:&p.command,
+    }).collect();
+    keys.sort_unstable();
+    (snapshot.inventory_healthy,keys)
+}
+
+#[cfg(test)]
+mod workflow_notice_inventory_tests {
+    use super::*;
+    use farcooler_core::inventory::{TaggedPane, ScreenStamp};
+    fn inventory() -> LiveInventory {
+        LiveInventory::new(TmuxServer::in_dir("unused-target-watch",uuid::Uuid::from_u128(1),&farcooler_core::scratch::dir("target-watch")))
+    }
+    fn pane() -> TaggedPane {
+        TaggedPane {daemon_id:uuid::Uuid::from_u128(1),worktree_id:uuid::Uuid::from_u128(2),terminal_id:uuid::Uuid::from_u128(3),schema_version:1,
+            pane_id:"%1".into(),window_id:"@1".into(),columns:80,rows:24,left:0,top:0,window_active:true,pane_active:true,zoomed:false,
+            tty:"/dev/unused".into(),dead:false,dead_status:None,dead_signal:None,command:"codex".into(),title:String::new(),
+            stamp:ScreenStamp {pid:10,..Default::default()} }
+    }
+    #[test]
+    fn workflow_notice_inventory_health_change_retained_without_store_write_or_timer() {
+        let inv=inventory();let mut changes=inv.subscribe_targets();
+        assert!(!changes.has_changed().unwrap());
+        inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));
+        assert!(changes.has_changed().unwrap(),"recovery alone must wake pending notices");changes.borrow_and_update();
+        for _ in 0..5 {inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));}
+        assert!(!changes.has_changed().unwrap(),"unchanged refresh cannot become an idle notice timer");
+        inv.replace_view(RuntimeSnapshot::unavailable(),None);
+        assert!(changes.has_changed().unwrap());
+        // Coalesce to the latest generation without dropping a pending change.
+        inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));
+        assert!(changes.has_changed().unwrap());
+    }
+    #[test]
+    fn workflow_notice_inventory_pid_tty_life_and_command_changes_exclude_output_geometry() {
+        let inv=inventory();let initial=RuntimeSnapshot::healthy(vec![pane()]);
+        inv.replace_view(initial.clone(),Some(vec![]));let mut changes=inv.subscribe_targets();
+        let mut output=initial.clone();let p=&mut output.panes[0];
+        p.stamp.activity=99;p.stamp.history=500;p.stamp.cursor=(3,4);p.title="new output".into();p.columns=120;p.rows=40;p.window_id="@9".into();p.pane_active=false;
+        inv.replace_view(output.clone(),Some(vec![]));assert!(!changes.has_changed().unwrap());
+        let mut respawn=output.clone();respawn.panes[0].stamp.pid+=1;
+        assert_eq!(respawn,output,"counterexample: ordinary snapshot equality ignores PID");
+        inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].tty="/dev/replaced".into();inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].command="shell".into();inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].dead=true;inv.replace_view(respawn,Some(vec![]));assert!(changes.has_changed().unwrap());
+    }
+}

@@ -1,0 +1,295 @@
+//! Finite workflow-only notification outbox. No delivery state is engine authority.
+use crate::{Store, workflow::{Result, WorkflowError}};
+use farcooler_protocol::workflow_config::{NotificationPolicy, NoticePoint};
+use farcooler_workflow::{Input, State, Phase, digest};
+use rusqlite::{params, OptionalExtension, Transaction};
+use serde::{Deserialize, Serialize};
+
+pub const PAGE: usize = 32;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notice {
+    pub id: String, pub event: String, pub workspace: String, pub epoch: u64,
+    pub revision: u64, pub item: String, pub run: String, pub stage: usize,
+    pub iteration: u8, pub attempt: u8, pub candidate: Option<String>,
+    pub definition_pin: String, pub execution_policy_pin: String,
+    pub notification_policy_pin: String, pub point: NoticePoint,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Delivery {
+    pub notice: Notice, pub state: String, pub attempt_id: Option<String>,
+    pub target: Option<String>, pub evidence: String,
+}
+
+pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE TABLE workflow_notification_policies(bundle_pin TEXT PRIMARY KEY REFERENCES workflow_bundles(pin), policy TEXT NOT NULL);
+        CREATE TABLE workflow_notice_outbox(
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, workspace TEXT NOT NULL,
+            revision INTEGER NOT NULL, payload TEXT NOT NULL, payload_hash TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','prepared','handed_off','unknown')),
+            attempt_id TEXT, target TEXT, evidence TEXT NOT NULL DEFAULT 'pending_no_proven_supported_owner_codex_target',
+            FOREIGN KEY(workspace,revision) REFERENCES workflow_events(workspace,revision));
+        CREATE INDEX workflow_notice_pending ON workflow_notice_outbox(state,sequence);
+        CREATE INDEX workflow_notice_workspace ON workflow_notice_outbox(workspace,sequence);
+        CREATE TABLE workflow_notice_target_generations(workspace BLOB PRIMARY KEY NOT NULL, generation INTEGER NOT NULL);
+        CREATE TABLE workflow_notice_attempts(id TEXT PRIMARY KEY, notice_id TEXT NOT NULL REFERENCES workflow_notice_outbox(id), target TEXT NOT NULL);
+        CREATE TRIGGER workflow_notice_payload_immutable BEFORE UPDATE OF id,workspace,revision,payload,payload_hash,sequence ON workflow_notice_outbox BEGIN SELECT RAISE(ABORT,'immutable workflow notice'); END;
+        CREATE TRIGGER workflow_notice_no_delete BEFORE DELETE ON workflow_notice_outbox BEGIN SELECT RAISE(ABORT,'immutable workflow notice'); END;
+        CREATE TRIGGER workflow_notice_attempt_no_update BEFORE UPDATE ON workflow_notice_attempts BEGIN SELECT RAISE(ABORT,'immutable workflow notice attempt'); END;
+        CREATE TRIGGER workflow_notice_attempt_no_delete BEFORE DELETE ON workflow_notice_attempts BEGIN SELECT RAISE(ABORT,'immutable workflow notice attempt'); END;
+        CREATE TRIGGER workflow_notice_policy_no_update BEFORE UPDATE ON workflow_notification_policies BEGIN SELECT RAISE(ABORT,'immutable workflow notice policy'); END;
+        CREATE TRIGGER workflow_notice_policy_no_delete BEFORE DELETE ON workflow_notification_policies BEGIN SELECT RAISE(ABORT,'immutable workflow notice policy'); END;")?;
+    target_generation_triggers(tx)
+}
+
+/// Only called from accepted transition transaction. Never replay old event history.
+pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &State) -> Result<()> {
+    for (id, item) in &new.items {
+        let raw: Option<String> = tx.query_row("SELECT policy FROM workflow_notification_policies WHERE bundle_pin=?1", [&item.policy_pin], |r| r.get(0)).optional()?;
+        let policy: NotificationPolicy = raw.map(|s| serde_json::from_str(&s)).transpose()?.unwrap_or_default();
+        let previous = old.items.get(id);
+        let mut points = Vec::new();
+        if previous.is_none_or(|i| i.phase != item.phase) {
+            let point = match item.phase {
+                Phase::WaitingApproval => Some(NoticePoint::WaitingApproval), Phase::WaitingReview => Some(NoticePoint::WaitingReview),
+                Phase::Blocked => Some(NoticePoint::Blocked), Phase::Uncertain => Some(NoticePoint::Uncertain),
+                Phase::Done => Some(NoticePoint::Done), Phase::Failed => Some(NoticePoint::Failed),
+                Phase::Cancelled => Some(NoticePoint::Cancelled), _ => None,
+            };
+            points.extend(point);
+        }
+        if previous.is_some_and(|i| (&i.run,i.stage,i.iteration) != (&item.run,item.stage,item.iteration)) {
+            points.push(NoticePoint::StageChanged);
+        }
+        for point in points.into_iter().filter(|p| policy.points.contains(p)) {
+            let notice = Notice { id:digest(&("workflow-notice/v1", &input.id, &input.workspace, new.epoch, new.revision, id, point)),
+                event:input.id.clone(),workspace:input.workspace.clone(),epoch:new.epoch,revision:new.revision,
+                item:id.clone(),run:item.run.clone(),stage:item.stage,iteration:item.iteration,attempt:item.attempt,
+                candidate:item.candidate.clone(),definition_pin:item.pin.clone(),execution_policy_pin:item.policy_pin.clone(),
+                notification_policy_pin:policy.pin(),point };
+            tx.execute("INSERT INTO workflow_notice_outbox(id,workspace,revision,payload,payload_hash) VALUES(?1,?2,?3,?4,?5)",
+                params![notice.id,notice.workspace,notice.revision,serde_json::to_string(&notice)?,digest(&notice)])?;
+        }
+    }
+    Ok(())
+}
+
+type DeliveryRow = (String,String,String,Option<String>,Option<String>,String);
+fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeliveryRow> {
+    Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))
+}
+fn delivery(raw: DeliveryRow) -> Result<Delivery> {
+    let (payload,hash,state,attempt_id,target,evidence) = raw;
+    let notice: Notice = serde_json::from_str(&payload)?;
+    if digest(&notice) != hash { return Err(WorkflowError::IdentityConflict); }
+    Ok(Delivery {notice,state,attempt_id,target,evidence})
+}
+impl Store {
+    /// Indexed pending queue; caller walks sequence once per real wake, not revision-zero history.
+    pub fn workflow_pending_notices(&self, after: i64) -> Result<Vec<(i64, Delivery)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT sequence,payload,payload_hash,state,attempt_id,target,evidence FROM workflow_notice_outbox WHERE state='pending' AND sequence>?1 ORDER BY sequence LIMIT 32")?;
+        let rows = stmt.query_map([after], |r| Ok((r.get(0)?, (r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))))?;
+        rows.map(|r| { let (sequence, raw) = r?; Ok((sequence,delivery(raw)?)) }).collect()
+    }
+    /// Inspection is bounded; returned identities can be used for exact subsequent lookup.
+    pub fn workflow_notice_deliveries(&self, workspace: &str) -> Result<Vec<Delivery>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT payload,payload_hash,state,attempt_id,target,evidence FROM workflow_notice_outbox WHERE workspace=?1 ORDER BY sequence DESC LIMIT 32")?;
+        stmt.query_map([workspace],decode)?.map(|r| delivery(r?)).collect()
+    }
+    pub fn workflow_notice_delivery(&self, id: &str) -> Result<Option<Delivery>> {
+        self.conn().query_row("SELECT payload,payload_hash,state,attempt_id,target,evidence FROM workflow_notice_outbox WHERE id=?1",[id],decode).optional()?.map(delivery).transpose()
+    }
+    pub fn workflow_prepare_notice(&self, notice: &Notice, attempt: &str, target: &str) -> Result<bool> {
+        if target.len()>8192 || attempt.len()>100 { return Err(WorkflowError::Oversized); }
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let changed = tx.execute("UPDATE workflow_notice_outbox SET state='prepared',attempt_id=?3,target=?4,evidence='prepared_before_native_spawn' WHERE id=?1 AND payload_hash=?2 AND state='pending'",params![notice.id,digest(notice),attempt,target])?;
+        if changed == 1 {
+            tx.execute("INSERT INTO workflow_notice_attempts(id,notice_id,target) VALUES(?1,?2,?3)",params![attempt,notice.id,target])?;
+        }
+        tx.commit()?;
+        Ok(changed == 1)
+    }
+    /// A prepared record is possibly sent. Recovery never relaunches it, even if
+    /// the crash occurred before spawn. Unknown is the honest reconciliation.
+    pub fn workflow_recover_notice_attempts(&self) -> Result<()> {
+        self.conn().execute("UPDATE workflow_notice_outbox SET state='unknown',evidence='restart_without_conclusive_native_receipt' WHERE state='prepared'",[])?;
+        Ok(())
+    }
+    /// Safe refusal is allowed only by the owner before any child was spawned.
+    /// All post-spawn errors must finish unknown, including nonzero exit/reply loss.
+    pub fn workflow_finish_notice(&self, id:&str, attempt:&str, target:&str, state:&str, evidence:&str) -> Result<bool> {
+        if !matches!(state,"pending"|"handed_off"|"unknown") || evidence.len()>1024 { return Err(WorkflowError::IdentityConflict); }
+        Ok(self.conn().execute("UPDATE workflow_notice_outbox SET state=?4,evidence=?5 WHERE id=?1 AND attempt_id=?2 AND ?3 IS NOT NULL AND state='prepared'",
+            params![id,attempt,target,state,evidence])? == 1)
+    }
+}
+
+/// Server-created current owner/Codex target proof. No wire constructor or
+/// deserializer. The first native path deliberately refuses member endpoints.
+pub struct NativeTarget { workspace: uuid::Uuid, terminal: uuid::Uuid, thread: String, fingerprint: String }
+fn target_fingerprint(conn:&rusqlite::Connection, workspace:uuid::Uuid, terminal:uuid::Uuid, thread:&str) -> Result<Option<String>> {
+    use crate::models::uuid_blob;
+    Ok(conn.query_row("SELECT json_object('resource_version',p.resource_version,'epoch',p.epoch,'lease_generation',p.lease_generation,'session',p.agent_session_id,'preset',p.command_preset,'target_generation',COALESCE((SELECT generation FROM workflow_notice_target_generations WHERE workspace=p.workspace_id),0))
+        FROM terminals p JOIN workspaces w ON w.id=p.workspace_id
+        WHERE p.id=?1 AND p.workspace_id=?2 AND p.agent_session_id=?3 AND p.role=2 AND p.pane_mode=0
+        AND (p.command_preset='codex' OR p.command_preset LIKE 'codex:%')
+        AND p.intent=1 AND p.runtime_confirmed=1 AND p.exit_code IS NULL AND p.exit_signal IS NULL
+        AND NOT EXISTS(SELECT 1 FROM workspace_leads WHERE workspace_id=?2)
+        AND NOT EXISTS(SELECT 1 FROM terminal_logins WHERE terminal_id=?1)
+        AND NOT EXISTS(SELECT 1 FROM check_in_target_reservations WHERE terminal_id=?1 OR workspace_id=?2)
+        AND NOT EXISTS(SELECT 1 FROM terminals q WHERE q.workspace_id=?2 AND q.role=2 AND q.id!=?1 AND q.intent=1 AND q.runtime_confirmed=1 AND q.exit_code IS NULL AND q.exit_signal IS NULL)",
+        params![uuid_blob(terminal),uuid_blob(workspace),thread],|r| r.get(0)).optional()?)
+}
+impl Store {
+    pub fn workflow_native_target(&self, workspace:uuid::Uuid, terminal:uuid::Uuid, thread:&str) -> Result<Option<NativeTarget>> {
+        Ok(target_fingerprint(&self.conn(),workspace,terminal,thread)?.map(|fingerprint|
+            NativeTarget { workspace,terminal,thread:thread.into(),fingerprint }))
+    }
+    pub fn workflow_native_target_identity(&self, proof:&NativeTarget) -> serde_json::Value {
+        serde_json::json!({"schema":"workflow-native-target/v1","workspace":proof.workspace.to_string(),
+            "terminal":proof.terminal.to_string(),"thread":&proof.thread,"row_facts":&proof.fingerprint})
+    }
+    /// Immediate transaction covers ALL durable target writers, including other
+    /// Store connections and lead/login/session/epoch ABA. Existing stop/remove
+    /// reservations cover external operations preceding their row update.
+    /// `spawn` must synchronously recheck native process/inventory facts then
+    /// spawn, with no awaits or calls back into Store. Admission linearizes at
+    /// spawn; a later target change cannot recall already admitted bytes.
+    pub fn workflow_with_native_notice_admission<T>(&self, notice:&Notice, attempt:&str, target:&str,
+        proof:&NativeTarget, spawn:impl FnOnce()->T) -> Result<Option<T>> {
+        let mut conn=self.conn();
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let prepared:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_notice_outbox WHERE id=?1 AND payload_hash=?2 AND state='prepared' AND attempt_id=?3 AND target=?4)",
+            params![notice.id,digest(notice),attempt,target],|r|r.get(0))?;
+        if !prepared || notice.workspace != proof.workspace.to_string()
+            || target_fingerprint(&tx,proof.workspace,proof.terminal,&proof.thread)?.as_ref()!=Some(&proof.fingerprint) {
+            return Ok(None);
+        }
+        // No fallible Store operation after spawn can discard the owned child.
+        let child=spawn();
+        drop(tx);
+        Ok(Some(child))
+    }
+}
+
+fn target_generation_triggers(tx:&Transaction<'_>) -> rusqlite::Result<()> {
+    for (table, column) in [("terminals","workspace_id"),("workspace_leads","workspace_id"),("check_in_target_reservations","workspace_id")] {
+        for (event, refs) in [("INSERT",vec!["NEW"]),("UPDATE",vec!["OLD","NEW"]),("DELETE",vec!["OLD"])] {
+            let body=refs.into_iter().map(|r|format!("INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT {r}.{column},1 WHERE {r}.{column} IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1;")).collect::<String>();
+            tx.execute_batch(&format!("CREATE TRIGGER workflow_notice_generation_{table}_{event} AFTER {event} ON {table} BEGIN {body} END;"))?;
+        }
+    }
+    for (event, reference) in [("INSERT","NEW"),("UPDATE","OLD"),("DELETE","OLD")] {
+        tx.execute_batch(&format!("CREATE TRIGGER workflow_notice_login_generation_{event} AFTER {event} ON terminal_logins BEGIN
+            INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT workspace_id,1 FROM terminals WHERE id={reference}.terminal_id AND workspace_id IS NOT NULL
+            ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END;"))?;
+    }
+    Ok(())
+}
+
+impl Store {
+    /// Dedicated wake for this outbox, registered only by the exclusive owner.
+    /// It carries no notices/results/authority and never waits for an ACK.
+    pub fn set_workflow_notice_waker(&self, wake:Option<std::sync::Arc<dyn Fn()+Send+Sync>>) {
+        *self.workflow_notice_waker.lock().unwrap_or_else(|e|e.into_inner())=wake;
+    }
+    pub(crate) fn wake_workflow_notices(&self) {
+        if let Some(wake)=self.workflow_notice_waker.lock().unwrap_or_else(|e|e.into_inner()).as_ref(){wake();}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use farcooler_workflow::{Command, Definition, Grant};
+    fn enqueue(workspace:&str, n:u64, policy:&str)->Input {
+        Input {schema:1,id:format!("event-{n}"),workspace:workspace.into(),expected_revision:n-1,epoch:1,
+            source:"controller".into(),source_sequence:n,now_ms:0,grant:Grant::Controller,busy_resources:Default::default(),
+            command:Command::Enqueue {item:format!("item-{n}"),definition:Definition::tracker("owner"),policy_pin:policy.into(),resource:format!("resource-{n}"),dependencies:Default::default(),initial_candidate:Some("candidate".into())}}
+    }
+    #[test]
+    fn workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery() {
+        let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("private.sqlite");
+        let store=Store::open(&path).unwrap();
+        let first=enqueue("ws",1,"policy");
+        store.conn().execute_batch("CREATE TRIGGER injected BEFORE INSERT ON workflow_receipts BEGIN SELECT RAISE(ABORT,'crash after notice'); END;").unwrap();
+        assert!(store.workflow_apply(&first).is_err());
+        assert!(store.workflow_pending_notices(0).unwrap().is_empty());
+        assert!(store.workflow_state("ws").unwrap().is_none());
+        store.conn().execute_batch("DROP TRIGGER injected").unwrap();
+        let receipt=store.workflow_apply(&first).unwrap();assert!(receipt.result.is_ok());
+        assert_eq!(store.workflow_apply(&first).unwrap(),receipt);
+        for n in 2..=35 { assert!(store.workflow_apply(&enqueue("ws",n,"policy")).unwrap().result.is_ok()); }
+        let page=store.workflow_pending_notices(0).unwrap();assert_eq!(page.len(),PAGE);
+        let tail=store.workflow_pending_notices(page.last().unwrap().0).unwrap();assert_eq!(tail.len(),3);
+        let a=&page[0].1.notice;let b=&page[1].1.notice;
+        assert_eq!(a.point,b.point);assert_eq!(a.candidate,b.candidate);assert_ne!(a.id,b.id);assert_ne!(a.event,b.event);
+        assert!(store.workflow_prepare_notice(a,"attempt","exact-target").unwrap());
+        assert!(!store.workflow_prepare_notice(a,"duplicate","other-target").unwrap());
+        assert!(!store.workflow_finish_notice(&a.id,"foreign","exact-target","handed_off","forged").unwrap());
+        assert!(!store.workflow_finish_notice(&a.id,"attempt","new-target","handed_off","forged").unwrap());
+        let id=a.id.clone();drop(store);
+        let store=Store::open(&path).unwrap();store.workflow_recover_notice_attempts().unwrap();
+        let delivery=store.workflow_notice_delivery(&id).unwrap().unwrap();assert_eq!(delivery.state,"unknown");
+        assert_eq!(delivery.attempt_id.as_deref(),Some("attempt"));assert_eq!(delivery.target.as_deref(),Some("exact-target"));
+        assert!(!store.workflow_pending_notices(0).unwrap().iter().any(|(_,d)|d.notice.id==id));
+        assert!(!store.workflow_prepare_notice(&delivery.notice,"retry","new-target").unwrap());
+        // An offline informational backlog never enters approval or effect eligibility.
+        let state=store.workflow_state("ws").unwrap().unwrap();let item=&state.items["item-1"];
+        let mut approve=first;approve.id="approve".into();approve.expected_revision=state.revision;approve.source_sequence=36;
+        approve.grant=Grant::Decision {principal:"owner".into()};
+        approve.command=Command::Approve {item:"item-1".into(),run:item.run.clone(),pin:item.pin.clone(),candidate:item.candidate.clone()};
+        assert!(store.workflow_apply(&approve).unwrap().result.is_ok());
+        let running=store.workflow_state("ws").unwrap().unwrap();let item=&running.items["item-1"];
+        assert_eq!(item.phase,Phase::Running);
+        let effect=item.pending.as_ref().unwrap();
+        let claim=store.workflow_claim_effect("ws",effect,"native-fixture",running.revision,running.epoch,0,1000).unwrap().unwrap();
+        assert!(store.workflow_admit_effect(&claim,1).unwrap(),"unknown informational attempt cannot gate dispatch");
+        let result=Input {schema:1,id:"observe".into(),workspace:"ws".into(),expected_revision:running.revision,epoch:1,
+            source:"adapter".into(),source_sequence:1,now_ms:2,grant:Grant::Operation {effect:effect.clone(),run:item.run.clone(),fence:item.fence},busy_resources:Default::default(),
+            command:Command::Observe {item:"item-1".into(),effect:effect.clone(),run:item.run.clone(),fence:item.fence,
+                outcome:farcooler_workflow::Outcome::Passed(farcooler_workflow::Evidence {candidate:item.candidate.clone().unwrap(),manifest:"manifest".into(),receipt:"receipt".into(),policy_pin:item.policy_pin.clone()})}};
+        assert!(store.workflow_apply(&result).unwrap().result.is_ok());
+        assert_eq!(store.workflow_state("ws").unwrap().unwrap().items["item-1"].phase,Phase::Done);
+    }
+    #[test]
+    fn workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission() {
+        use crate::workflow_publication::{Write, notification_configuration_pin, configuration_pin};
+        let store=Store::open_in_memory().unwrap();let definition=Definition::tracker("owner");
+        let silent=NotificationPolicy {points:Default::default()};
+        let selected=notification_configuration_pin(&definition,None,Some(&silent));
+        assert_ne!(selected,definition.pin());assert_eq!(configuration_pin(&definition,None),definition.pin());
+        store.workflow_wire_write("ws","publish","old",Write::Publish {expected_pin:None,definition:&definition,adapter:None,notifications:Some(&silent),revision:0}).unwrap();
+        store.workflow_apply(&enqueue("ws",1,&selected)).unwrap();
+        assert!(store.workflow_pending_notices(0).unwrap().is_empty());
+        store.workflow_wire_write("ws","publish2","new",Write::Publish {expected_pin:Some(&selected),definition:&definition,adapter:None,notifications:None,revision:1}).unwrap();
+        let state=store.workflow_state("ws").unwrap().unwrap();let item=&state.items["item-1"];
+        let mut approve=enqueue("ws",2,&selected);approve.command=Command::Approve {item:"item-1".into(),run:item.run.clone(),pin:item.pin.clone(),candidate:item.candidate.clone()};approve.grant=Grant::Decision {principal:"owner".into()};
+        store.workflow_apply(&approve).unwrap();
+        assert!(store.workflow_pending_notices(0).unwrap().is_empty(),"old item retains silent policy across publication");
+        assert_eq!(store.workflow_bundle(&selected).unwrap().unwrap().notifications,Some(silent));
+        assert!(store.conn().execute("UPDATE workflow_notification_policies SET policy='{}'",[]).is_err());
+        // A new item using the omitted policy gets the finite v1 default.
+        let input=enqueue("ws",3,&definition.pin());store.workflow_apply(&input).unwrap();
+        assert_eq!(store.workflow_pending_notices(0).unwrap().len(),1);
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    #[test]
+    fn workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes() {
+        let mut conn=rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+        crate::migrate::migrate_only_to(&mut conn,crate::migrate::CURRENT_SCHEMA_VERSION-1);
+        conn.execute("INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('old',1,1,'untouched-state')",[]).unwrap();
+        conn.execute("INSERT INTO workflow_events(workspace,revision,id,payload,payload_hash,notices) VALUES('old',1,'old-event','untouched-input','old-hash','[\"same text\"]')",[]).unwrap();
+        let before:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();
+        let tx=conn.transaction().unwrap();migration(&tx).unwrap();tx.commit().unwrap();
+        let count:u64=conn.query_row("SELECT count(*) FROM workflow_notice_outbox",[],|r|r.get(0)).unwrap();assert_eq!(count,0);
+        let after:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();assert_eq!(before,after);
+    }
+}

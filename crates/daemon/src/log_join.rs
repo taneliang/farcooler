@@ -202,7 +202,13 @@ fn scan_head<T>(path: &Path, pick: impl Fn(&serde_json::Value) -> Option<T>) -> 
     const HEAD_LINES: usize = 64;
     const HEAD_BYTES: u64 = 1 << 20;
 
-    let file = std::fs::File::open(path).ok()?;
+    use std::os::unix::fs::{OpenOptionsExt, MetadataExt};
+    // Native endpoint discovery must not block on a FIFO/device or follow a
+    // substituted final symlink. Validate the opened descriptor, not a prior stat.
+    let file = std::fs::OpenOptions::new().read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path).ok()?;
+    let metadata=file.metadata().ok()?;
+    if !metadata.is_file() || metadata.nlink()!=1 { return None; }
     let reader = std::io::BufReader::new(file.take(HEAD_BYTES));
     // `map_while` rather than `flatten`: a read that fails -- the byte bound
     // cutting a multi-byte character in half, most likely -- ends the scan,
@@ -1360,5 +1366,26 @@ mod tests {
         }
         eprintln!("checked {checked} real ~/.claude/projects director{ies}", ies = if checked == 1 { "y" } else { "ies" });
         assert!(checked > 0, "no real claude project directories found to check against");
+    }
+}
+
+#[cfg(test)]
+mod workflow_notice_metadata_tests {
+    use super::*;
+    #[test]
+    fn workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("rollout.jsonl");
+        std::fs::write(&path,r#"{"type":"session_meta","payload":{"source":"cli"}}"#).unwrap();
+        assert_eq!(rollout_is_subagent(&path),Some(false));
+        let alias=dir.path().join("alias.jsonl");std::os::unix::fs::symlink(&path,&alias).unwrap();
+        assert_eq!(rollout_is_subagent(&alias),None);
+        std::fs::remove_file(&alias).unwrap();std::fs::hard_link(&path,&alias).unwrap();
+        assert_eq!(rollout_is_subagent(&path),None);
+        let fifo=dir.path().join("fifo.jsonl");
+        use std::os::unix::ffi::OsStrExt;
+        let name=std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe{libc::mkfifo(name.as_ptr(),0o600)},0);
+        let started=std::time::Instant::now();assert_eq!(rollout_is_subagent(&fifo),None);
+        assert!(started.elapsed()<std::time::Duration::from_secs(1));
     }
 }

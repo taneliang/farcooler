@@ -15,7 +15,7 @@ pub struct Mutation {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Action {
     Get,
-    Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>> },
+    Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<crate::workflow_config::NotificationPolicy> },
     Enqueue { mutation: Mutation, item: String, pin: String },
     Approve { mutation: Mutation, item: String, run: String, pin: String, candidate: Option<String> },
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool },
@@ -48,7 +48,7 @@ mod tests {
     use super::*;
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {
-        let action = Action::Publish { adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
+        let action = Action::Publish { notifications:None, adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
         let raw = serde_json::to_string(&action).unwrap();
         assert_eq!(parse(&raw).unwrap(),action);
         let mut value:serde_json::Value = serde_json::from_str(&raw).unwrap();

@@ -88,5 +88,6 @@ pub use wakes::{PendingWake, WakeKind};
 pub use workspaces::{Vacated, valid_prefix};
 
 pub mod workflow_publication;
+pub mod workflow_notices;
 
 mod workflow_ownership;

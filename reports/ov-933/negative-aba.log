@@ -1,0 +1,42 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 29.95s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 5 tests
+test log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking ... ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery ... 
+thread 'watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery' (828188607) panicked at crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:83:9:
+lead ABA must receive zero bytes
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_cancel_and_timeout_reap_owned_child_and_keep_unknown ... owned native child pid=61396 cancel=false: reaped, exact delivery Unknown
+owned native child pid=62342 cancel=true: reaped, exact delivery Unknown
+ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_owned_reconnect_wake_and_shutdown ... ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_reply_loss_and_nonzero_are_unknown_without_resend ... actual private native possibly-accepted bytes (lost_reply=false): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpiZIMLz/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:bd8b78e956fe1c19646f265c04dfb3deb5f9e85b7a3a7f49b2320fc8b08fa920\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:783a5cb6e8d868df688c7533f990f9fae369a834e7b574a677cc8e6115b307a4\",\"stage\":0,\"workspace\":\"01a1b39a-d8a4-70c1-897c-b0393288f4bf\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+actual private native possibly-accepted bytes (lost_reply=true): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp43ViDh/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:b607c701cb12de4112f29249df6b952be2e71894ecd5ce0d773f9db8eec5185a\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:1db64eac6cbff7bb9f6dcd2adf2edbd593278c4198fb12effe607a976b4cd8ba\",\"stage\":0,\"workspace\":\"01a1b39a-dea8-7732-9d5a-0f4e00fce236\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+
+failures:
+
+failures:
+    watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 2712 filtered out; finished in 13.66s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

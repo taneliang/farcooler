@@ -1,0 +1,8 @@
+{
+  "mode": "atomic",
+  "path": "crates/store/src/workflow.rs",
+  "original": "f3d52d10e21017638a84caf1079f3acbbc3676a9a4463e072b6c84b8e8b09367",
+  "mutant": "e99f0f99f5193c5f03fcd3cda21405904d543f5c83cefe8eb9808a42c2b563f3",
+  "negative_exit": 101,
+  "restored": true
+}

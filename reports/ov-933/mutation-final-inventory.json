@@ -1,0 +1,9 @@
+{
+  "mode": "inventory",
+  "label": "final-inventory",
+  "path": "crates/tmux/src/inventory.rs",
+  "original": "9fd752b5060f1ff25776b10b0398cd4fa6f7ede646bf21a7e9e70363e513c6e5",
+  "mutant": "d2fab5cc0794aed876e4be078968149722c88eb7970cffb97fedff4b45dd374e",
+  "negative_exit": 101,
+  "restored": true
+}

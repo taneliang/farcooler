@@ -1,0 +1,187 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/ffi-guard)
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/tailcat)
+    Checking farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/agent-core)
+    Checking farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/vt)
+    Checking farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/agent-hooks)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/transport)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+    Checking farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/tmux)
+    Checking farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/review)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/client)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/daemon)
+error[E0425]: cannot find type `Board` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:6:15
+   |
+ 6 | fn enqueue(b:&Board,n:u64) {
+   |               ^^^^^ not found in this scope
+   |
+note: struct `crate::watch::answer_wake::tests::Board` exists but is inaccessible
+  --> crates/daemon/src/watch/answer_wake/tests.rs:68:1
+   |
+68 | struct Board {
+   | ^^^^^^^^^^^^ not accessible
+
+error[E0425]: cannot find type `Board` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:12:20
+   |
+12 | async fn target(b:&Board)->Terminal {
+   |                    ^^^^^ not found in this scope
+   |
+note: struct `crate::watch::answer_wake::tests::Board` exists but is inaccessible
+  --> crates/daemon/src/watch/answer_wake/tests.rs:68:1
+   |
+68 | struct Board {
+   | ^^^^^^^^^^^^ not accessible
+
+error[E0433]: cannot find `codex_turn_tests` in `super`
+    --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:16:28
+     |
+  16 |     let (rollout,_)=super::codex_turn_tests::running_rollout(b);
+     |                            ^^^^^^^^^^^^^^^^ could not find `codex_turn_tests` in `super`
+     |
+note: module `crate::watch::answer_wake::tests::codex_turn_tests` exists but is inaccessible
+    --> crates/daemon/src/watch/answer_wake/tests.rs:1478:1
+     |
+1478 | mod codex_turn_tests;
+     | ^^^^^^^^^^^^^^^^^^^^^ not accessible
+
+error[E0425]: cannot find type `Board` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:27:13
+   |
+27 | fn queue(b:&Board,status:i32)->(PathBuf,PathBuf) {
+   |             ^^^^^ not found in this scope
+   |
+note: struct `crate::watch::answer_wake::tests::Board` exists but is inaccessible
+  --> crates/daemon/src/watch/answer_wake/tests.rs:68:1
+   |
+68 | struct Board {
+   | ^^^^^^^^^^^^ not accessible
+
+error[E0425]: cannot find type `PathBuf` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:27:33
+   |
+27 | fn queue(b:&Board,status:i32)->(PathBuf,PathBuf) {
+   |                                 ^^^^^^^ not found in this scope
+   |
+   = note: struct `crate::workspace_home::service_tests::PathBuf` exists but is inaccessible
+help: consider importing this struct
+   |
+ 2 + use std::path::PathBuf;
+   |
+
+error[E0425]: cannot find type `PathBuf` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:27:41
+   |
+27 | fn queue(b:&Board,status:i32)->(PathBuf,PathBuf) {
+   |                                         ^^^^^^^ not found in this scope
+   |
+   = note: struct `crate::workspace_home::service_tests::PathBuf` exists but is inaccessible
+help: consider importing this struct
+   |
+ 2 + use std::path::PathBuf;
+   |
+
+error[E0425]: cannot find type `Board` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:34:22
+   |
+34 | async fn endpoint(b:&Board,notice:&farcooler_store::workflow_notices::Notice)->notices::Endpoint {
+   |                      ^^^^^ not found in this scope
+   |
+note: struct `crate::watch::answer_wake::tests::Board` exists but is inaccessible
+  --> crates/daemon/src/watch/answer_wake/tests.rs:68:1
+   |
+68 | struct Board {
+   | ^^^^^^^^^^^^ not accessible
+
+error[E0433]: cannot find type `Arc` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:35:15
+   |
+35 |     let owner=Arc::new(codex_turn::DiscoveryOwner::default());
+   |               ^^^ use of undeclared type `Arc`
+   |
+help: consider importing one of these structs
+   |
+ 2 + use crate::watch::Arc;
+   |
+ 2 + use std::sync::Arc;
+   |
+
+error[E0425]: cannot find function `board` in this scope
+   --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:42:11
+    |
+ 42 |     let b=board().await;enqueue(&b,1);enqueue(&b,2);
+    |           ^^^^^ not found in this scope
+    |
+note: these functions exist but are inaccessible
+   --> crates/daemon/src/report/tests.rs:125:1
+    |
+125 | fn board() -> Inputs {
+    | ^^^^^^^^^^^^^^^^^^^^ `crate::report::tests::board`: not accessible
+    |
+   ::: crates/daemon/src/crash_reports.rs:185:1
+    |
+185 | fn board(svc: &Service) -> Result<Option<Workspace>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::crash_reports::board`: not accessible
+    |
+   ::: crates/daemon/src/watch/answer_wake/tests.rs:117:1
+    |
+117 | async fn board() -> Board {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::watch::answer_wake::tests::board`: not accessible
+
+error[E0433]: cannot find type `Arc` in this scope
+  --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:47:19
+   |
+47 |         let owner=Arc::new(codex_turn::DiscoveryOwner::default());
+   |                   ^^^ use of undeclared type `Arc`
+   |
+help: consider importing one of these structs
+   |
+ 2 + use crate::watch::Arc;
+   |
+ 2 + use std::sync::Arc;
+   |
+
+error[E0425]: cannot find function `board` in this scope
+   --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:78:15
+    |
+ 78 |         let b=board().await;enqueue(&b,1);target(&b).await;
+    |               ^^^^^ not found in this scope
+    |
+note: these functions exist but are inaccessible
+   --> crates/daemon/src/report/tests.rs:125:1
+    |
+125 | fn board() -> Inputs {
+    | ^^^^^^^^^^^^^^^^^^^^ `crate::report::tests::board`: not accessible
+    |
+   ::: crates/daemon/src/crash_reports.rs:185:1
+    |
+185 | fn board(svc: &Service) -> Result<Option<Workspace>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::crash_reports::board`: not accessible
+    |
+   ::: crates/daemon/src/watch/answer_wake/tests.rs:117:1
+    |
+117 | async fn board() -> Board {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::watch::answer_wake::tests::board`: not accessible
+
+error[E0062]: field `notifications` specified more than once
+  --> crates/daemon/src/workflow_runtime/wire_commands.rs:49:100
+   |
+48 | ...   self.store.workflow_wire_write(workspace,&id,&payload,Write::Publish { notifications:None,
+   |                                                                              ------------------ first use of `notifications`
+49 | ...       expected_pin:expected_pin.as_deref(),definition,adapter:adapter.as_deref(),notifications:notifications.as_ref(),revision:s...
+   |                                                                                      ^^^^^^^^^^^^^ used more than once
+
+For more information about this error, try `rustc --explain E0062`.
+error: could not compile `farcooler-daemon` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+Some errors have detailed explanations: E0062, E0425, E0433.
+For more information about an error, try `rustc --explain E0062`.
+error: could not compile `farcooler-daemon` (lib test) due to 12 previous errors
+
+exit=101, stopped=None

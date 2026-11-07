@@ -6,6 +6,7 @@ pub(crate) struct Owner {
     handle: CommandHandle,
     stop: watch::Sender<bool>,
     task: JoinHandle<Result<()>>,
+    notices: JoinHandle<Result<()>>,
 }
 impl Service {
     pub fn start_workflows(&self) -> Result<()> {
@@ -16,10 +17,14 @@ impl Service {
             } else { "workflow service already started" }));
         }
         let mut runtime = Runtime::open_service(&self.root_dir().join("workflow"), self.store.clone())?;
+        let wake=self.workflow_notice_wake.clone();
+        self.store.set_workflow_notice_waker(Some(std::sync::Arc::new(move||wake.notify_one())));
+        runtime.notice_wake = Some(self.workflow_notice_wake.clone());
         let handle = runtime.command_handle(&runtime.controller())?;
         let (stop, signal) = watch::channel(false);
+        let notices = tokio::spawn(crate::workflow_notices::run(self.store.clone(),self.inventory.clone(),self.workflow_notice_wake.clone(),signal.clone()));
         let task = tokio::spawn(async move { runtime.run(signal).await });
-        *owner = Some(Owner { handle,stop,task });
+        *owner = Some(Owner { handle,stop,task,notices });
         Ok(())
     }
     pub(crate) fn workflow_handle(&self) -> Option<CommandHandle> {
@@ -30,7 +35,10 @@ impl Service {
         let owner = self.workflow_owner.lock().map_err(|_| Error::Refused("workflow owner lock poisoned"))?.take();
         if let Some(owner) = owner {
             owner.stop.send_replace(true);
-            owner.task.await.map_err(|_| Error::Refused("workflow owner failed to join"))??;
+            let runtime = owner.task.await;
+            let notices = owner.notices.await;
+            runtime.map_err(|_| Error::Refused("workflow owner failed to join"))??;
+            notices.map_err(|_| Error::Refused("workflow notice owner failed to join"))??;
         }
         Ok(())
     }

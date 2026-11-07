@@ -1,0 +1,17 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.28s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-ed354ba931bdf84d)
+
+running 3 tests
+test workflow_notices::migration_tests::workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes ... ok
+test workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery ... ok
+test workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 496 filtered out; finished in 0.17s
+
+
+exit=0, stopped=None

@@ -1,0 +1,28 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 6.85s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-ed354ba931bdf84d)
+
+running 3 tests
+test workflow_notices::migration_tests::workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes ... ok
+test workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery ... 
+thread 'workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery' (828344464) panicked at crates/store/src/workflow_notices.rs:232:9:
+assertion failed: !store.workflow_finish_notice(&a.id, "attempt", "new-target", "handed_off",
+            "forged").unwrap()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission ... ok
+
+failures:
+
+failures:
+    workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 496 filtered out; finished in 0.17s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

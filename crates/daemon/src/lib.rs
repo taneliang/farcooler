@@ -182,3 +182,4 @@ mod tests {
 }
 
 pub mod workflow_service;
+mod workflow_notices;

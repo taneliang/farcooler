@@ -41,6 +41,7 @@ impl Service {
         };
         if !reconciled { return result }
         let released = self.store.release_check_in_target_change(token);
+        self.workflow_notice_wake.notify_one();
         match (result, released) {
             (Err(error), release) => {
                 if !matches!(release, Ok(true)) { tracing::warn!(%token, "completed target stop needs reconciliation"); }

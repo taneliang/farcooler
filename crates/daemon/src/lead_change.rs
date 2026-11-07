@@ -131,7 +131,9 @@ impl Service {
         handoff: Option<&str>,
     ) -> Result<models::Terminal> {
         let _seat = self.orchestrator_locks.hold(workspace).await;
-        self.start_orchestrator_held(workspace, harness, replace, handoff).await
+        let result = self.start_orchestrator_held(workspace, harness, replace, handoff).await;
+        self.workflow_notice_wake.notify_one();
+        result
     }
 
     /// The lock a launch of terminal `id` holds: its workspace's when it's

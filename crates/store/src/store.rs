@@ -38,6 +38,7 @@ pub struct Store {
     /// cross threads. A mutex is also the honest model of the thing underneath:
     /// SQLite serializes writes regardless, and every call here is short.
     db: std::sync::Mutex<Connection>,
+    pub(crate) workflow_notice_waker: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Store {
@@ -58,7 +59,7 @@ impl Store {
         let existed = path.exists();
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;
-        Ok(Store { db: std::sync::Mutex::new(conn) })
+        Ok(Store { db: std::sync::Mutex::new(conn), workflow_notice_waker: Default::default() })
     }
 
     /// This database's schema, as `read_schema` reads a file's: what
@@ -76,7 +77,7 @@ impl Store {
     pub fn open_in_memory() -> Result<Store> {
         let mut conn = Connection::open_in_memory().map_err(map_err)?;
         Self::init(&mut conn, None)?;
-        Ok(Store { db: std::sync::Mutex::new(conn) })
+        Ok(Store { db: std::sync::Mutex::new(conn), workflow_notice_waker: Default::default() })
     }
 
     fn init(conn: &mut Connection, backup_source: Option<&Path>) -> Result<()> {
@@ -846,6 +847,7 @@ impl Store {
             "SELECT 1 FROM terminals WHERE id = ?1",
             &[&uuid_blob(id)],
         )?;
+        self.wake_workflow_notices();
         self.get_terminal(id)
     }
 
@@ -913,6 +915,7 @@ impl Store {
             // are the caller's problem to re-read, not ours to paper over.
             return Err(DomainError::ResourceConflict);
         }
+        self.wake_workflow_notices();
         self.get_terminal(id)
     }
 

@@ -1,0 +1,56 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/daemon)
+warning: unused import: `OpenOptionsExt`
+   --> crates/daemon/src/log_join.rs:205:29
+    |
+205 |     use std::os::unix::fs::{OpenOptionsExt, MetadataExt};
+    |                             ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-daemon` (lib test) generated 1 warning (run `cargo fix --lib -p farcooler-daemon --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 29.93s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 5 tests
+test log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking ... 
+thread 'log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking' (828204408) panicked at crates/daemon/src/log_join.rs:1381:9:
+assertion `left == right` failed
+  left: Some(false)
+ right: None
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery ... actual private native argv bytes: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp0gbp1y/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:d33608594de28890a4746b781c4a3d998bd5bb23e38ea55c6eadc764719df044\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:6470adab937ef13a2cce7a7f594033ae047f745d0e87569e973545ef9eee5abb\",\"stage\":0,\"workspace\":\"01a1b39b-d46f-7c30-be36-c692ceddd320\"},\"schema\":\"workflow-notice/v1\"}"]]
+["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp0gbp1y/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"second-phase-entry\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:45c6a6a44c07268f0d4872f69fab4030b8a5c2fae6b317cc184ffdc99c7b9ee2\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":3,\"run\":\"wf1:6c0318b37beec1fd15c005a0c1e529f8f2a73881559c297ecef894f43495a6be\",\"stage\":1,\"workspace\":\"01a1b39b-d46f-7c30-be36-c692ceddd320\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_cancel_and_timeout_reap_owned_child_and_keep_unknown ... owned native child pid=72058 cancel=false: reaped, exact delivery Unknown
+owned native child pid=73012 cancel=true: reaped, exact delivery Unknown
+ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_owned_reconnect_wake_and_shutdown ... ok
+test watch::answer_wake::tests::workflow_notice_tests::workflow_notice_native_reply_loss_and_nonzero_are_unknown_without_resend ... actual private native possibly-accepted bytes (lost_reply=false): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpX26175/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:0f6380fbc3b9ff7442cd2d0e61befa2e3271af7f6e446b65af75d19272849039\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:c40f1b44618345c0388a12e81878f13df20c8d431f5befe7896067052368eba5\",\"stage\":0,\"workspace\":\"01a1b39b-ff38-7832-8f1e-98a349a3ff2b\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+actual private native possibly-accepted bytes (lost_reply=true): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpoZWmYk/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:c3a39d4465f73550be27de27aba309edd243c95a36020361afbedb0ba20941ac\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:2ccbd82091f817fec84537631bd65f55aa0ba78a8631fa7c385e6ef995d74fdc\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:e45492b2752ab3b5601649fc5cf825d627d494680f33ab32408864243427d604\",\"stage\":0,\"workspace\":\"01a1b39c-04f6-7512-84e7-77da7300881e\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+
+failures:
+
+failures:
+    log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 2712 filtered out; finished in 13.97s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

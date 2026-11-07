@@ -1904,6 +1904,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 pub struct Service {
+    pub(crate) workflow_notice_wake: Arc<tokio::sync::Notify>,
     pub(crate) workflow_owner: std::sync::Mutex<Option<crate::workflow_service::Owner>>,
     /// Behind an `Arc` so `hooks` can read the same database through the same
     /// connection. `Store` is not `Clone` — it owns a `Connection` behind a
@@ -2138,6 +2139,7 @@ impl Service {
 
         let service = Self {
             workflow_owner: Default::default(),
+            workflow_notice_wake: Default::default(),
             store: store.clone(),
             tmux,
             inventory: inventory.clone(),

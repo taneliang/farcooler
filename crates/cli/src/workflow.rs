@@ -26,19 +26,19 @@ impl Publication {
     pub fn action(&self) -> Result<Action, Box<dyn std::error::Error>> {
         let bytes = read_file(&self.file)?;
         let value:serde_json::Value = serde_json::from_slice(&bytes)?;
-        let (definition, adapter) = if value.get("definition").is_some() {
+        let (definition, adapter, notifications) = if value.get("definition").is_some() {
             #[derive(serde::Deserialize, serde::Serialize)]
             #[serde(deny_unknown_fields)]
-            struct Bundle { definition: farcooler_protocol::workflow_commands::Definition, adapter: farcooler_protocol::workflow_config::AdapterConfiguration }
+            struct Bundle { definition: farcooler_protocol::workflow_commands::Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<farcooler_protocol::workflow_config::AdapterConfiguration>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<farcooler_protocol::workflow_config::NotificationPolicy> }
             let bundle: Bundle = serde_json::from_value(value.clone())?;
             if serde_json::to_value(&bundle)? != value { return Err("unknown bundle fields".into()); }
-            (bundle.definition, Some(Box::new(bundle.adapter)))
+            (bundle.definition, bundle.adapter.map(Box::new), bundle.notifications)
         } else {
             let definition = serde_json::from_value(value.clone())?;
             if serde_json::to_value(&definition)? != value { return Err("unknown definition fields".into()); }
-            (definition, None)
+            (definition, None, None)
         };
-        Ok(Action::Publish { adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
+        Ok(Action::Publish { notifications, adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
     }
 }
 #[derive(Subcommand)]
@@ -149,6 +149,17 @@ mod bundle_tests {
         let action=publication.action().unwrap();
         assert!(matches!(&action,Action::Publish {adapter:Some(_),..}));
         assert_eq!(farcooler_protocol::workflow_commands::parse(&serde_json::to_string(&action).unwrap()).unwrap(),action);
+        // Real file producer supports a tracker policy without a coding adapter.
+        let policy=serde_json::json!({"definition":definition,"notifications":{"points":["waiting_approval","stage_changed"]}});
+        std::fs::write(&path,serde_json::to_vec(&policy).unwrap()).unwrap();
+        let policy_action=publication.action().unwrap();
+        assert!(matches!(&policy_action,Action::Publish {adapter:None,notifications:Some(_),..}));
+        assert_eq!(farcooler_protocol::workflow_commands::parse(&serde_json::to_string(&policy_action).unwrap()).unwrap(),policy_action);
+        for notifications in [serde_json::json!({"points":["untrusted-prose-filter"]}),
+            serde_json::json!({"points":[],"grant":"Controller"})] {
+            std::fs::write(&path,serde_json::to_vec(&serde_json::json!({"definition":definition,"notifications":notifications})).unwrap()).unwrap();
+            assert!(publication.action().is_err(),"unknown policy points or caller authority must not survive the producer");
+        }
         let fifo=dir.path().join("fifo");let name=std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe {libc::mkfifo(name.as_ptr(),0o600)},0);
         assert!(read_file(&fifo).is_err());

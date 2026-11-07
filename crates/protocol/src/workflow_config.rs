@@ -67,3 +67,22 @@ pub enum AdapterConfiguration { #[serde(rename = "coding/v1")] Coding(CodingConf
 impl AdapterConfiguration {
     pub fn pin(&self) -> String { farcooler_workflow::digest(self) }
 }
+
+/// Finite informational key points. Never an execution or decision grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticePoint { WaitingApproval, WaitingReview, Blocked, Uncertain, Done, Failed, Cancelled, StageChanged }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationPolicy { pub points: std::collections::BTreeSet<NoticePoint> }
+// Omission permanently selects this v1 default for legacy immutable bundles.
+// New defaults require a new version; never retarget already admitted items.
+impl Default for NotificationPolicy {
+    fn default() -> Self {
+        use NoticePoint::*;
+        Self { points: [WaitingApproval, WaitingReview, Uncertain, Done, Failed, Cancelled].into() }
+    }
+}
+impl NotificationPolicy {
+    pub fn pin(&self) -> String { farcooler_workflow::digest(&("workflow-notifications/v1", self)) }
+}

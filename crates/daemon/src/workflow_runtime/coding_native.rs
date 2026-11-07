@@ -438,7 +438,7 @@ mod recovery_tests {
             let adapter = Some(AdapterConfiguration::Coding(config.clone()));
             let pin = farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
             let m = |id: &str, revision, sequence| Mutation { id:id.into(),revision,epoch:1,sequence };
-            runtime.wire_command(&workspace,"owner",Action::Publish { mutation:m("p",0,1),expected_pin:None,
+            runtime.wire_command(&workspace,"owner",Action::Publish { notifications:None, mutation:m("p",0,1),expected_pin:None,
                 definition,adapter:adapter.map(Box::new) }).unwrap();
             runtime.wire_command(&workspace,"owner",Action::Enqueue { mutation:m("e",0,1),item:"one".into(),pin:pin.clone() }).unwrap();
             runtime.pump(2).await.unwrap();

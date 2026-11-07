@@ -1,0 +1,44 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-933-workflow-notice-implementation/crates/store)
+warning: function `select` is never used
+  --> crates/store/src/workflow_notices.rs:45:15
+   |
+45 | pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &State) -> Result<()> {
+   |               ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-store` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 7.55s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-ed354ba931bdf84d)
+
+running 3 tests
+test workflow_notices::migration_tests::workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes ... ok
+test workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery ... 
+thread 'workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery' (828341993) panicked at crates/store/src/workflow_notices.rs:225:61:
+assertion `left == right` failed
+  left: 0
+ right: 32
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission ... 
+thread 'workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission' (828341996) panicked at crates/store/src/workflow_notices.rs:276:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+FAILED
+
+failures:
+
+failures:
+    workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery
+    workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 496 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

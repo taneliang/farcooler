@@ -1,0 +1,8 @@
+{
+  "mode": "admission",
+  "path": "crates/store/src/workflow_notices.rs",
+  "original": "6102d7534451dd314b742fb2ff6a694303951dc0290c10b9dd72461bd9dcc265",
+  "mutant": "7fed4d576ca4c8ae7d3bfbb2317d51766a207cc476fe75b1be773b9a40a3bec0",
+  "negative_exit": 101,
+  "restored": true
+}

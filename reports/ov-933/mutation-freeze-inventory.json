@@ -1,0 +1,9 @@
+{
+  "mode": "inventory",
+  "label": "freeze-inventory",
+  "path": "crates/tmux/src/inventory.rs",
+  "original": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+  "mutant": "7cca585016d9e8b78b613d66765132659ecfff8d3ae6621cf08617540aef9fe7",
+  "negative_exit": 101,
+  "restored": true
+}

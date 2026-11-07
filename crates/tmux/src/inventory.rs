@@ -23,6 +23,7 @@ use crate::windows::UnfinishedOpen;
 pub struct LiveInventory {
     server: TmuxServer,
     view: Arc<RwLock<RuntimeSnapshot>>,
+    targets: tokio::sync::watch::Sender<u64>,
     /// The panes an open never finished, from the read that made `view`. `None`
     /// when that read failed: nothing is known, and nothing is swept.
     unfinished: Arc<RwLock<Option<Vec<UnfinishedOpen>>>>,
@@ -30,7 +31,9 @@ pub struct LiveInventory {
 
 impl LiveInventory {
     pub fn new(server: TmuxServer) -> Self {
+        let (targets, _) = tokio::sync::watch::channel(0);
         Self {
+            targets,
             server,
             // Until the first successful refresh we know nothing, and "nothing
             // known" must never read as "alive".
@@ -101,16 +104,33 @@ impl LiveInventory {
                 RuntimeSnapshot::unavailable()
             }
         };
-        *self.view.write().expect("inventory lock") = snapshot.clone();
-        *self.unfinished.write().expect("unfinished lock") = None;
-        snapshot
+        self.replace_view(snapshot, None)
     }
 
     /// Make a successful read the view, and its unfinished opens the sweep's.
     fn publish(&self, read: PaneRead) -> RuntimeSnapshot {
         let snapshot = RuntimeSnapshot::healthy(read.panes);
-        *self.view.write().expect("inventory lock") = snapshot.clone();
-        *self.unfinished.write().expect("unfinished lock") = Some(read.unfinished);
+        self.replace_view(snapshot, Some(read.unfinished))
+    }
+
+    /// A change hint only: no terminal/session/role authority or delivery ACK.
+    /// Subscribe before the initial read/drain; watch retains a concurrent change.
+    pub fn subscribe_targets(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.targets.subscribe()
+    }
+
+    fn replace_view(&self, snapshot: RuntimeSnapshot, unfinished: Option<Vec<UnfinishedOpen>>) -> RuntimeSnapshot {
+        let changed = {
+            let mut view = self.view.write().expect("inventory lock");
+            // TaggedPane Eq intentionally ignores stamp.pid. Output/geometry
+            // must be quiet while a real respawn/TTY/identity change must wake.
+            let changed = target_keys(&view) != target_keys(&snapshot);
+            *view = snapshot.clone();
+            changed
+        };
+        *self.unfinished.write().expect("unfinished lock") = unfinished;
+        // All inventory locks are released before waking any subscriber.
+        if changed { self.targets.send_modify(|v| *v = v.wrapping_add(1)); }
         snapshot
     }
 
@@ -137,6 +157,20 @@ impl RuntimeInventory for LiveInventory {
     }
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct TargetKey<'a> {
+    daemon: uuid::Uuid, worktree: uuid::Uuid, terminal: uuid::Uuid,
+    schema: u32, pane: &'a str, tty: &'a str, pid: u32, dead: bool, command: &'a str,
+}
+fn target_keys(snapshot: &RuntimeSnapshot) -> (bool, Vec<TargetKey<'_>>) {
+    let mut keys: Vec<_> = snapshot.panes.iter().map(|p| TargetKey {
+        daemon:p.daemon_id,worktree:p.worktree_id,terminal:p.terminal_id,schema:p.schema_version,
+        pane:&p.pane_id,tty:&p.tty,pid:p.stamp.pid,dead:p.dead,command:&p.command,
+    }).collect();
+    keys.sort_unstable();
+    (snapshot.inventory_healthy,keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +185,49 @@ mod tests {
             "before the first refresh, nothing is proved alive"
         );
         assert!(snap.panes.is_empty());
+    }
+}
+
+
+#[cfg(test)]
+mod workflow_notice_inventory_tests {
+    use super::*;
+    use farcooler_core::inventory::{TaggedPane, ScreenStamp};
+    fn inventory() -> LiveInventory {
+        LiveInventory::new(TmuxServer::in_dir("unused-target-watch",uuid::Uuid::from_u128(1),&farcooler_core::scratch::dir("target-watch")))
+    }
+    fn pane() -> TaggedPane {
+        TaggedPane {daemon_id:uuid::Uuid::from_u128(1),worktree_id:uuid::Uuid::from_u128(2),terminal_id:uuid::Uuid::from_u128(3),schema_version:1,
+            pane_id:"%1".into(),window_id:"@1".into(),columns:80,rows:24,left:0,top:0,window_active:true,pane_active:true,zoomed:false,
+            tty:"/dev/unused".into(),dead:false,dead_status:None,dead_signal:None,command:"codex".into(),title:String::new(),
+            stamp:ScreenStamp {pid:10,..Default::default()} }
+    }
+    #[test]
+    fn workflow_notice_inventory_health_change_retained_without_store_write_or_timer() {
+        let inv=inventory();let mut changes=inv.subscribe_targets();
+        assert!(!changes.has_changed().unwrap());
+        inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));
+        assert!(changes.has_changed().unwrap(),"recovery alone must wake pending notices");changes.borrow_and_update();
+        for _ in 0..5 {inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));}
+        assert!(!changes.has_changed().unwrap(),"unchanged refresh cannot become an idle notice timer");
+        inv.replace_view(RuntimeSnapshot::unavailable(),None);
+        assert!(changes.has_changed().unwrap());
+        // Coalesce to the latest generation without dropping a pending change.
+        inv.replace_view(RuntimeSnapshot::healthy(vec![]),Some(vec![]));
+        assert!(changes.has_changed().unwrap());
+    }
+    #[test]
+    fn workflow_notice_inventory_pid_tty_life_and_command_changes_exclude_output_geometry() {
+        let inv=inventory();let initial=RuntimeSnapshot::healthy(vec![pane()]);
+        inv.replace_view(initial.clone(),Some(vec![]));let mut changes=inv.subscribe_targets();
+        let mut output=initial.clone();let p=&mut output.panes[0];
+        p.stamp.activity=99;p.stamp.history=500;p.stamp.cursor=(3,4);p.title="new output".into();p.columns=120;p.rows=40;p.window_id="@9".into();p.pane_active=false;
+        inv.replace_view(output.clone(),Some(vec![]));assert!(!changes.has_changed().unwrap());
+        let mut respawn=output.clone();respawn.panes[0].stamp.pid+=1;
+        assert_eq!(respawn,output,"counterexample: ordinary snapshot equality ignores PID");
+        inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].tty="/dev/replaced".into();inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].command="shell".into();inv.replace_view(respawn.clone(),Some(vec![]));assert!(changes.has_changed().unwrap());changes.borrow_and_update();
+        respawn.panes[0].dead=true;inv.replace_view(respawn,Some(vec![]));assert!(changes.has_changed().unwrap());
     }
 }

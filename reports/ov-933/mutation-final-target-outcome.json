@@ -1,0 +1,9 @@
+{
+  "mode": "target-outcome",
+  "label": "final-target-outcome",
+  "path": "crates/store/src/workflow_notices.rs",
+  "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+  "mutant": "21334dc3e78d427b412da5b16d5ed8c1633eaa1195d53b490d7f77e41eb7c05c",
+  "negative_exit": 101,
+  "restored": true
+}

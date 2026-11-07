@@ -1,4 +1,4 @@
-//! Opt-in isolated coding fixture runtime. No installed-app or Service caller.
+//! Workflow runtime for private fixtures and the sole ordinary Service owner.
 //! The local capability boundary is intended for authenticated embedding, not wire grants.
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
@@ -93,6 +93,7 @@ pub struct Runtime {
     root: PathBuf,
     store: std::sync::Arc<Store>,
     service_mode: bool,
+    pub(crate) notice_wake: Option<std::sync::Arc<tokio::sync::Notify>>,
     configuration_locks: std::collections::BTreeMap<PathBuf, File>,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     instance: Uuid,
@@ -202,7 +203,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None,
             #[cfg(test)] sweeps: 0,
-            root, store: std::sync::Arc::new(store), service_mode: false, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
+            root, store: std::sync::Arc::new(store), service_mode: false, notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -254,10 +255,12 @@ impl Runtime {
     }
     fn apply(&self, request: Request, source: &str, grant: Grant, now_ms: i64) -> Result<Receipt> {
         let epoch = self.state(&request.workspace)?.map_or(1, |s| s.epoch);
-        Ok(self.store.workflow_apply(&Input { schema: 1, id: request.id, workspace: request.workspace,
+        let receipt = self.store.workflow_apply(&Input { schema: 1, id: request.id, workspace: request.workspace,
             expected_revision: request.expected_revision, epoch, source: source.into(),
             source_sequence: request.sequence, now_ms, grant, command: request.command,
-            busy_resources: BTreeSet::new() })?)
+            busy_resources: BTreeSet::new() })?;
+        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+        Ok(receipt)
     }
     fn internal(&self, workspace: &str, command: Command, grant: Grant, now_ms: i64) -> Result<Receipt> {
         let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;

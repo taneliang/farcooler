@@ -189,3 +189,6 @@ fn only_a_main_thread_with_a_plain_id_is_a_target() {
     std::fs::write(&elsewhere, meta(THREAD, r#""cli""#) + "\n").unwrap();
     assert_eq!(crate::log_join::codex_thread_of(&elsewhere), None, "no sessions directory");
 }
+
+#[path = "workflow_notice_tests.rs"]
+mod workflow_notice_tests;

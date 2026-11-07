@@ -15,7 +15,7 @@ async fn publish_waiting(link: &mut Link, workspace: Uuid, config: &CodingConfig
     definition.stages[0].progression = Progression::AwaitApproval { principal:"owner".into() };
     let adapter = Some(AdapterConfiguration::Coding(config.clone()));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_ref());
-    accepted(&call(link,workspace,Action::Publish { mutation:mutation("p",0,1), expected_pin:None,
+    accepted(&call(link,workspace,Action::Publish { notifications:None, mutation:mutation("p",0,1), expected_pin:None,
         definition, adapter:adapter.map(Box::new) }).await);
     accepted(&call(link,workspace,Action::Enqueue { mutation:mutation("e",0,1),item:"drift".into(),pin:pin.clone() }).await);
     pin
@@ -26,7 +26,7 @@ async fn unaffected(host: &Host, link: &mut Link) {
     let mut definition = Definition::tracker("other");
     definition.stages[0].progression = Progression::AwaitApproval { principal:"owner".into() };
     let pin = definition.pin();
-    accepted(&call(link,workspace,Action::Publish { mutation:mutation("p",0,1),expected_pin:None,definition,adapter:None }).await);
+    accepted(&call(link,workspace,Action::Publish { notifications:None, mutation:mutation("p",0,1),expected_pin:None,definition,adapter:None }).await);
     accepted(&call(link,workspace,Action::Enqueue { mutation:mutation("e",0,1),item:"cancel".into(),pin:pin.clone() }).await);
     let state = get(link,workspace).await;
     let item = &state["state"]["items"]["cancel"];
@@ -37,7 +37,7 @@ async fn unaffected(host: &Host, link: &mut Link) {
     let mut definition = Definition::tracker("automatic");
     definition.stages[0].progression = Progression::Automatic; let pin = definition.pin();
     let revision = get(link,workspace).await["state"]["revision"].as_u64().unwrap();
-    accepted(&call(link,workspace,Action::Publish { mutation:mutation("p2",revision,2),expected_pin:Some(state["configuration"]["pin"].as_str().unwrap().into()),definition,adapter:None }).await);
+    accepted(&call(link,workspace,Action::Publish { notifications:None, mutation:mutation("p2",revision,2),expected_pin:Some(state["configuration"]["pin"].as_str().unwrap().into()),definition,adapter:None }).await);
     accepted(&call(link,workspace,Action::Enqueue { mutation:mutation("e2",revision,3),item:"done".into(),pin }).await);
     for _ in 0..100 {
         if get(link,workspace).await["state"]["items"]["done"]["phase"] == "Done" { return; }
@@ -103,7 +103,7 @@ async fn workflow_service_wrong_native_target_refused_before_publication() {
     let (dir,mut config) = configured(false,"pass").await;
     let host = Host::open(dir.path()).await; let mut link = host.connect().await;
     native_config(&mut config,&dir.path().join("settings.json"),&dir.path().join("wrong.sock"));
-    let action = Action::Publish { mutation:mutation("wrong",0,1),expected_pin:None,
+    let action = Action::Publish { notifications:None, mutation:mutation("wrong",0,1),expected_pin:None,
         definition:config.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(config))) };
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(host.workspace.as_bytes()));

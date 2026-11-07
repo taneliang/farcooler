@@ -56,7 +56,7 @@ async fn workflow_socket_scope_unknown_caller_disabled_runtime_and_forged_author
 async fn workflow_socket_publication_approve_cancel_and_reconnect_receipts() {
     let h=start(Scope::Control,None,true).await;let mut link=connect(&h).await;
     let mut definition=coding_definition(false);definition.stages[0].progression=Progression::AwaitApproval {principal:"owner".into()};let pin=definition.pin();
-    let publish=Action::Publish { adapter:None,mutation:m("publish",0,1),expected_pin:None,definition};
+    let publish=Action::Publish { notifications:None, adapter:None,mutation:m("publish",0,1),expected_pin:None,definition};
     let receipt=call(&mut link,h.workspace,&publish).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some());
     let enqueue=Action::Enqueue {mutation:m("enqueue",0,1),item:"a".into(),pin:pin.clone()};

@@ -1,0 +1,9 @@
+{
+  "mode": "aba",
+  "label": "final-aba",
+  "path": "crates/store/src/workflow_notices.rs",
+  "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+  "mutant": "5268d02a4aa15ad7073d8c94d62a4ba4b620407b4776548c4c5f9659804e0094",
+  "negative_exit": 101,
+  "restored": true
+}

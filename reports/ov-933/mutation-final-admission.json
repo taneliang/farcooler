@@ -1,0 +1,9 @@
+{
+  "mode": "admission",
+  "label": "final-admission",
+  "path": "crates/store/src/workflow_notices.rs",
+  "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+  "mutant": "2b30f1db70eee4c999c4614a1fd6f83df6eae99822c1cfe2070ac02722a69dcc",
+  "negative_exit": 101,
+  "restored": true
+}

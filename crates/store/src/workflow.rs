@@ -1,4 +1,4 @@
-//! Isolated workflow transaction boundary. No callers dispatch these durable intents yet.
+//! Atomic workflow state, effects, selected informational notices and receipts.
 //! Legacy task/line/landing authority remains untouched until coordinated replacement.
 use farcooler_workflow::{Input, State, Effect, Refusal, Grant, digest, owns_resource, step};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
@@ -224,6 +224,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
                      epoch = excluded.epoch, state = excluded.state",
                     params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
                 )?;
+                crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;

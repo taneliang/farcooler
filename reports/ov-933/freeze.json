@@ -1,0 +1,560 @@
+{
+  "task": "ov-933",
+  "base": "77250986dcb4b1dbb6b63e06d0b11dc1b92d88a3",
+  "head_before_commit": "77250986dcb4b1dbb6b63e06d0b11dc1b92d88a3",
+  "branch": "ov-933-workflow-notice-implementation",
+  "product_files": {
+    "Cargo.lock": "81c37dacb61f249b83ca7aba7d07ec2e148d2d1cbd8e3c5e1a68277612b7494f",
+    "crates/cli/src/workflow.rs": "3e011d5a88934b5b1a8347938b585eb08c52b07745fa64843c648926a493dca5",
+    "crates/daemon/src/check_in_target.rs": "8e4a3a798c2d2e100dfd088e61771b2a822b16b827768d6a352b43ce1b0a40ea",
+    "crates/daemon/src/lead_change.rs": "53c2c1d1ba62077ad693d00c65e0066789888d3566760c60b9c62921d30b08a6",
+    "crates/daemon/src/lib.rs": "a81d58bc35c575184147fa9d7361350d73665db312aa9adb02a3df1c6d2cddc2",
+    "crates/daemon/src/log_join.rs": "041e46745797e07d00839075124fc2262b46cee6ad1d3378375a90650164571b",
+    "crates/daemon/src/service.rs": "d7747f4d82c366e051ed670b6decc5ed36416e4a9da64909f8709eedbb8aa12a",
+    "crates/daemon/src/watch/answer_wake/codex_turn.rs": "af3e3c4b96ec183834b5ca7f5397486dd5096caff5d6e7a492195dc042888eb3",
+    "crates/daemon/src/watch/answer_wake/deliver_tests.rs": "4a43200974a27499364def54191f22e6bae9455e01518796bf3d92675c81a228",
+    "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633",
+    "crates/daemon/src/workflow_notices.rs": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+    "crates/daemon/src/workflow_runtime.rs": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+    "crates/daemon/src/workflow_runtime/admission_tests.rs": "687c27982797e24f18446f6598e0e1fb615fce70d1ebc74636bc02024d73221c",
+    "crates/daemon/src/workflow_runtime/coding_native.rs": "7458ce089729c5c8b72b199c5aa6e717b94bd1463bb7b302e8c701fa65eea190",
+    "crates/daemon/src/workflow_runtime/service_owner.rs": "cb905439ede3f4fea7267be3f087e3b0157c474c44cb979f510b6cdd544e1d8d",
+    "crates/daemon/src/workflow_runtime/wire_commands.rs": "f963f118634087ccf85a4fdbf38e95ae9e923759379ba785f4f9fde73464cfb8",
+    "crates/daemon/src/workflow_service.rs": "0ff0f546732f5616252bc02e4edddb288fdb5baaab45a314ec4849eb65e07323",
+    "crates/daemon/tests/workflow_commands_over_socket.rs": "906851a2c35cec034d5f7694539fdabb788307ea6b1c71e5224bef2f86607d04",
+    "crates/daemon/tests/workflow_service/safety.rs": "0048566eb29bdba37cc829f1f399e6eb72f4513df0debfec8200ce75a6e01a07",
+    "crates/daemon/tests/workflow_service_over_socket.rs": "906b2607cf54e2e695a89d73743682915b9c1e2e5c3a6c398d6c7e99063efaf1",
+    "crates/protocol/src/workflow_commands.rs": "11e9b425e7c40902d8b1b2151031e71860366663171fce4812ebab0a50d12a32",
+    "crates/protocol/src/workflow_config.rs": "64eaf7dfbeccc27020c8bbbbfc01907e4d8f44f659857e05d5bc77c9b396a21f",
+    "crates/store/Cargo.toml": "c8f60299a386ac48d477cddc65615b9465ef75b91dda51727126ae20daeca9c2",
+    "crates/store/src/lib.rs": "292d17b7952ba00d1d18becc4968b606d44095497fc6df6a035798e8b1e273e4",
+    "crates/store/src/migrate.rs": "659e133ed0981f63fbeb791fbf14451577a6899325665431018ba89d17b8da6d",
+    "crates/store/src/store.rs": "a129e82c74e3df905ee955e0b48107871be974bbc542ab0955e1d593afa04a57",
+    "crates/store/src/workflow.rs": "576ebd4c517d38e6d1b24c73c57b39db3e3705266eeaa86d03d5075a0b281c0e",
+    "crates/store/src/workflow_notices.rs": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+    "crates/store/src/workflow_publication.rs": "6eb47233087da662c507701a600c78e0357cf2184ffb9692fd13f639185d1787",
+    "crates/store/src/workspaces.rs": "577886159ea643cdae96a3b432105fc03c07b2eddc70ebe1096a5f6aa9a4f7de",
+    "crates/tmux/src/inventory.rs": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+  },
+  "gates": {
+    "affected-sealed": {
+      "exit": 0,
+      "input_count": 1231,
+      "seconds": 216.531449875,
+      "minimum_free": 23863558144,
+      "source_unchanged": true
+    },
+    "lint-sealed": {
+      "exit": 0,
+      "input_count": 1231,
+      "seconds": 25.290791125,
+      "minimum_free": 24076537856,
+      "source_unchanged": true
+    }
+  },
+  "main_suites": [
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-tmux",
+        "--lib",
+        "inventory::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 3,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 25,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-protocol",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 1,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "--bin",
+        "farcooler",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 2,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 69,
+      "ignored": 0,
+      "nested_summary_count": 1
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "log_join::tests::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 25,
+      "ignored": 2,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "watch::answer_wake::codex_turn::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 3,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_service_over_socket",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 10,
+      "ignored": 1,
+      "nested_summary_count": 12
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_commands_over_socket",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 2,
+      "ignored": 0,
+      "nested_summary_count": 0
+    }
+  ],
+  "main_pass_count": 140,
+  "main_ignored_count": 3,
+  "negative_guards": {
+    "final-admission": {
+      "mode": "admission",
+      "label": "final-admission",
+      "path": "crates/store/src/workflow_notices.rs",
+      "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+      "mutant": "2b30f1db70eee4c999c4614a1fd6f83df6eae99822c1cfe2070ac02722a69dcc",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/store/src/workflow_notices.rs": {
+          "tested": "2b30f1db70eee4c999c4614a1fd6f83df6eae99822c1cfe2070ac02722a69dcc",
+          "frozen": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "final-aba": {
+      "mode": "aba",
+      "label": "final-aba",
+      "path": "crates/store/src/workflow_notices.rs",
+      "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+      "mutant": "5268d02a4aa15ad7073d8c94d62a4ba4b620407b4776548c4c5f9659804e0094",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/store/src/workflow_notices.rs": {
+          "tested": "5268d02a4aa15ad7073d8c94d62a4ba4b620407b4776548c4c5f9659804e0094",
+          "frozen": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "final-atomic": {
+      "mode": "atomic",
+      "label": "final-atomic",
+      "path": "crates/store/src/workflow.rs",
+      "original": "576ebd4c517d38e6d1b24c73c57b39db3e3705266eeaa86d03d5075a0b281c0e",
+      "mutant": "d7c9b8a5ecc798ef9d19cf573da736b3650551d0ecff267807a9cb0c3a61a077",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/store/src/workflow.rs": {
+          "tested": "d7c9b8a5ecc798ef9d19cf573da736b3650551d0ecff267807a9cb0c3a61a077",
+          "frozen": "576ebd4c517d38e6d1b24c73c57b39db3e3705266eeaa86d03d5075a0b281c0e"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "final-target-outcome": {
+      "mode": "target-outcome",
+      "label": "final-target-outcome",
+      "path": "crates/store/src/workflow_notices.rs",
+      "original": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+      "mutant": "21334dc3e78d427b412da5b16d5ed8c1633eaa1195d53b490d7f77e41eb7c05c",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/store/src/workflow_notices.rs": {
+          "tested": "21334dc3e78d427b412da5b16d5ed8c1633eaa1195d53b490d7f77e41eb7c05c",
+          "frozen": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "final-metadata": {
+      "mode": "metadata",
+      "label": "final-metadata",
+      "path": "crates/daemon/src/log_join.rs",
+      "original": "041e46745797e07d00839075124fc2262b46cee6ad1d3378375a90650164571b",
+      "mutant": "b1c94bd92169abf9bb1edb70fb450e3ca210602af9c91fca496370dd5eae224d",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/log_join.rs": {
+          "tested": "b1c94bd92169abf9bb1edb70fb450e3ca210602af9c91fca496370dd5eae224d",
+          "frozen": "041e46745797e07d00839075124fc2262b46cee6ad1d3378375a90650164571b"
+        },
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "final-ack": {
+      "mode": "ack",
+      "label": "final-ack",
+      "path": "crates/daemon/src/workflow_runtime.rs",
+      "original": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+      "mutant": "6a59f149000d78bad8847b7edaeba469b9ab58f3c4167b790c83f6c064080c4c",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "39ad14217bce767a7f78058b5e17e4081570987fa9ac8a879976b0245c0e5528",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "0dce5e2679a128ff6e30f2697020dc0b7d09e3ad0326bc799a41ea63a6dd9793",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/daemon/src/workflow_runtime.rs": {
+          "tested": "6a59f149000d78bad8847b7edaeba469b9ab58f3c4167b790c83f6c064080c4c",
+          "frozen": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "03dc8b29fb174ee0245ca06d14c2ea911f38aa3ab8eba489ad034d578b1b2541",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "freeze-inventory": {
+      "mode": "inventory",
+      "label": "freeze-inventory",
+      "path": "crates/tmux/src/inventory.rs",
+      "original": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+      "mutant": "7cca585016d9e8b78b613d66765132659ecfff8d3ae6621cf08617540aef9fe7",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "5d44cd330a97ad83a6f83d427eac644e189e7c8b183dd33c8026cec9c830125b",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "6a4f717e2a685b5e9c41d49ef158b30b0025a737775ce1ed5432119555fa165d",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "7cca585016d9e8b78b613d66765132659ecfff8d3ae6621cf08617540aef9fe7",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "freeze-inventory-silence": {
+      "mode": "inventory-silence",
+      "label": "freeze-inventory-silence",
+      "path": "crates/tmux/src/inventory.rs",
+      "original": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+      "mutant": "5807bfc6e6b19a797e3ba12fa451ed33a50a3c9f653c48532bfd6d0ec11b6a85",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": {
+          "tested": "5d44cd330a97ad83a6f83d427eac644e189e7c8b183dd33c8026cec9c830125b",
+          "frozen": "6e863c273b3f50e204c975c9a7dff9f0b519c49ceb0d64dafe6162825ab7c633"
+        },
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "6a4f717e2a685b5e9c41d49ef158b30b0025a737775ce1ed5432119555fa165d",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        },
+        "crates/tmux/src/inventory.rs": {
+          "tested": "5807bfc6e6b19a797e3ba12fa451ed33a50a3c9f653c48532bfd6d0ec11b6a85",
+          "frozen": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4"
+        }
+      }
+    },
+    "freeze-owner-closed": {
+      "mode": "owner-closed",
+      "label": "freeze-owner-closed",
+      "path": "crates/daemon/src/workflow_notices.rs",
+      "original": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+      "mutant": "18197201c2795f5e113504c49490a209ba2200d203108362e84059dfd36e3818",
+      "negative_exit": 101,
+      "restored": true,
+      "guard_file_matches_final": true,
+      "input_graph_deltas": {
+        "crates/daemon/src/workflow_notices.rs": {
+          "tested": "18197201c2795f5e113504c49490a209ba2200d203108362e84059dfd36e3818",
+          "frozen": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba"
+        }
+      }
+    }
+  },
+  "closed_owner_old_source_sha256": "6a4f717e2a685b5e9c41d49ef158b30b0025a737775ce1ed5432119555fa165d",
+  "closed_owner_restored_sha256": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+  "evidence_files": {
+    "reports/ov-933/affected-final.json": "9666c11dc9be9b0ce8fb45a345990a1dcf6b7eaf5dd56c80b90e3f51a0d246ce",
+    "reports/ov-933/affected-final.log": "91b3501b805d0ad6c8e1e13ef779547164813411bf1a1155339c0f452c3bb5d4",
+    "reports/ov-933/affected-freeze.json": "17b3c44fe2453f65aaefb7ddfcebe0915131ad418ca2305be937b2051496c5c1",
+    "reports/ov-933/affected-freeze.log": "94d9bbcc63aeea51422c07e0abff1f3967d640182715a6576a6a4d2a415e7594",
+    "reports/ov-933/affected-sealed.json": "38f6db942e19c4dffb586ee47f0c2321dc619c1ac80044301036a39856f7a143",
+    "reports/ov-933/affected-sealed.log": "77906db9969a77917483838501e4af57280d1e4bd07a95d7feceb2e4935decbb",
+    "reports/ov-933/affected.json": "317e24e86ae1485a75e0f6d622656dffd8119b4304d01df5a9f70c44a181e863",
+    "reports/ov-933/affected.log": "d38b1d107a69a14bef916f2f34c6a0a21165e19786a8a0611b817833bfa6a14e",
+    "reports/ov-933/affected.py": "6c9f92c0c356ace6d6d1a56605232225da4e8eb15638708bd20d87aa10c6a443",
+    "reports/ov-933/cache-holders.jsonl": "d4ea16238f001ba464a0f05d30ca0be86161c2ef68fa85196872ce6a959c10c4",
+    "reports/ov-933/check.py": "c5f4a4d83d64accda919deb5e22357f66bd4aa8bec9dddb81bfe97c8fc0f2557",
+    "reports/ov-933/compile-fixed.json": "1bfb008d4de6e45ab11e417baa5e9c0dacf9716ec2664b9b386a223c04473b28",
+    "reports/ov-933/compile-fixed.log": "b5972fd7866906c4f5339a462e60af065d5d803cb4364b6bb3f5c56c585ec7c1",
+    "reports/ov-933/compile-restored.json": "041088234d9de26c3a472c3e330571eda3fc840b10cbe67b90a02e1f6ecc6f28",
+    "reports/ov-933/compile-restored.log": "df4450b22444ff37f59e6d305fbf22574b935d277d5e6fbcf427d2f6e866b798",
+    "reports/ov-933/compile.json": "5b4afcdd3f715c87ec47e2c5f36d522c250578eee9b97760e8808c14c5c24b21",
+    "reports/ov-933/compile.log": "beb1c4f324e8260d3aa4f495e32f01d5295d0990e9c1e58f0ef4e6b3b9e31565",
+    "reports/ov-933/contract.md": "e156243290f7eda45745c0e1e9c0dbbd60e970034026716c481f2ce7817507cb",
+    "reports/ov-933/entry.py": "83d6d2950a4367fc439e0998ffc8debb4425012301c6e323b12aca60bf675d33",
+    "reports/ov-933/final-negatives.py": "38b56a849bfaa196b4c7153bd69e0c315084091f7be2648a045238ea3355dda5",
+    "reports/ov-933/final-sealed-checks.py": "72e0d7f8e960526360325cc57864bd4a0d598d74be9f559529c6d0aada8c960d",
+    "reports/ov-933/freeze-checks.py": "83a58cb19e6a9f0ad539b357abe9114c5131b791cc42e9e2de74497e2a8c83c4",
+    "reports/ov-933/implementation.md": "216e3c5573ac3997a2db8d5ab5590a4526273c82e8490be1a24b015f66e6a559",
+    "reports/ov-933/inventory-native-restored.json": "f0227bbd74626b93099221d9c8a09ce34f479962e7583a7ecbd95a0a2dd4cc54",
+    "reports/ov-933/inventory-native-restored.log": "b3b90e672e27618892a5b5d9315c4e65bd6830586360d8a9d3eef919f24a8016",
+    "reports/ov-933/lint-final.json": "2c560ee2c040485ed2daab85168b42f8e9390d8d20758153f29540fe209f22a5",
+    "reports/ov-933/lint-final.log": "ca29f76a9e34594e57e3770f7ac2327ac8dceed0086cf01e80c4202e6c4a531b",
+    "reports/ov-933/lint-freeze.json": "c2613e2559c65379b846ec09cd79ab97b2581138ea8a29eb688a7e3b7bfaf4a4",
+    "reports/ov-933/lint-freeze.log": "33af589fe84f9781a4b97e9597e5f44f9039845bb35ef1c21ebe569e8391a2e8",
+    "reports/ov-933/lint-restored.json": "43a90ed04f5474395840f5703c71063261e9f393598936d8aff51d1ba954ae20",
+    "reports/ov-933/lint-restored.log": "ce7766113f991ab7e75b32f828580b3c7d8d3882bbcd04cb980113a591f8aec8",
+    "reports/ov-933/lint-sealed.json": "8e274c49b891c118a6998b1b10da956afe1e402b9bb428668b2aaf83d02e8aaf",
+    "reports/ov-933/lint-sealed.log": "00fb43a3ec26ad51cc12e474ca9cfce6790e111c201f9488d36da8eebaacef54",
+    "reports/ov-933/lint.json": "d78b1ccd4bbeab7c715a1dabae0655c0b1c15a2b730e52ada82463df1cc2ed1a",
+    "reports/ov-933/lint.log": "1394b4c4972c1f90cf48926f417d15ac27e216d7cd4a4c7de03734c8af6274d7",
+    "reports/ov-933/mutation-aba.json": "48731c08931fb4178ef7a83bad6e47345ccddff4af8fbb21cf2dab7d12b0e73f",
+    "reports/ov-933/mutation-ack.json": "c5a4973acc3cfad360c2b1b0a315d9c5301e04b11414d39da9c41a8770379e97",
+    "reports/ov-933/mutation-admission.json": "424d4fec6bccd01529d0bfaa80d8b0616197e1802887a500c7a720e821f9c5d8",
+    "reports/ov-933/mutation-atomic.json": "26bb48d60952105077dbdaf841a3ab705c803b17afe68fe865f3b658841dc93e",
+    "reports/ov-933/mutation-final-aba.json": "384ec9533a398ebe9477ca9ba26c21566e13f39e409b6638e293002f10175312",
+    "reports/ov-933/mutation-final-ack.json": "897de4c12cd46737e8a0fa921c2e5c7e3c4390669c25936204d57f24bda71eac",
+    "reports/ov-933/mutation-final-admission.json": "386b2b55e432043872b898265e5c7c685c41860a049586d8d0bd5051105e02f9",
+    "reports/ov-933/mutation-final-atomic.json": "ec97b760582b02359cf506e73c5776dfdbc9679c87837abe5c260d4c8ff32f63",
+    "reports/ov-933/mutation-final-inventory-silence.json": "be830338a6e92a68d58f37c33db7024410099f6ad9df7d990f3942fe4659cf75",
+    "reports/ov-933/mutation-final-inventory.json": "23e8bf960b9bf445ea5e76c3b82da532f4436c6da499209258f16f77201c9422",
+    "reports/ov-933/mutation-final-metadata.json": "4705e5143271478ea26fcaede9f1c24008000e8e4c179f7a3bad8c170dee0c4c",
+    "reports/ov-933/mutation-final-target-outcome.json": "b3cd5da2f3224967a1062e8b2d2f295fd05e2381e479fd6a88ef8093fde516c0",
+    "reports/ov-933/mutation-freeze-inventory-silence.json": "9d1ad4bae9a7f21e6873762b1c8edae719a3c858d8bf80eacc568861071057db",
+    "reports/ov-933/mutation-freeze-inventory.json": "c52711e8451d45226d001e5fdd0401196cb767afa4b1e4b74e682faca7f0055d",
+    "reports/ov-933/mutation-freeze-owner-closed.json": "bd9884112e2b0ea4563dda44e8a9d0b17bd48f1b3672ce49292c42ab6f16237e",
+    "reports/ov-933/mutation-metadata.json": "353fe2fa2bb78a18e918677fde85f6ac22b397759b0740ab5e623437e7966683",
+    "reports/ov-933/mutation-target-outcome.json": "c99e194a46fdfb8875209abd8d316611f9c8f59a69d8471ab82100837407ec13",
+    "reports/ov-933/native-complete.json": "ccf31da223e7ec9127c591354fa5251cc0f13f6bdaae42a66697716557914d63",
+    "reports/ov-933/native-complete.log": "5b0bb8dcebf318db2f8beb23d4f9b3696ca592b0f948dfce1917bcb6bf577f67",
+    "reports/ov-933/native-restored.json": "ff54fc03248b2b0a1997836be07cfb07b144ad5101d458dfbee14f1d2bf9ff67",
+    "reports/ov-933/native-restored.log": "c90f5c9b44c220b2a84f0f0dc6c802a17340552c27ddf67dc04811a8dadd47dc",
+    "reports/ov-933/negative-aba.json": "9e7e0712b37dca00b16e8023ff3951303525a603dbd3cba45ea402c45dd1bfa8",
+    "reports/ov-933/negative-aba.log": "9eb3143a19900d907b2f5a74faace9b3f4a8cf5b940b34d8e0f3e90821074bb1",
+    "reports/ov-933/negative-ack.json": "c463cb6bd0bcd081bb4bbc0f05fee1400cfb16b485f7d9672bc49db2809976bb",
+    "reports/ov-933/negative-ack.log": "93fdccf905a5bfc7459e5ab94f7068f8351165b650617d3a3b5e7e1465bc2501",
+    "reports/ov-933/negative-admission.json": "fc42b67a40acfe78788aaee697ba11b7bf3beefffe25a419c86dd6623492c193",
+    "reports/ov-933/negative-admission.log": "37c4f95cd799c65819ab3d6974163be0e53664821635137da5a223b762001146",
+    "reports/ov-933/negative-atomic.json": "f629a74e4edf1364f260914f8a1ef81c4050d8795e99218589ec6e8371cc75b2",
+    "reports/ov-933/negative-atomic.log": "7db65dd40ef94da7e11f735140ed534001319174bcb5af0a0439404b1c7adf04",
+    "reports/ov-933/negative-final-aba.json": "49f58c51b878f15eefd0db68e18ff42bdaeb70224da0df20d150250f99d68dfd",
+    "reports/ov-933/negative-final-aba.log": "14fed9f10ebbb0c28a47df41434e6d3f89b29d4e30669490c3d7bbffff6500d9",
+    "reports/ov-933/negative-final-ack.json": "3bcb8be434b008c25f16b6c45ea4c2973143c4a453457d78ee34516ee7506a17",
+    "reports/ov-933/negative-final-ack.log": "d8b97b8b03dda8f46035ad15c7c7bb213ae8a093be466e2fe5da78812c25b47f",
+    "reports/ov-933/negative-final-admission.json": "be66d7b3496805a893c28061b10dde3cf1d20bc28d469f47e0c987dd30377642",
+    "reports/ov-933/negative-final-admission.log": "e21d7b564021730dd6c1f473d8bc51f353c4b8a2e3f37c158ded61f9119c7689",
+    "reports/ov-933/negative-final-atomic.json": "f99b2c7b7f287b862df124bdd500c0b15d88303b518b23faa89288587afa9f18",
+    "reports/ov-933/negative-final-atomic.log": "8aed2f999fc6e1c6e794f792a41647c8872c7d476e64eae8521e6269ddc0ddcf",
+    "reports/ov-933/negative-final-inventory-silence.json": "6c8b017c2c077d7ecbe2ba8e604aeeb9b76b08790a27ded867f8a2b81f6df31e",
+    "reports/ov-933/negative-final-inventory-silence.log": "8b7fb17acc97e165d1b50ecad25983876a3be44de53056c300305cf0a3b62142",
+    "reports/ov-933/negative-final-inventory.json": "a8155b62373e0a059df2933d3f0ef2049b7b2a76c4a71f77fd46968603f1d88c",
+    "reports/ov-933/negative-final-inventory.log": "cce65b3557d046ce5e808c19043fbb1aa83b0ac9c02bbf017e4c35656058d892",
+    "reports/ov-933/negative-final-metadata.json": "920a251ace1ac68e419b564a45d5e98073c18338adc865d1995196c6a8facf23",
+    "reports/ov-933/negative-final-metadata.log": "1d2ee2809d26ec1a3d2a2e96ef1fa7378828684018e68bc6d21ecad32692dd35",
+    "reports/ov-933/negative-final-target-outcome.json": "3cbacf1391f6b7132f3caf6c851b43a5dbbd4fe132f381806d05c520195693aa",
+    "reports/ov-933/negative-final-target-outcome.log": "afff1c1edfb20b400fe01ac9254a9d7f4af25798cdaf00b88432d0facea21930",
+    "reports/ov-933/negative-freeze-inventory-silence.json": "e2f112b25110fe691a65a7186a35e1f4cc8e006db1e696b3caf933275e783f06",
+    "reports/ov-933/negative-freeze-inventory-silence.log": "41cc753930699a1769ef7e21ac917b3f68a2a4b612510c74d4a0dc9713cc22a6",
+    "reports/ov-933/negative-freeze-inventory.json": "29fc83f3a12dc3856b9ae1c695282580e6301018a991aa20114bd0c9ce19df68",
+    "reports/ov-933/negative-freeze-inventory.log": "e7b8ad432c52a06ec7fd1588fa0325c8b76cecdd45cf5d3bd3f9082e41fdc9b2",
+    "reports/ov-933/negative-freeze-owner-closed.json": "9c6ee5a5f2ef0339993a47166e7bb08490cc6811d21e83800d87ed08405a3804",
+    "reports/ov-933/negative-freeze-owner-closed.log": "5c431b98671238ea267f2ddc97ff1563ceaf0d7b891374b2a93c2bf2a8d50583",
+    "reports/ov-933/negative-metadata.json": "e8ecade8d4b29658b0ecc5d24f1befde57ec235f5b2a3d06f97db4948c9f9fd2",
+    "reports/ov-933/negative-metadata.log": "b04ed8ade2e6f44e0735113675d55b4bfe9c30254b3749f6a619be9b158b9cde",
+    "reports/ov-933/negative-sources/final-aba.mutant.txt": "5268d02a4aa15ad7073d8c94d62a4ba4b620407b4776548c4c5f9659804e0094",
+    "reports/ov-933/negative-sources/final-aba.original.txt": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+    "reports/ov-933/negative-sources/final-ack.mutant.txt": "6a59f149000d78bad8847b7edaeba469b9ab58f3c4167b790c83f6c064080c4c",
+    "reports/ov-933/negative-sources/final-ack.original.txt": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+    "reports/ov-933/negative-sources/final-admission.mutant.txt": "2b30f1db70eee4c999c4614a1fd6f83df6eae99822c1cfe2070ac02722a69dcc",
+    "reports/ov-933/negative-sources/final-admission.original.txt": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+    "reports/ov-933/negative-sources/final-atomic.mutant.txt": "d7c9b8a5ecc798ef9d19cf573da736b3650551d0ecff267807a9cb0c3a61a077",
+    "reports/ov-933/negative-sources/final-atomic.original.txt": "576ebd4c517d38e6d1b24c73c57b39db3e3705266eeaa86d03d5075a0b281c0e",
+    "reports/ov-933/negative-sources/final-inventory-silence.mutant.txt": "7eafd25c66a2da65e526130b19f9b256964fdc56a729594aee1e1a5300e86db2",
+    "reports/ov-933/negative-sources/final-inventory-silence.original.txt": "9fd752b5060f1ff25776b10b0398cd4fa6f7ede646bf21a7e9e70363e513c6e5",
+    "reports/ov-933/negative-sources/final-inventory.mutant.txt": "d2fab5cc0794aed876e4be078968149722c88eb7970cffb97fedff4b45dd374e",
+    "reports/ov-933/negative-sources/final-inventory.original.txt": "9fd752b5060f1ff25776b10b0398cd4fa6f7ede646bf21a7e9e70363e513c6e5",
+    "reports/ov-933/negative-sources/final-metadata.mutant.txt": "b1c94bd92169abf9bb1edb70fb450e3ca210602af9c91fca496370dd5eae224d",
+    "reports/ov-933/negative-sources/final-metadata.original.txt": "041e46745797e07d00839075124fc2262b46cee6ad1d3378375a90650164571b",
+    "reports/ov-933/negative-sources/final-target-outcome.mutant.txt": "21334dc3e78d427b412da5b16d5ed8c1633eaa1195d53b490d7f77e41eb7c05c",
+    "reports/ov-933/negative-sources/final-target-outcome.original.txt": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+    "reports/ov-933/negative-sources/freeze-inventory-silence.mutant.txt": "5807bfc6e6b19a797e3ba12fa451ed33a50a3c9f653c48532bfd6d0ec11b6a85",
+    "reports/ov-933/negative-sources/freeze-inventory-silence.original.txt": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+    "reports/ov-933/negative-sources/freeze-inventory.mutant.txt": "7cca585016d9e8b78b613d66765132659ecfff8d3ae6621cf08617540aef9fe7",
+    "reports/ov-933/negative-sources/freeze-inventory.original.txt": "73ea3a6d18088d1928e5f1371a7b1a73601d77e43c46ec61e10b19a0be35f3c4",
+    "reports/ov-933/negative-sources/freeze-owner-closed.mutant.txt": "18197201c2795f5e113504c49490a209ba2200d203108362e84059dfd36e3818",
+    "reports/ov-933/negative-sources/freeze-owner-closed.original.txt": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+    "reports/ov-933/negative-sources/owner-closed.old.txt": "6a4f717e2a685b5e9c41d49ef158b30b0025a737775ce1ed5432119555fa165d",
+    "reports/ov-933/negative-sources/owner-closed.restored.txt": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+    "reports/ov-933/negative-target-outcome.json": "22687712a381872d187b82d520706286d14ec2c270d6d33d2f5c8aef804511d8",
+    "reports/ov-933/negative-target-outcome.log": "49877efd5e9d6080e4cb6595624c75b0a5b4d63c10d6a1bed2eb025d35398892",
+    "reports/ov-933/negative.py": "fc4d5c04bd6f261eacfc3aa404b4f05b0281ac8260ba988c598a15f73ce5597e",
+    "reports/ov-933/notices-native.json": "e643a02a216ffc722a19ef66140a1018792ad8671ec5508cbec6db5bc67f28de",
+    "reports/ov-933/notices-native.log": "c80a1914282f385da56364feda69a309220ff284c46518bec471c4c200616890",
+    "reports/ov-933/notices-store.json": "eade7312970dccd4f8aafcb4fa6ec0032073f4b86d26467a1fe6e80deb2a6e48",
+    "reports/ov-933/notices-store.log": "2b69217f698d88e9d2a72a743636b1d96c0c817fecad157852828f78e6d7f0f5",
+    "reports/ov-933/owner-closed-red.json": "f8ec9b514c662a9a082a5a432c255e19dd9a96164a5ec62daa390731608d6151",
+    "reports/ov-933/owner-closed-red.log": "463e4e4e6389e3bcc2de0015aad431919a32abba007dd55680c17208ed90fd3d",
+    "reports/ov-933/product-diff-check.log": "19eaf43821a7660ec323a87c8457bf74823beb296c39f5e01aa8a683aa50f061",
+    "reports/ov-933/product-files.txt": "883d2a9dc6b4b45ca1e0b4374a507146c44e00681b2d0581cdbe96b3ee19e98b",
+    "reports/ov-933/reconnect-counterexample.md": "2647563f1de69bdff7c9def8c77cb4897e3cb58c40cf60799ff58ab45ed8922c",
+    "reports/ov-933/seal.py": "896c204393f91d844fe625a64b9cac0d6eb83592537a5b278fd71949766abba7",
+    "reports/ov-933/store-restored.json": "9341bdc4d80b6ea1d709e5a749d0256a0d6b7321739611cf8dd4cf7052bb9c4a",
+    "reports/ov-933/store-restored.log": "986857aefab57e750a557a1f242ca02faea180259361438e4ddaff4f78f6822a"
+  }
+}
