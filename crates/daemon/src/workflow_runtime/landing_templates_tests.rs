@@ -348,3 +348,36 @@ async fn a_draft_refuses_what_it_cannot_publish_or_what_nobody_can_decide() {
     let on_target = format!("- Gate: `x`\n- Base: {}", config.landing.as_ref().unwrap().target.trim_start_matches("refs/heads/"));
     assert!(lt::import_charter(&charter(&on_target), &config, None, &[], &[]).is_ok());
 }
+
+/// Pump a routed ticket until its route step is the active effect, then admit it: the state a daemon dies in.
+async fn at_admitted_route(runtime: &mut Runtime, item: &str) -> Binding {
+    let definition = routed_definition(runtime, &[("site/**", "ask")], "push", true);
+    enqueue_item(runtime, "w", item, definition);
+    for time in 2..200 {
+        runtime.pump(time).await.unwrap();
+        let active = runtime.store.workflow_outbox("w").unwrap().into_iter().any(|s| s.active && s.effect.kind == EffectKind::Execute(StageKind::Route));
+        if active { return super::coding_tests::admitted(runtime).await; }
+    }
+    panic!("the route step never became active");
+}
+
+#[tokio::test]
+async fn a_restart_with_the_route_admitted_reads_the_paths_again_instead_of_sticking() {
+    let (_dir, mut runtime) = lander("pass").await;
+    at_admitted_route(&mut runtime, "r").await;
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    let state = until(&mut runtime, |s| matches!(phase_of(s, "r"), Some(Phase::WaitingJoin | Phase::Failed | Phase::Uncertain))).await;
+    assert_eq!(phase_of(&state, "r"), Some(Phase::WaitingJoin), "the route read again and the ticket moved on");
+}
+
+#[tokio::test]
+async fn a_route_that_cannot_read_its_diff_fails_the_ticket_where_a_person_can_see_it() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let binding = at_admitted_route(&mut runtime, "r").await;
+    std::fs::write(runtime.tree(&binding).join("stray.txt"), "dirty").unwrap();
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    let state = until(&mut runtime, |s| matches!(phase_of(s, "r"), Some(Phase::WaitingJoin | Phase::Failed | Phase::Uncertain))).await;
+    assert_eq!(phase_of(&state, "r"), Some(Phase::Failed), "failed with attempts spent, not stuck uncertain");
+}

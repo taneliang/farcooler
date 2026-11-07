@@ -108,13 +108,15 @@ impl Exec {
             StageKind::Push => self.push(binding, cancel).await,
             StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-ci failed"); Outcome::SafeFailure })),
-            StageKind::Route => self.route_paths(binding).await,
+            // An unreadable diff has failed for a reason: it spends an attempt, then ends where a person can see it.
+            StageKind::Route => Ok(self.route_paths(binding).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "route failed"); Outcome::SafeFailure })),
             _ => Err(Error::Refused("not a landing verb")),
         }
     }
 
     /// Read the paths the ticket changed since it began and answer the label its pinned rules give them.
-    /// It only reads, so a crash before its fact is written just reads again. A route no definition can take
+    /// It only reads, so a crash before its fact is written reads again as a fresh attempt. A route no definition can take
     /// yet (`pull_request`) answers `rejected`, which ends the run.
     async fn route_paths(&self, binding: &Binding) -> Result<Outcome> {
         let rules = binding.effect.operation.arguments.get(1).and_then(|a| crate::path_routes::PathRules::read(a))
@@ -138,8 +140,8 @@ impl Exec {
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return match kind {
                     StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
-                    // A wait cut short only looks again; a fold made half is made anew and spends an attempt.
-                    StageKind::AwaitBase | StageKind::AwaitCi | StageKind::Route => Ok(Outcome::Interrupted),
+                    // A wait cut short only looks again; a fold or a route cut short is made anew and spends an attempt.
+                    StageKind::AwaitBase | StageKind::AwaitCi => Ok(Outcome::Interrupted),
                     _ => Ok(Outcome::SafeFailure),
                 };
             }
