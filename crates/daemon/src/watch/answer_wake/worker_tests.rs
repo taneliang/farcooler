@@ -344,16 +344,18 @@ async fn a_hold_and_an_answer_after_cutover_are_each_told_once() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.hold_ended();
     assert_eq!(b.holds().len(), 1, "the hold is queued through the engine");
-    b.pump().await;
-    si.submits(1).await;
+    // A pass can hold a send back (spacing, a screen read), so pump until it lands.
+    b.pump_until_submits(&si, 1).await;
     assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
     assert!(b.holds().is_empty());
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.answer("Ship it");
-    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
-    b.pump().await;
-    si.submits(2).await;
+    b.pump_until_submits(&si, 2).await;
     assert_eq!(si.submitted(), [b.hold_told(), b.told("Ship it")], "{}", si.log());
-    b.pump().await;
+    // Later passes, past the spacing, find nothing left to tell.
+    for _ in 0..3 {
+        tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(50)).await;
+        b.pump().await;
+    }
     assert_eq!(si.submitted().len(), 2, "each told once");
 }

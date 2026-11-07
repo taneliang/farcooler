@@ -175,7 +175,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
             if item.iteration < item.definition.max_reworks { kinds.push(ActionKind::RequestRework); }
             else { kinds.push(ActionKind::RejectReview); }
         }
-        if auth.controller && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::Cancelling)
+        if auth.controller && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
             && !item.run.starts_with("cancel:")
         { kinds.push(ActionKind::Cancel); }
         runs.push(RunCard { label: "Workflow Run".into(), phase_label: display::phase_label(&item.phase).into(),

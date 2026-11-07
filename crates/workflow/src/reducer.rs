@@ -135,7 +135,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 }
                 Command::Cancel { .. } => {
                     controller(input)?;
-                    if matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) { return Err(Refusal::Phase); }
+                    // A failed run is closed by cancelling it: that is the controller's way off the needs-you list.
+                    if matches!(item.phase, Phase::Done | Phase::Cancelled) { return Err(Refusal::Phase); }
                     if item.phase == Phase::Cancelling || item.run.starts_with("cancel:") {
                         return Err(Refusal::Phase);
                     }

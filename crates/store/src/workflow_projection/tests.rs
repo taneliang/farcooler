@@ -131,3 +131,30 @@ fn an_ended_run_refuses_a_hand_move_without_promising_the_card_comes_free() {
     let live = b.store.set_task_status(b.other.id, TaskStatus::InProgress, Actor::User);
     assert!(live.is_ok());
 }
+
+#[test]
+fn a_failed_run_is_on_the_needs_you_list_until_the_controller_cancels_it() {
+    let b = board();
+    enqueue(&b, Definition::coding());
+    let mut revision = 1;
+    // The provision stage runs out of attempts.
+    for n in 0..5 {
+        let state = b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap();
+        if state.items[&b.task.key].phase == Phase::Failed { break; }
+        let item = &state.items[&b.task.key];
+        let effect = item.pending.clone().expect("a stage is in flight");
+        let claim = b.store.workflow_claim_effect(&state.workspace, &effect, "fixture-runtime", state.revision, state.epoch, 1000, 2000).unwrap().unwrap();
+        assert!(b.store.workflow_admit_effect(&claim, 1001).unwrap());
+        let c = Command::Observe { item: b.task.key.clone(), effect: effect.clone(), run: item.run.clone(), fence: item.fence, outcome: Outcome::SafeFailure };
+        let grant = Grant::Operation { effect, run: item.run.clone(), fence: item.fence };
+        revision = b.store.workflow_apply(&input(&b, &format!("fail-{n}"), state.revision, grant, c)).unwrap().result.unwrap();
+    }
+    assert_eq!(seen(&b), ("needs_decision".into(), Some("needs_you".into())), "the failure waits on a person");
+    let e = b.store.set_task_status(b.task.id, TaskStatus::Done, Actor::User).unwrap_err();
+    assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned" }), "{e:?}");
+    // The orchestrator's way out is the same Cancel it uses on any run.
+    b.store.workflow_apply(&input(&b, "cancel", revision, Grant::Controller, Command::Cancel { item: b.task.key.clone() })).unwrap();
+    assert_eq!(seen(&b), ("cancelled".into(), Some("dropped".into())));
+    let e = b.store.set_task_status(b.task.id, TaskStatus::Done, Actor::User).unwrap_err();
+    assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
+}

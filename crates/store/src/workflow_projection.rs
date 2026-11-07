@@ -36,7 +36,7 @@ pub(crate) fn place(item: &Item) -> (TaskStatus, Stage) {
         Phase::Cancelled => (TaskStatus::Cancelled, Stage::Dropped),
         // Nothing has started: it waits its turn or its dependencies.
         Phase::Blocked => (TaskStatus::Todo, Stage::Waiting),
-        // Only a person can move these on.
+        // Only a person can move these on, or the controller can cancel a failed run.
         Phase::WaitingApproval | Phase::Uncertain | Phase::Failed => (TaskStatus::NeedsDecision, Stage::NeedsYou),
         Phase::WaitingReview if matches!(kind(item), Some(StageKind::Review(Reviewer::Person(_)))) => (TaskStatus::NeedsDecision, Stage::NeedsYou),
         Phase::WaitingReview => (TaskStatus::InReview, Stage::Reviewing),

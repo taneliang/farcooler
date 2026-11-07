@@ -178,6 +178,19 @@ fn workflow_retry_limit_and_exact_candidate() {
     assert_eq!(state.items["item"].phase, Phase::Failed);
 }
 #[test]
+fn a_failed_run_can_be_cancelled_by_its_controller() {
+    let mut state = start(Definition::coding());
+    for _ in 0..2 {
+        state = step(&state, &observe(&state, Outcome::Passed(evidence(&state.items["item"])))).unwrap().state;
+    }
+    for _ in 0..2 { state = step(&state, &observe(&state, Outcome::SafeFailure)).unwrap().state; }
+    assert_eq!(state.items["item"].phase, Phase::Failed);
+    let cancel = input(&state, Command::Cancel { item: "item".into() }, Grant::Controller);
+    assert_eq!(step(&state, &cancel).unwrap().state.items["item"].phase, Phase::Cancelled);
+    let nobody = input(&state, Command::Cancel { item: "item".into() }, Grant::Decision { principal: "owner".into() });
+    assert!(step(&state, &nobody).is_err(), "only a controller may");
+}
+#[test]
 fn workflow_dependencies_and_resource_conflict() {
     let mut state = start(Definition::coding());
     let mut add = enqueue(&state, Definition::tracker("owner"));
