@@ -472,6 +472,22 @@ async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
 }
 
 #[tokio::test]
+async fn a_group_whose_leader_is_killed_but_not_yet_reaped_is_not_an_error() {
+    // macOS answers EPERM to killpg(pid, 0) while only a zombie is left; that is a group on its way out.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("owner.json");
+    let mut gate = tokio::process::Command::new("/bin/sleep").arg("600").process_group(0).spawn().unwrap();
+    let pid = gate.id().unwrap();
+    crate::effect_runner::Owner::write(&path, pid).unwrap();
+    unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+    // Wait until the zombie shows (killpg no longer says alive), without reaping it.
+    for _ in 0..200 { if unsafe { libc::killpg(pid as i32, 0) } != 0 { break; } tokio::time::sleep(Duration::from_millis(5)).await; }
+    let reaper = tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(100)).await; gate.wait().await });
+    assert!(crate::effect_runner::Owner::reap(&path).await.is_ok(), "a zombie-only group is not an error");
+    reaper.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn a_pid_that_belongs_to_someone_else_is_left_alone() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("owner.json");

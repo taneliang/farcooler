@@ -121,12 +121,13 @@ impl Owner {
             Err(error) => return Err(error),
         };
         let owner: Owner = serde_json::from_slice(&raw).map_err(std::io::Error::other)?;
-        if Group::gone(owner.pid)? { return Ok(true); }
+        // macOS answers EPERM for a group holding only a zombie; that is a group on its way out, not an error.
+        if matches!(Group::gone(owner.pid), Ok(true)) { return Ok(true); }
         let leader_alive = unsafe { libc::kill(owner.pid as i32, 0) } == 0;
         if leader_alive && (owner.started.is_empty() || Self::started_at(owner.pid) != owner.started) { return Ok(true); }
-        Group::new(owner.pid).kill()?;
+        if let Err(error) = Group::new(owner.pid).kill() { tracing::warn!(pid = owner.pid, %error, "signalling an old group failed; waiting to see it go"); }
         for _ in 0..100 {
-            if Group::gone(owner.pid)? { return Ok(true); }
+            if matches!(Group::gone(owner.pid), Ok(true)) { return Ok(true); }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         Ok(false)
