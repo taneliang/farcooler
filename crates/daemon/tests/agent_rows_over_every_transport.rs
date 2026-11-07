@@ -125,11 +125,12 @@ fn append(path: &Path, line: serde_json::Value) {
 }
 
 /// Where claude would write the pane's transcript: its config dir's project
-/// directory for the worktree.
+/// directory for the worktree. A runtime with an explicit root reads the config
+/// dir under its own `home`, not `CLAUDE_CONFIG_DIR` (ov-937).
 fn transcript(dir: &Path, worktree: &pb::Worktree, terminal: &pb::Terminal) -> PathBuf {
     let path = std::fs::canonicalize(worktree.worktree_path.as_deref().expect("host_admin sees paths")).unwrap();
     let slug = farcooler_core::session_log::claude_slug(&path.to_string_lossy());
-    let project = dir.join("claude/projects").join(slug);
+    let project = dir.join("home/.claude/projects").join(slug);
     std::fs::create_dir_all(&project).unwrap();
     project.join(format!("{}.jsonl", terminal.agent_session_id.as_deref().unwrap()))
 }

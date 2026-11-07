@@ -70,19 +70,17 @@ async fn start() -> Daemon {
 /// A daemon whose `authorized_keys` is a scratch file rather than the
 /// developer's own, with the path to that file.
 ///
-/// `client.enroll` writes SSH keys into `~/.ssh/authorized_keys`, and the
-/// daemon resolves that from `HOME` — so a test that did not move `HOME` would
-/// be a test that can lock whoever ran the suite out of their own machine.
-/// `FARCOOLER_HOME` does not cover it, deliberately: that is the daemon's state
-/// directory, and the file sshd reads is not part of any state this program
-/// owns.
+/// `client.enroll` writes SSH keys into `<root>/ssh/authorized_keys`, and the
+/// daemon keeps it under its own root when `FARCOOLER_HOME` is explicit (ov-937),
+/// so a test that spawned one without that would write the file sshd reads, and
+/// could lock whoever ran the suite out of their own machine.
 ///
 /// The redirection is PROVEN before anything writes, by `the_scratch_file_is_
 /// the_one_being_read`. A check afterwards would be an assertion about damage
 /// already done.
 async fn start_with_a_scratch_home() -> (Daemon, PathBuf) {
     let daemon = spawn(true).await;
-    let authorized_keys = daemon.dir.path().join(".ssh").join("authorized_keys");
+    let authorized_keys = daemon.dir.path().join("ssh").join("authorized_keys");
     (daemon, authorized_keys)
 }
 

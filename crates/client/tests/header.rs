@@ -13,6 +13,7 @@ const FFI: &str = concat!(
     include_str!("../src/ffi/teammate.rs"),
     include_str!("../src/ffi/device_keys.rs"),
     include_str!("../src/ffi/sealed_reply.rs"),
+    include_str!("../src/workflow_presentation/ffi.rs"),
 );
 
 fn declared() -> Vec<String> {

@@ -111,7 +111,7 @@ async fn a_claude_pane(dir: &Path) -> (String, PathBuf) {
     );
     let Some(result::Value::Terminal(terminal)) = client.call(pane).await.expect("terminal.create").value else { panic!("terminal") };
     let path = std::fs::canonicalize(worktree.worktree_path.as_deref().unwrap()).unwrap();
-    let project = dir.join("claude/projects").join(farcooler_core::session_log::claude_slug(&path.to_string_lossy()));
+    let project = dir.join("home/.claude/projects").join(farcooler_core::session_log::claude_slug(&path.to_string_lossy()));
     std::fs::create_dir_all(&project).unwrap();
     let id = uuid::Uuid::from_slice(&terminal.id).unwrap().to_string();
     (id, project.join(format!("{}.jsonl", terminal.agent_session_id.unwrap())))

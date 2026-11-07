@@ -112,7 +112,8 @@ pub async fn start_with(received: Option<&str>, client_id: &str, scope: Scope) -
     let line =
         fence::render(received.trim(), "Test Device", client_id, scope, Grant::FarCooler, None)
             .expect("render a Key A line");
-    let authorized_keys = home.join(".ssh").join("authorized_keys");
+    // Under the runtime root, which is where an explicit FARCOOLER_HOME keeps it (ov-937).
+    let authorized_keys = runtime.join("ssh").join("authorized_keys");
     fence::write(
         &authorized_keys,
         fence::AUTHORIZED_KEYS,
@@ -143,7 +144,7 @@ pub async fn start_with(received: Option<&str>, client_id: &str, scope: Scope) -
     // names a bare `farcoolerd`, so it can only be found on PATH, so a test of
     // the shipped line has to arrange a PATH on which it is findable.
     // HOME too, and not only so a `~/`-anchored forced command expands to
-    // something this test controls. The daemon reads `$HOME/.ssh/authorized_keys`
+    // something this test controls. The daemon reads `<FARCOOLER_HOME>/ssh/authorized_keys`
     // with no override, so a forced command that inherited the real HOME would
     // have this test's ssh session reading — and on revoke, rewriting — the
     // developer's own fence.
