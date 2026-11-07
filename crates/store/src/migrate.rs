@@ -154,6 +154,22 @@ pub(crate) fn apply_remaining(tx: &Transaction, from_version: u32) -> farcooler_
     Ok(())
 }
 
+/// The migrations `from..to` and the version row, inside the caller's
+/// transaction, and no further. The cutover lifts a runner below registry 60
+/// to exactly 60 this way, so the pinned registry-60 catalog check can judge it.
+pub(crate) fn apply_between(tx: &Transaction, from: u32, to: u32) -> farcooler_core::Result<()> {
+    for (m, _) in &MIGRATIONS[from as usize..to as usize] {
+        m(tx).map_err(map_err)?;
+    }
+    tx.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [to.to_string()],
+    )
+    .map_err(map_err)?;
+    Ok(())
+}
+
 fn migration_0001_initial_schema(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"

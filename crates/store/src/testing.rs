@@ -211,6 +211,31 @@ pub fn write_source60(path: &Path) {
     conn.execute("DELETE FROM people_events", []).unwrap();
 }
 
+/// A raw database exactly as a build that stopped at `registry` (below 60)
+/// left it: that prefix of the migration history, then rows in whichever
+/// tables exist there, so a lift to 60 has real data to carry.
+pub fn write_source_below_60(path: &Path, registry: u32) {
+    assert!(registry < 60, "use write_source60 for 60");
+    let mut conn = Connection::open(path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+    crate::migrate::migrate_only_to(&mut conn, registry);
+    let has = |t: &str| conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1", [t], |_| Ok(())).is_ok();
+    source60_put(&conn, "repository_roots", &[("id", source60_id(1)), ("path", source60_text("resources/repo"))]);
+    source60_put(&conn, "repositories", &[("id", source60_id(2)), ("repository_root_id", source60_id(1)), ("canonical_git_dir", source60_text("resources/repo/.git"))]);
+    if has("workspaces") {
+        source60_put(&conn, "workspaces", &[("id", source60_id(3)), ("repository_id", source60_id(2)), ("name", source60_text("Main")), ("is_main", source60_int(1))]);
+    }
+    if has("tasks") {
+        for (n, key) in [(4u8, "ov-1"), (5, "ov-2")] {
+            let mut row = vec![("id", source60_id(n)), ("key", source60_text(key)), ("title", source60_text("空\nmultiline")), ("status", source60_text("in_progress")), ("status_since", source60_int(n as i64))];
+            let columns: Vec<String> = conn.prepare("PRAGMA table_info(tasks)").unwrap().query_map([], |r| r.get::<_, String>(1)).unwrap().map(|r| r.unwrap()).collect();
+            if columns.iter().any(|c| c == "workspace_id") { row.push(("workspace_id", source60_id(3))); }
+            if columns.iter().any(|c| c == "repository_id") { row.push(("repository_id", source60_id(2))); }
+            source60_put(&conn, "tasks", &row);
+        }
+    }
+}
+
 /// Fixture-only: the row count of `table`.
 pub fn count_rows_for_tests(store: &crate::Store, table: &str) -> i64 {
     store.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()

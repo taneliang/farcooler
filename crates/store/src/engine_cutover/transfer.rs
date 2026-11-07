@@ -39,6 +39,11 @@ const INTENT: &str = "intent.json";
 const HOLD: &str = "hold.json";
 const REPLAY_DB: &str = "replay.db";
 const RESTORE_DB: &str = "restore.db";
+const PRE_LIFT_DB: &str = "pre-lift.db";
+const PRE_LIFT: &str = "pre-lift.json";
+/// The registry a source is lifted to. Its prefix of `MIGRATIONS` is the one
+/// the pinned `SOURCE60_SCHEMA_HASH` describes.
+const LIFT_TO: u32 = 60;
 
 pub(super) fn sync_dir(dir: &Path) -> Result<()> { File::open(dir)?.sync_all()?; Ok(()) }
 fn sync_parent(db: &Path) -> Result<()> { if let Some(parent) = db.parent() { sync_dir(parent)?; } Ok(()) }
@@ -76,6 +81,75 @@ pub(super) fn clear_inert_journal(db: &Path) -> Result<()> {
         if read == 0 || first[0] == 0 { fs::remove_file(&journal)?; }
     }
     refuse_sidecars(db)
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PreLift { attempt: String, from: u32, to: u32, db_hash: String }
+
+fn schema_below_60(db: &Path) -> Option<u32> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let version = crate::migrate::read_schema_version(&conn).ok()?;
+    (1..LIFT_TO).contains(&version).then_some(version)
+}
+/// The pinned lift pragmas: what an ordinary open sets before it migrates.
+fn lift_connection(path: &Path) -> Result<Connection> {
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(conn)
+}
+fn lift(conn: &mut Connection, from: u32) -> Result<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::migrate::apply_between(&tx, from, LIFT_TO).map_err(|e| Error::Refused(e.to_string()))?;
+    // What the registry-60 build stamped: it needs a build that has its tables.
+    tx.execute("INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [LIFT_TO.to_string()])?;
+    tx.commit()?;
+    Ok(())
+}
+/// Bring a source below registry 60 up to exactly 60, so it meets the pinned
+/// registry-60 catalog check like any other. The order keeps the original
+/// whole at every step:
+///
+/// 1. The lift runs on a scratch copy first and is judged by `preflight`. A
+///    drifted catalog is refused here, with the real file never opened for writing.
+/// 2. The original bytes are copied, synced and hashed into `pre-lift.db`.
+/// 3. Only then does the real file lift, in one transaction.
+///
+/// `pre-lift.db` goes wherever the artifact directory goes (Recover retires it,
+/// Finish carries it). Recover returns the lifted file, not the original: the
+/// original is put back by hand from `pre-lift.db`.
+fn lift_below_60(db: &Path, dir: &Path, held: bool, attempt: &str) -> Result<bool> {
+    let Some(from) = schema_below_60(db) else { return Ok(false) };
+    let mut scratch = db.as_os_str().to_owned();
+    scratch.push(".lift-check");
+    let scratch = PathBuf::from(scratch);
+    let _ = fs::remove_file(&scratch);
+    fs::copy(db, &scratch)?;
+    let judged = (|| -> Result<()> {
+        let mut conn = lift_connection(&scratch)?;
+        lift(&mut conn, from)?;
+        preflight(&conn)?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&scratch);
+    judged?;
+    if !held { create_artifacts(dir)?; }
+    let bytes = fs::read(db)?;
+    let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT_DB))?;
+    copy.write_all(&bytes)?;
+    copy.sync_all()?;
+    drop(copy);
+    let kept = db_hash(&dir.join(PRE_LIFT_DB))?;
+    if kept != farcooler_workflow::digest(&bytes) { return refuse("pre-lift copy differs from the source"); }
+    // Evidence only: nothing reads it back to decide anything, so a tear is harmless.
+    let mut note = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT))?;
+    note.write_all(&serde_json::to_vec(&PreLift { attempt: attempt.into(), from, to: LIFT_TO, db_hash: kept })?)?;
+    note.sync_all()?;
+    drop(note);
+    sync_dir(dir)?;
+    let mut conn = lift_connection(db)?;
+    lift(&mut conn, from)?;
+    drop(conn);
+    Ok(true)
 }
 fn frozen_id(attempt: &str) -> String { format!("frozen:{attempt}") }
 fn create_artifacts(dir: &Path) -> Result<()> {
@@ -152,6 +226,7 @@ pub fn begin(db: &Path, owners: JoinedOwners) -> Result<(Store, Preflight)> {
     let dir = artifact_dir(db);
     let hold = held(&dir)?;
     if hold.as_ref().is_some_and(|h| h.attempt != owners.attempt()) { return refuse("another attempt holds this database"); }
+    let lifted = lift_below_60(db, &dir, hold.is_some(), owners.attempt())?;
     let (root, database) = location(db)?;
     let meta = fs::metadata(db)?;
     // Open before SQLite and closed after its commit: closing any descriptor on
@@ -167,7 +242,7 @@ pub fn begin(db: &Path, owners: JoinedOwners) -> Result<(Store, Preflight)> {
     let mut bytes = Vec::new();
     source.seek(SeekFrom::Start(0))?;
     source.read_to_end(&mut bytes)?;
-    if hold.is_none() { create_artifacts(&dir)?; }
+    if hold.is_none() && !lifted { create_artifacts(&dir)?; }
     reach("begin.before-baseline-db");
     // Original, closed, byte-identical copy; synced before the intent exists.
     let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(BASELINE_DB))?;

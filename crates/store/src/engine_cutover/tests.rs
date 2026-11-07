@@ -196,3 +196,4 @@ mod recovery;
 mod commit_closed;
 mod released_board;
 mod source60;
+mod lift;
