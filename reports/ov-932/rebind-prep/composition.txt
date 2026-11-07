@@ -1,0 +1,18 @@
+6949bcc33cb7ab432131923ce9f680db4e7e252d 2cb92869c0cadd938e8cc104d42c735543b9c2c9 build(macos): allow private bundles without registry writes
+059ed92c5bcb227c232e0fb4a609165cc7f89d1b 387b74ef939aea5b61cb75d7227d34a9b84ae8d6 fix(macos): isolate workflow adapter factory for full app build
+f1ae3a41b6ea9f2092b9c57e6e3c8887a3975745 36bb47274ad67e1b131d66293a6ec15a65a7fb08 test(daemon): record canonical runtime-root validation (ov-937)
+89b0ffea086752714a34ee8995b4c782d743e2b8 f618853e12279306e647bd4aad2e63f97e92e3b0 fix(daemon): keep explicit runtime roots private (ov-937)
+4c645bb788ec320fb19704ed042507adeccfd911 3f75db9e1f447d45d745cebd6c2daa61f90dee7d workflow: join owned native notice queue groups
+ .../FarCooler/NativeAgent/NativeAgents.swift       | 27 +++---
+ apps/macos/build-app.sh                            | 14 +++-
+ crates/cli/src/main.rs                             |  8 ++
+ crates/cli/src/runtime_selection_tests.rs          | 11 +++
+ crates/daemon/src/daemon_log.rs                    | 10 ++-
+ crates/daemon/src/log_watch.rs                     |  2 +-
+ crates/daemon/src/main.rs                          | 18 ++--
+ crates/daemon/src/paths.rs                         | 97 ++++++++++++++++++++--
+ crates/daemon/src/runtime_selection.rs             | 41 +++++++++
+ crates/daemon/src/runtime_selection_tests.rs       | 80 ++++++++++++++++++
+ crates/daemon/src/service.rs                       | 21 +++--
+ crates/daemon/src/watch.rs                         |  6 +-
+ 12 files changed, 289 insertions(+), 46 deletions(-)
