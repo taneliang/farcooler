@@ -127,6 +127,22 @@ import Testing
     }
 }
 
+/// A runner mid-upgrade refuses with `version-incompatible` and `what:
+/// cutover_held`. The phone must not say "update" for it (ov-963): updating is
+/// the move that strands the upgrade.
+@Test func aRunnerMidUpgradeIsToldNotToBeUpdated() {
+    let held = RunnerRefusal.trouble(
+        forWord: "version-incompatible", what: "cutover_held", message: "raw", otherwise: "generic")
+    #expect(held.sentence == RunnerRefusal.cutoverHeldSentence)
+    #expect(held.transcript == nil)
+    #expect(held.sentence.contains("mid-upgrade"))
+    #expect(held.sentence.contains("Don’t update"))
+    // The same code for other reasons is not this sentence.
+    let other = RunnerRefusal.trouble(
+        forWord: "version-incompatible", what: "newer_data", message: "raw", otherwise: "generic")
+    #expect(other.sentence == "generic")
+}
+
 /// The codes that are real but have no sentence of their own, and why.
 ///
 /// Deliberately listed rather than left to the fallback by accident. Twelve of
@@ -142,7 +158,9 @@ import Testing
         // No production site anywhere in the tree.
         "dirty-worktree", "repository-locked", "output-gap", "attachment-limit",
         "dispatch-unknown", "diff-too-large", "diff-unsupported", "pr-state-unavailable",
-        // Intercepted at the handshake as `SessionError::VersionMismatch`.
+        // Mostly intercepted at the handshake as `SessionError::VersionMismatch`.
+        // A runner mid-upgrade does send it per request, with `what:
+        // cutover_held`; that case has its own sentence, keyed by `what`.
         "version-incompatible",
         // Raised on the local send; never put in a response.
         "client-too-slow",

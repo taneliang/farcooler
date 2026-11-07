@@ -137,6 +137,15 @@ class RunnerRefusalTest {
         }
     }
 
+    @Test
+    fun `a runner mid-upgrade is told not to be updated`() {
+        val held = troubleFor("version-incompatible", "raw", "generic", "cutover_held")
+        assertEquals(RunnerRefusal.CUTOVER_HELD_SENTENCE, held.sentence)
+        assertNull(held.transcript)
+        assertTrue(held.sentence.contains("mid-upgrade"))
+        assertEquals("generic", troubleFor("version-incompatible", "raw", "generic", "newer_data").sentence)
+    }
+
     /**
      * The codes that are real but have no sentence of their own, and why.
      *

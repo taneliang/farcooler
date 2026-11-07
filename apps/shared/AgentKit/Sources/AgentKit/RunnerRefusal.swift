@@ -30,6 +30,8 @@ import Foundation
 /// proto, twelve cannot reach a phone at all: `host-offline` has no
 /// `DomainError` variant to produce it, eight more have no production site
 /// anywhere in the tree, `version-incompatible` is intercepted at the handshake
+/// and arrives as `SessionError::VersionMismatch` (except from a runner mid-upgrade, which sends it per
+/// request with `what: cutover_held`; `cutoverHeldSentence` says that one)
 /// and arrives as `SessionError::VersionMismatch`, `client-too-slow` is raised
 /// on the local send and never put in a response, and `idempotency-mismatch`
 /// has no caller outside the store's own tests because no request path ever
@@ -191,6 +193,19 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         "This device has already added five devices in the past day, which is the most it can add. "
         + "Try again tomorrow, or add it from the owner’s device."
 
+    /// What a runner in the middle of a data upgrade says to everything
+    /// (ov-963). It shares `version-incompatible` with "this app and that
+    /// runner are different versions", whose move is to update; here updating
+    /// is the one move that can strand the upgrade, so it gets its own words.
+    public static let cutoverHeldSentence =
+        "This runner is mid-upgrade. Don’t update it. Finish the upgrade on the runner, then try again."
+
+    /// Whether the runner refused because its data is mid-upgrade: the
+    /// `version-incompatible` code with `what` `cutover_held`.
+    public static func isCutoverHeld(word: String?, what: String?) -> Bool {
+        word == "version-incompatible" && what == "cutover_held"
+    }
+
     /// Whether the runner refused an enrollment for the daily limit. The limit
     /// travels as a `resource-conflict` whose `what` is `add_limit`; the same
     /// code with another `what` (`device_taken`, `not_held`) is something else.
@@ -206,6 +221,7 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         otherwise generic: String
     ) -> ReviewTrouble {
         if isAddLimit(word: word, what: what) { return ReviewTrouble(sentence: addLimitSentence) }
+        if isCutoverHeld(word: word, what: what) { return ReviewTrouble(sentence: cutoverHeldSentence) }
         return trouble(forWord: word, message: message, otherwise: generic)
     }
 

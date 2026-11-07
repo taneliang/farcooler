@@ -166,6 +166,10 @@ struct ActionOutcomeTests {
                 "code: version-incompatible",
                 "This runner’s Far Cooler and this app are different versions. Update the older one, then try again."
             ),
+            (
+                "code: version-incompatible\nwhat: cutover_held",
+                RunnerRefusal.cutoverHeldSentence
+            ),
             ("code: scope-denied", RunnerRefusal.scopeDenied.sentence),
             ("code: auth-required", RunnerRefusal.authRequired.sentence),
             ("code: resource-conflict\nwhat: not_held", RunnerRefusal.resourceConflict.sentence),

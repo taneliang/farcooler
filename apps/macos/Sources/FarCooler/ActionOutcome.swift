@@ -259,6 +259,14 @@ enum ActionCopy {
         {
             return "It was already restarted or dismissed."
         }
+        // A runner mid-upgrade shares `version-incompatible`, whose move is to
+        // update. Updating is what strands the upgrade (ov-963), so say so
+        // before the code is read.
+        if RunnerRefusal.isCutoverHeld(
+            word: TaskFailure.code(in: message), what: TaskFailure.what(in: message))
+        {
+            return RunnerRefusal.cutoverHeldSentence
+        }
         if let shared = RefusalCopy.refusal(in: message) { return shared.sentence }
         return switch TaskFailure.code(in: message) {
         case "dirty-worktree":

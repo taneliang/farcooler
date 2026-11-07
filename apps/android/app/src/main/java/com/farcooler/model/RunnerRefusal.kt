@@ -27,7 +27,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * **Only codes that can actually arrive are here.** Of the twenty-eight in the
  * proto, twelve cannot reach a phone at all: `host-offline` has no
  * `DomainError` variant to produce it, eight more have no production site
- * anywhere in the tree, `version-incompatible` is intercepted at the handshake,
+ * anywhere in the tree, `version-incompatible` is intercepted at the handshake (a runner mid-upgrade sends it per request
+ * with `what: cutover_held`; [RunnerRefusal.CUTOVER_HELD_SENTENCE] says that one),
  * `client-too-slow` is raised on the local send and never put in a response,
  * and `idempotency-mismatch` has no caller outside the store's own tests.
  * `confirmation-required` is real but the client core turns both of its remove
@@ -153,6 +154,16 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
                 "Try again tomorrow, or add it from the owner’s device."
 
         /**
+         * What a runner in the middle of a data upgrade says to everything (ov-963). It shares `version-incompatible`
+         * with "different versions", whose move is to update; here updating can strand the upgrade.
+         */
+        const val CUTOVER_HELD_SENTENCE =
+            "This runner is mid-upgrade. Don’t update it. Finish the upgrade on the runner, then try again."
+
+        /** Whether the runner refused because its data is mid-upgrade: `version-incompatible` with `what` `cutover_held`. */
+        fun isCutoverHeld(word: String?, what: String?): Boolean = word == "version-incompatible" && what == "cutover_held"
+
+        /**
          * Whether the runner refused an enrollment for the daily limit. It travels as a `resource-conflict` whose
          * `what` is `add_limit`; the same code with another `what` (`device_taken`) is something else.
          */
@@ -190,7 +201,11 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
  * keeping it would be noise rather than diagnosis.
  */
 fun troubleFor(word: String?, message: String?, generic: String, what: String?): Trouble =
-    if (RunnerRefusal.isAddLimit(word, what)) Trouble(RunnerRefusal.ADD_LIMIT_SENTENCE) else troubleFor(word, message, generic)
+    when {
+        RunnerRefusal.isAddLimit(word, what) -> Trouble(RunnerRefusal.ADD_LIMIT_SENTENCE)
+        RunnerRefusal.isCutoverHeld(word, what) -> Trouble(RunnerRefusal.CUTOVER_HELD_SENTENCE)
+        else -> troubleFor(word, message, generic)
+    }
 
 fun troubleFor(word: String?, message: String?, generic: String): Trouble {
     if (word == RunnerRefusal.TIMED_OUT_WORD) return Trouble(RunnerRefusal.TIMED_OUT_SENTENCE)
