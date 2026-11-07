@@ -77,7 +77,7 @@ else:
     sys.exit(2)
 "#;
 
-struct Gh { state: PathBuf, log: PathBuf }
+struct Gh { state: PathBuf, log: PathBuf, remote: PathBuf }
 
 /// A configured runtime with a private bare repository as the remote and the stub `gh`.
 async fn hub(mode: &str, gh_mode: &str) -> (tempfile::TempDir, Runtime, Gh) { hub_with(mode, gh_mode, 5000).await }
@@ -89,6 +89,13 @@ async fn hub_with(mode: &str, gh_mode: &str, timeout_ms: u64) -> (tempfile::Temp
     let status = tokio::process::Command::new("/usr/bin/git").current_dir(&repo)
         .args(["-c", "core.hooksPath=/dev/null", "push", bare.to_str().unwrap(), "HEAD:refs/heads/main"]).status().await.unwrap();
     assert!(status.success());
+    // Where pull requests live is not the landing transport: GitHub is a repository of its own.
+    let remote = dir.path().join("github-remote.git"); std::fs::create_dir(&remote).unwrap();
+    adapters::git(&remote, &["init", "--bare", "--quiet"]).await.unwrap();
+    let status = tokio::process::Command::new("/usr/bin/git").current_dir(&repo)
+        .args(["-c", "core.hooksPath=/dev/null", "push", remote.to_str().unwrap(), "HEAD:refs/heads/main"]).status().await.unwrap();
+    assert!(status.success());
+    let remote = remote.canonicalize().unwrap();
     let (gh, state, log) = (dir.path().join("gh"), dir.path().join("gh-state.json"), dir.path().join("gh-log.jsonl"));
     std::fs::write(&gh, GH).unwrap();
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -97,13 +104,14 @@ async fn hub_with(mode: &str, gh_mode: &str, timeout_ms: u64) -> (tempfile::Temp
     config.landing = Some(CodingLanding { job: "landing-957".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.pull_request = Some(CodingPullRequest { repository: "private/fixture".into(), base: "main".into(),
+        remote: Some(remote.to_string_lossy().into_owned()),
         gh: CodingCommand { argv: vec![gh.to_string_lossy().into_owned()], timeout_ms,
-            environment: [("GH_STATE", state.clone()), ("GH_LOG", log.clone()), ("GH_REMOTE", bare.clone())].into_iter()
+            environment: [("GH_STATE", state.clone()), ("GH_LOG", log.clone()), ("GH_REMOTE", remote.clone())].into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string_lossy().into_owned()))
                 .chain([("GH_MODE".to_string(), gh_mode.to_string())]).collect() } });
     std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
     drop(runtime);
-    (dir, Runtime::open(&root).unwrap(), Gh { state, log })
+    (dir, Runtime::open(&root).unwrap(), Gh { state, log, remote })
 }
 
 fn stage(config: &CodingConfig, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage {
@@ -165,7 +173,9 @@ async fn a_ticket_gets_one_pull_request_that_is_made_ready_and_waited_on() {
     let head = head_of("one");
     // The branch is on the remote, at the candidate the build made.
     let landing = runtime_f.coding.as_ref().unwrap().landing.clone().unwrap();
-    let on_remote = adapters::git(&landing.repository, &["rev-parse", &format!("refs/heads/{head}")]).await.unwrap();
+    let on_remote = adapters::git(&f.remote, &["rev-parse", &format!("refs/heads/{head}")]).await.unwrap();
+    assert!(adapters::git(&landing.repository, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{head}")]).await.is_err(),
+        "the landing transport is not where pull requests are pushed");
     // The ticket's candidate is the commit GitHub made, not the branch's.
     assert_eq!(state.items.get("one").and_then(|i| i.candidate.as_deref()).or_else(|| state.archive.get("one").and_then(|a| a.candidate.as_deref())), Some("cccccccccccccccccccccccccccccccccccccccc"));
     assert_ne!(on_remote, "cccccccccccccccccccccccccccccccccccccccc");
@@ -366,17 +376,21 @@ async fn a_pull_request_for_another_base_is_refused_not_adopted() {
 #[tokio::test]
 async fn a_commit_someone_else_pushed_to_the_head_branch_is_never_overwritten() {
     let (_dir, mut runtime, f) = hub("pass", "merge").await;
-    let landing = runtime.coding.as_ref().unwrap().landing.clone().unwrap();
+    let remote = f.remote.clone();
     // A reviewer's commit is already on the item's head branch.
-    let tree = adapters::git(&landing.repository, &["rev-parse", "main^{tree}"]).await.unwrap();
-    let theirs = adapters::git(&landing.repository, &["commit-tree", &tree, "-p", "main", "-m", "reviewer fix"]).await.unwrap();
+    let tree = adapters::git(&remote, &["rev-parse", "main^{tree}"]).await.unwrap();
+    let theirs = adapters::git(&remote, &["commit-tree", &tree, "-p", "main", "-m", "reviewer fix"]).await.unwrap();
     let reference = format!("refs/heads/{}", head_of("one"));
-    adapters::git(&landing.repository, &["update-ref", &reference, &theirs]).await.unwrap();
+    adapters::git(&remote, &["update-ref", &reference, &theirs]).await.unwrap();
     let definition = per_ticket_pull_request(&runtime, false, 5000);
     enqueue_item(&mut runtime, "w", "one", definition);
     for time in 2..200 { runtime.pump(time).await.unwrap(); }
-    assert_eq!(adapters::git(&landing.repository, &["rev-parse", &reference]).await.unwrap(), theirs, "their commit is still the branch");
+    assert_eq!(adapters::git(&remote, &["rev-parse", &reference]).await.unwrap(), theirs, "their commit is still the branch");
     assert_eq!(count(&f, "create"), 0);
+    // Nothing was pushed or even begun: the check read the remote, where their commit is, and not a local copy.
+    let begun: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".pushed-") || e.file_name().to_string_lossy().contains("branch-push")).collect();
+    assert!(begun.is_empty(), "{begun:?}");
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(phase_of(&state, "one"), Some(Phase::Failed));
 }
@@ -436,9 +450,9 @@ async fn restarts_during_the_wait_for_a_merge_spend_no_attempts() {
     let definition = per_ticket_pull_request(&runtime, false, 600_000);
     enqueue_item(&mut runtime, "w", "one", definition);
     let root = runtime.root.clone();
-    // `pump` blocks while the wait runs, so each life of the runtime is cut off from outside: a crash in mid-wait.
+    // `pump` blocks while the wait runs, so each life of the runtime is cut off from outside: a crash in mid-wait. The first life has the whole pipeline to run first.
     for round in 0..7u32 {
-        let _ = tokio::time::timeout(Duration::from_secs(4), async { for time in (2 + round * 1000)..(400 + round * 1000) { runtime.pump(time.into()).await.unwrap(); } }).await;
+        let _ = tokio::time::timeout(Duration::from_secs(if round == 0 { 20 } else { 4 }), async { for time in (2 + round * 1000)..(400 + round * 1000) { runtime.pump(time.into()).await.unwrap(); } }).await;
         let item = runtime.state("w").unwrap().unwrap().items["one"].clone();
         assert_eq!((item.phase.clone(), item.attempt, item.definition.stages[item.stage].kind.clone()), (Phase::Running, 1, StageKind::AwaitPr), "round {round}");
         drop(runtime);
@@ -484,4 +498,19 @@ fn a_pending_review_with_no_submission_time_does_not_blank_the_list() {
     let bytes = one(pending).into_bytes();
     assert_eq!(super::coding_pr::parse_for_test(&bytes).map(|p| p.len()), Some(1), "the list still reads");
     assert!(super::coding_pr::changes_requested_for_test(&bytes, 3, &"a".repeat(40)), "and the standing request still counts");
+}
+
+#[tokio::test]
+async fn the_pull_request_remote_is_a_path_or_an_https_or_ssh_url_and_nothing_else() {
+    let (_dir, runtime, _f) = hub("pass", "merge").await;
+    let mut config = runtime.coding.clone().unwrap();
+    config.validate().unwrap();
+    for good in ["https://github.com/private/fixture.git", "ssh://git@github.com/private/fixture.git"] {
+        config.pull_request.as_mut().unwrap().remote = Some(good.into());
+        config.validate().unwrap_or_else(|e| panic!("{good}: {e:?}"));
+    }
+    for bad in ["--upload-pack=x", "ext::sh -c x", "git://github.com/a/b", "file:///tmp/x", "relative/path", "https://a b", ""] {
+        config.pull_request.as_mut().unwrap().remote = Some(bad.into());
+        assert!(config.validate().is_err(), "{bad:?} must be refused");
+    }
 }

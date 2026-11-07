@@ -54,6 +54,10 @@ pub struct CodingPullRequest {
     pub repository: String,
     /// The branch pull requests are opened against.
     pub base: String,
+    /// Where head branches are pushed and read back: the repository the pull requests live in, as a
+    /// bare repository path, an `https://` or an `ssh://` URL. Left out, it is the landing transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
     pub gh: CodingCommand,
 }
 

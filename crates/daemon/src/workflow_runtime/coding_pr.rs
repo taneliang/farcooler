@@ -62,6 +62,10 @@ fn parse(out: &[u8]) -> Option<Vec<Pr>> {
     String::from_utf8_lossy(out).lines().rev().filter(|l| l.starts_with('[')).find_map(|l| serde_json::from_str(l).ok())
 }
 
+/// What a remote said about a branch.
+#[derive(Debug, PartialEq)]
+enum Seen { Unknown, Absent, At(String) }
+
 pub(super) fn is_pr_verb(kind: &StageKind) -> bool {
     matches!(kind, StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)
 }
@@ -131,6 +135,34 @@ impl Exec {
         if ours.len() > 1 { return Err(Error::Refused("more than one pull request has this head branch")); }
         Ok(Some(ours))
     }
+    /// Where head branches go and are read back from: the pull request remote, else the landing transport.
+    fn remote(&self) -> Result<String> {
+        match self.pull_request()?.remote.clone() {
+            Some(remote) => Ok(remote),
+            None => Ok(self.landing()?.repository.to_string_lossy().into_owned()),
+        }
+    }
+    /// What the remote holds at the item's head branch, asked of the remote itself. A remote that did not
+    /// answer is `Unknown` and never read as an empty branch: a lease on "absent" would be wrong.
+    async fn head_on_remote(&self, binding: &Binding, tag: &str, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Seen> {
+        let (program, environment) = self.git_environment().await?;
+        let reference = format!("refs/heads/{}", self.head_branch(binding));
+        let argv = vec![program, "ls-remote".into(), "--refs".into(), self.remote()?, reference.clone()];
+        let log = self.root.join("receipts").join(format!("{}.remote-{tag}.output", digest(&binding.effect)));
+        if tag == "poll" { let _ = std::fs::remove_file(&log); }
+        durable(&log, b"")?;
+        let exit = match crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel.clone()).await {
+            Ok(exit) => exit,
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return Ok(Seen::Unknown),
+            Err(error) => return Err(error.into()),
+        };
+        if exit != Some(0) { return Ok(Seen::Unknown); }
+        let out = self.bytes(&log)?;
+        // Notices on stderr share the log: only a line that is exactly `<sha> TAB <ref>` is an answer.
+        let found = String::from_utf8_lossy(&out).lines().find_map(|l| l.split_once('\t')
+            .filter(|(sha_, name)| *name == reference && sha(sha_)).map(|(sha_, _)| sha_.to_string()));
+        Ok(found.map_or(Seen::Absent, Seen::At))
+    }
     fn finish(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
         self.write_fact(binding, label, candidate, detail)
     }
@@ -138,10 +170,10 @@ impl Exec {
 
     /// Put the candidate on the remote as the head branch. A branch that already has it is left alone.
     async fn push_branch(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
-        let identity = self.landing()?.clone();
         let candidate = self.candidate_of(binding)?;
         if self.verify_tree(binding).await? != candidate { return Err(Error::Refused("pushed candidate is not the item's tree")); }
-        if adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
+        let remote = self.remote()?;
+        if std::path::Path::new(&remote).is_absolute() && adapters::git(std::path::Path::new(&remote), &["rev-parse", "--is-bare-repository"]).await? != "true" {
             return Err(Error::Refused("branch transport is not bare"));
         }
         let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;
@@ -149,7 +181,11 @@ impl Exec {
             return Err(Error::Refused("local config redirects transport"));
         }
         let reference = format!("refs/heads/{}", self.head_branch(binding));
-        let before = adapters::git(&identity.repository, &["rev-parse", "--verify", "--quiet", &reference]).await.ok();
+        let before = match self.head_on_remote(binding, "before", &cancel).await? {
+            Seen::Unknown => return Ok(Outcome::SafeFailure),
+            Seen::Absent => None,
+            Seen::At(sha) => Some(sha),
+        };
         // Only a commit this engine pushed (or began to push) may be replaced. Anyone else's push to the
         // head branch, a reviewer's fix for one, is theirs, and the lease is held on exactly what was seen.
         let ledger = |sha: &str| self.root.join("receipts").join(format!("{}.pushed-{sha}", &digest(&(&binding.workspace, &binding.effect.item))[4..20]));
@@ -168,14 +204,13 @@ impl Exec {
                 "--recurse-submodules=no".into(), "--signed=false".into(),
                 // Only over what was seen: an empty expectation means the branch is not there yet.
                 format!("--force-with-lease={reference}:{}", before.as_deref().unwrap_or("")),
-                identity.repository.to_string_lossy().into_owned(), format!("{candidate}:{reference}")];
+                remote, format!("{candidate}:{reference}")];
             let log = self.root.join("receipts").join(format!("{}.branch-push.output", digest(&binding.effect)));
             durable(&log, b"")?;
-            crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel).await?;
+            crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel.clone()).await?;
         }
-        let after = adapters::git(&identity.repository, &["rev-parse", "--verify", "--quiet", &reference]).await.ok();
         // Pushing a branch is safe to do again, so a push that did not land is a failure to try again.
-        if after.as_deref() != Some(candidate.as_str()) { return Ok(Outcome::SafeFailure); }
+        if self.head_on_remote(binding, "after", &cancel).await? != Seen::At(candidate.clone()) { return Ok(Outcome::SafeFailure); }
         self.finish(binding, "passed", &candidate, serde_json::json!({ "branch": reference, "pushed": before.as_deref() != Some(candidate.as_str()) }))?;
         self.settle(binding, &StageKind::PushBranch).await
     }
@@ -193,9 +228,11 @@ impl Exec {
         let existing = match found.into_iter().next() {
             Some(existing) => existing,
             None => {
-                let identity = self.landing()?;
-                let remote = adapters::git(&identity.repository, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{head}")]).await.ok();
-                if remote.as_deref() != Some(candidate.as_str()) { return Err(Error::Refused("the head branch does not hold the candidate")); }
+                match self.head_on_remote(binding, "open", &cancel).await? {
+                    Seen::At(on_remote) if on_remote == candidate => {}
+                    Seen::Unknown => return Ok(Outcome::SafeFailure),
+                    _ => return Err(Error::Refused("the head branch does not hold the candidate")),
+                }
                 let title = self.git_recorded(binding, &self.tree(binding), &["log", "-1", "--format=%s", &candidate]).await?;
                 let body = self.git_recorded(binding, &self.tree(binding), &["log", "-1", "--format=%b", &candidate]).await?;
                 let title: String = title.chars().take(200).collect();

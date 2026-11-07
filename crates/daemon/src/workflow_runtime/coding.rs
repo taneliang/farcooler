@@ -86,6 +86,13 @@ impl CodingConfigExt for CodingConfig {
                 || self.landing.as_ref().is_none_or(|l| l.target != format!("refs/heads/{}", pr.base)) || pr.gh.argv.len() != 1
             { return Err(Error::Refused("invalid pull request configuration")); }
             pr.gh.validate()?;
+            if let Some(remote) = &pr.remote {
+                let url = remote.starts_with("https://") || remote.starts_with("ssh://");
+                let path = std::path::Path::new(remote).is_absolute();
+                if !(url || path) || remote.len() > 500 || remote.bytes().any(|b| b.is_ascii_control() || b == b' ') {
+                    return Err(Error::Refused("invalid pull request remote"));
+                }
+            }
         }
         for check in &self.checks { check.validate()?; }
         if let Some(reviewer) = &self.reviewer {
