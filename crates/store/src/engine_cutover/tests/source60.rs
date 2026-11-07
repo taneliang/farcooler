@@ -30,7 +30,7 @@ fn source60_transfer_freezes_atomically_and_recover_returns_the_exact_bytes() {
     let (store, plan) = transfer::begin(&path, join_db(&path, "raw60")).unwrap();
     assert_eq!(plan.raw, raw.raw, "the plan is the raw source, not the upgraded rows");
     let schema = store.schema().unwrap();
-    assert_eq!((schema.version, schema.compatible_down_to), (67, Some(67)));
+    assert_eq!((schema.version, schema.compatible_down_to), (68, Some(68)));
     assert_eq!(store.engine_authority().unwrap().phase, "quiesced");
     assert_eq!(bytes(&artifact_dir(&path).join("baseline.db")), original);
     let (baseline, _) = transfer::validate_artifacts(&path).unwrap();

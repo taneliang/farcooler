@@ -55,9 +55,8 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     // a relink/restart or worker discovered after the engine transaction commits.
     for table in ["terminals","ticket_lines","ticket_work","landing_tickets"] {
         for (suffix,event) in [("insert","INSERT"),("update","UPDATE")] {
-            tx.execute_batch(&format!("CREATE TRIGGER workflow_excludes_{table}_{suffix} BEFORE {event} ON {table}
-                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)
-                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END;"))?;
+            // The text registry 68 recognizes and narrows for a ticket at rest (`engine_stage`).
+            tx.execute_batch(&format!("{};", crate::engine_stage::excludes(table, suffix, event, false)))?;
         }
     }
     Ok(())

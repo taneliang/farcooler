@@ -446,11 +446,12 @@ fn write_wait(tx: &Connection, task: Uuid, wait: Option<Wait>, rank: Option<i64>
     Ok(())
 }
 
-/// Whether the card's wait is its own to keep and let go: any card the engine does not own, and a ticket it
-/// holds with no run. A card with a run has no wait of its own (ov-962).
-fn holds_its_own_wait(conn: &Connection, task: Uuid) -> Result<bool> {
-    Ok(!crate::workflow_projection::is_owned(conn, task).map_err(map_err)?
-        || crate::workflow_projection::is_ticket(conn, task).map_err(map_err)?)
+/// Whether the card's timed hold is its own to let go: a card the engine does not own, held in the backlog
+/// (where holding put it), and a ticket the engine holds with no run, in whichever column the engine left it,
+/// since holding a ticket moves no column (ov-965). A card with a run has no wait of its own (ov-962).
+fn holds_its_own_wait(conn: &Connection, task: Uuid, status: &str) -> Result<bool> {
+    if crate::workflow_projection::is_ticket(conn, task).map_err(map_err)? { return Ok(true); }
+    Ok(status == "backlog" && !crate::workflow_projection::is_owned(conn, task).map_err(map_err)?)
 }
 
 /// The `wait` note for going from `before` to `after`, or nothing when the
@@ -501,13 +502,9 @@ impl Store {
                 crate::tasks::move_in(&tx, task, TaskStatus::Todo, TaskStatus::Backlog, actor, now)?;
             }
             let since = if before == wait { since.unwrap_or(now) } else { now };
-            // After release the status fence covers a ticket's wait too, so the write goes under the same
-            // lifted fence the projection uses; a card with a run never reaches here (ov-962).
-            let guards: &[&str] = if ticket { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
-            crate::workflow_projection::with_guards_down(&tx, guards, || {
-                write_wait(&tx, task, wait, None, since)?;
-                note_change(&tx, task, before, wait, actor)
-            })?;
+            // The wait fence passes a ticket at rest; a card with a run never reaches here (ov-965).
+            write_wait(&tx, task, wait, None, since)?;
+            note_change(&tx, task, before, wait, actor)?;
             tx.commit().map_err(map_err)?;
         }
         self.get_task(task)
@@ -571,14 +568,14 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT id, wait_until FROM tasks WHERE wait_kind = 'until' AND status = 'backlog'
+                "SELECT id, wait_until, status FROM tasks WHERE wait_kind = 'until' AND status IN ('backlog', 'todo')
                  ORDER BY wait_until, rowid",
             )
             .map_err(map_err)?;
-        let rows = stmt.query_map([], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?))).map_err(map_err)?;
+        let rows = stmt.query_map([], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))).map_err(map_err)?;
         for row in rows {
-            let (id, until) = row.map_err(map_err)?;
-            if holds_its_own_wait(&conn, id)? { return Ok(Some(until)); }
+            let (id, until, status) = row.map_err(map_err)?;
+            if holds_its_own_wait(&conn, id, &status)? { return Ok(Some(until)); }
         }
         Ok(None)
     }
@@ -594,24 +591,22 @@ impl Store {
             let due: Vec<(Uuid, i64)> = {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT id, wait_until FROM tasks
-                          WHERE wait_kind = 'until' AND status = 'backlog' AND wait_until <= ?1
+                        "SELECT id, wait_until, status FROM tasks
+                          WHERE wait_kind = 'until' AND status IN ('backlog', 'todo') AND wait_until <= ?1
                           ORDER BY wait_until, rowid",
                     )
                     .map_err(map_err)?;
-                let rows = stmt.query_map(params![now], |r| Ok((get_uuid(r, 0)?, r.get(1)?))).map_err(map_err)?;
-                let due: Vec<(Uuid, i64)> = rows.collect::<rusqlite::Result<_>>().map_err(map_err)?;
+                let rows = stmt.query_map(params![now], |r| Ok((get_uuid(r, 0)?, r.get(1)?, r.get::<_, String>(2)?))).map_err(map_err)?;
+                let due: Vec<(Uuid, i64, String)> = rows.collect::<rusqlite::Result<_>>().map_err(map_err)?;
                 let mut mine = Vec::with_capacity(due.len());
-                for (id, until) in due { if holds_its_own_wait(&tx, id)? { mine.push((id, until)); } }
+                for (id, until, status) in due { if holds_its_own_wait(&tx, id, &status)? { mine.push((id, until)); } }
                 mine
             };
             let mut released = Vec::with_capacity(due.len());
             // After release the hold still lets go (a board fact), and the
             // orchestrator is told through the engine's binding (ov-949).
             for (id, until) in due {
-                // A ticket's wait sits under the status fence after release, so it lets go under the lifted fence.
-                let guards: &[&str] = if crate::workflow_projection::is_owned(&tx, id).map_err(map_err)? { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
-                crate::workflow_projection::with_guards_down(&tx, guards, || write_wait(&tx, id, None, None, now))?;
+                write_wait(&tx, id, None, None, now)?;
                 let body =
                     format!("Held until {}. That time has come.", farcooler_core::local_time::moment(until));
                 let extra = json!({ "wait": "none", "was": "until", "until": until });

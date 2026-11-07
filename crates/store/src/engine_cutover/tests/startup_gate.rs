@@ -59,7 +59,7 @@ fn transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_ato
     let authority = store.engine_authority().unwrap();
     assert_eq!((authority.phase.as_str(), authority.manifest.as_deref()), ("quiesced", Some(plan.raw.hash().as_str())));
     let schema = store.schema().unwrap();
-    assert_eq!((schema.version, schema.compatible_down_to), (67, Some(67)), "refusing floor lands with the version");
+    assert_eq!((schema.version, schema.compatible_down_to), (68, Some(68)), "refusing floor lands with the version");
     assert_eq!(bytes(&artifact_dir(&path).join("baseline.db")), original, "baseline is the untouched original");
     let (baseline, intent) = transfer::validate_artifacts(&path).unwrap();
     assert_eq!((baseline.registry, baseline.raw_hash.as_str()), (65, plan.raw.hash().as_str()));

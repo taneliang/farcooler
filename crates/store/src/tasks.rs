@@ -936,17 +936,13 @@ impl Store {
             return Err(DomainError::InvalidArgument { what: "cycle" });
         }
 
-        // A ticket the engine holds with no run keeps its blocks; after release the fence on `task_blocks`
-        // covers every owned card, so the write goes under the lifted fence (ov-962).
-        let guards: &[&str] = if crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)? { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
-        crate::workflow_projection::with_guards_down(&tx, guards, || {
-            tx.execute(
-                "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, COALESCE(?3, ''))
-                 ON CONFLICT (task_id, blocked_by) DO UPDATE SET reason = COALESCE(?3, reason)",
-                params![uuid_blob(task), uuid_blob(blocked_by), reason],
-            )
-            .map_err(map_err)
-        })?;
+        // A ticket at rest keeps its blocks; the fence on `task_blocks` passes it (ov-965).
+        tx.execute(
+            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, COALESCE(?3, ''))
+             ON CONFLICT (task_id, blocked_by) DO UPDATE SET reason = COALESCE(?3, reason)",
+            params![uuid_blob(task), uuid_blob(blocked_by), reason],
+        )
+        .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(())
     }
@@ -970,14 +966,8 @@ impl Store {
     pub fn unblock(&self, task: Uuid, blocked_by: Uuid) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        let guards: &[&str] = if crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)? { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
-        crate::workflow_projection::with_guards_down(&tx, guards, || {
-            tx.execute(
-                "DELETE FROM task_blocks WHERE task_id = ?1 AND blocked_by = ?2",
-                params![uuid_blob(task), uuid_blob(blocked_by)],
-            )
-            .map_err(map_err)
-        })?;
+        tx.execute("DELETE FROM task_blocks WHERE task_id = ?1 AND blocked_by = ?2", params![uuid_blob(task), uuid_blob(blocked_by)])
+            .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         Ok(())
     }

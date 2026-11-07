@@ -100,7 +100,7 @@ fn released_holds_still_let_go_and_ci_chips_no_longer_move_landings() {
     // A hold whose time came: the free card lets go and is told once. A card the
     // engine owns is left alone (its fence is lifted here only to seed the hold).
     let past = crate::tasks::now_millis() - 1;
-    s.conn().execute_batch("DROP TRIGGER engine_task_execution_fence").unwrap();
+    s.conn().execute_batch("DROP TRIGGER engine_task_wait_fence").unwrap();
     s.conn().execute("UPDATE tasks SET wait_kind='until', wait_until=?1 WHERE id IN (?2,?3)", rusqlite::params![past, r.other.as_bytes().as_slice(), r.owned.as_bytes().as_slice()]).unwrap();
     let released = s.release_due_holds(crate::tasks::now_millis()).unwrap();
     assert_eq!(released.iter().map(|(t, _)| t.id).collect::<Vec<_>>(), vec![r.other], "only the unowned card");

@@ -26,6 +26,11 @@ pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4
 pub const SOURCE60_SCHEMA_HASH: &str = "wf1:7e663d320ef00a1181410d4610e24f6b6ee8729ca14f558d25c70a873f39053e";
 pub const SOURCE_SCHEMA_HASH: &str = "wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09";
 pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:322d78f8e47556c67cabfdbc1e4e0a37b568aedd766b7f12e4a1e0eba471610f";
+/// Registry 68 (ov-965): the engine objects once a ticket at rest is fenced on its column alone.
+pub const CUTOVER68_SCHEMA_HASH: &str = "wf1:e07a7a3bcc69de59bc2743f25ef5123ba3c7d91f982b7addd9b2a7a659ec25ac";
+/// The composed catalog at registry 68: schema65's, with the four `workflow_excludes_ticket_*` guards narrowed
+/// for a ticket at rest (`engine_stage::EXCLUDES`). The only non-engine change since 65.
+pub const SOURCE68_SCHEMA_HASH: &str = "wf1:4147456276ec0986ff8bbaef335ac62f303502efd89c88c6dc4105bf27fafa3a";
 pub const MAP_PIN: &str = "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -209,18 +214,20 @@ fn uuid(value: &Cell) -> Result<String> {
 /// Capture before Store::open: no waits sweep or schema stamp can erase raw facts.
 pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let registry = crate::migrate::read_schema_version(conn).map_err(|e| Error::Refused(e.to_string()))?;
-    if !matches!(registry,60|65..=67) { return refuse("expected exact raw schema60, composed schema65, cutover schema66 or manual schema67"); }
+    if !matches!(registry,60|65..=68) { return refuse("expected exact raw schema60, composed schema65, cutover schema66, manual schema67 or stage schema68"); }
     let unsafe_generation:bool=registry>=65 && conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
         OR EXISTS(SELECT 1 FROM workflow_resources r LEFT JOIN workflow_resource_generations g ON g.resource=r.resource WHERE g.resource IS NULL OR typeof(r.generation)!='integer' OR r.generation!=g.generation)",[],|r|r.get(0))?;
     if unsafe_generation {return refuse("resource generation is invalid, exhausted or inconsistent; no authority transfer");}
     let mut raw = Manifest::capture(conn)?;
     let cutover_objects:BTreeMap<_,_>=raw.objects.iter().filter(|(name,(_,owner,_))|name.starts_with("engine_")||owner.starts_with("engine_cutover_")).map(|(name,value)|(name.clone(),value.clone())).collect();
-    if registry>=66 && farcooler_workflow::digest(&cutover_objects)!=if registry==66 {CUTOVER_SCHEMA_HASH} else {CUTOVER67_SCHEMA_HASH} {return Err(Error::Refused(format!("cutover schema objects differ from the pinned schema; preserve and stop ({})",farcooler_workflow::digest(&cutover_objects))));}
+    let pinned=match registry {66=>CUTOVER_SCHEMA_HASH,67=>CUTOVER67_SCHEMA_HASH,_=>CUTOVER68_SCHEMA_HASH};
+    if registry>=66 && farcooler_workflow::digest(&cutover_objects)!=pinned {return Err(Error::Refused(format!("cutover schema objects differ from the pinned schema; preserve and stop ({})",farcooler_workflow::digest(&cutover_objects))));}
     // Only the exact signed 103-object namespace may be excluded as migration
     // metadata. Unknown same-prefix tables/triggers can never hide in a prefix.
     if registry>=66 {
-        raw.tables.retain(|name,_| !name.starts_with("engine_cutover_") && !name.starts_with("engine_manual_") && !name.starts_with("engine_notice_"));
-        raw.objects.retain(|name,(_,owner,_)| !name.starts_with("engine_") && !owner.starts_with("engine_cutover_") && !owner.starts_with("engine_manual_") && !owner.starts_with("engine_notice_"));
+        // `engine_stage_tickets` is the engine's own record, rebuilt from `workflow_states` on every command (ov-965).
+        raw.tables.retain(|name,_| !name.starts_with("engine_cutover_") && !name.starts_with("engine_manual_") && !name.starts_with("engine_notice_") && !name.starts_with("engine_stage_"));
+        raw.objects.retain(|name,(_,owner,_)| !name.starts_with("engine_") && !owner.starts_with("engine_cutover_") && !owner.starts_with("engine_manual_") && !owner.starts_with("engine_notice_") && !owner.starts_with("engine_stage_"));
     }
     let mut result = Preflight { source_pin:SOURCE_PIN.into(), map_pin:MAP_PIN.into(), registry,
         raw, bindings:Vec::new(), quarantines:Vec::new(), workspaces:BTreeSet::new() };
@@ -229,7 +236,7 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let catalog=catalog_hash(&result.raw);
     // The raw60 path reads no table until the catalog is the pinned one.
     if registry==60 && catalog!=SOURCE60_SCHEMA_HASH { return Err(Error::Refused(format!("schema60 catalog differs from the pinned registry prefix: {catalog}"))); }
-    let schema_unknown=registry!=60 && catalog!=SOURCE_SCHEMA_HASH;
+    let schema_unknown=registry!=60 && catalog!=if registry>=68 {SOURCE68_SCHEMA_HASH} else {SOURCE_SCHEMA_HASH};
     if schema_unknown { result.quarantines.push(Quarantine {resource:"schema:unknown".into(),reason:"composed source schema differs from pinned schema65 catalog; retain every raw field, block release".into()}); }
     let tasks = &result.raw.tables["tasks"];
     let mut aliases: BTreeMap<(String,String),Vec<String>> = BTreeMap::new();
@@ -415,7 +422,7 @@ impl Store {
         if required_resources(&tx)?!=*proof.protected() { return refuse("protected resource inventory changed"); }
         if authority(&tx)?.phase!="quiesced" { return refuse("cutover not quiesced"); }
         let current=Manifest::capture(&tx)?;
-        if !plan.raw.conserved_by(&current) { return refuse("source changed after raw preflight"); }
+        if !verify::as_registry68(plan).conserved_by(&current) { return refuse("source changed after raw preflight"); }
         let mut actual=BTreeSet::new();
         for row in &current.tables["workspaces"].rows { actual.insert(uuid(field(&current.tables["workspaces"],row,"id")?)?); }
         if actual!=plan.workspaces { return refuse("all-workspace coverage changed"); }

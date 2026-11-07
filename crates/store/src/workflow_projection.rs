@@ -17,15 +17,18 @@ pub(crate) fn is_owned(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<
         [task.as_bytes().as_slice()], |r| r.get(0))
 }
 
-/// Whether the engine holds this card as a tracker-only ticket at rest: no run, only a column. What a
-/// card's own notes (a wait) can change without touching the run's say over its column (ov-962).
+/// Whether the engine holds this card as a tracker-only ticket at rest: no run, only a column. Everything but
+/// the column is then the orchestrator's (ov-965). Read from the same record the guards read
+/// (`engine_stage_tickets`), so the store's answer and the database's can't differ.
 pub(crate) fn is_ticket(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<bool> {
-    let held: Option<(String, String)> = conn.query_row("SELECT workspace, item FROM workflow_owned_items WHERE task_id=?1",
-        [task.as_bytes().as_slice()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-    let Some((workspace, item)) = held else { return Ok(false) };
-    let raw: Option<String> = conn.query_row("SELECT state FROM workflow_states WHERE workspace=?1", [&workspace], |r| r.get(0)).optional()?;
-    Ok(raw.and_then(|s| serde_json::from_str::<State>(&s).ok())
-        .is_some_and(|state| state.items.get(&item).is_some_and(|i| i.definition.is_ticket() && i.phase == Phase::WaitingApproval)))
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM engine_stage_tickets WHERE task_id=?1)", [task.as_bytes().as_slice()], |r| r.get(0))
+}
+
+/// `refuse_if_owned` for a write to a card's own records (its line, wait, blocks, subagents): a ticket at rest
+/// takes it, and a card with a run or a closed ticket is refused.
+pub(crate) fn refuse_unless_at_rest(conn: &Connection, task: uuid::Uuid) -> DomainResult<()> {
+    if is_ticket(conn, task).map_err(crate::error::map_err)? { return Ok(()); }
+    refuse_if_owned(conn, task)
 }
 
 /// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
@@ -103,28 +106,10 @@ fn kind(item: &Item) -> Option<&StageKind> { item.definition.stages.get(item.sta
 /// write, so for the length of this transaction they are dropped and put back
 /// from their own stored text: the catalog is byte-identical afterward, and a
 /// failure rolls the drops back with everything else.
-/// The `ticket_work` pair is here because closing a card closes its open subagents inside the move (ov-962).
-const GUARDS: [&str; 5] = ["engine_task_execution_fence", "workflow_excludes_ticket_lines_insert", "workflow_excludes_ticket_lines_update",
-    "workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
-
-/// What a tracked ticket's own notes touch: its wait (a column the status fence also covers) and its blocks.
-pub(crate) const TICKET_GUARDS: [&str; 4] = ["engine_task_execution_fence", "engine_fence_task_blocks_i", "engine_fence_task_blocks_u", "engine_fence_task_blocks_d"];
-
-/// Runs `write` with `names` dropped, and puts them back from their stored text, as `project` does: a ticket the
-/// engine holds with no run keeps its say over its own wait and blocks after release, while a card with a run keeps
-/// every fence. The catalog is byte-identical afterward, and a failure rolls the drops back with the rest.
-pub(crate) fn with_guards_down<T>(tx: &Transaction<'_>, names: &[&str], write: impl FnOnce() -> DomainResult<T>) -> DomainResult<T> {
-    let map = crate::error::map_err;
-    let mut saved = Vec::new();
-    for name in names {
-        let sql: Option<String> = tx.query_row("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1", [name], |r| r.get(0)).optional().map_err(map)?;
-        saved.extend(sql);
-    }
-    for name in names { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}")).map_err(map)?; }
-    let written = write();
-    for sql in &saved { tx.execute_batch(sql).map_err(map)?; }
-    written
-}
+/// The `ticket_work` pair is here because closing a card closes its open subagents inside the move (ov-962), and
+/// the wait fence because a move clears a wait that doesn't fit the new column (`waits::after_move`).
+const GUARDS: [&str; 6] = ["engine_task_execution_fence", "engine_task_wait_fence", "workflow_excludes_ticket_lines_insert",
+    "workflow_excludes_ticket_lines_update", "workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
 
 /// Project every owned card of `state` onto the board. Only a card whose
 /// column or stage differs is touched, so a command that moves no card writes
@@ -150,8 +135,8 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
     let moved = moves.iter().filter_map(|(task, to, _, from, _, _)| Some(BoardMove {
         task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
-        let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (?1,?2,?3,?4,?5) ORDER BY name")?;
-        statement.query_map(params![GUARDS[0], GUARDS[1], GUARDS[2], GUARDS[3], GUARDS[4]], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (SELECT value FROM json_each(?1)) ORDER BY name")?;
+        statement.query_map([serde_json::to_string(&GUARDS)?], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
     };
     for name in GUARDS { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))?; }
     let written = write(tx, moves);

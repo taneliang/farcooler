@@ -138,7 +138,7 @@ fn back_up(db: &Path, plan: &Preflight, attempt: &str, protected: &BTreeSet<Stri
     write_private(&restore, &fs::read(dir.join("db"))?)?;
     let (restored, restored_plan, restored_resources) = manifest_of(&restore)?;
     if transfer::db_hash(&restore)? != snapshot.db_hash || restored != snapshot.manifest { return refuse("independent restore differs from the live database"); }
-    if !plan.raw.conserved_by(&restored_plan.raw) || restored_resources != *protected { return refuse("backup baseline or resources differ from the plan"); }
+    if !super::verify::as_registry68(plan).conserved_by(&restored_plan.raw) || restored_resources != *protected { return refuse("backup baseline or resources differ from the plan"); }
     fs::remove_file(&restore)?;
     transfer::sync_dir(&dir)?;
     reach("commit.after-restore");

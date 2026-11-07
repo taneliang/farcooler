@@ -4,6 +4,23 @@ use super::*;
 pub(super) fn row_key(table:&manifest::Table,row:&[Cell]) -> String {
     manifest::identity(&table.columns,row)
 }
+/// The source's catalog as registry 68 leaves it: a source from 65 to 67 has its four `workflow_excludes_ticket_*`
+/// guards narrowed for a ticket at rest (ov-965), and nothing else. Every comparison made after the freeze (which
+/// migrates the source to the current registry) compares against this, not the raw plan. Only the exact text that registry wrote is
+/// replaced, so a guard changed by hand still fails conservation.
+pub(super) fn as_registry68(plan:&Preflight) -> manifest::Manifest {
+    if (65..68).contains(&plan.registry) { narrowed(plan.raw.clone()) } else { plan.raw.clone() }
+}
+/// `raw` with the four guards' pre-68 text, where it is exactly that, replaced by registry 68's.
+pub(super) fn narrowed(mut raw:manifest::Manifest) -> manifest::Manifest {
+    for (table,suffix,event) in crate::engine_stage::EXCLUDES {
+        if let Some((_,_,sql))=raw.objects.get_mut(&format!("workflow_excludes_{table}_{suffix}"))
+            && sql.as_deref()==Some(crate::engine_stage::excludes(table,suffix,event,false).as_str()) {
+            *sql=Some(crate::engine_stage::excludes(table,suffix,event,true));
+        }
+    }
+    raw
+}
 /// A source at the registry keeps its exact catalog. A raw60 source grows into
 /// exactly the pinned later catalog, and every table it grew starts empty: the
 /// upgrade from 60 invents no row.
@@ -11,7 +28,7 @@ pub(super) fn catalog_matches(plan:&Preflight, after:&manifest::Manifest) -> boo
     if plan.registry!=60 {
         return plan.raw.tables.keys().eq(after.tables.keys()) && plan.raw.objects.keys().eq(after.objects.keys());
     }
-    catalog_hash(after)==SOURCE_SCHEMA_HASH
+    catalog_hash(after)==SOURCE68_SCHEMA_HASH
         && after.tables.iter().all(|(name,table)|plan.raw.tables.contains_key(name)||table.rows.is_empty())
 }
 pub(super) fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
@@ -32,7 +49,7 @@ pub(super) fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
         }
         current.rows.sort_by_cached_key(|row|serde_json::to_vec(row).expect("closed cells"));
     }
-    if !plan.raw.conserved_by(&after) || !catalog_matches(plan,&after) {
+    if !as_registry68(plan).conserved_by(&after) || !catalog_matches(plan,&after) {
         return refuse("per-field/schema/relationship/allocator conservation failed");
     }
     let schema:String=conn.query_row("SELECT value FROM meta WHERE key='schema_version'",[],|r|r.get(0))?;

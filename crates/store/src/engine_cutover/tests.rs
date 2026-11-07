@@ -120,6 +120,9 @@ fn engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved() {
         let index=table.columns.iter().position(|c|c.name=="generation").unwrap();
         for row in &mut table.rows { if let Cell::Integer(v)=&mut row[index] { assert_eq!(*v,2); *v-=1; } }
     }
+    // The other documented delta: registry 68 narrows four guards for a ticket at rest (ov-965), and only those.
+    assert!(!raw.conserved_by(&after), "the freeze migrated the source past 65");
+    let raw=verify::narrowed(raw);
     assert!(raw.conserved_by(&after));
     record_fixture("f08",&plan,&store);
     let mut corrupted=after.clone();
@@ -198,3 +201,4 @@ mod released_board;
 mod source60;
 mod lift;
 mod safety_steps;
+mod stage_only;

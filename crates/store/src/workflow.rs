@@ -244,6 +244,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
                      epoch = excluded.epoch, state = excluded.state",
                     params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
                 )?;
+                crate::engine_stage::sync(tx, &input.workspace, &transition.state)?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
                 moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state)?);
                 crate::workflow_effects::reserve(tx, &transition.state)?;

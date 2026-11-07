@@ -412,9 +412,6 @@ fn work_role(role: AgentRole) -> WorkRole {
     }
 }
 
-/// What keeps a hand-linked subagent off a card the engine owns.
-pub(crate) const WORK_GUARDS: [&str; 2] = ["workflow_excludes_ticket_work_insert", "workflow_excludes_ticket_work_update"];
-
 impl Store {
     /// Record a subagent working `task`, or fill in what's newly known about
     /// one already recorded. One that had ended is reopened: a resume.
@@ -442,10 +439,9 @@ impl Store {
             let existing = find(&tx, task, &record.harness, &record.agent_id)?;
             let (agent, role) = subagent_row(&tx, workspace, record)?;
             // A ticket the engine holds with no run still has its subagents recorded: the link is the card's own
-            // note, and the fence that keeps a run's card to the engine is lifted for it alone (ov-962).
+            // note, and the fence on `ticket_work` passes a ticket at rest (ov-965).
             let ticket = crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)?;
-            let guards: &[&str] = if ticket { &WORK_GUARDS } else { &[] };
-            let said = crate::workflow_projection::with_guards_down(&tx, guards, || Ok(match &existing {
+            let said = match &existing {
                 None => {
                     tx.execute(
                         "INSERT INTO ticket_work (agent_id, task_id, role, started_at, linked_by) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -468,7 +464,7 @@ impl Store {
                     .map_err(map_err)?;
                     w.ended_at.map(|_| ("resumed", "resumed"))
                 }
-            }))?;
+            };
             if let Some((event, how)) = said {
                 let label = record.label.as_deref().or(existing.as_ref().map(|w| w.label.as_str())).unwrap_or("");
                 let body = match label.trim() {
@@ -526,13 +522,9 @@ impl Store {
                     open
                 }
             };
-            let guards: &[&str] = if crate::workflow_projection::is_ticket(&tx, task).map_err(map_err)? { &WORK_GUARDS } else { &[] };
-            crate::workflow_projection::with_guards_down(&tx, guards, || {
-                for worker in &ending {
-                    end_one(&tx, worker, reason, actor)?;
-                }
-                Ok(())
-            })?;
+            for worker in &ending {
+                end_one(&tx, worker, reason, actor)?;
+            }
             tx.commit().map_err(map_err)?;
         }
         self.get_task(task)

@@ -324,7 +324,7 @@ impl PrivateRehearsal {
         if current!=*snapshot || scan(&self.root.join(format!("{name}-verified-restore")))?!=*snapshot {return refuse("closed backup/independent restore no longer matches");}
         let db=Connection::open_with_flags(backup.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let baseline=super::preflight(&db)?;
-        if !plan.raw.conserved_by(&baseline.raw) || super::required_resources(&db)?!=proof.protected_resources {return refuse("backup baseline/resource binding differs from plan");}
+        if !super::verify::as_registry68(plan).conserved_by(&baseline.raw) || super::required_resources(&db)?!=proof.protected_resources {return refuse("backup baseline/resource binding differs from plan");}
         let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot),evidence:Evidence::Rehearsal(proof.clone())};
         self.record(sequence,&JournalEntry {attempt:attempt.into(),stage:"backed_up".into(),evidence:serde_json::to_string(&(permit.baseline.clone(),permit.proof.clone(),permit.backup.clone()))?})?;
         Ok(permit)
