@@ -1130,7 +1130,9 @@ mod tests {
         // landings (ov-872): one line net.
         // 352 once it can draft a landing definition for the owner to publish
         // (ov-959): eight lines.
-        assert!(lines <= 352, "{lines} lines");
+        // 354 once agents were told never to run the cutover commands, which
+        // an unplanned Commit cannot undo (ov-963): two lines.
+        assert!(lines <= 354, "{lines} lines");
     }
 
     #[test]

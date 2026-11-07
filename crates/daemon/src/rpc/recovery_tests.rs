@@ -135,6 +135,8 @@ async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit
     assert!(op(&owner, r#"{"op":"Verify"}"#).await.is_err(), "not committed");
     let committed = op(&owner, r#"{"op":"Commit"}"#).await.unwrap();
     assert_eq!(committed["committed"], "a-1");
+    let asked = std::fs::read_to_string(startup::artifact_dir(&db).join("journal/commit-requested-1.json")).expect("the Commit names who asked");
+    assert!(asked.contains("pid 7 (started 1), tty ") && asked.contains("session leader"), "{asked}");
     assert!(std::path::Path::new(committed["backup"].as_str().unwrap()).join("db").is_file(), "with a closed backup");
     assert!(op(&owner, r#"{"op":"Recover"}"#).await.is_err(), "committed recovers forward only");
     assert!(op(&owner, r#"{"op":"Finish"}"#).await.is_err(), "not released");

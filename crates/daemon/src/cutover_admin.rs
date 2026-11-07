@@ -64,8 +64,11 @@ pub fn recover(root: &Path) -> Result<Value, Refused> {
 
 /// Take the closed backup and map the frozen attempt, under one proof. Past this
 /// the attempt recovers forward only.
-pub fn commit(root: &Path) -> Result<Value, Refused> {
+/// Commit, naming who asked (`caller_note`) in the journal first, so even a
+/// Commit that then refuses or crashes leaves its requester on record.
+pub fn commit(root: &Path, caller_note: &str) -> Result<Value, Refused> {
     let db = database(root);
+    closing::record_caller(&db, caller_note).map_err(refuse)?;
     let owners = JoinedOwners::acquire(&db, &attempt_of(&db)?).map_err(refuse)?;
     let committed = closing::commit(&db, owners).map_err(refuse)?;
     Ok(json!({"schema": 1, "committed": committed.attempt, "resumed": committed.resumed, "backup": committed.backup}))
@@ -117,12 +120,12 @@ pub async fn hold(svc: &crate::service::Service, attempt: &str, still_allowed: i
 }
 
 /// The ops a recovery process (no Service) answers.
-pub fn recovery(root: &Path, op: &Cutover) -> Result<Value, Refused> {
+pub fn recovery(root: &Path, op: &Cutover, caller_note: &str) -> Result<Value, Refused> {
     match op {
         Cutover::Inspect => Ok(inspect(root)),
         Cutover::Prepare { attempt } => prepare(root, attempt),
         Cutover::Recover => recover(root),
-        Cutover::Commit => commit(root),
+        Cutover::Commit => commit(root, caller_note),
         Cutover::Verify => verify(root),
         Cutover::Release => release(root),
         Cutover::Finish => finish(root),

@@ -40,6 +40,26 @@ fn record(db: &Path, baseline: &Baseline, name: &str, stage: &str) -> Result<()>
     let entry = JournalEntry { attempt: baseline.attempt.clone(), stage: stage.into(), evidence: baseline.raw_hash.clone() };
     transfer::publish(&dir, &file, &serde_json::to_vec(&entry)?, "journal.torn")
 }
+/// Who asked for a Commit, as the daemon saw them: pid, terminal and session.
+/// Evidence for the owner reading the journal afterward, never authority; the
+/// walk that admitted the caller is a guardrail, and this makes an unplanned
+/// Commit visible. One entry per request, so a repeat is seen too.
+pub fn record_caller(db: &Path, caller: &str) -> Result<()> {
+    let (baseline, _) = transfer::validate_artifacts(db)?;
+    let dir = journal_dir(db)?;
+    let entry = JournalEntry { attempt: baseline.attempt, stage: "commit-requested".into(), evidence: caller.into() };
+    for n in 1..=1000 {
+        let file = format!("commit-requested-{n}.json");
+        if fs::symlink_metadata(dir.join(&file)).is_ok() { continue; }
+        // Not `publish`: that one names a crash boundary, and this entry is
+        // evidence only. A torn one costs a line of history, not a decision.
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&file))?;
+        std::io::Write::write_all(&mut f, &serde_json::to_vec(&entry)?)?;
+        f.sync_all()?;
+        return transfer::sync_dir(&dir);
+    }
+    refuse("too many commit requests recorded")
+}
 /// Record `stage` and any earlier stage a crash left unrecorded.
 pub fn record_up_to(db: &Path, baseline: &Baseline, stage: &str) -> Result<()> {
     let Some(last) = STAGES.iter().position(|s| *s == stage) else { return refuse("unknown journal stage") };

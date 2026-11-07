@@ -34,6 +34,16 @@ impl RecoveryHandler {
         (self.start_of)(pid) == Some(start) && (self.seat_of)(pid) == Seat::Person
     }
 
+    /// Pid, terminal and session leader of the caller, for the journal.
+    fn caller_note(&self) -> String {
+        let Some((pid, start)) = self.caller else { return "unknown caller".into() };
+        // SAFETY: getsid reads another process's session id; it changes nothing.
+        let session = unsafe { libc::getsid(pid) };
+        let tty = std::process::Command::new("ps").args(["-o", "tty=", "-p", &pid.to_string()]).output().ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or_else(|| "?".into());
+        format!("pid {pid} (started {}), tty {tty}, session leader {session}", start.map_or("?".to_string(), |s| s.to_string()))
+    }
+
     fn run(&self, req: &Request) -> Result<serde_json::Value> {
         if req.method != workflow_cutover::METHOD { return Err(DomainError::CutoverHeld); }
         if self.peer.client_id.is_some() || self.peer.scope != farcooler_protocol::v1::Scope::HostAdmin {
@@ -43,7 +53,7 @@ impl RecoveryHandler {
         let Some(request::Payload::WorkflowCommand(p)) = &req.payload else { return Err(DomainError::NotFound) };
         if p.schema != 1 { return Err(DomainError::NotFound); }
         let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;
-        crate::cutover_admin::recovery(&self.root, &op).map_err(|error| {
+        crate::cutover_admin::recovery(&self.root, &op, &self.caller_note()).map_err(|error| {
             tracing::warn!(%error, "workflow.cutover refused in recovery");
             // `PageRefused` is the one error that carries a sentence over the
             // wire; the owner needs the holders named to act on a refusal.
