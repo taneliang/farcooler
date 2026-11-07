@@ -193,12 +193,22 @@ fn a_back_edge_to_a_build_needs_no_candidate_but_one_to_a_check_keeps_it() {
     assert_eq!(state.items["item"].candidate, candidate);
 }
 #[test]
-fn the_state_validator_refuses_a_forged_back_edge_count() {
+fn the_state_validator_refuses_forged_back_edge_counts() {
     let state = to_check(start(routed()));
-    let mut forged = state.clone();
-    forged.items.get_mut("item").unwrap().back_edges.insert("stage-2".into(), 3);
-    let probe = pass(&forged);
-    assert_eq!(step(&forged, &probe), Err(Refusal::Invalid));
+    // A count above the step's limit, even with a matching iteration.
+    let mut over = state.clone();
+    let item = over.items.get_mut("item").unwrap();
+    item.back_edges.insert("stage-2".into(), 3); item.iteration = 3;
+    assert_eq!(step(&over, &pass(&over)), Err(Refusal::Invalid));
+    // A count that disagrees with the iteration.
+    let mut off = state.clone();
+    off.items.get_mut("item").unwrap().back_edges.insert("stage-2".into(), 1);
+    assert_eq!(step(&off, &pass(&off)), Err(Refusal::Invalid));
+    // A count for a step that does not exist.
+    let mut ghost = state.clone();
+    let item = ghost.items.get_mut("item").unwrap();
+    item.back_edges.insert("nowhere".into(), 1); item.iteration = 1;
+    assert_eq!(step(&ghost, &pass(&ghost)), Err(Refusal::Invalid));
 }
 
 fn failed() -> State {
