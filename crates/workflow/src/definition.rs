@@ -382,6 +382,8 @@ pub fn emits_unrouted(kind: &StageKind, label: &str) -> bool {
 fn is_verb(kind: &StageKind) -> bool {
     matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route) || is_pr_verb(kind)
 }
+/// The waits: a restart only makes them look again, and they keep their first deadline.
+pub fn is_wait(kind: &StageKind) -> bool { matches!(kind, StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr) }
 /// The pull request verbs: they act on one ticket's head branch.
 fn is_pr_verb(kind: &StageKind) -> bool {
     matches!(kind, StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)

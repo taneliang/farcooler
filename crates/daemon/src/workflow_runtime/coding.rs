@@ -83,7 +83,7 @@ impl CodingConfigExt for CodingConfig {
             let sound_repository = pr.repository.split_once('/').is_some_and(|(owner, repo)| name(owner) && name(repo));
             // Pull requests are pushed to the landing transport, and `gh` is one program with no arguments of its own.
             if !sound_repository || !valid_id(&pr.base) || pr.base.starts_with('-') || pr.base.contains("..")
-                || self.landing.is_none() || pr.gh.argv.len() != 1
+                || self.landing.as_ref().is_none_or(|l| l.target != format!("refs/heads/{}", pr.base)) || pr.gh.argv.len() != 1
             { return Err(Error::Refused("invalid pull request configuration")); }
             pr.gh.validate()?;
         }

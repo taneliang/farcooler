@@ -7,6 +7,7 @@
 //! the step again. Pull requests are found by their head branch, whose name the engine derives from the
 //! item, so there is never a second one: more than one is a refusal, not a choice.
 use super::*;
+use std::collections::BTreeMap;
 use super::coding::{sha, wait_times};
 use super::coding_verbs::pause;
 
@@ -23,15 +24,43 @@ struct Pr {
     head_sha: String,
     #[serde(rename = "mergeCommit", default)]
     merge: Option<Oid>,
-    #[serde(rename = "latestReviews", default)]
+    #[serde(rename = "baseRefName")]
+    base: String,
+    #[serde(rename = "isCrossRepository")]
+    cross: bool,
     reviews: Vec<Review>,
 }
 #[derive(Clone, Debug, Deserialize)]
 struct Oid { oid: String }
 #[derive(Clone, Debug, Deserialize)]
-struct Review { state: String, #[serde(default)] commit: Option<Oid> }
+struct Review {
+    #[serde(default)] author: Option<Author>,
+    state: String,
+    #[serde(rename = "submittedAt", default)] submitted: String,
+    #[serde(default)] commit: Option<Oid>,
+}
+#[derive(Clone, Debug, Deserialize)]
+struct Author { login: String }
 
-const FIELDS: &str = "number,state,isDraft,headRefName,headRefOid,mergeCommit,latestReviews";
+/// `reviews` carries each review's commit; `latestReviews` does not, so it cannot say what a review was of.
+const FIELDS: &str = "number,state,isDraft,headRefName,headRefOid,mergeCommit,baseRefName,isCrossRepository,reviews";
+
+/// Whether a reviewer's standing decision, the latest of their approvals, change requests and dismissals,
+/// is a change requested of this commit. A comment decides nothing, and a review of an older commit is
+/// not a request to change this one.
+fn changes_requested_of(reviews: &[Review], candidate: &str) -> bool {
+    let mut latest: BTreeMap<&str, &Review> = BTreeMap::new();
+    for review in reviews.iter().filter(|r| matches!(r.state.as_str(), "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED")) {
+        let who = review.author.as_ref().map_or("", |a| a.login.as_str());
+        if latest.get(who).is_none_or(|seen| seen.submitted <= review.submitted) { latest.insert(who, review); }
+    }
+    latest.values().any(|r| r.state == "CHANGES_REQUESTED" && r.commit.as_ref().is_some_and(|c| c.oid == candidate))
+}
+/// `gh` may print a notice on stderr, which shares the log with its answer. The answer is a JSON array on a line of its own.
+fn parse(out: &[u8]) -> Option<Vec<Pr>> {
+    if let Ok(all) = serde_json::from_slice(out) { return Some(all); }
+    String::from_utf8_lossy(out).lines().rev().filter(|l| l.starts_with('[')).find_map(|l| serde_json::from_str(l).ok())
+}
 
 pub(super) fn is_pr_verb(kind: &StageKind) -> bool {
     matches!(kind, StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)
@@ -57,7 +86,9 @@ impl Exec {
             StageKind::PushBranch => self.push_branch(binding, cancel).await,
             StageKind::OpenPr => self.open_pr(binding, cancel).await,
             StageKind::PrReady => self.pr_ready(binding, cancel).await,
-            StageKind::AwaitPr => self.await_pr(binding, cancel).await,
+            // A wait that errs has failed for a reason and spends an attempt; only a cut-short wait is `Interrupted`.
+            StageKind::AwaitPr => Ok(self.await_pr(binding, cancel).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "await-pr failed"); Outcome::SafeFailure })),
             _ => Err(Error::Refused("not a pull request verb")),
         }
     }
@@ -70,19 +101,32 @@ impl Exec {
         let mut argv = pr.gh.argv.clone();
         argv.extend(args.iter().map(|a| a.to_string()));
         let log = self.root.join("receipts").join(format!("{}.gh-{tag}.output", digest(&binding.effect)));
+        // A poll's log is rewritten by the next poll, so a fortnight of waiting is one file, not thousands.
+        if tag == "poll" { let _ = std::fs::remove_file(&log); }
         durable(&log, b"")?;
-        let exit = crate::effect_runner::configured(&self.repository(), &argv, &pr.gh.environment, &log,
-            Duration::from_millis(pr.gh.timeout_ms), cancel.clone()).await?;
+        // A call that ran out of time has no exit. What it did is read by the lookup that follows, so a
+        // hung `gh pr create` that did create the pull request is not a failure.
+        let exit = match crate::effect_runner::configured(&self.repository(), &argv, &pr.gh.environment, &log,
+            Duration::from_millis(pr.gh.timeout_ms), cancel.clone()).await
+        {
+            Ok(exit) => exit,
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => None,
+            Err(error) => return Err(error.into()),
+        };
         Ok((exit, self.bytes(&log)?))
     }
     /// Every pull request, open or not, whose head is this item's branch. `None` when GitHub gave no answer.
     async fn list(&self, binding: &Binding, tag: &str, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<Vec<Pr>>> {
-        let (repo, head) = (self.pull_request()?.repository.clone(), self.head_branch(binding));
+        let (repo, base, head) = (self.pull_request()?.repository.clone(), self.pull_request()?.base.clone(), self.head_branch(binding));
         let (exit, out) = self.gh(binding, tag, &["pr", "list", "--repo", &repo, "--head", &head, "--state", "all",
             "--limit", "100", "--json", FIELDS], cancel).await?;
         if exit != Some(0) { return Ok(None); }
-        let Ok(all) = serde_json::from_slice::<Vec<Pr>>(&out) else { return Ok(None) };
-        let ours: Vec<Pr> = all.into_iter().filter(|p| p.head == head).collect();
+        let Some(all) = parse(&out) else { return Ok(None) };
+        // `--head` takes a bare branch name, so a fork's pull request from a branch of the same name is listed
+        // too. It is not ours and is not counted. A pull request of this repository for another base is
+        // not a way to land here, and it is not adopted.
+        let ours: Vec<Pr> = all.into_iter().filter(|p| p.head == head && !p.cross).collect();
+        if ours.iter().any(|p| p.base != base) { return Err(Error::Refused("a pull request for this head branch targets another base")); }
         // The head branch is this item's alone, so a second pull request is something to refuse, never to pick between.
         if ours.len() > 1 { return Err(Error::Refused("more than one pull request has this head branch")); }
         Ok(Some(ours))
@@ -106,7 +150,19 @@ impl Exec {
         }
         let reference = format!("refs/heads/{}", self.head_branch(binding));
         let before = adapters::git(&identity.repository, &["rev-parse", "--verify", "--quiet", &reference]).await.ok();
+        // Only a commit this engine pushed (or began to push) may be replaced. Anyone else's push to the
+        // head branch, a reviewer's fix for one, is theirs, and the lease is held on exactly what was seen.
+        let ledger = |sha: &str| self.root.join("receipts").join(format!("{}.pushed-{sha}", &digest(&(&binding.workspace, &binding.effect.item))[4..20]));
+        if let Some(seen) = before.as_deref().filter(|b| *b != candidate.as_str()) {
+            if !sha(seen) || !ledger(seen).try_exists()? { return Err(Error::Refused("the head branch holds a commit the engine did not push")); }
+        }
         if before.as_deref() != Some(candidate.as_str()) {
+            // Recorded before the push, so a crash in between still leaves the commit known as ours.
+            match durable(&ledger(&candidate), b"") {
+                Ok(()) => {}
+                Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
             let (program, environment) = self.git_environment().await?;
             let argv = vec![program, "push".into(), "--porcelain".into(), "--no-follow-tags".into(),
                 "--recurse-submodules=no".into(), "--signed=false".into(),
@@ -147,7 +203,7 @@ impl Exec {
                 let mut args = vec!["pr", "create", "--repo", &repo, "--head", &head, "--base", &base, "--title", &title, "--body", &body];
                 if draft { args.push("--draft"); }
                 // A create that failed may still have made the pull request, so the answer is the lookup that follows.
-                self.gh(binding, "create", &args, &cancel).await?;
+                if let Err(error) = self.gh(binding, "create", &args, &cancel).await { tracing::warn!(%error, "gh pr create did not finish"); }
                 let Some(after) = self.list(binding, "list-1", &cancel).await? else { return Ok(Outcome::SafeFailure) };
                 match after.into_iter().next() {
                     Some(created) => created,
@@ -155,7 +211,9 @@ impl Exec {
                 }
             }
         };
-        let label = if existing.state == "OPEN" { "passed" } else { "closed" };
+        // A merged one is not closed: the wait after this step reads what became of it.
+        let label = if existing.state == "CLOSED" { "closed" } else { "passed" };
+        if existing.state == "OPEN" && existing.head_sha != candidate { return Err(Error::Refused("the pull request head is not the pushed candidate")); }
         self.finish(binding, label, &candidate, serde_json::json!({ "number": existing.number, "head": head, "draft": existing.draft }))?;
         self.settle(binding, &StageKind::OpenPr).await
     }
@@ -167,11 +225,16 @@ impl Exec {
         let Some(found) = self.list(binding, "list-0", &cancel).await? else { return Ok(Outcome::SafeFailure) };
         let Some(existing) = found.into_iter().next() else { return Err(Error::Refused("there is no pull request to make ready")) };
         if existing.state != "OPEN" {
-            self.finish(binding, "closed", &candidate, serde_json::json!({ "number": existing.number }))?;
+            let label = if existing.state == "CLOSED" { "closed" } else { "passed" };
+            self.finish(binding, label, &candidate, serde_json::json!({ "number": existing.number }))?;
             return self.settle(binding, &StageKind::PrReady).await;
         }
+        // Only what was pushed is made ready: a commit added since has not been through a gate.
+        if existing.head_sha != candidate { return Err(Error::Refused("the pull request head is not the pushed candidate")); }
         if existing.draft {
-            self.gh(binding, "ready", &["pr", "ready", &existing.number.to_string(), "--repo", &repo], &cancel).await?;
+            if let Err(error) = self.gh(binding, "ready", &["pr", "ready", &existing.number.to_string(), "--repo", &repo], &cancel).await {
+                tracing::warn!(%error, "gh pr ready did not finish");
+            }
             let Some(after) = self.list(binding, "list-1", &cancel).await? else { return Ok(Outcome::SafeFailure) };
             if after.first().is_none_or(|p| p.draft) { return Ok(Outcome::SafeFailure); }
         }
@@ -188,8 +251,8 @@ impl Exec {
         let candidate = self.candidate_of(binding)?;
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
         for poll in 0u32.. {
-            if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
-            if let Some(found) = self.list(binding, &format!("poll-{poll}"), &cancel).await? {
+            if *cancel.borrow() { return Ok(Outcome::Interrupted); }
+            if let Some(found) = self.list(binding, "poll", &cancel).await? {
                 if let Some(pr) = found.first() {
                     let polls = serde_json::json!({ "polls": poll + 1, "number": pr.number });
                     match pr.state.as_str() {
@@ -207,8 +270,7 @@ impl Exec {
                         }
                         // A review of an older commit does not count: a rework pushes a new head, and the
                         // decision GitHub shows stays until the reviewer looks again.
-                        _ if pr.head_sha == candidate && pr.reviews.iter().any(|r| r.state == "CHANGES_REQUESTED"
-                            && r.commit.as_ref().is_some_and(|c| c.oid == candidate)) => {
+                        _ if pr.head_sha == candidate && changes_requested_of(&pr.reviews, &candidate) => {
                             self.finish(binding, "changes_requested", &candidate, polls)?;
                             return self.settle(binding, &StageKind::AwaitPr).await;
                         }
@@ -220,7 +282,7 @@ impl Exec {
                 self.finish(binding, "timeout", &candidate, serde_json::json!({ "polls": poll + 1 }))?;
                 return self.settle(binding, &StageKind::AwaitPr).await;
             }
-            if pause(every, &cancel).await { return Ok(Outcome::SafeFailure); }
+            if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
         }
         unreachable!("the poll count is unbounded")
     }

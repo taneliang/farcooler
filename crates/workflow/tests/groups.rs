@@ -655,3 +655,35 @@ fn a_wait_that_fails_for_a_real_reason_spends_attempts_and_ends() {
     for _ in 0..8 { if log.state.items.get(&group).is_some_and(|g| g.phase == Phase::Running) { log.outcome(&group, Outcome::SafeFailure); } }
     assert!(log.state.items.get(&group).map_or(true, |g| g.phase == Phase::Failed), "the pushed group has an exit");
 }
+
+// ov-957 review blocker B5: the wait for a pull request is a wait like the others.
+
+#[test]
+fn a_pull_request_wait_a_restart_interrupted_looks_again_and_keeps_its_patience() {
+    let mut definition = ticket();
+    definition.groups.clear();
+    let mut wait = verb("merged", StageKind::AwaitPr);
+    wait.routes.insert("closed".into(), Target::Fail);
+    definition.stages = vec![action("build"), verb("branch", StageKind::PushBranch), verb("pr", StageKind::OpenPr), wait];
+    definition.schema = 2;
+    definition.validate().unwrap();
+    let mut log = Log::new();
+    log.enqueue("a", definition);
+    while log.stage("a") != "merged" { log.pass("a"); }
+    let before = log.state.items["a"].clone();
+    let first = log.outcome("a", Outcome::Interrupted);
+    let after = &log.state.items["a"];
+    assert_eq!((after.phase.clone(), log.stage("a"), after.attempt), (Phase::Running, "merged".to_string(), before.attempt));
+    let again: Vec<_> = first.effects.iter().filter(|e| e.item == "a").collect();
+    assert_eq!(again.len(), 1);
+    log.now = 9000;
+    let second = log.outcome("a", Outcome::Interrupted);
+    assert_eq!(second.effects.iter().find(|e| e.item == "a").unwrap().created_ms, again[0].created_ms, "patience survives a restart");
+    // The steps before it are not waits.
+    let mut early = Log::new();
+    let mut d = ticket(); d.groups.clear();
+    d.stages = vec![action("build"), verb("branch", StageKind::PushBranch)]; d.schema = 2;
+    early.enqueue("a", d);
+    while early.stage("a") != "branch" { early.pass("a"); }
+    assert_eq!(early.try_outcome("a", Outcome::Interrupted).unwrap_err(), Refusal::Phase);
+}

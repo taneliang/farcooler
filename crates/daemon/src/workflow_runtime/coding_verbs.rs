@@ -142,7 +142,7 @@ impl Exec {
                 return match kind {
                     StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
                     // A wait cut short only looks again; a fold or a route cut short is made anew and spends an attempt.
-                    StageKind::AwaitBase | StageKind::AwaitCi => Ok(Outcome::Interrupted),
+                    StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr => Ok(Outcome::Interrupted),
                     _ => Ok(Outcome::SafeFailure),
                 };
             }
