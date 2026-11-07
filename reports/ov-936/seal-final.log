@@ -1,0 +1,64 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+SEAL 0 ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_", "--", "--nocapture"]
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 8.04s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 28 tests
+test engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore ... 
+thread 'engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore' (829523931) panicked at crates/store/src/engine_cutover/tests.rs:182:5:
+assertion failed: path.starts_with(std::env::temp_dir()) || path.starts_with("/private/tmp")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test engine_cutover::tests::cases::engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corruption ... ok
+test engine_cutover::tests::cases::engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_item ... ok
+test engine_cutover::tests::cases::engine_cutover_equal_time_rowid_order_is_conserved_not_just_field_counts ... ok
+test engine_cutover::tests::cases::engine_cutover_f02_stack_same_branch_order_and_hold_are_exact ... ok
+test engine_cutover::tests::cases::engine_cutover_f03_agents_multitask_history_and_open_work_are_quarantined ... ok
+test engine_cutover::tests::cases::engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated ... ok
+test engine_cutover::tests::cases::engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send ... ok
+test engine_cutover::tests::cases::engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... 
+thread 'engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push' (829525677) panicked at crates/store/src/engine_cutover/tests.rs:182:5:
+assertion failed: path.starts_with(std::env::temp_dir()) || path.starts_with("/private/tmp")
+FAILED
+test engine_cutover::tests::cases::engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case ... ok
+test engine_cutover::tests::cases::engine_cutover_interrupt_reopen_normalization_and_forward_recovery ... ok
+test engine_cutover::tests::cases::engine_cutover_old_sql_claims_and_engine_writes_are_frozen_before_commit ... ok
+test engine_cutover::tests::cases::engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_ledger ... ok
+test engine_cutover::tests::cases::engine_cutover_process_child ... ignored, owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries
+test engine_cutover::tests::cases::engine_cutover_process_kill_boundaries ... actual child SIGKILL boundary=before status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+actual child SIGKILL boundary=after status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+ok
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... ok
+test engine_cutover::tests::cases::engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_release ... ok
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... ok
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... ok
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+
+failures:
+
+failures:
+    engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore
+    engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push
+
+test result: FAILED. 25 passed; 2 failed; 1 ignored; 0 measured; 499 filtered out; finished in 14.01s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

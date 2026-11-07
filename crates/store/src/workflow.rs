@@ -1,6 +1,6 @@
 //! Atomic workflow state, effects, selected informational notices and receipts.
 //! Legacy task/line/landing authority remains untouched until coordinated replacement.
-use farcooler_workflow::{Input, State, Effect, Refusal, Grant, digest, owns_resource, step};
+use farcooler_workflow::{Command, Input, State, Effect, Refusal, Grant, digest, owns_resource, step};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use crate::Store;
@@ -15,6 +15,8 @@ pub enum WorkflowError {
     IdentityConflict,
     #[error("workflow item matches multiple tasks in its workspace")]
     AmbiguousTask,
+    #[error("workflow authority is frozen or this Store incarnation is stale")]
+    Authority,
     #[error("workflow input exceeds the admission bound")]
     Oversized,
 }
@@ -51,6 +53,7 @@ impl Store {
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         let receipt = apply_in(&tx, input, &payload)?;
         tx.commit()?;
         Ok(receipt)
@@ -156,6 +159,8 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
             if original != payload { return Err(WorkflowError::IdentityConflict); }
             return Ok(serde_json::from_str(&receipt)?);
         }
+        let workspace_frozen:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource=?1)",[format!("workspace:{}",input.workspace)],|r|r.get(0))?;
+        if workspace_frozen {return Err(WorkflowError::Authority);}
         let raw: Option<String> = tx.query_row(
             "SELECT state FROM workflow_states WHERE workspace = ?1", [&input.workspace], |r| r.get(0),
         ).optional()?;
@@ -175,9 +180,19 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
              AND resource IN (SELECT value FROM json_each(?2))"
         )?.query_map(params![input.workspace, serde_json::to_string(&relevant)?], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;
-        let mut result = if raw.is_none() && input.grant != Grant::Controller {
+        let blocked:std::collections::BTreeSet<String>=tx.prepare("SELECT resource FROM engine_cutover_quarantine")?
+            .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let target=match &input.command {
+            Command::Enqueue {resource,..} => Some(resource.as_str()),
+            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Resolve {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+            Command::Advance => None,
+        };
+        let quarantined=target.is_some_and(|resource|blocked.contains(resource));
+        admitted.busy_resources.extend(blocked.iter().filter(|resource|relevant.contains(*resource)).cloned());
+        let mut result = if quarantined { Err(Refusal::Resource) } else if raw.is_none() && input.grant != Grant::Controller {
             Err(Refusal::Unauthorized)
         } else { step(&state, &admitted) };
+        if result.as_ref().is_ok_and(|transition|transition.effects.iter().any(|effect|blocked.contains(&effect.resource))) { result=Err(Refusal::Resource); }
         if result.is_ok() && !crate::workflow_ownership::available(tx, input)? {
             result = Err(Refusal::Resource);
         }

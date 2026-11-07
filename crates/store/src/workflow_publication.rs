@@ -49,6 +49,7 @@ impl Store {
         if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
         let receipt = match write {
             Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?)?,

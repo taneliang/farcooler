@@ -2,7 +2,7 @@
 //! task mapping; a board item resolves only on its own workspace by key or UUID.
 use crate::workflow::Result;
 use farcooler_workflow::{Input, Command};
-use rusqlite::{Transaction, params};
+use rusqlite::{Transaction, OptionalExtension, params};
 
 fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8>>> {
     let Ok(workspace) = uuid::Uuid::parse_str(&input.workspace) else { return Ok(None) };
@@ -17,6 +17,10 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
     let Command::Enqueue { item,.. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
+    let migrated: Option<String> = tx.query_row("SELECT disposition FROM engine_cutover_items WHERE task=?1", [&task], |r|r.get(0)).optional()?;
+    if let Some(disposition)=migrated {
+        return Ok(disposition=="retained-intent" && !tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)", [task], |r|r.get::<_,bool>(0))?);
+    }
     Ok(!tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)
         OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
         OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)

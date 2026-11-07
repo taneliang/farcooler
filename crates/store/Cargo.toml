@@ -12,6 +12,7 @@ license.workspace = true
 testing = []
 
 [dependencies]
+libc.workspace = true
 farcooler-workflow.workspace = true
 serde.workspace = true
 farcooler-core.workspace = true
@@ -24,3 +25,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "engine_cutover_rehearsal"
+required-features = ["testing"]

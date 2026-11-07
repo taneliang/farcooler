@@ -1,0 +1,54 @@
+[
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/negatives.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "clippy",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--all-targets",
+      "--features",
+      "testing",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-daemon",
+      "-p",
+      "farcooler-cli",
+      "workflow_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  }
+]

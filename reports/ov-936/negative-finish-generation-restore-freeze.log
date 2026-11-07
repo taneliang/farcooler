@@ -1,0 +1,21 @@
+
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... FAILED
+
+failures:
+
+failures:
+    engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 527 filtered out; finished in 0.76s
+
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 3.51s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+thread 'engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push' (829605184) panicked at crates/store/src/engine_cutover/tests/cases.rs:161:5:
+assertion `left == right` failed
+  left: "legacy"
+ right: "quiesced"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p farcooler-store --lib`

@@ -1,0 +1,1347 @@
+{
+  "map_pin": "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf",
+  "map_product_pin": "77250986dcb4b1dbb6b63e06d0b11dc1b92d88a3",
+  "base": "fae3f30d0c3d1c475f9dc4463243f293fd88b007",
+  "sources": [
+    {
+      "path": "crates/daemon/src/check_in_target.rs",
+      "approved_sha256": "3991d718aff5cb63d3dd4de358e262af56a235ea17ae7ae18ea254b2bced7639",
+      "verified": true,
+      "base_sha256": "8e4a3a798c2d2e100dfd088e61771b2a822b16b827768d6a352b43ce1b0a40ea",
+      "changed_from_map": true,
+      "old_lines": 55,
+      "base_lines": 56
+    },
+    {
+      "path": "crates/daemon/src/ci_watch.rs",
+      "approved_sha256": "01537471d431f0e4403747e24384456bc4adbbc169da486d5c7f333b2ebd2c89",
+      "verified": true,
+      "base_sha256": "01537471d431f0e4403747e24384456bc4adbbc169da486d5c7f333b2ebd2c89",
+      "changed_from_map": false,
+      "old_lines": 459,
+      "base_lines": 459
+    },
+    {
+      "path": "crates/daemon/src/green_landing.rs",
+      "approved_sha256": "ae936c9c60d022f69038dba32b1ac9093291c536a4b05b980e99bf59ca076370",
+      "verified": true,
+      "base_sha256": "ae936c9c60d022f69038dba32b1ac9093291c536a4b05b980e99bf59ca076370",
+      "changed_from_map": false,
+      "old_lines": 109,
+      "base_lines": 109
+    },
+    {
+      "path": "crates/daemon/src/landing_job.rs",
+      "approved_sha256": "0f6696516bb28d3ba5d1997b21c140583303e9c602086e8a67f7692b9fb984dd",
+      "verified": true,
+      "base_sha256": "0f6696516bb28d3ba5d1997b21c140583303e9c602086e8a67f7692b9fb984dd",
+      "changed_from_map": false,
+      "old_lines": 570,
+      "base_lines": 570
+    },
+    {
+      "path": "crates/daemon/src/landing_run.rs",
+      "approved_sha256": "fa04c6a89a529d1bc03629832eda42271064ca0c42ccc946a9ad6c9c442e43bc",
+      "verified": true,
+      "base_sha256": "fa04c6a89a529d1bc03629832eda42271064ca0c42ccc946a9ad6c9c442e43bc",
+      "changed_from_map": false,
+      "old_lines": 212,
+      "base_lines": 212
+    },
+    {
+      "path": "crates/daemon/src/main.rs",
+      "approved_sha256": "2dbeba719bace913a6672b8236ff2a16289bbfb3fd099dd5402a7067f33b47fc",
+      "verified": true,
+      "base_sha256": "2dbeba719bace913a6672b8236ff2a16289bbfb3fd099dd5402a7067f33b47fc",
+      "changed_from_map": false,
+      "old_lines": 808,
+      "base_lines": 808
+    },
+    {
+      "path": "crates/daemon/src/plan_stage.rs",
+      "approved_sha256": "0bfadeee4cf5e87ecf4475b29f0a988365cffbdd17bd44b4b9ca123481f7df80",
+      "verified": true,
+      "base_sha256": "0bfadeee4cf5e87ecf4475b29f0a988365cffbdd17bd44b4b9ca123481f7df80",
+      "changed_from_map": false,
+      "old_lines": 228,
+      "base_lines": 228
+    },
+    {
+      "path": "crates/daemon/src/pr_watch.rs",
+      "approved_sha256": "2edc3718228c692750b4c7ccfa25bed7c16ae8733710096118de6c91fe9a7d54",
+      "verified": true,
+      "base_sha256": "2edc3718228c692750b4c7ccfa25bed7c16ae8733710096118de6c91fe9a7d54",
+      "changed_from_map": false,
+      "old_lines": 414,
+      "base_lines": 414
+    },
+    {
+      "path": "crates/daemon/src/rpc.rs",
+      "approved_sha256": "3af16cda635c5400afb32b8a4abef0f702585f006041c1c72bf33104b90a7674",
+      "verified": true,
+      "base_sha256": "3af16cda635c5400afb32b8a4abef0f702585f006041c1c72bf33104b90a7674",
+      "changed_from_map": false,
+      "old_lines": 2405,
+      "base_lines": 2405
+    },
+    {
+      "path": "crates/daemon/src/rpc_agent_stop.rs",
+      "approved_sha256": "1851cd3501ebd6e9b5edfda27a9d1e3e433fa656a51e686c340f12999bdd2f27",
+      "verified": true,
+      "base_sha256": "1851cd3501ebd6e9b5edfda27a9d1e3e433fa656a51e686c340f12999bdd2f27",
+      "changed_from_map": false,
+      "old_lines": 111,
+      "base_lines": 111
+    },
+    {
+      "path": "crates/daemon/src/rpc_board.rs",
+      "approved_sha256": "a096c12db5c6edbe3353f5262451eaf2bd7ce6e5b83154295fef3dc4e4ef7d88",
+      "verified": true,
+      "base_sha256": "a096c12db5c6edbe3353f5262451eaf2bd7ce6e5b83154295fef3dc4e4ef7d88",
+      "changed_from_map": false,
+      "old_lines": 160,
+      "base_lines": 160
+    },
+    {
+      "path": "crates/daemon/src/rpc_landings.rs",
+      "approved_sha256": "a9b2b95483c97b677704e08e2215cb42c14f9bf0aae0e33648360e02129fb2cf",
+      "verified": true,
+      "base_sha256": "a9b2b95483c97b677704e08e2215cb42c14f9bf0aae0e33648360e02129fb2cf",
+      "changed_from_map": false,
+      "old_lines": 234,
+      "base_lines": 234
+    },
+    {
+      "path": "crates/daemon/src/rpc_plan.rs",
+      "approved_sha256": "1933e0181d6e990e41236af3e4b171839f4808ca8451adc82b74da7dcf51e9d3",
+      "verified": true,
+      "base_sha256": "1933e0181d6e990e41236af3e4b171839f4808ca8451adc82b74da7dcf51e9d3",
+      "changed_from_map": false,
+      "old_lines": 666,
+      "base_lines": 666
+    },
+    {
+      "path": "crates/daemon/src/service.rs",
+      "approved_sha256": "4b3a081557b33f88b4ab757234c31a88fcaf1a8340d9ff7f5e07a666bbe6a957",
+      "verified": true,
+      "base_sha256": "d7747f4d82c366e051ed670b6decc5ed36416e4a9da64909f8709eedbb8aa12a",
+      "changed_from_map": true,
+      "old_lines": 11483,
+      "base_lines": 11485
+    },
+    {
+      "path": "crates/daemon/src/skill_install.rs",
+      "approved_sha256": "4efc3229e2d7089dcd8d1f1d454dcdd692b372078d4c629edf2385407c25e583",
+      "verified": true,
+      "base_sha256": "4efc3229e2d7089dcd8d1f1d454dcdd692b372078d4c629edf2385407c25e583",
+      "changed_from_map": false,
+      "old_lines": 1273,
+      "base_lines": 1273
+    },
+    {
+      "path": "crates/daemon/src/task_link.rs",
+      "approved_sha256": "979b38c2c7ba0bc576df01bfea8193158d3b58bf4264420ff4f1510307bda14a",
+      "verified": true,
+      "base_sha256": "979b38c2c7ba0bc576df01bfea8193158d3b58bf4264420ff4f1510307bda14a",
+      "changed_from_map": false,
+      "old_lines": 181,
+      "base_lines": 181
+    },
+    {
+      "path": "crates/daemon/src/task_ops.rs",
+      "approved_sha256": "1112dffab365e4633645686e5ef8fd08132f86f56fbdee11471caf5c7788abfc",
+      "verified": true,
+      "base_sha256": "1112dffab365e4633645686e5ef8fd08132f86f56fbdee11471caf5c7788abfc",
+      "changed_from_map": false,
+      "old_lines": 1109,
+      "base_lines": 1109
+    },
+    {
+      "path": "crates/daemon/src/task_starts.rs",
+      "approved_sha256": "a10a8d75537d97823c3d14ded91d99f1ed8e60edff4fcaebc37f59141f361b70",
+      "verified": true,
+      "base_sha256": "a10a8d75537d97823c3d14ded91d99f1ed8e60edff4fcaebc37f59141f361b70",
+      "changed_from_map": false,
+      "old_lines": 251,
+      "base_lines": 251
+    },
+    {
+      "path": "crates/daemon/src/watch/answer_wake/check_in.rs",
+      "approved_sha256": "bddb1fa40483f7a44a84ee05750b8571dfcb27780da71aaecac782295c5ef2cb",
+      "verified": true,
+      "base_sha256": "bddb1fa40483f7a44a84ee05750b8571dfcb27780da71aaecac782295c5ef2cb",
+      "changed_from_map": false,
+      "old_lines": 246,
+      "base_lines": 246
+    },
+    {
+      "path": "crates/daemon/src/watch/answer_wake.rs",
+      "approved_sha256": "37081540efedbc31f6d1dbb87d7fd4b5978cafc80bbba333e7e4753a38cc322d",
+      "verified": true,
+      "base_sha256": "37081540efedbc31f6d1dbb87d7fd4b5978cafc80bbba333e7e4753a38cc322d",
+      "changed_from_map": false,
+      "old_lines": 1241,
+      "base_lines": 1241
+    },
+    {
+      "path": "crates/daemon/src/watch/collecting_scan.rs",
+      "approved_sha256": "7e107523d78e6e6c514ca6981ae430eca47c70175763a2b8f2f890bdcd75771e",
+      "verified": true,
+      "base_sha256": "7e107523d78e6e6c514ca6981ae430eca47c70175763a2b8f2f890bdcd75771e",
+      "changed_from_map": false,
+      "old_lines": 116,
+      "base_lines": 116
+    },
+    {
+      "path": "crates/daemon/src/watch/holds.rs",
+      "approved_sha256": "295e225948b47d7618508416b1c0d8c47a33cbe3185d0619f5b33297c7a6336a",
+      "verified": true,
+      "base_sha256": "295e225948b47d7618508416b1c0d8c47a33cbe3185d0619f5b33297c7a6336a",
+      "changed_from_map": false,
+      "old_lines": 40,
+      "base_lines": 40
+    },
+    {
+      "path": "crates/daemon/src/watch/workers.rs",
+      "approved_sha256": "cbd8f91300915391ffae598981c09e43317bf8878ce23758275538c2f8802195",
+      "verified": true,
+      "base_sha256": "cbd8f91300915391ffae598981c09e43317bf8878ce23758275538c2f8802195",
+      "changed_from_map": false,
+      "old_lines": 226,
+      "base_lines": 226
+    },
+    {
+      "path": "crates/daemon/src/watch.rs",
+      "approved_sha256": "37f68990def82d61806f64bca0306b4a648684e9cb85d14297e8f6c2e0e6939c",
+      "verified": true,
+      "base_sha256": "37f68990def82d61806f64bca0306b4a648684e9cb85d14297e8f6c2e0e6939c",
+      "changed_from_map": false,
+      "old_lines": 8694,
+      "base_lines": 8694
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_execute.rs",
+      "approved_sha256": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df",
+      "verified": true,
+      "base_sha256": "39c7139fbc08306e4b2bb86031f39707e6386927331fdd94d52d4f424ca9b2df",
+      "changed_from_map": false,
+      "old_lines": 334,
+      "base_lines": 334
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_landing.rs",
+      "approved_sha256": "f2836ba466bb984056671001aeaf3dd2f16e4966c19c5c984f08c07ad48acbcf",
+      "verified": true,
+      "base_sha256": "f2836ba466bb984056671001aeaf3dd2f16e4966c19c5c984f08c07ad48acbcf",
+      "changed_from_map": false,
+      "old_lines": 188,
+      "base_lines": 188
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_native.rs",
+      "approved_sha256": "6800b96649276accb2fd54c7d066dba132ced69747d48d27008169af21cc0690",
+      "verified": true,
+      "base_sha256": "7458ce089729c5c8b72b199c5aa6e717b94bd1463bb7b302e8c701fa65eea190",
+      "changed_from_map": true,
+      "old_lines": 477,
+      "base_lines": 477
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "approved_sha256": "7c64171486f175128eec88a91828a08a7577278604a20c142d95f828815dfc79",
+      "verified": true,
+      "base_sha256": "cb905439ede3f4fea7267be3f087e3b0157c474c44cb979f510b6cdd544e1d8d",
+      "changed_from_map": true,
+      "old_lines": 129,
+      "base_lines": 129
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime.rs",
+      "approved_sha256": "7ec2d59b0cafe053188d5ab572fa440bee5fd4822b5844f2ac11380a0fe425e3",
+      "verified": true,
+      "base_sha256": "379a298735d837dad6c903e6dad2578db49984478d4f39408865e7e5ed6ed20e",
+      "changed_from_map": true,
+      "old_lines": 529,
+      "base_lines": 532
+    },
+    {
+      "path": "crates/daemon/src/workflow_service.rs",
+      "approved_sha256": "3a76e8402c2faa3db7ca77ff3245cb3d73c1767bc9c7a64d0305d4b5e3bda4b7",
+      "verified": true,
+      "base_sha256": "0ff0f546732f5616252bc02e4edddb288fdb5baaab45a314ec4849eb65e07323",
+      "changed_from_map": true,
+      "old_lines": 59,
+      "base_lines": 67
+    },
+    {
+      "path": "crates/store/src/access.rs",
+      "approved_sha256": "413282cbd07e22340a182890ba0ab155667378be5a6dffd718efbe233bf4658a",
+      "verified": true,
+      "base_sha256": "413282cbd07e22340a182890ba0ab155667378be5a6dffd718efbe233bf4658a",
+      "changed_from_map": false,
+      "old_lines": 241,
+      "base_lines": 241
+    },
+    {
+      "path": "crates/store/src/access_ops.rs",
+      "approved_sha256": "023357b1748844d65b476eaeddb5456f480823578a2a20b4823cc74366045327",
+      "verified": true,
+      "base_sha256": "023357b1748844d65b476eaeddb5456f480823578a2a20b4823cc74366045327",
+      "changed_from_map": false,
+      "old_lines": 301,
+      "base_lines": 301
+    },
+    {
+      "path": "crates/store/src/agent_panes.rs",
+      "approved_sha256": "03fd179d72b6895bdcd4bfc0ab16275940dd7556c1aaca5fbb1319deed8fdafb",
+      "verified": true,
+      "base_sha256": "03fd179d72b6895bdcd4bfc0ab16275940dd7556c1aaca5fbb1319deed8fdafb",
+      "changed_from_map": false,
+      "old_lines": 127,
+      "base_lines": 127
+    },
+    {
+      "path": "crates/store/src/agents.rs",
+      "approved_sha256": "536512f8728bb14d5825d045a215b74ba0875f73ef5af6a972e9b746b3df83db",
+      "verified": true,
+      "base_sha256": "536512f8728bb14d5825d045a215b74ba0875f73ef5af6a972e9b746b3df83db",
+      "changed_from_map": false,
+      "old_lines": 397,
+      "base_lines": 397
+    },
+    {
+      "path": "crates/store/src/backup.rs",
+      "approved_sha256": "9e148af3f54cdeb0fbb2d581c1dce9dd13c8425370f7ccdcb2e14be5340d66ee",
+      "verified": true,
+      "base_sha256": "9e148af3f54cdeb0fbb2d581c1dce9dd13c8425370f7ccdcb2e14be5340d66ee",
+      "changed_from_map": false,
+      "old_lines": 82,
+      "base_lines": 82
+    },
+    {
+      "path": "crates/store/src/board_ci.rs",
+      "approved_sha256": "17a637951391139abb4e6c953808ea1b2fa39c7bf7a673ce87f4242b2eb143a9",
+      "verified": true,
+      "base_sha256": "17a637951391139abb4e6c953808ea1b2fa39c7bf7a673ce87f4242b2eb143a9",
+      "changed_from_map": false,
+      "old_lines": 311,
+      "base_lines": 311
+    },
+    {
+      "path": "crates/store/src/board_reads.rs",
+      "approved_sha256": "a385bd5cd9bb9ebbd5e3604fba0fdd8b6da95cfab78f4c14ae0d5b05b8d98140",
+      "verified": true,
+      "base_sha256": "a385bd5cd9bb9ebbd5e3604fba0fdd8b6da95cfab78f4c14ae0d5b05b8d98140",
+      "changed_from_map": false,
+      "old_lines": 310,
+      "base_lines": 310
+    },
+    {
+      "path": "crates/store/src/check_ins.rs",
+      "approved_sha256": "b375b03d268ae6811131c3223c5ae8b86d01850f914b3fb45687f63adbee110c",
+      "verified": true,
+      "base_sha256": "b375b03d268ae6811131c3223c5ae8b86d01850f914b3fb45687f63adbee110c",
+      "changed_from_map": false,
+      "old_lines": 1092,
+      "base_lines": 1092
+    },
+    {
+      "path": "crates/store/src/claude_logins.rs",
+      "approved_sha256": "eac462b9be58ba53711f887ce6b6038dc6d6312d7b72f7d1653ef2b59ba57e1e",
+      "verified": true,
+      "base_sha256": "eac462b9be58ba53711f887ce6b6038dc6d6312d7b72f7d1653ef2b59ba57e1e",
+      "changed_from_map": false,
+      "old_lines": 436,
+      "base_lines": 436
+    },
+    {
+      "path": "crates/store/src/collecting.rs",
+      "approved_sha256": "cf48b6ecf3faa3c7c893dcac4a5f1acd53749432319353ae67572b4b63a63c88",
+      "verified": true,
+      "base_sha256": "cf48b6ecf3faa3c7c893dcac4a5f1acd53749432319353ae67572b4b63a63c88",
+      "changed_from_map": false,
+      "old_lines": 422,
+      "base_lines": 422
+    },
+    {
+      "path": "crates/store/src/compat.rs",
+      "approved_sha256": "756e54ca87c3345ea56fc63e302726f66a7daf8230ee856342cafb9258bf1940",
+      "verified": true,
+      "base_sha256": "756e54ca87c3345ea56fc63e302726f66a7daf8230ee856342cafb9258bf1940",
+      "changed_from_map": false,
+      "old_lines": 406,
+      "base_lines": 406
+    },
+    {
+      "path": "crates/store/src/compose_holds.rs",
+      "approved_sha256": "4a0f617d90d4545d8d32eb4b77ec7d5e056d154bcd5e86645313d09cff4d1a51",
+      "verified": true,
+      "base_sha256": "4a0f617d90d4545d8d32eb4b77ec7d5e056d154bcd5e86645313d09cff4d1a51",
+      "changed_from_map": false,
+      "old_lines": 186,
+      "base_lines": 186
+    },
+    {
+      "path": "crates/store/src/compose_waits.rs",
+      "approved_sha256": "6cde62e895c146d52c026c7eeb08eb36122b74d21b7014eb8430b4f40035b80b",
+      "verified": true,
+      "base_sha256": "6cde62e895c146d52c026c7eeb08eb36122b74d21b7014eb8430b4f40035b80b",
+      "changed_from_map": false,
+      "old_lines": 111,
+      "base_lines": 111
+    },
+    {
+      "path": "crates/store/src/crash_signatures.rs",
+      "approved_sha256": "6bbe78d502ebae02fdce53fadd3786eb3f531a7bdeb8d694cb40e8a60d4768fc",
+      "verified": true,
+      "base_sha256": "6bbe78d502ebae02fdce53fadd3786eb3f531a7bdeb8d694cb40e8a60d4768fc",
+      "changed_from_map": false,
+      "old_lines": 472,
+      "base_lines": 472
+    },
+    {
+      "path": "crates/store/src/device_added_by.rs",
+      "approved_sha256": "d5ef30480830af9ea78a0de9731db9a9ace01f6a8aba6c69496c9002ce6305d8",
+      "verified": true,
+      "base_sha256": "d5ef30480830af9ea78a0de9731db9a9ace01f6a8aba6c69496c9002ce6305d8",
+      "changed_from_map": false,
+      "old_lines": 171,
+      "base_lines": 171
+    },
+    {
+      "path": "crates/store/src/device_enrollers.rs",
+      "approved_sha256": "42b02c42cea94a35062cd633382e000c1319e2075ee7d4544d5d4413a54d6dd2",
+      "verified": true,
+      "base_sha256": "42b02c42cea94a35062cd633382e000c1319e2075ee7d4544d5d4413a54d6dd2",
+      "changed_from_map": false,
+      "old_lines": 144,
+      "base_lines": 144
+    },
+    {
+      "path": "crates/store/src/error.rs",
+      "approved_sha256": "6f2bdc057d92110c3dcbe173d3ad96de07fa3dd9357e789e694301e8cbacdc9a",
+      "verified": true,
+      "base_sha256": "6f2bdc057d92110c3dcbe173d3ad96de07fa3dd9357e789e694301e8cbacdc9a",
+      "changed_from_map": false,
+      "old_lines": 33,
+      "base_lines": 33
+    },
+    {
+      "path": "crates/store/src/landing.rs",
+      "approved_sha256": "ebab1588800b457a3a9f20afa91353d5cba67a18148ca34fdb6c93f13590c7d5",
+      "verified": true,
+      "base_sha256": "ebab1588800b457a3a9f20afa91353d5cba67a18148ca34fdb6c93f13590c7d5",
+      "changed_from_map": false,
+      "old_lines": 237,
+      "base_lines": 237
+    },
+    {
+      "path": "crates/store/src/landing_phase.rs",
+      "approved_sha256": "db11167f77382bc2263f5b9841f5052b23298a11d8a304f57ecd9996fd5df8a5",
+      "verified": true,
+      "base_sha256": "db11167f77382bc2263f5b9841f5052b23298a11d8a304f57ecd9996fd5df8a5",
+      "changed_from_map": false,
+      "old_lines": 163,
+      "base_lines": 163
+    },
+    {
+      "path": "crates/store/src/landings.rs",
+      "approved_sha256": "a79895ef1c3f4c01a6f3bd866bcbc8210a8c735aaca19c06613da0de098e09bb",
+      "verified": true,
+      "base_sha256": "a79895ef1c3f4c01a6f3bd866bcbc8210a8c735aaca19c06613da0de098e09bb",
+      "changed_from_map": false,
+      "old_lines": 861,
+      "base_lines": 861
+    },
+    {
+      "path": "crates/store/src/lane_migrations.rs",
+      "approved_sha256": "7fede2b7c33272d19596043e46ddf9a8c3ec3cc0429988792a97fe36fb5765c9",
+      "verified": true,
+      "base_sha256": "7fede2b7c33272d19596043e46ddf9a8c3ec3cc0429988792a97fe36fb5765c9",
+      "changed_from_map": false,
+      "old_lines": 283,
+      "base_lines": 283
+    },
+    {
+      "path": "crates/store/src/lfs_pointers.rs",
+      "approved_sha256": "75d8336b66d982ab6a463bd079e0a701fe9ea60c7d4d845d466656a9f438656f",
+      "verified": true,
+      "base_sha256": "75d8336b66d982ab6a463bd079e0a701fe9ea60c7d4d845d466656a9f438656f",
+      "changed_from_map": false,
+      "old_lines": 119,
+      "base_lines": 119
+    },
+    {
+      "path": "crates/store/src/lib.rs",
+      "approved_sha256": "2359cb7e4f2c7bbe597d43e4686cf70c5afd32db0ba8420c0a35e9cb2acef836",
+      "verified": true,
+      "base_sha256": "292d17b7952ba00d1d18becc4968b606d44095497fc6df6a035798e8b1e273e4",
+      "changed_from_map": true,
+      "old_lines": 92,
+      "base_lines": 93
+    },
+    {
+      "path": "crates/store/src/line_migration.rs",
+      "approved_sha256": "b456e67a659c87ffd92c59e66756d7059fba1e74693d95d6076d8c7d12d413bd",
+      "verified": true,
+      "base_sha256": "b456e67a659c87ffd92c59e66756d7059fba1e74693d95d6076d8c7d12d413bd",
+      "changed_from_map": false,
+      "old_lines": 699,
+      "base_lines": 699
+    },
+    {
+      "path": "crates/store/src/member_connectors.rs",
+      "approved_sha256": "f045e02bb3305ac8d6ccf6d963e0153e423a80d6e083eabc23669c9914af4145",
+      "verified": true,
+      "base_sha256": "f045e02bb3305ac8d6ccf6d963e0153e423a80d6e083eabc23669c9914af4145",
+      "changed_from_map": false,
+      "old_lines": 139,
+      "base_lines": 139
+    },
+    {
+      "path": "crates/store/src/member_login_policy.rs",
+      "approved_sha256": "e832f3382e114eaf97bb734b813bd7c8c941a636c1dcd949cb7c87acfd8797c4",
+      "verified": true,
+      "base_sha256": "e832f3382e114eaf97bb734b813bd7c8c941a636c1dcd949cb7c87acfd8797c4",
+      "changed_from_map": false,
+      "old_lines": 127,
+      "base_lines": 127
+    },
+    {
+      "path": "crates/store/src/member_marks.rs",
+      "approved_sha256": "42379cd632dd8cc4be1326b3a39b08aceeabdbcbdaa67a3e2da6214bf67e5446",
+      "verified": true,
+      "base_sha256": "42379cd632dd8cc4be1326b3a39b08aceeabdbcbdaa67a3e2da6214bf67e5446",
+      "changed_from_map": false,
+      "old_lines": 51,
+      "base_lines": 51
+    },
+    {
+      "path": "crates/store/src/member_roles.rs",
+      "approved_sha256": "4df391b69579adddd7f9a88fc0dccd37312eae6de15192fd64d20dbf3c4cacac",
+      "verified": true,
+      "base_sha256": "4df391b69579adddd7f9a88fc0dccd37312eae6de15192fd64d20dbf3c4cacac",
+      "changed_from_map": false,
+      "old_lines": 211,
+      "base_lines": 211
+    },
+    {
+      "path": "crates/store/src/messages.rs",
+      "approved_sha256": "78d2d08d9fd7852c5367b7ad3255553fe8f1e008365ae319917cff45f2f741c7",
+      "verified": true,
+      "base_sha256": "78d2d08d9fd7852c5367b7ad3255553fe8f1e008365ae319917cff45f2f741c7",
+      "changed_from_map": false,
+      "old_lines": 219,
+      "base_lines": 219
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "approved_sha256": "da3179cc634f8cae53ea33d10ca95cff9fba1a96491e5858c87bbef190b8ac47",
+      "verified": true,
+      "base_sha256": "659e133ed0981f63fbeb791fbf14451577a6899325665431018ba89d17b8da6d",
+      "changed_from_map": true,
+      "old_lines": 1764,
+      "base_lines": 1765
+    },
+    {
+      "path": "crates/store/src/models.rs",
+      "approved_sha256": "07b939943123b7b81bb28a56ea22082ef35a58218ccb1245a477d1cd6354f9c4",
+      "verified": true,
+      "base_sha256": "07b939943123b7b81bb28a56ea22082ef35a58218ccb1245a477d1cd6354f9c4",
+      "changed_from_map": false,
+      "old_lines": 930,
+      "base_lines": 930
+    },
+    {
+      "path": "crates/store/src/pages.rs",
+      "approved_sha256": "a556a48cbac7d4c2c13ffd226742b58cfe8e8ba591e10976bc1b30de962bd113",
+      "verified": true,
+      "base_sha256": "a556a48cbac7d4c2c13ffd226742b58cfe8e8ba591e10976bc1b30de962bd113",
+      "changed_from_map": false,
+      "old_lines": 490,
+      "base_lines": 490
+    },
+    {
+      "path": "crates/store/src/people.rs",
+      "approved_sha256": "e544279cafc01ca8fca2ed7ae47b06d5b05cec21cdaffe320fd49c72292c9f48",
+      "verified": true,
+      "base_sha256": "e544279cafc01ca8fca2ed7ae47b06d5b05cec21cdaffe320fd49c72292c9f48",
+      "changed_from_map": false,
+      "old_lines": 567,
+      "base_lines": 567
+    },
+    {
+      "path": "crates/store/src/plan.rs",
+      "approved_sha256": "900b72b09d595276b10bfaa890a159dce0286ddd9b6033c22ac86a2028b540d8",
+      "verified": true,
+      "base_sha256": "900b72b09d595276b10bfaa890a159dce0286ddd9b6033c22ac86a2028b540d8",
+      "changed_from_map": false,
+      "old_lines": 417,
+      "base_lines": 417
+    },
+    {
+      "path": "crates/store/src/plan_agents.rs",
+      "approved_sha256": "904d4397eb20da63e9c3597a87a07ce7018648a9bca02a0dd8517a1f73591464",
+      "verified": true,
+      "base_sha256": "904d4397eb20da63e9c3597a87a07ce7018648a9bca02a0dd8517a1f73591464",
+      "changed_from_map": false,
+      "old_lines": 256,
+      "base_lines": 256
+    },
+    {
+      "path": "crates/store/src/plan_cost.rs",
+      "approved_sha256": "26c3db7f45004455e0856255bf3e3b723e2ab17353c389d682870b25c760ae88",
+      "verified": true,
+      "base_sha256": "26c3db7f45004455e0856255bf3e3b723e2ab17353c389d682870b25c760ae88",
+      "changed_from_map": false,
+      "old_lines": 432,
+      "base_lines": 432
+    },
+    {
+      "path": "crates/store/src/plan_read.rs",
+      "approved_sha256": "f562ef00ad3eeb2a986799eba46cce7b2e4f0dc6a6e4e8a3224962e798737d2d",
+      "verified": true,
+      "base_sha256": "f562ef00ad3eeb2a986799eba46cce7b2e4f0dc6a6e4e8a3224962e798737d2d",
+      "changed_from_map": false,
+      "old_lines": 669,
+      "base_lines": 669
+    },
+    {
+      "path": "crates/store/src/pr_nudges.rs",
+      "approved_sha256": "503c68693d72a807f04089846cbf13d784655e4313cf6b8b80c9e1048a7e153d",
+      "verified": true,
+      "base_sha256": "503c68693d72a807f04089846cbf13d784655e4313cf6b8b80c9e1048a7e153d",
+      "changed_from_map": false,
+      "old_lines": 85,
+      "base_lines": 85
+    },
+    {
+      "path": "crates/store/src/read_counts.rs",
+      "approved_sha256": "1902452c9a2304dec25d8f3d8467a5367f9a46e40e1ae609e8ba71f17389a731",
+      "verified": true,
+      "base_sha256": "1902452c9a2304dec25d8f3d8467a5367f9a46e40e1ae609e8ba71f17389a731",
+      "changed_from_map": false,
+      "old_lines": 26,
+      "base_lines": 26
+    },
+    {
+      "path": "crates/store/src/review.rs",
+      "approved_sha256": "211def75373f6812be584dc8db284148da847d1cc39cb3a417b618c31a73a4ea",
+      "verified": true,
+      "base_sha256": "211def75373f6812be584dc8db284148da847d1cc39cb3a417b618c31a73a4ea",
+      "changed_from_map": false,
+      "old_lines": 265,
+      "base_lines": 265
+    },
+    {
+      "path": "crates/store/src/revoked_marks.rs",
+      "approved_sha256": "f51b485a9e461870d7ac6645427ca62497851c55ec22a6e8ede12239430a1f10",
+      "verified": true,
+      "base_sha256": "f51b485a9e461870d7ac6645427ca62497851c55ec22a6e8ede12239430a1f10",
+      "changed_from_map": false,
+      "old_lines": 81,
+      "base_lines": 81
+    },
+    {
+      "path": "crates/store/src/rulings.rs",
+      "approved_sha256": "367843a2552ffd848bb8a143a54db93d63127e539ae846ec8a984e4b5d812b9d",
+      "verified": true,
+      "base_sha256": "367843a2552ffd848bb8a143a54db93d63127e539ae846ec8a984e4b5d812b9d",
+      "changed_from_map": false,
+      "old_lines": 457,
+      "base_lines": 457
+    },
+    {
+      "path": "crates/store/src/step_up.rs",
+      "approved_sha256": "860d4d33db8268ee2991ab57a5bf10b55adeb0e226ef1d59f5b305f066b04482",
+      "verified": true,
+      "base_sha256": "860d4d33db8268ee2991ab57a5bf10b55adeb0e226ef1d59f5b305f066b04482",
+      "changed_from_map": false,
+      "old_lines": 182,
+      "base_lines": 182
+    },
+    {
+      "path": "crates/store/src/store.rs",
+      "approved_sha256": "cb7f8f9d157d24ea87ac6b1f67a8fc9bfe4678795289a8897bb66df6bbe3a2e3",
+      "verified": true,
+      "base_sha256": "a129e82c74e3df905ee955e0b48107871be974bbc542ab0955e1d593afa04a57",
+      "changed_from_map": true,
+      "old_lines": 1781,
+      "base_lines": 1784
+    },
+    {
+      "path": "crates/store/src/subagent_notes.rs",
+      "approved_sha256": "3ed36dd29ccaff931f9d873298e509b08038e3d609ff3e3d0796a50b2e1f4d04",
+      "verified": true,
+      "base_sha256": "3ed36dd29ccaff931f9d873298e509b08038e3d609ff3e3d0796a50b2e1f4d04",
+      "changed_from_map": false,
+      "old_lines": 73,
+      "base_lines": 73
+    },
+    {
+      "path": "crates/store/src/tasks.rs",
+      "approved_sha256": "180cb090d22c51f19e8cef169182a2d64b51472b975a0448202892d2c091d8fb",
+      "verified": true,
+      "base_sha256": "180cb090d22c51f19e8cef169182a2d64b51472b975a0448202892d2c091d8fb",
+      "changed_from_map": false,
+      "old_lines": 3194,
+      "base_lines": 3194
+    },
+    {
+      "path": "crates/store/src/ticket_lines.rs",
+      "approved_sha256": "3adaeb50d9394c8dfbeebc92e7d096aac411cb690e9fcb14ec21c66112fcbe1f",
+      "verified": true,
+      "base_sha256": "3adaeb50d9394c8dfbeebc92e7d096aac411cb690e9fcb14ec21c66112fcbe1f",
+      "changed_from_map": false,
+      "old_lines": 625,
+      "base_lines": 625
+    },
+    {
+      "path": "crates/store/src/ticket_work.rs",
+      "approved_sha256": "f3577c71af56ad68f0281bfbb9955f66e5925a854c63cc4638f0fa1524d867fb",
+      "verified": true,
+      "base_sha256": "f3577c71af56ad68f0281bfbb9955f66e5925a854c63cc4638f0fa1524d867fb",
+      "changed_from_map": false,
+      "old_lines": 297,
+      "base_lines": 297
+    },
+    {
+      "path": "crates/store/src/usage.rs",
+      "approved_sha256": "452010f2b4fe88da59aad12cc34a88f9706bab22baee5200dc2bfae0aac6e296",
+      "verified": true,
+      "base_sha256": "452010f2b4fe88da59aad12cc34a88f9706bab22baee5200dc2bfae0aac6e296",
+      "changed_from_map": false,
+      "old_lines": 608,
+      "base_lines": 608
+    },
+    {
+      "path": "crates/store/src/waits.rs",
+      "approved_sha256": "59e97935a445dc463e43935f11285b3c142320f502ecfec9342fb44c4cada051",
+      "verified": true,
+      "base_sha256": "59e97935a445dc463e43935f11285b3c142320f502ecfec9342fb44c4cada051",
+      "changed_from_map": false,
+      "old_lines": 670,
+      "base_lines": 670
+    },
+    {
+      "path": "crates/store/src/wakes.rs",
+      "approved_sha256": "6fda94a7af5ce72334fc27e1ca3df23a1e4e7eccee348b838cacea6a57b1f06d",
+      "verified": true,
+      "base_sha256": "6fda94a7af5ce72334fc27e1ca3df23a1e4e7eccee348b838cacea6a57b1f06d",
+      "changed_from_map": false,
+      "old_lines": 485,
+      "base_lines": 485
+    },
+    {
+      "path": "crates/store/src/web_panes.rs",
+      "approved_sha256": "4aa4bdf6d31851e02d7107b1d6e8a58d4766b4ce626c4a2dbf518012bc78c3db",
+      "verified": true,
+      "base_sha256": "4aa4bdf6d31851e02d7107b1d6e8a58d4766b4ce626c4a2dbf518012bc78c3db",
+      "changed_from_map": false,
+      "old_lines": 120,
+      "base_lines": 120
+    },
+    {
+      "path": "crates/store/src/workers.rs",
+      "approved_sha256": "460d8b7ce637dd7b94a157976bed787f77b825829502cb19d60e72cb3d68bd81",
+      "verified": true,
+      "base_sha256": "460d8b7ce637dd7b94a157976bed787f77b825829502cb19d60e72cb3d68bd81",
+      "changed_from_map": false,
+      "old_lines": 620,
+      "base_lines": 620
+    },
+    {
+      "path": "crates/store/src/workflow.rs",
+      "approved_sha256": "efa1dfde0476288a54c97aad697dd3430547355f05e6a2b2b5253a4aa6b76885",
+      "verified": true,
+      "base_sha256": "576ebd4c517d38e6d1b24c73c57b39db3e3705266eeaa86d03d5075a0b281c0e",
+      "changed_from_map": true,
+      "old_lines": 275,
+      "base_lines": 276
+    },
+    {
+      "path": "crates/store/src/workflow_effects.rs",
+      "approved_sha256": "430f052b0945b2e40662af5e1da5d470c3a7aa849b1dfe8209b7cee8ed418b5a",
+      "verified": true,
+      "base_sha256": "430f052b0945b2e40662af5e1da5d470c3a7aa849b1dfe8209b7cee8ed418b5a",
+      "changed_from_map": false,
+      "old_lines": 106,
+      "base_lines": 106
+    },
+    {
+      "path": "crates/store/src/workflow_ownership.rs",
+      "approved_sha256": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a",
+      "verified": true,
+      "base_sha256": "5009203fe4ef6fb904afe20149efcc8235feacc45da923c5ebe8f6270902360a",
+      "changed_from_map": false,
+      "old_lines": 177,
+      "base_lines": 177
+    },
+    {
+      "path": "crates/store/src/workflow_publication.rs",
+      "approved_sha256": "06e023fa8b0270683bf6f5e042ea6fdf895cffbbc882466533d7fb4596983638",
+      "verified": true,
+      "base_sha256": "6eb47233087da662c507701a600c78e0357cf2184ffb9692fd13f639185d1787",
+      "changed_from_map": true,
+      "old_lines": 159,
+      "base_lines": 167
+    },
+    {
+      "path": "crates/store/src/workspaces.rs",
+      "approved_sha256": "329d6615b144c7c6b7f60fc5d56f946ff5f7eb86e3108fc59008589e7d414c16",
+      "verified": true,
+      "base_sha256": "577886159ea643cdae96a3b432105fc03c07b2eddc70ebe1096a5f6aa9a4f7de",
+      "changed_from_map": true,
+      "old_lines": 1297,
+      "base_lines": 1300
+    }
+  ],
+  "anchors": [
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 20,
+      "approved_line": "    (migration_0001_initial_schema, Older::Refused),",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow_ownership.rs",
+      "line": 7,
+      "approved_line": "fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8>>> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 149,
+      "approved_line": "        CREATE TABLE repository_roots (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workspaces.rs",
+      "line": 8,
+      "approved_line": "//! Three rules this module keeps:",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 528,
+      "approved_line": "        CREATE TABLE tasks (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/waits.rs",
+      "line": 220,
+      "approved_line": "        ALTER TABLE tasks ADD COLUMN wait_kind TEXT;",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 560,
+      "approved_line": "        CREATE TABLE task_notes (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/lane_migrations.rs",
+      "line": 22,
+      "approved_line": "        CREATE TABLE board_themes (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/line_migration.rs",
+      "line": 80,
+      "approved_line": "    CREATE TABLE ticket_lines (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/line_migration.rs",
+      "line": 50,
+      "approved_line": "    CREATE TABLE agents (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/line_migration.rs",
+      "line": 115,
+      "approved_line": "    CREATE TABLE landings (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/line_migration.rs",
+      "line": 663,
+      "approved_line": "        \"CREATE TABLE plan_budgets_by_ticket (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/usage.rs",
+      "line": 34,
+      "approved_line": "        CREATE TABLE agent_turns (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/landing.rs",
+      "line": 122,
+      "approved_line": "        CREATE TABLE workspace_landing (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/lane_migrations.rs",
+      "line": 156,
+      "approved_line": "        CREATE TABLE board_ci (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/pr_nudges.rs",
+      "line": 37,
+      "approved_line": "        ALTER TABLE workspace_landing ADD COLUMN pr_nudge INTEGER NOT NULL DEFAULT 0;",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 905,
+      "approved_line": "        CREATE TABLE answer_wakes (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/waits.rs",
+      "line": 248,
+      "approved_line": "        CREATE TABLE hold_wakes (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/wakes.rs",
+      "line": 91,
+      "approved_line": "        \"ALTER TABLE answer_wakes ADD COLUMN pasted_at INTEGER;",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/messages.rs",
+      "line": 34,
+      "approved_line": "        CREATE TABLE message_wakes (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/compose_holds.rs",
+      "line": 26,
+      "approved_line": "        CREATE TABLE compose_holds (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/compose_waits.rs",
+      "line": 27,
+      "approved_line": "        CREATE TABLE compose_waits (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/check_ins.rs",
+      "line": 24,
+      "approved_line": "        CREATE TABLE check_in_schedules (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/pages.rs",
+      "line": 48,
+      "approved_line": "        CREATE TABLE board_pages (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/rulings.rs",
+      "line": 46,
+      "approved_line": "        CREATE TABLE board_rulings (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 329,
+      "approved_line": "        CREATE TABLE review_bases (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/board_reads.rs",
+      "line": 45,
+      "approved_line": "        CREATE TABLE board_read_floors (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/member_marks.rs",
+      "line": 22,
+      "approved_line": "        CREATE TABLE member_board_read_floors (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/people.rs",
+      "line": 40,
+      "approved_line": "        CREATE TABLE members (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/member_roles.rs",
+      "line": 42,
+      "approved_line": "        ALTER TABLE members ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'maintainer'));",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/access.rs",
+      "line": 37,
+      "approved_line": "        \"CREATE TABLE owner_devices (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/check_ins.rs",
+      "line": 135,
+      "approved_line": "    for table in [\"owner_devices\", \"device_caps\", \"released_devices\", \"member_devices\"] {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/claude_logins.rs",
+      "line": 49,
+      "approved_line": "        \"CREATE TABLE member_logins (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/member_connectors.rs",
+      "line": 34,
+      "approved_line": "        \"CREATE TABLE member_connectors (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/member_login_policy.rs",
+      "line": 43,
+      "approved_line": "        \"CREATE TABLE member_login_policy (",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 184,
+      "approved_line": "        CREATE TABLE terminals (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/web_panes.rs",
+      "line": 31,
+      "approved_line": "    tx.execute_batch(\"ALTER TABLE terminals ADD COLUMN web_url TEXT;\")",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/store.rs",
+      "line": 1,
+      "approved_line": "//! `Store`: the single durable connection.",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow.rs",
+      "line": 106,
+      "approved_line": "        \"CREATE TABLE workflow_states (",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow_effects.rs",
+      "line": 1,
+      "approved_line": "//! Durable effect admission metadata only. This module performs no external I/O.",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/workflow_publication.rs",
+      "line": 78,
+      "approved_line": "    tx.execute_batch(\"CREATE TABLE workflow_definitions(pin TEXT PRIMARY KEY NOT NULL, definition TEXT NOT NULL);",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow_ownership.rs",
+      "line": 33,
+      "approved_line": "pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/workflow_publication.rs",
+      "line": 19,
+      "approved_line": "    pub fn workflow_configuration(&self, workspace: &str) -> Result<Option<Configuration>> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "line": 90,
+      "approved_line": "    pub(super) fn select_item_configuration(&mut self, workspace: &str, item: &Item) -> Result<()> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 280,
+      "approved_line": "        DROP TABLE IF EXISTS pane_members;",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/rpc.rs",
+      "line": 1928,
+      "approved_line": "            \"task.list\" | \"task.get\" | \"task.get_by_key\" | \"task.search\" | \"task.create\" | \"task.update\"",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/rpc_board.rs",
+      "line": 59,
+      "approved_line": "        \"task.create\" => {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/task_ops.rs",
+      "line": 510,
+      "approved_line": "pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<pb::Task> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/tasks.rs",
+      "line": 338,
+      "approved_line": "pub(crate) fn move_in(",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/rpc.rs",
+      "line": 2078,
+      "approved_line": "            \"task.move\" => {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/waits.rs",
+      "line": 475,
+      "approved_line": "    pub fn set_wait(&self, task: Uuid, wait: Option<Wait>, actor: Actor) -> Result<Task> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/watch/holds.rs",
+      "line": 17,
+      "approved_line": "    pub(crate) fn release_due_holds(&self, now: i64) {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/store.rs",
+      "line": 100,
+      "approved_line": "        if current == migrate::CURRENT_SCHEMA_VERSION {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/rpc_plan.rs",
+      "line": 74,
+      "approved_line": "        \"line.order\" => {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/ticket_lines.rs",
+      "line": 335,
+      "approved_line": "pub(crate) fn move_stage(",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/collecting.rs",
+      "line": 93,
+      "approved_line": "pub(crate) fn stage_moved(tx: &Connection, task: Uuid, from: Stage, to: Stage, actor: Actor) -> Result<()> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/watch.rs",
+      "line": 4516,
+      "approved_line": "                    tokio::task::spawn_blocking(move || me.collect_ready_tickets());",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/watch/collecting_scan.rs",
+      "line": 35,
+      "approved_line": "    pub(crate) fn collect_ready_tickets(&self) -> Vec<uuid::Uuid> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/rpc_plan.rs",
+      "line": 120,
+      "approved_line": "        \"agent.record\" => {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/agents.rs",
+      "line": 229,
+      "approved_line": "    pub fn record_agent(&self, workspace: Uuid, new: &NewAgent) -> Result<Agent> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/ticket_work.rs",
+      "line": 208,
+      "approved_line": "    pub fn start_work(&self, agent: Uuid, task: Uuid, role: WorkRole, linked_by: LinkedBy, actor: Actor) -> Result<TicketWork> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/rpc_landings.rs",
+      "line": 27,
+      "approved_line": "pub(crate) async fn start_from(svc: &Arc<Service>, watcher: &Arc<Watcher>, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/landing_run.rs",
+      "line": 1,
+      "approved_line": "//! `landing.start` with `run` (ov-872, slice 5): read the charter's",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/landing_job.rs",
+      "line": 109,
+      "approved_line": "pub fn prepare(",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/landings.rs",
+      "line": 480,
+      "approved_line": "    pub fn start_landing(&self, workspace: Uuid, new: &NewLanding, tickets: &[Uuid], actor: Actor) -> Result<Landing> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/ci_watch.rs",
+      "line": 410,
+      "approved_line": "pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Duration {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/green_landing.rs",
+      "line": 84,
+      "approved_line": "pub async fn land_green_landings(svc: &Service, watcher: &Watcher) -> Vec<Uuid> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/pr_watch.rs",
+      "line": 326,
+      "approved_line": "pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &HashSet<Uuid>) -> Duration {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/task_ops.rs",
+      "line": 634,
+      "approved_line": "    // (`watch::answer_wake`).",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/rpc.rs",
+      "line": 2023,
+      "approved_line": "            \"workspace.check_in_holds\" => {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/watch/answer_wake/check_in.rs",
+      "line": 71,
+      "approved_line": "    pub async fn run_check_in_scheduler(self: Arc<Self>, daemon: Uuid, mut shutdown: tokio::sync::watch::Receiver<bool>) {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/check_ins.rs",
+      "line": 109,
+      "approved_line": "    // The veto and epoch change happen in the writer's own transaction. In",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/workflow_ownership.rs",
+      "line": 20,
+      "approved_line": "    Ok(!tx.query_row(\"SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/backup.rs",
+      "line": 32,
+      "approved_line": "pub(crate) fn write_checksummed_backup(path: &Path, from_schema_version: u32) -> Result<PathBuf> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/store.rs",
+      "line": 118,
+      "approved_line": "        migrate::migrate(conn, current)?;",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 127,
+      "approved_line": "pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_core::Result<()> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/usage.rs",
+      "line": 44,
+      "approved_line": "            -- `claude`, `codex`, or an ACP adapter's preset.",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 20,
+      "approved_line": "    (migration_0001_initial_schema, Older::Refused),",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/store.rs",
+      "line": 56,
+      "approved_line": "    pub fn open(path: impl AsRef<Path>) -> Result<Store> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/migrate.rs",
+      "line": 127,
+      "approved_line": "pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_core::Result<()> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow_publication.rs",
+      "line": 19,
+      "approved_line": "    pub fn workflow_configuration(&self, workspace: &str) -> Result<Option<Configuration>> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/store/src/workflow_effects.rs",
+      "line": 51,
+      "approved_line": "    pub fn workflow_claim_effect(&self, workspace: &str, effect: &str, lease_owner: &str,",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/store/src/workflow_ownership.rs",
+      "line": 7,
+      "approved_line": "fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8>>> {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/main.rs",
+      "line": 245,
+      "approved_line": "    service.start_workflows().map_err(|error| {",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/workflow_service.rs",
+      "line": 11,
+      "approved_line": "    pub fn start_workflows(&self) -> Result<()> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "line": 38,
+      "approved_line": "    pub(crate) fn open_service(root: &Path, store: std::sync::Arc<Store>) -> Result<Self> {",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_service.rs",
+      "line": 18,
+      "approved_line": "        let mut runtime = Runtime::open_service(&self.root_dir().join(\"workflow\"), self.store.clone())?;",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+      "line": 43,
+      "approved_line": "        let receipts = root.join(\"receipts\");",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_execute.rs",
+      "line": 43,
+      "approved_line": "        self.root.join(\"receipts\").join(format!(\"{}.process.json\", digest(&binding.effect)))",
+      "changed_in_base": false
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_native.rs",
+      "line": 57,
+      "approved_line": "        self.root.join(\"receipts\").join(format!(\"{}.native-{suffix}.json\", digest(&binding.effect)))",
+      "changed_in_base": true
+    },
+    {
+      "path": "crates/daemon/src/workflow_runtime/coding_landing.rs",
+      "line": 14,
+      "approved_line": "        self.root.join(\"receipts\").join(format!(\"{}.landing.json\", digest(&binding.effect)))",
+      "changed_in_base": false
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... FAILED
+
+failures:
+
+failures:
+    engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 529 filtered out; finished in 0.08s
+
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 3.55s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+thread 'engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release' (829809685) panicked at crates/store/src/engine_cutover/tests/cases.rs:239:5:
+assertion failed: store.engine_commit_for_test(&plan, &proof(&store), "changed").is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p farcooler-store --lib`

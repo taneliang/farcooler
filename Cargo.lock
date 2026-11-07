@@ -1099,6 +1099,7 @@ dependencies = [
  "farcooler-core",
  "farcooler-protocol",
  "farcooler-workflow",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

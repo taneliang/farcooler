@@ -1,0 +1,694 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+SEAL 0 ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_", "--", "--nocapture"]
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.41s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 28 tests
+test engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore ... ok
+test engine_cutover::tests::cases::engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corruption ... ok
+test engine_cutover::tests::cases::engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_item ... ok
+test engine_cutover::tests::cases::engine_cutover_equal_time_rowid_order_is_conserved_not_just_field_counts ... ok
+test engine_cutover::tests::cases::engine_cutover_f02_stack_same_branch_order_and_hold_are_exact ... ok
+test engine_cutover::tests::cases::engine_cutover_f03_agents_multitask_history_and_open_work_are_quarantined ... ok
+test engine_cutover::tests::cases::engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated ... ok
+test engine_cutover::tests::cases::engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send ... ok
+test engine_cutover::tests::cases::engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... ok
+test engine_cutover::tests::cases::engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case ... ok
+test engine_cutover::tests::cases::engine_cutover_interrupt_reopen_normalization_and_forward_recovery ... ok
+test engine_cutover::tests::cases::engine_cutover_old_sql_claims_and_engine_writes_are_frozen_before_commit ... ok
+test engine_cutover::tests::cases::engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_ledger ... ok
+test engine_cutover::tests::cases::engine_cutover_process_child ... ignored, owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries
+test engine_cutover::tests::cases::engine_cutover_process_kill_boundaries ... actual child SIGKILL boundary=before status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+actual child SIGKILL boundary=after status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+ok
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... ok
+test engine_cutover::tests::cases::engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_release ... ok
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... ok
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... ok
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+
+test result: ok. 27 passed; 0 failed; 1 ignored; 0 measured; 499 filtered out; finished in 14.76s
+
+SEAL 1 ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "--", "--nocapture", "--skip", "plan::tests::no_existing_table_gained_a_column", "--skip", "workflow_notices::migration_tests::workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes"]
+    Finished `test` profile [unoptimized] target(s) in 0.07s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 525 tests
+test access::tests::a_cap_can_only_be_viewer_or_member ... ok
+test access::tests::a_plan_is_written_once_and_a_second_changes_nothing ... ok
+test access::tests::a_plan_that_fails_writes_nothing ... ok
+test access::tests::nobody_stores_owner_as_a_members_access ... ok
+test access::tests::removing_a_member_takes_their_access_with_them ... ok
+test access::tests::the_migration_is_welcome ... ok
+test access_ops::tests::a_bind_is_refused_when_any_row_about_the_id_is_left ... ok
+test access_ops::tests::a_refresh_adds_prunes_and_keeps_what_has_a_say ... ok
+test access_ops::tests::clearing_a_device_removes_the_rows_a_revoke_owns_and_no_others ... ok
+test access_ops::tests::the_generation_moves_with_access_and_caps_and_not_with_a_new_device ... ok
+test agent_panes::tests::a_builder_s_pane_works_its_tickets ... ok
+test agent_panes::tests::a_reviewer_s_pane_leaves_the_stage_alone ... ok
+test agents::tests::a_harness_is_any_short_word ... ok
+test agents::tests::a_pane_starts_a_new_agent_after_its_last_ends ... ok
+test agents::tests::a_subagent_is_found_by_its_session ... ok
+test agents::tests::a_subagent_recorded_twice_is_one_agent ... ok
+test agents::tests::asking_to_stop_keeps_the_first_ask ... ok
+test agents::tests::ending_an_agent_ends_its_work ... ok
+test backup::tests::backup_is_byte_identical_and_checksum_verifies ... ok
+test backup::tests::backup_of_missing_file_fails_cleanly ... ok
+test board_reads::tests::a_first_look_holds_still ... ok
+test board_reads::tests::a_floor_never_lowers_even_from_a_first_upload ... ok
+test board_reads::tests::a_future_time_cannot_hide_later_news ... ok
+test board_reads::tests::a_mark_follows_its_task_across_a_move ... ok
+test board_reads::tests::a_mark_for_a_deleted_task_is_skipped ... ok
+test board_reads::tests::a_mark_for_another_boards_task_is_skipped_and_the_rest_land ... ok
+test board_reads::tests::a_task_takes_its_mark_when_it_goes ... ok
+test board_reads::tests::an_empty_store_migrates_to_a_first_look ... ok
+test board_reads::tests::marks_at_or_under_the_floor_are_dropped ... ok
+test board_reads::tests::marks_merge_by_max ... ok
+test board_reads::tests::reading_a_known_board_takes_no_write_lock ... ok
+test board_reads::tests::the_floor_only_rises ... ok
+test board_reads::tests::the_same_writes_in_any_order_end_in_the_same_state ... ok
+test check_ins::tests::a_stop_started_while_off_blocks_a_new_schedule_claim ... ok
+test check_ins::tests::a_stopping_agent_cannot_be_promoted_to_orchestrator ... ok
+test check_ins::tests::admission_vetoes_mutation_and_settles_only_its_attempt ... ok
+test check_ins::tests::admitted_enter_vetoes_status_until_fence_is_released ... ok
+test check_ins::tests::admitted_enter_vetoes_target_identity_and_parent_deletion ... ok
+test check_ins::tests::admitted_enter_vetoes_wake_switch_and_task_deletion ... ok
+test check_ins::tests::admitted_fence_refuses_a_reseat_even_when_values_are_unchanged ... ok
+test check_ins::tests::admitted_fence_vetoes_a_second_connection ... ok
+test check_ins::tests::agent_host_mode_cannot_be_claimed ... ok
+test check_ins::tests::an_unseated_agent_cannot_disable_a_check_in ... ok
+test check_ins::tests::destination_migration_preserves_legacy_attempt_without_inventing_proof ... ok
+test check_ins::tests::disable_after_claim_prevents_enter_admission ... ok
+test check_ins::tests::disable_rechecks_orchestrator_device_and_seat_in_the_write_transaction ... ok
+test check_ins::tests::disable_rechecks_owner_device_inside_the_write_transaction ... ok
+test check_ins::tests::enable_requires_expected_generation_and_starts_one_hour_later ... ok
+test check_ins::tests::fenced_task_move_rolls_back_the_whole_batch ... ok
+test check_ins::tests::lead_upsert_is_fenced_and_unchanged_lead_is_allowed ... ok
+test check_ins::tests::legacy_submitted_attempt_without_new_destination_proof_cannot_be_observed ... ok
+test check_ins::tests::missed_hours_coalesce_without_using_message_wakes ... ok
+test check_ins::tests::only_a_completed_target_hold_can_be_reconciled ... ok
+test check_ins::tests::orphaned_and_uncertain_target_holds_are_visible_and_cannot_be_released ... ok
+test check_ins::tests::receipt_is_bound_to_attempt_session_and_pinned_file ... ok
+test check_ins::tests::stale_acknowledgement_cannot_resolve_another_occurrence ... ok
+test check_ins::tests::status_change_invalidates_and_does_not_revive_on_return ... ok
+test check_ins::tests::uncertain_enter_keeps_its_fence_across_exclusive_recovery ... ok
+test check_ins::tests::unchanged_owner_device_write_does_not_disturb_an_admitted_attempt ... ok
+test check_ins::tests::unclean_instance_never_rearms_and_clean_close_requires_no_unknowns ... ok
+test check_ins::tests::unknown_cleanup_survives_recovery_and_only_its_token_clears_it ... ok
+test claude_logins::tests::a_panes_login_is_written_once_kept_and_goes_with_the_pane ... ok
+test claude_logins::tests::a_reused_handle_gets_a_new_login ... ok
+test claude_logins::tests::login_flags_are_noted_once_for_a_generation_and_cleared ... ok
+test claude_logins::tests::the_flags_migration_is_welcome ... ok
+test collecting::tests::a_departure_is_told_once ... ok
+test collecting::tests::a_landing_started_by_hand_adopts_the_collecting_one ... ok
+test collecting::tests::a_reviewed_ticket_joins_and_departs_when_nothing_is_ahead ... ok
+test collecting::tests::a_ticket_taken_off_by_hand_stays_off ... ok
+test collecting::tests::a_ticket_that_leaves_landing_comes_off_unless_the_push_carries_it ... ok
+test collecting::tests::an_emptied_departure_is_dropped_and_the_next_goes ... ok
+test collecting::tests::landing_lands_its_tickets_and_dropping_lets_them_go ... ok
+test collecting::tests::main_red_holds_the_departure ... ok
+test collecting::tests::the_scan_collects_a_stranded_ticket ... ok
+test compat::tests::a_database_from_a_newer_build_is_refused ... ok
+test compat::tests::a_database_s_schema_is_read_without_touching_it ... ok
+test compat::tests::a_newer_database_that_vouches_for_this_build_opens ... ok
+test compat::tests::a_newer_database_whose_floor_is_above_this_build_is_refused ... ok
+test compat::tests::main_s_newest_schema_opens_here_and_the_one_after_it_is_refused ... ok
+test compat::tests::opening_stamps_how_far_back_the_database_can_be_read ... ok
+test compat::tests::the_migrations_older_builds_may_read_past ... ok
+test compose_holds::tests::holds_keep_their_order_and_their_parts ... ok
+test compose_waits::tests::the_migration_is_welcome ... ok
+test compose_waits::tests::waits_are_kept_until_dropped_or_their_pane_goes ... ok
+test crash_signatures::tests::a_capped_place_gets_its_finding_once_the_cap_frees ... ok
+test crash_signatures::tests::a_failed_write_keeps_nothing ... ok
+test crash_signatures::tests::a_repeat_counts_on_one_row ... ok
+test crash_signatures::tests::findings_older_than_a_day_do_not_count ... ok
+test crash_signatures::tests::past_the_cap_new_signatures_overflow ... ok
+test crash_signatures::tests::places_are_bounded ... ok
+test crash_signatures::tests::the_migration_is_welcome ... ok
+test device_added_by::tests::a_members_own_device_is_bound_to_them_from_its_write ... ok
+test device_added_by::tests::a_revoked_device_waits_on_nothing ... ok
+test device_added_by::tests::binding_a_device_hands_over_what_it_added_as_the_owners ... ok
+test device_added_by::tests::every_enroller_is_kept_and_counted_by_day ... ok
+test device_added_by::tests::the_added_by_migration_is_welcome ... ok
+test device_added_by::tests::what_a_device_added_is_found_through_every_generation_and_any_cycle ... ok
+test device_enrollers::tests::a_device_a_member_enrolled_is_nobodys_until_bound ... ok
+test device_enrollers::tests::a_pending_teammate_is_released_until_bound_and_never_swept_meanwhile ... ok
+test device_enrollers::tests::a_removed_member_enrolls_nothing_more ... ok
+test device_enrollers::tests::the_migration_is_welcome ... ok
+test device_enrollers::tests::the_pending_teammates_migration_is_welcome ... ok
+test device_enrollers::tests::the_record_goes_with_its_member ... ok
+test engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore ... ok
+test engine_cutover::tests::cases::engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corruption ... ok
+test engine_cutover::tests::cases::engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_item ... ok
+test engine_cutover::tests::cases::engine_cutover_equal_time_rowid_order_is_conserved_not_just_field_counts ... ok
+test engine_cutover::tests::cases::engine_cutover_f02_stack_same_branch_order_and_hold_are_exact ... ok
+test engine_cutover::tests::cases::engine_cutover_f03_agents_multitask_history_and_open_work_are_quarantined ... ok
+test engine_cutover::tests::cases::engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated ... ok
+test engine_cutover::tests::cases::engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send ... ok
+test engine_cutover::tests::cases::engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... ok
+test engine_cutover::tests::cases::engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case ... ok
+test engine_cutover::tests::cases::engine_cutover_interrupt_reopen_normalization_and_forward_recovery ... ok
+test engine_cutover::tests::cases::engine_cutover_old_sql_claims_and_engine_writes_are_frozen_before_commit ... ok
+test engine_cutover::tests::cases::engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_ledger ... ok
+test engine_cutover::tests::cases::engine_cutover_process_child ... ignored, owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries
+test engine_cutover::tests::cases::engine_cutover_process_kill_boundaries ... actual child SIGKILL boundary=before status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+actual child SIGKILL boundary=after status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+ok
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... ok
+test engine_cutover::tests::cases::engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_release ... ok
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... ok
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... ok
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+test landing::tests::a_base_that_cannot_be_a_branch_is_refused_before_anything_is_written ... ok
+test landing::tests::a_stale_version_conflicts_and_writes_nothing ... ok
+test landing::tests::a_workspace_that_said_nothing_has_chosen_nothing ... ok
+test landing::tests::an_empty_base_and_zero_lines_take_the_value_away ... ok
+test landing::tests::each_field_given_is_set_and_each_absent_one_is_left ... ok
+test landing::tests::the_mode_words_round_trip ... ok
+test landing::tests::the_row_goes_with_its_workspace ... ok
+test landing_phase::tests::every_row_of_the_phase_table ... ok
+test landing_phase::tests::stalled_after_two_hours_without_an_open_agent_before_ci ... ok
+test landings::tests::a_landing_moves_only_as_expected ... ok
+test landings::tests::a_stack_lands_parent_first ... ok
+test landings::tests::a_ticket_must_be_ready_and_on_one_landing ... ok
+test landings::tests::moving_landing_membership_cannot_absorb_unrouted_tickets ... ok
+test landings::tests::one_ticket_lands_on_its_own ... ok
+test landings::tests::the_ask_route_takes_a_ticket_that_needs_you ... ok
+test landings::tests::the_lander_must_be_one ... ok
+test landings::tests::tickets_sharing_a_branch_land_together ... ok
+test lfs_pointers::tests::deleting_the_worktree_takes_its_rows ... ok
+test lfs_pointers::tests::recorded_paths_round_trip_and_count_per_worktree ... ok
+test lfs_pointers::tests::setting_replaces_and_only_a_change_moves_the_version ... ok
+test line_migration::tests::a_builder_pane_takes_its_lanes_name_as_its_title ... ok
+test line_migration::tests::a_lane_named_after_its_card_carries_that_card_over ... ok
+test line_migration::tests::a_train_named_without_a_number_takes_the_next_one ... ok
+test line_migration::tests::agents_are_one_row_each_with_their_role_and_place ... ok
+test line_migration::tests::an_empty_board_moves_and_the_move_runs_once ... ok
+test line_migration::tests::history_and_budgets_move_to_tickets ... ok
+test line_migration::tests::the_old_tables_are_gone_and_the_board_is_untouched ... ok
+test line_migration::tests::tickets_take_their_lanes_stage_branch_and_plan_order ... ok
+test line_migration::tests::trains_become_landings_with_their_numbers_and_tickets ... ok
+test line_migration::tests::who_worked_what_comes_from_lanes_trains_and_worker_records ... ok
+test member_connectors::tests::a_key_is_the_server_segment_claude_builds ... ok
+test member_connectors::tests::a_members_connectors_are_replaced_whole_and_go_with_them ... ok
+test member_connectors::tests::a_refused_list_writes_nothing ... ok
+test member_connectors::tests::the_migration_is_welcome ... ok
+test member_login_policy::tests::a_panes_shared_flag_changes_only_for_its_generation ... ok
+test member_login_policy::tests::off_by_default_and_set_per_harness ... ok
+test member_login_policy::tests::the_migration_is_welcome ... ok
+test member_marks::tests::a_members_board_reads_are_theirs_alone ... ok
+test member_marks::tests::a_members_review_mark_is_theirs_alone ... ok
+test member_marks::tests::a_removed_members_marks_go_with_them ... ok
+test member_marks::tests::the_migration_is_welcome ... ok
+test member_marks::tests::the_owner_writes_where_the_owner_always_did ... ok
+test member_marks::tests::the_owners_board_reads_reach_no_member ... ok
+test member_roles::tests::a_member_added_again_starts_over ... ok
+test member_roles::tests::a_role_change_is_logged_and_kept ... ok
+test member_roles::tests::every_member_starts_a_member ... ok
+test member_roles::tests::the_column_holds_only_the_two_roles ... ok
+test member_roles::tests::the_log_reads_back_newest_first ... ok
+test member_roles::tests::the_migration_is_welcome ... ok
+test messages::tests::a_board_that_types_nothing_takes_no_message ... ok
+test messages::tests::a_message_is_filed_and_queued_in_order ... ok
+test messages::tests::a_message_is_told_at_most_once ... ok
+test messages::tests::a_message_says_who_it_is_from_when_the_runner_said ... ok
+test messages::tests::a_runner_notice_folds_into_one_still_waiting ... ok
+test messages::tests::reported_reads_the_agents_writes_and_a_waiting_notice ... ok
+test messages::tests::waiting_and_sent_are_counted_per_recipient ... ok
+test migrate::more_tests::a_database_from_before_splits_were_recorded_reads_every_terminal_as_unknown ... ok
+test migrate::more_tests::a_repository_has_one_main ... ok
+test migrate::more_tests::a_split_from_before_the_sources_role_was_recorded_reads_as_unknown ... ok
+test migrate::more_tests::a_terminal_from_before_web_panes_has_no_page ... ok
+test migrate::tests::a_board_with_renamed_keys_survives_into_main ... ok
+test migrate::tests::a_database_from_before_dispatch_gains_terminal_task_id ... ok
+test migrate::tests::a_database_from_before_the_board_gains_its_tables ... ok
+test migrate::tests::a_database_from_before_the_rename_calls_every_worktree_a_worktree ... ok
+test migrate::tests::a_held_prefix_is_lowercased_and_one_differing_only_by_case_takes_a_digit ... ok
+test migrate::tests::a_note_cannot_be_deleted ... ok
+test migrate::tests::a_note_cannot_be_replaced ... ok
+test migrate::tests::a_note_cannot_be_updated ... ok
+test migrate::tests::a_repository_carries_the_prefix_its_task_keys_use ... ok
+test migrate::tests::a_repository_without_a_prefix_gets_a_main_with_one ... ok
+test migrate::tests::a_workspace_with_tasks_cannot_be_deleted_but_its_repository_can ... ok
+test migrate::tests::archived_rows_become_hidden ... ok
+test migrate::tests::dropping_the_name_keeps_the_workspace_and_its_terminals ... ok
+test migrate::tests::existing_workspaces_are_ranked_main_checkout_first_then_by_path ... ok
+test migrate::tests::fresh_database_starts_at_version_zero ... ok
+test migrate::tests::migrating_advances_the_watermark ... ok
+test migrate::tests::migrating_twice_is_a_safe_no_op ... ok
+test migrate::tests::migration_creates_every_expected_table ... ok
+test migrate::tests::one_row_per_worktree_path ... ok
+test migrate::tests::the_prefix_index_ignores_case ... ok
+test migrate::tests::two_repositories_cannot_share_a_task_prefix ... ok
+test migrate::tests::two_repositories_with_no_task_prefix_are_both_fine ... ok
+test models::actor_tests::a_members_word_reads_back_as_the_member ... ok
+test models::actor_tests::nothing_but_a_handle_a_member_could_have_is_a_member ... ok
+test pages::tests::a_change_replaces_the_page_whole_and_moves_the_revision ... ok
+test pages::tests::a_page_round_trips_and_lists_in_order ... ok
+test pages::tests::a_slot_must_be_a_slot ... ok
+test pages::tests::a_theme_draws_three_pages ... ok
+test pages::tests::a_workspace_holds_twelve_pages ... ok
+test pages::tests::an_anchor_or_a_place_that_changes_is_a_change_and_keep_leaves_it ... ok
+test pages::tests::deleting_a_workspace_takes_its_pages_and_events ... ok
+test pages::tests::if_revision_refuses_a_write_against_a_page_that_changed ... ok
+test pages::tests::more_than_thirty_changing_writes_an_hour_to_one_slot_are_refused ... ok
+test pages::tests::nothing_existing_gained_a_column_a_key_or_a_trigger_for_pages ... ok
+test pages::tests::publishing_identical_bytes_is_no_change_and_logs_nothing ... ok
+test pages::tests::removing_logs_and_a_second_removal_is_not_found ... ok
+test pages::tests::rotating_slots_cannot_exceed_the_boards_hourly_cap ... ok
+test pages::tests::stats_say_how_often_and_with_what_shape ... ok
+test pages::tests::the_board_and_the_plan_are_the_same_bytes_with_the_pages_dropped ... ok
+test pages::tests::the_cards_on_a_board_are_known_by_key_in_lower_case ... ok
+test pages::tests::the_drill_goes_red_when_a_plan_read_depends_on_the_pages ... ok
+test pages::tests::the_drill_goes_red_when_a_read_depends_on_the_pages ... ok
+test pages::tests::the_drill_goes_red_when_a_task_write_depends_on_the_pages ... ok
+test pages::tests::the_events_keep_shapes_and_no_content ... ok
+test pages::tests::the_migration_is_welcome ... ok
+test pages::tests::the_pages_survive_the_plan_layer_being_dropped ... ok
+test people::tests::a_handle_and_a_name_are_checked ... ok
+test people::tests::a_member_holds_their_devices_and_no_one_elses ... ok
+test people::tests::a_member_keeps_the_directory_account_they_were_added_under ... ok
+test people::tests::a_rep_is_bound_once_and_goes_with_its_pane_or_member ... ok
+test people::tests::a_set_built_from_a_stale_read_is_refused ... ok
+test people::tests::a_set_names_the_devices_it_released ... ok
+test people::tests::a_sweep_names_only_devices_taken_off_a_member ... ok
+test people::tests::a_workspace_has_one_lead_and_the_owner_is_the_default ... ok
+test people::tests::members_from_before_accounts_migrate_without_one ... ok
+test plan::tests::a_card_from_another_board_is_refused ... ok
+test plan::tests::a_card_is_in_one_theme ... ok
+test plan::tests::a_moved_card_leaves_its_theme_and_the_line ... ok
+test plan::tests::progress_is_derived_from_the_board ... ok
+test plan::tests::rewriting_the_story_keeps_the_old_one ... ok
+test plan::tests::the_board_is_the_same_bytes_with_the_layer_dropped ... ok
+test plan::tests::the_drill_goes_red_when_a_read_depends_on_the_layer ... ok
+test plan::tests::the_drill_goes_red_when_a_task_write_depends_on_the_layer ... ok
+test plan::tests::the_layer_s_migrations_are_marked ... ok
+test plan_agents::tests::a_pane_is_listed_while_its_terminal_runs ... ok
+test plan_agents::tests::a_subagent_is_listed_while_it_runs ... ok
+test plan_agents::tests::a_subagent_untitled_reads_its_parent_s_description ... ok
+test plan_agents::tests::an_agent_carries_its_open_tickets_and_its_own_spend ... ok
+test plan_agents::tests::an_ended_agent_leaves_the_list_but_not_the_day_s_spend ... ok
+test plan_agents::tests::working_first_then_the_orchestrator_then_tokens ... ok
+test plan_cost::tests::a_budget_is_kept_changed_and_removed ... ok
+test plan_cost::tests::a_closed_ticket_keeps_its_days ... ok
+test plan_cost::tests::a_comparison_needs_three_finished_cards_and_says_how_many_it_held_back ... ok
+test plan_cost::tests::a_run_is_spread_over_the_days_it_ran ... ok
+test plan_cost::tests::a_shared_agent_is_split_in_the_trend ... ok
+test plan_cost::tests::a_theme_trend_is_its_lanes_by_day_and_shares_like_its_spend ... ok
+test plan_cost::tests::spend_on_cards_that_did_not_land_is_in_flight_and_a_shared_card_is_one_card ... ok
+test plan_cost::tests::the_week_counts_cache_writes_stored_before_the_split ... ok
+test plan_cost::tests::the_week_counts_seven_days_and_no_limit ... ok
+test plan_cost::tests::the_week_counts_this_project_and_not_the_runner ... ok
+test plan_cost::tests::the_week_is_split_by_harness_and_model_and_the_parts_add_up ... ok
+test plan_cost::tests::what_a_run_spent_before_the_window_is_not_in_it ... ok
+test plan_read::tests::a_landing_reads_its_number_and_what_it_carries ... ok
+test plan_read::tests::a_theme_last_moved_is_the_newest_of_its_story_cards_tickets_and_rulings ... ok
+test plan_read::tests::a_ticket_s_spend_is_its_own_agents_runs ... ok
+test plan_read::tests::a_ticket_s_spend_matches_the_usage_report_for_its_agents ... ok
+test plan_read::tests::an_agent_on_two_tickets_is_split_between_them_and_counted_once ... ok
+test plan_read::tests::finished_tickets_age_out_and_a_long_stage_is_stale ... ok
+test plan_read::tests::fix_rounds_are_counted_from_the_fixes_started ... ok
+test pr_nudges::tests::a_claim_given_back_after_a_post_that_failed_may_be_taken_again ... ok
+test pr_nudges::tests::a_pull_request_is_nudged_once_and_a_second_claim_is_refused ... ok
+test pr_nudges::tests::a_restart_does_not_send_it_again ... ok
+test pr_nudges::tests::nudges_are_off_until_somebody_turns_them_on_and_the_wait_defaults_to_a_day ... ok
+test pr_nudges::tests::the_migration_is_welcome ... ok
+test pr_nudges::tests::the_same_repository_registered_twice_is_one_to_github ... ok
+test review::tests::a_pinned_base_overrides_whatever_would_have_been_guessed ... ok
+test review::tests::a_read_mark_round_trips_with_its_gate ... ok
+test review::tests::the_review_buffer_has_no_tables_left ... ok
+test review::tests::what_survives_is_the_base_and_whether_you_have_read_it ... ok
+test revoked_marks::tests::a_mark_is_kept_until_it_is_lifted ... ok
+test revoked_marks::tests::the_revoked_marks_migration_is_welcome ... ok
+test rulings::tests::a_moved_card_leaves_the_ruling_s_cards ... ok
+test rulings::tests::a_reversal_is_marked_with_its_commit ... ok
+test rulings::tests::a_ruling_is_confirmed_or_reversed_once ... ok
+test rulings::tests::a_ruling_s_cards_carry_keys_and_stay_out_of_the_plan_s_cards ... ok
+test rulings::tests::a_ruling_takes_the_board_s_next_number ... ok
+test rulings::tests::another_board_s_cards_and_theme_are_refused ... ok
+test rulings::tests::every_part_is_required_and_bounded ... ok
+test rulings::tests::keep_all_keeps_every_open_ruling_on_this_board_only ... ok
+test rulings::tests::keeping_records_who_and_when ... ok
+test rulings::tests::rulings_go_with_their_board ... ok
+test rulings::tests::the_migration_is_welcome ... ok
+test rulings::tests::the_plan_reads_standing_first_newest_first ... ok
+test rulings::tests::the_settled_history_is_capped_unless_all_is_asked_for ... ok
+test step_up::tests::a_proposal_is_replaceable_and_a_trusted_key_is_not ... ok
+test step_up::tests::a_proposal_is_trusted_once_inside_its_window ... ok
+test step_up::tests::a_sign_count_only_moves_forward ... ok
+test store::tests::a_new_terminal_starts_in_terminal_pane_mode ... ok
+test store::tests::a_new_worktree_lands_at_the_end ... ok
+test store::tests::a_reorder_naming_the_same_card_twice_or_a_stranger_is_refused ... ok
+test store::tests::a_session_id_finds_every_terminal_that_claims_it_and_no_others ... ok
+test store::tests::a_session_id_survives_a_reopen_because_it_is_intent_not_runtime ... ok
+test store::tests::a_split_records_whether_it_was_made_from_the_orchestrator ... ok
+test store::tests::a_split_terminal_names_what_it_was_split_from ... ok
+test store::tests::a_stores_init_actually_closes_the_replace_gap_in_task_notes ... ok
+test store::tests::a_terminal_created_for_a_task_reads_it_back ... ok
+test store::tests::delete_also_honors_expected_version ... ok
+test store::tests::deleting_a_repository_takes_its_whole_board_with_it ... ok
+test store::tests::deleting_the_task_leaves_the_terminal_and_forgets_the_link ... ok
+test store::tests::different_clients_do_not_collide_on_the_same_key ... ok
+test store::tests::different_hash_same_key_is_rejected ... ok
+test store::tests::file_backed_store_persists_and_reopen_is_idempotent ... ok
+test store::tests::fresh_idempotency_key_is_recorded_and_not_a_replay ... ok
+test store::tests::only_a_caller_that_asks_for_it_moves_the_epoch ... ok
+test store::tests::pruning_removes_only_entries_past_retention ... ok
+test store::tests::reordering_a_subset_leaves_every_other_card_where_it_was ... ok
+test store::tests::reordering_moves_the_cards_and_survives_a_reopen ... ok
+test store::tests::repository_root_round_trip ... ok
+test store::tests::repository_round_trip_and_update ... ok
+test store::tests::same_hash_replay_is_reported_and_not_double_recorded ... ok
+test store::tests::stale_version_is_a_conflict_not_silently_applied ... ok
+test store::tests::terminal_round_trip_and_update ... ok
+test store::tests::terminals_table_has_no_runtime_state_column ... ok
+test store::tests::the_rank_counts_across_every_repository_on_the_runner ... ok
+test store::tests::two_terminals_claiming_one_session_both_come_back ... ok
+test store::tests::updating_a_missing_resource_is_not_found_not_conflict ... ok
+test store::tests::worktree_flags_round_trip ... ok
+test store::tests::worktree_round_trip_and_update ... ok
+test subagent_notes::tests::a_subagent_without_a_description_has_no_label ... ok
+test subagent_notes::tests::a_worker_label_still_wins ... ok
+test subagent_notes::tests::an_empty_worker_label_falls_back_to_the_description ... ok
+test subagent_notes::tests::an_old_database_migrates_and_lists_its_subagents_unlabeled ... ok
+test subagent_notes::tests::an_unjoined_subagent_shows_the_description_its_parent_gave_it ... ok
+test subagent_notes::tests::the_latest_description_wins_and_blank_changes_nothing ... ok
+test tasks::boards_from_before_card_times::an_old_board_reads_its_last_change_from_what_was_already_written ... ok
+test tasks::prefixless_boards::a_board_registered_before_prefixes_gets_one_by_the_registration_rule ... ok
+test tasks::prefixless_boards::a_repository_without_a_main_gets_one_with_a_free_prefix ... ok
+test tasks::prefixless_boards::its_tasks_take_the_prefix_and_keep_their_history ... ok
+test tasks::prefixless_boards::the_backup_is_the_board_before_the_migration ... ok
+test tasks::prefixless_boards::the_old_key_still_resolves ... ok
+test tasks::tests::a_block_does_not_move_updated_at ... ok
+test tasks::tests::a_block_on_a_task_that_is_not_there_is_still_not_found ... ok
+test tasks::tests::a_block_on_a_task_that_is_not_there_names_the_argument_and_not_a_conflict ... ok
+test tasks::tests::a_caller_cannot_append_a_status_change_or_a_creation_by_hand ... ok
+test tasks::tests::a_card_nothing_has_happened_to_was_added_and_not_updated ... ok
+test tasks::tests::a_corrected_reason_keeps_the_edge_where_it_was_in_the_listing ... ok
+test tasks::tests::a_created_and_moved_task_reads_back_as_what_was_returned ... ok
+test tasks::tests::a_created_task_carries_the_repositorys_next_key ... ok
+test tasks::tests::a_cycle_is_refused_rather_than_stored ... ok
+test tasks::tests::a_cycle_three_tasks_long_is_also_refused ... ok
+test tasks::tests::a_decision_keeps_what_it_rejected ... ok
+test tasks::tests::a_diamond_of_shared_dependencies_is_allowed ... ok
+test tasks::tests::a_first_block_with_no_reason_reads_back_as_an_empty_reason ... ok
+test tasks::tests::a_key_is_looked_for_on_every_board_and_narrowed_by_one ... ok
+test tasks::tests::a_key_resolves_to_the_task_it_names ... ok
+test tasks::tests::a_listing_shows_only_its_own_repositorys_tasks ... ok
+test tasks::tests::a_literal_backslash_in_the_query_is_matched_literally ... ok
+test tasks::tests::a_main_already_made_is_never_made_again ... ok
+test tasks::tests::a_move_after_the_last_note_is_the_last_movement ... ok
+test tasks::tests::a_move_moves_updated_at ... ok
+test tasks::tests::a_name_with_no_letters_falls_back_rather_than_producing_an_empty_prefix ... ok
+test tasks::tests::a_note_cannot_supersede_a_note_of_another_kind ... ok
+test tasks::tests::a_note_cannot_supersede_another_tasks_note ... ok
+test tasks::tests::a_note_moves_updated_at ... ok
+test tasks::tests::a_note_on_a_task_that_does_not_exist_says_so ... ok
+test tasks::tests::a_note_or_an_edit_is_movement ... ok
+test tasks::tests::a_percent_or_underscore_in_the_query_is_matched_literally_not_as_a_wildcard ... ok
+test tasks::tests::a_prefix_is_letters_from_the_name_lowercased ... ok
+test tasks::tests::a_revision_against_a_stale_version_is_refused ... ok
+test tasks::tests::a_revision_moves_updated_at_and_one_that_changes_nothing_does_not ... ok
+test tasks::tests::a_status_change_records_when_it_happened_and_who_did_it ... ok
+test tasks::tests::a_status_change_that_cannot_land_writes_no_note ... ok
+test tasks::tests::a_status_change_whose_note_is_refused_leaves_the_row_where_it_was ... ok
+test tasks::tests::a_status_move_does_not_conflict_with_a_revision_in_flight ... ok
+test tasks::tests::a_supersede_link_survives_the_database ... ok
+test tasks::tests::a_task_can_be_blocked_on_several_things_each_with_a_reason ... ok
+test tasks::tests::a_task_cannot_block_on_itself ... ok
+test tasks::tests::a_task_that_has_not_moved_can_be_found_by_how_long_it_has_sat ... ok
+test tasks::tests::a_worktrees_open_tasks_are_found_by_index ... ok
+test tasks::tests::an_agent_note_names_the_terminal_you_can_go_and_read ... ok
+test tasks::tests::an_agents_terminal_and_a_decisions_alternatives_survive_the_database ... ok
+test tasks::tests::cancelled_tasks_are_never_stale_either ... ok
+test tasks::tests::correcting_the_record_supersedes_rather_than_edits ... ok
+test tasks::tests::creating_a_task_records_who_made_it ... ok
+test tasks::tests::decisions_are_searchable_across_every_task_in_a_repository ... ok
+test tasks::tests::every_status_and_kind_round_trips_through_its_stored_form ... ok
+test tasks::tests::filling_in_a_new_task_is_not_an_update ... ok
+test tasks::tests::finished_tasks_are_never_stale ... ok
+test tasks::tests::key_numbering_does_not_leak_across_prefixes ... ok
+test tasks::tests::keys_count_up_within_a_workspace ... ok
+test tasks::tests::listing_filters_by_status_and_reports_staleness ... ok
+test tasks::tests::notes_do_not_leak_between_tasks ... ok
+test tasks::tests::only_active_work_is_listed_as_stale ... ok
+test tasks::tests::re_asserting_the_status_a_task_already_has_does_not_restart_its_clock ... ok
+test tasks::tests::re_blocking_a_pair_replaces_the_reason_rather_than_refusing ... ok
+test tasks::tests::re_blocking_with_an_empty_reason_clears_the_reason_that_was_there ... ok
+test tasks::tests::re_blocking_without_a_reason_leaves_the_reason_that_was_there ... ok
+test tasks::tests::renaming_a_repository_does_not_change_its_task_keys ... ok
+test tasks::tests::revising_the_understanding_rewrites_the_row_and_records_nothing ... ok
+test tasks::tests::search_does_not_hide_a_note_that_was_later_superseded ... ok
+test tasks::tests::search_does_not_leak_across_repositories ... ok
+test tasks::tests::search_flags_a_hit_that_was_later_superseded_even_when_the_retracting_note_does_not_match ... ok
+test tasks::tests::search_orders_by_at_not_by_insertion_order ... ok
+test tasks::tests::several_stale_tasks_sort_worst_stall_first ... ok
+test tasks::tests::staleness_does_not_leak_across_repositories ... ok
+test tasks::tests::the_stale_sweep_sorts_on_the_last_movement ... ok
+test tasks::tests::there_is_no_path_that_rewrites_a_note ... ok
+test tasks::tests::two_repositories_that_derive_the_same_prefix_do_not_collide ... ok
+test tasks::tests::unblocking_a_link_in_a_cycle_lets_it_be_closed_the_other_way ... ok
+test tasks::tests::unblocking_removes_the_edge_and_only_that_edge ... ok
+test tasks::tests::unblocking_something_never_blocked_is_not_an_error ... ok
+test ticket_lines::tests::a_stacked_ticket_lands_after_its_parent ... ok
+test ticket_lines::tests::a_ticket_goes_on_the_line_once ... ok
+test ticket_lines::tests::an_edit_is_in_the_timeline ... ok
+test ticket_lines::tests::fields_set_and_clear ... ok
+test ticket_lines::tests::stages_move_along_their_arrows ... ok
+test ticket_lines::tests::the_plan_orders_waiting_tickets ... ok
+test ticket_lines::tests::tickets_sharing_a_branch_dont_land_alone ... ok
+test ticket_work::tests::a_reviewer_holds_tickets_from_any_builder ... ok
+test ticket_work::tests::an_ended_agent_takes_no_work ... ok
+test ticket_work::tests::the_orchestrators_link_relinks_a_guess ... ok
+test ticket_work::tests::the_role_must_fit_the_agent ... ok
+test ticket_work::tests::work_ends_once_and_reopens ... ok
+test usage::tests::a_cost_is_reported_estimated_or_unknown_and_says_which ... ok
+test usage::tests::a_subagent_run_replaces_itself_as_it_grows_and_is_not_a_turn ... ok
+test usage::tests::an_aggregate_keeps_its_provenance_mix ... ok
+test usage::tests::one_hour_writes_are_kept_and_older_rows_are_marked ... ok
+test usage::tests::the_migration_only_adds ... ok
+test usage::tests::the_same_turn_key_is_recorded_once ... ok
+test usage::tests::the_split_migration_is_welcome_and_leaves_old_rows_unsplit ... ok
+test usage::tests::totals_break_down_by_task_and_by_day_in_the_callers_offset ... ok
+test waits::tests::a_build_line_place_survives_review_and_a_reorder_writes_nothing ... ok
+test waits::tests::a_copy_of_a_real_board_keeps_every_card_key_and_note ... ignored, needs FARCOOLER_DB_COPY: a copy of a real database
+test waits::tests::a_done_task_ranked_first_takes_no_place ... ok
+test waits::tests::a_finished_blocker_stops_counting ... ok
+test waits::tests::a_hold_whose_time_came_is_let_go ... ok
+test waits::tests::a_line_is_replaced_whole ... ok
+test waits::tests::a_line_refuses_a_task_it_cannot_hold ... ok
+test waits::tests::a_note_from_a_newer_build_reads_as_unknown ... ok
+test waits::tests::a_stale_wait_does_not_come_back_with_a_move ... ok
+test waits::tests::a_task_in_the_agent_line_leaves_it_when_dispatched ... ok
+test waits::tests::ahead_names_the_front_of_the_line ... ok
+test waits::tests::holding_a_todo_task_moves_it_to_the_backlog ... ok
+test waits::tests::moving_a_task_to_another_board_takes_it_out_of_line ... ok
+test waits::tests::only_a_change_of_wait_writes_a_note ... ok
+test waits::tests::opening_sweeps_what_an_older_build_left ... ok
+test waits::tests::set_wait_refuses_what_it_cannot_mean ... ok
+test waits::tests::the_two_copies_of_the_fit_rule_agree ... ok
+test wakes::tests::a_paste_is_marked_on_a_claimed_row_and_taken_once ... ok
+test wakes::tests::a_persons_answer_is_queued_with_it_and_claimed_once ... ok
+test wakes::tests::a_silent_finish_writes_no_note ... ok
+test wakes::tests::a_workspace_wakes_on_answer_until_turned_off ... ok
+test wakes::tests::an_answer_is_queued_and_told_exactly_once ... ok
+test wakes::tests::only_the_daemons_word_queues_an_agents_answer ... ok
+test wakes::tests::the_runner_is_an_actor_that_round_trips ... ok
+test web_panes::tests::a_missing_terminal_is_not_found ... ok
+test web_panes::tests::a_pane_the_client_draws_is_a_changes_or_a_web_pane_and_nothing_else ... ok
+test web_panes::tests::a_web_panes_page_survives_a_reopen ... ok
+test web_panes::tests::web_mode_round_trips_through_its_number ... ok
+test workers::observed_tests::a_hold_that_ended_is_its_own_wake ... ok
+test workers::observed_tests::followed_workers_are_the_open_ones_and_the_recently_ended ... ok
+test workers::observed_tests::only_that_subagents_spend_moves ... ok
+test workers::observed_tests::spend_written_before_the_link_moves_to_the_task ... ok
+test workers::tests::a_board_shows_the_open_ones_and_the_last_closed ... ok
+test workers::tests::a_key_links_only_where_the_description_starts_with_it ... ok
+test workers::tests::a_subagent_ends_once_and_a_resume_reopens_it ... ok
+test workers::tests::a_subagent_links_from_a_leading_key_on_its_own_board ... ok
+test workers::tests::a_subagent_on_a_task_that_finishes_is_closed ... ok
+test workers::tests::ending_with_no_id_ends_every_open_one ... ok
+test workers::tests::recording_a_subagent_on_a_todo_task_starts_it ... ok
+test workers::tests::recording_the_same_subagent_twice_is_one_row ... ok
+test workers::tests::the_orchestrator_s_record_overrides_a_description_link ... ok
+test workflow::tests::workflow_atomic_reopen_duplicate_payload_and_replay ... ok
+test workflow::tests::workflow_blocked_shared_resource_reopen_and_generation_handoff ... ok
+test workflow::tests::workflow_claim_dispatch_crash_boundaries_and_generation ... ok
+test workflow::tests::workflow_complete_coding_trace_reopens_between_every_effect ... ok
+test workflow::tests::workflow_concurrent_resource_admission_across_connections ... ok
+test workflow::tests::workflow_concurrent_same_revision_and_duplicate_command ... ok
+test workflow::tests::workflow_cross_workspace_dependents_cannot_block_completion_and_replay ... ok
+test workflow::tests::workflow_immutable_history_and_refusing_registry ... ok
+test workflow::tests::workflow_migration_from_every_registered_source_schema ... migration source schemas tested=66
+ok
+test workflow::tests::workflow_refusals_deduplicated_without_revision ... ok
+test workflow::tests::workflow_sql_failure_rolls_back_every_boundary ... ok
+test workflow::tests::workflow_tracker_exact_approval_duplicate_and_reopen_done ... ok
+test workflow::tests::workflow_uncertain_boundary_reopen_and_cancellation_holds_resource ... ok
+test workflow_notices::tests::workflow_notice_atomic_replay_equal_new_events_bounded_backlog_and_crash_recovery ... ok
+test workflow_notices::tests::workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_engine_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_current_legacy_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_engine_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_former_legacy_first ... ok
+test workflow_ownership::alias_tests::workflow_ownership_aliases_refuse_ambiguity_and_keep_workspace_boundary ... ok
+test workflow_ownership::legacy_first_tests::workflow_ownership_existing_legacy_terminal_refuses_before_any_effect ... ok
+test workflow_ownership::tests::workflow_ownership_concurrent_engine_and_legacy_have_one_winner ... ok
+test workflow_publication::tests::workflow_publication_legacy_none_payload_and_prebundle_receipt_survive_migration ... ok
+test workflow_publication::tests::workflow_publication_rolls_back_definition_config_and_receipt_together ... ok
+test workspaces::tests::a_claim_sticks_and_an_assignment_overrides_it ... ok
+test workspaces::tests::a_derived_prefix_is_always_a_valid_one ... ok
+test workspaces::tests::a_key_is_never_issued_twice_across_prefix_renames ... ok
+test workspaces::tests::a_main_checkout_cannot_be_assigned_away_from_main ... ok
+test workspaces::tests::a_move_across_repositories_is_refused ... ok
+test workspaces::tests::a_moved_task_keeps_its_key_and_leaves_a_note ... ok
+test workspaces::tests::a_prefix_is_a_letter_then_up_to_seven_letters_or_digits ... ok
+test workspaces::tests::a_stale_version_is_a_conflict ... ok
+test workspaces::tests::a_vacated_orchestrator_frees_its_seat_only_as_it_was_read ... ok
+test workspaces::tests::assigning_a_worktree_moves_its_agents_and_nothing_else ... ok
+test workspaces::tests::deleting_refuses_main_and_anything_still_holding_work ... ok
+test workspaces::tests::every_role_and_claim_source_round_trips ... ok
+test workspaces::tests::numbering_counts_former_keys ... ok
+test workspaces::tests::numbering_spans_the_runner ... ok
+test workspaces::tests::one_orchestrator_per_workspace ... ok
+test workspaces::tests::only_main_can_claim_a_main_checkout ... ok
+test workspaces::tests::prefixes_are_unique_on_the_runner_ignoring_case ... ok
+test workspaces::tests::registering_a_repository_makes_its_main ... ok
+
+test result: ok. 523 passed; 0 failed; 2 ignored; 0 measured; 2 filtered out; finished in 35.93s
+
+SEAL 2 ["/Users/e-liang/.cargo/bin/cargo", "clippy", "--offline", "-p", "farcooler-store", "--all-targets", "--features", "testing", "--", "-D", "warnings"]
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `dev` profile [unoptimized] target(s) in 5.57s
+SEAL 3 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/cli.py"]
+{"authority":{"incarnation":1,"manifest":"wf1:00275634313f4301c4c03e6dadfd80e1df76afe90ecf754f932121ab987c7873","phase":"committed"},"baseline":"wf1:00275634313f4301c4c03e6dadfd80e1df76afe90ecf754f932121ab987c7873","enter":0,"old_reader_fixture":"/private/tmp/ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964/db.sqlite","push":0,"restored":"/private/tmp/ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964/independent-restore","root":"/private/tmp/ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964","send":0,"synthetic_only":true}
+
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `dev` profile [unoptimized] target(s) in 2.61s
+     Running `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/examples/engine_cutover_rehearsal /private/tmp ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964`
+
+SEAL 4 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/old-reader.py"]
+   Compiling farcooler-workflow v0.1.0 (/private/tmp/ov936-reader-source-vkwy3y3m/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/private/tmp/ov936-reader-source-vkwy3y3m/crates/ffi-guard)
+   Compiling farcooler-protocol v0.1.0 (/private/tmp/ov936-reader-source-vkwy3y3m/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/private/tmp/ov936-reader-source-vkwy3y3m/crates/core)
+   Compiling farcooler-store v0.1.0 (/private/tmp/ov936-reader-source-vkwy3y3m/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 5.85s
+     Running tests/engine_cutover_old_reader.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/engine_cutover_old_reader-60d63abdba02eca9)
+
+running 1 test
+test actual_old_store_refuses_migrated_private_fixture ... actual Store::open refused NewerData; schema=65
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling farcooler-workflow v0.1.0 (/private/tmp/ov936-reader-source-8dpzj70e/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/private/tmp/ov936-reader-source-8dpzj70e/crates/ffi-guard)
+   Compiling farcooler-protocol v0.1.0 (/private/tmp/ov936-reader-source-8dpzj70e/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/private/tmp/ov936-reader-source-8dpzj70e/crates/core)
+   Compiling farcooler-store v0.1.0 (/private/tmp/ov936-reader-source-8dpzj70e/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 5.38s
+     Running tests/engine_cutover_old_reader.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/engine_cutover_old_reader-0deb9df259b310e9)
+
+running 1 test
+test actual_old_store_refuses_migrated_private_fixture ... actual Store::open refused NewerData; schema=64
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+SEAL 5 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/negatives.py"]
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+{"name": "incarnation", "path": "crates/store/src/engine_cutover.rs", "command": ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_f09_existing_engine_claims", "--", "--nocapture"], "original": "5d9a4ac3e814c4cd7f404fbd3138e769f068bc70b1fea60a87c1d006d9d0e3e4", "mutant": "de64f1312b69d774d0000895ccdde0e71a935cd3416d0d1318c079a45346292d", "exit": 101, "meaningful": true, "restored": true, "assertion": "old Store handle cannot write after transfer"}
+{"name": "legacy-writer", "path": "crates/store/src/engine_cutover.rs", "command": ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_f04_landing_routes", "--", "--nocapture"], "original": "5d9a4ac3e814c4cd7f404fbd3138e769f068bc70b1fea60a87c1d006d9d0e3e4", "mutant": "a341837d383e8c5bc0cf37aac31493bd17fe3fb80352ca224793d5ccb39790d4", "exit": 101, "meaningful": true, "restored": true, "assertion": "assertion failed"}
+{"name": "conservation", "path": "crates/store/src/engine_cutover.rs", "command": ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_stale_source_and_per_field_corruption", "--", "--nocapture"], "original": "5d9a4ac3e814c4cd7f404fbd3138e769f068bc70b1fea60a87c1d006d9d0e3e4", "mutant": "6da5011da0330aefbec3feb007e606df1230b430bffca1a5dad8a3cd6c340c53", "exit": 101, "meaningful": true, "restored": true, "assertion": "assertion failed"}
+{"name": "restore-freeze", "path": "crates/store/src/engine_cutover/rehearsal.rs", "command": ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_f11_restored_pending", "--", "--nocapture"], "original": "f82d77bdeb0e61c4a65c719e4327c9f683f82332e00f52490686843c024af21a", "mutant": "ef809616efd44b79923e0365adc0e0a6837c8a81c8638b87c4445a05d14d096d", "exit": 101, "meaningful": true, "restored": true, "assertion": "left: \"legacy\""}
+{"name": "restore-quarantine", "path": "crates/store/src/engine_cutover/rehearsal.rs", "command": ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_f11_restored_pending", "--", "--nocapture"], "original": "f82d77bdeb0e61c4a65c719e4327c9f683f82332e00f52490686843c024af21a", "mutant": "d5b14bf817c2f981cc21e36b00c77ba13e02a208457949ec7ebd47dfd8dae681", "exit": 101, "meaningful": true, "restored": true, "assertion": "post-backup quarantine must survive forward release"}
+SEAL 6 ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_", "--", "--nocapture"]
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.43s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 28 tests
+test engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore ... ok
+test engine_cutover::tests::cases::engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corruption ... ok
+test engine_cutover::tests::cases::engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_item ... ok
+test engine_cutover::tests::cases::engine_cutover_equal_time_rowid_order_is_conserved_not_just_field_counts ... ok
+test engine_cutover::tests::cases::engine_cutover_f02_stack_same_branch_order_and_hold_are_exact ... ok
+test engine_cutover::tests::cases::engine_cutover_f03_agents_multitask_history_and_open_work_are_quarantined ... ok
+test engine_cutover::tests::cases::engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated ... ok
+test engine_cutover::tests::cases::engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send ... ok
+test engine_cutover::tests::cases::engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... ok
+test engine_cutover::tests::cases::engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case ... ok
+test engine_cutover::tests::cases::engine_cutover_interrupt_reopen_normalization_and_forward_recovery ... ok
+test engine_cutover::tests::cases::engine_cutover_old_sql_claims_and_engine_writes_are_frozen_before_commit ... ok
+test engine_cutover::tests::cases::engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_ledger ... ok
+test engine_cutover::tests::cases::engine_cutover_process_child ... ignored, owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries
+test engine_cutover::tests::cases::engine_cutover_process_kill_boundaries ... actual child SIGKILL boundary=before status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+actual child SIGKILL boundary=after status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+ok
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... ok
+test engine_cutover::tests::cases::engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_release ... ok
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... ok
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... ok
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+
+test result: ok. 27 passed; 0 failed; 1 ignored; 0 measured; 499 filtered out; finished in 15.32s
+
+SEAL 7 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/scripts/migration-lint.py"]
+migration-lint: ok.
+SEAL 8 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/scripts/file-size-budget.py"]
+file-size-budget: ok. 2 grandfathered entries have room to lower; run ./scripts/file-size-budget.py --update and commit the manifest.
+SEAL 9 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/pack-evidence.py"]
+{"evidence_files": 301, "raw_bytes": 1117779428, "signed_gzip_bytes": 40424903, "originals_retained": true}
+
+exit=0, stopped=None

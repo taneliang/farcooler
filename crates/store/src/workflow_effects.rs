@@ -13,6 +13,7 @@ pub struct EffectClaim {
     pub resource_generation: u64,
     pub revision: u64,
     pub epoch: u64,
+    pub authority_incarnation: u64,
 }
 
 pub(crate) fn reserve(tx: &Transaction<'_>, state: &State) -> rusqlite::Result<()> {
@@ -55,6 +56,9 @@ impl Store {
             || lease_until.saturating_sub(now_ms) > 300_000 { return Ok(None); }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Ok(None); }
+        let blocked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine q JOIN workflow_outbox o ON q.resource=json_extract(o.payload,'$.resource') WHERE o.workspace=?1 AND o.id=?2) OR EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='workspace:'||?1)",params![workspace,effect],|r|r.get(0))?;
+        if blocked { return Ok(None); }
         let state: Option<String> = tx.query_row("SELECT state FROM workflow_states WHERE workspace = ?1",
             [workspace], |r| r.get(0)).optional()?;
         let Some(state) = state else { return Ok(None); };
@@ -82,13 +86,16 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(Some(EffectClaim { workspace: workspace.into(), effect: effect.into(), owner: lease_owner.into(),
-            lease_generation, resource_generation: generation, revision, epoch }))
+            lease_generation, resource_generation: generation, revision, epoch, authority_incarnation:self.engine_incarnation }))
     }
 
     /// Persists the uncertain-effect boundary before any adapter call. Expiry after
     /// this point never permits re-execution, even by the same owner.
     pub fn workflow_admit_effect(&self, claim: &EffectClaim, now_ms: i64) -> Result<bool> {
-        let n = self.conn().execute(
+        let mut conn=self.conn();
+        let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if claim.authority_incarnation!=self.engine_incarnation || !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? { return Ok(false); }
+        let n = tx.execute(
             "UPDATE workflow_outbox SET dispatch_state = 'admitted'
              WHERE workspace = ?1 AND id = ?2 AND active = 1 AND dispatch_state = 'claimed'
              AND lease_owner = ?3 AND lease_generation = ?4 AND lease_until > ?5
@@ -101,6 +108,7 @@ impl Store {
             params![claim.workspace, claim.effect, claim.owner, claim.lease_generation, now_ms,
                 claim.resource_generation, claim.revision, claim.epoch],
         )?;
+        tx.commit()?;
         Ok(n == 1)
     }
 }

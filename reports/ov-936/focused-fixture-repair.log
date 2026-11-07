@@ -1,0 +1,36 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 7.59s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 5 tests
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... 
+thread 'engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved' (829052261) panicked at crates/store/src/engine_cutover/tests.rs:82:85:
+called `Result::unwrap()` on an `Err` value: SqliteFailure(Error { code: ConstraintViolation, extended_code: 1811 }, Some("check_in_enter_in_flight"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... 
+thread 'engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines' (829052317) panicked at crates/store/src/engine_cutover/tests.rs:48:5:
+assertion `left == right` failed
+  left: 4
+ right: 3
+FAILED
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+
+failures:
+
+failures:
+    engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved
+    engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 499 filtered out; finished in 0.99s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

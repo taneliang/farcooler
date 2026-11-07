@@ -1,0 +1,111 @@
+[
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "--",
+      "--nocapture",
+      "--skip",
+      "plan::tests::no_existing_table_gained_a_column",
+      "--skip",
+      "workflow_notices::migration_tests::workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "clippy",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--all-targets",
+      "--features",
+      "testing",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/cli.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/old-reader.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/entry.py",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/negatives.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/entry.py",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target",
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/scripts/migration-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/scripts/file-size-budget.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/pack-evidence.py"
+    ],
+    "exit": 0
+  }
+]

@@ -1,0 +1,290 @@
+//! Closed PRIVATE synthetic file workflow. There are no installed-path defaults.
+//! The root is minted create-new; DB/resource pointers are evidence, never inputs
+//! to filesystem traversal. An outer append-only journal survives DB restoration.
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Component, Path, PathBuf};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, OpenOptionsExt};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use super::{Authority, Error, Result, authority, refuse};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resource {
+    pub kind: String,
+    pub mode: u32,
+    pub links: u64,
+    pub bytes_hash: String,
+    pub target: Option<PathBuf>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub root_mode: u32,
+    pub files: BTreeMap<PathBuf, Resource>,
+    pub db_manifest: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalEntry {
+    pub attempt: String,
+    pub stage: String,
+    pub evidence: String,
+}
+/// An explicit newly-created sandbox. Constructor never opens an existing root.
+/// This seam cannot be used with owner resources or discover configured paths.
+pub struct PrivateRehearsal { root: PathBuf }
+impl PrivateRehearsal {
+    pub fn create(parent: &Path, name: &str) -> Result<Self> {
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b==b'-') { return refuse("invalid private rehearsal name"); }
+        let root=parent.canonicalize()?.join(name);
+        fs::create_dir(&root)?;
+        fs::set_permissions(&root,fs::Permissions::from_mode(0o700))?;
+        create_file(&root.join("SYNTHETIC-ONLY"),b"ov-936 private synthetic rehearsal\n",0o600)?;
+        fs::create_dir(root.join("live"))?;
+        fs::create_dir(root.join("journal"))?;
+        fs::create_dir(root.join("fake-remote"))?;
+        Ok(Self {root})
+    }
+    pub fn root(&self) -> &Path { &self.root }
+    pub fn live(&self) -> PathBuf { self.root.join("live") }
+    /// Each entry has its own exclusive immutable file: no replace/truncate or
+    /// journal rollback when a DB snapshot is restored. fsync file and directory.
+    pub fn record(&self, sequence: u32, entry: &JournalEntry) -> Result<()> {
+        self.check_dir("journal")?;
+        create_file(&self.root.join("journal").join(format!("{sequence:06}.json")),&serde_json::to_vec(entry)?,0o600)
+    }
+    pub fn recover(&self, db: &Connection, attempt: &str, sequence: u32) -> Result<Authority> {
+        let current=authority(db)?;
+        let evidence=serde_json::to_string(&current)?;
+        let stage=if matches!(current.phase.as_str(),"committed"|"released") { "forward-recovery" } else { "frozen-precommit" };
+        self.record(sequence,&JournalEntry {attempt:attempt.into(),stage:stage.into(),evidence})?;
+        Ok(current)
+    }
+    /// All fixture writers/Store handles must be dropped. A residual WAL or
+    /// rollback journal, lock, failed check or collision stops before copying.
+    pub fn backup(&self, name: &str) -> Result<Snapshot> {
+        self.check_dir("live")?;
+        let live=self.live();
+        closed(&live.join("db.sqlite"))?;
+        let snapshot=scan(&live)?;
+        let destination=self.child_name(name)?;
+        fs::create_dir(&destination)?;
+        copy_tree(&live,&destination,&snapshot)?;
+        create_file(&destination.join("SNAPSHOT.json"),&serde_json::to_vec(&snapshot)?,0o600)?;
+        // Independently restore into another create-new destination and compare
+        // typed DB state plus every byte/mode/link before trusting the backup.
+        let restored=self.root.join(format!("{name}-verified-restore"));
+        fs::create_dir(&restored)?;
+        copy_tree(&destination,&restored,&snapshot)?;
+        if scan(&restored)? != snapshot { return refuse("independent restore mismatch"); }
+        sync_dir(&destination)?;
+        sync_dir(&self.root)?;
+        Ok(snapshot)
+    }
+    pub fn restore(&self, name: &str, destination: &str, expected: &Snapshot) -> Result<PathBuf> {
+        private_dir(&self.root)?;
+        let source=self.child_name(name)?;
+        private_dir(&source)?;
+        let declared:Snapshot=serde_json::from_slice(&fs::read(source.join("SNAPSHOT.json"))?)?;
+        if &declared!=expected { return refuse("backup manifest mismatch"); }
+        let target=self.child_name(destination)?;
+        fs::create_dir(&target)?;
+        copy_tree(&source,&target,expected)?;
+        if scan(&target)?!=*expected { return refuse("restored resources differ"); }
+        let mut conn=Connection::open_with_flags(target.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let version=crate::migrate::read_schema_version(&conn).map_err(|e|Error::Refused(e.to_string()))?;
+        crate::migrate::migrate(&mut conn,version).map_err(|e|Error::Refused(e.to_string()))?;
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("UPDATE engine_cutover_authority SET phase='quiesced',incarnation=incarnation+1 WHERE singleton=1",[])?;
+        // A restored pending DB never overrides the append-only external ledger.
+        // Preserve exact facts and quarantine only their protected resources.
+        for entry in fs::read_dir(self.root.join("journal"))? {
+            let entry=entry?;
+            if !entry.file_name().to_string_lossy().starts_with("effect-") { continue; }
+            let fact:ExternalFact=serde_json::from_slice(&read_regular(&entry.path())?)?;
+            tx.execute("INSERT INTO engine_cutover_external VALUES(?1,?2,?3,?4,'unreconciled')",rusqlite::params![fact.operation,fact.resource,fact.request_hash,serde_json::to_string(&fact)?])?;
+            let _ = &fact;
+        }
+        crate::compat::stamp_compatible_down_to(&tx).map_err(|e|Error::Refused(e.to_string()))?;
+        tx.commit()?;
+        conn.close().map_err(|(_,e)|Error::Storage(e))?;
+        Ok(target)
+    }
+    fn check_dir(&self,name:&str) -> Result<()> {private_dir(&self.root)?;private_dir(&self.root.join(name)).map(|_|())}
+    fn child_name(&self, name: &str) -> Result<PathBuf> {
+        if name.is_empty() || !name.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-') || matches!(name,"live"|"journal"|"SYNTHETIC-ONLY") { return refuse("invalid private destination"); }
+        Ok(self.root.join(name))
+    }
+}
+fn private_dir(path:&Path) -> Result<u32> {
+    let metadata=fs::symlink_metadata(path)?;
+    if !metadata.is_dir() {return refuse("private directory replaced; symlink traversal refused");}
+    if metadata.mode()&0o7000!=0 {return refuse("special permission bits require explicit resource disposition");}
+    Ok(metadata.mode()&0o777)
+}
+fn read_regular(path:&Path) -> Result<Vec<u8>> {
+    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_NONBLOCK).open(path)?;
+    let metadata=file.metadata()?;
+    if !metadata.is_file() || metadata.nlink()!=1 { return refuse("resource is not private regular single-link file"); }
+    let mut bytes=Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+fn sync_dir(path: &Path) -> Result<()> { File::open(path)?.sync_all()?; Ok(()) }
+fn create_file(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    let mut file=OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)?;
+    file.set_permissions(fs::Permissions::from_mode(mode))?;
+    file.sync_all()?;
+    sync_dir(path.parent().ok_or_else(||Error::Refused("missing parent".into()))?)
+}
+fn closed(path: &Path) -> Result<()> {
+    for suffix in ["-wal","-shm","-journal"] {
+        if path.with_file_name(format!("db.sqlite{suffix}")).exists() { return refuse("database has unclosed journal/WAL state"); }
+    }
+    if !fs::symlink_metadata(path)?.file_type().is_file() { return refuse("database is not a regular file"); }
+    let conn=Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    conn.busy_timeout(std::time::Duration::ZERO)?;
+    conn.execute_batch("BEGIN EXCLUSIVE;")?;
+    let check:String=conn.query_row("PRAGMA quick_check",[],|r|r.get(0))?;
+    if check!="ok" { return refuse("closed database integrity check failed"); }
+    conn.execute_batch("ROLLBACK;")?;
+    conn.close().map_err(|(_,e)|Error::Storage(e))?;
+    Ok(())
+}
+fn scan(root: &Path) -> Result<Snapshot> {
+    let root_mode=private_dir(root)?;
+    let mut files=BTreeMap::new();
+    scan_dir(root,root,&mut files)?;
+    let db=Connection::open_with_flags(root.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let db_manifest=super::manifest::Manifest::capture(&db)?.hash();
+    db.close().map_err(|(_,e)|Error::Storage(e))?;
+    Ok(Snapshot {root_mode,files,db_manifest})
+}
+fn scan_dir(root:&Path, directory:&Path, files:&mut BTreeMap<PathBuf,Resource>) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry=entry?;
+        let path=entry.path();
+        let relative=path.strip_prefix(root).map_err(|_|Error::Refused("resource escaped root".into()))?.to_path_buf();
+
+        let metadata=fs::symlink_metadata(&path)?;
+        if metadata.mode()&0o7000!=0 {return refuse("special permission bits require explicit resource disposition");}
+        if metadata.is_dir() {
+            files.insert(relative,Resource {kind:"directory".into(),mode:metadata.mode()&0o777,links:0,bytes_hash:farcooler_workflow::digest(&Vec::<u8>::new()),target:None});
+            scan_dir(root,&path,files)?;continue;
+        }
+        let (kind,bytes,target)=if metadata.file_type().is_symlink() {
+            let target=fs::read_link(&path)?;
+            ("symlink",Vec::new(),Some(target))
+        } else if metadata.is_file() && metadata.nlink()==1 {
+            ("file",read_regular(&path)?,None)
+        } else { return refuse("special or multiply-linked resource refused"); };
+        files.insert(relative,Resource {kind:kind.into(),mode:metadata.mode()&0o777,links:metadata.nlink(),bytes_hash:farcooler_workflow::digest(&bytes),target});
+    }
+    Ok(())
+}
+fn copy_tree(source:&Path, target:&Path, expected:&Snapshot) -> Result<()> {
+    for (relative,resource) in &expected.files {
+        if !relative.components().all(|c|matches!(c,Component::Normal(_))) { return refuse("unsafe resource manifest path"); }
+        let from=source.join(relative);
+        let to=target.join(relative);
+        if let Some(parent)=to.parent() { fs::create_dir_all(parent)?; }
+        let metadata=fs::symlink_metadata(&from)?;
+        if resource.kind=="directory" {
+            if !metadata.is_dir() || metadata.mode()&0o777!=resource.mode {return refuse("resource directory identity changed");}
+            fs::create_dir(&to)?;fs::set_permissions(&to,fs::Permissions::from_mode(resource.mode))?;
+        } else if resource.kind=="symlink" {
+            if !metadata.file_type().is_symlink() || fs::read_link(&from)?.as_path()!=resource.target.as_deref().ok_or_else(||Error::Refused("missing symlink identity".into()))? { return refuse("symlink identity changed"); }
+            std::os::unix::fs::symlink(resource.target.as_ref().expect("checked"),&to)?;
+        } else {
+            if !metadata.is_file() || metadata.nlink()!=1 { return refuse("resource replaced before copy"); }
+            let bytes=read_regular(&from)?;
+            if farcooler_workflow::digest(&bytes)!=resource.bytes_hash { return refuse("resource checksum mismatch"); }
+            create_file(&to,&bytes,resource.mode)?;
+        }
+    }
+    fs::set_permissions(target,fs::Permissions::from_mode(expected.root_mode))?;
+    sync_dir(target)?;
+    Ok(())
+}
+
+/// Durable post-backup facts are kept outside the replaceable DB. Missing exact
+/// receipts are uncertain and never become retry permission. Fake only: there is
+/// no provider integration in this rehearsal module.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalFact {
+    pub operation: String,
+    pub request_hash: String,
+    pub resource: String,
+    pub incarnation: String,
+    pub receipt: Option<String>,
+}
+impl PrivateRehearsal {
+    pub fn retain_effect(&self, fact: &ExternalFact) -> Result<()> {
+        self.check_dir("journal")?;
+        let name=farcooler_workflow::digest(&(&fact.operation,&fact.resource));
+        create_file(&self.root.join("journal").join(format!("effect-{}.json",name.replace(':',"-"))),&serde_json::to_vec(fact)?,0o600)
+    }
+    pub fn reconcile(&self, fact: &ExternalFact, read_back: Option<&ExternalFact>) -> Result<bool> {
+        self.check_dir("journal")?;
+        let name=farcooler_workflow::digest(&(&fact.operation,&fact.resource));
+        let original:ExternalFact=serde_json::from_slice(&fs::read(self.root.join("journal").join(format!("effect-{}.json",name.replace(':',"-"))))?)?;
+        if original!=*fact { return refuse("post-backup effect identity changed"); }
+        Ok(read_back.is_some_and(|observed|observed.operation==fact.operation && observed.request_hash==fact.request_hash
+            && observed.resource==fact.resource && observed.incarnation==fact.incarnation && observed.receipt.is_some()))
+    }
+}
+
+impl PrivateRehearsal {
+    /// Finite local stand-in only. Each accepted operation is create-new outside
+    /// the replaceable DB, so counters observe actual fake adapter admissions.
+    pub fn fake_apply(&self,kind:&str,fact:&ExternalFact) -> Result<ExternalFact> {
+        self.check_dir("fake-remote")?;
+        if !matches!(kind,"send"|"push"|"enter"|"write") { return refuse("unsupported finite fake effect"); }
+        let call=self.fake_counter(kind)?;
+        create_file(&self.root.join("fake-remote").join(format!("calls-{kind}-{call:06}.json")),&serde_json::to_vec(fact)?,0o600)?;
+        let id=farcooler_workflow::digest(&(kind,&fact.operation,&fact.resource));
+        let mut observed=fact.clone();observed.receipt=Some(farcooler_workflow::digest(&("fake-exact-receipt",kind,fact)));
+        create_file(&self.root.join("fake-remote").join(format!("{kind}-{}.json",id.replace(':',"-"))),&serde_json::to_vec(&observed)?,0o600)?;
+        Ok(observed)
+    }
+    pub fn fake_counter(&self,kind:&str) -> Result<usize> {
+        self.check_dir("fake-remote")?;
+        Ok(fs::read_dir(self.root.join("fake-remote"))?.collect::<std::io::Result<Vec<_>>>()?.iter()
+            .filter(|entry|entry.file_name().to_string_lossy().starts_with(&format!("calls-{kind}-"))).count())
+    }
+}
+
+/// Non-wire capability minted only after a closed backup and independent restore
+/// compare. No public constructor or deserializer can fabricate this evidence.
+pub struct CommitPermit {baseline:String,proof:String,attempt:String,backup:String}
+impl CommitPermit {
+    pub(super) fn validate(&self,plan:&super::Preflight,proof:&super::Quiescence) -> Result<()> {
+        if self.baseline!=plan.raw.hash() || self.proof!=farcooler_workflow::digest(proof) || self.attempt.is_empty() || self.backup.is_empty() {return refuse("commit permit does not bind baseline/quiescence/backup");}
+        Ok(())
+    }
+    pub(super) fn attempt(&self)->&str {&self.attempt}
+    pub(super) fn backup_hash(&self)->&str {&self.backup}
+    #[cfg(test)]
+    pub(super) fn unit(plan:&super::Preflight,proof:&super::Quiescence,attempt:&str)->Self {
+        Self {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:"UNIT-ONLY-NO-BACKUP-CLAIM".into()}
+    }
+}
+impl PrivateRehearsal {
+    pub fn commit_permit(&self,plan:&super::Preflight,proof:&super::Quiescence,attempt:&str,name:&str,snapshot:&Snapshot,sequence:u32) -> Result<CommitPermit> {
+        proof.validate()?;
+        private_dir(&self.root)?;
+        let backup=self.child_name(name)?;
+        private_dir(&backup)?;
+        let declared:Snapshot=serde_json::from_slice(&read_regular(&backup.join("SNAPSHOT.json"))?)?;
+        if &declared!=snapshot {return refuse("closed backup identity mismatch");}
+        let mut current=scan(&backup)?;current.files.remove(Path::new("SNAPSHOT.json"));
+        if current!=*snapshot || scan(&self.root.join(format!("{name}-verified-restore")))?!=*snapshot {return refuse("closed backup/independent restore no longer matches");}
+        let db=Connection::open_with_flags(backup.join("db.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let baseline=super::preflight(&db)?;
+        if !plan.raw.conserved_by(&baseline.raw) || super::required_resources(&db)?!=proof.protected_resources {return refuse("backup baseline/resource binding differs from plan");}
+        let permit=CommitPermit {baseline:plan.raw.hash(),proof:farcooler_workflow::digest(proof),attempt:attempt.into(),backup:farcooler_workflow::digest(snapshot)};
+        self.record(sequence,&JournalEntry {attempt:attempt.into(),stage:"backed_up".into(),evidence:serde_json::to_string(&(permit.baseline.clone(),permit.proof.clone(),permit.backup.clone()))?})?;
+        Ok(permit)
+    }
+}

@@ -1,0 +1,5344 @@
+{
+  "objects": {
+    "agent_turn_models": [
+      "table",
+      "agent_turn_models",
+      "CREATE TABLE agent_turn_models (\n            turn_id BLOB NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,\n            -- Empty when the harness named no model.\n            model TEXT NOT NULL,\n            input_tokens INTEGER NOT NULL,\n            output_tokens INTEGER NOT NULL,\n            cache_read_tokens INTEGER NOT NULL,\n            cache_write_tokens INTEGER NOT NULL,\n            -- Millionths of a US dollar. NULL exactly when `cost_source` is\n            -- `unknown`.\n            cost_micros INTEGER,\n            cost_source TEXT NOT NULL,\n            -- The price table an estimate came from; NULL unless estimated.\n            price_table TEXT, cache_write_1h_tokens INTEGER,\n            PRIMARY KEY (turn_id, model)\n        )"
+    ],
+    "agent_turns": [
+      "table",
+      "agent_turns",
+      "CREATE TABLE agent_turns (\n            id BLOB PRIMARY KEY,\n            -- The harness's own name for the turn. A turn heard twice (a\n            -- shim replaying its ring, a log re-read after rotation) is one.\n            turn_key TEXT NOT NULL UNIQUE,\n            terminal_id BLOB,\n            worktree_id BLOB,\n            repository_id BLOB,\n            workspace_id BLOB,\n            task_id BLOB,\n            -- `claude`, `codex`, or an ACP adapter's preset.\n            harness TEXT NOT NULL,\n            -- `chat` (a protocol the daemon speaks) or `terminal` (a log it reads).\n            surface TEXT NOT NULL,\n            started_at INTEGER,\n            ended_at INTEGER NOT NULL,\n            active_ms INTEGER,\n            -- `reported`, `partial` (some calls stated none) or `not_reported`.\n            usage TEXT NOT NULL,\n            -- `turn`, or `subagent`: a claude subagent's whole run, read from\n            -- its own transcript and kept current while it runs. Its spend\n            -- counts; turn counts and active time leave it out.\n            kind TEXT NOT NULL DEFAULT 'turn'\n        )"
+    ],
+    "agent_turns_by_end": [
+      "index",
+      "agent_turns",
+      "CREATE INDEX agent_turns_by_end ON agent_turns (ended_at)"
+    ],
+    "agent_turns_by_task": [
+      "index",
+      "agent_turns",
+      "CREATE INDEX agent_turns_by_task ON agent_turns (task_id, ended_at) WHERE task_id IS NOT NULL"
+    ],
+    "agents": [
+      "table",
+      "agents",
+      "CREATE TABLE agents (\n        id BLOB PRIMARY KEY NOT NULL,\n        workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n        role TEXT NOT NULL CHECK (role IN ('orchestrator', 'builder', 'reviewer', 'lander')),\n        kind TEXT NOT NULL CHECK (kind IN ('pane', 'subagent')),\n        harness TEXT NOT NULL,\n        -- A pane's terminal. No key into terminals: an agent is history, and\n        -- outlives its pane.\n        terminal_id BLOB,\n        -- A subagent's own id (Claude's agentId, codex's agent path), and the\n        -- pane it runs under.\n        subagent_id TEXT,\n        parent_terminal_id BLOB,\n        session_id TEXT,\n        session_cwd TEXT,\n        model TEXT NOT NULL DEFAULT '',\n        title TEXT NOT NULL DEFAULT '',\n        started_at INTEGER NOT NULL,\n        ended_at INTEGER,\n        end_reason TEXT,\n        stop_asked_by TEXT,\n        stop_asked_at INTEGER,\n        CHECK ((kind = 'pane') = (terminal_id IS NOT NULL)),\n        CHECK ((kind = 'subagent') = (subagent_id IS NOT NULL))\n    )"
+    ],
+    "agents_by_subagent": [
+      "index",
+      "agents",
+      "CREATE UNIQUE INDEX agents_by_subagent ON agents (workspace_id, harness, subagent_id) WHERE subagent_id IS NOT NULL"
+    ],
+    "agents_by_terminal": [
+      "index",
+      "agents",
+      "CREATE INDEX agents_by_terminal ON agents (terminal_id) WHERE terminal_id IS NOT NULL"
+    ],
+    "agents_open": [
+      "index",
+      "agents",
+      "CREATE INDEX agents_open ON agents (workspace_id) WHERE ended_at IS NULL"
+    ],
+    "answer_wakes": [
+      "table",
+      "answer_wakes",
+      "CREATE TABLE answer_wakes (\n            note_id BLOB PRIMARY KEY NOT NULL,\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            enqueued_at INTEGER NOT NULL,\n            claimed_at INTEGER,\n            done_at INTEGER\n        , pasted_at INTEGER)"
+    ],
+    "answer_wakes_pending": [
+      "index",
+      "answer_wakes",
+      "CREATE INDEX answer_wakes_pending ON answer_wakes (enqueued_at) WHERE done_at IS NULL"
+    ],
+    "board_ci": [
+      "table",
+      "board_ci",
+      "CREATE TABLE board_ci (\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            subject TEXT NOT NULL,\n            -- The commit the runs are for, in full, once a run names it.\n            sha TEXT NOT NULL DEFAULT '',\n            status TEXT NOT NULL,\n            url TEXT NOT NULL DEFAULT '',\n            -- JSON: [{\"name\", \"state\", \"url\"}], in the order GitHub lists them.\n            jobs TEXT NOT NULL DEFAULT '[]',\n            -- When a read last worked; 0 if none has.\n            fetched_at INTEGER NOT NULL,\n            changed_at INTEGER NOT NULL,\n            -- When the runner last asked, whether or not GitHub answered.\n            asked_at INTEGER NOT NULL DEFAULT 0,\n            PRIMARY KEY (workspace_id, subject)\n        )"
+    ],
+    "board_pages": [
+      "table",
+      "board_pages",
+      "CREATE TABLE board_pages (\n            id BLOB PRIMARY KEY NOT NULL,\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            slot TEXT NOT NULL,\n            -- Copied out of the document so the list doesn't parse every page.\n            title TEXT NOT NULL,\n            summary TEXT NOT NULL DEFAULT '',\n            -- '' or 'theme', and the theme's id as text. No foreign key: a\n            -- page must outlive the plan layer.\n            anchor_kind TEXT NOT NULL DEFAULT '',\n            anchor TEXT NOT NULL DEFAULT '',\n            doc_json TEXT NOT NULL,\n            schema_v INTEGER NOT NULL,\n            bytes INTEGER NOT NULL,\n            revision INTEGER NOT NULL,\n            ordinal INTEGER NOT NULL,\n            actor TEXT NOT NULL,\n            updated_at INTEGER NOT NULL,\n            created_at INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL,\n            UNIQUE (workspace_id, slot)\n        )"
+    ],
+    "board_read_floors": [
+      "table",
+      "board_read_floors",
+      "CREATE TABLE board_read_floors (\n            workspace_id BLOB PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,\n            -- Starts at the runner's first look and only ever rises.\n            floor_ms INTEGER NOT NULL\n        )"
+    ],
+    "board_ruling_tasks": [
+      "table",
+      "board_ruling_tasks",
+      "CREATE TABLE board_ruling_tasks (\n            ruling_id BLOB NOT NULL REFERENCES board_rulings(id) ON DELETE CASCADE,\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            PRIMARY KEY (ruling_id, task_id)\n        )"
+    ],
+    "board_ruling_tasks_by_task": [
+      "index",
+      "board_ruling_tasks",
+      "CREATE INDEX board_ruling_tasks_by_task ON board_ruling_tasks (task_id)"
+    ],
+    "board_rulings": [
+      "table",
+      "board_rulings",
+      "CREATE TABLE board_rulings (\n            id BLOB PRIMARY KEY NOT NULL,\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            -- The short id's number: R-12. Counts up per board, never reused.\n            number INTEGER NOT NULL,\n            decision TEXT NOT NULL,\n            why TEXT NOT NULL,\n            reversal TEXT NOT NULL,\n            theme_id BLOB REFERENCES board_themes(id) ON DELETE SET NULL,\n            state TEXT NOT NULL,\n            -- The owner's words, or the orchestrator's, on the last move.\n            note TEXT NOT NULL DEFAULT '',\n            actor TEXT NOT NULL,\n            created_at INTEGER NOT NULL,\n            settled_by TEXT,\n            settled_at INTEGER,\n            resource_version INTEGER NOT NULL, reversed_sha TEXT,\n            UNIQUE (workspace_id, number)\n        )"
+    ],
+    "board_theme_tasks": [
+      "table",
+      "board_theme_tasks",
+      "CREATE TABLE board_theme_tasks (\n            task_id BLOB PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            theme_id BLOB NOT NULL REFERENCES board_themes(id) ON DELETE CASCADE,\n            added_at INTEGER NOT NULL\n        )"
+    ],
+    "board_theme_tasks_by_theme": [
+      "index",
+      "board_theme_tasks",
+      "CREATE INDEX board_theme_tasks_by_theme ON board_theme_tasks (theme_id)"
+    ],
+    "board_themes": [
+      "table",
+      "board_themes",
+      "CREATE TABLE board_themes (\n            id BLOB PRIMARY KEY NOT NULL,\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            name TEXT NOT NULL,\n            outcome TEXT NOT NULL DEFAULT '',\n            story TEXT NOT NULL DEFAULT '',\n            next TEXT NOT NULL DEFAULT '',\n            owner_ask TEXT NOT NULL DEFAULT '',\n            state TEXT NOT NULL,\n            ordinal INTEGER NOT NULL,\n            -- When `story` was last written; 0 until it first is.\n            story_at INTEGER NOT NULL DEFAULT 0,\n            created_at INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL\n        )"
+    ],
+    "board_themes_live_name": [
+      "index",
+      "board_themes",
+      "CREATE UNIQUE INDEX board_themes_live_name\n            ON board_themes (workspace_id, name COLLATE NOCASE) WHERE state <> 'dropped'"
+    ],
+    "check_in_cleanup_fence": [
+      "table",
+      "check_in_cleanup_fence",
+      "CREATE TABLE check_in_cleanup_fence (\n            token BLOB PRIMARY KEY NOT NULL,\n            started_at INTEGER NOT NULL\n        )"
+    ],
+    "check_in_device_caps_delete": [
+      "trigger",
+      "device_caps",
+      "CREATE TRIGGER check_in_device_caps_delete BEFORE DELETE ON device_caps WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = OLD.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = OLD.client_id; END"
+    ],
+    "check_in_device_caps_insert": [
+      "trigger",
+      "device_caps",
+      "CREATE TRIGGER check_in_device_caps_insert BEFORE INSERT ON device_caps WHEN NOT EXISTS (SELECT 1 FROM device_caps WHERE client_id = NEW.client_id AND cap IS NEW.cap) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = NEW.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = NEW.client_id; END"
+    ],
+    "check_in_device_caps_update": [
+      "trigger",
+      "device_caps",
+      "CREATE TRIGGER check_in_device_caps_update BEFORE UPDATE ON device_caps WHEN NOT (OLD.client_id IS NEW.client_id AND OLD.cap IS NEW.cap) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device IN (OLD.client_id, NEW.client_id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device IN (OLD.client_id, NEW.client_id); END"
+    ],
+    "check_in_enter_fences": [
+      "table",
+      "check_in_enter_fences",
+      "CREATE TABLE check_in_enter_fences (\n            workspace_id BLOB PRIMARY KEY NOT NULL,\n            task_id BLOB NOT NULL,\n            terminal_id BLOB NOT NULL,\n            occurrence_id BLOB NOT NULL UNIQUE,\n            attempt_id BLOB NOT NULL UNIQUE,\n            daemon_instance BLOB NOT NULL,\n            authorizer_device TEXT\n        )"
+    ],
+    "check_in_instance": [
+      "table",
+      "check_in_instance",
+      "CREATE TABLE check_in_instance (\n            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),\n            instance_id BLOB NOT NULL,\n            clean INTEGER NOT NULL CHECK (clean IN (0, 1))\n        )"
+    ],
+    "check_in_lead_delete": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER check_in_lead_delete BEFORE DELETE ON workspace_leads WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = OLD.workspace_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = OLD.workspace_id; END"
+    ],
+    "check_in_lead_insert": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER check_in_lead_insert BEFORE INSERT ON workspace_leads WHEN NOT EXISTS (SELECT 1 FROM workspace_leads WHERE workspace_id = NEW.workspace_id AND handle IS NEW.handle) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = NEW.workspace_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = NEW.workspace_id; END"
+    ],
+    "check_in_lead_update": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER check_in_lead_update BEFORE UPDATE ON workspace_leads WHEN NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.handle IS NEW.handle) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id IN (OLD.workspace_id, NEW.workspace_id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id IN (OLD.workspace_id, NEW.workspace_id); END"
+    ],
+    "check_in_member_devices_delete": [
+      "trigger",
+      "member_devices",
+      "CREATE TRIGGER check_in_member_devices_delete BEFORE DELETE ON member_devices WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = OLD.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = OLD.client_id; END"
+    ],
+    "check_in_member_devices_insert": [
+      "trigger",
+      "member_devices",
+      "CREATE TRIGGER check_in_member_devices_insert BEFORE INSERT ON member_devices WHEN NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = NEW.client_id AND handle IS NEW.handle) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = NEW.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = NEW.client_id; END"
+    ],
+    "check_in_member_devices_update": [
+      "trigger",
+      "member_devices",
+      "CREATE TRIGGER check_in_member_devices_update BEFORE UPDATE ON member_devices WHEN NOT (OLD.client_id IS NEW.client_id AND OLD.handle IS NEW.handle) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device IN (OLD.client_id, NEW.client_id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device IN (OLD.client_id, NEW.client_id); END"
+    ],
+    "check_in_occurrences": [
+      "table",
+      "check_in_occurrences",
+      "CREATE TABLE check_in_occurrences (\n            id BLOB PRIMARY KEY NOT NULL,\n            workspace_id BLOB NOT NULL,\n            task_id BLOB NOT NULL,\n            generation BLOB NOT NULL,\n            eligibility_epoch INTEGER NOT NULL,\n            authorizer_device TEXT,\n            authorizer_source TEXT NOT NULL CHECK (authorizer_source IN ('local_person', 'owner_device')),\n            authorized_at INTEGER NOT NULL,\n            template_version INTEGER NOT NULL,\n            due_at INTEGER NOT NULL,\n            state TEXT NOT NULL CHECK (state IN\n                ('pending', 'claimed', 'enter_admitted', 'submitted', 'confirmed', 'cancelled', 'uncertain', 'resolved_uncertain')),\n            attempt_id BLOB,\n            daemon_instance BLOB,\n            terminal_id BLOB,\n            pane_id TEXT,\n            terminal_lease INTEGER,\n            terminal_epoch INTEGER,\n            process_id INTEGER,\n            process_started INTEGER,\n            thread_id TEXT,\n            message_text TEXT,\n            rollout_path TEXT,\n            rollout_device INTEGER,\n            rollout_inode INTEGER,\n            rollout_offset INTEGER,\n            claimed_at INTEGER,\n            admitted_at INTEGER,\n            submitted_at INTEGER,\n            confirmed_at INTEGER,\n            observation TEXT,\n            reason TEXT\n        , tty TEXT, process_incarnation INTEGER)"
+    ],
+    "check_in_one_active": [
+      "index",
+      "check_in_occurrences",
+      "CREATE UNIQUE INDEX check_in_one_active ON check_in_occurrences(workspace_id)\n            WHERE state IN ('pending', 'claimed', 'enter_admitted', 'submitted', 'uncertain')"
+    ],
+    "check_in_owner_devices_delete": [
+      "trigger",
+      "owner_devices",
+      "CREATE TRIGGER check_in_owner_devices_delete BEFORE DELETE ON owner_devices WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = OLD.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = OLD.client_id; END"
+    ],
+    "check_in_owner_devices_insert": [
+      "trigger",
+      "owner_devices",
+      "CREATE TRIGGER check_in_owner_devices_insert BEFORE INSERT ON owner_devices WHEN NOT EXISTS (SELECT 1 FROM owner_devices WHERE client_id = NEW.client_id AND state IS NEW.state) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = NEW.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = NEW.client_id; END"
+    ],
+    "check_in_owner_devices_update": [
+      "trigger",
+      "owner_devices",
+      "CREATE TRIGGER check_in_owner_devices_update BEFORE UPDATE ON owner_devices WHEN NOT (OLD.client_id IS NEW.client_id AND OLD.state IS NEW.state) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device IN (OLD.client_id, NEW.client_id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device IN (OLD.client_id, NEW.client_id); END"
+    ],
+    "check_in_released_devices_delete": [
+      "trigger",
+      "released_devices",
+      "CREATE TRIGGER check_in_released_devices_delete BEFORE DELETE ON released_devices WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = OLD.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = OLD.client_id; END"
+    ],
+    "check_in_released_devices_insert": [
+      "trigger",
+      "released_devices",
+      "CREATE TRIGGER check_in_released_devices_insert BEFORE INSERT ON released_devices WHEN NOT EXISTS (SELECT 1 FROM released_devices WHERE client_id = NEW.client_id) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device = NEW.client_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device = NEW.client_id; END"
+    ],
+    "check_in_released_devices_update": [
+      "trigger",
+      "released_devices",
+      "CREATE TRIGGER check_in_released_devices_update BEFORE UPDATE ON released_devices WHEN NOT (OLD.client_id IS NEW.client_id) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.authorizer_device IN (OLD.client_id, NEW.client_id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'authorizer_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.authorizer_device IN (OLD.client_id, NEW.client_id); END"
+    ],
+    "check_in_repository_delete": [
+      "trigger",
+      "repositories",
+      "CREATE TRIGGER check_in_repository_delete BEFORE DELETE ON repositories WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id IN (SELECT id FROM workspaces WHERE repository_id = OLD.id)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id IN (SELECT id FROM workspaces WHERE repository_id = OLD.id); END"
+    ],
+    "check_in_reservations_by_workspace": [
+      "index",
+      "check_in_target_reservations",
+      "CREATE INDEX check_in_reservations_by_workspace ON check_in_target_reservations(workspace_id)"
+    ],
+    "check_in_reserved_target_move": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER check_in_reserved_target_move BEFORE UPDATE OF workspace_id, role ON terminals WHEN NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.role IS NEW.role) AND EXISTS (SELECT 1 FROM check_in_target_reservations WHERE terminal_id = OLD.id) BEGIN SELECT RAISE(ABORT, 'check_in_target_in_flight'); END"
+    ],
+    "check_in_schedule_delete": [
+      "trigger",
+      "check_in_schedules",
+      "CREATE TRIGGER check_in_schedule_delete BEFORE DELETE ON check_in_schedules WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END"
+    ],
+    "check_in_schedule_insert": [
+      "trigger",
+      "check_in_schedules",
+      "CREATE TRIGGER check_in_schedule_insert BEFORE INSERT ON check_in_schedules WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = NEW.workspace_id) BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END"
+    ],
+    "check_in_schedule_update": [
+      "trigger",
+      "check_in_schedules",
+      "CREATE TRIGGER check_in_schedule_update BEFORE UPDATE ON check_in_schedules WHEN EXISTS (SELECT 1 FROM check_in_enter_fences WHERE workspace_id = OLD.workspace_id) BEGIN SELECT RAISE(ABORT, 'check_in_enter_in_flight'); END"
+    ],
+    "check_in_schedules": [
+      "table",
+      "check_in_schedules",
+      "CREATE TABLE check_in_schedules (\n            workspace_id BLOB PRIMARY KEY NOT NULL,\n            task_id BLOB NOT NULL,\n            generation BLOB NOT NULL,\n            authorizer_device TEXT,\n            authorizer_source TEXT NOT NULL CHECK (authorizer_source IN ('local_person', 'owner_device')),\n            authorized_at INTEGER NOT NULL,\n            template_version INTEGER NOT NULL,\n            next_due INTEGER NOT NULL,\n            state TEXT NOT NULL CHECK (state IN ('enabled', 'disabled', 'suspended')),\n            eligibility_epoch INTEGER NOT NULL DEFAULT 0,\n            reason TEXT\n        )"
+    ],
+    "check_in_target_reservations": [
+      "table",
+      "check_in_target_reservations",
+      "CREATE TABLE check_in_target_reservations (\n            token BLOB PRIMARY KEY NOT NULL,\n            workspace_id BLOB,\n            terminal_id BLOB NOT NULL,\n            operation TEXT NOT NULL CHECK (operation IN ('stop', 'remove')),\n            phase TEXT NOT NULL CHECK (phase IN ('reserved', 'completed', 'uncertain')),\n            process_id INTEGER NOT NULL,\n            process_started INTEGER,\n            created_at INTEGER NOT NULL\n        )"
+    ],
+    "check_in_task_delete": [
+      "trigger",
+      "tasks",
+      "CREATE TRIGGER check_in_task_delete BEFORE DELETE ON tasks WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.task_id = OLD.id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.task_id = OLD.id; END"
+    ],
+    "check_in_task_update": [
+      "trigger",
+      "tasks",
+      "CREATE TRIGGER check_in_task_update BEFORE UPDATE OF status, workspace_id ON tasks WHEN NOT (OLD.workspace_id IS NEW.workspace_id) OR ((OLD.status IN ('done', 'cancelled')) != (NEW.status IN ('done', 'cancelled'))) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.task_id = OLD.id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.task_id = OLD.id; END"
+    ],
+    "check_in_terminal_delete": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER check_in_terminal_delete BEFORE DELETE ON terminals WHEN OLD.role = 2 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = OLD.workspace_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = OLD.workspace_id; END"
+    ],
+    "check_in_terminal_insert": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER check_in_terminal_insert BEFORE INSERT ON terminals WHEN NEW.role = 2 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = NEW.workspace_id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = NEW.workspace_id; END"
+    ],
+    "check_in_terminal_update": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER check_in_terminal_update BEFORE UPDATE ON terminals WHEN NOT (OLD.workspace_id IS NEW.workspace_id AND OLD.role IS NEW.role AND OLD.command_preset IS NEW.command_preset AND OLD.intent IS NEW.intent AND OLD.runtime_confirmed IS NEW.runtime_confirmed AND OLD.exit_code IS NEW.exit_code AND OLD.exit_signal IS NEW.exit_signal AND OLD.lease_generation IS NEW.lease_generation AND OLD.epoch IS NEW.epoch AND OLD.pane_mode IS NEW.pane_mode AND OLD.agent_session_id IS NEW.agent_session_id) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE (s.workspace_id IN (OLD.workspace_id, NEW.workspace_id) AND (OLD.role = 2 OR NEW.role = 2))) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND (check_in_schedules.workspace_id IN (OLD.workspace_id, NEW.workspace_id) AND (OLD.role = 2 OR NEW.role = 2)); END"
+    ],
+    "check_in_workspace_delete": [
+      "trigger",
+      "workspaces",
+      "CREATE TRIGGER check_in_workspace_delete BEFORE DELETE ON workspaces WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = OLD.id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = OLD.id; END"
+    ],
+    "check_in_workspace_update": [
+      "trigger",
+      "workspaces",
+      "CREATE TRIGGER check_in_workspace_update BEFORE UPDATE OF wake_on_answer ON workspaces WHEN NOT (OLD.wake_on_answer IS NEW.wake_on_answer) BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id = OLD.id) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id = OLD.id; END"
+    ],
+    "check_in_worktree_delete": [
+      "trigger",
+      "worktrees",
+      "CREATE TRIGGER check_in_worktree_delete BEFORE DELETE ON worktrees WHEN 1 BEGIN SELECT CASE WHEN EXISTS (SELECT 1 FROM check_in_schedules s JOIN check_in_enter_fences f ON f.workspace_id = s.workspace_id WHERE s.workspace_id IN (SELECT workspace_id FROM terminals WHERE worktree_id = OLD.id AND role = 2)) THEN RAISE(ABORT, 'check_in_enter_in_flight') END; UPDATE check_in_schedules SET state = 'suspended', reason = 'eligibility_changed', eligibility_epoch = eligibility_epoch + 1 WHERE state = 'enabled' AND check_in_schedules.workspace_id IN (SELECT workspace_id FROM terminals WHERE worktree_id = OLD.id AND role = 2); END"
+    ],
+    "compose_hold_images": [
+      "table",
+      "compose_hold_images",
+      "CREATE TABLE compose_hold_images (\n            hold_seq INTEGER NOT NULL REFERENCES compose_holds(seq) ON DELETE CASCADE,\n            ord INTEGER NOT NULL,\n            mime TEXT NOT NULL,\n            bytes BLOB NOT NULL,\n            PRIMARY KEY (hold_seq, ord)\n        )"
+    ],
+    "compose_holds": [
+      "table",
+      "compose_holds",
+      "CREATE TABLE compose_holds (\n            seq INTEGER PRIMARY KEY AUTOINCREMENT,\n            id BLOB NOT NULL UNIQUE,\n            terminal_id BLOB NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,\n            text TEXT NOT NULL,\n            files TEXT NOT NULL,\n            enqueued_at INTEGER NOT NULL,\n            claimed_at INTEGER\n        )"
+    ],
+    "compose_holds_by_terminal": [
+      "index",
+      "compose_holds",
+      "CREATE INDEX compose_holds_by_terminal ON compose_holds (terminal_id, seq)"
+    ],
+    "compose_waits": [
+      "table",
+      "compose_waits",
+      "CREATE TABLE compose_waits (\n            id BLOB PRIMARY KEY,\n            terminal_id BLOB NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,\n            wait TEXT NOT NULL,\n            kept_at INTEGER NOT NULL\n        )"
+    ],
+    "crash_signatures": [
+      "table",
+      "crash_signatures",
+      "CREATE TABLE crash_signatures (\n             -- The daemon's digest of the signature, lowercase hex.\n             signature TEXT PRIMARY KEY NOT NULL,\n             -- The signature as first reported, JSON.\n             detail TEXT NOT NULL,\n             count INTEGER NOT NULL,\n             first_seen INTEGER NOT NULL,\n             last_seen INTEGER NOT NULL,\n             -- The app build of the latest report.\n             last_build TEXT NOT NULL,\n             -- The card filed for it, if any. No key into tasks: the record\n             -- outlives a card deleted.\n             task_id BLOB,\n             -- Every place it was reported from, JSON: the build and the\n             -- app's own frames' offsets, as the daemon spells them.\n             places TEXT NOT NULL DEFAULT '[]'\n         )"
+    ],
+    "device_added_by": [
+      "table",
+      "device_added_by",
+      "CREATE TABLE device_added_by (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             added_by TEXT NOT NULL,\n             added_at INTEGER NOT NULL\n         )"
+    ],
+    "device_added_by_enroller": [
+      "index",
+      "device_added_by",
+      "CREATE INDEX device_added_by_enroller ON device_added_by(added_by, added_at)"
+    ],
+    "device_caps": [
+      "table",
+      "device_caps",
+      "CREATE TABLE device_caps (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             cap TEXT NOT NULL CHECK (cap IN ('viewer', 'member'))\n         )"
+    ],
+    "device_enrollers": [
+      "table",
+      "device_enrollers",
+      "CREATE TABLE device_enrollers (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n             enrolled_at INTEGER NOT NULL\n         )"
+    ],
+    "hold_wakes": [
+      "table",
+      "hold_wakes",
+      "CREATE TABLE hold_wakes (\n            note_id BLOB PRIMARY KEY NOT NULL,\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            enqueued_at INTEGER NOT NULL,\n            claimed_at INTEGER,\n            done_at INTEGER\n        , pasted_at INTEGER)"
+    ],
+    "hold_wakes_pending": [
+      "index",
+      "hold_wakes",
+      "CREATE INDEX hold_wakes_pending ON hold_wakes (enqueued_at) WHERE done_at IS NULL"
+    ],
+    "idempotency": [
+      "table",
+      "idempotency",
+      "CREATE TABLE idempotency (\n            key TEXT NOT NULL,\n            client_id BLOB NOT NULL,\n            request_hash TEXT NOT NULL,\n            created_at INTEGER NOT NULL,\n            PRIMARY KEY (key, client_id)\n        )"
+    ],
+    "landing_tickets": [
+      "table",
+      "landing_tickets",
+      "CREATE TABLE landing_tickets (\n        landing_id BLOB NOT NULL REFERENCES landings(id) ON DELETE CASCADE,\n        task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n        added_at INTEGER NOT NULL,\n        PRIMARY KEY (landing_id, task_id)\n    )"
+    ],
+    "landing_tickets_by_task": [
+      "index",
+      "landing_tickets",
+      "CREATE INDEX landing_tickets_by_task ON landing_tickets (task_id)"
+    ],
+    "landings": [
+      "table",
+      "landings",
+      "CREATE TABLE landings (\n        id BLOB PRIMARY KEY NOT NULL,\n        workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n        number INTEGER NOT NULL,\n        route TEXT NOT NULL,\n        base TEXT NOT NULL DEFAULT '',\n        pushed_sha TEXT,\n        state TEXT NOT NULL,\n        state_since INTEGER NOT NULL,\n        lander_id BLOB REFERENCES agents(id) ON DELETE SET NULL,\n        title TEXT NOT NULL DEFAULT '',\n        collecting INTEGER NOT NULL DEFAULT 0,\n        actor TEXT NOT NULL,\n        created_at INTEGER NOT NULL,\n        landed_at INTEGER,\n        resource_version INTEGER NOT NULL,\n        UNIQUE (workspace_id, number)\n    )"
+    ],
+    "landings_collecting": [
+      "index",
+      "landings",
+      "CREATE UNIQUE INDEX landings_collecting ON landings (workspace_id)\n        WHERE collecting = 1 AND state NOT IN ('landed', 'dropped')"
+    ],
+    "line_events": [
+      "table",
+      "line_events",
+      "CREATE TABLE line_events (\n        id BLOB PRIMARY KEY NOT NULL,\n        at INTEGER NOT NULL,\n        actor TEXT NOT NULL,\n        theme_id BLOB REFERENCES board_themes(id) ON DELETE CASCADE,\n        task_id BLOB REFERENCES tasks(id) ON DELETE CASCADE,\n        landing_id BLOB REFERENCES landings(id) ON DELETE CASCADE,\n        kind TEXT NOT NULL,\n        body TEXT NOT NULL DEFAULT '',\n        extra TEXT NOT NULL DEFAULT '{}',\n        CHECK ((theme_id IS NULL) <> (task_id IS NULL AND landing_id IS NULL))\n    )"
+    ],
+    "line_events_by_landing": [
+      "index",
+      "line_events",
+      "CREATE INDEX line_events_by_landing ON line_events (landing_id, at) WHERE landing_id IS NOT NULL"
+    ],
+    "line_events_by_task": [
+      "index",
+      "line_events",
+      "CREATE INDEX line_events_by_task ON line_events (task_id, at) WHERE task_id IS NOT NULL"
+    ],
+    "line_events_by_theme": [
+      "index",
+      "line_events",
+      "CREATE INDEX line_events_by_theme ON line_events (theme_id, at) WHERE theme_id IS NOT NULL"
+    ],
+    "member_access": [
+      "table",
+      "member_access",
+      "CREATE TABLE member_access (\n             handle TEXT PRIMARY KEY NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n             access TEXT NOT NULL CHECK (access IN ('admin', 'member', 'viewer'))\n         )"
+    ],
+    "member_board_read_floors": [
+      "table",
+      "member_board_read_floors",
+      "CREATE TABLE member_board_read_floors (\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n            floor_ms INTEGER NOT NULL,\n            PRIMARY KEY (workspace_id, handle)\n        )"
+    ],
+    "member_connectors": [
+      "table",
+      "member_connectors",
+      "CREATE TABLE member_connectors (\n             handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n             server TEXT NOT NULL,\n             PRIMARY KEY (handle, server)\n         )"
+    ],
+    "member_devices": [
+      "table",
+      "member_devices",
+      "CREATE TABLE member_devices (\n            client_id TEXT PRIMARY KEY NOT NULL,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE\n        )"
+    ],
+    "member_login_policy": [
+      "table",
+      "member_login_policy",
+      "CREATE TABLE member_login_policy (\n             harness TEXT PRIMARY KEY NOT NULL,\n             members_own INTEGER NOT NULL,\n             set_at INTEGER NOT NULL,\n             set_by TEXT NOT NULL\n         )"
+    ],
+    "member_logins": [
+      "table",
+      "member_logins",
+      "CREATE TABLE member_logins (\n             handle TEXT PRIMARY KEY NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n             login_id TEXT NOT NULL UNIQUE\n         , stopped_at INTEGER, asked_at INTEGER, signed_in_at INTEGER, codex_asked_at INTEGER, cursor_asked_at INTEGER)"
+    ],
+    "member_review_reviewed": [
+      "table",
+      "member_review_reviewed",
+      "CREATE TABLE member_review_reviewed (\n            worktree_id BLOB NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,\n            branch TEXT NOT NULL,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n            head_commit TEXT NOT NULL,\n            worktree_digest TEXT NOT NULL,\n            gate_head INTEGER NOT NULL DEFAULT 0,\n            gate_index INTEGER NOT NULL DEFAULT 0,\n            marked_at INTEGER NOT NULL,\n            PRIMARY KEY (worktree_id, branch, handle)\n        )"
+    ],
+    "member_task_reads": [
+      "table",
+      "member_task_reads",
+      "CREATE TABLE member_task_reads (\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n            opened_ms INTEGER NOT NULL,\n            PRIMARY KEY (task_id, handle)\n        )"
+    ],
+    "members": [
+      "table",
+      "members",
+      "CREATE TABLE members (\n            handle TEXT PRIMARY KEY NOT NULL,\n            name TEXT NOT NULL,\n            created_at INTEGER NOT NULL\n        , account TEXT NULL, email TEXT NULL, role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'maintainer')))"
+    ],
+    "members_by_account": [
+      "index",
+      "members",
+      "CREATE UNIQUE INDEX members_by_account ON members(account) WHERE account IS NOT NULL"
+    ],
+    "message_wakes": [
+      "table",
+      "message_wakes",
+      "CREATE TABLE message_wakes (\n            note_id BLOB PRIMARY KEY NOT NULL,\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            to_terminal BLOB,\n            enqueued_at INTEGER NOT NULL,\n            claimed_at INTEGER,\n            pasted_at INTEGER,\n            done_at INTEGER\n        )"
+    ],
+    "message_wakes_pending": [
+      "index",
+      "message_wakes",
+      "CREATE INDEX message_wakes_pending ON message_wakes (enqueued_at) WHERE done_at IS NULL"
+    ],
+    "meta": [
+      "table",
+      "meta",
+      "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)"
+    ],
+    "owner_devices": [
+      "table",
+      "owner_devices",
+      "CREATE TABLE owner_devices (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             state TEXT NOT NULL DEFAULT 'confirmed' CHECK (state IN ('confirmed', 'check'))\n         )"
+    ],
+    "page_events": [
+      "table",
+      "page_events",
+      "CREATE TABLE page_events (\n            id INTEGER PRIMARY KEY AUTOINCREMENT,\n            at INTEGER NOT NULL,\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            slot TEXT NOT NULL,\n            actor TEXT NOT NULL,\n            kind TEXT NOT NULL,\n            bytes INTEGER NOT NULL,\n            revision INTEGER NOT NULL,\n            shape TEXT NOT NULL DEFAULT ''\n        )"
+    ],
+    "page_events_by_slot": [
+      "index",
+      "page_events",
+      "CREATE INDEX page_events_by_slot ON page_events (workspace_id, slot, at)"
+    ],
+    "pending_teammates": [
+      "table",
+      "pending_teammates",
+      "CREATE TABLE pending_teammates (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             enrolled_at INTEGER NOT NULL\n         )"
+    ],
+    "people_events": [
+      "table",
+      "people_events",
+      "CREATE TABLE people_events (\n            id INTEGER PRIMARY KEY AUTOINCREMENT,\n            at INTEGER NOT NULL,\n            -- Who made the change: `user` for the owner, `member:<handle>`.\n            actor TEXT NOT NULL,\n            -- Whom it's about; empty for a charter edit.\n            handle TEXT NOT NULL,\n            -- The workspace, for a charter edit. No key into workspaces: the\n            -- record outlives a workspace deleted.\n            workspace_id BLOB,\n            kind TEXT NOT NULL,\n            detail TEXT NOT NULL DEFAULT '{}'\n        )"
+    ],
+    "plan_budgets": [
+      "table",
+      "plan_budgets",
+      "CREATE TABLE \"plan_budgets\" (\n             id BLOB PRIMARY KEY NOT NULL,\n             workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n             theme_id BLOB REFERENCES board_themes(id) ON DELETE CASCADE,\n             task_id BLOB REFERENCES tasks(id) ON DELETE CASCADE,\n             tokens INTEGER NOT NULL CHECK (tokens > 0),\n             set_at INTEGER NOT NULL,\n             CHECK ((theme_id IS NULL) <> (task_id IS NULL))\n         )"
+    ],
+    "plan_budgets_by_task": [
+      "index",
+      "plan_budgets",
+      "CREATE UNIQUE INDEX plan_budgets_by_task ON plan_budgets (task_id) WHERE task_id IS NOT NULL"
+    ],
+    "plan_budgets_by_theme": [
+      "index",
+      "plan_budgets",
+      "CREATE UNIQUE INDEX plan_budgets_by_theme ON plan_budgets (theme_id) WHERE theme_id IS NOT NULL"
+    ],
+    "pr_nudges": [
+      "table",
+      "pr_nudges",
+      "CREATE TABLE pr_nudges (\n            -- `host/owner/repo` on GitHub, lower case.\n            repo TEXT NOT NULL,\n            pr_number INTEGER NOT NULL,\n            -- Unix milliseconds, when the comment was claimed (and so, but for a crash, sent).\n            claimed_at INTEGER NOT NULL,\n            PRIMARY KEY (repo, pr_number)\n        )"
+    ],
+    "released_devices": [
+      "table",
+      "released_devices",
+      "CREATE TABLE released_devices (\n            client_id TEXT PRIMARY KEY NOT NULL\n        )"
+    ],
+    "rep_desks": [
+      "table",
+      "rep_desks",
+      "CREATE TABLE rep_desks (\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            PRIMARY KEY (workspace_id, handle)\n        )"
+    ],
+    "repositories": [
+      "table",
+      "repositories",
+      "CREATE TABLE repositories (\n            id BLOB PRIMARY KEY,\n            host_id BLOB NOT NULL,\n            repository_root_id BLOB NOT NULL REFERENCES repository_roots(id),\n            display_name TEXT NOT NULL,\n            canonical_git_dir TEXT NOT NULL,\n            remote_summary TEXT NOT NULL,\n            resource_version INTEGER NOT NULL\n        , task_key_prefix TEXT NOT NULL DEFAULT '')"
+    ],
+    "repositories_one_task_prefix": [
+      "index",
+      "repositories",
+      "CREATE UNIQUE INDEX repositories_one_task_prefix\n            ON repositories (task_key_prefix) WHERE task_key_prefix != ''"
+    ],
+    "repository_roots": [
+      "table",
+      "repository_roots",
+      "CREATE TABLE repository_roots (\n            id BLOB PRIMARY KEY,\n            host_id BLOB NOT NULL,\n            path TEXT NOT NULL UNIQUE,\n            created_at INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL\n        )"
+    ],
+    "reps": [
+      "table",
+      "reps",
+      "CREATE TABLE reps (\n            terminal_id BLOB PRIMARY KEY NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,\n            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,\n            UNIQUE (workspace_id, handle)\n        )"
+    ],
+    "review_bases": [
+      "table",
+      "review_bases",
+      "CREATE TABLE review_bases (\n            worktree_id BLOB PRIMARY KEY REFERENCES \"worktrees\"(id) ON DELETE CASCADE,\n            base_ref TEXT NOT NULL\n        )"
+    ],
+    "review_reviewed": [
+      "table",
+      "review_reviewed",
+      "CREATE TABLE review_reviewed (\n            worktree_id BLOB NOT NULL REFERENCES \"worktrees\"(id) ON DELETE CASCADE,\n            branch TEXT NOT NULL,\n            head_commit TEXT NOT NULL,\n            worktree_digest TEXT NOT NULL,\n            gate_head INTEGER NOT NULL DEFAULT 0,\n            gate_index INTEGER NOT NULL DEFAULT 0,\n            marked_at INTEGER NOT NULL,\n            PRIMARY KEY (worktree_id, branch)\n        )"
+    ],
+    "review_stack_parents": [
+      "table",
+      "review_stack_parents",
+      "CREATE TABLE review_stack_parents (\n            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,\n            branch TEXT NOT NULL,\n            parent_branch TEXT NOT NULL,\n            PRIMARY KEY (repository_id, branch)\n        )"
+    ],
+    "revoked_marks": [
+      "table",
+      "revoked_marks",
+      "CREATE TABLE revoked_marks (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             revoked_at INTEGER NOT NULL\n         )"
+    ],
+    "sqlite_sequence": [
+      "table",
+      "sqlite_sequence",
+      "CREATE TABLE sqlite_sequence(name,seq)"
+    ],
+    "step_up_keys": [
+      "table",
+      "step_up_keys",
+      "CREATE TABLE step_up_keys (\n             client_id TEXT PRIMARY KEY NOT NULL,\n             alg TEXT NOT NULL,\n             pubkey BLOB NOT NULL,\n             state TEXT NOT NULL CHECK (state IN ('trusted', 'proposed')),\n             registered_at INTEGER NOT NULL,\n             sign_count INTEGER NOT NULL DEFAULT 0\n         )"
+    ],
+    "subagent_descriptions": [
+      "table",
+      "subagent_descriptions",
+      "CREATE TABLE subagent_descriptions (\n             agent_id TEXT PRIMARY KEY NOT NULL,\n             description TEXT NOT NULL,\n             recorded_at INTEGER NOT NULL\n         )"
+    ],
+    "task_blocks": [
+      "table",
+      "task_blocks",
+      "CREATE TABLE task_blocks (\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            blocked_by BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            reason TEXT NOT NULL DEFAULT '',\n            PRIMARY KEY (task_id, blocked_by)\n        )"
+    ],
+    "task_notes": [
+      "table",
+      "task_notes",
+      "CREATE TABLE task_notes (\n            id BLOB PRIMARY KEY NOT NULL,\n            -- A task deleted (directly, or by its repository cascading, see\n            -- tasks.repository_id above) takes its whole decision log with\n            -- it, and succeeds in doing so: the append-only trigger below is\n            -- guarded to fire only while the task still exists, so it stops\n            -- a note being rewritten or erased one at a time out of a LIVE\n            -- log, and gets out of the way of the log leaving as a unit when\n            -- its task goes.\n            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n            kind TEXT NOT NULL,\n            actor TEXT NOT NULL,\n            at INTEGER NOT NULL,\n            body TEXT NOT NULL,\n            extra TEXT NOT NULL DEFAULT '{}',\n            supersedes BLOB REFERENCES task_notes(id)\n        )"
+    ],
+    "task_notes_by_kind": [
+      "index",
+      "task_notes",
+      "CREATE INDEX task_notes_by_kind ON task_notes (task_id, kind)"
+    ],
+    "task_notes_by_task": [
+      "index",
+      "task_notes",
+      "CREATE INDEX task_notes_by_task ON task_notes (task_id, at)"
+    ],
+    "task_notes_forbid_delete": [
+      "trigger",
+      "task_notes",
+      "CREATE TRIGGER task_notes_forbid_delete\n        BEFORE DELETE ON task_notes\n        WHEN EXISTS (SELECT 1 FROM tasks WHERE id = OLD.task_id)\n        BEGIN\n            SELECT RAISE(ABORT, 'task_notes is append-only; supersede instead');\n        END"
+    ],
+    "task_notes_forbid_update": [
+      "trigger",
+      "task_notes",
+      "CREATE TRIGGER task_notes_forbid_update\n        BEFORE UPDATE ON task_notes\n        BEGIN\n            SELECT RAISE(ABORT, 'task_notes is append-only; supersede instead');\n        END"
+    ],
+    "task_reads": [
+      "table",
+      "task_reads",
+      "CREATE TABLE task_reads (\n            task_id BLOB PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,\n            opened_ms INTEGER NOT NULL\n        )"
+    ],
+    "tasks": [
+      "table",
+      "tasks",
+      "CREATE TABLE tasks (\n            id BLOB PRIMARY KEY NOT NULL,\n            -- Deleting a repository cascades here, and from here on to every\n            -- note the task ever carried (see task_notes.task_id below). The\n            -- notes' append-only triggers do not block this: they guard a\n            -- note against being touched while its task is still around, not\n            -- against leaving with it. So deleting a repository DOES succeed\n            -- and DOES take its whole board with it, decision log included —\n            -- the same rule as the ephemeral rows (workspaces, terminals)\n            -- this pattern was written for, even though a task's notes are a\n            -- decision log the design explicitly wants kept while the task\n            -- lives. Left as CASCADE deliberately — changing it is a product\n            -- decision, not this migration's to make — but a reader of the\n            -- schema should not have to discover the consequence by testing\n            -- repository deletion.\n            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,\n            key TEXT NOT NULL,\n            title TEXT NOT NULL,\n            status TEXT NOT NULL,\n            status_since INTEGER NOT NULL,\n            intent TEXT NOT NULL DEFAULT '',\n            acceptance TEXT NOT NULL DEFAULT '[]',\n            constraints TEXT NOT NULL DEFAULT '[]',\n            labels TEXT NOT NULL DEFAULT '[]',\n            worktree_id BLOB REFERENCES \"worktrees\"(id) ON DELETE SET NULL,\n            created_at INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL, former_key TEXT, edited_at INTEGER, workspace_id BLOB REFERENCES workspaces(id), wait_kind TEXT, wait_line TEXT, wait_rank INTEGER, wait_until INTEGER, wait_event TEXT, wait_since INTEGER,\n            UNIQUE (repository_id, key)\n        )"
+    ],
+    "tasks_by_repository": [
+      "index",
+      "tasks",
+      "CREATE INDEX tasks_by_repository ON tasks (repository_id, status)"
+    ],
+    "tasks_by_workspace": [
+      "index",
+      "tasks",
+      "CREATE INDEX tasks_by_workspace ON tasks (workspace_id, status)"
+    ],
+    "tasks_by_worktree": [
+      "index",
+      "tasks",
+      "CREATE INDEX tasks_by_worktree ON tasks (worktree_id, status)"
+    ],
+    "tasks_held_until": [
+      "index",
+      "tasks",
+      "CREATE INDEX tasks_held_until ON tasks (wait_until) WHERE wait_until IS NOT NULL"
+    ],
+    "tasks_in_line": [
+      "index",
+      "tasks",
+      "CREATE INDEX tasks_in_line ON tasks (workspace_id, wait_line, wait_rank) WHERE wait_rank IS NOT NULL"
+    ],
+    "tasks_keep_a_workspace": [
+      "trigger",
+      "tasks",
+      "CREATE TRIGGER tasks_keep_a_workspace\n        BEFORE UPDATE OF workspace_id ON tasks WHEN NEW.workspace_id IS NULL\n        BEGIN\n            SELECT RAISE(ABORT, 'a task needs a workspace');\n        END"
+    ],
+    "tasks_need_a_workspace": [
+      "trigger",
+      "tasks",
+      "CREATE TRIGGER tasks_need_a_workspace\n        BEFORE INSERT ON tasks WHEN NEW.workspace_id IS NULL\n        BEGIN\n            SELECT RAISE(ABORT, 'a task needs a workspace');\n        END"
+    ],
+    "terminal_logins": [
+      "table",
+      "terminal_logins",
+      "CREATE TABLE terminal_logins (\n             terminal_id BLOB PRIMARY KEY NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,\n             handle TEXT NOT NULL,\n             login_id TEXT NOT NULL,\n             config_dir TEXT NOT NULL\n         , shared INTEGER NOT NULL DEFAULT 0)"
+    ],
+    "terminals": [
+      "table",
+      "terminals",
+      "CREATE TABLE terminals (\n            id BLOB PRIMARY KEY,\n            worktree_id BLOB NOT NULL REFERENCES \"worktrees\"(id),\n            title TEXT NOT NULL,\n            command_preset TEXT NOT NULL,\n            intent INTEGER NOT NULL,\n            runtime_confirmed INTEGER NOT NULL,\n            exit_code INTEGER,\n            exit_signal INTEGER,\n            lease_generation INTEGER NOT NULL,\n            epoch INTEGER NOT NULL,\n            \"columns\" INTEGER NOT NULL,\n            \"rows\" INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL\n        , pane_mode INTEGER NOT NULL DEFAULT 0, agent_session_id TEXT, task_id BLOB REFERENCES tasks(id) ON DELETE SET NULL, workspace_id BLOB REFERENCES workspaces(id), role INTEGER NOT NULL DEFAULT 1, split_of BLOB, split_of_orchestrator INTEGER, web_url TEXT)"
+    ],
+    "ticket_lines": [
+      "table",
+      "ticket_lines",
+      "CREATE TABLE ticket_lines (\n        task_id BLOB PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n        stage TEXT NOT NULL,\n        reason TEXT NOT NULL DEFAULT '',\n        branch TEXT NOT NULL DEFAULT '',\n        worktree_id BLOB REFERENCES worktrees(id) ON DELETE SET NULL,\n        worktree_path TEXT NOT NULL DEFAULT '',\n        stack_parent BLOB REFERENCES ticket_lines(task_id) ON DELETE SET NULL,\n        -- The lane a carried-over ticket shares a branch from; only the\n        -- migration writes it.\n        same_branch BLOB,\n        pr_number INTEGER,\n        landed_sha TEXT,\n        -- Set only on a waiting ticket.\n        plan_rank INTEGER,\n        stage_since INTEGER NOT NULL,\n        held_off INTEGER NOT NULL DEFAULT 0,\n        created_at INTEGER NOT NULL,\n        resource_version INTEGER NOT NULL\n    )"
+    ],
+    "ticket_lines_by_group": [
+      "index",
+      "ticket_lines",
+      "CREATE INDEX ticket_lines_by_group ON ticket_lines (same_branch) WHERE same_branch IS NOT NULL"
+    ],
+    "ticket_lines_by_parent": [
+      "index",
+      "ticket_lines",
+      "CREATE INDEX ticket_lines_by_parent ON ticket_lines (stack_parent) WHERE stack_parent IS NOT NULL"
+    ],
+    "ticket_work": [
+      "table",
+      "ticket_work",
+      "CREATE TABLE ticket_work (\n        agent_id BLOB NOT NULL REFERENCES agents(id) ON DELETE CASCADE,\n        task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\n        role TEXT NOT NULL CHECK (role IN ('build', 'fix', 'review', 'land')),\n        started_at INTEGER NOT NULL,\n        ended_at INTEGER,\n        verdict TEXT,\n        linked_by TEXT NOT NULL DEFAULT 'orchestrator',\n        PRIMARY KEY (agent_id, task_id, role)\n    )"
+    ],
+    "ticket_work_by_task": [
+      "index",
+      "ticket_work",
+      "CREATE INDEX ticket_work_by_task ON ticket_work (task_id)"
+    ],
+    "workflow_bundle_selections": [
+      "table",
+      "workflow_bundle_selections",
+      "CREATE TABLE workflow_bundle_selections(workspace TEXT PRIMARY KEY NOT NULL, pin TEXT NOT NULL REFERENCES workflow_bundles(pin))"
+    ],
+    "workflow_bundles": [
+      "table",
+      "workflow_bundles",
+      "CREATE TABLE workflow_bundles(pin TEXT PRIMARY KEY NOT NULL, definition_pin TEXT NOT NULL REFERENCES workflow_definitions(pin), adapter TEXT NOT NULL)"
+    ],
+    "workflow_bundles_no_delete": [
+      "trigger",
+      "workflow_bundles",
+      "CREATE TRIGGER workflow_bundles_no_delete BEFORE DELETE ON workflow_bundles BEGIN SELECT RAISE(ABORT,'immutable bundle'); END"
+    ],
+    "workflow_bundles_no_update": [
+      "trigger",
+      "workflow_bundles",
+      "CREATE TRIGGER workflow_bundles_no_update BEFORE UPDATE ON workflow_bundles BEGIN SELECT RAISE(ABORT,'immutable bundle'); END"
+    ],
+    "workflow_configurations": [
+      "table",
+      "workflow_configurations",
+      "CREATE TABLE workflow_configurations(workspace TEXT PRIMARY KEY NOT NULL, pin TEXT NOT NULL REFERENCES workflow_definitions(pin))"
+    ],
+    "workflow_definitions": [
+      "table",
+      "workflow_definitions",
+      "CREATE TABLE workflow_definitions(pin TEXT PRIMARY KEY NOT NULL, definition TEXT NOT NULL)"
+    ],
+    "workflow_definitions_immutable_delete": [
+      "trigger",
+      "workflow_definitions",
+      "CREATE TRIGGER workflow_definitions_immutable_delete BEFORE DELETE ON workflow_definitions BEGIN SELECT RAISE(ABORT, 'immutable definition'); END"
+    ],
+    "workflow_definitions_immutable_update": [
+      "trigger",
+      "workflow_definitions",
+      "CREATE TRIGGER workflow_definitions_immutable_update BEFORE UPDATE ON workflow_definitions BEGIN SELECT RAISE(ABORT, 'immutable definition'); END"
+    ],
+    "workflow_events": [
+      "table",
+      "workflow_events",
+      "CREATE TABLE workflow_events (\n            workspace TEXT NOT NULL REFERENCES workflow_states(workspace) DEFERRABLE INITIALLY DEFERRED,\n            revision INTEGER NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,\n            payload_hash TEXT NOT NULL, notices TEXT NOT NULL,\n            PRIMARY KEY(workspace, revision), UNIQUE(workspace, id))"
+    ],
+    "workflow_events_no_delete": [
+      "trigger",
+      "workflow_events",
+      "CREATE TRIGGER workflow_events_no_delete BEFORE DELETE ON workflow_events\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow event'); END"
+    ],
+    "workflow_events_no_update": [
+      "trigger",
+      "workflow_events",
+      "CREATE TRIGGER workflow_events_no_update BEFORE UPDATE ON workflow_events\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow event'); END"
+    ],
+    "workflow_excludes_landing_tickets_insert": [
+      "trigger",
+      "landing_tickets",
+      "CREATE TRIGGER workflow_excludes_landing_tickets_insert BEFORE INSERT ON landing_tickets\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_landing_tickets_update": [
+      "trigger",
+      "landing_tickets",
+      "CREATE TRIGGER workflow_excludes_landing_tickets_update BEFORE UPDATE ON landing_tickets\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_terminals_insert": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER workflow_excludes_terminals_insert BEFORE INSERT ON terminals\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_terminals_update": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER workflow_excludes_terminals_update BEFORE UPDATE ON terminals\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_ticket_lines_insert": [
+      "trigger",
+      "ticket_lines",
+      "CREATE TRIGGER workflow_excludes_ticket_lines_insert BEFORE INSERT ON ticket_lines\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_ticket_lines_update": [
+      "trigger",
+      "ticket_lines",
+      "CREATE TRIGGER workflow_excludes_ticket_lines_update BEFORE UPDATE ON ticket_lines\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_ticket_work_insert": [
+      "trigger",
+      "ticket_work",
+      "CREATE TRIGGER workflow_excludes_ticket_work_insert BEFORE INSERT ON ticket_work\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_excludes_ticket_work_update": [
+      "trigger",
+      "ticket_work",
+      "CREATE TRIGGER workflow_excludes_ticket_work_update BEFORE UPDATE ON ticket_work\n                WHEN NEW.task_id IS NOT NULL AND EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=NEW.task_id)\n                BEGIN SELECT RAISE(ABORT,'task owned by workflow engine'); END"
+    ],
+    "workflow_notice_attempt_no_delete": [
+      "trigger",
+      "workflow_notice_attempts",
+      "CREATE TRIGGER workflow_notice_attempt_no_delete BEFORE DELETE ON workflow_notice_attempts BEGIN SELECT RAISE(ABORT,'immutable workflow notice attempt'); END"
+    ],
+    "workflow_notice_attempt_no_update": [
+      "trigger",
+      "workflow_notice_attempts",
+      "CREATE TRIGGER workflow_notice_attempt_no_update BEFORE UPDATE ON workflow_notice_attempts BEGIN SELECT RAISE(ABORT,'immutable workflow notice attempt'); END"
+    ],
+    "workflow_notice_attempts": [
+      "table",
+      "workflow_notice_attempts",
+      "CREATE TABLE workflow_notice_attempts(id TEXT PRIMARY KEY, notice_id TEXT NOT NULL REFERENCES workflow_notice_outbox(id), target TEXT NOT NULL)"
+    ],
+    "workflow_notice_generation_check_in_target_reservations_DELETE": [
+      "trigger",
+      "check_in_target_reservations",
+      "CREATE TRIGGER workflow_notice_generation_check_in_target_reservations_DELETE AFTER DELETE ON check_in_target_reservations BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_check_in_target_reservations_INSERT": [
+      "trigger",
+      "check_in_target_reservations",
+      "CREATE TRIGGER workflow_notice_generation_check_in_target_reservations_INSERT AFTER INSERT ON check_in_target_reservations BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_check_in_target_reservations_UPDATE": [
+      "trigger",
+      "check_in_target_reservations",
+      "CREATE TRIGGER workflow_notice_generation_check_in_target_reservations_UPDATE AFTER UPDATE ON check_in_target_reservations BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1;INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_terminals_DELETE": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER workflow_notice_generation_terminals_DELETE AFTER DELETE ON terminals BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_terminals_INSERT": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER workflow_notice_generation_terminals_INSERT AFTER INSERT ON terminals BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_terminals_UPDATE": [
+      "trigger",
+      "terminals",
+      "CREATE TRIGGER workflow_notice_generation_terminals_UPDATE AFTER UPDATE ON terminals BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1;INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_workspace_leads_DELETE": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER workflow_notice_generation_workspace_leads_DELETE AFTER DELETE ON workspace_leads BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_workspace_leads_INSERT": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER workflow_notice_generation_workspace_leads_INSERT AFTER INSERT ON workspace_leads BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_generation_workspace_leads_UPDATE": [
+      "trigger",
+      "workspace_leads",
+      "CREATE TRIGGER workflow_notice_generation_workspace_leads_UPDATE AFTER UPDATE ON workspace_leads BEGIN INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT OLD.workspace_id,1 WHERE OLD.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1;INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT NEW.workspace_id,1 WHERE NEW.workspace_id IS NOT NULL ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_login_generation_DELETE": [
+      "trigger",
+      "terminal_logins",
+      "CREATE TRIGGER workflow_notice_login_generation_DELETE AFTER DELETE ON terminal_logins BEGIN\n            INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT workspace_id,1 FROM terminals WHERE id=OLD.terminal_id AND workspace_id IS NOT NULL\n            ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_login_generation_INSERT": [
+      "trigger",
+      "terminal_logins",
+      "CREATE TRIGGER workflow_notice_login_generation_INSERT AFTER INSERT ON terminal_logins BEGIN\n            INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT workspace_id,1 FROM terminals WHERE id=NEW.terminal_id AND workspace_id IS NOT NULL\n            ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_login_generation_UPDATE": [
+      "trigger",
+      "terminal_logins",
+      "CREATE TRIGGER workflow_notice_login_generation_UPDATE AFTER UPDATE ON terminal_logins BEGIN\n            INSERT INTO workflow_notice_target_generations(workspace,generation) SELECT workspace_id,1 FROM terminals WHERE id=OLD.terminal_id AND workspace_id IS NOT NULL\n            ON CONFLICT(workspace) DO UPDATE SET generation=generation+1; END"
+    ],
+    "workflow_notice_no_delete": [
+      "trigger",
+      "workflow_notice_outbox",
+      "CREATE TRIGGER workflow_notice_no_delete BEFORE DELETE ON workflow_notice_outbox BEGIN SELECT RAISE(ABORT,'immutable workflow notice'); END"
+    ],
+    "workflow_notice_outbox": [
+      "table",
+      "workflow_notice_outbox",
+      "CREATE TABLE workflow_notice_outbox(\n            sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, workspace TEXT NOT NULL,\n            revision INTEGER NOT NULL, payload TEXT NOT NULL, payload_hash TEXT NOT NULL,\n            state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','prepared','handed_off','unknown')),\n            attempt_id TEXT, target TEXT, evidence TEXT NOT NULL DEFAULT 'pending_no_proven_supported_owner_codex_target',\n            FOREIGN KEY(workspace,revision) REFERENCES workflow_events(workspace,revision))"
+    ],
+    "workflow_notice_payload_immutable": [
+      "trigger",
+      "workflow_notice_outbox",
+      "CREATE TRIGGER workflow_notice_payload_immutable BEFORE UPDATE OF id,workspace,revision,payload,payload_hash,sequence ON workflow_notice_outbox BEGIN SELECT RAISE(ABORT,'immutable workflow notice'); END"
+    ],
+    "workflow_notice_pending": [
+      "index",
+      "workflow_notice_outbox",
+      "CREATE INDEX workflow_notice_pending ON workflow_notice_outbox(state,sequence)"
+    ],
+    "workflow_notice_policy_no_delete": [
+      "trigger",
+      "workflow_notification_policies",
+      "CREATE TRIGGER workflow_notice_policy_no_delete BEFORE DELETE ON workflow_notification_policies BEGIN SELECT RAISE(ABORT,'immutable workflow notice policy'); END"
+    ],
+    "workflow_notice_policy_no_update": [
+      "trigger",
+      "workflow_notification_policies",
+      "CREATE TRIGGER workflow_notice_policy_no_update BEFORE UPDATE ON workflow_notification_policies BEGIN SELECT RAISE(ABORT,'immutable workflow notice policy'); END"
+    ],
+    "workflow_notice_target_generations": [
+      "table",
+      "workflow_notice_target_generations",
+      "CREATE TABLE workflow_notice_target_generations(workspace BLOB PRIMARY KEY NOT NULL, generation INTEGER NOT NULL)"
+    ],
+    "workflow_notice_workspace": [
+      "index",
+      "workflow_notice_outbox",
+      "CREATE INDEX workflow_notice_workspace ON workflow_notice_outbox(workspace,sequence)"
+    ],
+    "workflow_notification_policies": [
+      "table",
+      "workflow_notification_policies",
+      "CREATE TABLE workflow_notification_policies(bundle_pin TEXT PRIMARY KEY REFERENCES workflow_bundles(pin), policy TEXT NOT NULL)"
+    ],
+    "workflow_outbox": [
+      "table",
+      "workflow_outbox",
+      "CREATE TABLE workflow_outbox (\n            workspace TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,\n            payload TEXT NOT NULL, payload_hash TEXT NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)),\n            dispatch_state TEXT NOT NULL DEFAULT 'pending'\n                CHECK(dispatch_state IN ('pending','claimed','admitted','uncertain','settled','suppressed')),\n            lease_owner TEXT, lease_generation INTEGER NOT NULL DEFAULT 0, lease_until INTEGER,\n            resource_generation INTEGER,\n            PRIMARY KEY(workspace, id), FOREIGN KEY(workspace, revision)\n                REFERENCES workflow_events(workspace, revision))"
+    ],
+    "workflow_outbox_no_delete": [
+      "trigger",
+      "workflow_outbox",
+      "CREATE TRIGGER workflow_outbox_no_delete BEFORE DELETE ON workflow_outbox\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow effect'); END"
+    ],
+    "workflow_outbox_no_payload_update": [
+      "trigger",
+      "workflow_outbox",
+      "CREATE TRIGGER workflow_outbox_no_payload_update\n            BEFORE UPDATE OF workspace, id, revision, payload, payload_hash ON workflow_outbox\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow effect'); END"
+    ],
+    "workflow_owned_items": [
+      "table",
+      "workflow_owned_items",
+      "CREATE TABLE workflow_owned_items(workspace TEXT NOT NULL,item TEXT NOT NULL,task_id BLOB UNIQUE REFERENCES tasks(id),PRIMARY KEY(workspace,item))"
+    ],
+    "workflow_owned_no_delete": [
+      "trigger",
+      "workflow_owned_items",
+      "CREATE TRIGGER workflow_owned_no_delete BEFORE DELETE ON workflow_owned_items BEGIN SELECT RAISE(ABORT,'immutable execution ownership'); END"
+    ],
+    "workflow_owned_no_update": [
+      "trigger",
+      "workflow_owned_items",
+      "CREATE TRIGGER workflow_owned_no_update BEFORE UPDATE ON workflow_owned_items BEGIN SELECT RAISE(ABORT,'immutable execution ownership'); END"
+    ],
+    "workflow_receipts": [
+      "table",
+      "workflow_receipts",
+      "CREATE TABLE workflow_receipts (\n            workspace TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,\n            payload_hash TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(workspace, id))"
+    ],
+    "workflow_receipts_no_delete": [
+      "trigger",
+      "workflow_receipts",
+      "CREATE TRIGGER workflow_receipts_no_delete BEFORE DELETE ON workflow_receipts\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow receipt'); END"
+    ],
+    "workflow_receipts_no_update": [
+      "trigger",
+      "workflow_receipts",
+      "CREATE TRIGGER workflow_receipts_no_update BEFORE UPDATE ON workflow_receipts\n            BEGIN SELECT RAISE(ABORT, 'immutable workflow receipt'); END"
+    ],
+    "workflow_resource_generations": [
+      "table",
+      "workflow_resource_generations",
+      "CREATE TABLE workflow_resource_generations (resource TEXT PRIMARY KEY, generation INTEGER NOT NULL)"
+    ],
+    "workflow_resources": [
+      "table",
+      "workflow_resources",
+      "CREATE TABLE workflow_resources (\n            resource TEXT PRIMARY KEY, workspace TEXT NOT NULL REFERENCES workflow_states(workspace),\n            item TEXT NOT NULL, run TEXT NOT NULL, fence INTEGER NOT NULL, generation INTEGER NOT NULL,\n            UNIQUE(workspace, item))"
+    ],
+    "workflow_states": [
+      "table",
+      "workflow_states",
+      "CREATE TABLE workflow_states (\n            workspace TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision > 0),\n            epoch INTEGER NOT NULL, state TEXT NOT NULL)"
+    ],
+    "workflow_wire_receipts": [
+      "table",
+      "workflow_wire_receipts",
+      "CREATE TABLE workflow_wire_receipts(workspace TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(workspace,id))"
+    ],
+    "workflow_wire_receipts_immutable_delete": [
+      "trigger",
+      "workflow_wire_receipts",
+      "CREATE TRIGGER workflow_wire_receipts_immutable_delete BEFORE DELETE ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT, 'immutable wire receipt'); END"
+    ],
+    "workflow_wire_receipts_immutable_update": [
+      "trigger",
+      "workflow_wire_receipts",
+      "CREATE TRIGGER workflow_wire_receipts_immutable_update BEFORE UPDATE ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT, 'immutable wire receipt'); END"
+    ],
+    "workspace_landing": [
+      "table",
+      "workspace_landing",
+      "CREATE TABLE workspace_landing (\n            workspace_id BLOB PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            -- `direct` or `pull_requests`; NULL until somebody chooses.\n            mode TEXT,\n            base TEXT,\n            budget_lines INTEGER,\n            pr_cost_line INTEGER NOT NULL DEFAULT 0\n        , pr_nudge INTEGER NOT NULL DEFAULT 0, pr_nudge_hours INTEGER)"
+    ],
+    "workspace_leads": [
+      "table",
+      "workspace_leads",
+      "CREATE TABLE workspace_leads (\n            workspace_id BLOB PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,\n            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE\n        )"
+    ],
+    "workspaces": [
+      "table",
+      "workspaces",
+      "CREATE TABLE workspaces (\n            id BLOB PRIMARY KEY NOT NULL,\n            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,\n            name TEXT NOT NULL,\n            task_prefix TEXT NOT NULL,\n            is_main INTEGER NOT NULL DEFAULT 0,\n            ordinal INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL DEFAULT 1,\n            created_at INTEGER NOT NULL\n        , wake_on_answer INTEGER NOT NULL DEFAULT 1)"
+    ],
+    "workspaces_by_repository": [
+      "index",
+      "workspaces",
+      "CREATE INDEX workspaces_by_repository ON workspaces (repository_id, ordinal)"
+    ],
+    "workspaces_one_main": [
+      "index",
+      "workspaces",
+      "CREATE UNIQUE INDEX workspaces_one_main ON workspaces (repository_id) WHERE is_main = 1"
+    ],
+    "workspaces_one_prefix": [
+      "index",
+      "workspaces",
+      "CREATE UNIQUE INDEX workspaces_one_prefix ON workspaces (task_prefix COLLATE NOCASE)"
+    ],
+    "worktree_lfs_pointers": [
+      "table",
+      "worktree_lfs_pointers",
+      "CREATE TABLE worktree_lfs_pointers (\n            worktree_id BLOB NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,\n            path TEXT NOT NULL,\n            PRIMARY KEY (worktree_id, path)\n        )"
+    ],
+    "worktrees": [
+      "table",
+      "worktrees",
+      "CREATE TABLE \"worktrees\" (\n            id BLOB PRIMARY KEY,\n            repository_id BLOB NOT NULL REFERENCES repositories(id),\n            branch TEXT NOT NULL,\n            worktree_path TEXT NOT NULL,\n            hidden INTEGER NOT NULL,\n            creation_failed INTEGER NOT NULL,\n            resource_version INTEGER NOT NULL\n        , is_main_checkout INTEGER NOT NULL DEFAULT 0, worktree_missing INTEGER NOT NULL DEFAULT 0, ordinal INTEGER NOT NULL DEFAULT 0, workspace_id BLOB REFERENCES workspaces(id), claim_source TEXT)"
+    ],
+    "worktrees_by_ordinal": [
+      "index",
+      "worktrees",
+      "CREATE INDEX worktrees_by_ordinal ON worktrees (ordinal)"
+    ],
+    "worktrees_one_per_path": [
+      "index",
+      "worktrees",
+      "CREATE UNIQUE INDEX worktrees_one_per_path ON worktrees (repository_id, worktree_path)"
+    ]
+  },
+  "tables": {
+    "agent_turn_models": {
+      "columns": [
+        {
+          "name": "turn_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "model",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "input_tokens",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "output_tokens",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cache_read_tokens",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cache_write_tokens",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cost_micros",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cost_source",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "price_table",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cache_write_1h_tokens",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "agent_turns": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "turn_key",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "repository_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "harness",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "surface",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "started_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "ended_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "active_ms",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "usage",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'turn'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "agents": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "role",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "harness",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "subagent_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "parent_terminal_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "session_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "session_cwd",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "model",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "title",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "started_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "ended_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "end_reason",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "stop_asked_by",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "stop_asked_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "answer_wakes": {
+      "columns": [
+        {
+          "name": "note_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "enqueued_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "done_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pasted_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_ci": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "subject",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "sha",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "status",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "url",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "jobs",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'[]'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "fetched_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "changed_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "asked_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_pages": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "slot",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "title",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "summary",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "anchor_kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "anchor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "doc_json",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "schema_v",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "bytes",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "ordinal",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "updated_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_read_floors": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "floor_ms",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_ruling_tasks": {
+      "columns": [
+        {
+          "name": "ruling_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_rulings": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "number",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "decision",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "why",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "reversal",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "theme_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "note",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "settled_by",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "settled_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "reversed_sha",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_theme_tasks": {
+      "columns": [
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "theme_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "added_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "board_themes": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "name",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "outcome",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "story",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "next",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "owner_ask",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "ordinal",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "story_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_cleanup_fence": {
+      "columns": [
+        {
+          "name": "token",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "started_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_enter_fences": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "occurrence_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "attempt_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "daemon_instance",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorizer_device",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_instance": {
+      "columns": [
+        {
+          "name": "singleton",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "instance_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "clean",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_occurrences": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "generation",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "eligibility_epoch",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorizer_device",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorizer_source",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorized_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "template_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "due_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "attempt_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "daemon_instance",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pane_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_lease",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_epoch",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "process_id",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "process_started",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "thread_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "message_text",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "rollout_path",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "rollout_device",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "rollout_inode",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "rollout_offset",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "admitted_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "submitted_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "confirmed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "observation",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "reason",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "tty",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "process_incarnation",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_schedules": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "generation",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorizer_device",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorizer_source",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "authorized_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "template_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "next_due",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "eligibility_epoch",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "reason",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "check_in_target_reservations": {
+      "columns": [
+        {
+          "name": "token",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "operation",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "phase",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "process_id",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "process_started",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "compose_hold_images": {
+      "columns": [
+        {
+          "name": "hold_seq",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "ord",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "mime",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "bytes",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "compose_holds": {
+      "columns": [
+        {
+          "name": "seq",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "text",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "files",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "enqueued_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "compose_waits": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kept_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "crash_signatures": {
+      "columns": [
+        {
+          "name": "signature",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "detail",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "count",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "first_seen",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "last_seen",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "last_build",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "places",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'[]'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "device_added_by": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "added_by",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "added_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "device_caps": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "cap",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "device_enrollers": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "enrolled_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "hold_wakes": {
+      "columns": [
+        {
+          "name": "note_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "enqueued_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "done_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pasted_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "idempotency": {
+      "columns": [
+        {
+          "name": "key",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "client_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "request_hash",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "landing_tickets": {
+      "columns": [
+        {
+          "name": "landing_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "added_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "landings": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "number",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "route",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "base",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "pushed_sha",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state_since",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "lander_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "title",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "collecting",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "landed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "line_events": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "theme_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "landing_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "body",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "extra",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'{}'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_access": {
+      "columns": [
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "access",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_board_read_floors": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "floor_ms",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_connectors": {
+      "columns": [
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "server",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_devices": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_login_policy": {
+      "columns": [
+        {
+          "name": "harness",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "members_own",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "set_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "set_by",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_logins": {
+      "columns": [
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "login_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "stopped_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "asked_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "signed_in_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "codex_asked_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "cursor_asked_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_review_reviewed": {
+      "columns": [
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 3
+        },
+        {
+          "name": "head_commit",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_digest",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "gate_head",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "gate_index",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "marked_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "member_task_reads": {
+      "columns": [
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "opened_ms",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "members": {
+      "columns": [
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "name",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "account",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "email",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "role",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'member'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "message_wakes": {
+      "columns": [
+        {
+          "name": "note_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "to_terminal",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "enqueued_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pasted_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "done_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "meta": {
+      "columns": [
+        {
+          "name": "key",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "value",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [
+        [
+          {
+            "Text": [
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              95,
+              118,
+              101,
+              114,
+              115,
+              105,
+              111,
+              110
+            ]
+          },
+          {
+            "Text": [
+              54,
+              53
+            ]
+          }
+        ]
+      ],
+      "rowids": {
+        "wf1:96f18c2c5bc0e66a64f0d3c226e1a569bbb16e8e81adb5c5d44eef8abfee8ae1": [
+          1
+        ]
+      }
+    },
+    "owner_devices": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'confirmed'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "page_events": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "slot",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "bytes",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "shape",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "pending_teammates": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "enrolled_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "people_events": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "detail",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'{}'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "plan_budgets": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "theme_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "tokens",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "set_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "pr_nudges": {
+      "columns": [
+        {
+          "name": "repo",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "pr_number",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "claimed_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "released_devices": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "rep_desks": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "repositories": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "host_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "repository_root_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "display_name",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "canonical_git_dir",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "remote_summary",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_key_prefix",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "repository_roots": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "host_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "path",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "reps": {
+      "columns": [
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "review_bases": {
+      "columns": [
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "base_ref",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "review_reviewed": {
+      "columns": [
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "head_commit",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_digest",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "gate_head",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "gate_index",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "marked_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "review_stack_parents": {
+      "columns": [
+        {
+          "name": "repository_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "parent_branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "revoked_marks": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "revoked_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "sqlite_sequence": {
+      "columns": [
+        {
+          "name": "name",
+          "declared_type": "",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "seq",
+          "declared_type": "",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "step_up_keys": {
+      "columns": [
+        {
+          "name": "client_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "alg",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pubkey",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "registered_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "sign_count",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "subagent_descriptions": {
+      "columns": [
+        {
+          "name": "agent_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "description",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "recorded_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "task_blocks": {
+      "columns": [
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "blocked_by",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "reason",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "task_notes": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "kind",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "actor",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "body",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "extra",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'{}'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "supersedes",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "task_reads": {
+      "columns": [
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "opened_ms",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "tasks": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "repository_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "key",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "title",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "status",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "status_since",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "intent",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "acceptance",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'[]'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "constraints",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'[]'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "labels",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'[]'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "former_key",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "edited_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_kind",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_line",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_rank",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_until",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_event",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wait_since",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "terminal_logins": {
+      "columns": [
+        {
+          "name": "terminal_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "login_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "config_dir",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "shared",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "terminals": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "title",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "command_preset",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "intent",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "runtime_confirmed",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "exit_code",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "exit_signal",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "lease_generation",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "epoch",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "columns",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "rows",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pane_mode",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "agent_session_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "role",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_order": 0
+        },
+        {
+          "name": "split_of",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "split_of_orchestrator",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "web_url",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "ticket_lines": {
+      "columns": [
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "stage",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "reason",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_path",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "''",
+          "primary_key_order": 0
+        },
+        {
+          "name": "stack_parent",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "same_branch",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pr_number",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "landed_sha",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "plan_rank",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "stage_since",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "held_off",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "ticket_work": {
+      "columns": [
+        {
+          "name": "agent_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "role",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 3
+        },
+        {
+          "name": "started_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "ended_at",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "verdict",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "linked_by",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'orchestrator'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_bundle_selections": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "pin",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_bundles": {
+      "columns": [
+        {
+          "name": "pin",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "definition_pin",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "adapter",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_configurations": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "pin",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_definitions": {
+      "columns": [
+        {
+          "name": "pin",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "definition",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_events": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload_hash",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "notices",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_notice_attempts": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "notice_id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "target",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_notice_outbox": {
+      "columns": [
+        {
+          "name": "sequence",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload_hash",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'pending'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "attempt_id",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "target",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "evidence",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'pending_no_proven_supported_owner_codex_target'",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_notice_target_generations": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "generation",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_notification_policies": {
+      "columns": [
+        {
+          "name": "bundle_pin",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "policy",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_outbox": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload_hash",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "active",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "dispatch_state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": "'pending'",
+          "primary_key_order": 0
+        },
+        {
+          "name": "lease_owner",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "lease_generation",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "lease_until",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_generation",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_owned_items": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "item",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "task_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_receipts": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "payload",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "payload_hash",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "receipt",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_resource_generations": {
+      "columns": [
+        {
+          "name": "resource",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "generation",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_resources": {
+      "columns": [
+        {
+          "name": "resource",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "item",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "run",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "fence",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "generation",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_states": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "revision",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "epoch",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "state",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workflow_wire_receipts": {
+      "columns": [
+        {
+          "name": "workspace",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "id",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        },
+        {
+          "name": "payload",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "receipt",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workspace_landing": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "mode",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "base",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "budget_lines",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "pr_cost_line",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "pr_nudge",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "pr_nudge_hours",
+          "declared_type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workspace_leads": {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "handle",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "workspaces": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "repository_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "name",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "task_prefix",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "is_main",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "ordinal",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_order": 0
+        },
+        {
+          "name": "created_at",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "wake_on_answer",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "worktree_lfs_pointers": {
+      "columns": [
+        {
+          "name": "worktree_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "path",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 2
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    },
+    "worktrees": {
+      "columns": [
+        {
+          "name": "id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 1
+        },
+        {
+          "name": "repository_id",
+          "declared_type": "BLOB",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "branch",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_path",
+          "declared_type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "hidden",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "creation_failed",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "resource_version",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "is_main_checkout",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "worktree_missing",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "ordinal",
+          "declared_type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_order": 0
+        },
+        {
+          "name": "workspace_id",
+          "declared_type": "BLOB",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        },
+        {
+          "name": "claim_source",
+          "declared_type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_order": 0
+        }
+      ],
+      "rows": [],
+      "rowids": {}
+    }
+  }
+}

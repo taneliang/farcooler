@@ -1,0 +1,26 @@
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+error[E0432]: unresolved import `farcooler_protocol::workflow_config::NotificationPolicy`
+ --> crates/store/src/workflow_publication.rs:3:65
+  |
+3 | use farcooler_protocol::workflow_config::{AdapterConfiguration, NotificationPolicy};
+  |                                                                 ^^^^^^^^^^^^^^^^^^ no `NotificationPolicy` in `workflow_config`
+
+error[E0432]: unresolved imports `farcooler_protocol::workflow_config::NotificationPolicy`, `farcooler_protocol::workflow_config::NoticePoint`
+ --> crates/store/src/workflow_notices.rs:3:43
+  |
+3 | use farcooler_protocol::workflow_config::{NotificationPolicy, NoticePoint};
+  |                                           ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^ no `NoticePoint` in `workflow_config`
+  |                                           |
+  |                                           no `NotificationPolicy` in `workflow_config`
+
+error[E0559]: variant `farcooler_protocol::workflow_commands::Action::Publish` has no field named `notifications`
+   --> crates/store/src/workflow_publication.rs:142:73
+    |
+142 |         let current = serde_json::to_string(&("owner",Action::Publish { notifications:None, mutation,
+    |                                                                         ^^^^^^^^^^^^^ `farcooler_protocol::workflow_commands::Action::Publish` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+Some errors have detailed explanations: E0432, E0559.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `farcooler-store` (lib test) due to 3 previous errors

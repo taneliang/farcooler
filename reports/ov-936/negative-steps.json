@@ -1,0 +1,107 @@
+[
+  {
+    "name": "incarnation",
+    "path": "crates/store/src/engine_cutover.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f09_existing_engine_claims",
+      "--",
+      "--nocapture"
+    ],
+    "original": "402cf1a4e6de9bbf1f05b269fa731c1d4b29cbdd62745d6e999e3dc0f914f066",
+    "mutant": "211622218b1927ef4a1cdc9a9d1a932adc54967913753cb7bc7cdbfc2da7e5c6",
+    "exit": 101,
+    "meaningful": true,
+    "restored": true,
+    "assertion": "old Store handle cannot write after transfer"
+  },
+  {
+    "name": "legacy-writer",
+    "path": "crates/store/src/engine_cutover.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f04_landing_routes",
+      "--",
+      "--nocapture"
+    ],
+    "original": "402cf1a4e6de9bbf1f05b269fa731c1d4b29cbdd62745d6e999e3dc0f914f066",
+    "mutant": "1c8db8ebab717e4fc3208711d74b19d32ad2a2b12c829c2047ba9cf7fc6b8ee3",
+    "exit": 101,
+    "meaningful": true,
+    "restored": true,
+    "assertion": "assertion failed"
+  },
+  {
+    "name": "conservation",
+    "path": "crates/store/src/engine_cutover.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_stale_source_and_per_field_corruption",
+      "--",
+      "--nocapture"
+    ],
+    "original": "402cf1a4e6de9bbf1f05b269fa731c1d4b29cbdd62745d6e999e3dc0f914f066",
+    "mutant": "2e597ae335ab1e34279e1ab1e4254cc707c0d3b418ddd9c7a8813949ac437648",
+    "exit": 101,
+    "meaningful": true,
+    "restored": true,
+    "assertion": "assertion failed"
+  },
+  {
+    "name": "restore-freeze",
+    "path": "crates/store/src/engine_cutover/rehearsal.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f11_restored_pending",
+      "--",
+      "--nocapture"
+    ],
+    "original": "f82d77bdeb0e61c4a65c719e4327c9f683f82332e00f52490686843c024af21a",
+    "mutant": "ef809616efd44b79923e0365adc0e0a6837c8a81c8638b87c4445a05d14d096d",
+    "exit": 101,
+    "meaningful": true,
+    "restored": true,
+    "assertion": "left: \"legacy\""
+  },
+  {
+    "name": "restore-quarantine",
+    "path": "crates/store/src/engine_cutover/rehearsal.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f11_restored_pending",
+      "--",
+      "--nocapture"
+    ],
+    "original": "f82d77bdeb0e61c4a65c719e4327c9f683f82332e00f52490686843c024af21a",
+    "mutant": "d5b14bf817c2f981cc21e36b00c77ba13e02a208457949ec7ebd47dfd8dae681",
+    "exit": 101,
+    "meaningful": true,
+    "restored": true,
+    "assertion": "post-backup quarantine must survive forward release"
+  }
+]

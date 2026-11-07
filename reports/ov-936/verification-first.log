@@ -1,0 +1,25 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+VERIFY 0 ["/usr/bin/python3", "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/old-reader.py"]
+   Compiling farcooler-protocol v0.1.0 (/private/tmp/ov936-reader-source-ulkiphbc/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/private/tmp/ov936-reader-source-ulkiphbc/crates/workflow)
+   Compiling farcooler-ffi-guard v0.1.0 (/private/tmp/ov936-reader-source-ulkiphbc/crates/ffi-guard)
+error: failed to run custom build command for `farcooler-protocol v0.1.0 (/private/tmp/ov936-reader-source-ulkiphbc/crates/protocol)`
+
+Caused by:
+  process didn't exit successfully: `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/build/farcooler-protocol-443d4fbb808083d7/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-changed=../../proto/farcooler.proto
+  cargo:rustc-env=FARCOOLER_BUILD=0.1.0+unknown
+  cargo:rerun-if-changed=../../scripts/version.sh
+  cargo:rerun-if-env-changed=FARCOOLER_CHANNEL
+  cargo:rerun-if-env-changed=FARCOOLER_TAG
+  cargo:rustc-env=FARCOOLER_CHANNEL=dev
+
+  --- stderr
+  Error: Custom { kind: Other, error: "protoc failed: Could not make proto path relative: ../../proto/farcooler.proto: No such file or directory\n" }
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/reports/ov-936/old-reader.py", line 47, in <module>
+    assert result.returncode==0 and before==after
+AssertionError
+
+exit=1, stopped=None

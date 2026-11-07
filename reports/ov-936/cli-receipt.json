@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/Users/e-liang/.cargo/bin/cargo",
+    "run",
+    "--offline",
+    "-p",
+    "farcooler-store",
+    "--features",
+    "testing",
+    "--example",
+    "engine_cutover_rehearsal",
+    "--",
+    "/private/tmp",
+    "ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964"
+  ],
+  "exit": 0,
+  "fixture_path": "/private/tmp/ov936-old-reader-9640a20e-b51a-4b12-849a-53d4571f1964/db.sqlite"
+}

@@ -38,10 +38,16 @@ pub struct Store {
     /// cross threads. A mutex is also the honest model of the thing underneath:
     /// SQLite serializes writes regardless, and every call here is short.
     db: std::sync::Mutex<Connection>,
+    pub(crate) engine_incarnation: u64,
     pub(crate) workflow_notice_waker: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Store {
+    pub(crate) fn from_engine_cutover_connection(conn: Connection) -> Result<Self> {
+        let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|_|DomainError::OperationFailed)?.incarnation;
+        Ok(Self { db:std::sync::Mutex::new(conn),engine_incarnation,workflow_notice_waker:Default::default() })
+    }
+
     /// The connection, locked.
     ///
     /// A poisoned lock means a previous caller panicked mid-query. The
@@ -59,7 +65,8 @@ impl Store {
         let existed = path.exists();
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;
-        Ok(Store { db: std::sync::Mutex::new(conn), workflow_notice_waker: Default::default() })
+        let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.incarnation;
+        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default() })
     }
 
     /// This database's schema, as `read_schema` reads a file's: what
@@ -77,7 +84,8 @@ impl Store {
     pub fn open_in_memory() -> Result<Store> {
         let mut conn = Connection::open_in_memory().map_err(map_err)?;
         Self::init(&mut conn, None)?;
-        Ok(Store { db: std::sync::Mutex::new(conn), workflow_notice_waker: Default::default() })
+        let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.incarnation;
+        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default() })
     }
 
     fn init(conn: &mut Connection, backup_source: Option<&Path>) -> Result<()> {
@@ -103,7 +111,9 @@ impl Store {
             // running it is exactly what must stay safe if it does happen.
             // Stamped here too, so a database migrated before the marker
             // existed carries it from its next open.
-            crate::waits::sweep_unfitting(conn)?;
+            if crate::engine_cutover::authority(conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.phase == "legacy" {
+                crate::waits::sweep_unfitting(conn)?;
+            }
             return migrate::stamp_compatible_down_to(conn);
         }
 
@@ -117,7 +127,9 @@ impl Store {
         }
 
         migrate::migrate(conn, current)?;
-        crate::waits::sweep_unfitting(conn)?;
+        if crate::engine_cutover::authority(conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.phase == "legacy" {
+                crate::waits::sweep_unfitting(conn)?;
+            }
         migrate::stamp_compatible_down_to(conn)
     }
 

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "incarnation",
+    "path": "crates/store/src/engine_cutover.rs",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "engine_cutover_f09_existing_engine_claims",
+      "--",
+      "--nocapture"
+    ],
+    "original": "19b653d3f1aba62b151f2d47bf6c545559822e62777c0ed5298aa1195b473068",
+    "mutant": "f720de1bf95fef526fab422fc46f0ace981369c0d29af7092683435f6ad9400d",
+    "exit": 101,
+    "meaningful": false,
+    "restored": true,
+    "assertion": "old Store handle cannot write after transfer"
+  }
+]

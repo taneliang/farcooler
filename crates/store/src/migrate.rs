@@ -113,6 +113,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::workflow_publication::migration_bundles, Older::Refused), // ov-931: immutable adapter bundles
     (crate::workflow_ownership::migration, Older::Refused), // ov-931: single task execution owner
     (crate::workflow_notices::migration, Older::Refused), // ov-933: durable finite informational notices
+    (crate::engine_cutover::migration, Older::Refused), // ov-936: all-workspace authority fences
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

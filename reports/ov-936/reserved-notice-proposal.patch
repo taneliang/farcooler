@@ -1,0 +1,27 @@
+--- a/crates/store/src/workflow_notices.rs
++++ b/crates/store/src/workflow_notices.rs
+@@ -104,6 +104,7 @@
+         if target.len()>8192 || attempt.len()>100 { return Err(WorkflowError::Oversized); }
+         let mut conn = self.conn();
+         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
++        if !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? {return Ok(false);}
+         let changed = tx.execute("UPDATE workflow_notice_outbox SET state='prepared',attempt_id=?3,target=?4,evidence='prepared_before_native_spawn' WHERE id=?1 AND payload_hash=?2 AND state='pending'",params![notice.id,digest(notice),attempt,target])?;
+         if changed == 1 {
+             tx.execute("INSERT INTO workflow_notice_attempts(id,notice_id,target) VALUES(?1,?2,?3)",params![attempt,notice.id,target])?;
+@@ -161,6 +162,7 @@
+         proof:&NativeTarget, spawn:impl FnOnce()->T) -> Result<Option<T>> {
+         let mut conn=self.conn();
+         let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
++        if !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? {return Ok(None);}
+         let prepared:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_notice_outbox WHERE id=?1 AND payload_hash=?2 AND state='prepared' AND attempt_id=?3 AND target=?4)",
+             params![notice.id,digest(notice),attempt,target],|r|r.get(0))?;
+         if !prepared || notice.workspace != proof.workspace.to_string()
+@@ -284,7 +286,7 @@
+     fn workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes() {
+         let mut conn=rusqlite::Connection::open_in_memory().unwrap();
+         conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+-        crate::migrate::migrate_only_to(&mut conn,crate::migrate::CURRENT_SCHEMA_VERSION-1);
++        crate::migrate::migrate_only_to(&mut conn,64); // exact pre-notice registry pin; later migrations append
+         conn.execute("INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('old',1,1,'untouched-state')",[]).unwrap();
+         conn.execute("INSERT INTO workflow_events(workspace,revision,id,payload,payload_hash,notices) VALUES('old',1,'old-event','untouched-input','old-hash','[\"same text\"]')",[]).unwrap();
+         let before:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();

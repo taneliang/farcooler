@@ -1,0 +1,95 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+RESTORED 0 ["/Users/e-liang/.cargo/bin/cargo", "test", "--offline", "-p", "farcooler-store", "--lib", "engine_cutover_", "--", "--nocapture"]
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+warning: unused `std::result::Result` that must be used
+   --> crates/store/src/engine_cutover.rs:127:5
+    |
+127 | /     tx.execute_batch("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,wor...
+128 | |         WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+129 | |         AND NOT(OLD.id IS NEW.id AND OLD.workspace_id IS NEW.workspace_id AND OLD.repository_id IS NEW.repository_id AND OLD.key ...
+130 | |         BEGIN SELECT RAISE(ABORT,'migrated task identity is fenced'); END;
+...   |
+139 | |         AND NOT(OLD.task_id IS NEW.task_id AND OLD.worktree_id IS NEW.worktree_id AND OLD.workspace_id IS NEW.workspace_id AND OL...
+140 | |         BEGIN SELECT RAISE(ABORT,'legacy task-bound terminal restart retired'); END;");
+    | |______________________________________________________________________________________^
+    |
+    = note: this `Result` may be an `Err` variant, which should be handled
+    = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
+help: use `let _ = ...` to ignore the resulting value
+    |
+127 |     let _ = tx.execute_batch("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,worktree_id ON tasks
+    |     +++++++
+
+warning: `farcooler-store` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 7.56s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 25 tests
+test engine_cutover::tests::cases::engine_cutover_all_field_closed_file_backup_public_permit_and_restore ... ok
+test engine_cutover::tests::cases::engine_cutover_closed_backup_controls_reject_wal_collision_and_resource_corruption ... ok
+test engine_cutover::tests::cases::engine_cutover_f02_stack_same_branch_order_and_hold_are_exact ... ok
+test engine_cutover::tests::cases::engine_cutover_f03_agents_multitask_history_and_open_work_are_quarantined ... ok
+test engine_cutover::tests::cases::engine_cutover_f04_landing_routes_sha_events_and_ci_are_not_regenerated ... ok
+test engine_cutover::tests::cases::engine_cutover_f05_budget_scopes_usage_null_cost_and_cache_split_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f06_all_wake_claim_states_and_compose_image_bytes_do_not_send ... ok
+test engine_cutover::tests::cases::engine_cutover_f07_all_finite_checkin_states_and_existing_fences_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_all_dispatch_states_retain_exact_history_and_no_admitted_retry ... ok
+test engine_cutover::tests::cases::engine_cutover_f09_existing_engine_claims_pins_and_duplicate_receipts_survive ... ok
+test engine_cutover::tests::cases::engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push ... ok
+test engine_cutover::tests::cases::engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case ... ok
+test engine_cutover::tests::cases::engine_cutover_interrupt_reopen_normalization_and_forward_recovery ... ok
+test engine_cutover::tests::cases::engine_cutover_precommit_transaction_failure_rolls_back_every_workspace_and_ledger ... ok
+test engine_cutover::tests::cases::engine_cutover_process_child ... ignored, owned subprocess helper; invoked only by engine_cutover_process_kill_boundaries
+test engine_cutover::tests::cases::engine_cutover_process_kill_boundaries ... actual child SIGKILL boundary=before status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+actual child SIGKILL boundary=after status=signal: 9 (SIGKILL) stdout=
+running 1 test
+test engine_cutover::tests::cases::engine_cutover_process_child ... 
+ok
+test engine_cutover::tests::cases::engine_cutover_stale_source_and_per_field_corruption_refuse_release ... ok
+test engine_cutover::tests::cases::engine_cutover_task_move_rekey_and_terminal_hook_cannot_regain_authority ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_engine_json_fields_cannot_be_erased_after_release ... ok
+test engine_cutover::tests::cases::engine_cutover_unknown_schema_field_and_standalone_are_retained_but_block_release ... ok
+test engine_cutover::tests::engine_cutover_f01_typed_raw_conservation_and_atomic_workspace_coverage ... ok
+test engine_cutover::tests::engine_cutover_f08_every_current_table_and_column_is_seeded_and_conserved ... ok
+test engine_cutover::tests::engine_cutover_f10_raw_invalid_wait_survives_and_ambiguous_alias_quarantines ... ok
+test engine_cutover::tests::engine_cutover_f12_closed_backup_independent_restore_and_postbackup_receipts ... ok
+test engine_cutover::tests::engine_cutover_schema_catalog ... source65 tables=87 objects=201 columns=540 schema=wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09
+ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 499 filtered out; finished in 8.05s
+
+RESTORED 1 ["/Users/e-liang/.cargo/bin/cargo", "clippy", "--offline", "-p", "farcooler-store", "--all-targets", "--features", "testing", "--", "-D", "warnings"]
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/protocol)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/workflow)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/core)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-936-engine-authority-cutover/crates/store)
+error: unused `std::result::Result` that must be used
+   --> crates/store/src/engine_cutover.rs:127:5
+    |
+127 | /     tx.execute_batch("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,wor...
+128 | |         WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy'
+129 | |         AND NOT(OLD.id IS NEW.id AND OLD.workspace_id IS NEW.workspace_id AND OLD.repository_id IS NEW.repository_id AND OLD.key ...
+130 | |         BEGIN SELECT RAISE(ABORT,'migrated task identity is fenced'); END;
+...   |
+139 | |         AND NOT(OLD.task_id IS NEW.task_id AND OLD.worktree_id IS NEW.worktree_id AND OLD.workspace_id IS NEW.workspace_id AND OL...
+140 | |         BEGIN SELECT RAISE(ABORT,'legacy task-bound terminal restart retired'); END;");
+    | |______________________________________________________________________________________^
+    |
+    = note: this `Result` may be an `Err` variant, which should be handled
+    = note: `-D unused-must-use` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unused_must_use)]`
+help: use `let _ = ...` to ignore the resulting value
+    |
+127 |     let _ = tx.execute_batch("CREATE TRIGGER engine_task_identity_fence BEFORE UPDATE OF id,workspace_id,repository_id,key,former_key,worktree_id ON tasks
+    |     +++++++
+
+error: could not compile `farcooler-store` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `farcooler-store` (lib test) due to 1 previous error
+
+exit=101, stopped=None
