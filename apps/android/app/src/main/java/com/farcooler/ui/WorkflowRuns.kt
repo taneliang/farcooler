@@ -76,7 +76,7 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) {
-            if (ticket == generation) mutable.value = mutable.value.copy(notice = "Couldn’t refresh workflow runs. Reconnect or try Refresh.")
+            if (ticket == generation) mutable.value = mutable.value.copy(notice = "Couldn’t refresh workflow runs. Reconnect, then refresh again.")
         }
         return if (ticket == generation) ticket else null
     }
@@ -111,6 +111,7 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
     suspend fun retry(entry: RetainedWorkflow, port: WorkflowPort?) {
         if (port == null || !mutable.value.ready || mutable.value.busy) return
         val ticket = generation; val display = selection
+        var failed = false
         mutable.value = mutable.value.copy(busy = true, inspection = "")
         try {
             val result = port.retry(host, workspace, entry.id)
@@ -118,10 +119,11 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
                 it.item == entry.item && it.text("run") == entry.run } == true)
                 mutable.value = mutable.value.copy(inspection = result)
         } catch (cancel: CancellationException) { disconnect(); throw cancel }
-        catch (_: Exception) { }
+        catch (_: Exception) { failed = true }
         if (ticket == generation) {
             mutable.value = mutable.value.copy(busy = false, ready = false)
-            refresh(port)
+            val currentRefresh = refresh(port)
+            if (failed && currentRefresh != null && currentRefresh == generation) mutable.value = mutable.value.copy(notice = "The action wasn’t confirmed. Check the refreshed run before trying again.")
         }
     }
 

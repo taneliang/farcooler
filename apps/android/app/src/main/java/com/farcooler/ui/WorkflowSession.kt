@@ -81,7 +81,7 @@ class WorkflowSessionPort(
         val reason = selection["reason"]
         entries.firstOrNull { it["phase"]?.jsonPrimitive?.content != "abandoned" && it["item"]?.jsonPrimitive?.content == item && it["action"] == action }?.let { prior ->
             check(prior["reason"] == reason) { "Inspect or retry the retained decision before changing its reason" }
-            return@withLock prior["result"]?.jsonPrimitive?.content ?: error("Use Retry Retained Action")
+            return@withLock prior["result"]?.jsonPrimitive?.content ?: error("Retry the retained action")
         }
         val observation = requireNotNull(observed[key(scope, item, action.toString())])
         val entry = buildJsonObject {

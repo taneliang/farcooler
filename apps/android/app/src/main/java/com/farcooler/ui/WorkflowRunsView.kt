@@ -44,7 +44,7 @@ val LocalWorkflowPort = compositionLocalOf<WorkflowPort?> { null }
 @Composable
 fun WorkflowRunsButton(host: String, workspace: String) {
     var showing by rememberSaveable(host, workspace) { mutableStateOf(false) }
-    TextButton(onClick = { showing = true }) { Text("Workflow Runs") }
+    TextButton(onClick = { showing = true }) { Text("Workflow runs") }
     if (showing) Dialog(onDismissRequest = { showing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         androidx.compose.material3.Surface {
             WorkflowRunsView(host, workspace) { showing = false }
@@ -75,14 +75,14 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         view.retained.forEach { entry ->
             TextButton(onClick = { select(entry.item); scope.launch { model.retry(entry, port) } }, enabled = view.ready && !view.busy) {
-                Text("${if (entry.reinspect) "Reinspect Unsubmitted Action" else "Retry Retained Action"} · ${entry.item} · ${entry.label}")
+                Text("${if (entry.reinspect) "Reinspect unsubmitted action" else "Retry retained action"} · ${entry.item} · ${entry.label}")
             }
         }
-        Text("Workflow Runs", style = MaterialTheme.typography.headlineSmall)
+        Text("Workflow runs", style = MaterialTheme.typography.headlineSmall)
         TextButton(onClick = close) { Text("Close") }
         Button(onClick = { scope.launch { model.refresh(port) } }, enabled = !view.busy) { Text("Refresh") }
         if (view.notice.isNotEmpty()) Text(view.notice)
-        if (selected != null) TextButton(onClick = { select(null) }) { Text("All Runs") }
+        if (selected != null) TextButton(onClick = { select(null) }) { Text("All runs") }
         val run = view.presentation?.runs?.firstOrNull { it.item == selected }
         if (run != null) {
             WorkflowRunCard(run, view.ready && !view.busy && port != null, performReason = { action, reason ->
