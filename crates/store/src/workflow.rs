@@ -189,7 +189,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
             .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let target=match &input.command {
             Command::Enqueue {resource,..} => Some(resource.as_str()),
-            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Retry {item}|Command::Resolve {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Resolve {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance => None,
         };
         let quarantined=target.is_some_and(|resource|blocked.contains(resource));

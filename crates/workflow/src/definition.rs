@@ -10,6 +10,10 @@ pub enum Reviewer { Dispatch, Orchestrator(String), Person(String) }
 pub enum StageKind {
     Provision, Build, Check, Review(Reviewer), Land, Ci, Tracker,
     Action(String), Evaluate(String),
+    /// Wait for the orchestrator to queue this ticket into the named group, then take the group's
+    /// result as a label: `passed`, `rejected`, or `dropped`. `adopt` takes the group's result as
+    /// the ticket's candidate.
+    Join { group: String, adopt: bool },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
@@ -35,7 +39,21 @@ pub struct Stage {
 fn is_zero(n: &u8) -> bool { *n == 0 }
 /// Where a labeled result goes next.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Target { Step(String), Done, Fail }
+pub enum Target {
+    Step(String), Done, Fail,
+    /// Group steps only. With two or more members, this group keeps the first half and goes back
+    /// to `step`, and the rest form a new group. With one member (or no room) take `otherwise`.
+    Split { step: String, otherwise: Box<Target> },
+}
+/// A batch of tickets run together by an item of its own. Its steps are a definition of their own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupDef {
+    /// Most members one group holds; a later ticket opens a group behind it.
+    pub limit: u8,
+    /// The resource one group at a time holds, such as a branch on a remote.
+    pub exclusive: String,
+    pub steps: Vec<Stage>,
+}
 /// A finite forward sequence; rejected evaluators may take one bounded, pinned rework edge.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
@@ -44,6 +62,9 @@ pub struct Definition {
     pub stages: Vec<Stage>,
     pub max_reworks: u8,
     pub rework_target: Option<String>,
+    /// Schema 2 only: batches that tickets reaching a `Join` step are queued into.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub groups: BTreeMap<String, GroupDef>,
 }
 impl Definition {
     pub fn validate(&self) -> Result<(), Refusal> {
@@ -126,7 +147,7 @@ impl Definition {
                 let to = match stage.routes.get(label) {
                     Some(Target::Step(id)) => Some(index[id.as_str()]),
                     Some(Target::Done) => { done_reachable_from.push(i); None }
-                    Some(Target::Fail) => None,
+                    Some(Target::Fail | Target::Split { .. }) => None,
                     None if label == "passed" && i + 1 < n => Some(i + 1),
                     None if label == "passed" => { done_reachable_from.push(i); None }
                     None => None,
@@ -171,7 +192,7 @@ impl Definition {
     pub fn coding() -> Self {
         let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check,
             StageKind::Review(Reviewer::Dispatch), StageKind::Land, StageKind::Ci];
-        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()),
+        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
                 max_attempts: 2, routes: BTreeMap::new(), limit: 0,
@@ -181,7 +202,7 @@ impl Definition {
             }).collect() }
     }
     pub fn tracker(principal: &str) -> Self {
-        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None,
+        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
                 max_attempts: 1, routes: BTreeMap::new(), limit: 0,

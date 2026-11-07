@@ -145,7 +145,7 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
             _ => None,
         };
         let mut reasons = vec![match item.phase {
-            Phase::Blocked => Reason::DependenciesOrResource,
+            Phase::Blocked | Phase::WaitingJoin | Phase::Joined => Reason::DependenciesOrResource,
             Phase::WaitingApproval => Reason::ApprovalRequired,
             Phase::WaitingReview => Reason::ReviewRequired,
             Phase::Running => Reason::Automatic,

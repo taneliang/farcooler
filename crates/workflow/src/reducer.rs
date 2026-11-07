@@ -44,7 +44,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
-                back_edges: BTreeMap::new(), retries: 0 };
+                back_edges: BTreeMap::new(), retries: 0,
+                members: Vec::new(), group_of: None, grouped_in: None };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -52,6 +53,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
                 | Command::Observe { item, .. } | Command::Cancel { item } | Command::Retry { item }
+                | Command::Queue { item } | Command::Leave { item }
                 | Command::Resolve { item, .. } => item,
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             };
@@ -161,6 +163,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { item.phase = Phase::Cancelled; }
                 }
+                Command::Queue { .. } | Command::Leave { .. } => { return Err(Refusal::Phase); }
                 Command::Retry { .. } => {
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
@@ -253,7 +256,7 @@ fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mu
     effects.push(Effect { id: effect_id, item: id.into(), run: item.run.clone(),
         epoch: input.epoch, fence: item.fence, resource: item.resource.clone(),
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
-        candidate: item.candidate.clone(), kind,
+        candidate: item.candidate.clone(), members: item.members.clone(), kind,
         operation: item.definition.stages[item.stage].operation.clone(), created_ms: input.now_ms });
 }
 fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
@@ -330,7 +333,7 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: &Evide
     if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
     let target = target_of(item, label);
     let to = match &target {
-        Target::Fail => { item.phase = Phase::Failed; return Ok(()); }
+        Target::Fail | Target::Split { .. } => { item.phase = Phase::Failed; return Ok(()); }
         Target::Done => {
             item.stage = item.definition.stages.len();
             item.phase = Phase::Done;

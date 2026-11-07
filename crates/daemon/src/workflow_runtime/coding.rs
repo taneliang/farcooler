@@ -93,7 +93,7 @@ impl CodingConfigExt for CodingConfig {
         stages.push(self.stage("ci", StageKind::Ci, "coding-ci/v1", &self.ci.repository));
         Ok(Definition { schema: 1, source: "configured-coding/v1".into(), stages,
             max_reworks: if self.reviewer.is_some() { 2 } else { 0 },
-            rework_target: self.reviewer.as_ref().map(|_| "build".into()) })
+            rework_target: self.reviewer.as_ref().map(|_| "build".into()), groups: Default::default() })
     }
     fn stage(&self, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage {
         Stage { id: id.into(), kind, operation: self.operation(version, argument),

@@ -7,6 +7,7 @@ pub(super) fn phase_label(phase: &Phase) -> &'static str {
         Phase::WaitingReview => "Awaiting Review", Phase::Running => "Running",
         Phase::Uncertain => "Outcome Uncertain", Phase::Cancelling => "Cancelling",
         Phase::Done => "Completed", Phase::Failed => "Failed", Phase::Cancelled => "Cancelled",
+        Phase::WaitingJoin => "Waiting to Land", Phase::Joined => "Queued in a Batch",
     }
 }
 pub(super) fn stage_card(stage: &farcooler_workflow::Stage) -> StageCard {
@@ -15,7 +16,7 @@ pub(super) fn stage_card(stage: &farcooler_workflow::Stage) -> StageCard {
         StageKind::Check => "Run Checks", StageKind::Review(_) => "Review",
         StageKind::Land => "Land Changes", StageKind::Ci => "Check CI",
         StageKind::Tracker => "Update Tracker", StageKind::Action(_) => "Run Action",
-        StageKind::Evaluate(_) => "Evaluate Result",
+        StageKind::Evaluate(_) => "Evaluate Result", StageKind::Join { .. } => "Join Batch",
     };
     let progression_label = match &stage.progression {
         Progression::Automatic => "Automatic".into(),

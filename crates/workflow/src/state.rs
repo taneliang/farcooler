@@ -8,7 +8,11 @@ pub enum Refusal {
     Phase, Evidence, Limit,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, Uncertain, Cancelling, Done, Failed, Cancelled }
+pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, Uncertain, Cancelling, Done, Failed, Cancelled,
+    /// At a `Join` step, not yet queued into a group. Holds no resource.
+    WaitingJoin,
+    /// Queued into a group (`grouped_in`). Holds no resource.
+    Joined }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     pub definition: Definition,
@@ -34,7 +38,20 @@ pub struct Item {
     /// How many times a controller has retried this item after it failed.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retries: u8,
+    /// A group item only: the tickets it runs, each pinned to the candidate it joined with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<Member>,
+    /// A group item only: the join name and the pin of the definition whose tickets it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_of: Option<GroupOf>,
+    /// A joined ticket only: the group item it is queued into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grouped_in: Option<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member { pub item: String, pub candidate: String }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupOf { pub name: String, pub pin: String }
 fn is_zero(n: &u8) -> bool { *n == 0 }
 /// A failed item can be retried this many times, so a bad step cannot loop forever.
 pub const MAX_RETRIES: u8 = 3;
@@ -100,6 +117,10 @@ pub enum Command {
     Cancel { item: String },
     /// A controller runs a failed item's step again, within `MAX_RETRIES`.
     Retry { item: String },
+    /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
+    Queue { item: String },
+    /// The orchestrator pulls a queued ticket out of a group that has not left yet.
+    Leave { item: String },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +145,9 @@ pub struct Effect {
     pub definition_pin: String,
     pub policy_pin: String,
     pub candidate: Option<String>,
+    /// A group's tickets and the candidates they joined with, so none is resolved again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<Member>,
     pub kind: EffectKind,
     pub operation: OperationSpec,
     pub created_ms: i64,
