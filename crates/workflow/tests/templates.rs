@@ -215,3 +215,65 @@ fn a_gate_that_rejects_sends_a_ticket_back_to_build_on_every_template() {
         assert_eq!(w.at("one"), "build", "{} {name}", t.name());
     }
 }
+
+fn routed_plan() -> Plan {
+    let mut p = plan(Template::BatchedPush);
+    p.paths = Some(PathRoutes { argument: r#"{"default":"push","rules":[["site/**","ask"]]}"#.into(), approver: Some("owner".into()) });
+    p
+}
+#[test]
+fn a_path_route_step_is_one_generic_step_between_the_ticket_gates_and_the_join() {
+    let d = make(&routed_plan());
+    assert_eq!(ids(&d), ["provision", "build", "route", "approve", "join"]);
+    let route = &d.stages[2];
+    assert_eq!(route.kind, StageKind::Route);
+    assert_eq!(route.routes["push"], Target::Step("join".into()));
+    assert_eq!(route.routes["ask"], Target::Step("approve".into()));
+    assert!(!route.routes.contains_key("pull_request"), "a label nobody routes ends the run");
+    assert_eq!(route.operation.arguments[1], routed_plan().paths.unwrap().argument);
+    // Without an approver there is nowhere for `ask` to go, so the plan is not built.
+    let mut p = routed_plan(); p.paths.as_mut().unwrap().approver = None;
+    let d = make(&p);
+    assert_eq!(ids(&d), ["provision", "build", "route", "join"]);
+    assert!(!d.stages[2].routes.contains_key("ask"));
+}
+#[test]
+fn a_ticket_on_the_push_route_skips_the_approval_and_one_on_the_ask_route_waits_for_it() {
+    let mut w = Walk::new();
+    let d = make(&routed_plan());
+    w.enqueue("quiet", d.clone());
+    w.enqueue("loud", d);
+    for _ in 0..40 {
+        let ids: Vec<String> = w.state.items.keys().cloned().collect();
+        let mut moved = false;
+        for id in &ids {
+            let item = &w.state.items[id];
+            if item.pending.is_some() && item.definition.stages[item.stage].kind == StageKind::Route {
+                w.label(id, if id == "loud" { "ask" } else { "push" }); moved = true; break;
+            }
+        }
+        if !moved && !w.tick() { break; }
+    }
+    assert!(done(&w, "quiet") && done(&w, "loud"));
+    assert_eq!(passed_through(&w, "quiet"), ["provision", "build", "route"]);
+    assert_eq!(passed_through(&w, "loud"), ["provision", "build", "route", "approve"]);
+}
+#[test]
+fn a_route_that_answers_rejected_fails_the_ticket_and_lands_nothing() {
+    let mut w = Walk::new();
+    w.enqueue("odd", make(&routed_plan()));
+    while w.state.items["odd"].definition.stages[w.state.items["odd"].stage].kind != StageKind::Route || w.state.items["odd"].pending.is_none() { assert!(w.tick()); }
+    w.outcome("odd", Outcome::Rejected);
+    assert_eq!(w.state.items.get("odd").map(|i| i.phase.clone()).or_else(|| w.state.archive.get("odd").map(|a| a.phase.clone())), Some(Phase::Failed));
+    assert!(!w.visited.iter().any(|(_, s)| s == "approve" || s == "join"));
+}
+#[test]
+fn a_route_step_is_refused_in_a_group_and_in_an_unrouted_definition() {
+    let mut d = make(&routed_plan());
+    d.schema = 1; d.groups.clear();
+    assert!(d.validate().is_err());
+    let mut d = make(&routed_plan());
+    let route = d.stages.remove(2);
+    d.groups.get_mut("landing").unwrap().steps.insert(0, route);
+    assert!(d.validate().is_err());
+}

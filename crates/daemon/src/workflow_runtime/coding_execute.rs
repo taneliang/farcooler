@@ -204,7 +204,7 @@ impl Exec {
                 crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
                     .map_err(|_| Error::Refused("configured worktree provisioning uncertain"))?;
             }
-            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi =>
+            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route =>
                 return self.execute_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
                 // A gate that was ended mid-run (a restart, a crash) may have left files in the tree. They are

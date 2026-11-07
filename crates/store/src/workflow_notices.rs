@@ -28,7 +28,7 @@ pub fn verb_name(kind: &StageKind) -> String {
         StageKind::Review(_) => "review".into(), StageKind::Land => "land".into(), StageKind::Ci => "ci".into(),
         StageKind::Tracker => "tracker".into(), StageKind::Action(a) | StageKind::Evaluate(a) => a.clone(),
         StageKind::Join { .. } => "join".into(), StageKind::AwaitBase => "await-base".into(), StageKind::Fold => "fold".into(),
-        StageKind::Run => "run".into(), StageKind::Push => "push".into(), StageKind::AwaitCi => "await-ci".into(),
+        StageKind::Run => "run".into(), StageKind::Push => "push".into(), StageKind::AwaitCi => "await-ci".into(), StageKind::Route => "route".into(),
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -292,7 +292,7 @@ mod tests {
         let notice=&store.workflow_pending_notices(0).unwrap()[0].1.notice;
         assert_eq!(notice.verb.as_deref(),Some("tracker"));
         assert!(notice.tickets.is_empty());
-        for (kind,word) in [(StageKind::AwaitBase,"await-base"),(StageKind::Fold,"fold"),(StageKind::Run,"run"),(StageKind::Push,"push"),(StageKind::AwaitCi,"await-ci")] {
+        for (kind,word) in [(StageKind::AwaitBase,"await-base"),(StageKind::Fold,"fold"),(StageKind::Run,"run"),(StageKind::Push,"push"),(StageKind::AwaitCi,"await-ci"),(StageKind::Route,"route")] {
             assert_eq!(verb_name(&kind),word);
         }
         // A notice written before ov-958 reads back, and writes the same bytes.

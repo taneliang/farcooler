@@ -41,7 +41,7 @@ pub(super) fn classify_push(exit: Option<i32>, porcelain: &str, remote_after: Op
     }
 }
 pub(super) fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
 }
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
@@ -108,8 +108,26 @@ impl Exec {
             StageKind::Push => self.push(binding, cancel).await,
             StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-ci failed"); Outcome::SafeFailure })),
+            StageKind::Route => self.route_paths(binding).await,
             _ => Err(Error::Refused("not a landing verb")),
         }
+    }
+
+    /// Read the paths the ticket changed since it began and answer the label its pinned rules give them.
+    /// It only reads, so a crash before its fact is written just reads again. A route no definition can take
+    /// yet (`pull_request`) answers `rejected`, which ends the run.
+    async fn route_paths(&self, binding: &Binding) -> Result<Outcome> {
+        let rules = binding.effect.operation.arguments.get(1).and_then(|a| crate::path_routes::PathRules::read(a))
+            .ok_or(Error::Refused("unsound path rules"))?;
+        let tree = self.tree(binding);
+        self.verify_candidate(binding, &tree).await?;
+        let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;
+        let changed = self.git_recorded(binding, &tree, &["-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", "-z", &binding.base, &candidate]).await?;
+        let paths: Vec<String> = changed.split('\0').filter(|p| !p.is_empty()).map(String::from).collect();
+        let route = rules.route_of(&paths);
+        let label = match route { farcooler_core::charter_landing::Route::PullRequest => "rejected", other => crate::path_routes::label(other) };
+        self.write_fact(binding, label, &candidate, serde_json::json!({ "route": crate::path_routes::label(route), "paths": paths }))?;
+        self.reconcile_verb(binding, &StageKind::Route).await
     }
 
     /// Read the settled fact: never runs a command. With no fact, a read is read again and a fold is
@@ -121,7 +139,7 @@ impl Exec {
                 return match kind {
                     StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
                     // A wait cut short only looks again; a fold made half is made anew and spends an attempt.
-                    StageKind::AwaitBase | StageKind::AwaitCi => Ok(Outcome::Interrupted),
+                    StageKind::AwaitBase | StageKind::AwaitCi | StageKind::Route => Ok(Outcome::Interrupted),
                     _ => Ok(Outcome::SafeFailure),
                 };
             }

@@ -4,10 +4,11 @@
 //! configured adapter and what turns a charter into a draft bundle. Nothing here publishes: a person
 //! reads the draft and publishes it, as for any definition.
 use farcooler_core::charter_landing::{self, Route};
+use crate::path_routes::PathRules;
 use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCommand, CodingConfig};
 pub use farcooler_workflow::templates::Template;
 pub use farcooler_workflow::{Reviewer, StageKind};
-use farcooler_workflow::templates::{self, Gate, Pins, Plan};
+use farcooler_workflow::templates::{self, Gate, PathRoutes, Pins, Plan};
 use farcooler_workflow::{Definition, OperationSpec};
 use crate::workflow_runtime::CodingConfigExt;
 
@@ -62,6 +63,10 @@ pub enum Error {
     /// An agent gate needs the reviewer the runner is set up with.
     NoReviewer,
     BatchTooLarge,
+    /// A `--route` that isn't `GLOB=push` or `GLOB=ask`.
+    BadRoute(String),
+    /// A charter that mixes pull requests with other routes: no definition can say that yet.
+    MixedRoutes,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -77,6 +82,8 @@ impl std::fmt::Display for Error {
             Self::BadEnvironment(text) => write!(f, "`{text}` isn't a gate setting. Write it as NAME=value."),
             Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Only the owner can, so name owner."),
             Self::NoReviewer => f.write_str("An agent gate needs a reviewer, and this runner isn't set up with one."),
+            Self::BadRoute(text) => write!(f, "`{text}` isn't a route. Write it as PATTERN=push or PATTERN=ask."),
+            Self::MixedRoutes => f.write_str("This charter sends some paths by pull request and others another way, and a definition can't say that yet. Make them all one route, or wait for the pull request steps."),
             Self::BatchTooLarge => write!(f, "A batch holds at most {MAX_BATCH} tickets, so a failing one can always be found by splitting."),
         }
     }
@@ -112,9 +119,9 @@ fn person(principal: &str) -> Result<Gate, Error> {
 
 /// What a charter's landing section says, as a draft bundle for `config`.
 ///
-/// - The most careful route in the section wins for the whole workspace: ask over pull request over push.
-///   That is what a ticket touching every rule's files would have got, so it is never less careful. The
-///   note says which rules it folded.
+/// - Path rules become a `route` step: a ticket takes the route its most careful changed file earns, `push`
+///   straight to the landing or `ask` through a person first. One route for every path needs no step.
+///   A charter that mixes pull requests with the other routes is refused: that needs pull request steps.
 /// - Each `Gate:` becomes one command gate, run with `sh -c` and a pinned environment. `Gate: none` is
 ///   a gate that always passes, written out.
 /// - `Ask` adds a gate a person decides before the ticket lands.
@@ -128,14 +135,17 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
     let environment = gate_environment(environment)?;
     if rules.base != configured { return Err(Error::BaseDiffers { charter: rules.base.clone(), configured: configured.into() }); }
     let mut notes = Vec::new();
-    let all = std::iter::once(rules.default_route).chain(rules.rules.iter().map(|(_, r)| *r));
-    let careful = |r: &Route| match r { Route::Push => 0, Route::PullRequest => 1, Route::Ask => 2 };
-    let route = all.max_by_key(careful).unwrap_or(Route::Push);
-    let differs = rules.default_route != route || rules.rules.iter().any(|(_, r)| *r != route);
-    if differs {
-        notes.push(format!("Every ticket takes the {} route, the most careful the charter names. Path rules ({}) aren't a step yet.",
-            match route { Route::Push => "push", Route::PullRequest => "pull request", Route::Ask => "ask" },
-            rules.rules.iter().map(|(g, _)| format!("`{g}`")).collect::<Vec<_>>().join(", ")));
+    let mut every = std::iter::once(rules.default_route).chain(rules.rules.iter().map(|(_, r)| *r));
+    let all_pull_requests = every.clone().all(|r| r == Route::PullRequest);
+    if !all_pull_requests && every.any(|r| r == Route::PullRequest) { return Err(Error::MixedRoutes); }
+    let differs = rules.rules.iter().any(|(_, r)| *r != rules.default_route);
+    let by_path = differs.then(|| PathRules::new(rules.default_route, &rules.rules));
+    // With one route for every path, nothing needs routing: ask is one more gate, and the rest is the default.
+    let route = if by_path.is_some() { Route::Push } else { rules.default_route };
+    if by_path.is_some() {
+        notes.push(format!("Each ticket takes the route its changed paths earn: {}. The most careful file decides.",
+            rules.rules.iter().map(|(g, r)| format!("`{g}` {}", crate::path_routes::label(*r).replace('_', " "))).collect::<Vec<_>>().join(", ")
+                + &format!(", else {}", crate::path_routes::label(rules.default_route).replace('_', " "))));
     } else if !rules.rules.is_empty() {
         notes.push("The charter's path rules all agree with its default route, so none is written.".into());
     }
@@ -163,17 +173,46 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
     let mut plan = Plan::new(template, gates);
     plan.ci = rules.ci;
     plan.green_base = rules.ci;
+    plan.paths = by_path.map(|p| PathRoutes { argument: p.argument(), approver: Some("owner".into()) });
     let definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
     Ok((Bundle { definition, adapter: AdapterConfiguration::Coding(config) }, notes))
+}
+
+/// What a template draft can be told besides its gates.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// Most tickets in a batch.
+    pub batch: Option<u8>,
+    /// `NAME=value` settings every command gate runs with.
+    pub environment: Vec<String>,
+    /// The route a ticket takes when no path rule matches: `push` unless it says `ask`. Only used with `routes`.
+    pub route_default: Option<String>,
+    /// `PATTERN=push` or `PATTERN=ask`, first match wins per file. Any makes the draft route tickets by path.
+    pub routes: Vec<String>,
+}
+impl Options {
+    fn routes(&self) -> Result<Option<PathRules>, Error> {
+        if self.routes.is_empty() && self.route_default.is_none() { return Ok(None); }
+        let default = self.route_default.clone().unwrap_or_else(|| "push".into());
+        let mut rules = Vec::new();
+        for text in &self.routes {
+            let (glob, route) = text.rsplit_once('=').filter(|(g, r)| !g.is_empty() && matches!(*r, "push" | "ask")).ok_or_else(|| Error::BadRoute(text.clone()))?;
+            rules.push((glob.to_string(), route.to_string()));
+        }
+        if !matches!(default.as_str(), "push" | "ask") { return Err(Error::BadRoute(default)); }
+        let paths = PathRules { default, rules };
+        PathRules::read(&paths.argument()).map(Some).ok_or(Error::BadRoute("too many routes".into()))
+    }
 }
 
 /// One of the four templates on `config`, with `commands` as the whole set of its command gates (in order)
 /// and `extra` as its agent and person gates. The draft replaces the runner's configured checks, so it
 /// always lists every gate it should have; tickets already in flight keep the bundle they started with.
-pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &[Extra], batch: Option<u8>, environment: &[String]) -> Result<Bundle, Error> {
+pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &[Extra], options: &Options) -> Result<Bundle, Error> {
     let template = Template::parse(name).ok_or_else(|| Error::NoSuchTemplate(name.into()))?;
-    if batch.is_some_and(|b| b > MAX_BATCH) { return Err(Error::BatchTooLarge); }
-    let environment = gate_environment(environment)?;
+    if options.batch.is_some_and(|b| b > MAX_BATCH) { return Err(Error::BatchTooLarge); }
+    let environment = gate_environment(&options.environment)?;
+    let paths = options.routes()?;
     let mut config = config.clone();
     config.checks.clear();
     let mut gates = Vec::new();
@@ -189,7 +228,11 @@ pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &
         });
     }
     let mut plan = Plan::new(template, gates);
-    if let Some(batch) = batch { plan.batch = batch; }
+    if let Some(batch) = options.batch { plan.batch = batch; }
+    plan.paths = paths.map(|p| {
+        let asks = p.default == "ask" || p.rules.iter().any(|(_, r)| r == "ask");
+        PathRoutes { argument: p.argument(), approver: asks.then(|| "owner".into()) }
+    });
     let definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
     Ok(Bundle { definition, adapter: AdapterConfiguration::Coding(config) })
 }

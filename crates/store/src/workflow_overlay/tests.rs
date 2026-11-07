@@ -21,7 +21,7 @@ fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> 
         pending: None, candidate: candidate.map(Into::into), last_evidence: None, stopping: None,
         rework_history: vec![], back_edges: BTreeMap::new(), retries: 0, pushed: None,
         members: members.iter().map(|m| Member { item: (*m).into(), candidate: format!("cand-{m}") }).collect(),
-        handed: vec![], since_ms: 0,
+        handed: vec![], since_ms: 0, wait_since: None,
         group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None }
 }
 fn ci(sha: &str, status: CiStatus) -> CiRead {

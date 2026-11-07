@@ -26,6 +26,17 @@ impl Gates {
     }
 }
 
+#[derive(Args, Clone, Default)]
+pub struct Routes {
+    /// Route tickets by the paths they change: PATTERN=push or PATTERN=ask, first match wins per file, and the most
+    /// careful file decides. `ask` sends a ticket through the owner first. Repeat for several.
+    #[arg(long, value_name = "PATTERN=ROUTE")]
+    pub route: Vec<String>,
+    /// The route a ticket takes when no `--route` pattern matches it: push (the default) or ask.
+    #[arg(long, value_name = "ROUTE")]
+    pub route_default: Option<String>,
+}
+
 #[derive(Args, Clone)]
 pub struct Output {
     /// Write the draft here instead of printing it. Publish it with `workspace set-workflow --file`.
@@ -55,9 +66,10 @@ pub fn import(charter: &str, held: &Held, gates: &Gates) -> Result<(Bundle, Vec<
     lt::import_charter(charter, config, held.source.as_deref(), &gates.extras(), &gates.gate_env)
 }
 
-pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, batch: Option<u8>) -> Result<Bundle, lt::Error> {
+pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, routes: &Routes, batch: Option<u8>) -> Result<Bundle, lt::Error> {
     let config = held.adapter.as_ref().ok_or(lt::Error::NoAdapter)?;
-    lt::template(name, config, commands, &gates.extras(), batch, &gates.gate_env)
+    let options = lt::Options { batch, environment: gates.gate_env.clone(), route_default: routes.route_default.clone(), routes: routes.route.clone() };
+    lt::template(name, config, commands, &gates.extras(), &options)
 }
 
 /// Print or write a draft, and say how to publish it. The words go to standard error so `--json`
@@ -123,14 +135,23 @@ mod tests {
         assert!(lt::Error::NoAdapter.to_string().ends_with('.'));
     }
     #[test]
+    fn a_template_routes_tickets_by_path_from_flags() {
+        let held = held(&get(None)).unwrap();
+        let routes = Routes { route: vec!["site/**=ask".into()], route_default: None };
+        let bundle = template("ticket-push", &held, &["make check".into()], &Gates::default(), &routes, None).unwrap();
+        assert!(bundle.definition.stages.iter().any(|s| s.kind == lt::StageKind::Route));
+        let bad = Routes { route: vec!["site/**".into()], route_default: None };
+        assert!(matches!(template("ticket-push", &held, &["make check".into()], &Gates::default(), &bad, None).unwrap_err(), lt::Error::BadRoute(_)));
+    }
+    #[test]
     fn a_template_takes_gates_of_all_three_kinds_from_flags() {
         let held = held(&get(None)).unwrap();
         let gates = Gates { agent_gate: false, person_gate: vec!["owner".into()], gate_env: vec![] };
-        let bundle = template("batched-push", &held, &["make check".into()], &gates, Some(4)).unwrap();
+        let bundle = template("batched-push", &held, &["make check".into()], &gates, &Routes::default(), Some(4)).unwrap();
         assert_eq!(bundle.definition.groups["landing"].limit, 4);
         assert!(bundle.definition.stages.iter().any(|s| matches!(&s.kind, lt::StageKind::Review(lt::Reviewer::Person(p)) if p == "owner")));
         // An agent gate needs the reviewer this runner doesn't have.
         let agent = Gates { agent_gate: true, person_gate: vec![], gate_env: vec![] };
-        assert_eq!(template("batched-push", &held, &["make check".into()], &agent, None).unwrap_err(), lt::Error::NoReviewer);
+        assert_eq!(template("batched-push", &held, &["make check".into()], &agent, &Routes::default(), None).unwrap_err(), lt::Error::NoReviewer);
     }
 }

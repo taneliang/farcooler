@@ -51,6 +51,12 @@ pub enum Gate {
     Person { principal: String },
 }
 
+/// Rules that send each ticket to the route its changed paths earn. The host writes `argument` in the form its
+/// route verb reads and pins it; the template only places the step. A ticket answers `push` (straight to the
+/// gates and the landing) or `ask` (through `approver`, a person, first). Any other label ends the run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PathRoutes { pub argument: String, pub approver: Option<String> }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub template: Template,
@@ -65,11 +71,13 @@ pub struct Plan {
     pub base_patience_ms: u64,
     pub ci_patience_ms: u64,
     pub source: String,
+    /// Route tickets by the paths they change, after the ticket gates and before they join a group.
+    pub paths: Option<PathRoutes>,
 }
 impl Plan {
     pub fn new(template: Template, gates: Vec<Gate>) -> Self {
         Self { template, gates, green_base: true, ci: true, batch: 8, every_ms: 60_000,
-            base_patience_ms: 3 * 3_600_000, ci_patience_ms: 3 * 3_600_000, source: format!("landing/{}", template.name()) }
+            base_patience_ms: 3 * 3_600_000, ci_patience_ms: 3 * 3_600_000, source: format!("landing/{}", template.name()), paths: None }
     }
 }
 
@@ -112,6 +120,19 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
         };
         judged += 1;
         stages.push(routed(stage, "rejected", step("build"), 2));
+    }
+    // Where a ticket that passed its gates goes next: the join of a push template, else the end of the steps.
+    if let (Some(paths), true) = (&plan.paths, t.pushes()) {
+        let mut route = m.stage("route", StageKind::Route, "coding-route/v1", &paths.argument);
+        route.routes.insert("push".into(), step("join"));
+        stages.push(route);
+        if let Some(principal) = &paths.approver {
+            stages.last_mut().unwrap().routes.insert("ask".into(), step("approve"));
+            let approve = m.stage("approve", StageKind::Review(Reviewer::Person(principal.clone())), "coding-review/v1", &format!("person:{principal}"));
+            stages.push(routed(approve, "rejected", step("build"), 2));
+        }
+    } else if plan.paths.is_some() {
+        return Err(Refusal::Definition);
     }
     let batch = if t.batched() { plan.batch } else { 1 };
     let (every, base_wait, ci_wait) = (plan.every_ms, plan.base_patience_ms, plan.ci_patience_ms);

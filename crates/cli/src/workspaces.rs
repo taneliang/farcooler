@@ -60,14 +60,17 @@ pub enum WorkspaceCmd {
         workspace: String,
         /// batched-push, ticket-push, ticket-pr or batched-pr.
         name: String,
-        /// A command gate, run with `sh -c`. Repeat for several; they run in order.
+        /// A command gate, run with `sh -c`. Repeat for several; they run in order. This is the whole list: the
+        /// draft replaces the gates the runner has now, so name the ones to keep.
         #[arg(long = "gate", value_name = "COMMAND")]
         gate: Vec<String>,
-        /// Most tickets in one batch (the batched templates).
+        /// Most tickets in one batch (the batched templates), up to 8.
         #[arg(long)]
         batch: Option<u8>,
         #[command(flatten)]
         gates: crate::landing_templates::Gates,
+        #[command(flatten)]
+        routes: crate::landing_templates::Routes,
         #[command(flatten)]
         output: crate::landing_templates::Output,
         #[arg(long)]
@@ -609,10 +612,10 @@ async fn workspace_via(
 
         WorkspaceCmd::LandingTemplates => print!("{}", crate::landing_templates::list()),
 
-        WorkspaceCmd::LandingTemplate { workspace, name, gate, batch, gates, output, repo } => {
+        WorkspaceCmd::LandingTemplate { workspace, name, gate, batch, gates, routes, output, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
-            let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, batch)?;
+            let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
             crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
         }
 

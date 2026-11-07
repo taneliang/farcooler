@@ -158,6 +158,13 @@ impl Pinned for CodingConfig {
                     self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
                 StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },
                 StageKind::Ci if landed => self.operation("coding-ci/v1", &self.ci.repository),
+                // A route reads the ticket's change and answers a label the definition routes. Its rules are the
+                // step's own to choose, so any readable, bounded set of them is pinned; the pin is the rest of it.
+                StageKind::Route if built && !landed && !in_group => {
+                    let rules = stage.operation.arguments.get(1).filter(|a| crate::path_routes::PathRules::read(a).is_some())
+                        .ok_or(Error::Refused("unsound path rules"))?;
+                    self.operation("coding-route/v1", rules)
+                },
                 StageKind::Join { group, .. } if built && !in_group => self.operation("coding-join/v1", group),
                 StageKind::AwaitBase if in_group && !based && !pushed => {
                     based = true; landing?;

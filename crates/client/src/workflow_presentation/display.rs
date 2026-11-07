@@ -18,7 +18,7 @@ pub(super) fn stage_card(stage: &farcooler_workflow::Stage) -> StageCard {
         StageKind::Tracker => "Update Tracker", StageKind::Action(_) => "Run Action",
         StageKind::Evaluate(_) => "Evaluate Result", StageKind::Join { .. } => "Join Batch",
         StageKind::AwaitBase => "Wait for Base", StageKind::Fold => "Combine Changes",
-        StageKind::Run => "Run Gate", StageKind::Push => "Push Changes", StageKind::AwaitCi => "Wait for CI",
+        StageKind::Run => "Run Gate", StageKind::Push => "Push Changes", StageKind::AwaitCi => "Wait for CI", StageKind::Route => "Choose Route",
     };
     let progression_label = match &stage.progression {
         Progression::Automatic => "Automatic".into(),

@@ -1,6 +1,7 @@
 //! The landing templates pinned to a configured runner, and run against a real git repository with a
 //! local bare repository standing in for the remote. No network push is ever made (ov-959).
 use super::*;
+use super::concurrency_tests::enqueue_item;
 use super::coding_verbs_tests::{at_join, command, lander, outbox, phase_of, remote_head, until};
 use crate::landing_templates::{self as lt, Extra, Host};
 use farcooler_workflow::templates::{self, Gate, Plan, Template};
@@ -113,15 +114,99 @@ async fn gate_none_is_written_out_as_a_gate_that_passes() {
 }
 
 #[tokio::test]
-async fn the_most_careful_route_wins_and_ask_adds_a_gate_only_a_person_decides() {
+async fn path_rules_become_a_route_step_and_one_route_for_every_path_needs_none() {
     let (_dir, config) = config_for_import().await;
     let (bundle, notes) = lt::import_charter(&charter("- Route: push\n- Route `services/site/**`: ask\n- Gate: `scripts/g.sh`"), &config, None, &[], &[]).unwrap();
-    assert!(notes.iter().any(|n| n.contains("ask") && n.contains("services/site/**")), "{notes:?}");
-    let person: Vec<_> = bundle.definition.stages.iter().filter(|s| matches!(&s.kind, StageKind::Review(Reviewer::Person(p)) if p == "owner")).collect();
-    assert_eq!(person.len(), 1);
-    let (bundle, _) = lt::import_charter(&charter("- Route: pull request"), &config, None, &[], &[]).unwrap();
+    assert!(notes.iter().any(|n| n.contains("services/site/**") && n.contains("ask")), "{notes:?}");
+    let ids: Vec<_> = bundle.definition.stages.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["provision", "build", "route", "approve", "join"]);
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(adapted) = &bundle.adapter;
+    adapted.validate_definition(&bundle.definition).expect("a route step pins");
+    // Every path asking is one more gate, not a step; every path pushing is neither.
+    let (all_ask, _) = lt::import_charter(&charter("- Route: ask\n- Gate: `scripts/g.sh`"), &config, None, &[], &[]).unwrap();
+    assert!(all_ask.definition.stages.iter().all(|s| s.kind != StageKind::Route));
+    assert_eq!(all_ask.definition.stages.iter().filter(|s| matches!(&s.kind, StageKind::Review(Reviewer::Person(p)) if p == "owner")).count(), 1);
+    let (quiet, _) = lt::import_charter(&charter("- Route: push\n- Route `docs/**`: push\n- Gate: `scripts/g.sh`"), &config, None, &[], &[]).unwrap();
+    assert!(quiet.definition.stages.iter().all(|s| s.kind != StageKind::Route && !matches!(s.kind, StageKind::Review(_))));
+}
+
+#[tokio::test]
+async fn a_charter_that_mixes_pull_requests_with_other_routes_is_refused_not_folded() {
+    let (_dir, config) = config_for_import().await;
+    for section in ["- Route: pull request\n- Route `services/site/**`: ask\n- Gate: `g`", "- Route: push\n- Route `docs/**`: pull request\n- Gate: `g`"] {
+        assert_eq!(lt::import_charter(&charter(section), &config, None, &[], &[]).unwrap_err(), lt::Error::MixedRoutes, "{section}");
+    }
+    let (bundle, notes) = lt::import_charter(&charter("- Route: pull request\n- Route `docs/**`: pull request"), &config, None, &[], &[]).unwrap();
     assert_eq!(bundle.definition.source, "landing/ticket-pr");
-    assert!(bundle.definition.groups.is_empty());
+    assert!(notes.iter().any(|n| n.contains("can't be published yet")), "{notes:?}");
+}
+
+#[tokio::test]
+async fn a_template_draft_takes_path_routes_from_flags() {
+    let (_dir, config) = config_for_import().await;
+    let options = lt::Options { routes: vec!["site/**=ask".into()], ..Default::default() };
+    let bundle = lt::template("ticket-push", &config, &["make check".into()], &[], &options).unwrap();
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(adapted) = &bundle.adapter;
+    adapted.validate_definition(&bundle.definition).unwrap();
+    assert!(bundle.definition.stages.iter().any(|s| s.kind == StageKind::Route));
+    for bad in ["site/**", "=ask", "site/**=maybe", "site/**=pull_request"] {
+        let options = lt::Options { routes: vec![bad.into()], ..Default::default() };
+        assert!(matches!(lt::template("ticket-push", &config, &["x".into()], &[], &options).unwrap_err(), lt::Error::BadRoute(_)), "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn a_route_step_with_rules_nobody_can_read_does_not_pin() {
+    let (_dir, runtime) = lander("pass").await;
+    let config = runtime.coding.clone().unwrap();
+    let mut plan = plan(Template::TicketPush, vec![Gate::Command(1)]);
+    plan.paths = Some(templates::PathRoutes { argument: "not rules".into(), approver: None });
+    let definition = templates::build(&plan, &Host(&config)).unwrap();
+    assert!(config.validate_definition(&definition).is_err());
+}
+
+fn routed_definition(runtime: &Runtime, rules: &[(&str, &str)], default: &str, approver: bool) -> Definition {
+    let rules = crate::path_routes::PathRules { default: default.into(), rules: rules.iter().map(|(g, r)| (g.to_string(), r.to_string())).collect() };
+    let mut p = plan(Template::TicketPush, vec![Gate::Command(1)]);
+    p.paths = Some(templates::PathRoutes { argument: rules.argument(), approver: approver.then(|| "owner".into()) });
+    let definition = built(runtime, &p);
+    runtime.coding.as_ref().unwrap().validate_definition(&definition).unwrap();
+    definition
+}
+
+#[tokio::test]
+async fn a_ticket_whose_paths_earn_push_lands_without_a_person() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = routed_definition(&runtime, &[("site/**", "ask")], "push", true);
+    let first = remote_head(&runtime).await;
+    // The build writes result-*.txt at the top, which no rule asks about.
+    at_join(&mut runtime, "quiet", &definition).await;
+    assert!(command(&runtime, Command::Queue { item: "quiet".into() }).result.is_ok());
+    until(&mut runtime, |s| phase_of(s, "quiet") == Some(Phase::Done)).await;
+    assert_ne!(remote_head(&runtime).await, first);
+    assert_eq!(outbox(&runtime, StageKind::Route), 1);
+}
+
+#[tokio::test]
+async fn a_ticket_whose_paths_earn_ask_waits_for_the_owner_and_pushes_nothing_until_then() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = routed_definition(&runtime, &[("result-*.txt", "ask")], "push", true);
+    let first = remote_head(&runtime).await;
+    enqueue_item(&mut runtime, "w", "loud", definition.clone());
+    until(&mut runtime, |s| phase_of(s, "loud") == Some(Phase::WaitingReview)).await;
+    assert_eq!(remote_head(&runtime).await, first, "nothing is pushed while the owner hasn't said");
+    assert_eq!(outbox(&runtime, StageKind::Push), 0);
+}
+
+#[tokio::test]
+async fn a_route_the_definition_cannot_take_ends_the_run_and_pushes_nothing() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = routed_definition(&runtime, &[("result-*.txt", "pull_request")], "push", false);
+    let first = remote_head(&runtime).await;
+    enqueue_item(&mut runtime, "w", "odd", definition);
+    until(&mut runtime, |s| phase_of(s, "odd") == Some(Phase::Failed)).await;
+    assert_eq!(remote_head(&runtime).await, first);
+    assert_eq!(outbox(&runtime, StageKind::Push), 0);
 }
 
 #[tokio::test]
@@ -142,10 +227,10 @@ async fn an_imported_gate_of_each_kind_can_be_added_by_hand() {
     let (_dir, config) = config_for_import().await;
     let (bundle, _) = lt::import_charter(&charter("- Gate: `scripts/g.sh`"), &config, None, &[Extra::Person("owner".into())], &[]).unwrap();
     assert!(bundle.definition.stages.iter().any(|s| matches!(&s.kind, StageKind::Review(Reviewer::Person(_)))));
-    let bundle = lt::template("ticket-push", &config, &["scripts/g.sh".into()], &[Extra::Person("owner".into())], None, &[]).unwrap();
+    let bundle = lt::template("ticket-push", &config, &["scripts/g.sh".into()], &[Extra::Person("owner".into())], &lt::Options::default()).unwrap();
     assert_eq!(bundle.definition.groups["landing"].limit, 1);
-    assert_eq!(lt::template("shipping", &config, &[], &[], None, &[]).unwrap_err(), lt::Error::NoSuchTemplate("shipping".into()));
-    assert_eq!(lt::template("batched-push", &config, &[], &[], None, &[]).unwrap_err(), lt::Error::Unsound, "a push needs a command gate");
+    assert_eq!(lt::template("shipping", &config, &[], &[], &lt::Options::default()).unwrap_err(), lt::Error::NoSuchTemplate("shipping".into()));
+    assert_eq!(lt::template("batched-push", &config, &[], &[], &lt::Options::default()).unwrap_err(), lt::Error::Unsound, "a push needs a command gate");
 }
 
 /// Import a charter against the live runner's own settings, swap the imported settings in, and reopen.
@@ -196,7 +281,7 @@ async fn a_bundle_drafted_from_the_runners_adapter_still_publishes_after_a_ticke
     // The target has moved on from the base the adapter was set up at.
     let config = runtime.coding.clone().unwrap();
     assert_ne!(remote_head(&runtime).await, config.base);
-    let draft = lt::template("batched-push", &config, &["make check".into()], &[], None, &[]).unwrap();
+    let draft = lt::template("batched-push", &config, &["make check".into()], &[], &lt::Options::default()).unwrap();
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(drafted) = &draft.adapter;
     drafted.validate_definition(&draft.definition).unwrap();
     super::service_owner::publication_base_current(drafted).await.expect("a moved target does not refuse a draft");
@@ -218,14 +303,14 @@ async fn redrafting_lists_every_gate_so_none_is_lost_and_the_cap_is_never_reache
     let mut config = runtime.coding.clone().unwrap();
     for round in 0..4 {
         let gates = ["a", "b", "c"].map(String::from);
-        let bundle = lt::template("batched-push", &config, &gates, &[], None, &[]).unwrap();
+        let bundle = lt::template("batched-push", &config, &gates, &[], &lt::Options::default()).unwrap();
         let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(drafted) = bundle.adapter;
         assert_eq!(drafted.checks.len(), 3, "round {round}");
         assert_eq!(bundle.definition.groups["landing"].steps.iter().filter(|s| s.kind == StageKind::Run).count(), 3, "round {round}");
         config = drafted;
     }
     // Dropping a gate is saying the shorter list.
-    let bundle = lt::template("batched-push", &config, &["a".into()], &[], None, &[]).unwrap();
+    let bundle = lt::template("batched-push", &config, &["a".into()], &[], &lt::Options::default()).unwrap();
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(drafted) = bundle.adapter;
     assert_eq!(drafted.checks.len(), 1);
 }
@@ -235,13 +320,13 @@ async fn a_gate_gets_home_and_whatever_environment_the_draft_names() {
     let (_dir, runtime) = lander("pass").await;
     let config = runtime.coding.clone().unwrap();
     let env = ["CARGO_HOME=/opt/cargo".to_string(), "PATH=/opt/bin:/usr/bin".to_string()];
-    let bundle = lt::template("ticket-push", &config, &["cargo test".into()], &[], None, &env).unwrap();
+    let bundle = lt::template("ticket-push", &config, &["cargo test".into()], &[], &lt::Options { environment: env.to_vec(), ..Default::default() }).unwrap();
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(drafted) = &bundle.adapter;
     let got = &drafted.checks[0].environment;
     assert_eq!(got.get("CARGO_HOME").map(String::as_str), Some("/opt/cargo"));
     assert_eq!(got.get("PATH").map(String::as_str), Some("/opt/bin:/usr/bin"), "a named PATH wins over the default");
     assert!(got.contains_key("HOME"), "HOME is there by default");
-    assert!(matches!(lt::template("ticket-push", &config, &["x".into()], &[], None, &["nonsense".into()]).unwrap_err(), lt::Error::BadEnvironment(_)));
+    assert!(matches!(lt::template("ticket-push", &config, &["x".into()], &[], &lt::Options { environment: vec!["nonsense".into()], ..Default::default() }).unwrap_err(), lt::Error::BadEnvironment(_)));
     // The import takes the same setting.
     let (imported, _) = lt::import_charter(&charter("- Gate: `cargo test`"), &config, None, &[], &["CARGO_HOME=/opt/cargo".into()]).unwrap();
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(c) = &imported.adapter;
@@ -254,10 +339,10 @@ async fn a_draft_refuses_what_it_cannot_publish_or_what_nobody_can_decide() {
     let config = runtime.coding.clone().unwrap();
     let gates = ["make check".to_string()];
     for who in ["alice", "orchestrator"] {
-        assert_eq!(lt::template("ticket-push", &config, &gates, &[Extra::Person(who.into())], None, &[]).unwrap_err(), lt::Error::NotADecider(who.into()));
+        assert_eq!(lt::template("ticket-push", &config, &gates, &[Extra::Person(who.into())], &lt::Options::default()).unwrap_err(), lt::Error::NotADecider(who.into()));
     }
-    assert_eq!(lt::template("batched-push", &config, &gates, &[], Some(16), &[]).unwrap_err(), lt::Error::BatchTooLarge);
-    assert!(lt::template("batched-push", &config, &gates, &[], Some(8), &[]).is_ok());
+    assert_eq!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(16), ..Default::default() }).unwrap_err(), lt::Error::BatchTooLarge);
+    assert!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(8), ..Default::default() }).is_ok());
     assert_eq!(lt::import_charter(&charter("- Gate: `x`"), &config, None, &[Extra::Agent], &[]).unwrap_err(), lt::Error::NoReviewer);
     // The branch a push lands on is the target, whatever the local ref is called.
     let on_target = format!("- Gate: `x`\n- Base: {}", config.landing.as_ref().unwrap().target.trim_start_matches("refs/heads/"));

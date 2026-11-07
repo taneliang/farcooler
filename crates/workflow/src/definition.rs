@@ -24,6 +24,9 @@ pub enum StageKind {
     Push,
     /// Wait for CI on the candidate: one effect, polled inside.
     AwaitCi,
+    /// Read the paths the ticket changed and answer with the label its pinned rules give them. It only
+    /// reads: the definition routes each label, and a label it doesn't route ends the run.
+    Route,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
@@ -107,6 +110,8 @@ impl Definition {
             if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push) {
                 return Err(Refusal::Definition);
             }
+            // A route reads a ticket's own change, which a group has no single answer for.
+            if in_group && matches!(stage.kind, StageKind::Route) { return Err(Refusal::Definition); }
             match stage.kind {
                 // Routed definitions check candidate availability along their edges instead.
                 _ if routed => {}
@@ -331,7 +336,7 @@ pub const MAX_GROUP_MEMBERS: u8 = 32;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a
 /// definition's own is only for steps whose binding or command the definition chose.
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {
-    emits_unrouted(kind, label) || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_))
+    emits_unrouted(kind, label) || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_) | StageKind::Route)
 }
 /// Labels a step's own kind produces, which need no route to be a valid answer: with none, they fail
 /// the item. A label of a definition's own (a check's or an action's) must be declared by a route.
@@ -345,14 +350,14 @@ pub fn emits_unrouted(kind: &StageKind, label: &str) -> bool {
 }
 /// The landing verbs: all of them need routes, so they are for schema 2.
 fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
 }
 /// Steps that move the base. Nothing after one may run its group over again.
 pub fn lands(kind: &StageKind) -> bool { matches!(kind, StageKind::Land | StageKind::Push) }
 fn needs_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
         | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. }
-        | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi)
+        | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
 }
 /// What a step's result becomes the item's candidate. Waiting for the base takes the base as the
 /// candidate, which the fold then builds on and replaces.
