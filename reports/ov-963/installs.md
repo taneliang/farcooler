@@ -55,3 +55,22 @@ I would take option 2 inside Prepare. It needs the orchestrator's ruling, becaus
 - Whether Canary's real catalog hash matches the pinned registry-60 hash. Only the version number was ever read, and not by me.
 - Why registries 39, 55 and 59, and f60fee4e6's own run, are missing from the success list.
 - The registry of the 264 runs before Oct 5. It is below 28.
+
+## Ruling taken: the lift is built (last fix round)
+
+The orchestrator ruled option 2, inside Prepare. `transfer::begin` now does, before the baseline exists:
+
+1. If the file is at a registry from 1 to 59, run the lift on a **scratch copy** (`<db>.lift-check`) and judge it with `preflight`. That is the pinned `SOURCE60_SCHEMA_HASH` check. A drifted catalog is refused here, with the real file never opened for writing and no artifact written.
+2. Copy the original bytes into the attempt's `pre-lift.db`, synced, hashed, with a `pre-lift.json` note. **This is the backup.** Before this round none existed on the cutover path: the ordinary open writes a checksummed backup before it migrates, but Prepare never goes through that open.
+3. Lift the real file in one transaction to exactly 60 (`migrate::apply_between`), stamping `compatible_down_to` 60 as the registry-60 build did.
+4. Carry on as a registry-60 source. The baseline is the lifted file.
+
+What this means for getting back:
+
+- **Recover returns the lifted registry-60 file**, not the original. The original is whole in `pre-lift.db` inside the attempt's artifact directory (renamed to `.cutover-abandoned-N` by Recover, or carried by Finish). Putting it back is a manual step: stop the daemon, copy `pre-lift.db` over the database.
+- A crash between steps 2 and 3 leaves the original untouched and an artifact directory with no baseline; Recover retires it as abandoned.
+- A crash after step 3 leaves a lifted registry-60 file and no baseline; Recover retires the directory and the next Prepare starts from 60.
+
+Tests, on rows from the real migration history stopped at registries 28, 45 and 57: `crates/store/src/engine_cutover/tests/lift.rs`. Four mutants (no copy, no judgement, runs past 60, no floor) go red.
+
+Not covered: the lift has no entry in the real-crash boundary matrix, so a SIGKILL inside it is argued above, not run. The rows in the fixtures are small, so the lift's transaction at real size is unmeasured. The pinned history is the prefix of `MIGRATIONS` in this tree; the runtime check is the catalog hash, not a comparison of migration text.

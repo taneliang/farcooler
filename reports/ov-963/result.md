@@ -64,3 +64,13 @@ Rerun at this branch's tip: the example reached `committed`, with zero fake send
 - **M2, fixed.** The two cutover write connections set `fullfsync` and `checkpoint_fullfsync`. A store test reads both back and fails without them. Power loss is still unproven.
 - **Left, named.** M3 (pause updates mid-attempt: needs a product decision on the Sparkle side). M4 (three safety steps with no red mutant: still not counted as proven). M5 (the inert journal is deleted, not kept). M6 and M7 (harmless).
 - **Not rerun.** The 37 recorded mutants. The matrix, the store cutover tests and the recovery tests ran green after the changes.
+
+## Last fix round (HEAD after this commit)
+
+- **B1, built.** Prepare lifts a runner at registry 1 to 59 to exactly 60, judged first on a scratch copy by the pinned catalog hash, behind `pre-lift.db`. See `installs.md` for the order, what Recover returns and what is not covered. Fixtures at 28, 45 and 57 come from the real migration history; a drifted catalog is refused with the file and directory untouched.
+- **M3, made safe at the takeover point.** `daemon_link::ensure_in` keeps the running recovery daemon (`kept_held`) and starts no new one when a cutover is frozen at a schema this build does not write; the CLI says to reinstall the build that started it. Not done: pausing Sparkle itself, so the app bundle can still change under a runner.
+- **M4.** The restore compare, the live re-hash and `quick_check` each have a test that makes the damage (through a test-only seam in `closing.rs`) and a mutant that goes red. `quick_check` does not compare indexes with tables; the test damages an index page structurally, which is what it does catch.
+- **M5.** An inert journal is renamed to `<db>-journal.inert-N`, never overwritten.
+- **Left, named:** M6 (journal parent not synced, torn entry kept) and M7 (settle wait is about 1.7 s, not 500 ms), both harmless as the review says.
+- **New finding, not built.** `startup::inspect` refuses any database below the current registry, including a released one. The first migration after 67 would send every released install back to "pre-cutover schema requires the explicit authenticated cutover". Ordinary admission needs to admit a released database below current and let `Store::open` migrate it.
+- **Ran:** store lib 615 passed; the real-crash matrix 6 passed; cli `daemon_link` 11 passed; mutants 47 of 47 red (this round's ten new ones rerun, the earlier 37 not). Clippy clean on touched files. One parallel run of the whole `engine_cutover` filter hit "another process has this database open" once and passed on rerun: the holder scan seeing a sibling test's child between fork and exec.
