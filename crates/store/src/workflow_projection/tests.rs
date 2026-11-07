@@ -201,6 +201,12 @@ fn a_tracked_ticket_can_be_held_and_released_but_a_run_still_refuses() {
     let held = b.store.set_wait(b.task.id, Some(Wait::Parked), Actor::User).expect("a ticket may be parked");
     assert_eq!(held.status, TaskStatus::Backlog);
     assert!(b.store.set_wait(b.task.id, None, Actor::User).is_ok(), "and released");
+    // A timed hold is waited for and lets go, which a sweep that skipped every owned card never did.
+    let now = crate::tasks::now_millis();
+    b.store.set_wait(b.task.id, Some(Wait::Until(now + 60_000)), Actor::User).unwrap();
+    assert_eq!(b.store.next_hold_due().unwrap(), Some(now + 60_000));
+    assert_eq!(b.store.release_due_holds(now + 120_000).unwrap().len(), 1, "the ticket's hold let go");
+    assert_eq!(b.store.next_hold_due().unwrap(), None);
     // Once a run owns it, the wait is refused as ever.
     let b = board();
     enqueue(&b, Definition::coding());
@@ -216,6 +222,10 @@ fn a_reps_desk_card_is_never_tracked() {
     b.store.conn().execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     b.store.conn().execute("INSERT INTO rep_desks(workspace_id, handle, task_id) VALUES(?1,?2,?3)",
         rusqlite::params![b.ws.as_bytes().as_slice(), handle, b.task.id.as_bytes().as_slice()]).unwrap();
+    assert!(b.store.untracked_tickets(None).unwrap().is_empty(), "a board with nothing published tracks nothing");
+    let definition = Definition::tracker("owner");
+    b.store.workflow_wire_write(&b.ws.to_string(), "publish", "publish", crate::workflow_publication::Write::Publish {
+        expected_pin: None, definition: &definition, adapter: None, notifications: None, revision: 0 }).unwrap();
     let tracked: Vec<String> = b.store.untracked_tickets(None).unwrap().into_iter().map(|(_, k, _)| k).collect();
     assert_eq!(tracked, vec![b.other.key.clone()], "only the real card is tracked");
 }

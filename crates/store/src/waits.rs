@@ -446,6 +446,13 @@ fn write_wait(tx: &Connection, task: Uuid, wait: Option<Wait>, rank: Option<i64>
     Ok(())
 }
 
+/// Whether the card's wait is its own to keep and let go: any card the engine does not own, and a ticket it
+/// holds with no run. A card with a run has no wait of its own (ov-962).
+fn holds_its_own_wait(conn: &Connection, task: Uuid) -> Result<bool> {
+    Ok(!crate::workflow_projection::is_owned(conn, task).map_err(map_err)?
+        || crate::workflow_projection::is_ticket(conn, task).map_err(map_err)?)
+}
+
 /// The `wait` note for going from `before` to `after`, or nothing when the
 /// two are the same wait.
 fn note_change(tx: &Connection, task: Uuid, before: Option<Wait>, after: Option<Wait>, actor: Actor) -> Result<()> {
@@ -494,8 +501,13 @@ impl Store {
                 crate::tasks::move_in(&tx, task, TaskStatus::Todo, TaskStatus::Backlog, actor, now)?;
             }
             let since = if before == wait { since.unwrap_or(now) } else { now };
-            write_wait(&tx, task, wait, None, since)?;
-            note_change(&tx, task, before, wait, actor)?;
+            // After release the status fence covers a ticket's wait too, so the write goes under the same
+            // lifted fence the projection uses; a card with a run never reaches here (ov-962).
+            let guards: &[&str] = if ticket { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
+            crate::workflow_projection::with_guards_down(&tx, guards, || {
+                write_wait(&tx, task, wait, None, since)?;
+                note_change(&tx, task, before, wait, actor)
+            })?;
             tx.commit().map_err(map_err)?;
         }
         self.get_task(task)
@@ -553,16 +565,22 @@ impl Store {
         tasks.iter().map(|&id| self.get_task(id)).collect()
     }
 
-    /// The earliest time a held task is due, if any task is held until one.
+    /// The earliest time a held task is due, if any task is held until one. A card the engine owns is not
+    /// waited for, unless it is a ticket with no run: that one's hold is its own note (ov-962).
     pub fn next_hold_due(&self) -> Result<Option<i64>> {
-        self.conn()
-            .query_row(
-                "SELECT min(wait_until) FROM tasks WHERE wait_kind = 'until' AND status = 'backlog'
-                    AND NOT EXISTS (SELECT 1 FROM workflow_owned_items o WHERE o.task_id = tasks.id)",
-                [],
-                |r| r.get(0),
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, wait_until FROM tasks WHERE wait_kind = 'until' AND status = 'backlog'
+                 ORDER BY wait_until, rowid",
             )
-            .map_err(map_err)
+            .map_err(map_err)?;
+        let rows = stmt.query_map([], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?))).map_err(map_err)?;
+        for row in rows {
+            let (id, until) = row.map_err(map_err)?;
+            if holds_its_own_wait(&conn, id)? { return Ok(Some(until)); }
+        }
+        Ok(None)
     }
 
     /// Let go of every task held until a time at or before `now`, each with a
@@ -578,18 +596,22 @@ impl Store {
                     .prepare(
                         "SELECT id, wait_until FROM tasks
                           WHERE wait_kind = 'until' AND status = 'backlog' AND wait_until <= ?1
-                            AND NOT EXISTS (SELECT 1 FROM workflow_owned_items o WHERE o.task_id = tasks.id)
                           ORDER BY wait_until, rowid",
                     )
                     .map_err(map_err)?;
                 let rows = stmt.query_map(params![now], |r| Ok((get_uuid(r, 0)?, r.get(1)?))).map_err(map_err)?;
-                rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
+                let due: Vec<(Uuid, i64)> = rows.collect::<rusqlite::Result<_>>().map_err(map_err)?;
+                let mut mine = Vec::with_capacity(due.len());
+                for (id, until) in due { if holds_its_own_wait(&tx, id)? { mine.push((id, until)); } }
+                mine
             };
             let mut released = Vec::with_capacity(due.len());
             // After release the hold still lets go (a board fact), and the
             // orchestrator is told through the engine's binding (ov-949).
             for (id, until) in due {
-                write_wait(&tx, id, None, None, now)?;
+                // A ticket's wait sits under the status fence after release, so it lets go under the lifted fence.
+                let guards: &[&str] = if crate::workflow_projection::is_owned(&tx, id).map_err(map_err)? { &crate::workflow_projection::TICKET_GUARDS } else { &[] };
+                crate::workflow_projection::with_guards_down(&tx, guards, || write_wait(&tx, id, None, None, now))?;
                 let body =
                     format!("Held until {}. That time has come.", farcooler_core::local_time::moment(until));
                 let extra = json!({ "wait": "none", "was": "until", "until": until });

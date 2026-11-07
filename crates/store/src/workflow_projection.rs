@@ -93,6 +93,25 @@ fn kind(item: &Item) -> Option<&StageKind> { item.definition.stages.get(item.sta
 /// failure rolls the drops back with everything else.
 const GUARDS: [&str; 3] = ["engine_task_execution_fence", "workflow_excludes_ticket_lines_insert", "workflow_excludes_ticket_lines_update"];
 
+/// What a tracked ticket's own notes touch: its wait (a column the status fence also covers) and its blocks.
+pub(crate) const TICKET_GUARDS: [&str; 4] = ["engine_task_execution_fence", "engine_fence_task_blocks_i", "engine_fence_task_blocks_u", "engine_fence_task_blocks_d"];
+
+/// Runs `write` with `names` dropped, and puts them back from their stored text, as `project` does: a ticket the
+/// engine holds with no run keeps its say over its own wait and blocks after release, while a card with a run keeps
+/// every fence. The catalog is byte-identical afterward, and a failure rolls the drops back with the rest.
+pub(crate) fn with_guards_down<T>(tx: &Transaction<'_>, names: &[&str], write: impl FnOnce() -> DomainResult<T>) -> DomainResult<T> {
+    let map = crate::error::map_err;
+    let mut saved = Vec::new();
+    for name in names {
+        let sql: Option<String> = tx.query_row("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1", [name], |r| r.get(0)).optional().map_err(map)?;
+        saved.extend(sql);
+    }
+    for name in names { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}")).map_err(map)?; }
+    let written = write();
+    for sql in &saved { tx.execute_batch(sql).map_err(map)?; }
+    written
+}
+
 /// Project every owned card of `state` onto the board. Only a card whose
 /// column or stage differs is touched, so a command that moves no card writes
 /// nothing.

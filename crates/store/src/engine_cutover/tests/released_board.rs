@@ -261,3 +261,41 @@ fn released_empty_workspace_with_landing_history_says_why_it_stays() {
     let err = s.delete_workspace(kept.id).unwrap_err();
     assert!(matches!(err, farcooler_core::DomainError::InvalidArgument { what: "landing_history" }), "not the not-empty copy: {err:?}");
 }
+
+/// ov-962 B4: a ticket the engine holds with no run keeps its wait and its blocks after release, and a timed
+/// hold lets go. The fences stay for a card with a run, and are back, byte for byte, after each write.
+#[test]
+fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
+    let r = released();
+    let s = &r.store;
+    let card = s.create_task(r.ws, "ticket", Actor::User).unwrap();
+    let definition = farcooler_workflow::Definition::ticket();
+    let policy_pin = s.workflow_ticket_bundle(&definition).unwrap();
+    let input = farcooler_workflow::Input { schema: 1, id: "t".into(), workspace: r.ws.to_string(), expected_revision: 1, epoch: 1,
+        source: "controller".into(), source_sequence: 2, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Enqueue { item: card.key.clone(), policy_pin, resource: "own-ticket".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
+    assert!(s.workflow_apply(&input).unwrap().result.is_ok(), "the engine tracks the ticket");
+    assert!(s.task_is_tracked_ticket(card.id).unwrap());
+    let triggers = || -> Vec<String> { let c = s.conn(); let mut q = c.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' ORDER BY name").unwrap();
+        q.query_map([], |x| x.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap() };
+    let before = triggers();
+    s.set_wait(card.id, Some(Wait::Parked), Actor::User).expect("a ticket parks after release");
+    s.set_wait(card.id, None, Actor::User).expect("and is let go");
+    s.set_block(card.id, r.other, Some("because")).expect("a ticket takes a block after release");
+    assert_eq!(s.blocks_for(card.id).unwrap().len(), 1);
+    s.unblock(card.id, r.other).unwrap();
+    assert!(s.blocks_for(card.id).unwrap().is_empty(), "and drops it");
+    // A timed hold is waited for, and lets go when its time comes, with its note and its wake.
+    let now = crate::tasks::now_millis();
+    s.set_wait(card.id, Some(Wait::Until(now + 60_000)), Actor::User).expect("a ticket takes a timed hold");
+    assert_eq!(s.next_hold_due().unwrap(), Some(now + 60_000), "the sweep waits for it");
+    let released = s.release_due_holds(now + 120_000).unwrap();
+    assert_eq!(released.iter().map(|(t, _)| t.id).collect::<Vec<_>>(), vec![card.id], "the hold let go");
+    assert_eq!(s.next_hold_due().unwrap(), None);
+    assert_eq!(triggers(), before, "every fence is back as it was");
+    // The column is still the engine's, and a card with a run still refuses all of it.
+    assert!(s.set_task_status(card.id, TaskStatus::Done, Actor::User).is_err());
+    assert!(s.set_wait(r.owned, Some(Wait::Parked), Actor::User).is_err());
+    assert!(s.set_block(r.owned, r.other, None).is_err());
+}
