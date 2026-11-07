@@ -3,6 +3,7 @@
 mod definition;
 mod reducer;
 mod state;
+pub mod templates;
 pub use definition::*;
 pub use reducer::*;
 pub use state::*;
