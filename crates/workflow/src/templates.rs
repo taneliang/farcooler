@@ -159,22 +159,22 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
             groups.insert("landing".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps });
         }
         Template::TicketPr => {
-            stages.push(m.stage("branch", StageKind::Action("push-branch".into()), "pr/v1", "push-branch"));
-            stages.push(m.stage("pr", StageKind::Action("open-pr".into()), "pr/v1", "open-pr"));
-            stages.push(ending(routed(m.wait("merged", StageKind::Action("await-pr".into()), "pr/v1", "await-pr", 300_000, 14 * 24 * 3_600_000),
+            stages.push(m.stage("branch", StageKind::PushBranch, "coding-push-branch/v1", ""));
+            stages.push(m.stage("pr", StageKind::OpenPr, "coding-open-pr/v1", "ready"));
+            stages.push(ending(routed(m.wait("merged", StageKind::AwaitPr, "coding-await-pr/v1", "", every, 14 * 24 * 3_600_000),
                 "changes_requested", step("build"), 2), "closed", Target::Fail));
             if plan.ci {
                 stages.push(m.wait("ci", StageKind::AwaitCi, "coding-await-ci/v1", &pins.ci_subject(), every, ci_wait));
             }
         }
         Template::BatchedPr => {
-            stages.push(m.stage("branch", StageKind::Action("push-branch".into()), "pr/v1", "push-branch"));
-            stages.push(m.stage("pr", StageKind::Action("open-pr".into()), "pr/v1", "open-pr:draft"));
+            stages.push(m.stage("branch", StageKind::PushBranch, "coding-push-branch/v1", ""));
+            stages.push(m.stage("pr", StageKind::OpenPr, "coding-open-pr/v1", "draft"));
             let mut join = m.stage("rehearse", StageKind::Join { group: "rehearsal".into(), adopt: false }, "coding-join/v1", "rehearsal");
             join.max_attempts = 1;
             stages.push(routed(join, "rejected", step("build"), 2));
-            stages.push(m.stage("ready", StageKind::Action("pr-ready".into()), "pr/v1", "pr-ready"));
-            stages.push(ending(routed(m.wait("merged", StageKind::Action("await-pr".into()), "pr/v1", "await-pr", 300_000, 14 * 24 * 3_600_000),
+            stages.push(m.stage("ready", StageKind::PrReady, "coding-pr-ready/v1", ""));
+            stages.push(ending(routed(m.wait("merged", StageKind::AwaitPr, "coding-await-pr/v1", "", every, 14 * 24 * 3_600_000),
                 "changes_requested", step("build"), 2), "closed", Target::Fail));
             groups.insert("rehearsal".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps: folds(&m) });
         }

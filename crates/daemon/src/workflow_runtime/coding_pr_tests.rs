@@ -3,6 +3,7 @@
 use super::*;
 use super::coding_tests::configured;
 use super::concurrency_tests::enqueue_item;
+use super::coding_verbs_tests::command;
 use std::collections::BTreeMap;
 
 /// A stand-in for `gh`. Its "GitHub" is one JSON file; every call is appended to a log. Behavior is
@@ -587,4 +588,44 @@ async fn a_remote_url_with_credentials_is_refused() {
     }
     config.pull_request.as_mut().unwrap().remote = Some("ssh://git@github.com/a/b.git".into());
     config.validate().unwrap();
+}
+
+fn from_template(runtime: &Runtime, template: farcooler_workflow::templates::Template) -> Definition {
+    use farcooler_workflow::templates::{self, Gate, Plan};
+    let mut plan = Plan::new(template, vec![Gate::Command(0)]);
+    (plan.every_ms, plan.base_patience_ms, plan.ci_patience_ms, plan.green_base) = (20, 5000, 5000, false);
+    let definition = templates::build(&plan, &crate::landing_templates::Host(runtime.coding.as_ref().unwrap())).unwrap();
+    runtime.coding.as_ref().unwrap().validate_definition(&definition).expect("the runner pins what the template names");
+    definition
+}
+
+#[tokio::test]
+async fn the_per_ticket_pull_request_template_runs_on_the_real_verbs() {
+    let (_dir_f, mut runtime_f, f) = hub("pass", "merge").await;
+    let definition = from_template(&runtime_f, farcooler_workflow::templates::Template::TicketPr);
+    assert!(definition.stages.iter().all(|s| !matches!(s.kind, StageKind::Action(_))), "no stub steps are left");
+    enqueue_item(&mut runtime_f, "w", "one", definition);
+    until(&mut runtime_f, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let landing = runtime_f.coding.as_ref().unwrap().landing.clone().unwrap();
+    adapters::git(&f.remote, &["rev-parse", &format!("refs/heads/{}", head_of("one"))]).await.expect("the branch went to the pull request remote");
+    assert!(adapters::git(&landing.repository, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{}", head_of("one"))]).await.is_err());
+    let all = prs(&f);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!((count(&f, "create"), count(&f, "ready"), count(&f, "merge")), (1, 0, 0), "opened ready; the merge is a person's");
+}
+
+#[tokio::test]
+async fn the_batched_pull_request_template_opens_a_draft_and_makes_it_ready_after_the_rehearsal() {
+    let (_dir_f, mut runtime_f, f) = hub("pass", "merge").await;
+    let definition = from_template(&runtime_f, farcooler_workflow::templates::Template::BatchedPr);
+    assert!(definition.stages.iter().all(|s| !matches!(s.kind, StageKind::Action(_))));
+    enqueue_item(&mut runtime_f, "w", "one", definition);
+    // The item stops at the rehearsal join until it is queued.
+    for time in 2..60 { runtime_f.pump(time).await.unwrap(); }
+    assert!(command(&runtime_f, Command::Queue { item: "one".into() }).result.is_ok());
+    until(&mut runtime_f, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let all = prs(&f);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(all[0]["isDraft"], false, "it was opened as a draft and made ready after the rehearsal");
+    assert_eq!((count(&f, "create"), count(&f, "ready"), count(&f, "merge")), (1, 1, 0));
 }
