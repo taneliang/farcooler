@@ -104,7 +104,7 @@ pub fn open_recovery(db: &Path, proof: &JoinedOwners) -> Result<crate::Store> {
     if !proof.binds(db) { return refuse("join proof was issued for another database"); }
     settle_journal(db)?;
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON;")?;
+    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
     let version: Option<String> = conn.query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| r.get(0)).optional()?;
     if version.and_then(|v| v.parse::<u32>().ok()) != Some(CURRENT_SCHEMA_VERSION) {
         return refuse("recovery open needs the current schema; run the explicit transfer");

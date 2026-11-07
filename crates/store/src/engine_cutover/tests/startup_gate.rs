@@ -130,3 +130,22 @@ fn transfer_finish_needs_a_released_attempt_and_keeps_the_evidence() {
     let store = open_recovery(&path, &owners).unwrap();
     assert!(transfer::finish(&path, &store, owners).is_err(), "no second disposition");
 }
+
+/// SQLite's default sync on macOS is a plain `fsync`, which can leave a commit
+/// in the drive's cache. The cutover's database commits must be as strong as
+/// its artifact files (`sync_all` is `F_FULLFSYNC` there).
+#[test]
+fn cutover_connections_sync_fully() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = source65(tmp.path());
+    let full = |store: &crate::Store| -> (i64, i64) {
+        let conn = store.conn();
+        (conn.query_row("PRAGMA fullfsync", [], |r| r.get(0)).unwrap(), conn.query_row("PRAGMA checkpoint_fullfsync", [], |r| r.get(0)).unwrap())
+    };
+    let (begun, _) = transfer::begin(&path, join_db(&path, "a")).unwrap();
+    assert_eq!(full(&begun), (1, 1), "the upgrade's own connection");
+    drop(begun);
+    let owners = join_db(&path, "a");
+    let reopened = open_recovery(&path, &owners).unwrap();
+    assert_eq!(full(&reopened), (1, 1), "and every recovery open after it");
+}

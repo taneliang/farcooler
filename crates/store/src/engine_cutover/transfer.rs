@@ -158,7 +158,7 @@ pub fn begin(db: &Path, owners: JoinedOwners) -> Result<(Store, Preflight)> {
     // this file drops every POSIX lock the process holds on it, SQLite's too.
     let mut source = File::open(db)?;
     let mut conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON;")?;
+    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let plan = preflight(&tx)?;
