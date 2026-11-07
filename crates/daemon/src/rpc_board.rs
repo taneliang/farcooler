@@ -80,10 +80,12 @@ pub(crate) async fn dispatch(
             // A person's hand never moves a card; an agent's does, through the engine, when the card is a
             // tracker-only ticket (ov-951). Anything else falls through to the store, which refuses an owned card.
             if let Ok(id) = crate::task_ops::required_id(&p.task_id)
-                && matches!(crate::caller_seat::caller_seat(svc, caller_pid).await, crate::caller_seat::Seat::Agent(_))
-                && let Some(task) = crate::ticket_moves::move_through_engine(svc, id, &p).await?
+                && svc.store.task_is_engine_owned(id)?
             {
-                return Ok(result::Value::Task(task));
+                let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
+                if let Some(task) = crate::ticket_moves::move_through_engine(svc, seat, id, &p).await? {
+                    return Ok(result::Value::Task(task));
+                }
             }
             Ok(result::Value::Task(crate::task_ops::set_status(svc, watcher, &p)?))
         }

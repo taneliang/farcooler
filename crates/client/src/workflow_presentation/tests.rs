@@ -227,3 +227,18 @@ fn workflow_presentation_generic_display_slots() {
     let response: Response = serde_json::from_str(&json(&serde_json::to_string(&old).unwrap())).unwrap();
     assert_eq!(response.error, Some(Error::Invalid));
 }
+
+/// A tracker-only ticket has no run to stop, and a person does not move a card by hand: it offers no action.
+#[test]
+fn a_tracker_only_ticket_offers_a_person_no_action() {
+    let definition = Definition::ticket();
+    let state = apply(&State::empty("workspace".into(), 1), Command::Enqueue {
+        item: "item".into(), initial_candidate: Some(definition.pin()), definition, policy_pin: "policy".into(),
+        resource: "resource".into(), dependencies: Default::default() }, Grant::Controller);
+    let card = project(&state, &auth()).unwrap().runs.remove(0);
+    assert!(card.actions.is_empty(), "{:?}", card.actions);
+    // And a stale or hand-built Cancel is refused.
+    let forged = Action { kind: ActionKind::Cancel, label: "Cancel".into(),
+        guard: digest(&(digest(&("workflow-presentation/v2", &state, &auth())), "item")) };
+    assert!(action(&state, &auth(), "item", &forged).is_err());
+}

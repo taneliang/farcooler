@@ -101,4 +101,8 @@ impl Store {
     pub fn untracked_tickets(&self, only: Option<uuid::Uuid>) -> farcooler_core::Result<Vec<(uuid::Uuid, String, models::TaskStatus)>> {
         workflow_projection::untracked(&self.conn(), only).map_err(error::map_err)
     }
+    /// Whether the engine holds this card (a ticket at rest or a run).
+    pub fn task_is_engine_owned(&self, task: uuid::Uuid) -> farcooler_core::Result<bool> {
+        workflow_projection::is_owned(&self.conn(), task).map_err(error::map_err)
+    }
 }
