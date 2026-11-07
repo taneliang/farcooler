@@ -1,7 +1,7 @@
 //! Finite workflow-only notification outbox. No delivery state is engine authority.
 use crate::{Store, workflow::{Result, WorkflowError}};
 use farcooler_protocol::workflow_config::{NotificationPolicy, NoticePoint};
-use farcooler_workflow::{Input, State, Phase, digest};
+use farcooler_workflow::{Input, State, Phase, StageKind, digest};
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,23 @@ pub struct Notice {
     pub iteration: u8, pub attempt: u8, pub candidate: Option<String>,
     pub definition_pin: String, pub execution_policy_pin: String,
     pub notification_policy_pin: String, pub point: NoticePoint,
+    /// The step the item was at, by verb (`await-ci`, `fold`, ...). Absent on notices from before ov-958.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verb: Option<String>,
+    /// A landing group only: the tickets it holds, so the notice says whose landing it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tickets: Vec<String>,
+}
+
+/// The name a step's verb goes by in a notice.
+pub fn verb_name(kind: &StageKind) -> String {
+    match kind {
+        StageKind::Provision => "provision".into(), StageKind::Build => "build".into(), StageKind::Check => "check".into(),
+        StageKind::Review(_) => "review".into(), StageKind::Land => "land".into(), StageKind::Ci => "ci".into(),
+        StageKind::Tracker => "tracker".into(), StageKind::Action(a) | StageKind::Evaluate(a) => a.clone(),
+        StageKind::Join { .. } => "join".into(), StageKind::AwaitBase => "await-base".into(), StageKind::Fold => "fold".into(),
+        StageKind::Run => "run".into(), StageKind::Push => "push".into(), StageKind::AwaitCi => "await-ci".into(),
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Delivery {
@@ -65,7 +82,9 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
                 event:input.id.clone(),workspace:input.workspace.clone(),epoch:new.epoch,revision:new.revision,
                 item:id.clone(),run:item.run.clone(),stage:item.stage,iteration:item.iteration,attempt:item.attempt,
                 candidate:item.candidate.clone(),definition_pin:item.pin.clone(),execution_policy_pin:item.policy_pin.clone(),
-                notification_policy_pin:policy.pin(),point };
+                notification_policy_pin:policy.pin(),point,
+                verb:item.definition.stages.get(item.stage).map(|s|verb_name(&s.kind)),
+                tickets:item.members.iter().map(|m|m.item.clone()).collect() };
             tx.execute("INSERT INTO workflow_notice_outbox(id,workspace,revision,payload,payload_hash) VALUES(?1,?2,?3,?4,?5)",
                 params![notice.id,notice.workspace,notice.revision,serde_json::to_string(&notice)?,digest(&notice)])?;
         }
@@ -265,6 +284,21 @@ mod tests {
                 outcome:farcooler_workflow::Outcome::Passed(farcooler_workflow::Evidence {candidate:item.candidate.clone().unwrap(),manifest:"manifest".into(),receipt:"receipt".into(),policy_pin:item.policy_pin.clone()})}};
         assert!(store.workflow_apply(&result).unwrap().result.is_ok());
         assert_eq!(store.workflow_state("ws").unwrap().unwrap().items["item-1"].phase,Phase::Done);
+    }
+    #[test]
+    fn a_notice_names_the_verb_the_item_was_at_and_a_group_notice_its_tickets() {
+        let store=Store::open_in_memory().unwrap();
+        store.workflow_apply(&enqueue("ws",1,&Definition::tracker("owner").pin())).unwrap();
+        let notice=&store.workflow_pending_notices(0).unwrap()[0].1.notice;
+        assert_eq!(notice.verb.as_deref(),Some("tracker"));
+        assert!(notice.tickets.is_empty());
+        for (kind,word) in [(StageKind::AwaitBase,"await-base"),(StageKind::Fold,"fold"),(StageKind::Run,"run"),(StageKind::Push,"push"),(StageKind::AwaitCi,"await-ci")] {
+            assert_eq!(verb_name(&kind),word);
+        }
+        // A notice written before ov-958 reads back, and writes the same bytes.
+        let mut old=serde_json::to_value(notice).unwrap();old.as_object_mut().unwrap().remove("verb");
+        let read:Notice=serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(read.verb,None);assert_eq!(serde_json::to_value(&read).unwrap(),old);
     }
     #[test]
     fn workflow_notice_policy_pinned_at_enqueue_and_immutable_legacy_omission() {
