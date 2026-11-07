@@ -85,6 +85,8 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
     written?;
     Ok(moved)
 }
+/// What the daemon registers to hear of engine moves.
+pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
 /// A card the engine moved: what the board must tell its open clients.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }

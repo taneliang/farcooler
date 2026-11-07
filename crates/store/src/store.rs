@@ -42,7 +42,7 @@ pub struct Store {
     /// Held for this Store's life: see `engine_cutover::owners`.
     _owner: Option<std::fs::File>,
     pub(crate) workflow_notice_waker: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
-    pub(crate) workflow_board_listener: std::sync::Mutex<Option<std::sync::Arc<dyn Fn(&[crate::workflow_projection::BoardMove]) + Send + Sync>>>,
+    pub(crate) workflow_board_listener: std::sync::Mutex<Option<crate::workflow_projection::BoardListener>>,
 }
 
 impl Store {
