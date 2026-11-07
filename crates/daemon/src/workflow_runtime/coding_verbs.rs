@@ -45,7 +45,7 @@ const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.em
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 
 impl Exec {
-    fn verb_path(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn verb_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.verb.json", digest(&binding.effect)))
     }
     /// Which base a folded commit was made on: a push leases the target against exactly that.
@@ -327,6 +327,36 @@ impl Exec {
             PushVerdict::Unknown => return Err(Error::Refused("push outcome unknown; inspect receipt")),
         }
         self.reconcile_verb(binding, &StageKind::Push).await
+    }
+}
+
+impl Runtime {
+    /// A person's word on an uncertain push, believed only after the remote is read: `landed` needs the
+    /// pushed commit on the target and `not landed` needs it absent. The word is written as the push's own
+    /// settlement; the next sweep resolves the item from it, so a landed push goes on and one that did not
+    /// starts over from the base. Nothing is pushed.
+    pub async fn settle_push(&self, controller: &Controller, workspace: &str, item_id: &str, landed: bool) -> Result<()> {
+        self.authorize(controller.instance)?;
+        let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
+        let item = state.items.get(item_id).ok_or(Error::Refused("no such item"))?;
+        if item.phase != Phase::Uncertain { return Err(Error::Refused("only an uncertain item can be settled")); }
+        let pending = item.pending.as_ref().ok_or(Error::Refused("nothing is pending"))?;
+        let stored = self.store.workflow_outbox(workspace)?.into_iter()
+            .find(|s| &s.effect.id == pending && s.dispatch_state == "uncertain")
+            .ok_or(Error::Refused("the effect is not uncertain"))?;
+        if stored.effect.kind != EffectKind::Execute(StageKind::Push) { return Err(Error::Refused("only a push can be settled")); }
+        let candidate = stored.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
+        let identity = self.landing()?;
+        // Read the remote first; a claim it contradicts is refused.
+        let on_remote = adapters::git(&identity.repository, &["merge-base", "--is-ancestor", &candidate, &identity.target]).await.is_ok();
+        if on_remote != landed { return Err(Error::Refused("the remote disagrees")); }
+        let base = self.item_base(workspace, &stored.effect)?;
+        let binding = Binding::new(workspace, &stored.effect,
+            stored.resource_generation.ok_or(Error::Refused("the push was never admitted"))?, item.iteration, &base);
+        self.write_fact(&binding, if landed { "passed" } else { "base_moved" }, &candidate,
+            serde_json::json!({ "settled_by": "person", "landed": landed }))?;
+        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+        Ok(())
     }
 }
 

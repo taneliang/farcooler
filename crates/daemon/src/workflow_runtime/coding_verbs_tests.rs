@@ -339,3 +339,64 @@ async fn a_definition_must_pin_the_landing_target_and_sound_waits() {
     assert!(local.validate_definition(&good).is_err());
     let _: BTreeMap<String, String> = BTreeMap::new();
 }
+
+/// Run the group to its push, admit it and leave the runner "crashed" with no settlement.
+async fn uncertain_push(sent: bool) -> (tempfile::TempDir, Runtime, String) {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..5 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    let (_hold, cancelled) = tokio::sync::watch::channel(false);
+    if sent {
+        runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+        std::fs::remove_file(runtime.verb_path(&binding)).unwrap(); // the push landed, the word that it did was lost
+    }
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(50).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    let group = group_id(&state);
+    assert_eq!(state.items[&group].phase, Phase::Uncertain);
+    (_dir, runtime, group)
+}
+
+#[tokio::test]
+async fn a_person_settles_a_lost_push_that_did_land() {
+    let (_dir, mut runtime, group) = uncertain_push(true).await;
+    let controller = runtime.controller();
+    assert!(runtime.settle_push(&controller, "w", &group, false).await.is_err(), "the commit is on the remote, so it did not fail to land");
+    runtime.settle_push(&controller, "w", &group, true).await.unwrap();
+    let pushed = remote_head(&runtime).await;
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_eq!(candidate_of(&state, "one"), Some(pushed.as_str()));
+    assert_eq!(outbox(&runtime, StageKind::Push), 1, "settling pushed nothing");
+}
+
+#[tokio::test]
+async fn a_person_settles_a_lost_push_that_did_not_land_and_the_group_starts_over() {
+    let (_dir, mut runtime, group) = uncertain_push(false).await;
+    let controller = runtime.controller();
+    assert!(runtime.settle_push(&controller, "w", &group, true).await.is_err(), "the remote does not have the commit, so it did not land");
+    let first = remote_head(&runtime).await;
+    runtime.settle_push(&controller, "w", &group, false).await.unwrap();
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_ne!(remote_head(&runtime).await, first);
+    assert_eq!(outbox(&runtime, StageKind::Push), 2, "the second push is a new one from a fresh base");
+    assert_eq!(candidate_of(&state, "one"), Some(remote_head(&runtime).await.as_str()));
+}
+
+#[tokio::test]
+async fn only_an_uncertain_push_can_be_settled() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    let state = runtime.state("w").unwrap().unwrap();
+    let group = group_id(&state);
+    let controller = runtime.controller();
+    assert!(runtime.settle_push(&controller, "w", &group, true).await.is_err(), "a running group is not uncertain");
+    assert!(runtime.settle_push(&controller, "w", "one", true).await.is_err(), "a ticket is not a push");
+    assert!(runtime.settle_push(&controller, "w", "nobody", true).await.is_err());
+}
