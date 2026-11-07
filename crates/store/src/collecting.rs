@@ -91,7 +91,8 @@ pub(crate) fn ensure_collecting(tx: &Connection, workspace: Uuid, actor: Actor) 
 /// landing when it reaches landing, and when it leaves landing it comes off an
 /// open or gating landing, or is noted as kept on one whose push carries it.
 pub(crate) fn stage_moved(tx: &Connection, task: Uuid, from: Stage, to: Stage, actor: Actor) -> Result<()> {
-    if from == to {
+    // After release a stage move is only the stage; the landing tables are the engine's (ov-947).
+    if from == to || !crate::engine_cutover::legacy_authority(tx) {
         return Ok(());
     }
     let on = landing_of_in(tx, task)?;

@@ -17,10 +17,10 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
     let Command::Enqueue { item,.. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
+    // A migrated card must be retained-intent; every card then passes the occupancy
+    // check, because after release a hand agent may have taken it (ov-946).
     let migrated: Option<String> = tx.query_row("SELECT disposition FROM engine_cutover_items WHERE task=?1", [&task], |r|r.get(0)).optional()?;
-    if let Some(disposition)=migrated {
-        return Ok(disposition=="retained-intent" && !tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)", [task], |r|r.get::<_,bool>(0))?);
-    }
+    if migrated.is_some_and(|d| d != "retained-intent") { return Ok(false); }
     Ok(!tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)
         OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
         OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)

@@ -7,7 +7,7 @@ use crate::waits::{Wait, WaitEvent};
 use crate::workers::WorkerRecord;
 use crate::models::{TaskStatus, NoteKind};
 
-struct Released { _tmp: tempfile::TempDir, store: Store, ws: uuid::Uuid, free: uuid::Uuid, other: uuid::Uuid, owned: uuid::Uuid, terminal: uuid::Uuid, tree: uuid::Uuid }
+struct Released { _tmp: tempfile::TempDir, store: Store, ws: uuid::Uuid, free: uuid::Uuid, other: uuid::Uuid, owned: uuid::Uuid, intent: uuid::Uuid, terminal: uuid::Uuid, tree: uuid::Uuid }
 
 fn released() -> Released {
     let tmp = tempfile::tempdir().unwrap();
@@ -18,6 +18,7 @@ fn released() -> Released {
     let free = store.create_task(ws.id, "free", Actor::User).unwrap().id;
     let other = store.create_task(ws.id, "other", Actor::User).unwrap().id;
     let owned = store.create_task(ws.id, "owned", Actor::User).unwrap();
+    let intent = store.create_task(ws.id, "intent", Actor::User).unwrap().id;
     let tree = store.create_worktree(repo, "topic", "/isolated", false).unwrap().id;
     let terminal = store.create_terminal_for_test(tree, ws.id);
     let c = store.enable_check_in(crate::check_ins::EnableCheckIn { workspace: ws.id, task: free, device: None,
@@ -40,7 +41,7 @@ fn released() -> Released {
         command: farcooler_workflow::Command::Enqueue { item: owned.key.clone(), policy_pin: definition.pin(), resource: "own".into(),
             dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
     assert!(store.workflow_apply(&input).unwrap().result.is_ok(), "the engine takes one card");
-    Released { _tmp: tmp, store, ws: ws.id, free, other, owned: owned.id, terminal, tree }
+    Released { _tmp: tmp, store, ws: ws.id, free, other, owned: owned.id, intent, terminal, tree }
 }
 
 #[test]
@@ -107,4 +108,47 @@ fn released_holds_still_let_go_and_ci_chips_no_longer_move_landings() {
     assert!(s.record_ci(r.ws, &read).unwrap().landings_moved.is_empty());
     assert_eq!(s.conn().query_row("SELECT state FROM landings", [], |x| x.get::<_, String>(0)).unwrap(), "pushed");
     assert_eq!(s.conn().query_row("SELECT status FROM board_ci", [], |x| x.get::<_, String>(0)).unwrap(), "passed");
+}
+
+fn enqueue(r: &Released, id: &str, key: &str) -> farcooler_workflow::Input {
+    let definition = farcooler_workflow::Definition::tracker("owner");
+    farcooler_workflow::Input { schema: 1, id: id.into(), workspace: r.ws.to_string(), expected_revision: 1, epoch: 1,
+        source: "controller".into(), source_sequence: 2, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Enqueue { item: key.into(), policy_pin: definition.pin(), resource: "own2".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } }
+}
+
+#[test]
+fn a_migrated_card_with_a_hand_agent_refuses_the_engine() {
+    let r = released();
+    let s = &r.store;
+    let key = s.get_task(r.intent).unwrap().key;
+    let disposition: String = s.conn().query_row("SELECT disposition FROM engine_cutover_items WHERE task=?1", [r.intent.as_bytes().as_slice()], |x| x.get(0)).unwrap();
+    assert_eq!(disposition, "retained-intent", "the fixture card is a migrated retained-intent card");
+    s.create_terminal_for_task(r.tree, "hand", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.intent)).unwrap();
+    assert_eq!(s.workflow_apply(&enqueue(&r, "e2", &key)).unwrap().result, Err(farcooler_workflow::Refusal::Resource),
+        "a hand agent and the engine must never run one card");
+    // And the other side: once a hand agent has left, the same card is free to enqueue.
+    let r2 = released();
+    let key2 = r2.store.get_task(r2.intent).unwrap().key;
+    assert!(r2.store.workflow_apply(&enqueue(&r2, "e3", &key2)).unwrap().result.is_ok(), "an idle migrated card is takeable");
+}
+
+#[test]
+fn a_stage_move_into_or_out_of_landing_works_after_release() {
+    use crate::ticket_lines::Stage;
+    let r = released();
+    let s = &r.store;
+    let user = Actor::User;
+    let up = |stage| LineUpdate { stage: Some(stage), ..Default::default() };
+    s.put_on_line(r.free, &NewTicketLine { reason: "plan".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, user).unwrap();
+    for stage in [Stage::Building, Stage::Reviewing] { s.update_line(r.free, &up(stage), user).unwrap(); }
+    let into = s.update_line(r.free, &up(Stage::Landing), user);
+    assert!(into.is_ok(), "into landing: {into:?}");
+    assert!(s.landing_of(r.free).unwrap().is_none(), "no legacy landing is joined after release");
+    // A card stranded on an open landing at cutover can still be moved back by hand.
+    s.conn().execute_batch("DROP TRIGGER engine_fence_landings_i; DROP TRIGGER engine_fence_landing_tickets_i").unwrap();
+    s.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'03030303030303030303030303030303',?1,3,'push','main','open',2,'t',1,'user',1,1)", [r.ws.as_bytes().as_slice()]).unwrap();
+    s.conn().execute("INSERT INTO landing_tickets(landing_id,task_id,added_at) SELECT x'03030303030303030303030303030303',?1,1", [r.free.as_bytes().as_slice()]).unwrap();
+    assert!(s.update_line(r.free, &up(Stage::Building), user).is_ok(), "out of landing");
 }
