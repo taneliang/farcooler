@@ -22,6 +22,8 @@ A process killed mid-transaction leaves a nonempty journal with no header. SQLit
   - The first run missed 3. One was a wrong expected list. One needed raw60, since a current source already has the floor. One was a real gap: a row checked that `baseline.db` existed, not that it was whole. The check was strengthened and all three reran red.
   - That re-run preceded a later one-line guard in the test (`dir.exists()`, needed once artifacts are renamed), so the guard itself was not mutated.
 - `reports/ov-963/real-cli.py` (`real-cli.json`): the real `farcooler` CLI and a production-feature `farcoolerd`, Prepare to ordinary service. `FARCOOLER_TEST_CUTOVER_KILL_AT` was set throughout and ignored. Exit 75 seen.
+- `reports/ov-940/old-reader.py`, rerun: the pinned registry-60 Store at d625aaeb opens a raw fixture and refuses the file this build's Prepare leaves with `NewerData`.
+- Store 605 passed, 3 ignored. Daemon cutover, recovery, refusal and writer-join filters pass, apart from the failure below. Matrix file 6 passed in 106 seconds. Clippy is clean on everything this lane touched.
 - The new tests were not shown red before the code, because the API did not exist. The mutants are the red evidence, as in ov-940.
 
 ## Not proved
@@ -32,6 +34,15 @@ A process killed mid-transaction leaves a nonempty journal with no header. SQLit
 - **Remote owner (R4).** A remote owner can run Prepare and not Recover. Unchanged.
 - **A second pty.** An orphan on a new pty counts as a person to `recovery_seat`. The tests rely on this, and an agent on the same login could do the same. The review bounded this impact; it needs a ruling before release.
 - **Linux.** The `/proc` scan and the orphan test ran only on macOS here.
+
+## Red on this base, not from this lane
+
+None of these files' failing lines are in this diff.
+
+- `people::actor_tests::every_write_that_names_an_actor_is_listed`, as ov-940 reported.
+- `file-size-budget`: `crates/store/src/store.rs` is 1 line over. This lane does not touch the file.
+- Clippy: `crates/daemon/src/workflow_runtime.rs:473` and `crates/store/src/workflow_overlay/tests.rs:205`.
+- `copy-lint`: 5 Android title-case strings.
 
 ## What changed for the ov-936 rehearsal
 
