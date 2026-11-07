@@ -90,10 +90,21 @@ fn ceiling(gating: bool, deadline: Duration) -> Duration {
     if gating { deadline + LONGEST_HOLD + HOLD_GRACE } else { deadline }
 }
 
+/// Set only in the pane of a native workflow build. The hooks file such a build runs under is
+/// pinned, so it names one shared socket; each build listens on a socket of its own instead, and
+/// says so here, which lets builds run side by side.
+pub const NATIVE_HOOK_SOCKET: &str = "FARCOOLER_NATIVE_HOOK_SOCKET";
+
+/// The socket a native build's pane asks hooks to report to, if it names a usable path.
+fn private_socket(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|v| !v.is_empty()).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
 /// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
 /// parameter only so the binary's own tests can take the machine's speed out
 /// of a test that is about something else; see `--deadline-ms` in `main.rs`.
 pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool, deadline: Duration) {
+    let socket = private_socket(std::env::var_os(NATIVE_HOOK_SOCKET)).unwrap_or(socket);
     // One bound over everything, rather than one per way of getting stuck. A
     // list of blocking calls each with its own guard is only right while
     // somebody keeps adding to the list; a bound around the lot is a property,

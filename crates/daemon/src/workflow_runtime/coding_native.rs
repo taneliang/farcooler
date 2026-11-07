@@ -53,6 +53,11 @@ impl Exec {
         matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
             && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }))
     }
+    /// Each native build listens on a socket of its own, so builds run side by side. The pinned
+    /// hooks file still names `h.sock`; the build's pane tells the hook CLI where to report instead.
+    pub(super) fn native_socket(&self, binding: &Binding) -> PathBuf {
+        self.root.join(format!("n-{}.sock", &terminal(binding).simple().to_string()[..12]))
+    }
     fn native_path(&self, binding: &Binding, suffix: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.native-{suffix}.json", digest(&binding.effect)))
     }
@@ -69,7 +74,7 @@ impl Exec {
     }
     pub(super) fn validate_native_configuration(&self, config: &CodingConfig) -> Result<()> {
         if matches!(config.harness, CodingHarness::Native { .. }) {
-            if self.root.join("h.sock").as_os_str().len() > 103 {
+            if self.root.join("n-000000000000.sock").as_os_str().len() > 103 {
                 return Err(Error::Refused("native runtime needs a short private socket path"));
             }
             self.native_config_hooks(config)?;
@@ -185,10 +190,7 @@ impl Exec {
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
         mut cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
         self.native_hooks()?;
-        // Native builds share one hook socket. launch_ready admits one at a time; this marks the
-        // socket as held so a Stop's stale-socket cleanup leaves it alone.
-        let _slot = self.native_slot.try_lock().map_err(|_| Error::Refused("native hook socket is busy"))?;
-        let socket = self.root.join("h.sock");
+        let socket = self.native_socket(binding);
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
         let listener = tokio::net::UnixListener::bind(&socket)?;
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
@@ -235,8 +237,9 @@ impl Exec {
         self.quiesce_native(&owner).await?;
         durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement {
             owner, hooks: Vec::new(), completed: None })?)?;
-        // Another native build may hold the socket right now; only an idle host has a stale one.
-        if self.native_slot.try_lock().is_ok() && self.root.join("h.sock").try_exists()? { std::fs::remove_file(self.root.join("h.sock"))?; }
+        // The socket is this build's alone, so a leftover one is stale by construction.
+        let socket = self.native_socket(binding);
+        if socket.try_exists()? { std::fs::remove_file(socket)?; }
         Ok(())
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<()> {
@@ -294,6 +297,14 @@ def hook(event, sid=session, cwd=os.getcwd(), **extra):
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt='implement the selected task')
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
+if mode == 'barrier':
+    d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
+    d.mkdir(exist_ok=True)
+    (d / session).write_text(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
+    t = time.time()
+    while len(list(d.iterdir())) < 2:
+        if time.time() - t > 4: sys.exit(9)
+        time.sleep(0.05)
 if mode == 'cancel':
     subprocess.run(['/bin/sleep','30'])
 else:
@@ -329,43 +340,29 @@ else:
             assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done, "{agent}");
             let pid: i32 = std::fs::read_to_string(dir.path().join("started")).unwrap().parse().unwrap();
             assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "native TUI must be reaped before candidate success");
-            assert!(!runtime.root.join("h.sock").exists());
+            let left: Vec<_> = std::fs::read_dir(&runtime.root).unwrap().map(|e| e.unwrap().file_name())
+                .filter(|n| n.to_string_lossy().ends_with(".sock")).collect();
+            assert!(left.is_empty(), "{agent}: {left:?}");
         }
     }
     #[tokio::test]
-    async fn workflow_native_builds_in_one_pump_take_turns_on_the_hook_socket() {
-        let (_dir, mut runtime, _fake) = native("pass").await;
+    async fn workflow_native_builds_overlap_each_on_its_own_hook_socket() {
+        let (dir, mut runtime, _fake) = native("barrier").await;
         let definition = runtime.configured_definition().unwrap();
         super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "one", definition.clone());
         super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "two", definition);
-        // Both get past Build (and its checks). Landing on one branch is a separate matter.
+        // Each build waits (up to four seconds) for the other to start, so only an overlap passes.
         for time in 2..5 { runtime.pump(time).await.unwrap(); }
         let state = runtime.state("w").unwrap().unwrap();
         for id in ["one", "two"] {
             assert!(state.items[id].stage >= 2 && state.items[id].phase == Phase::Running, "{id}: {state:?}");
         }
-    }
-    #[tokio::test]
-    async fn workflow_native_build_queued_for_the_hook_socket_is_never_admitted_and_survives_shutdown() {
-        let (dir, mut runtime, _fake) = native("cancel").await;
-        let definition = runtime.configured_definition().unwrap();
-        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "one", definition.clone());
-        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "two", definition);
-        let (stop, receiver) = tokio::sync::watch::channel(false);
-        let started = dir.path().join("started");
-        let task = tokio::spawn(async move { runtime.run(receiver).await.unwrap(); runtime });
-        for _ in 0..500 {
-            if started.exists() { break; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(started.exists(), "the first native build did not start");
-        // The second build must be held back, not admitted and parked on the socket.
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        stop.send(true).unwrap();
-        let runtime = tokio::time::timeout(Duration::from_secs(20), task).await.unwrap().unwrap();
-        let state = runtime.state("w").unwrap().unwrap();
-        for id in ["one", "two"] {
-            assert_ne!(state.items[id].phase, Phase::Uncertain, "{id}: {state:?}");
+        let sockets: BTreeSet<String> = std::fs::read_dir(dir.path().join("barrier")).unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap()).collect();
+        assert_eq!(sockets.len(), 2, "{sockets:?}");
+        for socket in &sockets {
+            assert!(socket.len() <= 103 && !socket.ends_with("/h.sock"), "{socket}");
+            assert!(!Path::new(socket).exists(), "{socket} outlived its build");
         }
     }
     #[tokio::test]

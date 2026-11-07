@@ -97,7 +97,7 @@ impl Exec {
                     command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());
                     command.environment.entry("COLORTERM".into()).or_insert_with(|| "truecolor".into());
                     command.environment.insert("FARCOOLER_NATIVE_SESSION".into(), Self::native_session(binding));
-                    command.environment.insert("FARCOOLER_NATIVE_HOOK_SOCKET".into(), self.root.join("h.sock").to_string_lossy().into_owned());
+                    command.environment.insert("FARCOOLER_NATIVE_HOOK_SOCKET".into(), self.native_socket(binding).to_string_lossy().into_owned());
                     command
                 }
             },

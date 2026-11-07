@@ -103,8 +103,6 @@ pub struct Exec {
     resource: String,
     base: String,
     coding: Option<CodingConfig>,
-    /// One native build at a time: they share one hook socket on this host (ov-952).
-    native_slot: std::sync::Arc<tokio::sync::Mutex<()>>,
     /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
     /// its patience on the same clock its effect was created on.
     launched: Option<(i64, std::time::Instant)>,
@@ -257,7 +255,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, native_slot: Default::default(), launched: None },
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -502,11 +500,6 @@ impl Runtime {
                 if let EffectKind::Stop { operation } = &effect.kind {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
                 }
-                // Native builds share one hook socket, so a second waits here, before it is claimed
-                // or admitted: a queued build owns nothing that a cancel or restart must reconcile.
-                let native = matches!(effect.kind, EffectKind::Execute(StageKind::Build))
-                    && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }));
-                if native && running.iter().any(|j| j.native) { continue; }
                 // A stop must always get through; everything else waits for a free slot.
                 let wait = matches!(effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi));
                 if !matches!(effect.kind, EffectKind::Stop { .. }) && !wait
@@ -558,7 +551,7 @@ impl Runtime {
                     if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, native, wait });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, wait });
             }
         }
         Ok(())
@@ -678,8 +671,6 @@ struct Running {
     effect: Effect,
     binding: Binding,
     cancel: tokio::sync::watch::Sender<bool>,
-    /// Holds the shared native hook socket.
-    native: bool,
     /// Waits for something else (the base, CI) and does no work of its own, so the cap leaves it out.
     wait: bool,
 }
