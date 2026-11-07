@@ -598,5 +598,89 @@
   "built": true,
   "exit": 101,
   "pass": true
+ },
+ "lift-before-its-copy": {
+  "want": [
+   "lift.before-copy",
+   "lift.after-copy",
+   "lift.torn-note",
+   "lift.after-note",
+   "lift.in-lift",
+   "lift.after-lift"
+  ],
+  "red": [
+   "lift.after-copy",
+   "lift.after-lift",
+   "lift.after-note",
+   "lift.before-copy",
+   "lift.in-lift",
+   "lift.torn-note"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "lift-copy-is-half": {
+  "want": [
+   "lift.after-copy",
+   "lift.torn-note",
+   "lift.after-note",
+   "lift.in-lift",
+   "lift.after-lift"
+  ],
+  "red": [
+   "lift.after-copy",
+   "lift.after-lift",
+   "lift.after-note",
+   "lift.in-lift",
+   "lift.torn-note"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "torn-lift-note-blocks-recover": {
+  "want": [
+   "lift.torn-note"
+  ],
+  "red": [
+   "lift.torn-note"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "lift-note-after-the-lift": {
+  "want": [
+   "lift.after-note"
+  ],
+  "red": [
+   "lift.after-note"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "lift-commits-before-its-boundary": {
+  "want": [
+   "lift.in-lift"
+  ],
+  "red": [
+   "lift.in-lift"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
+ },
+ "pre-lift-copy-removed-after-lifting": {
+  "want": [
+   "lift.after-lift"
+  ],
+  "red": [
+   "lift.after-lift"
+  ],
+  "built": true,
+  "exit": 101,
+  "pass": true
  }
 }

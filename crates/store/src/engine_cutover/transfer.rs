@@ -105,11 +105,14 @@ fn lift_connection(path: &Path) -> Result<Connection> {
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
 }
-fn lift(conn: &mut Connection, from: u32) -> Result<()> {
+/// `boundary` names the crash point inside the transaction, for the real file
+/// only; the scratch copy passes none.
+fn lift(conn: &mut Connection, from: u32, boundary: Option<&'static str>) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::migrate::apply_between(&tx, from, LIFT_TO).map_err(|e| Error::Refused(e.to_string()))?;
     // What the registry-60 build stamped: it needs a build that has its tables.
     tx.execute("INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [LIFT_TO.to_string()])?;
+    if let Some(name) = boundary { reach(name); }
     tx.commit()?;
     Ok(())
 }
@@ -134,13 +137,14 @@ fn lift_below_60(db: &Path, dir: &Path, held: bool, attempt: &str) -> Result<boo
     fs::copy(db, &scratch)?;
     let judged = (|| -> Result<()> {
         let mut conn = lift_connection(&scratch)?;
-        lift(&mut conn, from)?;
+        lift(&mut conn, from, None)?;
         preflight(&conn)?;
         Ok(())
     })();
     let _ = fs::remove_file(&scratch);
     judged?;
     if !held { create_artifacts(dir)?; }
+    reach("lift.before-copy");
     let bytes = fs::read(db)?;
     let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT_DB))?;
     copy.write_all(&bytes)?;
@@ -148,15 +152,14 @@ fn lift_below_60(db: &Path, dir: &Path, held: bool, attempt: &str) -> Result<boo
     drop(copy);
     let kept = db_hash(&dir.join(PRE_LIFT_DB))?;
     if kept != farcooler_workflow::digest(&bytes) { return refuse("pre-lift copy differs from the source"); }
+    reach("lift.after-copy");
     // Evidence only: nothing reads it back to decide anything, so a tear is harmless.
-    let mut note = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT))?;
-    note.write_all(&serde_json::to_vec(&PreLift { attempt: attempt.into(), from, to: LIFT_TO, db_hash: kept })?)?;
-    note.sync_all()?;
-    drop(note);
-    sync_dir(dir)?;
+    publish(dir, PRE_LIFT, &serde_json::to_vec(&PreLift { attempt: attempt.into(), from, to: LIFT_TO, db_hash: kept })?, "lift.torn-note")?;
+    reach("lift.after-note");
     let mut conn = lift_connection(db)?;
-    lift(&mut conn, from)?;
+    lift(&mut conn, from, Some("lift.in-lift"))?;
     drop(conn);
+    reach("lift.after-lift");
     Ok(true)
 }
 fn frozen_id(attempt: &str) -> String { format!("frozen:{attempt}") }

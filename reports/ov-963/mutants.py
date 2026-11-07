@@ -23,6 +23,15 @@ PUBLISH_BASELINE = 'publish(&dir, BASELINE, &serde_json::to_vec(&baseline)?, "be
 BOUNDARIES = re.findall(r'"([a-z]+\.[a-z-]+)"', (root / 'crates/store/src/engine_cutover/boundary.rs').read_text().split('];')[0])
 # name, [(file, old, new)], boundaries that must go red (matrix) or a test filter
 MUTANTS = [
+ ('lift-before-its-copy', [(T, 'reach("lift.before-copy");\n    let bytes = fs::read(db)?;', 'lift(&mut lift_connection(db)?, from, None)?;\n    reach("lift.before-copy");\n    let bytes = fs::read(db)?;')],
+    ['lift.before-copy', 'lift.after-copy', 'lift.torn-note', 'lift.after-note', 'lift.in-lift', 'lift.after-lift']),
+ ('lift-copy-is-half', [(T, '.open(dir.join(PRE_LIFT_DB))?;\n    copy.write_all(&bytes)?;', '.open(dir.join(PRE_LIFT_DB))?;\n    copy.write_all(&bytes[..bytes.len() / 2])?;'),
+    (T, 'if kept != farcooler_workflow::digest(&bytes) { return refuse("pre-lift copy differs from the source"); }\n', '')], ['lift.after-copy', 'lift.torn-note', 'lift.after-note', 'lift.in-lift', 'lift.after-lift']),
+ ('torn-lift-note-blocks-recover', [(T, '    clear_inert_journal(db)?;\n    // A hold alone', '    clear_inert_journal(db)?;\n    if let Ok(note) = fs::read(dir.join(PRE_LIFT)) { serde_json::from_slice::<serde_json::Value>(&note)?; }\n    // A hold alone')], ['lift.torn-note']),
+ ('lift-note-after-the-lift', [(T, '    publish(dir, PRE_LIFT, &serde_json::to_vec(&PreLift { attempt: attempt.into(), from, to: LIFT_TO, db_hash: kept })?, "lift.torn-note")?;\n', ''),
+    (T, 'reach("lift.after-lift");\n', 'reach("lift.after-lift");\n    publish(dir, PRE_LIFT, &serde_json::to_vec(&PreLift { attempt: attempt.into(), from, to: LIFT_TO, db_hash: kept })?, "lift.torn-note")?;\n')], ['lift.after-note']),
+ ('lift-commits-before-its-boundary', [(T, 'if let Some(name) = boundary { reach(name); }\n    tx.commit()?;', 'tx.commit()?;\n    if let Some(name) = boundary { reach(name); }')], ['lift.in-lift']),
+ ('pre-lift-copy-removed-after-lifting', [(T, 'reach("lift.after-lift");', 'fs::remove_file(dir.join(PRE_LIFT_DB))?;\n    reach("lift.after-lift");')], ['lift.after-lift']),
  ('hold-moves-first', [(T, 'reach("hold.before");\n    create_artifacts(&dir)?;', 'create_artifacts(&dir)?;\n    reach("hold.before");')], ['hold.before']),
  ('gate-needs-a-complete-intent', [(S, 'if std::fs::symlink_metadata(artifact_dir(db)).is_ok() {\n', 'if std::fs::symlink_metadata(artifact_dir(db).join("intent.json")).is_ok() {\n')],
     ['hold.torn', 'hold.after', 'begin.before-baseline-db', 'begin.after-baseline-db', 'begin.torn-baseline', 'begin.before-intent']),
@@ -94,7 +103,7 @@ for name, edits, want in MUTANTS:
             f.write_text(text.replace(old, new, 1))
         if isinstance(want, list):
             # A current source's floor is already the current one; only raw60 can show this.
-            cmd = ['cargo', 'test', '-p', 'farcooler-daemon', '--test', 'a_cutover_survives_every_crash', 'a_raw_schema60' if name == 'floor-after-the-commit' else 'a_current_runner']
+            cmd = ['cargo', 'test', '-p', 'farcooler-daemon', '--test', 'a_cutover_survives_every_crash', 'a_runner_below_60' if want[0].startswith('lift.') else 'a_raw_schema60' if name == 'floor-after-the-commit' else 'a_current_runner']
             extra = {'CUTOVER_ONLY': ','.join(want)}
         elif isinstance(want, tuple):
             cmd = ['cargo', 'test', '-p', 'farcooler-cli', '--bin', 'farcooler', want[1]] if want[0] == 'cli' else ['cargo', 'test', '-p', 'farcooler-store', '--lib', want[1]]; extra = {}

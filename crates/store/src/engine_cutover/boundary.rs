@@ -6,6 +6,7 @@
 /// Every boundary, in the order a forward run reaches it. Recover's come last.
 pub const ALL: &[&str] = &[
     "hold.before", "hold.torn", "hold.after",
+    "lift.before-copy", "lift.after-copy", "lift.torn-note", "lift.after-note", "lift.in-lift", "lift.after-lift",
     "begin.before-baseline-db", "begin.after-baseline-db", "begin.torn-baseline", "begin.before-intent", "begin.torn-intent",
     "begin.after-intent", "begin.in-upgrade", "begin.after-upgrade",
     "commit.before-copy", "commit.after-copy", "commit.torn-snapshot", "commit.after-snapshot", "commit.after-restore", "journal.torn", "commit.after-permit",

@@ -52,7 +52,7 @@ fn cutover_helper_entry() {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Source { Raw60, Legacy }
+enum Source { Raw60, Legacy, Below(u32) }
 
 /// One runner under a short path, with everything a daemon reaches outside it.
 struct Runner { _dir: tempfile::TempDir, home: PathBuf, tmux: PathBuf, claude: PathBuf, original: Vec<u8> }
@@ -65,6 +65,7 @@ impl Runner {
         let db = cutover_admin::database(&home);
         match source {
             Source::Raw60 => farcooler_store::testing::write_source60(&db),
+            Source::Below(registry) => farcooler_store::testing::write_source_below_60(&db, registry),
             Source::Legacy => {
                 let store = Store::open(&db).unwrap();
                 let host = uuid::Uuid::now_v7();
@@ -229,7 +230,7 @@ fn row(name: &str, source: Source) -> Row {
 }
 fn stage_of(name: &str) -> &'static str {
     match name.split('.').next().unwrap() {
-        "hold" => "hold", "begin" => "prepare", "commit" | "journal" => "commit", "verify" => "verify",
+        "hold" => "hold", "begin" | "lift" => "prepare", "commit" | "journal" => "commit", "verify" => "verify",
         "release" => "release", "finish" => "finish", "recover" => "recover", other => panic!("no stage for {other}"),
     }
 }
@@ -346,7 +347,7 @@ async fn whole_matrix(source: Source) {
     let room = Arc::new(tokio::sync::Semaphore::new(4));
     let mut cases = Vec::new();
     for &name in boundary::ALL {
-        if !wanted(name) || (source == Source::Raw60 && stage_of(name) == "hold") { continue; }
+        if !wanted(name) || (source == Source::Raw60 && stage_of(name) == "hold") || name.starts_with("lift.") { continue; }
         let room = room.clone();
         cases.push((name, tokio::spawn(async move {
             let _seat = room.acquire().await.unwrap();
@@ -459,4 +460,76 @@ async fn an_old_build_cannot_lose_its_writes_across_recover() {
     old.wait().unwrap();
     let kept = rusqlite::Connection::open(runner.db()).unwrap().query_row("SELECT count(*) FROM meta WHERE key='old-build-write'", [], |r| r.get::<_, i64>(0)).unwrap();
     assert_eq!((refused, kept), (Ok(REFUSED), 1), "Recover waits, and the old build's write is still in the file a reader opens");
+}
+
+/// The lift from a registry below 60 is the one step that rewrites the owner's
+/// file before any baseline exists. At each of its durable steps a real process
+/// dies, and the original must be whole: in the database until the lift commits,
+/// in `pre-lift.db` from the copy on. Then Recover and a fresh Prepare, through
+/// to ordinary service.
+fn lift_row(name: &str) -> (bool, bool, bool, bool) {
+    // (copy exists, note torn, db is lifted, note whole)
+    match name {
+        "lift.before-copy" => (false, false, false, false),
+        "lift.after-copy" => (true, false, false, false),
+        "lift.torn-note" => (true, true, false, false),
+        "lift.after-note" | "lift.in-lift" => (true, false, false, true),
+        "lift.after-lift" => (true, false, true, true),
+        other => panic!("no lift row for {other}"),
+    }
+}
+async fn lift_case(registry: u32, name: &'static str) {
+    let runner = Runner::new(Source::Below(registry));
+    assert_eq!(runner.stage("prepare", Some(name)).await, Err(libc::SIGKILL), "{name} was never reached");
+    let (copy, torn, lifted, whole) = lift_row(name);
+    let dir = runner.artifacts();
+    let kept = dir.join("pre-lift.db");
+    assert_eq!(kept.exists(), copy, "{name}");
+    if copy { assert!(std::fs::read(&kept).unwrap() == runner.original, "{name}: pre-lift.db is the exact original"); }
+    let note = dir.join("pre-lift.json");
+    if torn { assert!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&note).unwrap()).is_err(), "{name}: the note is torn"); }
+    if whole { assert!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&note).unwrap()).is_ok(), "{name}: the note is whole"); }
+    let found = runner.settled();
+    if lifted {
+        assert_eq!(found.schema.as_deref(), Some("60"), "{name}: the lift committed, to exactly 60");
+        assert_eq!(found.floor.as_deref(), Some("60"), "{name}: with the floor of the build that wrote 60");
+    } else {
+        assert!(found.bytes == runner.original, "{name}: a crash before the lift commits leaves the original file, after any rollback");
+    }
+    assert!(!dir.join("baseline.db").exists() && !dir.join("intent.json").exists(), "{name}: no baseline yet");
+    every_seam_is_held(&runner, name).await;
+    // The real way back: a fresh proof, then a new Prepare on whatever Recover left.
+    assert_eq!(runner.stage("recover", None).await, Ok(0), "{name}: Recover");
+    assert!(!dir.exists(), "{name}: Recover retired the attempt");
+    let evidence: Vec<_> = std::fs::read_dir(&runner.home).unwrap().map(|e| e.unwrap().path())
+        .filter(|p| p.display().to_string().contains(".cutover-abandoned-")).collect();
+    assert_eq!(evidence.len(), 1, "{name}: the attempt is kept as evidence");
+    if copy { assert!(std::fs::read(evidence[0].join("pre-lift.db")).unwrap() == runner.original, "{name}: the original survived Recover"); }
+    let after = std::fs::read(runner.db()).unwrap();
+    if !lifted { assert!(after == runner.original, "{name}: Recover leaves the original file as it was"); }
+    // And on to ordinary service, with the original still kept somewhere.
+    runner.must("prepare").await;
+    for stage in ["commit", "verify", "release", "finish"] { runner.must(stage).await; }
+    assert_eq!(runner.phase().as_deref(), Some("released"), "{name}");
+    let originals = std::fs::read_dir(&runner.home).unwrap().map(|e| e.unwrap().path())
+        .filter(|p| p.is_dir() && p.join("pre-lift.db").is_file() && std::fs::read(p.join("pre-lift.db")).unwrap() == runner.original).count();
+    assert!(originals >= 1, "{name}: some kept directory still holds the original");
+    main_serves_ordinarily(&runner).await;
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn a_runner_below_60_survives_a_crash_at_every_lift_step() {
+    let only = std::env::var("CUTOVER_ONLY").ok();
+    let room = Arc::new(tokio::sync::Semaphore::new(3));
+    let mut cases = Vec::new();
+    for &name in boundary::ALL.iter().filter(|n| n.starts_with("lift.")) {
+        if only.as_deref().is_some_and(|list| !list.split(',').any(|n| n == name)) { continue; }
+        for registry in [28u32, 57] {
+            let room = room.clone();
+            cases.push((name, tokio::spawn(async move { let _seat = room.acquire().await.unwrap(); lift_case(registry, name).await; })));
+        }
+    }
+    assert!(!cases.is_empty());
+    let mut red = Vec::new();
+    for (name, case) in cases { if case.await.is_err() { eprintln!("BOUNDARY-RED {name}"); red.push(name); } }
+    assert!(red.is_empty(), "red at {red:?}");
 }
