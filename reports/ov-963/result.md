@@ -53,3 +53,14 @@ Rerun at this branch's tip: the example reached `committed`, with zero fake send
 - `CommitPermit` has two evidence kinds. The rehearsal keeps `Quiescence`.
 - The raw60 fixture moved to `farcooler_store::testing::write_source60`.
 - `testing::commit_for_tests` is gone. `released_transfer_for_tests` remains.
+
+## Fix round (review: `independent-review.md`)
+
+- **B2, fixed.** A recovery daemon answers every ordinary method with `CutoverHeld`, the sentence the stdio path already used. A stage refusal now carries a short sentence on the wire: the holder's pid when a process has the file open, otherwise a pointer to `farcooler workflow-cutover inspect`. The raw store text stays in the daemon log. `main_serves_only_recovery` now asserts the exact sentence; the old `CapabilityUnsupported` goes red.
+- **B3, fixed.** `a_hot_journal_is_rolled_back_by_sqlite_before_clearing_deletes_anything` builds a real hot journal, and requires the bytes after `clear_inert_journal` to equal SQLite's own rollback of the same image. The review's delete-any-journal mutant, with `settle_journal` removed, goes red. A row-count oracle did not catch it, because the half-written pages sat beyond the root.
+- **B1, investigated, not built.** `installs.md`: no Preview or Stable build ever shipped; Canary shipped registries 28 to 57 and the installed app is at 60. Two options for a stepping stone, with a recommendation. The orchestrator rules.
+- **Ruling, done.** Commit writes `journal/commit-requested-N.json` (pid, start, tty, session leader) before it does anything. The manager skill says agents never run `workflow-cutover`. The skill's line cap moved from 344 to 346 for it. Two matrix rows now name the journal entry they lack, not the whole directory.
+- **M1, fixed.** A live Prepare, held or refused, stops the daemon with exit 75. The test that pinned exit 0 now pins 75, and goes red without the flag.
+- **M2, fixed.** The two cutover write connections set `fullfsync` and `checkpoint_fullfsync`. A store test reads both back and fails without them. Power loss is still unproven.
+- **Left, named.** M3 (pause updates mid-attempt: needs a product decision on the Sparkle side). M4 (three safety steps with no red mutant: still not counted as proven). M5 (the inert journal is deleted, not kept). M6 and M7 (harmless).
+- **Not rerun.** The 37 recorded mutants. The matrix, the store cutover tests and the recovery tests ran green after the changes.
