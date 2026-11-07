@@ -28,7 +28,16 @@ pub struct Item {
     pub stopping: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rework_history: Vec<ReworkDecision>,
+    /// Back edges taken so far, by the id of the step that took them (schema 2).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub back_edges: BTreeMap<String, u8>,
+    /// How many times a controller has retried this item after it failed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub retries: u8,
 }
+fn is_zero(n: &u8) -> bool { *n == 0 }
+/// A failed item can be retried this many times, so a bad step cannot loop forever.
+pub const MAX_RETRIES: u8 = 3;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     pub schema: u32,
@@ -89,6 +98,8 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Observe { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
     Cancel { item: String },
+    /// A controller runs a failed item's step again, within `MAX_RETRIES`.
+    Retry { item: String },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +110,7 @@ pub struct Evidence {
     pub policy_pin: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Outcome { Passed(Evidence), Rejected(Evidence), SafeFailure, Uncertain, Stopped { operation: String, receipt: String } }
+pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure, Uncertain, Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind { Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

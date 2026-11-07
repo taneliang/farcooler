@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::BTreeMap;
 
 pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     if !valid_state(state) { return Err(Refusal::Invalid); }
@@ -42,14 +43,15 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new() };
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
+                back_edges: BTreeMap::new(), retries: 0 };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
         command => {
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
-                | Command::Observe { item, .. } | Command::Cancel { item }
+                | Command::Observe { item, .. } | Command::Cancel { item } | Command::Retry { item }
                 | Command::Resolve { item, .. } => item,
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             };
@@ -115,6 +117,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             item.phase = Phase::Cancelled;
                             item.pending = None;
                         }
+                        Outcome::Labeled(..) => { return Err(Refusal::Invalid); }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
@@ -148,6 +151,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { item.phase = Phase::Cancelled; }
                 }
+                Command::Retry { .. } => { return Err(Refusal::Phase); }
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }
             next.items.insert(id.clone(), item);

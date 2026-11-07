@@ -24,7 +24,18 @@ pub struct Stage {
     pub progression: Progression,
     pub max_attempts: u8,
     pub operation: OperationSpec,
+    /// Schema 2 only: where each result label goes. A label with no route falls forward on
+    /// `passed` and to `Fail` on anything else.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub routes: BTreeMap<String, Target>,
+    /// Schema 2 only: how many times this step's back edges may be taken in one run.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub limit: u8,
 }
+fn is_zero(n: &u8) -> bool { *n == 0 }
+/// Where a labeled result goes next.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Target { Step(String), Done, Fail }
 /// A finite forward sequence; rejected evaluators may take one bounded, pinned rework edge.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
@@ -92,7 +103,7 @@ impl Definition {
         Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
-                max_attempts: 2,
+                max_attempts: 2, routes: BTreeMap::new(), limit: 0,
                 operation: OperationSpec { adapter_version: "fixture/v1".into(),
                     arguments: if i == 2 { vec!["cargo".into(), "test".into(), "--locked".into()] }
                         else { vec![format!("coding-operation-{i}")] }, environment: BTreeMap::new() },
@@ -102,7 +113,8 @@ impl Definition {
         Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None,
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
-                max_attempts: 1, operation: OperationSpec { adapter_version: "tracker/v1".into(),
+                max_attempts: 1, routes: BTreeMap::new(), limit: 0,
+                operation: OperationSpec { adapter_version: "tracker/v1".into(),
                     arguments: vec![], environment: BTreeMap::new() } }] }
     }
 }
