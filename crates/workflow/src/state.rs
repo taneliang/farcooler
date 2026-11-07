@@ -38,11 +38,21 @@ pub struct State {
     pub items: BTreeMap<String, Item>,
     pub seen: BTreeSet<String>,
     pub source_sequences: BTreeMap<String, u64>,
+    /// Items that finished and left `items`. A name stays taken, and a dependency on a
+    /// finished item stays met. The whole record is in the event log (ov-953).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub archive: BTreeMap<String, Archived>,
+}
+/// What a later step needs to know about an item that has left live state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Archived {
+    pub phase: Phase,
+    pub candidate: Option<String>,
 }
 impl State {
     pub fn empty(workspace: String, epoch: u64) -> Self {
         Self { schema: 1, workspace, epoch, revision: 0, items: BTreeMap::new(),
-            seen: BTreeSet::new(), source_sequences: BTreeMap::new() }
+            seen: BTreeSet::new(), source_sequences: BTreeMap::new(), archive: BTreeMap::new() }
     }
 }
 /// Admission is trusted only after the runtime authenticates this capability.

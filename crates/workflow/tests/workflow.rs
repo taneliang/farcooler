@@ -460,3 +460,71 @@ fn workflow_reasoned_rework_bounds_budget_and_legacy_bytes() {
     assert_eq!(legacy.items["item"].iteration, 1);
     assert!(!serde_json::to_string(&legacy).unwrap().contains("rework_history"));
 }
+
+fn tracker_input(state: &State, name: &str, dependencies: &[&str]) -> Input {
+    input(state, Command::Enqueue { item: name.into(), definition: Definition::tracker("owner"), policy_pin: "policy-1".into(),
+        resource: format!("resource/{name}"), dependencies: dependencies.iter().map(|d| d.to_string()).collect(),
+        initial_candidate: Some("checklist-v1".into()) }, Grant::Controller)
+}
+fn approve_tracker(state: &State, name: &str) -> Input {
+    let item = &state.items[name];
+    input(state, Command::Approve { item: name.into(), run: item.run.clone(), pin: item.pin.clone(),
+        candidate: item.candidate.clone() }, Grant::Decision { principal: "owner".into() })
+}
+fn settle_tracker(state: &State, name: &str) -> Input {
+    let item = &state.items[name];
+    let effect = item.pending.clone().unwrap();
+    input(state, Command::Observe { item: name.into(), effect: effect.clone(), run: item.run.clone(), fence: item.fence,
+        outcome: Outcome::Passed(Evidence { candidate: item.candidate.clone().unwrap(), manifest: "m".into(),
+            receipt: "r".into(), policy_pin: item.policy_pin.clone() }) },
+        Grant::Operation { effect, run: item.run.clone(), fence: item.fence })
+}
+/// Enqueue, approve and settle a tracker, and return the state the moment the item is Done.
+fn finish_tracker(mut state: State, name: &str) -> State {
+    for build in [|s: &State, n: &str| tracker_input(s, n, &[]), approve_tracker, settle_tracker] {
+        let event = build(&state, name);
+        state = step(&state, &event).unwrap().state;
+    }
+    assert_eq!(state.items[name].phase, Phase::Done);
+    state
+}
+#[test]
+fn workflow_finished_items_leave_live_state_but_keep_their_history() {
+    let state = finish_tracker(State::empty("workspace".into(), 1), "first");
+    // The finishing step still shows the item, so the board can follow it to Done.
+    assert!(state.items.contains_key("first"));
+    let state = step(&state, &input(&state, Command::Advance, Grant::Controller)).unwrap().state;
+    assert!(!state.items.contains_key("first"), "a finished item leaves live state on the next step");
+    let kept = &state.archive["first"];
+    assert_eq!(kept.phase, Phase::Done);
+    assert_eq!(kept.candidate.as_deref(), Some("checklist-v1"));
+    // Its name stays taken, and a dependency on it is still met.
+    assert_eq!(step(&state, &tracker_input(&state, "first", &[])), Err(Refusal::Invalid));
+    let next = step(&state, &tracker_input(&state, "after", &["first"])).unwrap().state;
+    assert_eq!(next.items["after"].phase, Phase::WaitingApproval);
+    // A state with no archive serializes exactly as before.
+    assert!(!serde_json::to_string(&State::empty("workspace".into(), 1)).unwrap().contains("archive"));
+}
+#[test]
+fn workflow_enqueue_does_not_stop_at_1024_finished_items() {
+    let mut state = State::empty("workspace".into(), 1);
+    for n in 0..1100 { state = finish_tracker(state, &format!("item-{n}")); }
+    assert!(state.items.len() <= 2, "{} items still live", state.items.len());
+    assert!(state.archive.len() >= 1098);
+}
+#[test]
+fn workflow_archived_replay_is_identical() {
+    let mut state = State::empty("workspace".into(), 1);
+    let mut log = Vec::new();
+    for name in ["a", "b", "c"] {
+        for build in [|s: &State, n: &str| tracker_input(s, n, &[]), approve_tracker, settle_tracker] {
+            let event = build(&state, name);
+            state = step(&state, &event).unwrap().state;
+            log.push(event);
+        }
+    }
+    let mut replay = State::empty("workspace".into(), 1);
+    for event in log { replay = step(&replay, &event).unwrap().state; }
+    assert_eq!(digest(&state), digest(&replay));
+    assert!(replay.archive.contains_key("a"));
+}

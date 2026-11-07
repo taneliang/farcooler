@@ -22,7 +22,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             controller(input)?;
             definition.validate()?;
             if !valid_id(item) || !valid_id(resource) || !valid_id(policy_pin)
-                || next.items.contains_key(item) || next.items.len() >= 1024
+                || next.items.contains_key(item) || next.archive.contains_key(item) || next.items.len() >= 1024
                 || dependencies.len() > 128
             { return Err(Refusal::Invalid); }
             let tracker = matches!(definition.stages[0].kind, StageKind::Tracker);
@@ -31,9 +31,9 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             { return Err(Refusal::Evidence); }
             // Dependencies can name existing items only: insertion cannot create a cycle.
             for dep in dependencies {
-                if !next.items.contains_key(dep) { return Err(Refusal::Missing); }
+                if !next.items.contains_key(dep) && !next.archive.contains_key(dep) { return Err(Refusal::Missing); }
             }
-            if dependencies.iter().all(|d| next.items[d].phase == Phase::Done)
+            if dependencies.iter().all(|d| dependency_done(&next, d))
                 && (input.busy_resources.contains(resource)
                     || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
                 return Err(Refusal::Resource);
@@ -153,6 +153,16 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             next.items.insert(id.clone(), item);
         }
     }
+    // A failed run stays: cancelling it is the controller's way off the needs-you list.
+    // An item that was already finished before this step leaves live state now, so its final
+    // phase has been seen by the board and the notices before it goes. The event log keeps all of it.
+    let finished: Vec<_> = state.items.iter().filter(|(_, i)| matches!(i.phase, Phase::Done | Phase::Cancelled))
+        .map(|(id, _)| id.clone()).collect();
+    for id in finished {
+        if let Some(item) = next.items.remove(&id) {
+            next.archive.insert(id, Archived { phase: item.phase, candidate: item.candidate });
+        }
+    }
     // Completion of a prerequisite can release blocked work without another controller command.
     let ready_ids: Vec<_> = next.items.iter().filter(|(_, i)| i.phase == Phase::Blocked && ready(&next, i, input))
         .map(|(id, _)| id.clone()).collect();
@@ -179,8 +189,11 @@ pub fn owns_resource(item: &Item) -> bool {
 }
 fn ready(state: &State, item: &Item, input: &Input) -> bool {
     if input.busy_resources.contains(&item.resource) { return false; }
-    item.dependencies.iter().all(|d| state.items.get(d).is_some_and(|i| i.phase == Phase::Done))
+    item.dependencies.iter().all(|d| dependency_done(state, d))
         && !state.items.values().any(|i| owns_resource(i) && i.resource == item.resource)
+}
+fn dependency_done(state: &State, id: &str) -> bool {
+    state.items.get(id).map(|i| &i.phase).or_else(|| state.archive.get(id).map(|a| &a.phase)) == Some(&Phase::Done)
 }
 fn controller(input: &Input) -> Result<(), Refusal> {
     if input.grant == Grant::Controller { Ok(()) } else { Err(Refusal::Unauthorized) }
@@ -262,6 +275,9 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
 
 fn valid_state(state: &State) -> bool {
     valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= 1024
+        && state.archive.iter().all(|(id, a)| valid_id(id) && !state.items.contains_key(id)
+            && matches!(a.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
+            && a.candidate.as_deref().is_none_or(valid_id))
         && state.items.iter().all(|(id, item)| {
             valid_id(id) && item.definition.validate().is_ok() && item.pin == item.definition.pin()
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)

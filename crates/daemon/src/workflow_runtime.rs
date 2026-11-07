@@ -391,7 +391,7 @@ impl Runtime {
                     // A cancel fences the original Observe; its private settlement
                     // remains available for the Stop effect's quiescence check.
                     let current = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
-                    if current.items[&effect.item].pending.as_ref() == Some(&effect.id) {
+                    if current.items.get(&effect.item).is_some_and(|i| i.pending.as_ref() == Some(&effect.id)) {
                         self.observe(&workspace, &effect, outcome, false, now_ms)?;
                     }
                     count += 1;
@@ -414,7 +414,8 @@ impl Runtime {
                 let effect = stored.effect;
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
                 let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
-                let item = &state.items[&effect.item];
+                // A finished item has left live state and has nothing left to run.
+                let Some(item) = state.items.get(&effect.item) else { continue };
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
                 let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
