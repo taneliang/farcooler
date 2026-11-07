@@ -26,9 +26,19 @@ impl Publication {
     pub fn action(&self) -> Result<Action, Box<dyn std::error::Error>> {
         let bytes = read_file(&self.file)?;
         let value:serde_json::Value = serde_json::from_slice(&bytes)?;
-        let definition = serde_json::from_value(value.clone())?;
-        if serde_json::to_value(&definition)? != value { return Err("unknown definition fields".into()); }
-        Ok(Action::Publish { mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
+        let (definition, adapter) = if value.get("definition").is_some() {
+            #[derive(serde::Deserialize, serde::Serialize)]
+            #[serde(deny_unknown_fields)]
+            struct Bundle { definition: farcooler_protocol::workflow_commands::Definition, adapter: farcooler_protocol::workflow_config::AdapterConfiguration }
+            let bundle: Bundle = serde_json::from_value(value.clone())?;
+            if serde_json::to_value(&bundle)? != value { return Err("unknown bundle fields".into()); }
+            (bundle.definition, Some(Box::new(bundle.adapter)))
+        } else {
+            let definition = serde_json::from_value(value.clone())?;
+            if serde_json::to_value(&definition)? != value { return Err("unknown definition fields".into()); }
+            (definition, None)
+        };
+        Ok(Action::Publish { adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
     }
 }
 #[derive(Subcommand)]
@@ -115,5 +125,33 @@ mod tests {
         std::fs::write(&path,vec![b' ';MAX_BYTES+1]).unwrap();
         assert!(publication.action().is_err());
         assert!(crate::Cli::try_parse_from(["farcooler","workflow","enqueue",&workspace.to_string(),"item","--pin","x"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod bundle_tests {
+    use super::*;
+    #[test]
+    fn workflow_bundle_file_closed_schema_and_bounded_inputs() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("workflow.json");
+        let definition=farcooler_protocol::workflow_commands::Definition::tracker("owner");
+        let publication=Publication { file:path.clone(),expected_pin:None,identity:Identity {command_id:"publish".into(),revision:0,epoch:1,sequence:1} };
+        // Bad adapter tags and extra envelope fields must not be silently lost.
+        for value in [serde_json::json!({"definition":definition,"adapter":{"version":"untrusted/v9","config":{} }}),
+            serde_json::json!({"definition":definition,"adapter":null,"principal":"owner"})] {
+            std::fs::write(&path,serde_json::to_vec(&value).unwrap()).unwrap();assert!(publication.action().is_err());
+        }
+        let command=serde_json::json!({"argv":["/usr/bin/true"],"environment":{},"timeout_ms":1000});
+        let config=serde_json::json!({"repository":"/isolated","base":"0000000000000000000000000000000000000000","landing_ref":"refs/heads/main","landing":null,
+            "harness":{"Command":command},"checks":[command],"reviewer":null,"ci":{"repository":"offline/repo","workflow":"check","event":"push","command":command}});
+        let value=serde_json::json!({"definition":definition,"adapter":{"version":"coding/v1","config":config}});
+        std::fs::write(&path,serde_json::to_vec(&value).unwrap()).unwrap();
+        let action=publication.action().unwrap();
+        assert!(matches!(&action,Action::Publish {adapter:Some(_),..}));
+        assert_eq!(farcooler_protocol::workflow_commands::parse(&serde_json::to_string(&action).unwrap()).unwrap(),action);
+        let fifo=dir.path().join("fifo");let name=std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe {libc::mkfifo(name.as_ptr(),0o600)},0);
+        assert!(read_file(&fifo).is_err());
+        std::fs::write(&path,vec![b' ';MAX_BYTES+1]).unwrap();assert!(publication.action().is_err());
     }
 }

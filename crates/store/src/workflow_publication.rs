@@ -1,23 +1,36 @@
 //! Publication and authenticated wire receipts share the workflow transaction.
 use crate::{Store, workflow::{Receipt, Result, WorkflowError, apply_in}};
+use farcooler_protocol::workflow_config::AdapterConfiguration;
 use farcooler_workflow::{Definition, Input, Refusal};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Configuration { pub pin: String, pub definition: Definition }
+pub struct Configuration { pub pin: String, pub definition: Definition, pub adapter: Option<AdapterConfiguration> }
+pub fn configuration_pin(definition: &Definition, adapter: Option<&AdapterConfiguration>) -> String {
+    adapter.map_or_else(|| definition.pin(), |a| farcooler_workflow::digest(&("workflow-bundle/v1", definition, a)))
+}
 pub enum Write<'a> {
-    Publish { expected_pin: Option<&'a str>, definition: &'a Definition, revision: u64 },
+    Publish { expected_pin: Option<&'a str>, definition: &'a Definition, adapter: Option<&'a AdapterConfiguration>, revision: u64 },
     Apply(&'a Input),
     Refuse(Refusal),
 }
 impl Store {
     pub fn workflow_configuration(&self, workspace: &str) -> Result<Option<Configuration>> {
-        let conn = self.conn();
-        let raw: Option<(String, String)> = conn.query_row(
-            "SELECT c.pin, d.definition FROM workflow_configurations c JOIN workflow_definitions d ON d.pin=c.pin WHERE c.workspace=?1",
-            [workspace], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-        raw.map(|(pin, raw)| Ok(Configuration { pin, definition: serde_json::from_str(&raw)? })).transpose()
+        let pin: Option<String> = self.conn().query_row(
+            "SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
+        match pin { Some(pin) => self.workflow_bundle(&pin), None => Ok(None) }
+    }
+    pub fn workflow_bundle(&self, pin: &str) -> Result<Option<Configuration>> {
+        let raw: Option<(String, String)> = self.conn().query_row(
+            "SELECT d.definition,b.adapter FROM workflow_bundles b JOIN workflow_definitions d ON d.pin=b.definition_pin WHERE b.pin=?1",
+            [pin], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        raw.map(|(definition,adapter)| {
+            let definition = serde_json::from_str(&definition)?;
+            let adapter: Option<AdapterConfiguration> = serde_json::from_str(&adapter)?;
+            if configuration_pin(&definition, adapter.as_ref()) != pin { return Err(WorkflowError::IdentityConflict); }
+            Ok(Configuration { pin:pin.into(),definition,adapter })
+        }).transpose()
     }
     pub fn workflow_definition(&self, pin: &str) -> Result<Option<Definition>> {
         let raw: Option<String> = self.conn().query_row("SELECT definition FROM workflow_definitions WHERE pin=?1", [pin], |r| r.get(0)).optional()?;
@@ -35,14 +48,16 @@ impl Store {
         let receipt = match write {
             Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?)?,
             Write::Refuse(reason) => Receipt { id: id.into(), result: Err(reason), effects: vec![] },
-            Write::Publish { expected_pin, definition, revision } => {
-                let current: Option<String> = tx.query_row("SELECT pin FROM workflow_configurations WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
+            Write::Publish { expected_pin, definition, adapter, revision } => {
+                let current: Option<String> = tx.query_row("SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
                 let result = if current.as_deref() != expected_pin { Err(Refusal::Stale) }
                     else { definition.validate().map(|()| revision) };
                 if result.is_ok() {
-                    let pin = definition.pin();
-                    tx.execute("INSERT INTO workflow_definitions(pin,definition) VALUES(?1,?2) ON CONFLICT(pin) DO NOTHING", params![pin, serde_json::to_string(definition)?])?;
-                    tx.execute("INSERT INTO workflow_configurations(workspace,pin) VALUES(?1,?2) ON CONFLICT(workspace) DO UPDATE SET pin=excluded.pin", params![workspace,pin])?;
+                    let pin = configuration_pin(definition, adapter);
+                    let definition_pin = definition.pin();
+                    tx.execute("INSERT INTO workflow_definitions(pin,definition) VALUES(?1,?2) ON CONFLICT(pin) DO NOTHING", params![definition_pin, serde_json::to_string(definition)?])?;
+                    tx.execute("INSERT INTO workflow_bundles(pin,definition_pin,adapter) VALUES(?1,?2,?3) ON CONFLICT(pin) DO NOTHING", params![pin,definition_pin,serde_json::to_string(&adapter)?])?;
+                    tx.execute("INSERT INTO workflow_bundle_selections(workspace,pin) VALUES(?1,?2) ON CONFLICT(workspace) DO UPDATE SET pin=excluded.pin", params![workspace,pin])?;
                 }
                 Receipt { id: id.into(), result, effects: vec![] }
             }
@@ -70,6 +85,15 @@ pub(crate) fn migration_publication(tx: &Transaction<'_>) -> rusqlite::Result<()
         ")
 }
 
+pub(crate) fn migration_bundles(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE TABLE workflow_bundles(pin TEXT PRIMARY KEY NOT NULL, definition_pin TEXT NOT NULL REFERENCES workflow_definitions(pin), adapter TEXT NOT NULL);
+        CREATE TABLE workflow_bundle_selections(workspace TEXT PRIMARY KEY NOT NULL, pin TEXT NOT NULL REFERENCES workflow_bundles(pin));
+        INSERT INTO workflow_bundles SELECT pin,pin,'null' FROM workflow_definitions;
+        INSERT INTO workflow_bundle_selections SELECT workspace,pin FROM workflow_configurations;
+        CREATE TRIGGER workflow_bundles_no_update BEFORE UPDATE ON workflow_bundles BEGIN SELECT RAISE(ABORT,'immutable bundle'); END;
+        CREATE TRIGGER workflow_bundles_no_delete BEFORE DELETE ON workflow_bundles BEGIN SELECT RAISE(ABORT,'immutable bundle'); END;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,15 +102,18 @@ mod tests {
         let store=Store::open_in_memory().unwrap();
         store.conn().execute_batch("CREATE TRIGGER fail_publication BEFORE INSERT ON workflow_wire_receipts BEGIN SELECT RAISE(ABORT,'fixture crash'); END;").unwrap();
         let definition=Definition::tracker("owner");
-        assert!(store.workflow_wire_write("ws","p","payload",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).is_err());
+        assert!(store.workflow_wire_write("ws","p","payload",Write::Publish { adapter:None, expected_pin:None,definition:&definition,revision:0 }).is_err());
         assert!(store.workflow_configuration("ws").unwrap().is_none());
         assert!(store.workflow_definition(&definition.pin()).unwrap().is_none());
+        assert!(store.workflow_bundle(&definition.pin()).unwrap().is_none());
         store.conn().execute_batch("DROP TRIGGER fail_publication").unwrap();
-        let receipt=store.workflow_wire_write("ws","p","payload",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).unwrap();
+        let receipt=store.workflow_wire_write("ws","p","payload",Write::Publish { adapter:None, expected_pin:None,definition:&definition,revision:0 }).unwrap();
         assert!(receipt.result.is_ok());
+        assert!(store.workflow_bundle(&definition.pin()).unwrap().is_some());
+        assert!(store.conn().execute("UPDATE workflow_bundles SET adapter='{}'",[]).is_err());
         assert!(store.conn().execute("UPDATE workflow_definitions SET definition='{}'",[]).is_err());
         assert!(store.conn().execute("DELETE FROM workflow_wire_receipts",[]).is_err());
-        let refusal=store.workflow_wire_write("ws","p2","payload2",Write::Publish { expected_pin:None,definition:&definition,revision:0 }).unwrap();
+        let refusal=store.workflow_wire_write("ws","p2","payload2",Write::Publish { adapter:None, expected_pin:None,definition:&definition,revision:0 }).unwrap();
         assert_eq!(refusal.result,Err(Refusal::Stale));
     }
 }

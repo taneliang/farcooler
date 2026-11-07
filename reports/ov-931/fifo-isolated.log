@@ -1,0 +1,29 @@
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/reports/ov-931/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed -- --nocapture); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof, PID 92193, started 2026-11-07 07:58:08, running /usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /usr/bin/xcodebuild -project apps/ios/FarCooler.xcodeproj -scheme FarCooler -destination 'generic/platform=iOS Simulator' -derivedDataPath /private/tmp/ov932-apps/ios-derived -jobs 6 build-for-testing ARCHS=arm64 CODE_SIGNING_ALLOWED=NO (1 in line ahead of you)
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.56s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... 
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2708 filtered out; finished in 6.12s
+
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2708 filtered out; finished in 6.15s
+
+
+exit=0, stopped=None

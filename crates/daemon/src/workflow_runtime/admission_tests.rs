@@ -41,7 +41,7 @@ async fn held(
     }).await.expect("RPC reached inbox");
     let before = snapshot(runtime, workspace);
     change();
-    runtime.receive(message);
+    runtime.receive(message).await;
     let response = pending.await;
     if refuse {
         assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "changed authority committed: {response:?}");
@@ -65,7 +65,7 @@ async fn workflow_held_queue_device_authority_changes_refuse_without_writes() {
             let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
             let definition = coding_definition(false);
             let pin = definition.pin();
-            let publish = Action::Publish { mutation: mutation("p", 0, 1), expected_pin: None, definition };
+            let publish = Action::Publish { adapter:None, mutation: mutation("p", 0, 1), expected_pin: None, definition };
             let action = if publication { publish } else {
                 runtime.wire_command(&workspace.to_string(), "owner", publish).unwrap();
                 Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }
@@ -107,7 +107,7 @@ async fn workflow_held_queue_orchestrator_proof_changes_refuse_without_writes() 
         let dir = tempfile::tempdir().unwrap();
         let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let definition = coding_definition(false); let pin = definition.pin();
-        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish {
+        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { adapter:None,
             mutation: mutation("p", 0, 1), expected_pin: None, definition,
         }).unwrap();
         let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));

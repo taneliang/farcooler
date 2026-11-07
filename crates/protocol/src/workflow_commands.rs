@@ -1,5 +1,5 @@
 //! Closed command vocabulary, shared by the real CLI producer and daemon parser.
-use farcooler_workflow::Definition;
+pub use farcooler_workflow::Definition;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BYTES: usize = 60 * 1024;
@@ -15,7 +15,7 @@ pub struct Mutation {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Action {
     Get,
-    Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition },
+    Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>> },
     Enqueue { mutation: Mutation, item: String, pin: String },
     Approve { mutation: Mutation, item: String, run: String, pin: String, candidate: Option<String> },
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool },
@@ -48,7 +48,7 @@ mod tests {
     use super::*;
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {
-        let action = Action::Publish { mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
+        let action = Action::Publish { adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
         let raw = serde_json::to_string(&action).unwrap();
         assert_eq!(parse(&raw).unwrap(),action);
         let mut value:serde_json::Value = serde_json::from_str(&raw).unwrap();

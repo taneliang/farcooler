@@ -1,0 +1,670 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
+   Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/cli)
+    Finished `test` profile [unoptimized] target(s) in 1m 00s
+     Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler-b62c640d25c2be42)
+
+running 2 tests
+test workflow::bundle_tests::workflow_bundle_file_closed_schema_and_bounded_inputs ... ok
+test workflow::tests::workflow_real_producer_parser_fixture_roundtrip_and_bounds ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 593 filtered out; finished in 0.01s
+
+     Running tests/a_hook_is_never_in_the_way.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_hook_is_never_in_the_way-a5548febe364e9e9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/a_rep_gate_reads_its_connectors.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_rep_gate_reads_its_connectors-0341ada9d6127a45)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_rep_gate_runs_the_pinned_git.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_rep_gate_runs_the_pinned_git-4e42ee5db7bdec29)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/a_tunneled_runner_gets_a_proxy_command.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_tunneled_runner_gets_a_proxy_command-4cb79f6dcf57e142)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests/a_waiter_hands_over_a_message.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_waiter_hands_over_a_message-7017359a1126f5ed)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/enrolling_a_device_from_a_terminal.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/enrolling_a_device_from_a_terminal-c24e347698d35b0b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/removing_asks_for_its_name.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/removing_asks_for_its_name-230ed3f45c6eef87)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/the_old_host_flag_still_works.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/the_old_host_flag_still_works-0a780151e61a34c0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/the_runner_signs_for_the_account_it_is_told.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/the_runner_signs_for_the_account_it_is_told-5089e6c05870d88c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 59 tests
+test ci_canary::tests::a_workflow_run_of_another_workflow_is_not_the_trains ... ok
+test ci_watch::tests::a_commit_s_runs_count_each_workflow_once ... ok
+test effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group ... ok
+test landing::tests::a_merge_queue_no_workflow_answers_warns_it_will_wait_forever ... ok
+test landing::tests::a_workflow_runs_on_merge_group_only_in_its_code ... ok
+test landing::tests::deployment_workflow_and_code_scanning_rules_lean_to_pull_requests ... ok
+test landing_read::tests::a_planted_workflow_without_merge_group_is_seen_and_one_with_it_is_too ... ok
+test landing_read::tests::a_workflow_in_a_subdirectory_does_not_run_so_it_does_not_count ... ok
+test landing_read::tests::a_workflow_that_cannot_be_read_leaves_the_answer_unread ... ok
+test workflow_runtime::admission_tests::workflow_held_queue_device_authority_changes_refuse_without_writes ... device change=0 publication=true
+device change=0 publication=false
+device change=1 publication=true
+device change=1 publication=false
+device change=2 publication=true
+device change=2 publication=false
+device change=3 publication=true
+device change=3 publication=false
+device change=4 publication=true
+device change=4 publication=false
+device change=5 publication=true
+device change=5 publication=false
+device change=6 publication=true
+device change=6 publication=false
+ok
+test workflow_runtime::admission_tests::workflow_held_queue_orchestrator_proof_changes_refuse_without_writes ... orchestrator change=0
+orchestrator change=1
+orchestrator change=2
+orchestrator change=3
+orchestrator change=4
+ok
+test workflow_runtime::coding_landing::failure_tests::workflow_coding_remote_rejected_update_records_exit_without_acceptance ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpcxhekc/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... 
+running 1 test
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_fifo_receipts_are_bounded_and_never_replayed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2708 filtered out; finished in 5.44s
+
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_submodule_destination ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpxPOwz9/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_conserves_tags ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpOujucf/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_push_disables_signing ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpEENWYi/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::security_tests::workflow_coding_security_receipt_file_identity_and_size ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_remote_missing_settlement_after_acceptance_never_pushes_again ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpFfwRun/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_private_remote_exact_sha_and_repeated_bases ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpexeRpG/private-remote.git
+ * [new branch]      HEAD -> main
+ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpfcU6Cf/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpI6x44t/private-remote.git
+ * [new branch]      HEAD -> main
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpI6x44t/private-remote.git
+   b7fda8f..87afcbc  87afcbc7e28a5f44804f421c1382c691f7a819bf -> main
+ok
+test workflow_runtime::coding_native::recovery_tests::workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_owned_cancel_reaps_terminal_and_descendant ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence ... ok
+test workflow_runtime::coding_native::tests::workflow_coding_native_settlement_survives_crash_without_launching_again ... ok
+test workflow_runtime::coding_tests::workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncertain ... ok
+test workflow_runtime::coding_tests::workflow_coding_approval_is_exact_and_configuration_cannot_change_admitted_work ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_running_owned_process_settles_original_then_stop ... ok
+test workflow_runtime::coding_tests::workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_fact ... ok
+test workflow_runtime::coding_tests::workflow_coding_crash_each_stage_reconciles_facts_without_reexecution ... ok
+test workflow_runtime::coding_tests::workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success ... ok
+test workflow_runtime::coding_tests::workflow_coding_foreign_provider_binding_cannot_settle_success ... ok
+test workflow_runtime::coding_tests::workflow_coding_landing_cas_refuses_changed_base_and_retains_uncertainty ... ok
+test workflow_runtime::coding_tests::workflow_coding_native_launch_pins_existing_hooks_without_installing_or_launching ... ok
+test workflow_runtime::coding_tests::workflow_coding_pending_ci_wakes_from_explicit_observation_without_relaunch ... ok
+test workflow_runtime::coding_tests::workflow_coding_pins_policy_and_rejects_wrong_config_and_duplicate_writer ... ok
+test workflow_runtime::coding_tests::workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_base ... ok
+test workflow_runtime::coding_tests::workflow_coding_reviewer_rejection_has_bounded_rework ... ok
+test workflow_runtime::coding_tests::workflow_coding_visible_git_without_process_settlement_remains_uncertain ... ok
+test workflow_runtime::tests::workflow_runtime_accepted_result_before_commit_is_reconciled_once ... ok
+test workflow_runtime::tests::workflow_runtime_admitted_base_is_never_recreated ... ok
+test workflow_runtime::tests::workflow_runtime_approval_policies_and_authentication ... ok
+test workflow_runtime::tests::workflow_runtime_cancel_requires_original_settlement ... ok
+test workflow_runtime::tests::workflow_runtime_capabilities_specs_and_writer_are_local ... ok
+test workflow_runtime::tests::workflow_runtime_every_accepted_adapter_result_reopens_without_reexecution ... ok
+test workflow_runtime::tests::workflow_runtime_generated_crash_receipt_and_replay_properties ... runtime generated recovery/replay: seeds=64 accepted_events=160; stale generation rejected=32
+ok
+test workflow_runtime::tests::workflow_runtime_interrupted_base_publication_recovers_before_admission ... ok
+test workflow_runtime::tests::workflow_runtime_offline_rework_exact_candidate_and_replay ... ok
+test workflow_runtime::tests::workflow_runtime_owned_inbox_approval_cancel_and_idle ... ok
+test workflow_runtime::tests::workflow_runtime_owned_lease_deadline_and_explicit_reconciliation ... ok
+test workflow_runtime::tests::workflow_runtime_owned_loop_finishes_without_controller ... ok
+test workflow_runtime::tests::workflow_runtime_release_and_recovery_advance_blocked_work_without_churn ... ok
+test workflow_runtime::tests::workflow_runtime_restart_pre_admit_and_admitted_are_distinct ... ok
+test workflow_runtime::tests::workflow_runtime_second_coding_item_pins_new_base_and_recovers ... ok
+test workflow_runtime::tests::workflow_runtime_semantic_review_and_corrupt_journal_are_not_success ... ok
+test workflow_runtime::wire_commands::semantic_review_tests::workflow_wire_semantic_review_requires_exact_observation_and_principal ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_auto_and_every_stage_approval_preserve_policy ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_pins_policy_and_replays_after_restart_without_reexecution ... ok
+test workflow_runtime::wire_commands::tests::workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse ... ok
+
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 2650 filtered out; finished in 81.35s
+
+     Running unittests src/bin/farcooler-lfs-filter.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_lfs_filter-e5e5121e5cc0d41b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcoolerd-fb4d844209e1201b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/a_bad_review_search_is_not_logged.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_bad_review_search_is_not_logged-cbd8b7175eb15457)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_change_set_tells_the_truth_about_a_worktree.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_change_set_tells_the_truth_about_a_worktree-87a9cabdc5a44be6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.00s
+
+     Running tests/a_configured_derp_map_reaches_the_tunnel.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_configured_derp_map_reaches_the_tunnel-bf4f71e6cd1170c1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a_device_registers_its_own_node_key.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_device_registers_its_own_node_key-af3b54ff0c3842e9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/a_diff_is_parsed_or_refused_never_mangled.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_diff_is_parsed_or_refused_never_mangled-5cb1928ed6c04165)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+     Running tests/a_forced_command_still_streams.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_forced_command_still_streams-4a42b08cc4bd05a0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/a_forgotten_projector_lets_its_watch_go.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_forgotten_projector_lets_its_watch_go-46bfcbcb7bef375a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_green_landing_on_main_lands.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_green_landing_on_main_lands-5a11db71594264f5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/a_hook_reaches_the_daemon.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_hook_reaches_the_daemon-06a2f0d9a03074fb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.00s
+
+     Running tests/a_page_reads_live_ci.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_page_reads_live_ci-025b234e83aea27f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_pairing_gives_the_runner_a_tunnel.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_pairing_gives_the_runner_a_tunnel-9e582ea6d01da49d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a_pairing_writes_the_node_key.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_pairing_writes_the_node_key-875359213173e59f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/a_phone_moves_its_line_to_a_new_key.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_phone_moves_its_line_to_a_new_key-a086e51f21722e3a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/a_pull_request_nobody_reviewed_is_nudged_once.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_pull_request_nobody_reviewed_is_nudged_once-fd50e4fbd7815297)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/a_pushed_landing_follows_its_ci.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_pushed_landing_follows_its_ci-934eec6a9ce06939)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_read_fills_pr_state_without_waiting_for_github.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_read_fills_pr_state_without_waiting_for_github-6220e805113787d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/a_real_sshd_admits_a_passkey.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_real_sshd_admits_a_passkey-dc9cb1501f08f43f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/a_real_sshd_forces_the_scope.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_real_sshd_forces_the_scope-3267cdedd716cfa6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/a_real_sshd_master_outlives_a_revoke.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_real_sshd_master_outlives_a_revoke-1bd83b8f7e3296ef)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_real_tunnel_carries_the_scope.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_real_tunnel_carries_the_scope-6aa5be697e4ad8cf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a_relayed_session_keeps_its_scope.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_relayed_session_keeps_its_scope-2db0954e25e8fea3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/a_resized_pane_says_so.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_resized_pane_says_so-725adc1bcef37f3b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/a_reviewers_usual_wait_reaches_the_plan.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_reviewers_usual_wait_reaches_the_plan-866886323f19bcad)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/a_running_agent_reaches_every_client.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_running_agent_reaches_every_client-4e48059a22cd83ec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_stdio_relay_ends_when_the_daemon_hangs_up.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_stdio_relay_ends_when_the_daemon_hangs_up-8a00dd73eaa043a1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/a_sweep_rebuilds_the_tunnel_once.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_sweep_rebuilds_the_tunnel_once-181777c1bcce49c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a_task_notice_reaches_its_member.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_task_notice_reaches_its_member-eaecbd28bfbcca5b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/a_terminal_name_reaches_every_client.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_terminal_name_reaches_every_client-4d706f1e9a71f995)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/a_ticket_shows_its_pr_stage.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_ticket_shows_its_pr_stage-d9dad5eca55cb560)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/a_worktree_names_its_open_tasks.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/a_worktree_names_its_open_tasks-0078faf4005fb50a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/agent_panes_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/agent_panes_over_the_socket-cf749fca366e4005)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/agent_rows_over_every_transport.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/agent_rows_over_every_transport-21979ab9ae4847b3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/agent_stop_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/agent_stop_over_the_socket-0f3b017b0536c7f9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/an_empty_allowlist_starts_no_tunnel.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/an_empty_allowlist_starts_no_tunnel-db151e192937492f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/an_enrollment_is_logged.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/an_enrollment_is_logged-9e579051b115abfb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/an_orchestrator_starts_from_its_home.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/an_orchestrator_starts_from_its_home-aae0e069d28e0e00)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/board_reads_sync_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/board_reads_sync_over_the_socket-073246aeb2274a4e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/every_method_is_dispatched.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/every_method_is_dispatched-98c48f21075c4deb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/git_runs_nothing_a_repository_plants.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/git_runs_nothing_a_repository_plants-4b8b7a56a41d02c1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/landing_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/landing_over_the_socket-e05b79c4c0e505bc)
+
+running 2 tests
+test a_merge_queue_with_a_merge_group_workflow_does_not ... ok
+test a_merge_queue_with_no_merge_group_workflow_warns ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.75s
+
+     Running tests/landing_phase_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/landing_phase_over_the_socket-c1f1348da8b54019)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/landings_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/landings_over_the_socket-371882bb79e9f99d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/lfs_content_under_the_git_sandbox.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/lfs_content_under_the_git_sandbox-3da586d8c2959dc1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/marks_are_each_persons.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/marks_are_each_persons-87689e3852d56754)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/needs_you_changed_is_announced.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/needs_you_changed_is_announced-3f2ce09eaf9339c2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/needs_you_goes_to_its_member.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/needs_you_goes_to_its_member-0fff3647a94e13e4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/needs_you_reads_every_kind_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/needs_you_reads_every_kind_over_the_socket-393f9ae133edd97e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/one_daemon_per_home.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/one_daemon_per_home-c14c9421b8f8f8e1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/only_the_daemon_adopts_charters.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/only_the_daemon_adopts_charters-23a642cccb76d62d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/pages_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/pages_over_the_socket-a1cf18cb0561d9b0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/passkey_keys_follow_the_sshd.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/passkey_keys_follow_the_sshd-05df720af456f97a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/phones_act_on_a_pull_request.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/phones_act_on_a_pull_request-2c7821ec18d49990)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/plan_agents_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_agents_over_the_socket-c87249c69b929385)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/plan_cost_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_cost_over_the_socket-ef0dac5e62803d9b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/plan_last_moved_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_last_moved_over_the_socket-de86c8f96c17b141)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/plan_layer_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_layer_over_the_socket-b74cec622d3511df)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/plan_suggestions_follow_the_scope.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_suggestions_follow_the_scope-8baf3b26d69a1ef7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/plan_waits_follow_the_scope.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/plan_waits_follow_the_scope-8e922904c29b9016)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/pr_actions_need_control.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/pr_actions_need_control-335c699835511e5a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/projector_setting.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/projector_setting-c8273ddf3f0058f8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/report_reads_the_board_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/report_reads_the_board_over_the_socket-7dd3dd2a6e397e41)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/review_requests_reach_needs_you.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/review_requests_reach_needs_you-d7954e1490c1f42f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/revocation_closes_what_it_revoked.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/revocation_closes_what_it_revoked-10ccd408169ecf68)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/rpc_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/rpc_over_socket-19482d5b960ffcf8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 87 filtered out; finished in 0.00s
+
+     Running tests/ruling_actions_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/ruling_actions_over_the_socket-d1b03836be3f83d8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/rulings_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/rulings_over_the_socket-383b13ae347cad70)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/stdio_transport.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/stdio_transport-8fa434a333d50bde)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/survey_over_the_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/survey_over_the_socket-43780a4895217816)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/the_daemon_keeps_its_log.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/the_daemon_keeps_its_log-83a281a3fd2c75dd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/the_daemon_log_holds_stderr.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/the_daemon_log_holds_stderr-3dd3ef4458a6187c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/the_pr_watch_paces_itself.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/the_pr_watch_paces_itself-ab568cfc5e9e508e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/workflow_commands_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_commands_over_socket-a0707957eb57a37b)
+
+running 2 tests
+test workflow_socket_publication_approve_cancel_and_reconnect_receipts ... ok
+test workflow_socket_scope_unknown_caller_disabled_runtime_and_forged_authority_refuse ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/workflow_service_over_socket.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/workflow_service_over_socket-bd201935ee5c5d8b)
+
+running 5 tests
+test workflow_service_child ... ignored
+test workflow_service_no_git_bootstrap_shutdown_and_recovery ... 
+thread 'workflow_service_no_git_bootstrap_shutdown_and_recovery' (827092293) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 2, retryable: false, message: "scope denied: known caller required", what: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion ... 
+thread 'workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion' (827092325) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 2, retryable: false, message: "scope denied: known caller required", what: "" }
+FAILED
+test workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown ... 
+running 1 test
+test workflow_service_child ... 
+thread 'workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown' (827092361) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 2, retryable: false, message: "scope denied: known caller required", what: "" }
+FAILED
+test workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch ... 
+thread 'workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch' (827092412) panicked at crates/daemon/tests/workflow_service_over_socket.rs:125:66:
+called `Result::unwrap()` on an `Err` value: Daemon { code: 2, retryable: false, message: "scope denied: known caller required", what: "" }
+FAILED
+
+failures:
+
+failures:
+    workflow_service_no_git_bootstrap_shutdown_and_recovery
+    workflow_service_ordinary_socket_config_pins_rework_restart_and_offline_completion
+    workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown
+    workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch
+
+test result: FAILED. 0 passed; 4 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+error: test failed, to rerun pass `-p farcooler-daemon --test workflow_service_over_socket`
+
+exit=101, stopped=None

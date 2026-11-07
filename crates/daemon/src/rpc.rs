@@ -107,7 +107,7 @@ impl Rpc {
         attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     ) -> Self {
         Self {
-            workflow: None,
+            workflow: service.workflow_handle(),
             service,
             watcher,
             peer,
@@ -239,7 +239,7 @@ impl RpcFactory {
         let session = service.sessions().open(peer.client_id.clone());
         let (push, pushes) = farcooler_transport::push_queue(crate::resync::TERMINAL_BACKLOG_BYTES);
         Self {
-            workflow: None,
+            workflow: service.workflow_handle(),
             service,
             watcher,
             stop,
@@ -777,7 +777,7 @@ impl Rpc {
                 if p.schema != 1 || p.json.len() > MAX_BYTES { return Err(DomainError::NotFound); }
                 let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;
                 if action.method() != req.method { return Err(DomainError::NotFound); }
-                let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "isolated workflow fixture" })?;
+                let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "workflow execution service" })?;
                 let admission = crate::workflow_runtime::Admission::capture(
                     svc.clone(), self.peer.clone(), self.session.clone(), self.caller_pid,
                     self.caller_pane.clone(), workspace,

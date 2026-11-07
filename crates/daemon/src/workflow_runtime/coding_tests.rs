@@ -336,3 +336,18 @@ async fn workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_f
     let stored = runtime.store.workflow_outbox("w").unwrap();
     assert_eq!(stored.iter().find(|s| s.effect.id == original.effect.id).unwrap().dispatch_state, "settled");
 }
+
+#[tokio::test]
+async fn workflow_coding_adapted_person_review_and_optional_archetype() {
+    let (_dir,runtime)=configured(true,"pass").await;
+    let config=runtime.coding.as_ref().unwrap();let mut definition=config.definition().unwrap();
+    definition.source="adapted-local-policy/v1".into();
+    for stage in &mut definition.stages {
+        stage.id=format!("adapted-{}",stage.id);
+        if matches!(stage.kind,StageKind::Review(_)) {stage.kind=StageKind::Review(Reviewer::Person("owner".into()));}
+    }
+    definition.rework_target=Some("adapted-build".into());
+    assert!(config.validate_definition(&definition).is_ok());
+    definition.stages[0].kind=StageKind::Land;
+    assert!(config.validate_definition(&definition).is_err(),"landing without candidate prerequisites accepted");
+}

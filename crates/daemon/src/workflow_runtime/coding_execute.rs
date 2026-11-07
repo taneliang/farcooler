@@ -1,5 +1,6 @@
 //! Configured execution and fact-based reconciliation. Nothing here grants wire authority.
 use super::*;
+use super::coding::FileValidation;
 use super::coding::sha;
 use farcooler_store::board_ci::CiStatus;
 

@@ -1904,6 +1904,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 pub struct Service {
+    pub(crate) workflow_owner: std::sync::Mutex<Option<crate::workflow_service::Owner>>,
     /// Behind an `Arc` so `hooks` can read the same database through the same
     /// connection. `Store` is not `Clone` — it owns a `Connection` behind a
     /// mutex — so the alternative is a second connection to the same file:
@@ -2136,6 +2137,7 @@ impl Service {
         let claims = Arc::new(crate::claims::Ledger::default());
 
         let service = Self {
+            workflow_owner: Default::default(),
             store: store.clone(),
             tmux,
             inventory: inventory.clone(),

@@ -1,0 +1,1 @@
+file-size-budget: ok. 2 grandfathered entries have room to lower; run ./scripts/file-size-budget.py --update and commit the manifest.

@@ -13,10 +13,11 @@ use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
 mod coding;
+mod service_owner;
 mod coding_execute;
 mod coding_native;
 mod coding_landing;
-pub use coding::{CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
+pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
 mod admission;
@@ -89,7 +90,10 @@ impl CommandHandle {
 
 pub struct Runtime {
     root: PathBuf,
-    store: Store,
+    store: std::sync::Arc<Store>,
+    service_mode: bool,
+    configuration_locks: std::collections::BTreeMap<PathBuf, File>,
+    shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     instance: Uuid,
     resource: String,
     base: String,
@@ -197,7 +201,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None,
             #[cfg(test)] sweeps: 0,
-            root, store, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
+            root, store: std::sync::Arc::new(store), service_mode: false, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), resource, base, coding, last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -284,11 +288,13 @@ impl Runtime {
                 self.internal(&workspace, Command::Advance, Grant::Controller, now_ms)?;
             }
             for stored in self.store.workflow_outbox(&workspace)? {
+                if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(count); }
                 if !stored.active { continue; }
                 let effect = stored.effect;
                 let state = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
                 let item = &state.items[&effect.item];
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
+                self.select_item_configuration(&workspace, item)?;
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     let binding = Binding::new(&workspace, &effect, stored.resource_generation
                         .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(&workspace, &effect)?);
@@ -328,6 +334,8 @@ impl Runtime {
                 // available while commands (especially Cancel) are admitted.
                 let (_, placeholder) = mpsc::channel(1);
                 let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
+                let mut shutdown = self.shutdown.clone();
+                let mut stopping = false;
                 let result = {
                     let execution = async {
                         if self.coding.is_some() { self.execute_coding(&workspace, &binding, cancelled).await }
@@ -337,9 +345,15 @@ impl Runtime {
                     loop {
                         tokio::select! {
                             result = &mut execution => break result,
+                            _ = async {
+                                match &mut shutdown {
+                                    Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } },
+                                    None => std::future::pending::<()>().await,
+                                }
+                            }, if !stopping => { stopping = true; cancel.send_replace(true); },
                             message = inbox.recv() => {
                                 if let Some(message) = message {
-                                    self.receive(message);
+                                    self.receive(message).await;
                                     if self.state(&workspace)?.is_some_and(|s| s.items.get(&effect.item)
                                         .is_some_and(|i| i.phase == Phase::Cancelling)) {
                                         cancel.send_replace(true);
@@ -386,7 +400,7 @@ impl Runtime {
         if receipt.result.is_err() { return Err(Error::Refused("result admission refused")); }
         Ok(())
     }
-    fn receive(&self, message: Inbox) {
+    async fn receive(&self, message: Inbox) {
         match message {
             Inbox::Apply(authority, request, time, reply) => {
                 let request = *request;
@@ -400,29 +414,34 @@ impl Runtime {
             }
             Inbox::State(workspace, reply) => { let _ = reply.send(self.state(&workspace)); }
             Inbox::Wire(admission, action, reply) => {
-                let result = admission.recheck().and_then(|()| admission.permits(&action))
-                    .map_err(|_| Error::Refused("workflow caller authority changed"))
-                    .and_then(|()| {
-                        let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
-                        let mut result = self.wire_command(&admission.workspace(), admission.principal(), *action)?;
-                        if get {
-                            let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
-                            result["context"] = admission.context(epoch);
-                        }
-                        Ok(result)
-                    });
+                let result = async {
+                    admission.recheck().and_then(|()| admission.permits(&action))
+                        .map_err(|_| Error::Refused("workflow caller authority changed"))?;
+                    self.validate_wire_publication(&admission.workspace(), admission.principal(), &action).await?;
+                    // No await separates final retained authority recheck from receipt/transaction.
+                    admission.recheck().and_then(|()| admission.permits(&action))
+                        .map_err(|_| Error::Refused("workflow caller authority changed"))?;
+                    let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
+                    let mut result = self.wire_command(&admission.workspace(), admission.principal(), *action)?;
+                    if get {
+                        let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
+                        result["context"] = admission.context(epoch);
+                    }
+                    Ok(result)
+                }.await;
                 let _ = reply.send(result);
             }
             Inbox::Reconcile => {}
         }
     }
     pub async fn run(&mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
+        self.shutdown = Some(shutdown.clone());
         loop {
             if *shutdown.borrow() { return Ok(()); }
             // Bounded drain prevents a busy sender from starving effects/shutdown.
             for _ in 0..32 {
                 let Ok(message) = self.inbox.try_recv() else { break; };
-                self.receive(message);
+                self.receive(message).await;
             }
             if self.pump(now()).await? > 0 { continue; }
             loop {
@@ -434,7 +453,7 @@ impl Runtime {
                     message = self.inbox.recv() => {
                         let Some(message) = message else { return Ok(()); };
                         let read_only = matches!(message, Inbox::State(..));
-                        self.receive(message);
+                        self.receive(message).await;
                         if !read_only { break; }
                     }
                     _ = async {

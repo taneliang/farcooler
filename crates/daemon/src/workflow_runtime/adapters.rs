@@ -64,13 +64,12 @@ impl Runtime {
     }
     pub(super) fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
         let path = self.base_path(workspace, effect);
-        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
-            Ok(file) => file,
-            // Existing admitted v1 fixtures used the immutable creation base.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(self.base.clone()),
-            Err(e) => return Err(e.into()),
+        let bytes = match self.bytes(&path) {
+            Ok(bytes) => bytes,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(self.base.clone()),
+            Err(error) => return Err(error),
         };
-        let base: String = serde_json::from_reader(file)?;
+        let base: String = serde_json::from_slice(&bytes)?;
         if base.len() != 40 || !base.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::Refused("invalid item base"));
         }
@@ -106,7 +105,7 @@ impl Runtime {
         // Validate and make even a recovered pre-rename/fsync selection durable
         // before the caller can cross the admission boundary.
         let base = self.item_base(workspace, effect)?;
-        OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path)?.sync_all()?;
+        OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path)?.sync_all()?;
         File::open(&self.root)?.sync_all()?;
         Ok(base)
     }
@@ -115,12 +114,12 @@ impl Runtime {
     }
     pub(super) fn read_journal(&self, binding: &Binding) -> Result<Option<Journal>> {
         let path = self.journal_path(&binding.effect);
-        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
+        let bytes = match self.bytes(&path) {
+            Ok(bytes) => bytes,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
         };
-        let journal: Journal = serde_json::from_reader(file)?;
+        let journal: Journal = serde_json::from_slice(&bytes)?;
         if journal.binding != *binding { return Err(Error::Refused("receipt binding mismatch")); }
         Ok(Some(journal))
     }
@@ -139,7 +138,8 @@ impl Runtime {
         };
         let path = self.root.join("receipts").join(format!("{}.git.jsonl", binding.effect.id));
         let mut file = OpenOptions::new().append(true).create(true).mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW).open(path)?;
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+        if !file.metadata()?.is_file() || file.metadata()?.nlink()!=1 { return Err(Error::Refused("aliased or nonregular Git log")); }
         use std::io::Write;
         writeln!(file, "{raw}")?;
         file.sync_all()?;
@@ -246,8 +246,7 @@ impl Runtime {
         // An admitted operation needs the runner's own quiescent settlement receipt.
         if original.resource_generation.is_some() && original.dispatch_state != "suppressed" {
             let path = self.journal_path(&original.effect);
-            let file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
-            let journal: Journal = serde_json::from_reader(file)?;
+            let journal: Journal = serde_json::from_slice(&self.bytes(&path)?)?;
             if journal.binding.effect != original.effect || journal.binding.workspace != workspace
                 || Some(journal.binding.generation) != original.resource_generation
                 || journal.binding.base != binding.base || journal.outcome == Outcome::Uncertain

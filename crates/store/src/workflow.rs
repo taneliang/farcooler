@@ -176,6 +176,9 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
         let mut result = if raw.is_none() && input.grant != Grant::Controller {
             Err(Refusal::Unauthorized)
         } else { step(&state, &admitted) };
+        if result.is_ok() && !crate::workflow_ownership::available(tx, input)? {
+            result = Err(Refusal::Resource);
+        }
         if result.is_ok() {
             if let farcooler_workflow::Command::Observe { effect, .. }
                 | farcooler_workflow::Command::Resolve { effect, .. } = &input.command
@@ -205,6 +208,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str) -> Re
         let receipt = match result {
             Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![] },
             Ok(transition) => {
+                crate::workflow_ownership::reserve(tx, input)?;
                 let revision = transition.state.revision;
                 tx.execute(
                     "INSERT INTO workflow_events (workspace, revision, id, payload, payload_hash, notices)

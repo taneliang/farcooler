@@ -110,6 +110,8 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::check_ins::migration_check_in_destination, Older::Refused), // ov-892: old observers lack destination proof
     (crate::workflow::migration_workflow, Older::Refused), // ov-922: workflow receipts and ownership require current admission
     (crate::workflow_publication::migration_publication, Older::Refused), // ov-925: pinned configuration and wire command receipts
+    (crate::workflow_publication::migration_bundles, Older::Refused), // ov-931: immutable adapter bundles
+    (crate::workflow_ownership::migration, Older::Refused), // ov-931: single task execution owner
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

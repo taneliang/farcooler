@@ -1,0 +1,22 @@
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+   Compiling aws-lc-sys v0.43.0
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling aws-lc-rs v1.17.3
+   Compiling russh v0.62.4
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+error[E0432]: unresolved import `farcooler_protocol::workflow_config`
+ --> crates/store/src/workflow_publication.rs:3:25
+  |
+3 | use farcooler_protocol::workflow_config::AdapterConfiguration;
+  |                         ^^^^^^^^^^^^^^^ could not find `workflow_config` in `farcooler_protocol`
+
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `farcooler-store` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `farcooler-store` (lib test) due to 1 previous error
+
+exit=101, stopped=None

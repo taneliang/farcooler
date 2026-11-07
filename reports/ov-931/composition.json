@@ -1,0 +1,655 @@
+{
+  "kind": "manager-approved-source-inputs",
+  "created_utc": "2026-11-06T23:39:45.554504+00:00",
+  "remote_main_observed": "d625aaeb9c4c41d5849170eb21b909e55bd56d11",
+  "inputs": [
+    {
+      "ticket": "ov-930",
+      "pin": "5de71fdeb3c9bdd86f8119b865b4aadc59e45b30",
+      "tree": "de6f0c65d619e6f02785f6dbc66d8661a18224d0",
+      "disposition": "approved-source",
+      "review": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-930/independent-review.md",
+      "review_sha256": "4143258b2eff4112a22385c3694d62d9604a40c4ee8d3ba4d2265b39cbd14bec"
+    },
+    {
+      "ticket": "ov-929",
+      "pin": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "tree": "4e9d3ebae58585234d7c22ebdda7e35d3a3c966e",
+      "disposition": "approved-source",
+      "review": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-929/independent-review.md",
+      "review_sha256": "d386f5f1f238f3d9391ccaffb485d91308effd3d7b3bd80a7182cea67ddab2cd"
+    },
+    {
+      "ticket": "ov-928",
+      "pin": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "tree": "b40deb3fbc83e7b54ac434d86b9cab448cc6aca3",
+      "disposition": "approved-source-two-security-blockers-closed",
+      "review": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-928/independent-review.md",
+      "review_sha256": "1863d61439239913b72196ab1e3a6d191a7d593fd30ceb65ff3c125631deda03",
+      "unique_since_7038": [
+        "b2329453fb64074b52164885067050f646af4e33",
+        "b15f90bb44c7641b48c524dd94a4233a94093f52",
+        "72f32038f80ae7faacb6e055c435888bb18a1d0d"
+      ]
+    }
+  ],
+  "rule": "931 may compose these reviewed source inputs; final union/conflict resolutions and new service/config changes require independent931 review and applicable gates. No production activation.",
+  "composition_head": "c40197486572a584f8c85ec2dde423587e0560e6",
+  "ordered_cherry_picks": [
+    "c6d272209",
+    "b2329453f",
+    "b15f90bb4",
+    "72f32038f"
+  ],
+  "composed_paths": {
+    "crates/daemon/src/rpc.rs": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "a457092b39679d5db6b25e55e416843b6f85dc13",
+      "composed_blob": "a457092b39679d5db6b25e55e416843b6f85dc13",
+      "equal": true
+    },
+    "crates/daemon/src/rpc/runner_settings.rs": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "af9135f51280fa1d7b6f9929213e637df3ca501c",
+      "composed_blob": "af9135f51280fa1d7b6f9929213e637df3ca501c",
+      "equal": true
+    },
+    "reports/ov-929/check.py": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "4b592644d15b431f4ff8161ac27db9cacc4fe759",
+      "composed_blob": "4b592644d15b431f4ff8161ac27db9cacc4fe759",
+      "equal": true
+    },
+    "reports/ov-929/entry.py": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "971498e5b6a1fffd9ca100f25aed7102abf95d7c",
+      "composed_blob": "971498e5b6a1fffd9ca100f25aed7102abf95d7c",
+      "equal": true
+    },
+    "reports/ov-929/equivalence.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "2d16df894370b1031020aa12268ca21a5d496f75",
+      "composed_blob": "2d16df894370b1031020aa12268ca21a5d496f75",
+      "equal": true
+    },
+    "reports/ov-929/equivalence.py": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "ebbbcaae69d2c04c8b5ab98f8b6b1c25b4c9c096",
+      "composed_blob": "ebbbcaae69d2c04c8b5ab98f8b6b1c25b4c9c096",
+      "equal": true
+    },
+    "reports/ov-929/green.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "e882073a8967746fb9846c5bbfd4cd83fa7b0c63",
+      "composed_blob": "e882073a8967746fb9846c5bbfd4cd83fa7b0c63",
+      "equal": true
+    },
+    "reports/ov-929/green.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "71c2069d9c46ce806f55c1e0217d8873c075d0b4",
+      "composed_blob": "71c2069d9c46ce806f55c1e0217d8873c075d0b4",
+      "equal": true
+    },
+    "reports/ov-929/handoff.md": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "6b9cd2b01d41d01db5b4ed905d11dbafb82ad60f",
+      "composed_blob": "6b9cd2b01d41d01db5b4ed905d11dbafb82ad60f",
+      "equal": true
+    },
+    "reports/ov-929/lint.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "8fb6484bc3e2a157768bc20f01bcf40a690ecbb1",
+      "composed_blob": "8fb6484bc3e2a157768bc20f01bcf40a690ecbb1",
+      "equal": true
+    },
+    "reports/ov-929/lint.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "69733d7bf5f8555513b612f5ca9945c478ff6530",
+      "composed_blob": "69733d7bf5f8555513b612f5ca9945c478ff6530",
+      "equal": true
+    },
+    "reports/ov-929/scope.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "2e86661a476a38cbf5dc5f5d0c832497e38611d1",
+      "composed_blob": "2e86661a476a38cbf5dc5f5d0c832497e38611d1",
+      "equal": true
+    },
+    "reports/ov-929/scope.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "48be248cb03d343af40f075f2650f170a662a2a7",
+      "composed_blob": "48be248cb03d343af40f075f2650f170a662a2a7",
+      "equal": true
+    },
+    "reports/ov-929/session.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "8f81db2f70cbaf3369d2255ec1e976f8c002a8e0",
+      "composed_blob": "8f81db2f70cbaf3369d2255ec1e976f8c002a8e0",
+      "equal": true
+    },
+    "reports/ov-929/session.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "cb012203cc7173c1de69c8dd28a76170d4e13654",
+      "composed_blob": "cb012203cc7173c1de69c8dd28a76170d4e13654",
+      "equal": true
+    },
+    "reports/ov-929/size-budget.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "8fcf1e6e1f3d94739c541e3561e4be2c046866f9",
+      "composed_blob": "8fcf1e6e1f3d94739c541e3561e4be2c046866f9",
+      "equal": true
+    },
+    "reports/ov-929/socket.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "dd0de96f84385d534256981a7cb57dd4d5b60fbf",
+      "composed_blob": "dd0de96f84385d534256981a7cb57dd4d5b60fbf",
+      "equal": true
+    },
+    "reports/ov-929/socket.log": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "284d95bde5e36511bb3780447c6aaae27aaf3f65",
+      "composed_blob": "284d95bde5e36511bb3780447c6aaae27aaf3f65",
+      "equal": true
+    },
+    "reports/ov-929/toolchain.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "ffdf870b809482a72d2c809f9047f20ce8e3aa9e",
+      "composed_blob": "ffdf870b809482a72d2c809f9047f20ce8e3aa9e",
+      "equal": true
+    },
+    "reports/ov-929/validation.json": {
+      "input": "c6d27220984cc25e1ff899cb96edb1d6e7eb65cc",
+      "input_blob": "ccb3e641f1d9a4abcd299e978f2c463419610d49",
+      "composed_blob": "ccb3e641f1d9a4abcd299e978f2c463419610d49",
+      "equal": true
+    },
+    "crates/daemon/src/effect_runner.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "9c222badaa52075f4d34bdb00d93e8b6f8d14a5d",
+      "composed_blob": "9c222badaa52075f4d34bdb00d93e8b6f8d14a5d",
+      "equal": true
+    },
+    "crates/daemon/src/hook_install.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "304cc26c39d171e3990b62bcb68f377396ff26b3",
+      "composed_blob": "304cc26c39d171e3990b62bcb68f377396ff26b3",
+      "equal": true
+    },
+    "crates/daemon/src/hook_install/native_host.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "5614ea05ca7d7fffd5f20a70560c2428b381d1a4",
+      "composed_blob": "5614ea05ca7d7fffd5f20a70560c2428b381d1a4",
+      "equal": true
+    },
+    "crates/daemon/src/landing_job.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "64d31f23b3b91971c60b4f8081b5069e290b54ac",
+      "composed_blob": "64d31f23b3b91971c60b4f8081b5069e290b54ac",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "25f066c475ce85a2d4bef25e62a71ca3d1f354e6",
+      "composed_blob": "74b808ca9ac5b142c8d92382203425981a9cd7d9",
+      "equal": false
+    },
+    "crates/daemon/src/workflow_runtime/adapters.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f5c2884424bd787a0f5819cf5547459e0f1f9ff2",
+      "composed_blob": "f5c2884424bd787a0f5819cf5547459e0f1f9ff2",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "47d50cf73ea9a46798e6f31bc03c2eb3c264a7eb",
+      "composed_blob": "47d50cf73ea9a46798e6f31bc03c2eb3c264a7eb",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding_execute.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "edfcc003c5661119c774db54eea6430fec3c9595",
+      "composed_blob": "edfcc003c5661119c774db54eea6430fec3c9595",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding_landing.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "0cfec463ac320043f58353729b48cdc17c93f2af",
+      "composed_blob": "0cfec463ac320043f58353729b48cdc17c93f2af",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding_native.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "13641b074a6e9c749e1221cdfb88633bad39d9d2",
+      "composed_blob": "13641b074a6e9c749e1221cdfb88633bad39d9d2",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding_security_tests.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "1380b9c711bfc45bda391e275fb052aef16f0259",
+      "composed_blob": "1380b9c711bfc45bda391e275fb052aef16f0259",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/coding_tests.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "7801c1db58fb3049f7f5256f5b454c0cb6265204",
+      "composed_blob": "7801c1db58fb3049f7f5256f5b454c0cb6265204",
+      "equal": true
+    },
+    "crates/daemon/src/workflow_runtime/tests.rs": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "a2b8267fbd46798641c14f4218c67f0702e06eaa",
+      "composed_blob": "a2b8267fbd46798641c14f4218c67f0702e06eaa",
+      "equal": true
+    },
+    "reports/ov-928/binding-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "d25fd6b6a27426c31d30fd51c1323cdd55bc3b4b",
+      "composed_blob": "d25fd6b6a27426c31d30fd51c1323cdd55bc3b4b",
+      "equal": true
+    },
+    "reports/ov-928/binding-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "1647d672d7238bc78f6f65a670d52a1b0a0dc072",
+      "composed_blob": "1647d672d7238bc78f6f65a670d52a1b0a0dc072",
+      "equal": true
+    },
+    "reports/ov-928/binding-mutation.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "ff4733299c1b9b133cc9e1b840f8a8588c329cb1",
+      "composed_blob": "ff4733299c1b9b133cc9e1b840f8a8588c329cb1",
+      "equal": true
+    },
+    "reports/ov-928/binding-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "10cebcd84357082d5f8293b5614f542a4d74f14d",
+      "composed_blob": "10cebcd84357082d5f8293b5614f542a4d74f14d",
+      "equal": true
+    },
+    "reports/ov-928/binding-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "68c748c9203ccadf194c2b6681b1ec33b0acd23b",
+      "composed_blob": "68c748c9203ccadf194c2b6681b1ec33b0acd23b",
+      "equal": true
+    },
+    "reports/ov-928/check.py": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "9b112340265096bc007603e11a536599f8391d94",
+      "composed_blob": "9b112340265096bc007603e11a536599f8391d94",
+      "equal": true
+    },
+    "reports/ov-928/continuation-contract.md": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "35f6d1a408415576821b808ec243082f104e2733",
+      "composed_blob": "35f6d1a408415576821b808ec243082f104e2733",
+      "equal": true
+    },
+    "reports/ov-928/continuation-first-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "739df8305b537463409ba0746b8dc247a7d1bdf6",
+      "composed_blob": "739df8305b537463409ba0746b8dc247a7d1bdf6",
+      "equal": true
+    },
+    "reports/ov-928/continuation-first-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "908410b612c99fc165cf4091e84bbe1ceab2156e",
+      "composed_blob": "908410b612c99fc165cf4091e84bbe1ceab2156e",
+      "equal": true
+    },
+    "reports/ov-928/continuation-gate.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b37f5acc4f3504b41f7c344ebbef1ed4683119d8",
+      "composed_blob": "b37f5acc4f3504b41f7c344ebbef1ed4683119d8",
+      "equal": true
+    },
+    "reports/ov-928/continuation-gate.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "dac2f80f703d7a5637d091dc9ed3a0e1347367f2",
+      "composed_blob": "dac2f80f703d7a5637d091dc9ed3a0e1347367f2",
+      "equal": true
+    },
+    "reports/ov-928/continuation-handoff.md": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "44df4965e879f71e28e2566821e5379664450c3d",
+      "composed_blob": "44df4965e879f71e28e2566821e5379664450c3d",
+      "equal": true
+    },
+    "reports/ov-928/continuation-lint.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "dc8081c2694e36b90b694f9eef5c862dac2c31b5",
+      "composed_blob": "dc8081c2694e36b90b694f9eef5c862dac2c31b5",
+      "equal": true
+    },
+    "reports/ov-928/continuation-lint.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "5858d7680c85568ee4ce2af66404eb14d008bf98",
+      "composed_blob": "5858d7680c85568ee4ce2af66404eb14d008bf98",
+      "equal": true
+    },
+    "reports/ov-928/continuation-native-mutation.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f9f0986655a54df89ab637401e3587bd11050293",
+      "composed_blob": "f9f0986655a54df89ab637401e3587bd11050293",
+      "equal": true
+    },
+    "reports/ov-928/continuation-native-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "0f21feaeb004fb9a9818e5b85616ce80f9cfee65",
+      "composed_blob": "0f21feaeb004fb9a9818e5b85616ce80f9cfee65",
+      "equal": true
+    },
+    "reports/ov-928/continuation-native-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "a9e7ed95596b4ee8bd87e423cc27325682b07f37",
+      "composed_blob": "a9e7ed95596b4ee8bd87e423cc27325682b07f37",
+      "equal": true
+    },
+    "reports/ov-928/continuation-pre-recovery-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "8a2446105e25fdecf29a825e2756ac8820737442",
+      "composed_blob": "8a2446105e25fdecf29a825e2756ac8820737442",
+      "equal": true
+    },
+    "reports/ov-928/continuation-pre-recovery-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "74697012d39ae4803cadbee95a5598a22371bbf4",
+      "composed_blob": "74697012d39ae4803cadbee95a5598a22371bbf4",
+      "equal": true
+    },
+    "reports/ov-928/continuation-recovery-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "c689762c30f53a64e4b0c9e295ce41e8071fbd7a",
+      "composed_blob": "c689762c30f53a64e4b0c9e295ce41e8071fbd7a",
+      "equal": true
+    },
+    "reports/ov-928/continuation-recovery-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "96c088633980129bb0a0e395477b647bcea35d51",
+      "composed_blob": "96c088633980129bb0a0e395477b647bcea35d51",
+      "equal": true
+    },
+    "reports/ov-928/continuation-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "6d9afbda1a37ce04f6c4a60906a54d40cfcfdd1f",
+      "composed_blob": "6d9afbda1a37ce04f6c4a60906a54d40cfcfdd1f",
+      "equal": true
+    },
+    "reports/ov-928/continuation-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "2de45193c7d644a319e496fbd08f03cda35784fc",
+      "composed_blob": "2de45193c7d644a319e496fbd08f03cda35784fc",
+      "equal": true
+    },
+    "reports/ov-928/continuation-size-budget.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "534ef3576b0aafc18d9db8663605a0202fa5b998",
+      "composed_blob": "534ef3576b0aafc18d9db8663605a0202fa5b998",
+      "equal": true
+    },
+    "reports/ov-928/continuation-source-sha256.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "9b778428049ae3424f3d87fc94afa833cfe5ee30",
+      "composed_blob": "9b778428049ae3424f3d87fc94afa833cfe5ee30",
+      "equal": true
+    },
+    "reports/ov-928/continuation.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "5b34b818df2f89d33c98df7277d357aaba8a9883",
+      "composed_blob": "5b34b818df2f89d33c98df7277d357aaba8a9883",
+      "equal": true
+    },
+    "reports/ov-928/continuation.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "e28bddfb70518fca45ba658b01f825e55a101fae",
+      "composed_blob": "e28bddfb70518fca45ba658b01f825e55a101fae",
+      "equal": true
+    },
+    "reports/ov-928/contract.md": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "bd8b3c32425e6bbd832fbc6a3fc4599e8f42a1dc",
+      "composed_blob": "bd8b3c32425e6bbd832fbc6a3fc4599e8f42a1dc",
+      "equal": true
+    },
+    "reports/ov-928/first-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f6eb0bfaa87fd5b46bdbe838e942af8ec37900f3",
+      "composed_blob": "f6eb0bfaa87fd5b46bdbe838e942af8ec37900f3",
+      "equal": true
+    },
+    "reports/ov-928/first-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b8a3ff4dac32b18c9582f512dea7bfec77cc058d",
+      "composed_blob": "b8a3ff4dac32b18c9582f512dea7bfec77cc058d",
+      "equal": true
+    },
+    "reports/ov-928/focused.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f6eb0bfaa87fd5b46bdbe838e942af8ec37900f3",
+      "composed_blob": "f6eb0bfaa87fd5b46bdbe838e942af8ec37900f3",
+      "equal": true
+    },
+    "reports/ov-928/focused.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b8a3ff4dac32b18c9582f512dea7bfec77cc058d",
+      "composed_blob": "b8a3ff4dac32b18c9582f512dea7bfec77cc058d",
+      "equal": true
+    },
+    "reports/ov-928/gate.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "3a308fc381875eff11237db74cb93fefb5bd1e04",
+      "composed_blob": "3a308fc381875eff11237db74cb93fefb5bd1e04",
+      "equal": true
+    },
+    "reports/ov-928/gate.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "9bbfc41137ed075ca8820bf3b0461bbd12d72fd0",
+      "composed_blob": "9bbfc41137ed075ca8820bf3b0461bbd12d72fd0",
+      "equal": true
+    },
+    "reports/ov-928/handoff.md": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "5053ccc76f10e9768ab280eb5f761886b1c56f26",
+      "composed_blob": "5053ccc76f10e9768ab280eb5f761886b1c56f26",
+      "equal": true
+    },
+    "reports/ov-928/initial-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "452d80336054fdaaed7a0893ca9b14f0f666b0bb",
+      "composed_blob": "452d80336054fdaaed7a0893ca9b14f0f666b0bb",
+      "equal": true
+    },
+    "reports/ov-928/initial-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "a49e9c0e9f672b732f5cfa2815196396a1418f0c",
+      "composed_blob": "a49e9c0e9f672b732f5cfa2815196396a1418f0c",
+      "equal": true
+    },
+    "reports/ov-928/lint.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f7f4a15494324578f2adc276db3166922cba91a7",
+      "composed_blob": "f7f4a15494324578f2adc276db3166922cba91a7",
+      "equal": true
+    },
+    "reports/ov-928/lint.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b00b7f19a923c7da3fa41d457761369807b0eb51",
+      "composed_blob": "b00b7f19a923c7da3fa41d457761369807b0eb51",
+      "equal": true
+    },
+    "reports/ov-928/mutate-binding.py": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f2187a0cc158503b63440e2089c1f524f1b6d884",
+      "composed_blob": "f2187a0cc158503b63440e2089c1f524f1b6d884",
+      "equal": true
+    },
+    "reports/ov-928/mutate-native-session.py": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "265a0258916da31469dba7bebc4fdebb8522629d",
+      "composed_blob": "265a0258916da31469dba7bebc4fdebb8522629d",
+      "equal": true
+    },
+    "reports/ov-928/native-path-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "1d5f01d4b6ce472d9fc819a1fe5227cfdee19e9e",
+      "composed_blob": "1d5f01d4b6ce472d9fc819a1fe5227cfdee19e9e",
+      "equal": true
+    },
+    "reports/ov-928/native-path-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "c0ed7f61b13e22ef14f37d9535378189f9621653",
+      "composed_blob": "c0ed7f61b13e22ef14f37d9535378189f9621653",
+      "equal": true
+    },
+    "reports/ov-928/pre-stop-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "e95dcbad8740e7d8d2e9d060a7ea36a881a495da",
+      "composed_blob": "e95dcbad8740e7d8d2e9d060a7ea36a881a495da",
+      "equal": true
+    },
+    "reports/ov-928/pre-stop-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "a02f3f6d200ec3a29edf1284b7bfe00d3c8c13c4",
+      "composed_blob": "a02f3f6d200ec3a29edf1284b7bfe00d3c8c13c4",
+      "equal": true
+    },
+    "reports/ov-928/runtime.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "2ec427651200e42ee9c5b564d7268518746ccbf8",
+      "composed_blob": "2ec427651200e42ee9c5b564d7268518746ccbf8",
+      "equal": true
+    },
+    "reports/ov-928/runtime.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "6fd3a9f3cf07582e48d9c08c427ecea1fd6a6529",
+      "composed_blob": "6fd3a9f3cf07582e48d9c08c427ecea1fd6a6529",
+      "equal": true
+    },
+    "reports/ov-928/security-evidence-sha256.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "820d71315f19d905e838a6f58e590c8edf7fcdbd",
+      "composed_blob": "820d71315f19d905e838a6f58e590c8edf7fcdbd",
+      "equal": true
+    },
+    "reports/ov-928/security-first-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b3612edd87abc77156492b34955190f7b5b59b7a",
+      "composed_blob": "b3612edd87abc77156492b34955190f7b5b59b7a",
+      "equal": true
+    },
+    "reports/ov-928/security-first-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "990bd099380aa225c85823d6b596e263d33ca5bb",
+      "composed_blob": "990bd099380aa225c85823d6b596e263d33ca5bb",
+      "equal": true
+    },
+    "reports/ov-928/security-green.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "e8e403c251ea8cbb0fcd22fe9c907e9807474fa9",
+      "composed_blob": "e8e403c251ea8cbb0fcd22fe9c907e9807474fa9",
+      "equal": true
+    },
+    "reports/ov-928/security-green.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b04f5426c3d3607750fb8be458fbb6c838bc7dfd",
+      "composed_blob": "b04f5426c3d3607750fb8be458fbb6c838bc7dfd",
+      "equal": true
+    },
+    "reports/ov-928/security-handoff.md": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f428f294c03804011362d1b5da2aaab2f2b3f989",
+      "composed_blob": "f428f294c03804011362d1b5da2aaab2f2b3f989",
+      "equal": true
+    },
+    "reports/ov-928/security-holder-check.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "46d4aeaac0bf8677fd07e85c6f3229055f05f1a1",
+      "composed_blob": "46d4aeaac0bf8677fd07e85c6f3229055f05f1a1",
+      "equal": true
+    },
+    "reports/ov-928/security-initial-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "44c9174d739702c46748e92841b7fb215ca48c7e",
+      "composed_blob": "44c9174d739702c46748e92841b7fb215ca48c7e",
+      "equal": true
+    },
+    "reports/ov-928/security-initial-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "b188396695fde72df06a870bff131e673f25abd1",
+      "composed_blob": "b188396695fde72df06a870bff131e673f25abd1",
+      "equal": true
+    },
+    "reports/ov-928/security-lint.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "8fc1c1c5d532b89692cae2a053a924d84b7f367e",
+      "composed_blob": "8fc1c1c5d532b89692cae2a053a924d84b7f367e",
+      "equal": true
+    },
+    "reports/ov-928/security-lint.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "6b33b71d92120b37eef817340f62023bf26aa275",
+      "composed_blob": "6b33b71d92120b37eef817340f62023bf26aa275",
+      "equal": true
+    },
+    "reports/ov-928/security-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "6233880932ca56818552eff9fcbee4acf14a60fd",
+      "composed_blob": "6233880932ca56818552eff9fcbee4acf14a60fd",
+      "equal": true
+    },
+    "reports/ov-928/security-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "e9eaf12864f73496079dc740ccec0d34ea2e5799",
+      "composed_blob": "e9eaf12864f73496079dc740ccec0d34ea2e5799",
+      "equal": true
+    },
+    "reports/ov-928/security-restoration.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "f867b762ed3399aa3bd5f1fd0b689530baf80ba1",
+      "composed_blob": "f867b762ed3399aa3bd5f1fd0b689530baf80ba1",
+      "equal": true
+    },
+    "reports/ov-928/security-size-budget.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "269dc2b4e80de1a8ac067da6291f2c5361a57b23",
+      "composed_blob": "269dc2b4e80de1a8ac067da6291f2c5361a57b23",
+      "equal": true
+    },
+    "reports/ov-928/security-snapshot-red.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "62365903e291a543536c8e36ca114bd3db52e1ae",
+      "composed_blob": "62365903e291a543536c8e36ca114bd3db52e1ae",
+      "equal": true
+    },
+    "reports/ov-928/security-snapshot-red.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "535041f2a8b4268bd65811ce3a87d5b46f188f68",
+      "composed_blob": "535041f2a8b4268bd65811ce3a87d5b46f188f68",
+      "equal": true
+    },
+    "reports/ov-928/security-source-sha256.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "c9dc3b1183af1b327f2d0fa6a9c07659655895c6",
+      "composed_blob": "c9dc3b1183af1b327f2d0fa6a9c07659655895c6",
+      "equal": true
+    },
+    "reports/ov-928/security-submodule-probe.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "8254a9652a68d57fad3a1adb939392968d77841c",
+      "composed_blob": "8254a9652a68d57fad3a1adb939392968d77841c",
+      "equal": true
+    },
+    "reports/ov-928/security-submodule-probe.log": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "2046fca9795ffb4d3b7b16df52b28dfc959542c6",
+      "composed_blob": "2046fca9795ffb4d3b7b16df52b28dfc959542c6",
+      "equal": true
+    },
+    "reports/ov-928/source-sha256.json": {
+      "input": "72f32038f80ae7faacb6e055c435888bb18a1d0d",
+      "input_blob": "fb2c566e6ead787ab922ea343b5af8096e673e9f",
+      "composed_blob": "fb2c566e6ead787ab922ea343b5af8096e673e9f",
+      "equal": true
+    }
+  },
+  "overlap_note": "Only runtime receive context response differs from corrected928 blob: retained reviewed930 admission.context addition, shown in composition-overlap.patch. No manual cherry-pick conflict. New931 changes reviewed separately.",
+  "approved_manifest_sha256": "798b8509c5a36f78808f844b59e300c46e121abb120f3c0adba54a6c190050ac",
+  "overlap_patch_sha256": "ad59dacc026cada88132b6e9439567b154346d7dbd48b4a021a8d115acb06880"
+}

@@ -42,21 +42,21 @@ impl Runtime {
             self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
         } else {
             match &action {
-                Action::Publish { expected_pin, definition, .. } => {
+                Action::Publish { expected_pin, definition, adapter, .. } => {
                     // A valid pure definition can still name an unsupported fixture adapter.
-                    adapters::validate(definition)?;
+                    self.validate_publication(definition, adapter.as_deref())?;
                     self.store.workflow_wire_write(workspace,&id,&payload,Write::Publish {
-                        expected_pin:expected_pin.as_deref(),definition,revision:state.revision })?
+                        expected_pin:expected_pin.as_deref(),definition,adapter:adapter.as_deref(),revision:state.revision })?
                 }
                 Action::Enqueue { item, pin, .. } => {
                     let configuration = self.store.workflow_configuration(workspace)?;
                     match configuration.filter(|c| &c.pin == pin) {
                         None => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
                         Some(configuration) => {
-                            adapters::validate(&configuration.definition)?;
+                            self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| pin.clone());
                             let input = input(Command::Enqueue { item:item.clone(),definition:configuration.definition,
-                                policy_pin:pin.clone(),resource:self.resource.clone(),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
+                                policy_pin:pin.clone(),resource:self.publication_resource(workspace, configuration.adapter.as_ref()),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
                             self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                         }
                     }
@@ -101,7 +101,7 @@ mod tests {
         let mut definition = coding_definition(false);
         definition.stages[0].progression = Progression::AwaitApproval { principal:"owner".into() };
         let pin = definition.pin();
-        let publication = Action::Publish { mutation:m("publish",0,1),expected_pin:None,definition };
+        let publication = Action::Publish { adapter:None, mutation:m("publish",0,1),expected_pin:None,definition };
         ok(&runtime.wire_command("ws","owner",publication.clone()).unwrap());
         let enqueue = Action::Enqueue { mutation:m("enqueue",0,1),item:"a".into(),pin:pin.clone() };
         let receipt = runtime.wire_command("ws","owner",enqueue.clone()).unwrap(); ok(&receipt);
@@ -109,7 +109,7 @@ mod tests {
         let state = runtime.state("ws").unwrap().unwrap();
         assert_eq!(state.items["a"].phase,Phase::WaitingApproval);
         let new_definition = coding_definition(true);
-        ok(&runtime.wire_command("ws","owner",Action::Publish { mutation:m("publish2",state.revision,2),expected_pin:Some(pin.clone()),definition:new_definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { adapter:None, mutation:m("publish2",state.revision,2),expected_pin:Some(pin.clone()),definition:new_definition }).unwrap());
         assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].pin,pin);
         assert_eq!(runtime.wire_command("ws","owner",enqueue.clone()).unwrap(),receipt);
         assert!(runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("enqueue",0,1),item:"different".into(),pin:pin.clone() }).is_err());
@@ -123,7 +123,7 @@ mod tests {
     async fn workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse() {
         let dir = tempfile::tempdir().unwrap(); let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
         let definition = Definition::tracker("owner"); let pin = definition.pin();
-        ok(&runtime.wire_command("ws","owner",Action::Publish { mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
         ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
         runtime.pump(10).await.unwrap();
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
@@ -147,7 +147,7 @@ mod tests {
             let mut definition = coding_definition(false);
             if every { for stage in &mut definition.stages { stage.progression=Progression::AwaitApproval { principal:"orchestrator".into() }; } }
             let pin=definition.pin();
-            ok(&runtime.wire_command("ws","owner",Action::Publish { mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+            ok(&runtime.wire_command("ws","owner",Action::Publish { adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
             ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
             let mut approvals=0;
             for time in 1..40 {
@@ -177,7 +177,7 @@ mod semantic_review_tests {
             definition.stages.iter_mut().find(|s| matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
             let pin=definition.pin();
             let m=|id:&str,revision,sequence| Mutation { id:id.into(),revision,epoch:1,sequence };
-            runtime.wire_command("ws","owner",Action::Publish { mutation:m("p",0,1),expected_pin:None,definition }).unwrap();
+            runtime.wire_command("ws","owner",Action::Publish { adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap();
             runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap();
             for time in 1..15 {
                 runtime.pump(time).await.unwrap();

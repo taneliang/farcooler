@@ -242,6 +242,10 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    service.start_workflows().map_err(|error| {
+        eprintln!("cannot start workflow service: {error}"); 1
+    })?;
+
     // This process holds the daemon lock. Claimed and submitted check-ins
     // cannot be replayed after a crash; admitted fences remain held until the
     // old sender is proven unable to start a late key.
@@ -464,9 +468,11 @@ async fn run() -> Result<(), i32> {
 
     // A member's sign-in under way ends with the daemon, claude and all
     // (ov-584, review L3); its watchdog is the backstop for a crash.
+    let workflow_stop = service.stop_workflows().await;
+    if let Err(error) = &workflow_stop { tracing::error!(%error, "workflow shutdown failed"); }
     service.end_sign_ins();
     let _ = std::fs::remove_file(&socket);
-    result
+    result.and(workflow_stop.map_err(|_| 1))
 }
 
 /// Write one terminal's live output to stdout until the pane goes away.

@@ -2,65 +2,18 @@
 use super::*;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodingCommand {
-    pub argv: Vec<String>,
-    pub environment: BTreeMap<String, String>,
-    pub timeout_ms: u64,
+pub use farcooler_protocol::workflow_config::*;
+trait CommandValidation { fn validate(&self) -> Result<()>; }
+pub(super) trait FileValidation { fn verify(&self) -> Result<()>; }
+/// Host-side validation and optional archetype for the shared configuration DTO.
+pub trait CodingConfigExt {
+    fn validate(&self) -> Result<()>;
+    fn operation(&self, version: &str, argument: &str) -> OperationSpec;
+    fn definition(&self) -> Result<Definition>;
+    fn stage(&self, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage;
+    fn validate_definition(&self, definition: &Definition) -> Result<()>;
 }
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LaunchFile { pub path: PathBuf, pub digest: String }
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub enum CodingHarness {
-    Command(CodingCommand),
-    /// Existing native launch policy, never prepared/installed by this runtime.
-    Native { preset: String, settings: Option<LaunchFile>, project_hooks: Option<LaunchFile>, plugin_dir: Option<PathBuf>,
-        prompt: String, process: CodingCommand },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodingReviewer { pub identity: String, pub command: CodingCommand }
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodingCi {
-    pub repository: String,
-    pub workflow: String,
-    pub event: String,
-    pub command: CodingCommand,
-}
-
-/// Explicit local transport identity; no named remote lookup or network URL.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodingLanding {
-    pub job: String,
-    pub repository: PathBuf,
-    pub target: String,
-    pub config_digest: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CodingConfig {
-    pub repository: PathBuf,
-    pub base: String,
-    pub landing_ref: String,
-    #[serde(default)]
-    pub landing: Option<CodingLanding>,
-    pub harness: CodingHarness,
-    pub checks: Vec<CodingCommand>,
-    pub reviewer: Option<CodingReviewer>,
-    pub ci: CodingCi,
-}
-
-impl CodingCommand {
+impl CommandValidation for CodingCommand {
     fn validate(&self) -> Result<()> {
         if self.argv.is_empty() || self.argv.len() > 32 || !Path::new(&self.argv[0]).is_absolute()
             || self.argv.iter().any(|a| a.len() > 4096 || a.contains('\0'))
@@ -69,16 +22,19 @@ impl CodingCommand {
                 k.is_empty() || !k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 || k.starts_with("FARCOOLER_") || v.len() > 4096 || v.contains('\0'))
         { return Err(Error::Refused("invalid configured command")); }
+        let executable = std::fs::metadata(&self.argv[0])?;
+        if !executable.is_file() || executable.permissions().mode() & 0o111 == 0 {
+            return Err(Error::Refused("configured executable is not executable"));
+        }
         Ok(())
     }
 }
-impl CodingConfig {
-    pub fn pin(&self) -> String { digest(self) }
-    pub(super) fn validate(&self) -> Result<()> {
-        if self.repository.canonicalize()? != self.repository || !self.repository.join(".git").is_dir()
+impl CodingConfigExt for CodingConfig {
+    fn validate(&self) -> Result<()> {
+        if self.repository.canonicalize()? != self.repository || (!self.repository.join(".git").is_dir() || self.repository.join(".git").canonicalize()? != self.repository.join(".git"))
             || !sha(&self.base) || !self.landing_ref.starts_with("refs/heads/")
             || self.landing_ref.contains("..") || !valid_id(&self.landing_ref)
-            || self.checks.is_empty() || self.checks.len() > 8
+            || self.checks.len() > 8
             || self.ci.repository.is_empty() || self.ci.workflow.is_empty() || self.ci.event.is_empty()
         { return Err(Error::Refused("invalid coding configuration")); }
         if let Some(landing) = &self.landing {
@@ -86,7 +42,7 @@ impl CodingConfig {
                 || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
                 || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
                 || landing.target.contains("..")
-                || digest(&std::fs::read(landing.repository.join("config"))?) != landing.config_digest {
+                || digest(&bounded_file(&landing.repository.join("config"))?) != landing.config_digest {
                 return Err(Error::Refused("invalid or changed local landing identity"));
             }
         }
@@ -122,7 +78,7 @@ impl CodingConfig {
     fn operation(&self, version: &str, argument: &str) -> OperationSpec {
         OperationSpec { adapter_version: version.into(), arguments: vec![self.pin(), argument.into()], environment: BTreeMap::new() }
     }
-    pub fn definition(&self) -> Result<Definition> {
+    fn definition(&self) -> Result<Definition> {
         self.validate()?;
         let mut stages = vec![self.stage("provision", StageKind::Provision, "coding-worktree/v1", ""),
             self.stage("build", StageKind::Build, "coding-harness/v1", "")];
@@ -142,19 +98,37 @@ impl CodingConfig {
         Stage { id: id.into(), kind, operation: self.operation(version, argument),
             progression: Progression::Automatic, max_attempts: 1 }
     }
-    pub(super) fn validate_definition(&self, definition: &Definition) -> Result<()> {
+    fn validate_definition(&self, definition: &Definition) -> Result<()> {
         definition.validate().map_err(|_| Error::Refused("invalid definition"))?;
-        let expected = self.definition()?;
-        if definition.source != expected.source || definition.stages.len() != expected.stages.len()
-            || definition.stages.iter().zip(&expected.stages).any(|(a,b)|
-                a.id != b.id || a.kind != b.kind || a.operation != b.operation)
-        { return Err(Error::Refused("definition does not pin configured operations")); }
+        self.validate()?;
+        let mut provisioned = false;
+        let mut built = false;
+        let mut landed = false;
+        for stage in &definition.stages {
+            let (version, argument) = match &stage.kind {
+                StageKind::Provision if !provisioned && !built => { provisioned = true; ("coding-worktree/v1", String::new()) },
+                StageKind::Build if provisioned && !landed => { built = true; ("coding-harness/v1", String::new()) },
+                StageKind::Check if built && !landed => {
+                    let index = stage.operation.arguments.get(1).and_then(|s| s.parse::<usize>().ok())
+                        .filter(|i| *i < self.checks.len()).ok_or(Error::Refused("unknown configured check"))?;
+                    ("coding-check/v1", index.to_string())
+                },
+                StageKind::Review(_) if built && !landed =>
+                    ("coding-review/v1", self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity.clone()),
+                StageKind::Land if built && !landed => { landed = true; ("coding-land/v1", self.landing_ref.clone()) },
+                StageKind::Ci if landed => ("coding-ci/v1", self.ci.repository.clone()),
+                _ => return Err(Error::Refused("unsupported operation or unsafe prerequisites")),
+            };
+            if stage.operation != self.operation(version, &argument) {
+                return Err(Error::Refused("definition does not pin configured operations"));
+            }
+        }
         Ok(())
     }
 }
-impl LaunchFile {
-    pub(super) fn verify(&self) -> Result<()> {
-        if self.path.canonicalize()? != self.path || digest(&std::fs::read(&self.path)?) != self.digest {
+impl FileValidation for LaunchFile {
+    fn verify(&self) -> Result<()> {
+        if self.path.canonicalize()? != self.path || digest(&bounded_file(&self.path)?) != self.digest {
             return Err(Error::Refused("native settings changed"));
         }
         Ok(())
@@ -198,4 +172,17 @@ impl Runtime {
     pub(super) fn landing_ref(&self) -> &str {
         self.coding.as_ref().map_or("refs/heads/landed", |c| c.landing_ref.as_str())
     }
+}
+
+/// Configuration inputs must never block on a FIFO or allocate unbounded bytes.
+fn bounded_file(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let file = OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > 60 * 1024 {
+        return Err(Error::Refused("nonregular, aliased or oversized configuration input"));
+    }
+    let mut bytes = Vec::new(); file.take(60 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 60 * 1024 { return Err(Error::Refused("oversized configuration input")); }
+    Ok(bytes)
 }

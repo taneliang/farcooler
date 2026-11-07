@@ -1,0 +1,27 @@
+  waiting for the machine-wide heavy-job lock (/Users/e-liang/.cargo/bin/cargo check --offline -p farcooler-daemon -p farcooler-cli --all-targets); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof, PID 1222, started 2026-11-07 07:48:34, running /usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-932-workflow-platform-proof/reports/ov-930/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /usr/bin/swift build --package-path apps/macos --scratch-path /private/tmp/ov932-apps/mac-build --cache-path /private/tmp/ov932-apps/swiftpm-cache --config-path /private/tmp/ov932-apps/swiftpm-config --security-path /private/tmp/ov932-apps/swiftpm-security -c debug --jobs 6 --disable-automatic-resolution --skip-update (1 in line ahead of you)
+    Checking farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/protocol)
+   Compiling aws-lc-sys v0.43.0
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/core)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/ceremony)
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/transport)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/store)
+    Checking farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/review)
+    Checking farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/tmux)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/daemon)
+   Compiling aws-lc-rs v1.17.3
+    Checking russh v0.62.4
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/client)
+    Checking farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-931-workflow-service/crates/cli)
+warning: unused import: `StageKind`
+ --> crates/daemon/tests/workflow_service_over_socket.rs:7:55
+  |
+7 | use farcooler_workflow::{Definition,Progression,Phase,StageKind};
+  |                                                       ^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-daemon` (test "workflow_service_over_socket") generated 1 warning (run `cargo fix --test "workflow_service_over_socket" -p farcooler-daemon` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized] target(s) in 31.87s
+
+exit=0, stopped=None

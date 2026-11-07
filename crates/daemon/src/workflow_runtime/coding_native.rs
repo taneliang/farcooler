@@ -1,5 +1,6 @@
 //! Retained managed tmux PTY + normalized hook ownership, without Service activation.
 use super::*;
+use super::coding::FileValidation;
 use farcooler_agent_core::event::{AgentEvent, EndReason};
 use farcooler_agent_hooks::{Agent, assemble::MessageAssembler, facts::facts, wire::HookLine};
 use farcooler_tmux::TmuxServer;

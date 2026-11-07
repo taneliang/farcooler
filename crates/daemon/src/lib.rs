@@ -180,3 +180,5 @@ mod tests {
         assert!(!expected.is_empty(), "a machine with no name would break title matching");
     }
 }
+
+pub mod workflow_service;

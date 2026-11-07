@@ -35,7 +35,7 @@ async fn seed(session: &Session, h: &Harness, item: &str, revision: u64, sequenc
     if sequence == 1 {
         let mut definition=coding_definition(false);
         definition.stages[0].progression=Progression::AwaitApproval {principal:"owner".into()};
-        let a=wire::Action::Publish {mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
+        let a=wire::Action::Publish { adapter:None,mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
         let receipt=session.workflow_wire(h.workspace,serde_json::to_string(&a).unwrap()).await.unwrap();
     assert!(receipt.pointer("/receipt/result/Ok").is_some(),"seed {item} revision={revision} sequence={sequence}: {receipt}");
     }
