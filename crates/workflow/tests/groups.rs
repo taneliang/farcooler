@@ -405,6 +405,25 @@ fn a_split_cannot_target_a_step_at_or_after_a_landing() {
     assert_eq!(d.validate(), Ok(()));
 }
 #[test]
+fn a_split_after_a_landing_is_refused_by_the_landing_rule_alone() {
+    // base, fold, land, rerun, ci. The split target `rerun` makes a candidate anew and sits after the
+    // landing, so no other rule refuses it: only "a split never follows a landing" can.
+    let mut d = ticket();
+    let g = &mut d.groups.get_mut("landing").unwrap().steps;
+    g[1].routes.clear(); g[1].limit = 0;
+    g[2].kind = StageKind::Land; g[2].routes.clear(); g[2].limit = 0;
+    g.push(action("rerun"));
+    let mut ci = action("ci"); ci.kind = StageKind::Ci;
+    ci.routes.insert("rejected".into(), Target::Split { step: "rerun".into(), otherwise: Box::new(Target::Fail) });
+    ci.limit = 1;
+    g.push(ci);
+    assert_eq!(d.validate(), Err(Refusal::Definition));
+    // The same shape with a plain back edge to `rerun` is sound, so the split is what was refused.
+    let g = &mut d.groups.get_mut("landing").unwrap().steps;
+    g[4].routes.insert("rejected".into(), Target::Step("rerun".into()));
+    assert_eq!(d.validate(), Ok(()));
+}
+#[test]
 fn a_split_must_restart_at_a_step_that_makes_its_candidate_anew() {
     // A Tracker only adopts a candidate, so a half restarting there would keep the one it had.
     let mut d = ticket();
