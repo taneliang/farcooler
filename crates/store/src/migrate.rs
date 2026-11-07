@@ -114,6 +114,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::workflow_ownership::migration, Older::Refused), // ov-931: single task execution owner
     (crate::workflow_notices::migration, Older::Refused), // ov-933: durable finite informational notices
     (crate::engine_cutover::migration, Older::Refused), // ov-936: all-workspace authority fences
+    (crate::engine_manual::migration, Older::Refused), // ov-940: manual delivery binding and notice eligibility floor
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

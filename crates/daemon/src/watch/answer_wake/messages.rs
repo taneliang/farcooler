@@ -260,7 +260,7 @@ impl Watcher {
             }
             (actor, _) => actor,
         };
-        let note = store.send_message(task.id, actor, &text, recipient.terminal, extra)?;
+        let note = store.send_manual_message(task.id, actor, &text, recipient.terminal, extra)?;
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
         Ok(result::Value::MessageSent(pb::MessageSent {

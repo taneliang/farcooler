@@ -19,6 +19,7 @@ pub const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-
 pub const SOURCE_PIN: &str = "fae3f30d0c3d1c475f9dc4463243f293fd88b007";
 pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4193f5f92726d37b7286a52a5e2d";
 pub const SOURCE_SCHEMA_HASH: &str = "wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09";
+pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:e0cf501b0e043034e27c05995ce8dea92913cb8181dcf20f2f7f7ba2281da704";
 pub const MAP_PIN: &str = "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -165,18 +166,18 @@ fn uuid(value: &Cell) -> Result<String> {
 /// Capture before Store::open: no waits sweep or schema stamp can erase raw facts.
 pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let registry = crate::migrate::read_schema_version(conn).map_err(|e| Error::Refused(e.to_string()))?;
-    if !(65..=66).contains(&registry) { return refuse("expected exact composed schema65 or cutover schema66"); }
+    if !(65..=67).contains(&registry) { return refuse("expected exact composed schema65, cutover schema66 or manual schema67"); }
     let unsafe_generation:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
         OR EXISTS(SELECT 1 FROM workflow_resources r LEFT JOIN workflow_resource_generations g ON g.resource=r.resource WHERE g.resource IS NULL OR typeof(r.generation)!='integer' OR r.generation!=g.generation)",[],|r|r.get(0))?;
     if unsafe_generation {return refuse("resource generation is invalid, exhausted or inconsistent; no authority transfer");}
     let mut raw = Manifest::capture(conn)?;
     let cutover_objects:BTreeMap<_,_>=raw.objects.iter().filter(|(name,(_,owner,_))|name.starts_with("engine_")||owner.starts_with("engine_cutover_")).map(|(name,value)|(name.clone(),value.clone())).collect();
-    if registry==66 && farcooler_workflow::digest(&cutover_objects)!=CUTOVER_SCHEMA_HASH {return refuse("cutover schema objects differ from pinned schema66; preserve and stop");}
+    if registry>=66 && farcooler_workflow::digest(&cutover_objects)!=if registry==66 {CUTOVER_SCHEMA_HASH} else {CUTOVER67_SCHEMA_HASH} {return Err(Error::Refused(format!("cutover schema objects differ from the pinned schema; preserve and stop ({})",farcooler_workflow::digest(&cutover_objects))));}
     // Only the exact signed 103-object namespace may be excluded as migration
     // metadata. Unknown same-prefix tables/triggers can never hide in a prefix.
-    if registry==66 {
-        raw.tables.retain(|name,_| !name.starts_with("engine_cutover_"));
-        raw.objects.retain(|name,(_,owner,_)| !name.starts_with("engine_") && !owner.starts_with("engine_cutover_"));
+    if registry>=66 {
+        raw.tables.retain(|name,_| !name.starts_with("engine_cutover_") && !name.starts_with("engine_manual_") && !name.starts_with("engine_notice_"));
+        raw.objects.retain(|name,(_,owner,_)| !name.starts_with("engine_") && !owner.starts_with("engine_cutover_") && !owner.starts_with("engine_manual_") && !owner.starts_with("engine_notice_"));
     }
     let mut result = Preflight { source_pin:SOURCE_PIN.into(), map_pin:MAP_PIN.into(), registry,
         raw, bindings:Vec::new(), quarantines:Vec::new(), workspaces:BTreeSet::new() };
@@ -413,6 +414,7 @@ impl Store {
         // fence claims; admitted/uncertain effects remain non-retryable as-is.
         tx.execute("UPDATE workflow_resource_generations SET generation=generation+1",[])?;
         tx.execute("UPDATE workflow_resources SET generation=(SELECT generation FROM workflow_resource_generations g WHERE g.resource=workflow_resources.resource)",[])?;
+        crate::engine_manual::record_notice_floor(&tx,incarnation)?;
         tx.execute("UPDATE engine_cutover_authority SET phase='committed',incarnation=?1,manifest=?2 WHERE singleton=1",params![incarnation,plan.raw.hash()])?;
         crate::compat::stamp_compatible_down_to(&tx).map_err(|e|Error::Refused(e.to_string()))?;
         tx.commit()?;

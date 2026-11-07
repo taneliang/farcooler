@@ -247,7 +247,7 @@ fn engine_cutover_f12_pre58_upgrade_is_a_separate_actual_registry_case() {
     let tmp=tempfile::tempdir().unwrap();let path=tmp.path().join("pre58.sqlite");
     let conn=Connection::open(&path).unwrap();conn.execute_batch(include_str!("../../../fixtures/before_the_line.sql")).unwrap();
     assert_eq!(crate::migrate::read_schema_version(&conn).unwrap(),57);drop(conn);
-    let store=Store::open_fixture(&path).unwrap();assert_eq!(store.schema().unwrap().version,66);
+    let store=Store::open_fixture(&path).unwrap();assert_eq!(store.schema().unwrap().version,67);
     assert_eq!(store.engine_authority().unwrap().phase,"legacy");
     assert_eq!(store.conn().query_row("SELECT count(*) FROM tasks",[],|r|r.get::<_,usize>(0)).unwrap(),11);
     let plan=conserved(&store,"pre58-after-upgrade");assert_eq!(plan.bindings.len(),11);

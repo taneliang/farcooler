@@ -87,7 +87,7 @@ impl Store {
     /// Indexed pending queue; caller walks sequence once per real wake, not revision-zero history.
     pub fn workflow_pending_notices(&self, after: i64) -> Result<Vec<(i64, Delivery)>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT sequence,payload,payload_hash,state,attempt_id,target,evidence FROM workflow_notice_outbox WHERE state='pending' AND sequence>?1 ORDER BY sequence LIMIT 32")?;
+        let mut stmt = conn.prepare("SELECT sequence,payload,payload_hash,state,attempt_id,target,evidence FROM workflow_notice_outbox WHERE state='pending' AND sequence>?1 AND sequence>COALESCE((SELECT floor FROM engine_notice_eligibility WHERE singleton=1),0) ORDER BY sequence LIMIT 32")?;
         let rows = stmt.query_map([after], |r| Ok((r.get(0)?, (r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))))?;
         rows.map(|r| { let (sequence, raw) = r?; Ok((sequence,delivery(raw)?)) }).collect()
     }
@@ -104,6 +104,7 @@ impl Store {
         if target.len()>8192 || attempt.len()>100 { return Err(WorkflowError::Oversized); }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? || !crate::engine_manual::notice_eligible(&tx,&notice.id)? { return Ok(false); }
         let changed = tx.execute("UPDATE workflow_notice_outbox SET state='prepared',attempt_id=?3,target=?4,evidence='prepared_before_native_spawn' WHERE id=?1 AND payload_hash=?2 AND state='pending'",params![notice.id,digest(notice),attempt,target])?;
         if changed == 1 {
             tx.execute("INSERT INTO workflow_notice_attempts(id,notice_id,target) VALUES(?1,?2,?3)",params![attempt,notice.id,target])?;
@@ -161,6 +162,7 @@ impl Store {
         proof:&NativeTarget, spawn:impl FnOnce()->T) -> Result<Option<T>> {
         let mut conn=self.conn();
         let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? || !crate::engine_manual::notice_eligible(&tx,&notice.id)? { return Ok(None); }
         let prepared:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_notice_outbox WHERE id=?1 AND payload_hash=?2 AND state='prepared' AND attempt_id=?3 AND target=?4)",
             params![notice.id,digest(notice),attempt,target],|r|r.get(0))?;
         if !prepared || notice.workspace != proof.workspace.to_string()

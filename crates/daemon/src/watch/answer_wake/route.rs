@@ -353,7 +353,7 @@ impl Watcher {
         }
         let said = if to.role == TerminalRole::Orchestrator { "the orchestrator".to_string() } else { to.title.clone() };
         let extra = serde_json::json!({ "message": { "to": said, "in_pane": true } });
-        store.send_message(task.id, actor, &text, Some(pane), extra)?;
+        store.send_manual_message(task.id, actor, &text, Some(pane), extra)?;
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
         Ok(Delivered::Queued)

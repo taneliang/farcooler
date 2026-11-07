@@ -205,3 +205,4 @@ fn save_db(label:&str,path:&std::path::Path) {
 
 mod storage_safety;
 mod startup_gate;
+mod manual_delivery;

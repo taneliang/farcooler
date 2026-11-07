@@ -25,7 +25,7 @@ args = {
     'groups': ['test','--offline','-p','farcooler-daemon','--lib','workflow_runtime_','--','--nocapture'],
     'compile': ['check','--offline','-p','farcooler-store','--all-targets'],
     'affected': ['test','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-cli','workflow_','--','--nocapture'],
-    'gate': ['test','--offline','-p','farcooler-store','--lib','--','startup_gate_','transfer_','owner_join_','--nocapture'],
+    'gate': ['test','--offline','-p','farcooler-store','--lib','--','startup_gate_','transfer_','owner_join_','manual_','notice_eligibility_','--nocapture'],
     'compile-all': ['check','--offline','-p','farcooler-store','-p','farcooler-daemon','-p','farcooler-cli','--all-targets'],
     'daemon': ['test','--offline','-p','farcooler-daemon','--lib'],
     'daemon-f': ['test','--offline','-p','farcooler-daemon','--lib','--',*os.environ.get('OV940_FILTERS','').split(),'--nocapture'],

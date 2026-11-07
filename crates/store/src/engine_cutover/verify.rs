@@ -27,7 +27,8 @@ fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
     }
     let schema:String=conn.query_row("SELECT value FROM meta WHERE key='schema_version'",[],|r|r.get(0))?;
     let floor:String=conn.query_row("SELECT value FROM meta WHERE key='compatible_down_to'",[],|r|r.get(0))?;
-    if schema!="66" || floor!="66" { return refuse("authority compatibility stamp differs from registry66"); }
+    let current=crate::migrate::CURRENT_SCHEMA_VERSION.to_string();
+    if schema!=current || floor!=current { return refuse("authority compatibility stamp differs from the current registry"); }
     let mut expected=BTreeMap::new();
     for (name,table) in &plan.raw.tables {
         for row in &table.rows {

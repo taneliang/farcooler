@@ -62,6 +62,7 @@ pub mod device_added_by;
 pub mod access;
 pub mod access_ops;
 pub mod step_up;
+mod engine_manual;
 pub use compose_holds::ComposeHold;
 pub use compose_waits::ComposeWait;
 pub use check_ins::{EnableCheckIn, PinCheckInRollout, fixed_check_in_message, CheckInObservation, CheckInOccurrence, CheckInStatus, CheckInTargetHold, PendingCheckIn, CHECK_IN_CONFIRMATION_TIMEOUT_MS};

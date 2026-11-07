@@ -1,0 +1,105 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 33.59s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-2ab3a43642087497)
+
+running 71 tests
+test fs_watch::settle::tests::a_sentinel_routed_away_fails_instead_of_retrying - should panic ... 
+thread 'fs_watch::settle::tests::a_sentinel_routed_away_fails_instead_of_retrying' (833294906) panicked at crates/daemon/src/fs_watch/settle.rs:186:17:
+a witness stream saw /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpwiTKuc/fc-settle-away-0 (one of 15 attempts) 45s ago and the backend never delivered it: routed away. The last deliveries were []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+test landing_job::tests::gating_landing_membership_cannot_absorb_unrouted_tickets_during_push_fetch ... ok
+test landing_job::tests::pushed_landing_membership_cannot_absorb_unrouted_tickets_during_ci ... ok
+test people::tests::a_reps_pane_only_reads_messages_and_comments ... ok
+test registry_binding::tests::a_hook_from_an_unnamed_session_routes_through_the_registry ... ok
+test rep_gate::tests::a_rep_reads_the_board_messages_comments_and_reads_its_checkout ... ok
+test rpc_board::tests::every_board_route_has_an_arm ... ok
+test service::hook_wiring_tests::a_chat_that_names_its_session_is_refused_by_the_other_route_too ... ok
+test session_projectors::follow_tests::a_hooks_move_routes_the_watch_off_the_hooks_thread ... ok
+test skill_install::practice_tests::tickets_are_logged_and_routed_by_the_record ... ok
+test watch::answer_wake::route::pin_tests::only_a_typed_send_confirms_a_typed_send ... ok
+test watch::answer_wake::route::pin_tests::the_socket_is_a_peers_never_the_users ... ok
+test watch::answer_wake::route::pin_tests::the_wake_is_a_notification_never_user_input ... ok
+test watch::answer_wake::route::pin_tests::typed_is_a_human_turn ... ok
+test watch::answer_wake::tests::compose_held_tests::held_messages_survive_a_restart ... ok
+test watch::answer_wake::tests::mailbox_tests::a_route_is_private ... ok
+test watch::answer_wake::tests::messages_tests::a_builder_is_addressed_by_its_ticket_and_tags_its_own ... ok
+test watch::answer_wake::tests::messages_tests::a_cursor_pane_is_told_between_turns_and_not_during_one ... ok
+test watch::answer_wake::tests::messages_tests::a_done_transition_queues_the_notice ... ok
+test watch::answer_wake::tests::messages_tests::a_long_message_wraps_in_cursors_box_and_is_sent ... ok
+test watch::answer_wake::tests::messages_tests::a_message_survives_a_restart ... ok
+test watch::answer_wake::tests::messages_tests::a_silent_stop_tells_the_orchestrator_once ... ok
+test watch::answer_wake::tests::messages_tests::a_waiting_message_holds_back_later_ones_for_its_pane ... ok
+test watch::answer_wake::tests::messages_tests::an_agents_message_reaches_its_orchestrator ... ok
+test watch::answer_wake::tests::messages_tests::no_message_is_tagged_as_the_owners ... ok
+test watch::answer_wake::tests::messages_tests::refusals_file_nothing ... ok
+test watch::answer_wake::tests::messages_tests::the_orchestrator_cant_message_itself_through_a_ticket ... ok
+test watch::answer_wake::tests::messages_tests::the_orchestrator_reaches_a_cards_agent ... ok
+test watch::answer_wake::tests::messages_tests::with_no_orchestrator_no_notice_is_queued ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_message_to_a_stopped_rep_wakes_it_then_arrives ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_messages_nobody_but_its_orchestrator ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_messages_only_on_its_own_board ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_never_wakes_a_rep ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_reps_message_reaches_the_orchestrator_with_its_person ... ok
+test watch::answer_wake::tests::rep_messages_tests::only_the_lead_messages_as_a_person ... ok
+test watch::answer_wake::tests::rep_messages_tests::only_who_may_start_a_rep_wakes_it ... ok
+test watch::answer_wake::tests::rep_messages_tests::the_orchestrator_asks_a_person_through_their_rep ... ok
+test watch::answer_wake::tests::route_tests::a_callers_seat_is_read_from_its_process ... ok
+test watch::answer_wake::tests::route_tests::a_claude_in_a_shell_pane_messaging_a_lane_goes_by_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::a_command_an_agent_left_behind_is_refused_as_a_person ... ok
+test watch::answer_wake::tests::route_tests::a_draft_is_pasted_never_entered ... ok
+test watch::answer_wake::tests::route_tests::a_held_persons_message_never_stalls_the_agents_behind_it ... ok
+test watch::answer_wake::tests::route_tests::a_key_is_gated ... ok
+test watch::answer_wake::tests::route_tests::a_members_message_is_typed_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_person_in_a_plain_shell_pane_is_typed_as_their_own_turn ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_behind_a_draft_is_held_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_is_typed_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_taken_before_the_upgrade_is_not_typed_again ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_waiting_from_before_the_upgrade_is_taken_back_and_typed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_tell_keeps_composes_rules ... ok
+test watch::answer_wake::tests::route_tests::a_prompt_behind_a_draft_is_refused ... ok
+test watch::answer_wake::tests::route_tests::a_prompt_is_composed ... ok
+test watch::answer_wake::tests::route_tests::a_trust_enter_from_a_pane_is_not_a_persons ... ok
+test watch::answer_wake::tests::route_tests::a_wake_routes_by_its_author ... ok
+test watch::answer_wake::tests::route_tests::agent_and_runner_messages_keep_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::an_agents_live_deliveries_are_held_to_its_rules ... ok
+test watch::answer_wake::tests::route_tests::an_agents_tell_goes_by_the_mailbox_and_runs_no_command ... ok
+test watch::answer_wake::tests::route_tests::an_agents_tell_with_no_card_goes_unfiled_to_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::an_answer_gets_composes_check_before_an_unfenced_enter ... ok
+test watch::answer_wake::tests::route_tests::an_unknown_caller_is_refused_in_pane ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_forged_message_record_queues_nothing_and_names_nobody ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_person_answering_from_their_own_shell_pane_is_typed ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_persons_answer_is_still_typed_as_their_own_turn ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agent_outside_every_pane_is_unknown_not_the_person ... 
+thread 'watch::answer_wake::tests::route_tests::answer_seat_tests::an_agent_outside_every_pane_is_unknown_not_the_person' (833315931) panicked at crates/daemon/src/watch/answer_wake/answer_seat_tests.rs:188:5:
+Err(InvalidArgument { what: "manual_actor" })
+FAILED
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_does_not_supersede_a_persons ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_is_taken_back_when_its_wake_ends_undelivered ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_an_agent_left_behind_is_refused ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_a_claude_in_a_shell_pane_is_an_agent_message ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_an_unreadable_seat_is_refused ... ok
+test watch::answer_wake::tests::route_tests::the_process_that_runs_a_program_is_found_not_the_shell_that_names_it ... ok
+test watch::member_push::tests::a_runner_with_no_members_routes_no_members_part ... ok
+
+failures:
+
+failures:
+    watch::answer_wake::tests::route_tests::answer_seat_tests::an_agent_outside_every_pane_is_unknown_not_the_person
+
+test result: FAILED. 70 passed; 1 failed; 0 ignored; 0 measured; 2661 filtered out; finished in 102.71s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

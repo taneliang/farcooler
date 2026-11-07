@@ -123,10 +123,11 @@ impl Store {
             .prepare(&format!(
                 "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at, w.pasted_at, {}
                    FROM {} w JOIN task_notes n ON n.id = w.note_id
-                  WHERE w.done_at IS NULL
+                  WHERE w.done_at IS NULL AND {}
                   ORDER BY w.enqueued_at, w.rowid",
                 kind.to_column(),
-                kind.table()
+                kind.table(),
+                if kind == WakeKind::Message { crate::engine_manual::VISIBLE_MESSAGE } else { crate::engine_manual::VISIBLE_LEGACY }
             ))
             .map_err(map_err)?;
         let rows = stmt
