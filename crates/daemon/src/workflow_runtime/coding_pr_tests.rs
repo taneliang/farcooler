@@ -32,6 +32,10 @@ if args[:2] == ['pr', 'list']:
             if mode == 'wrong-head' and state['looks'] >= 3:
                 pr['state'] = 'MERGED'; pr['mergeCommit'] = dict(oid='c' * 40); pr['headRefOid'] = 'd' * 40
             if mode == 'close' and state['looks'] >= 3: pr['state'] = 'CLOSED'
+            if mode == 'stale-review':
+                # A change was requested of an older commit; the head has moved on since.
+                pr['latestReviews'] = [dict(state='CHANGES_REQUESTED', commit=dict(oid='e' * 40))]
+                if state['looks'] >= 5: pr['state'] = 'MERGED'; pr['mergeCommit'] = dict(oid='c' * 40)
             if mode == 'rework' and state['looks'] >= 3 and not pr.get('reworked'):
                 pr['latestReviews'] = [dict(state='CHANGES_REQUESTED', commit=dict(oid=pr['headRefOid']))]
             if mode == 'rework' and pr.get('reworked') and state['looks'] >= 6:
@@ -247,6 +251,7 @@ async fn two_pull_requests_for_one_head_branch_are_refused_and_nothing_is_chosen
     let state = runtime_f.state("w").unwrap().unwrap();
     assert_ne!(phase_of(&state, "one"), Some(Phase::Done));
     assert_eq!(count(&f, "ready"), 0);
+    assert_eq!(outbox(&runtime_f, StageKind::AwaitPr), 0, "nothing waits on a pull request that cannot be told from another");
 }
 
 #[tokio::test]
@@ -286,4 +291,14 @@ async fn a_definition_with_pull_request_steps_needs_the_pull_request_identity() 
     assert!(c.validate_definition(&with_branch).is_err(), "no pull request identity, no landing identity");
     with_branch.stages.truncate(4);
     assert!(c.validate_definition(&with_branch).is_err());
+}
+
+#[tokio::test]
+async fn a_change_requested_of_an_older_commit_does_not_send_the_ticket_back() {
+    let (_dir, mut runtime, f) = hub("pass", "stale-review").await;
+    let definition = per_ticket_pull_request(&runtime, false, 5000);
+    enqueue_item(&mut runtime, "w", "one", definition);
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_eq!(outbox(&runtime, StageKind::PushBranch), 1, "no rework: the review was of a commit that is no longer the head");
+    assert_eq!(count(&f, "create"), 1);
 }

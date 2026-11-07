@@ -47,9 +47,20 @@ fn each_step_needs_the_one_before_it() {
 }
 #[test]
 fn they_are_not_group_steps() {
-    let mut d = definition(vec![step("build", StageKind::Action("build".into())), step("join", StageKind::Join { group: "g".into(), adopt: true })]);
-    d.groups.insert("g".into(), GroupDef { limit: 4, exclusive: "ref:r:main".into(), steps: vec![step("branch", StageKind::PushBranch)] });
-    assert_eq!(d.validate(), Err(Refusal::Definition));
+    let split = |to: &str| Target::Split { step: to.into(), otherwise: Box::new(Target::Fail) };
+    let group = |extra: Option<Stage>| {
+        let mut steps = vec![step("base", StageKind::AwaitBase),
+            route(step("fold", StageKind::Fold), "conflict", split("base"), 3),
+            route(step("gate", StageKind::Run), "rejected", split("base"), 3),
+            route(step("push", StageKind::Push), "base_moved", Target::Step("base".into()), 2),
+            step("ci", StageKind::AwaitCi)];
+        if let Some(extra) = extra { steps.insert(1, extra); }
+        let mut d = definition(vec![step("build", StageKind::Action("build".into())), step("join", StageKind::Join { group: "g".into(), adopt: true })]);
+        d.groups.insert("g".into(), GroupDef { limit: 4, exclusive: "ref:r:main".into(), steps });
+        d
+    };
+    assert_eq!(group(None).validate(), Ok(()), "the group is sound without it");
+    assert_eq!(group(Some(step("branch", StageKind::PushBranch))).validate(), Err(Refusal::Definition));
 }
 #[test]
 fn each_verb_emits_only_its_own_labels() {
