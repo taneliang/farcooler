@@ -26,7 +26,8 @@ impl Runtime {
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
-            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } => mutation,
+            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
+            | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. } => mutation,
             Action::Get => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -105,6 +106,37 @@ impl Runtime {
                     }
                 }
                 Action::Settle { .. } => unreachable!("settling reads the remote, so it is answered before this"),
+                Action::Track { item, column, .. } => {
+                    let Some(definition) = Definition::ticket_at(column.as_deref().unwrap_or("backlog")) else {
+                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Invalid))?}));
+                    };
+                    self.validate_publication(&definition, None)?;
+                    let policy_pin = self.store.workflow_ticket_bundle(&definition)?;
+                    let input = input(Command::Enqueue { item:item.clone(),initial_candidate:Some(definition.pin()),definition,
+                        policy_pin,resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new() },Grant::Controller);
+                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                }
+                Action::Move { item, run, pin, to, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let input = input(Command::Move { item:item.clone(),to:to.clone() },Grant::Controller);
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    }
+                }
+                Action::Start { item, run, pin, start_pin, .. } => {
+                    let configuration = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin);
+                    match configuration {
+                        Some(configuration) if state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) => {
+                            self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
+                            let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
+                            let input = input(Command::Start { item:item.clone(),definition:configuration.definition,
+                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
+                            self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        }
+                        _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
+                    }
+                }
                 Action::Get => unreachable!(),
             }
         };
@@ -164,6 +196,32 @@ mod tests {
         ok(&runtime.wire_command("ws","owner",approve(m("approve",state.revision,2),item.run.clone(),pin.clone())).unwrap());
         runtime.pump(20).await.unwrap();
         assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].phase,Phase::Done);
+    }
+    #[tokio::test]
+    async fn workflow_wire_tracks_moves_and_starts_a_ticket_through_the_engine() {
+        let dir = tempfile::tempdir().unwrap(); let runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
+        let track = Action::Track { mutation:m("track",0,1),item:"a".into(),column:None };
+        let receipt = runtime.wire_command("ws","orchestrator",track.clone()).unwrap(); ok(&receipt);
+        assert_eq!(runtime.wire_command("ws","orchestrator",track).unwrap(),receipt,"a retried track is the same receipt");
+        let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
+        assert!(item.definition.is_ticket());
+        let mv = |id,rev,run:&str,pin:&str,to:&str| Action::Move { mutation:m(id,rev,2),item:"a".into(),run:run.into(),pin:pin.into(),to:to.into() };
+        let stale = runtime.wire_command("ws","orchestrator",mv("old",state.revision,"old",&item.pin,"doing")).unwrap();
+        assert!(stale.to_string().contains("Stale"),"{stale}");
+        ok(&runtime.wire_command("ws","orchestrator",mv("doing",state.revision,&item.run,&item.pin,"doing")).unwrap());
+        let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
+        assert_eq!(item.definition.stages[item.stage].id,"doing");
+        // Starting needs the published definition's pin; a pin that is not the published one is stale.
+        let definition = coding_definition(false); let start_pin = definition.pin();
+        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None,adapter:None,mutation:m("publish",state.revision,3),expected_pin:None,definition }).unwrap());
+        let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
+        let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into() };
+        let stale = runtime.wire_command("ws","orchestrator",start("wrong","wf1:other")).unwrap();
+        assert!(stale.to_string().contains("Stale"),"{stale}");
+        ok(&runtime.wire_command("ws","orchestrator",start("start",&start_pin)).unwrap());
+        let state = runtime.state("ws").unwrap().unwrap();
+        assert_eq!(state.items["a"].policy_pin,start_pin);
+        assert!(!state.items["a"].definition.is_ticket());
     }
     #[tokio::test]
     async fn workflow_wire_retry_needs_the_exact_run_and_a_failed_item() {

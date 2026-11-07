@@ -340,13 +340,16 @@ impl Definition {
     }
     /// The tracker-only template for a ticket with no run: one step per live column. The orchestrator
     /// moves it with `Move`; `done` and `cancelled` close it. It starts a run with `Start`.
-    pub fn ticket() -> Self {
+    pub fn ticket() -> Self { Self::ticket_at("backlog").expect("backlog is a column") }
+    /// The same template, starting in `column` (an existing card keeps the column it is already in).
+    pub fn ticket_at(column: &str) -> Option<Self> {
+        let start = TICKET_COLUMNS.iter().position(|c| *c == column)?;
         let stage = |id: &str| Stage { id: id.into(), kind: StageKind::Tracker,
             progression: Progression::AwaitApproval { principal: "orchestrator".into() },
             max_attempts: 1, routes: BTreeMap::new(), limit: 0,
             operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
-        Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
-            stages: TICKET_COLUMNS.iter().map(|id| stage(id)).collect() }
+        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
+            stages: TICKET_COLUMNS.iter().cycle().skip(start).take(TICKET_COLUMNS.len()).map(|id| stage(id)).collect() })
     }
     /// Whether this is the tracker-only template: a ticket with no run, moved by column.
     pub fn is_ticket(&self) -> bool {

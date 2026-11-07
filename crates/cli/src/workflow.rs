@@ -70,6 +70,12 @@ pub enum WorkflowCmd {
     /// Settle a push whose outcome was lost, after looking at the target yourself. The runner reads the
     /// target first and refuses a word it contradicts. Pass `--landed true` if the commit is on the target.
     Settle { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long, action = clap::ArgAction::Set, required = true)] landed:bool,#[command(flatten)] identity:Identity },
+    /// Bring a ticket under the engine with no run: it sits in Backlog until the orchestrator moves it.
+    Track { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:Identity },
+    /// Move a tracked ticket to a column: backlog, todo, doing, review or decision; done or cancelled close it.
+    Move { workspace:Uuid,item:String,#[arg(long)] to:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Start a run on a tracked ticket under the published definition `--start-pin`.
+    Start { workspace:Uuid,item:String,#[arg(long)] start_pin:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -92,6 +98,9 @@ impl WorkflowCmd {
             Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
             Self::Leave { workspace,item,run,pin,identity } => (workspace,Action::Leave { mutation:identity.mutation(),item,run,pin }),
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
+            Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
+            Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
+            Self::Start { workspace,item,start_pin,run,pin,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }

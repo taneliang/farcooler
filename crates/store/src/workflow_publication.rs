@@ -24,6 +24,18 @@ impl Store {
             "SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
         match pin { Some(pin) => self.workflow_bundle(&pin), None => Ok(None) }
     }
+    /// The tracker-only template's bundle, stored if it is not yet, and its pin. It needs no publication:
+    /// it is built in, runs nothing, and a ticket is tracked under it before any definition is chosen.
+    pub fn workflow_ticket_bundle(&self, definition: &Definition) -> Result<String> {
+        if !definition.is_ticket() { return Err(WorkflowError::IdentityConflict); }
+        let pin = notification_configuration_pin(definition, None, None);
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("INSERT INTO workflow_definitions(pin,definition) VALUES(?1,?2) ON CONFLICT(pin) DO NOTHING", params![definition.pin(), serde_json::to_string(definition)?])?;
+        tx.execute("INSERT INTO workflow_bundles(pin,definition_pin,adapter) VALUES(?1,?2,?3) ON CONFLICT(pin) DO NOTHING", params![pin, definition.pin(), serde_json::to_string(&None::<AdapterConfiguration>)?])?;
+        tx.commit()?;
+        Ok(pin)
+    }
     pub fn workflow_bundle(&self, pin: &str) -> Result<Option<Configuration>> {
         let raw: Option<(String, String)> = self.conn().query_row(
             "SELECT d.definition,b.adapter FROM workflow_bundles b JOIN workflow_definitions d ON d.pin=b.definition_pin WHERE b.pin=?1",

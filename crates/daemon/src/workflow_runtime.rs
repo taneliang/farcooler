@@ -66,6 +66,8 @@ enum Inbox {
     Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
     State(String, oneshot::Sender<Result<Option<State>>>),
     Wire(Box<Admission>, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<serde_json::Value>>),
+    /// Bring cards under the engine with no run: (workspace, item, column).
+    Track(Vec<(String, String, String)>, oneshot::Sender<Result<usize>>),
     Reconcile,
 }
 impl CommandHandle {
@@ -86,6 +88,12 @@ impl CommandHandle {
         let (send, receive) = oneshot::channel();
         self.send.send(Inbox::State(workspace.into(), send)).await
             .map_err(|_| Error::Refused("runtime inbox closed"))?;
+        receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
+    }
+    /// Bring cards under the engine as tracker-only tickets, each in the column it is in. Returns how many were taken.
+    pub async fn track(&self, tickets: Vec<(String, String, String)>) -> Result<usize> {
+        let (send, receive) = oneshot::channel();
+        self.send.send(Inbox::Track(tickets, send)).await.map_err(|_| Error::Refused("runtime inbox closed"))?;
         receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
     }
     /// Trusted runner signals that a delayed local receipt is available; never supplies a result.
@@ -296,7 +304,7 @@ impl Runtime {
                 }
                 self.validate_definition(definition)?;
             }
-            Command::Cancel { .. } | Command::Retry { .. } | Command::Queue { .. } | Command::Leave { .. } => {}
+            Command::Cancel { .. } | Command::Retry { .. } | Command::Queue { .. } | Command::Leave { .. } | Command::Move { .. } => {}
             _ => return Err(Error::Refused("not a controller command")),
         }
         self.apply(request, "controller", Grant::Controller, now_ms)
@@ -627,8 +635,26 @@ impl Runtime {
                 }.await;
                 let _ = reply.send(result);
             }
+            Inbox::Track(tickets, reply) => { let _ = reply.send(self.track_tickets(&tickets)); }
             Inbox::Reconcile => {}
         }
+    }
+    /// A card the engine refuses (a live worker or landing owns it) stays out and is not an error.
+    fn track_tickets(&self, tickets: &[(String, String, String)]) -> Result<usize> {
+        let mut taken = 0;
+        for (workspace, item, column) in tickets {
+            let Some(definition) = Definition::ticket_at(column) else { continue };
+            let policy_pin = self.store.workflow_ticket_bundle(&definition)?;
+            let Ok(Some(state)) = self.state(workspace).map(|s| Some(s.unwrap_or_else(|| State::empty(workspace.clone(), 1)))) else { continue };
+            let sequence = state.source_sequences.get("runtime").copied().unwrap_or(0) + 1;
+            let receipt = self.apply(Request { id: format!("track:{}", Uuid::now_v7()), workspace: workspace.clone(),
+                expected_revision: state.revision, sequence, command: Command::Enqueue { item: item.clone(),
+                    initial_candidate: Some(definition.pin()), definition, policy_pin,
+                    resource: Exec::item_resource(workspace, item), dependencies: BTreeSet::new() } },
+                "runtime", Grant::Controller, now());
+            if receipt.is_ok_and(|r| r.result.is_ok()) { taken += 1; }
+        }
+        Ok(taken)
     }
     pub async fn run(&mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         self.shutdown = Some(shutdown.clone());

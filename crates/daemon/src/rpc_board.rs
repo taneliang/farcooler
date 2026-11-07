@@ -60,7 +60,10 @@ pub(crate) async fn dispatch(
             let Some(request::Payload::TaskCreate(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            Ok(result::Value::Task(crate::task_ops::create(svc, watcher, &p)?))
+            let task = crate::task_ops::create(svc, watcher, &p)?;
+            // A new card is an engine item at once, in its column, with no run (ov-951).
+            if let Some(id) = crate::task_ops::required_id(&task.id).ok() { svc.track_tickets(Some(id)).await; }
+            Ok(result::Value::Task(task))
         }
 
         "task.update" => {

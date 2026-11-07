@@ -27,6 +27,19 @@ impl Service {
         *owner = Some(Owner { handle,stop,task,notices });
         Ok(())
     }
+    /// Bring every open card no run owns under the engine (ov-951): all of them at start, or one just made.
+    pub async fn track_tickets(&self, only: Option<uuid::Uuid>) {
+        let Some(handle) = self.workflow_handle() else { return };
+        let column = |s: farcooler_store::models::TaskStatus| {
+            use farcooler_store::models::TaskStatus as S;
+            match s { S::Backlog => "backlog", S::Todo => "todo", S::InProgress => "doing", S::InReview => "review",
+                S::NeedsDecision => "decision", S::Done | S::Cancelled => "backlog" }
+        };
+        let Ok(found) = self.store.untracked_tickets(only) else { return };
+        let tickets: Vec<_> = found.into_iter().map(|(w, k, s)| (w.to_string(), k, column(s).to_string())).collect();
+        if tickets.is_empty() { return; }
+        if let Err(error) = handle.track(tickets).await { tracing::warn!(%error, "could not track cards"); }
+    }
     pub(crate) fn workflow_handle(&self) -> Option<CommandHandle> {
         self.workflow_owner.lock().ok()?.as_ref()
             .filter(|o| !o.task.is_finished() && !o.handle.is_closed()).map(|o| o.handle.clone())
@@ -63,5 +76,30 @@ mod tests {
         assert!(service.workflow_handle().unwrap().state("any").await.unwrap().is_none());
         service.stop_workflows().await.unwrap();
         assert!(service.workflow_handle().is_none());
+    }
+    #[tokio::test]
+    async fn every_open_card_becomes_an_engine_item_in_its_own_column_and_a_new_one_at_once() {
+        use farcooler_store::models::{Actor, TaskStatus};
+        let (_dir, service, repo) = crate::test_support::fixture().await;
+        let board = service.store.ensure_main_workspace(repo).unwrap();
+        let backlog = service.store.create_task(board.id, "plain", Actor::User).unwrap();
+        let doing = service.store.create_task(board.id, "under way", Actor::User).unwrap();
+        service.store.set_task_status(doing.id, TaskStatus::InProgress, Actor::User).unwrap();
+        let closed = service.store.create_task(board.id, "finished", Actor::User).unwrap();
+        service.store.set_task_status(closed.id, TaskStatus::Done, Actor::User).unwrap();
+        service.start_workflows().unwrap();
+        service.track_tickets(None).await;
+        let state = service.workflow_handle().unwrap().state(&board.id.to_string()).await.unwrap().unwrap();
+        let column = |key: &str| { let i = &state.items[key]; i.definition.stages[i.stage].id.clone() };
+        assert_eq!(column(&backlog.key), "backlog");
+        assert_eq!(column(&doing.key), "doing", "a card keeps the column it is in");
+        assert!(!state.items.contains_key(&closed.key), "a finished card is no run");
+        assert_eq!(service.store.get_task(doing.id).unwrap().status, TaskStatus::InProgress, "tracking moves nothing");
+        assert!(service.store.untracked_tickets(None).unwrap().is_empty());
+        // A card made later is tracked when it is made, and a hand move is then refused.
+        let fresh = service.store.create_task(board.id, "later", Actor::User).unwrap();
+        service.track_tickets(Some(fresh.id)).await;
+        assert!(service.store.set_task_status(fresh.id, TaskStatus::Todo, Actor::User).is_err());
+        service.stop_workflows().await.unwrap();
     }
 }

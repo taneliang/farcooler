@@ -30,6 +30,12 @@ pub enum Action {
     /// A person's word on a push whose outcome was lost, believed only after the remote is read:
     /// `landed` says the pushed commit is on the target. Person-only; it pushes nothing.
     Settle { mutation: Mutation, item: String, run: String, pin: String, landed: bool },
+    /// Bring a ticket under the engine with no run: the tracker-only template, in its first column.
+    Track { mutation: Mutation, item: String, #[serde(default, skip_serializing_if = "Option::is_none")] column: Option<String> },
+    /// Move a tracker-only ticket to a column (`backlog`, `todo`, `doing`, `review`, `decision`), or close it (`done`, `cancelled`).
+    Move { mutation: Mutation, item: String, run: String, pin: String, to: String },
+    /// Start a run on a tracker-only ticket under the workspace's published definition `start_pin`.
+    Start { mutation: Mutation, item: String, run: String, pin: String, start_pin: String },
 }
 impl Action {
     pub fn method(&self) -> &'static str {
@@ -44,6 +50,9 @@ impl Action {
             Self::Queue { .. } => "workflow.queue",
             Self::Leave { .. } => "workflow.leave",
             Self::Settle { .. } => "workflow.settle",
+            Self::Track { .. } => "workflow.track",
+            Self::Move { .. } => "workflow.move",
+            Self::Start { .. } => "workflow.start",
         }
     }
 }

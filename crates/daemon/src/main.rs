@@ -256,6 +256,8 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         eprintln!("cannot start workflow service: {error}"); 1
     })?;
 
+    service.track_tickets(None).await;
+
     // This process holds the daemon lock. Claimed and submitted check-ins
     // cannot be replayed after a crash; admitted fences remain held until the
     // old sender is proven unable to start a late key.

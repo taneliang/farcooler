@@ -15,7 +15,7 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
     Ok(found)
 }
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
-    let Command::Enqueue { item,.. } = &input.command else { return Ok(true) };
+    let Command::Enqueue { item, definition, .. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
     // A migrated card must be retained-intent. Its history stays inert (a landed line, a settled
     // landing, a dead pane), but anything live after release is a hand worker the engine must
@@ -30,6 +30,9 @@ pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
             OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND wait_kind IS NOT NULL)
             OR EXISTS(SELECT 1 FROM check_in_schedules WHERE task_id=?1 AND state='enabled')",
+        // A ticket tracked with no run takes over an existing card and its line; only a live worker or landing blocks it.
+        None if definition.is_ticket() => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1 AND exit_code IS NULL AND exit_signal IS NULL)
+            OR EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=?1 AND l.state NOT IN ('landed','dropped'))",
         None => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM landing_tickets WHERE task_id=?1)",

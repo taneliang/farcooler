@@ -159,3 +159,19 @@ fn a_ticket_that_started_cannot_be_moved_by_column() {
     log.try_run(start("ov-1", coding()), Grant::Controller).unwrap();
     assert_eq!(log.mv("ov-1", "todo"), Err(Refusal::Phase));
 }
+
+#[test]
+fn a_ticket_can_begin_in_the_column_its_card_is_already_in() {
+    let mut log = Log::new();
+    let d = Definition::ticket_at("doing").unwrap();
+    d.validate().unwrap();
+    assert!(d.is_ticket());
+    assert_ne!(d.pin(), Definition::ticket().pin());
+    assert!(Definition::ticket_at("nowhere").is_none());
+    log.try_run(Command::Enqueue { item: "ov-1".into(), policy_pin: "policy-1".into(), resource: "res".into(),
+        dependencies: BTreeSet::new(), initial_candidate: Some(d.pin()), definition: d }, Grant::Controller).unwrap();
+    assert_eq!(log.step_id("ov-1"), "doing");
+    log.mv("ov-1", "backlog").unwrap();
+    log.mv("ov-1", "decision").unwrap();
+    assert_eq!(log.step_id("ov-1"), "decision");
+}

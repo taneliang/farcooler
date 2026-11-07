@@ -96,3 +96,9 @@ pub mod workflow_overlay;
 mod workflow_ownership;
 mod workflow_projection;
 pub use workflow_projection::BoardMove;
+impl Store {
+    /// Open cards no run owns: (workspace, key, column), for the engine to track (ov-951).
+    pub fn untracked_tickets(&self, only: Option<uuid::Uuid>) -> farcooler_core::Result<Vec<(uuid::Uuid, String, models::TaskStatus)>> {
+        workflow_projection::untracked(&self.conn(), only).map_err(error::map_err)
+    }
+}

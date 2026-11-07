@@ -17,6 +17,18 @@ pub(crate) fn is_owned(conn: &Connection, task: uuid::Uuid) -> rusqlite::Result<
         [task.as_bytes().as_slice()], |r| r.get(0))
 }
 
+/// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
+pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Result<Vec<(uuid::Uuid, String, TaskStatus)>> {
+    let mut statement = conn.prepare("SELECT t.workspace_id, t.key, t.status FROM tasks t
+        WHERE t.status NOT IN ('done','cancelled') AND (?1 IS NULL OR t.id=?1)
+        AND NOT EXISTS(SELECT 1 FROM workflow_owned_items o WHERE o.task_id=t.id) ORDER BY t.created_at, t.rowid")?;
+    let rows = statement.query_map([only.map(|u| u.as_bytes().to_vec())], |r| {
+        let workspace: Vec<u8> = r.get(0)?; let status: String = r.get(2)?;
+        Ok((uuid::Uuid::from_slice(&workspace).ok(), r.get::<_, String>(1)?, TaskStatus::parse(&status)))
+    })?;
+    Ok(rows.filter_map(|row| row.ok()).filter_map(|(w, k, s)| Some((w?, k, s?))).collect())
+}
+
 /// A hand move (column, hold, line edit) on a card the engine owns: refused
 /// in any phase, because the next step of the run would overwrite it.
 pub(crate) fn refuse_if_owned(conn: &Connection, task: uuid::Uuid) -> DomainResult<()> {
