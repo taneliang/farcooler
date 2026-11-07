@@ -78,6 +78,9 @@ impl Store {
         }
         let kind = if actor == Actor::Runner { NoteKind::Progress } else { NoteKind::Comment };
         let note = insert_note(&tx, task, kind, actor, body, &extra, None)?;
+        if crate::engine_manual::admit(&tx, self.engine_incarnation, note.id, task)? == crate::engine_manual::Admission::Closed {
+            return Err(DomainError::Conflict { what: "engine_not_released" });
+        }
         tx.execute(
             "INSERT INTO message_wakes (note_id, task_id, to_terminal, enqueued_at) VALUES (?1, ?2, ?3, ?4)",
             params![uuid_blob(note.id), uuid_blob(task), to.map(uuid_blob), now_millis()],
@@ -97,10 +100,10 @@ impl Store {
             use rusqlite::OptionalExtension;
             self.conn()
                 .query_row(
-                    "SELECT m.note_id, n.body, m.enqueued_at FROM message_wakes m JOIN task_notes n ON n.id = m.note_id
+                    &format!("SELECT m.note_id, n.body, m.enqueued_at FROM message_wakes m JOIN task_notes n ON n.id = m.note_id
                       WHERE m.task_id = ?1 AND m.done_at IS NULL AND m.claimed_at IS NULL
-                        AND m.to_terminal IS NULL AND n.actor = 'runner'
-                      ORDER BY m.enqueued_at LIMIT 1",
+                        AND m.to_terminal IS NULL AND n.actor = 'runner' AND {}
+                      ORDER BY m.enqueued_at LIMIT 1", crate::engine_manual::visible("m")),
                     params![uuid_blob(task)],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
@@ -176,8 +179,8 @@ impl Store {
     pub fn messages_waiting(&self, workspace: Uuid, to: Option<Uuid>) -> Result<u32> {
         self.conn()
             .query_row(
-                "SELECT count(*) FROM message_wakes m JOIN tasks t ON t.id = m.task_id
-                  WHERE m.done_at IS NULL AND t.workspace_id = ?1 AND m.to_terminal IS ?2",
+                &format!("SELECT count(*) FROM message_wakes m JOIN tasks t ON t.id = m.task_id
+                  WHERE m.done_at IS NULL AND t.workspace_id = ?1 AND m.to_terminal IS ?2 AND {}", crate::engine_manual::visible("m")),
                 params![uuid_blob(workspace), to.map(uuid_blob)],
                 |r| r.get(0),
             )
@@ -204,9 +207,9 @@ impl Store {
     pub fn reported_since(&self, task: Uuid, actor: Actor, since: i64) -> Result<bool> {
         self.conn()
             .query_row(
-                "SELECT EXISTS (SELECT 1 FROM task_notes WHERE task_id = ?1 AND actor = ?2 AND at >= ?3)
+                &format!("SELECT EXISTS (SELECT 1 FROM task_notes WHERE task_id = ?1 AND actor = ?2 AND at >= ?3)
                      OR EXISTS (SELECT 1 FROM message_wakes m JOIN task_notes n ON n.id = m.note_id
-                                 WHERE m.task_id = ?1 AND m.done_at IS NULL AND n.actor = 'runner')",
+                                 WHERE m.task_id = ?1 AND m.done_at IS NULL AND n.actor = 'runner' AND {})", crate::engine_manual::visible("m")),
                 params![uuid_blob(task), actor.to_string(), since],
                 |r| r.get(0),
             )

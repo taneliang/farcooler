@@ -127,7 +127,7 @@ impl Store {
                   ORDER BY w.enqueued_at, w.rowid",
                 kind.to_column(),
                 kind.table(),
-                if kind == WakeKind::Message { crate::engine_manual::VISIBLE_MESSAGE } else { crate::engine_manual::VISIBLE_LEGACY }
+                crate::engine_manual::visible("w")
             ))
             .map_err(map_err)?;
         let rows = stmt
@@ -207,14 +207,10 @@ impl Store {
         };
         let Some(wakes) = wakes else { return Err(farcooler_core::DomainError::NotFound) };
         let note = insert_note(&tx, task, kind, actor, body, &extra, supersedes)?;
-        // After release the legacy answer queue is fenced and never read
-        // (engine_manual::VISIBLE_LEGACY): the answer lands as a note, and
-        // telling the orchestrator is the engine's (ov-945 ticket 4).
+        // After release the answer is queued through the engine's binding
+        // (ov-949); in the cutover window it lands as a note and nothing is queued.
         let wakes = wakes
-            && tx
-                .query_row("SELECT phase FROM engine_cutover_authority WHERE singleton=1", [], |r| r.get::<_, String>(0))
-                .map_err(map_err)?
-                == "legacy";
+            && crate::engine_manual::admit(&tx, self.engine_incarnation, note.id, task)? != crate::engine_manual::Admission::Closed;
         if wakes {
             tx.execute(
                 "INSERT OR IGNORE INTO answer_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
@@ -293,7 +289,7 @@ impl Store {
     /// tick: an indexed probe of an almost always empty set.
     pub fn any_pending_answer_wake(&self) -> Result<bool> {
         self.conn()
-            .query_row("SELECT EXISTS (SELECT 1 FROM answer_wakes WHERE done_at IS NULL)", [], |r| r.get(0))
+            .query_row(&format!("SELECT EXISTS (SELECT 1 FROM answer_wakes w WHERE w.done_at IS NULL AND {})", crate::engine_manual::visible("w")), [], |r| r.get(0))
             .map_err(map_err)
     }
 

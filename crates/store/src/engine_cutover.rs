@@ -22,7 +22,7 @@ pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4
 /// every workflow table. Its tables and rows are conserved unchanged upward.
 pub const SOURCE60_SCHEMA_HASH: &str = "wf1:7e663d320ef00a1181410d4610e24f6b6ee8729ca14f558d25c70a873f39053e";
 pub const SOURCE_SCHEMA_HASH: &str = "wf1:9feeae84e856a84252be1ae4d038e3c35122d1808921d9b8754a304e730d3b09";
-pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:0e04b8601923e04b05ade7b253dd1f5918799d9c458899b2ee96fe918873b060";
+pub const CUTOVER67_SCHEMA_HASH: &str = "wf1:322d78f8e47556c67cabfdbc1e4e0a37b568aedd766b7f12e4a1e0eba471610f";
 pub const MAP_PIN: &str = "bdff40f0b2944173c2be5b5fa906dcd2af88f7bf";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

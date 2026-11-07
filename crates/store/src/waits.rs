@@ -583,16 +583,15 @@ impl Store {
                 rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
             };
             let mut released = Vec::with_capacity(due.len());
-            // After release the hold still lets go (a board fact), but telling
-            // the orchestrator is the engine's: the legacy queue is fenced (ov-947).
-            let queue = crate::engine_cutover::legacy_authority(&tx);
+            // After release the hold still lets go (a board fact), and the
+            // orchestrator is told through the engine's binding (ov-949).
             for (id, until) in due {
                 write_wait(&tx, id, None, None, now)?;
                 let body =
                     format!("Held until {}. That time has come.", farcooler_core::local_time::moment(until));
                 let extra = json!({ "wait": "none", "was": "until", "until": until });
                 let note = insert_note(&tx, id, NoteKind::Wait, Actor::Runner, &body, &extra, None)?;
-                if queue {
+                if crate::engine_manual::admit(&tx, self.engine_incarnation, note.id, id)? != crate::engine_manual::Admission::Closed {
                     tx.execute(
                         "INSERT OR IGNORE INTO hold_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
                         params![uuid_blob(note.id), uuid_blob(id), now],

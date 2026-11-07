@@ -1,6 +1,9 @@
 //! Registry 67: the minimal durable authority the engine needs for retained
-//! communication. Old `message_wakes` rows stay inert history; only a row bound
-//! here to the CURRENT released incarnation may be inserted, claimed or settled.
+//! communication. Old `message_wakes`, `answer_wakes` and `hold_wakes` rows stay
+//! inert history; only a row whose note is bound here to the CURRENT released
+//! incarnation may be inserted, claimed or settled (ov-940, ov-949). The three
+//! queues keep their own claim and finish steps, which is what tells each wake
+//! at most once; the binding says which rows the engine admitted.
 //! Notice eligibility is a floor: pending outbox rows at or below it are
 //! retained history and are never rediscovered by the consumer.
 use rusqlite::{Transaction, params};
@@ -13,7 +16,7 @@ use crate::store::Store;
 pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     let bound = |note: &str| format!("EXISTS(SELECT 1 FROM engine_manual_delivery d JOIN engine_cutover_authority a
         ON a.singleton=1 AND a.phase='released' AND a.incarnation=d.incarnation WHERE d.note_id={note})");
-    tx.execute_batch(&format!("
+    tx.execute_batch("
         CREATE TABLE engine_manual_delivery(note_id BLOB PRIMARY KEY, task_id BLOB NOT NULL, incarnation INTEGER NOT NULL);
         CREATE TRIGGER engine_manual_no_update BEFORE UPDATE ON engine_manual_delivery BEGIN SELECT RAISE(ABORT,'immutable manual delivery binding'); END;
         CREATE TRIGGER engine_manual_no_delete BEFORE DELETE ON engine_manual_delivery BEGIN SELECT RAISE(ABORT,'immutable manual delivery binding'); END;
@@ -25,21 +28,55 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         CREATE TRIGGER engine_notice_eligibility_no_delete BEFORE DELETE ON engine_notice_eligibility BEGIN SELECT RAISE(ABORT,'immutable notice eligibility'); END;
         DROP TRIGGER engine_fence_message_wakes_i;
         DROP TRIGGER engine_fence_message_wakes_u;
-        CREATE TRIGGER engine_fence_message_wakes_i BEFORE INSERT ON message_wakes
+        DROP TRIGGER engine_fence_answer_wakes_i;
+        DROP TRIGGER engine_fence_answer_wakes_u;
+        DROP TRIGGER engine_fence_hold_wakes_i;
+        DROP TRIGGER engine_fence_hold_wakes_u;")?;
+    for table in ["message_wakes","answer_wakes","hold_wakes"] {
+        tx.execute_batch(&format!("
+        CREATE TRIGGER engine_fence_{table}_i BEFORE INSERT ON {table}
             WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy' AND NOT {new}
             BEGIN SELECT RAISE(ABORT,'legacy execution authority retired'); END;
-        CREATE TRIGGER engine_fence_message_wakes_u BEFORE UPDATE ON message_wakes
+        CREATE TRIGGER engine_fence_{table}_u BEFORE UPDATE ON {table}
             WHEN (SELECT phase FROM engine_cutover_authority WHERE singleton=1)!='legacy' AND NOT {old}
             BEGIN SELECT RAISE(ABORT,'legacy execution authority retired'); END;",
-        new = bound("NEW.note_id"), old = bound("OLD.note_id")))
+            new = bound("NEW.note_id"), old = bound("OLD.note_id")))?;
+    }
+    Ok(())
 }
 
-/// SQL fragment: which message wakes the retained consumer may see right now.
-pub(crate) const VISIBLE_MESSAGE: &str = "((SELECT phase FROM engine_cutover_authority WHERE singleton=1)='legacy'
+/// SQL fragment over a queue aliased `alias`: which wakes the retained consumer
+/// may see right now. While legacy, all of them; after release, only the ones
+/// the engine bound to this incarnation. Everything queued before is history.
+pub(crate) fn visible(alias: &str) -> String {
+    format!("((SELECT phase FROM engine_cutover_authority WHERE singleton=1)='legacy'
     OR EXISTS(SELECT 1 FROM engine_manual_delivery d JOIN engine_cutover_authority a
-        ON a.singleton=1 AND a.phase='released' AND a.incarnation=d.incarnation WHERE d.note_id=w.note_id))";
-/// Answers and ended holds are legacy progression: visible only while legacy.
-pub(crate) const VISIBLE_LEGACY: &str = "(SELECT phase FROM engine_cutover_authority WHERE singleton=1)='legacy'";
+        ON a.singleton=1 AND a.phase='released' AND a.incarnation=d.incarnation WHERE d.note_id={alias}.note_id))")
+}
+
+/// What the engine says about queueing a wake for `note` right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Admission {
+    /// Before cutover: the old queue works as it always did.
+    Legacy,
+    /// Released: the note is now bound to this incarnation, and may be queued.
+    Bound,
+    /// Quiesced, committed, or another incarnation's: nothing may be queued.
+    Closed,
+}
+
+/// Decide, and when released bind `note` to this incarnation, inside the
+/// caller's transaction, so the binding and the wake commit or fail together.
+pub(crate) fn admit(tx: &rusqlite::Connection, incarnation: u64, note: Uuid, task: Uuid) -> Result<Admission> {
+    let (phase, current) = tx
+        .query_row("SELECT phase, incarnation FROM engine_cutover_authority WHERE singleton=1", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))
+        .map_err(map_err)?;
+    if phase == "legacy" { return Ok(Admission::Legacy); }
+    if phase != "released" || current != incarnation { return Ok(Admission::Closed); }
+    tx.execute("INSERT INTO engine_manual_delivery(note_id,task_id,incarnation) VALUES(?1,?2,?3)", params![uuid_blob(note), uuid_blob(task), incarnation])
+        .map_err(map_err)?;
+    Ok(Admission::Bound)
+}
 
 /// Recorded in the SAME transaction as the engine commit.
 pub(crate) fn record_notice_floor(tx: &Transaction<'_>, incarnation: u64) -> rusqlite::Result<()> {
@@ -56,28 +93,10 @@ pub(crate) fn notice_eligible(tx: &rusqlite::Connection, id: &str) -> rusqlite::
 impl Store {
     /// A person's explicit manual message. The caller (Service) has already
     /// authenticated the actor; an authenticated caller's actor (person, member, manager or
-    /// agent) is accepted here, never the runner. Under a released engine it writes the note, the
-    /// binding to the current incarnation and the wake in one transaction;
-    /// before cutover it is the ordinary `send_message`. Other phases refuse.
+    /// agent) is accepted here, never the runner. It is `send_message`, which binds
+    /// and queues through the engine once released and refuses in the cutover window.
     pub fn send_manual_message(&self, task: Uuid, actor: Actor, body: &str, to: Option<Uuid>, extra: serde_json::Value) -> Result<TaskNote> {
         if actor == Actor::Runner { return Err(DomainError::InvalidArgument { what: "manual_actor" }); }
-        let phase = crate::engine_cutover::authority(&self.conn()).map_err(|_| DomainError::OperationFailed)?;
-        if phase.phase == "legacy" { return self.send_message(task, actor, body, to, extra); }
-        if phase.phase != "released" || phase.incarnation != self.engine_incarnation { return Err(DomainError::Conflict { what: "engine_not_released" }); }
-        let mut conn = self.conn();
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
-        let wakes: Option<bool> = {
-            use rusqlite::OptionalExtension;
-            tx.query_row("SELECT w.wake_on_answer FROM tasks t JOIN workspaces w ON w.id = t.workspace_id WHERE t.id = ?1",
-                params![uuid_blob(task)], |r| r.get(0)).optional().map_err(map_err)?
-        };
-        match wakes { None => return Err(DomainError::NotFound), Some(false) => return Err(DomainError::Conflict { what: "typing_off" }), Some(true) => {} }
-        let note = crate::tasks::insert_note(&tx, task, crate::models::NoteKind::Comment, actor, body, &extra, None)?;
-        tx.execute("INSERT INTO engine_manual_delivery(note_id,task_id,incarnation) VALUES(?1,?2,?3)",
-            params![uuid_blob(note.id), uuid_blob(task), self.engine_incarnation]).map_err(map_err)?;
-        tx.execute("INSERT INTO message_wakes (note_id, task_id, to_terminal, enqueued_at) VALUES (?1, ?2, ?3, ?4)",
-            params![uuid_blob(note.id), uuid_blob(task), to.map(uuid_blob), crate::tasks::now_millis()]).map_err(map_err)?;
-        tx.commit().map_err(map_err)?;
-        Ok(note)
+        self.send_message(task, actor, body, to, extra)
     }
 }

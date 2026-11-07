@@ -30,8 +30,7 @@ fn manual_delivery_is_fresh_bound_and_never_revives_old_queue_rows() {
     assert!(store.pending_message_wakes().unwrap().is_empty(), "the pre-cutover queued row is inert history");
     assert_eq!(store.conn().query_row("SELECT count(*) FROM message_wakes", [], |r| r.get::<_, i64>(0)).unwrap(), 1, "and is retained");
     assert!(store.conn().execute("UPDATE message_wakes SET claimed_at=1", []).is_err(), "old row cannot be claimed");
-    assert!(store.send_message(task, Actor::User, "x", None, serde_json::json!({})).is_err(), "ordinary queue stays fenced");
-    assert!(store.send_runner_notice(task, "x", serde_json::json!({})).is_err(), "automatic producers stay fenced");
+    assert!(store.conn().execute("INSERT INTO message_wakes(note_id,task_id,enqueued_at) VALUES(x'0102',?1,1)", [task.as_bytes().as_slice()]).is_err(), "a row with no binding stays fenced");
     assert!(store.send_manual_message(task, Actor::Runner, "x", None, serde_json::json!({})).is_err(), "never the runner");
     let note = store.send_manual_message(task, Actor::User, "fresh manual", None, serde_json::json!({})).unwrap();
     let pending = store.pending_message_wakes().unwrap();
