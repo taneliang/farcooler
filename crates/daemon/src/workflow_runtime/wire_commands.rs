@@ -140,6 +140,13 @@ impl Runtime {
                 Action::Get => unreachable!(),
             }
         };
+        // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).
+        if matches!(action, Action::Publish { .. }) && receipt.result.is_ok() {
+            let found = self.store.untracked_tickets(None).unwrap_or_default();
+            let mine: Vec<_> = found.into_iter().filter(|(w, _, _)| w.to_string() == workspace)
+                .map(|(w, k, s)| (w.to_string(), k, crate::workflow_service::column_of(s).to_string())).collect();
+            let _ = self.track_tickets(&mine);
+        }
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
         Ok(serde_json::json!({"schema":1,"receipt":receipt}))
     }

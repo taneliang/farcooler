@@ -351,3 +351,13 @@ pub(crate) fn sign_in_member(svc: &crate::service::Service, handle: &str) {
     let dir = crate::claude_logins::ensure_login_dir(svc.root_dir(), &id).unwrap();
     std::fs::write(std::path::Path::new(&dir).join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"member@example.com"}}"#).unwrap();
 }
+
+/// Publishes a workflow for `workspace` straight through the store, so the board tracks its cards (ov-962).
+/// The definition is a plain coding one with no adapter: enough for tracking, which runs nothing.
+pub(crate) fn publish_for_test(svc: &crate::service::Service, workspace: Uuid) {
+    use farcooler_store::workflow_publication::Write;
+    let definition = crate::workflow_runtime::coding_definition(false);
+    svc.store.workflow_wire_write(&workspace.to_string(), "publish-for-test", "publish-for-test",
+        Write::Publish { expected_pin: None, definition: &definition, adapter: None, notifications: None, revision: 0 })
+        .expect("the store accepts a publication");
+}

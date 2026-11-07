@@ -6,11 +6,6 @@ use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::TaskStatus;
 
-/// Whether this daemon tracks cards on its own: always, except under the integration tests' stub-agents
-/// switch (`service::test_stub_agents`), which a shipped install never sets. Those tests drive the hand
-/// flows (lines, pull request stages) on cards the engine would otherwise hold (ov-962).
-pub fn auto_tracking() -> bool { !crate::service::test_stub_agents() }
-
 /// The engine column a status names.
 pub(crate) fn column(status: TaskStatus) -> &'static str {
     match status {
@@ -88,6 +83,7 @@ mod tests {
         let seat = Seat::Agent(Some(orchestrator));
         // Before the engine holds it, nothing is moved here.
         assert!(move_through_engine(&svc, seat, &Person::Owner, card.id, &set(card.id, TaskStatus::Todo)).await.unwrap().is_none());
+        crate::test_support::publish_for_test(&svc, board.id);
         svc.start_workflows().unwrap();
         svc.track_tickets(None).await;
         for status in [TaskStatus::Todo, TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::NeedsDecision, TaskStatus::Backlog] {
@@ -129,6 +125,7 @@ mod tests {
             assert!(!allowed(seat, &card, TaskStatus::Todo), "{seat:?}");
         }
         // Through the engine, the same refusal comes before any move.
+        crate::test_support::publish_for_test(&svc, board.id);
         svc.start_workflows().unwrap();
         svc.track_tickets(Some(other.id)).await;
         for seat in [Seat::Person, Seat::Agent(None), Seat::Unreadable, own] {

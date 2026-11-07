@@ -97,9 +97,14 @@ mod workflow_ownership;
 mod workflow_projection;
 pub use workflow_projection::BoardMove;
 impl Store {
-    /// Open cards no run owns: (workspace, key, column), for the engine to track (ov-951).
+    /// Open cards no run owns: (workspace, key, column), for the engine to track (ov-951). Only a board
+    /// with a published workflow is tracked; a board without one keeps its cards as they always were (ov-962).
     pub fn untracked_tickets(&self, only: Option<uuid::Uuid>) -> farcooler_core::Result<Vec<(uuid::Uuid, String, models::TaskStatus)>> {
-        workflow_projection::untracked(&self.conn(), only).map_err(error::map_err)
+        let conn = self.conn();
+        let mut found = workflow_projection::untracked(&conn, only).map_err(error::map_err)?;
+        found.retain(|(workspace, _, _)| conn.query_row("SELECT 1 FROM workflow_bundle_selections WHERE workspace=?1",
+            [workspace.to_string()], |_| Ok(())).is_ok());
+        Ok(found)
     }
     /// Whether the engine holds this card as a ticket at rest: a column, no run (ov-962).
     pub fn task_is_tracked_ticket(&self, task: uuid::Uuid) -> farcooler_core::Result<bool> {

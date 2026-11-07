@@ -8,6 +8,12 @@ pub(crate) struct Owner {
     task: JoinHandle<Result<()>>,
     notices: JoinHandle<Result<()>>,
 }
+/// The engine column a card's status puts it in when it is first tracked.
+pub(crate) fn column_of(s: farcooler_store::models::TaskStatus) -> &'static str {
+    use farcooler_store::models::TaskStatus as S;
+    match s { S::Backlog => "backlog", S::Todo => "todo", S::InProgress => "doing", S::InReview => "review",
+        S::NeedsDecision => "decision", S::Done | S::Cancelled => "backlog" }
+}
 impl Service {
     pub fn start_workflows(&self) -> Result<()> {
         let mut owner = self.workflow_owner.lock().map_err(|_| Error::Refused("workflow owner lock poisoned"))?;
@@ -30,13 +36,8 @@ impl Service {
     /// Bring every open card no run owns under the engine (ov-951): all of them at start, or one just made.
     pub async fn track_tickets(&self, only: Option<uuid::Uuid>) {
         let Some(handle) = self.workflow_handle() else { return };
-        let column = |s: farcooler_store::models::TaskStatus| {
-            use farcooler_store::models::TaskStatus as S;
-            match s { S::Backlog => "backlog", S::Todo => "todo", S::InProgress => "doing", S::InReview => "review",
-                S::NeedsDecision => "decision", S::Done | S::Cancelled => "backlog" }
-        };
         let Ok(found) = self.store.untracked_tickets(only) else { return };
-        let tickets: Vec<_> = found.into_iter().map(|(w, k, s)| (w.to_string(), k, column(s).to_string())).collect();
+        let tickets: Vec<_> = found.into_iter().map(|(w, k, s)| (w.to_string(), k, column_of(s).to_string())).collect();
         if tickets.is_empty() { return; }
         if let Err(error) = handle.track(tickets).await { tracing::warn!(%error, "could not track cards"); }
     }
@@ -85,6 +86,14 @@ mod tests {
         let backlog = service.store.create_task(board.id, "plain", Actor::User).unwrap();
         let doing = service.store.create_task(board.id, "under way", Actor::User).unwrap();
         service.store.set_task_status(doing.id, TaskStatus::InProgress, Actor::User).unwrap();
+        // A board with nothing published keeps its cards as they were.
+        service.start_workflows().unwrap();
+        service.track_tickets(None).await;
+        assert!(service.store.untracked_tickets(None).unwrap().is_empty(), "no publication, nothing to track");
+        assert!(service.store.set_task_status(backlog.id, TaskStatus::Todo, Actor::User).is_ok(), "an untracked card takes a hand move");
+        service.store.set_task_status(backlog.id, TaskStatus::Backlog, Actor::User).unwrap();
+        service.stop_workflows().await.unwrap();
+        crate::test_support::publish_for_test(&service, board.id);
         let closed = service.store.create_task(board.id, "finished", Actor::User).unwrap();
         service.store.set_task_status(closed.id, TaskStatus::Done, Actor::User).unwrap();
         service.start_workflows().unwrap();
