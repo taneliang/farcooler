@@ -18,6 +18,7 @@ mod coding_execute;
 mod coding_native;
 mod coding_landing;
 mod coding_verbs;
+mod coding_settle;
 pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
@@ -619,7 +620,11 @@ impl Runtime {
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
-                    let mut result = self.wire_command(&admission.workspace(), admission.principal(), *action)?;
+                    let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
+                        self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
+                    } else {
+                        self.wire_command(&admission.workspace(), admission.principal(), *action)?
+                    };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
                         result["context"] = admission.context(epoch);

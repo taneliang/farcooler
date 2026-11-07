@@ -72,7 +72,7 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
     if let Some(environment) = environment {
         command.env_clear().env("PATH", "/usr/bin:/bin").envs(environment.iter().copied());
     }
-    supervise(command, tree, log, limit, None).await.map(|status| status == Some(0))
+    supervise(command, tree, log, limit, None, None).await.map(|status| status == Some(0))
 }
 
 /// Configured argv uses the same group ownership/quiescence boundary as gates.
@@ -80,14 +80,61 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
 pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>) -> std::io::Result<Option<i32>>
 {
+    owned(tree, argv, environment, log, limit, cancel, None).await
+}
+
+/// Like `configured`, but records who the process is in `owner` as soon as it exists, so that a
+/// later run that finds the process still going (the daemon died and left it) can end it. The
+/// record is a pid and the process's start time; see `Owner::reap`.
+pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
+    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>) -> std::io::Result<Option<i32>>
+{
     let program = argv.first().ok_or_else(|| std::io::Error::other("empty argv"))?;
     let mut command = Command::new(program);
     command.args(&argv[1..]).env_clear().envs(environment);
-    supervise(command, tree, log, limit, Some(cancel)).await
+    supervise(command, tree, log, limit, Some(cancel), owner).await
+}
+
+/// A process this runtime started and may have outlived: its pid, which is also its process group,
+/// and when it started, so a recycled pid is never taken for it.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct Owner { pub pid: u32, pub started: String }
+impl Owner {
+    fn started_at(pid: u32) -> String {
+        std::process::Command::new("/bin/ps").args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output()
+            .ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    }
+    pub(crate) fn write(path: &Path, pid: u32) -> std::io::Result<()> {
+        let bytes = serde_json::to_vec(&Owner { pid, started: Self::started_at(pid) }).map_err(std::io::Error::other)?;
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, bytes)?;
+        std::fs::File::open(&temporary)?.sync_all()?;
+        std::fs::rename(&temporary, path)
+    }
+    /// End whatever the record at `path` still owns. True when nothing of it is left. A group that is
+    /// alive with its leader gone is ours (a pid is never reused while its group lives); a live leader
+    /// that started at another time is someone else's, and left alone.
+    pub(crate) async fn reap(path: &Path) -> std::io::Result<bool> {
+        let raw = match std::fs::read(path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        let owner: Owner = serde_json::from_slice(&raw).map_err(std::io::Error::other)?;
+        if Group::gone(owner.pid)? { return Ok(true); }
+        let leader_alive = unsafe { libc::kill(owner.pid as i32, 0) } == 0;
+        if leader_alive && (owner.started.is_empty() || Self::started_at(owner.pid) != owner.started) { return Ok(true); }
+        Group::new(owner.pid).kill()?;
+        for _ in 0..100 {
+            if Group::gone(owner.pid)? { return Ok(true); }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Ok(false)
+    }
 }
 
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
-    mut cancel: Option<tokio::sync::watch::Receiver<bool>>) -> std::io::Result<Option<i32>>
+    mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>) -> std::io::Result<Option<i32>>
 {
     let file = std::fs::OpenOptions::new().append(true).create(true).open(log)?;
     command.current_dir(tree)
@@ -96,6 +143,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     let mut child = command.spawn()?;
     let pid = child.id().expect("newly spawned child has a pid");
     let mut group = Group(Some(pid));
+    if let Some(owner) = owner { Owner::write(owner, pid)?; }
     let result = tokio::select! {
         result = tokio::time::timeout(limit, exited(pid)) => Some(result),
         _ = async {

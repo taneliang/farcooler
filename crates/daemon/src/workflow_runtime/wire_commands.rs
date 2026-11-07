@@ -26,7 +26,7 @@ impl Runtime {
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
-            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } => mutation,
+            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } => mutation,
             Action::Get => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -104,6 +104,7 @@ impl Runtime {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
+                Action::Settle { .. } => unreachable!("settling reads the remote, so it is answered before this"),
                 Action::Get => unreachable!(),
             }
         };

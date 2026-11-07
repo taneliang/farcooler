@@ -1035,6 +1035,7 @@ pub mod method {
         WorkflowRetry = "workflow.retry" => WORKFLOW_COMMANDS,
         WorkflowQueue = "workflow.queue" => WORKFLOW_COMMANDS,
         WorkflowLeave = "workflow.leave" => WORKFLOW_COMMANDS,
+        WorkflowSettle = "workflow.settle" => WORKFLOW_COMMANDS,
         WorkflowCutover = "workflow.cutover" => WORKFLOW_COMMANDS,
         LayoutViewport = "layout.viewport" => LAYOUT,
         LayoutPreset = "layout.preset" => LAYOUT,

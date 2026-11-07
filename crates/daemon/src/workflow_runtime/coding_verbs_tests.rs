@@ -8,6 +8,10 @@ use std::collections::BTreeMap;
 
 const GATE: &str = r#"elif stage == 'gate':
     if mode == 'gate-fail': sys.exit(5)
+    if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
+    if mode == 'batch-fail':
+        head = subprocess.check_output(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'rev-parse', 'refs/heads/main']).decode().strip()
+        if int(subprocess.check_output(['/usr/bin/git', 'rev-list', '--count', head + '..HEAD']).decode().strip()) > 1: sys.exit(5)
     if mode == 'move-base' and not pathlib.Path(os.environ['MARKER']).exists():
         pathlib.Path(os.environ['MARKER']).write_text('x')
         d = os.environ['SCRATCH']
@@ -399,4 +403,148 @@ async fn only_an_uncertain_push_can_be_settled() {
     assert!(runtime.settle_push(&controller, "w", &group, true).await.is_err(), "a running group is not uncertain");
     assert!(runtime.settle_push(&controller, "w", "one", true).await.is_err(), "a ticket is not a push");
     assert!(runtime.settle_push(&controller, "w", "nobody", true).await.is_err());
+}
+
+// ov-956 review blockers.
+
+#[tokio::test]
+async fn a_rejected_gate_splits_a_batch_and_both_halves_land() {
+    let (_dir, mut runtime) = lander("batch-fail").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    let first = remote_head(&runtime).await;
+    for item in ["x", "a", "b"] { at_join(&mut runtime, item, &definition).await; }
+    // `x` takes the target; `a` and `b` queue behind it and form one group.
+    for item in ["x", "a", "b"] { assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok()); }
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items[&state.items["a"].grouped_in.clone().unwrap()].members.len(), 2);
+    for item in ["x", "a", "b"] { until(&mut runtime, |s| phase_of(s, item) == Some(Phase::Done)).await; }
+    let landing = runtime.coding.as_ref().unwrap().landing.clone().unwrap();
+    assert_eq!(adapters::git(&landing.repository, &["rev-list", "--count", &format!("{first}..{}", landing.target)]).await.unwrap(), "3",
+        "each ticket's commit landed");
+    assert_eq!(outbox(&runtime, StageKind::Run), 4, "x, then the pair (rejected), then each half");
+    assert_eq!(outbox(&runtime, StageKind::Push), 3);
+}
+
+#[tokio::test]
+async fn a_failing_gate_is_rejected_on_the_first_run_and_not_retried_as_a_crash() {
+    let (_dir, mut runtime) = lander("gate-fail").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(outbox(&runtime, StageKind::Run), 1, "a failing exit is the candidate's answer: one run, not one per attempt");
+}
+
+#[tokio::test]
+async fn a_gate_that_leaves_the_tree_dirty_rejects_the_candidate_and_wedges_nothing() {
+    let (_dir, mut runtime) = lander("gate-dirty").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    let first = remote_head(&runtime).await;
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(remote_head(&runtime).await, first);
+    assert_eq!(state.items[&group_id(&state)].phase, Phase::Failed, "failed, not uncertain: the target is free");
+}
+
+#[tokio::test]
+async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert!(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)));
+    // The daemon died with the gate running: its process group lives on, recorded, with no result.
+    let mut gate = tokio::process::Command::new("/bin/sleep").arg("600").process_group(0).spawn().unwrap();
+    let pid = gate.id().unwrap();
+    crate::effect_runner::Owner::write(&runtime.owner_path(&binding), pid).unwrap();
+    std::fs::write(runtime.tree(&binding).join("half-built.txt"), "left by the gate").unwrap();
+    let reaped = tokio::spawn(async move { gate.wait().await });
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    // Waiting on it proves it ended: a gate nobody ended would sleep for ten minutes.
+    tokio::time::timeout(Duration::from_secs(5), reaped).await.expect("the old gate was not ended").unwrap().unwrap();
+    assert_ne!(unsafe { libc::killpg(pid as i32, 0) }, 0, "the old gate's process group is gone");
+    assert_eq!(outbox(&runtime, StageKind::Run), 2, "the gate ran again on a clean tree");
+}
+
+#[tokio::test]
+async fn a_pid_that_belongs_to_someone_else_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("owner.json");
+    let mut other = tokio::process::Command::new("/bin/sleep").arg("600").process_group(0).spawn().unwrap();
+    let pid = other.id().unwrap();
+    std::fs::write(&path, serde_json::to_vec(&serde_json::json!({ "pid": pid, "started": "Thu Jan  1 00:00:00 1970" })).unwrap()).unwrap();
+    assert!(crate::effect_runner::Owner::reap(&path).await.unwrap(), "nothing of ours is left");
+    assert_eq!(unsafe { libc::killpg(pid as i32, 0) }, 0, "a process that started at another time is not ours to kill");
+    other.kill().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_restart_during_ci_looks_again_and_the_pushed_group_ends_as_landed() {
+    let (_dir, mut runtime) = lander("ci-pending").await;
+    let mut definition = batched_push(&runtime, "any", 400);
+    definition.groups.get_mut("landing").unwrap().steps[4].max_attempts = 1;
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..6 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert!(matches!(binding.effect.kind, EffectKind::Execute(StageKind::AwaitCi)));
+    let pushed = remote_head(&runtime).await;
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    // CI never finishes, so the wait times out: the group fails, after the push.
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2, "the restart cost no attempt: CI was looked at again");
+    assert_eq!(candidate_of(&state, "one"), Some(pushed.as_str()), "the ticket carries what landed, and was not told `rejected`");
+    assert_eq!(state.items["one"].back_edges.get("join"), None);
+}
+
+#[tokio::test]
+async fn a_push_that_fails_its_checks_before_sending_is_tried_again_and_never_uncertain() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    let first = remote_head(&runtime).await;
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..5 { runtime.pump(time).await.unwrap(); }
+    // The fold's record is gone: the push cannot show what it was built on, so it sends nothing.
+    for entry in std::fs::read_dir(runtime.root.join("receipts")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.file_name().unwrap().to_string_lossy().starts_with("fold-") { std::fs::remove_file(path).unwrap(); }
+    }
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(remote_head(&runtime).await, first);
+    assert_eq!(state.items[&group_id(&state)].phase, Phase::Failed, "failed and free, not uncertain");
+    assert_eq!(outbox(&runtime, StageKind::Push), 2, "tried again, up to its attempts");
+}
+
+#[tokio::test]
+async fn a_remote_that_cannot_be_read_settles_nothing() {
+    let (dir, runtime, group) = uncertain_push(false).await;
+    let landing = runtime.coding.as_ref().unwrap().landing.clone().unwrap();
+    std::fs::rename(&landing.repository, dir.path().join("moved-away.git")).unwrap();
+    let controller = runtime.controller();
+    // Unreadable is not "absent": saying the push did not land must not be believed.
+    assert!(runtime.settle_push(&controller, "w", &group, false).await.is_err());
+    assert!(runtime.settle_push(&controller, "w", &group, true).await.is_err());
+    std::fs::rename(dir.path().join("moved-away.git"), &landing.repository).unwrap();
+    runtime.settle_push(&controller, "w", &group, false).await.unwrap();
+}
+
+#[tokio::test]
+async fn the_wire_settles_a_lost_push_for_the_exact_run_and_refuses_a_stale_one() {
+    let (_dir, mut runtime, group) = uncertain_push(true).await;
+    let state = runtime.state("w").unwrap().unwrap();
+    let item = &state.items[&group];
+    let stale = runtime.settle_wire("w", &group, "old-run", &item.pin, true, state.epoch).await.unwrap();
+    assert_eq!(stale.pointer("/receipt/result/Err").and_then(|v| v.as_str()), Some("Stale"), "{stale}");
+    let wrong_remote = runtime.settle_wire("w", &group, &item.run, &item.pin, false, state.epoch).await.unwrap();
+    assert!(wrong_remote.pointer("/receipt/result/Err").is_some(), "the remote has the commit: {wrong_remote}");
+    let settled = runtime.settle_wire("w", &group, &item.run, &item.pin, true, state.epoch).await.unwrap();
+    assert!(settled.pointer("/receipt/result/Ok").is_some(), "{settled}");
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
 }

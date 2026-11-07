@@ -33,8 +33,10 @@ pub(super) fn classify_push(exit: Option<i32>, porcelain: &str, remote_after: Op
         Some(0) if remote_after == Some(candidate) => PushVerdict::Landed,
         // A zero exit with the candidate nowhere is not a landing, and not a refusal either.
         Some(0) | None => PushVerdict::Unknown,
-        // Porcelain marks a ref the remote refused with `!`. Seeing the candidate there anyway means we cannot say.
-        Some(_) if porcelain.lines().any(|l| l.starts_with('!')) && remote_after.is_some_and(|r| r != candidate) => PushVerdict::Refused,
+        // Porcelain marks a ref the remote refused with `!` and says why. Only a refusal (not
+        // `[remote failure]`, where the ref may have moved) counts, and only if the candidate is not there.
+        Some(_) if porcelain.lines().any(|l| l.starts_with('!') && (l.contains("[rejected]") || l.contains("[remote rejected]")))
+            && remote_after.is_some_and(|r| r != candidate) => PushVerdict::Refused,
         Some(_) => PushVerdict::Unknown,
     }
 }
@@ -52,12 +54,30 @@ impl Exec {
     fn fold_index(&self, binding: &Binding, folded: &str) -> PathBuf {
         self.root.join("receipts").join(format!("fold-{}-{folded}.json", digest(&(&binding.workspace, &binding.effect.item))))
     }
-    fn landing(&self) -> Result<&CodingLanding> {
+    pub(super) fn landing(&self) -> Result<&CodingLanding> {
         self.coding.as_ref().and_then(|c| c.landing.as_ref()).ok_or(Error::Refused("landing verbs need a landing identity"))
     }
     fn write_fact(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
         durable(&self.verb_path(binding), &serde_json::to_vec(&VerbFact {
             binding: binding.clone(), label: label.into(), candidate: candidate.into(), detail })?)
+    }
+    /// A person's settlement replaces the fact a crash left, atomically; nothing else ever does.
+    pub(super) fn settle_fact(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
+        let path = self.verb_path(binding);
+        let temporary = path.with_extension("settling");
+        let _ = std::fs::remove_file(&temporary);
+        durable(&temporary, &serde_json::to_vec(&VerbFact { binding: binding.clone(), label: label.into(), candidate: candidate.into(), detail })?)?;
+        std::fs::rename(&temporary, &path)?;
+        std::fs::File::open(path.parent().ok_or(Error::Refused("missing parent"))?)?.sync_all()?;
+        Ok(())
+    }
+    /// The local repository's configuration must not redirect or extend the transport.
+    async fn refuse_redirected_transport(&self, binding: &Binding) -> Result<()> {
+        let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;
+        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
+            return Err(Error::Refused("local landing config redirects transport"));
+        }
+        Ok(())
     }
     /// Git in `dir`, recorded like `git_recorded`, but a refusal is an answer and not an error.
     async fn try_git(&self, binding: &Binding, dir: &Path, args: &[&str]) -> Result<(bool, String, String)> {
@@ -108,7 +128,7 @@ impl Exec {
         if matches!(kind, StageKind::Push) && fact.label == "passed" {
             let identity = self.landing()?;
             if fact.candidate != binding.effect.candidate.clone().unwrap_or_default()
-                || adapters::git(&identity.repository, &["merge-base", "--is-ancestor", &fact.candidate, &identity.target]).await.is_err()
+                || !on_remote(&identity.repository, &identity.target, &fact.candidate).await?
             { return Err(Error::Refused("remote landing SHA changed")); }
         }
         let manifest = digest(&(binding, &fact.candidate, &raw, &fact.label));
@@ -149,6 +169,7 @@ impl Exec {
     /// Another lander's commits are not here until this runs. A fetch that fails is a poll with no answer.
     async fn fetch_base(&self, binding: &Binding, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<String>> {
         let identity = self.landing()?;
+        self.refuse_redirected_transport(binding).await?;
         let local = format!("refs/farcooler/base/{}", &digest(&(&identity.repository, &identity.target))[4..20]);
         let (program, environment) = self.git_environment().await?;
         let argv = vec![program, "fetch".into(), "--quiet".into(), "--no-tags".into(), "--no-recurse-submodules".into(),
@@ -276,24 +297,29 @@ impl Exec {
     /// so starting over from the new base is safe. A timeout or a lost connection is not: that is uncertain.
     async fn push(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         let identity = self.landing()?.clone();
-        self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.validate()?;
-        let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
-        // The tree is exactly what the gate judged.
-        if self.verify_tree(binding).await? != candidate { return Err(Error::Refused("pushed candidate is not the gated tree")); }
-        let index: serde_json::Value = serde_json::from_slice(&self.bytes(&self.fold_index(binding, &candidate))?)?;
-        let base = index["base"].as_str().filter(|b| sha(b)).ok_or(Error::Refused("push has no fold record"))?.to_string();
-        if index["folded"] != candidate || index["item"] != binding.effect.item {
-            return Err(Error::Refused("fold record is for another commit"));
-        }
-        self.git_recorded(binding, &self.tree(binding), &["merge-base", "--is-ancestor", &base, &candidate]).await?;
-        if adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
-            return Err(Error::Refused("landing transport is not bare"));
-        }
-        let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;
-        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
-            return Err(Error::Refused("local landing config redirects transport"));
-        }
-        let before = adapters::git(&identity.repository, &["rev-parse", &identity.target]).await?;
+        // Everything up to the send changes nothing outside: a failure here is retried, not uncertain.
+        let checked = async {
+            self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.validate()?;
+            let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
+            // The tree is exactly what the gate judged.
+            if self.verify_tree(binding).await? != candidate { return Err(Error::Refused("pushed candidate is not the gated tree")); }
+            let index: serde_json::Value = serde_json::from_slice(&self.bytes(&self.fold_index(binding, &candidate))?)?;
+            let base = index["base"].as_str().filter(|b| sha(b)).ok_or(Error::Refused("push has no fold record"))?.to_string();
+            if index["folded"] != candidate || index["item"] != binding.effect.item {
+                return Err(Error::Refused("fold record is for another commit"));
+            }
+            self.git_recorded(binding, &self.tree(binding), &["merge-base", "--is-ancestor", &base, &candidate]).await?;
+            if adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
+                return Err(Error::Refused("landing transport is not bare"));
+            }
+            self.refuse_redirected_transport(binding).await?;
+            let before = adapters::git(&identity.repository, &["rev-parse", &identity.target]).await?;
+            Ok((candidate, base, before))
+        }.await;
+        let Ok((candidate, base, before)) = checked else {
+            tracing::warn!(effect = %binding.effect.id, "push refused before anything was sent; it will be tried again");
+            return Ok(Outcome::SafeFailure);
+        };
         if before != base {
             // Another lander got there after the gate; nothing was sent.
             self.write_fact(binding, "base_moved", &candidate, serde_json::json!({ "base": base, "target": before, "sent": false }))?;
@@ -330,34 +356,17 @@ impl Exec {
     }
 }
 
-impl Runtime {
-    /// A person's word on an uncertain push, believed only after the remote is read: `landed` needs the
-    /// pushed commit on the target and `not landed` needs it absent. The word is written as the push's own
-    /// settlement; the next sweep resolves the item from it, so a landed push goes on and one that did not
-    /// starts over from the base. Nothing is pushed.
-    pub async fn settle_push(&self, controller: &Controller, workspace: &str, item_id: &str, landed: bool) -> Result<()> {
-        self.authorize(controller.instance)?;
-        let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
-        let item = state.items.get(item_id).ok_or(Error::Refused("no such item"))?;
-        if item.phase != Phase::Uncertain { return Err(Error::Refused("only an uncertain item can be settled")); }
-        let pending = item.pending.as_ref().ok_or(Error::Refused("nothing is pending"))?;
-        let stored = self.store.workflow_outbox(workspace)?.into_iter()
-            .find(|s| &s.effect.id == pending && s.dispatch_state == "uncertain")
-            .ok_or(Error::Refused("the effect is not uncertain"))?;
-        if stored.effect.kind != EffectKind::Execute(StageKind::Push) { return Err(Error::Refused("only a push can be settled")); }
-        let candidate = stored.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
-        let identity = self.landing()?;
-        // Read the remote first; a claim it contradicts is refused.
-        let on_remote = adapters::git(&identity.repository, &["merge-base", "--is-ancestor", &candidate, &identity.target]).await.is_ok();
-        if on_remote != landed { return Err(Error::Refused("the remote disagrees")); }
-        let base = self.item_base(workspace, &stored.effect)?;
-        let binding = Binding::new(workspace, &stored.effect,
-            stored.resource_generation.ok_or(Error::Refused("the push was never admitted"))?, item.iteration, &base);
-        self.write_fact(&binding, if landed { "passed" } else { "base_moved" }, &candidate,
-            serde_json::json!({ "settled_by": "person", "landed": landed }))?;
-        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
-        Ok(())
-    }
+/// Whether `candidate` is on the target of the repository at `repository`. A remote that cannot be read is
+/// an error, never an answer of "no": only an object the remote lacks, or one off the target, is absent.
+pub(super) async fn on_remote(repository: &Path, target: &str, candidate: &str) -> Result<bool> {
+    let read = crate::git::git(repository, &["rev-parse", "--verify", "--quiet", target]).await
+        .map_err(|_| Error::Refused("the landing remote cannot be read"))?;
+    if !read.ok { return Err(Error::Refused("the landing target cannot be read")); }
+    let known = crate::git::git(repository, &["cat-file", "-e", &format!("{candidate}^{{commit}}")]).await
+        .map_err(|_| Error::Refused("the landing remote cannot be read"))?;
+    if !known.ok { return Ok(false); }
+    Ok(crate::git::git(repository, &["merge-base", "--is-ancestor", candidate, target]).await
+        .map_err(|_| Error::Refused("the landing remote cannot be read"))?.ok)
 }
 
 /// Sleep `every` milliseconds. True when a cancel came first.

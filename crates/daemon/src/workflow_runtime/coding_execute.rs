@@ -42,6 +42,9 @@ impl Exec {
     fn fact_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect)))
     }
+    pub(super) fn owner_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.owner.json", digest(&binding.effect)))
+    }
     fn provider_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provider.json", digest(&binding.effect)))
     }
@@ -133,8 +136,11 @@ impl Exec {
         let exit = if self.is_native_build(binding) {
             self.run_native(binding, &command, cancel).await?
         } else {
-            crate::effect_runner::configured(&self.tree(binding), &command.argv, &command.environment,
-                &log, Duration::from_millis(command.timeout_ms), cancel).await?
+            // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
+            // recovery can end it before it runs again (a group's gate holds the whole landing target).
+            let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
+            crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
+                &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await?
         };
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, exit, log_digest: digest(&self.bytes(&log)?) };
@@ -201,6 +207,12 @@ impl Exec {
             StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi =>
                 return self.execute_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
+                // A gate that was ended mid-run (a restart, a crash) may have left files in the tree. They are
+                // ours and the candidate is a commit, so start the run from exactly the commit.
+                if matches!(kind, StageKind::Run) && tree.try_exists()? {
+                    self.git_recorded(binding, &tree, &["reset", "--hard", "--quiet"]).await?;
+                    self.git_recorded(binding, &tree, &["clean", "-fdq"]).await?;
+                }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
                 self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
@@ -220,6 +232,36 @@ impl Exec {
             durable(&self.git_settlement(binding), &serde_json::to_vec(&GitSettlement { binding: binding.clone() })?)?;
         }
         self.reconcile_coding(binding).await
+    }
+    /// A gate's answer. It judges the candidate commit: a nonzero exit, or a tree the gate changed, is
+    /// the candidate failing (`rejected`, which the definition routes: retry, split or fail). It is never
+    /// a reason to leave the target stuck. With no fact the gate died with the daemon: whatever of it
+    /// still runs is ended, and the step runs anew on a clean tree.
+    async fn reconcile_run(&self, binding: &Binding) -> Result<Outcome> {
+        let raw = match self.bytes(&self.fact_path(binding)) {
+            Ok(raw) => raw,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                if !crate::effect_runner::Owner::reap(&self.owner_path(binding)).await? {
+                    return Err(Error::Refused("the gate's process could not be ended"));
+                }
+                return Ok(Outcome::SafeFailure);
+            }
+            Err(error) => return Err(error),
+        };
+        let fact: ProcessFact = serde_json::from_slice(&raw)?;
+        let command = self.bound_command(binding, false)?;
+        if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
+            || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
+            return Err(Error::Refused("configured process receipt mismatch"));
+        }
+        // Killed, timed out or cancelled: no verdict on the candidate.
+        let Some(code) = fact.exit else { return Ok(Outcome::SafeFailure); };
+        let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;
+        let unchanged = code == 0 && self.verify_candidate(binding, &self.tree(binding)).await.is_ok();
+        let manifest = digest(&(binding, &candidate, &raw, unchanged));
+        let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),
+            policy_pin: binding.effect.policy_pin.clone() };
+        Ok(if unchanged { Outcome::Passed(evidence) } else { Outcome::Rejected(evidence) })
     }
     pub(super) async fn verify_tree(&self, binding: &Binding) -> Result<String> {
         let tree = self.tree(binding);
@@ -255,6 +297,7 @@ impl Exec {
         if let EffectKind::Stop { operation } = &binding.effect.kind { return self.stop_coding(binding, operation).await; }
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
+        if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
         if matches!(kind, StageKind::Provision | StageKind::Land) {
             let raw = self.bytes(&self.git_settlement(binding))?;

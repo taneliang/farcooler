@@ -85,7 +85,7 @@ impl Admission {
     }
     pub(crate) fn recheck_now(&self) -> Result<()> { self.recheck() }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
-        if matches!(action, Action::Publish { .. }) && self.seat != Seat::Person {
+        if matches!(action, Action::Publish { .. } | Action::Settle { .. }) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
         Ok(())

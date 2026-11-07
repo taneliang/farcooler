@@ -67,6 +67,9 @@ pub enum WorkflowCmd {
     Queue { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Take a queued ticket out of a group that has not left yet.
     Leave { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Settle a push whose outcome was lost, after looking at the target yourself. The runner reads the
+    /// target first and refuses a word it contradicts. Pass `--landed true` if the commit is on the target.
+    Settle { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long, action = clap::ArgAction::Set, required = true)] landed:bool,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -88,6 +91,7 @@ impl WorkflowCmd {
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
             Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
             Self::Leave { workspace,item,run,pin,identity } => (workspace,Action::Leave { mutation:identity.mutation(),item,run,pin }),
+            Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }
@@ -157,6 +161,18 @@ mod tests {
                 assert!(matches!(action,Action::Review{reason:Some(r),passed:false,mutation,..} if r==reason && mutation.revision==u64::MAX-1 && mutation.epoch==u64::MAX && mutation.sequence==u64::MAX));
             } else {assert!(result.is_err());}
         }
+    }
+    #[test]
+    fn workflow_settle_says_which_way_and_travels_as_its_own_method() {
+        let args=["farcooler","workflow","settle","00000000-0000-0000-0000-000000000000","group-1","--run","run","--pin","pin",
+            "--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        assert!(crate::Cli::try_parse_from(args).is_err(),"landed or not must be said");
+        let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args.into_iter().chain(["--landed","true"])).unwrap().command else {panic!()};
+        let (workspace,action)=cmd.action().unwrap();
+        assert!(matches!(action,Action::Settle{landed:true,..}));
+        let request=super::request(workspace,&action).unwrap();
+        assert_eq!(request.method,"workflow.settle");
+        assert_eq!(request.required_capabilities,[capability::WORKFLOW_COMMANDS]);
     }
     #[test]
     fn workflow_legacy_review_bytes_stay_unchanged() {

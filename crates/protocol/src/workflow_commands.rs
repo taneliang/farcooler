@@ -27,6 +27,9 @@ pub enum Action {
     Queue { mutation: Mutation, item: String, run: String, pin: String },
     /// Pull a queued ticket out of a group that has not left yet.
     Leave { mutation: Mutation, item: String, run: String, pin: String },
+    /// A person's word on a push whose outcome was lost, believed only after the remote is read:
+    /// `landed` says the pushed commit is on the target. Person-only; it pushes nothing.
+    Settle { mutation: Mutation, item: String, run: String, pin: String, landed: bool },
 }
 impl Action {
     pub fn method(&self) -> &'static str {
@@ -40,6 +43,7 @@ impl Action {
             Self::Retry { .. } => "workflow.retry",
             Self::Queue { .. } => "workflow.queue",
             Self::Leave { .. } => "workflow.leave",
+            Self::Settle { .. } => "workflow.settle",
         }
     }
 }
@@ -74,6 +78,10 @@ mod tests {
         let raw = serde_json::to_string(&retry).unwrap();
         assert_eq!(parse(&raw).unwrap(),retry);
         assert_eq!(retry.method(),"workflow.retry");
+        let settle = r#"{"action":"Settle","mutation":{"id":"s","revision":3,"epoch":1,"sequence":2},"item":"a","run":"run","pin":"pin","landed":true}"#;
+        assert_eq!(serde_json::to_string(&parse(settle).unwrap()).unwrap(),settle);
+        assert_eq!(parse(settle).unwrap().method(),"workflow.settle");
+        assert!(parse(&settle.replace(r#","landed":true"#,"")).is_err(),"a settlement says which way");
         for action in ["Queue","Leave"] {
             let raw = format!(r#"{{"action":"{action}","mutation":{{"id":"q","revision":3,"epoch":1,"sequence":2}},"item":"a","run":"run","pin":"pin"}}"#);
             let parsed = parse(&raw).unwrap();
