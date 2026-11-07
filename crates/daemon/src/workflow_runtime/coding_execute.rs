@@ -87,7 +87,7 @@ impl Exec {
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
                     }
                     let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
-                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(prompt.clone())),
+                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(Self::briefed(prompt, &binding.effect.item))),
                         ..Default::default() };
                     let launch = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
                     let mut command = process.clone();
@@ -111,6 +111,11 @@ impl Exec {
         self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
         Ok(command)
     }
+    /// The published prompt, led by the card this run is for. The card's own words are read by the agent
+    /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
+    fn briefed(prompt: &str, item: &str) -> String {
+        format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.\n\n{prompt}")
+    }
     /// Context wins over command environment and is pinned in the process fact.
     pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) {
         let effect = &binding.effect;
@@ -125,6 +130,9 @@ impl Exec {
             ("FARCOOLER_BASE", binding.base.clone()),
             ("FARCOOLER_ITERATION", binding.iteration.to_string()),
             ("FARCOOLER_RECEIPT", receipt.to_string_lossy().into_owned()),
+            // Which card the run is for (ov-962): the published prompt is the same for every ticket on the board.
+            ("FARCOOLER_WORKFLOW_ITEM", effect.item.clone()),
+            ("FARCOOLER_WORKSPACE", binding.workspace.clone()),
         ] { command.environment.insert(key.into(), value); }
     }
     async fn run_coding(&self, binding: &Binding, command: CodingCommand,

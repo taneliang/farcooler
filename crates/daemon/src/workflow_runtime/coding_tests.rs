@@ -354,3 +354,46 @@ async fn workflow_coding_adapted_person_review_and_optional_archetype() {
     definition.stages[0].kind=StageKind::Land;
     assert!(config.validate_definition(&definition).is_err(),"landing without candidate prerequisites accepted");
 }
+
+/// ov-962 B2: a ticket started through the engine reaches its agent by name, in the prompt and in the
+/// environment, because the published prompt is one text for every ticket on the board.
+#[tokio::test]
+async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let settings = dir.path().join("existing-settings.json");
+    std::fs::write(&settings, b"{\"hooks\":{}}").unwrap();
+    let published = runtime.coding.clone().unwrap();
+    let mut config = published.clone();
+    config.harness = CodingHarness::Native { preset: "claude:opus".into(),
+        settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
+        project_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
+    let definition = published.definition().unwrap();
+    let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
+    let wire = |runtime: &Runtime, principal, action| runtime.wire_command("w", principal, action).unwrap();
+    let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(published.clone())));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    ok(&wire(&runtime, "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    // What the daemon's tracking does for a card: the ticket template, no run.
+    assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
+    let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
+    ok(&wire(&runtime, "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
+        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin }));
+    runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
+    let binding = admitted(&runtime).await;
+    // A command harness is told by the environment alone.
+    let command = runtime.coding_command(&binding).unwrap();
+    assert_eq!(command.environment["FARCOOLER_WORKFLOW_ITEM"], "ov-7");
+    // A native one is told in its prompt as well. (A native publication needs live hooks; the launch is
+    // built from the same item, so the harness is swapped after Start.)
+    runtime.coding = Some(config);
+    let command = runtime.coding_command(&binding).unwrap();
+    assert!(command.argv[2].contains("ticket ov-7"), "the prompt names the ticket: {}", command.argv[2]);
+    assert!(command.argv[2].contains("implement the selected task"), "and keeps the published prompt");
+    assert_eq!(command.environment["FARCOOLER_WORKFLOW_ITEM"], "ov-7");
+    assert_eq!(command.environment["FARCOOLER_WORKSPACE"], "w");
+    // A recovery rebuilds the same command.
+    assert_eq!(runtime.coding_command(&binding).unwrap(), command);
+}
