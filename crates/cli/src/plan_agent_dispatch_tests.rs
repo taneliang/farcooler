@@ -388,9 +388,19 @@ async fn an_unanswered_engine_is_said_when_the_pane_fails() {
 #[tokio::test]
 async fn task_dispatch_turns_a_tracked_ticket_away_before_any_worktree() {
     let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval")]);
-    let said = super::super::start::refuse_tracked(&mut link, &items()[1]).await.unwrap_err().to_string();
+    let said = super::super::start::refuse_tracked(&mut link, &items()[1], true).await.unwrap_err().to_string();
     assert!(said.contains("ov-2 is tracked by the engine") && said.contains("agent dispatch --role builder --ticket ov-2"), "{said}");
     let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
-    super::super::start::refuse_tracked(&mut link, &items()[1]).await.unwrap();
+    super::super::start::refuse_tracked(&mut link, &items()[1], true).await.unwrap();
     assert!(link.methods().iter().all(|m| *m == "workflow.get"), "{:?}", link.methods());
+}
+
+/// A member's orchestrator can't be asked: `task dispatch --new` makes no worktree on a guess, `--worktree` goes on.
+#[tokio::test]
+async fn task_dispatch_makes_no_worktree_when_the_engine_cannot_be_asked() {
+    let mut link = with_engine(&[]);
+    link.engine_unanswered = true;
+    let said = super::super::start::refuse_tracked(&mut link, &items()[1], true).await.unwrap_err().to_string();
+    assert!(said.contains("no worktree was made"), "{said}");
+    super::super::start::refuse_tracked(&mut link, &items()[1], false).await.unwrap();
 }

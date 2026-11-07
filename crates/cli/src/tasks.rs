@@ -656,7 +656,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             agent_preset(&preset)?;
             let actor = actor_for(actor.as_deref())?;
             let task = find_task(&mut link, repo.as_deref(), &key).await?;
-            crate::plan::agent::refuse_tracked(&mut link, &task).await?;
+            crate::plan::agent::refuse_tracked(&mut link, &task, worktree.is_none()).await?;
             let lane = match (worktree, new, branch) {
                 (Some(named), _, _) => Lane::Existing(named),
                 (None, Some(name), Some(branch)) => Lane::New { name, branch, base },

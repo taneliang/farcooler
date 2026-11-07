@@ -192,10 +192,18 @@ pub(super) async fn through_engine<L: DispatchLink>(
 
 /// `task dispatch` opens a pane, which a tracked ticket refuses after any worktree is made. So it asks
 /// first, and sends the person to `agent dispatch`, which starts the ticket through the engine (ov-962).
-pub(crate) async fn refuse_tracked<L: DispatchLink>(link: &mut L, ticket: &pb::Task) -> Result<(), Failed> {
+/// When the engine can't be asked (a member's orchestrator), a new worktree is not made on a guess: it
+/// would be left behind if the card turns out to be tracked. An existing worktree makes nothing, so it goes on.
+pub(crate) async fn refuse_tracked<L: DispatchLink>(link: &mut L, ticket: &pb::Task, makes_worktree: bool) -> Result<(), Failed> {
     if !link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Ok(()); }
     let Some(workspace) = Uuid::from_slice(&ticket.workspace_id).ok() else { return Ok(()) };
-    let Seen::Held(seen) = snapshot(link, workspace).await else { return Ok(()) };
-    if seen.hold(&ticket.key) == Hold::None { return Ok(()); }
-    Err(format!("{} is tracked by the engine, which refuses a pane. Start it with `farcooler agent dispatch --role builder --ticket {}`.", ticket.key, ticket.key).into())
+    match snapshot(link, workspace).await {
+        Seen::Held(seen) if seen.hold(&ticket.key) != Hold::None => Err(format!(
+            "{} is tracked by the engine, which refuses a pane. Start it with `farcooler agent dispatch --role builder --ticket {}`.",
+            ticket.key, ticket.key).into()),
+        Seen::Unanswered if makes_worktree => Err(format!(
+            "Couldn't ask the engine whether {} is tracked, so no worktree was made. Dispatch into one that exists with --worktree, or ask the workspace owner's orchestrator.",
+            ticket.key).into()),
+        _ => Ok(()),
+    }
 }
