@@ -84,7 +84,7 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
                 candidate:item.candidate.clone(),definition_pin:item.pin.clone(),execution_policy_pin:item.policy_pin.clone(),
                 notification_policy_pin:policy.pin(),point,
                 verb:item.definition.stages.get(item.stage).map(|s|verb_name(&s.kind)),
-                tickets:item.members.iter().map(|m|m.item.clone()).collect() };
+                tickets:item.members.iter().map(|m|&m.item).chain(&item.handed).cloned().collect() };
             tx.execute("INSERT INTO workflow_notice_outbox(id,workspace,revision,payload,payload_hash) VALUES(?1,?2,?3,?4,?5)",
                 params![notice.id,notice.workspace,notice.revision,serde_json::to_string(&notice)?,digest(&notice)])?;
         }

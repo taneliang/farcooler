@@ -212,6 +212,9 @@ fn a_failed_group_rejects_its_members_through_their_own_routes() {
     assert_eq!(log.stage("a"), "stage-1", "the join step routes rejected back to the build");
     assert_eq!(log.state.items["a"].back_edges["join"], 1);
     assert_eq!(log.state.items["a"].grouped_in, None);
+    assert!(log.state.items[&group].members.is_empty());
+    assert_eq!(log.state.items[&group].handed, vec!["a".to_string()], "a finished group remembers whom it ran");
+    assert_eq!(log.state.items[&group].since_ms, 1000, "and when it reached the phase it ended in");
 }
 #[test]
 fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {

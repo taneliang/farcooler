@@ -11,8 +11,8 @@
 //! | `run`, `push` | Gating locally |
 //! | `await-ci` | Waiting for CI (CI failed, when the SHA's read says so) |
 //! | A wait on a person | Ready to land |
-//! | Failed after a push | CI failed |
-//! | Failed or uncertain before one | Stalled |
+//! | Failed after a push, CI's read of that commit failed | CI failed |
+//! | Any other failure, or uncertain | Stalled |
 //!
 //! A group that has finished leaves live state on the next step, so a landed group is not drawn
 //! here: its tickets' cards say Landed, and the event log keeps the rest.
@@ -54,7 +54,7 @@ impl GroupLanding {
         match (&self.phase, &self.verb) {
             (Phase::Done, _) => LandingPhase::Landed,
             (Phase::Cancelled, _) => LandingPhase::Dropped,
-            (Phase::Failed, _) if self.after_push => LandingPhase::CiFailed,
+            (Phase::Failed, _) if self.after_push && ci.is_some_and(|c| c.status == CiStatus::Failed) => LandingPhase::CiFailed,
             (Phase::Failed | Phase::Uncertain, _) => LandingPhase::Stalled,
             (Phase::Blocked, _) => LandingPhase::WaitingForPreviousLanding,
             (Phase::WaitingApproval | Phase::WaitingReview, _) => LandingPhase::ReadyToLand,
@@ -114,8 +114,8 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
         let sha = pushed(item);
         GroupLanding {
             group: id.clone(), name,
-            tickets: item.members.iter().filter_map(|m| task_of(&m.item)).collect(),
-            after_push: sha.is_some(), pushed_sha: sha, since: since(id),
+            tickets: item.members.iter().map(|m| &m.item).chain(&item.handed).filter_map(|i| task_of(i)).collect(),
+            after_push: sha.is_some(), pushed_sha: sha, since: if item.since_ms > 0 { item.since_ms } else { since(id) },
             phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
         }
     }).collect()

@@ -48,6 +48,13 @@ pub struct Item {
     /// landed, whatever CI says, so the group can no longer be cancelled and never ends as `rejected`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pushed: Option<String>,
+    /// A group item only: the tickets it handed back when it ended, so a finished group still names
+    /// the tickets it ran after `members` has been emptied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handed: Vec<String>,
+    /// A group item only: when it last changed step or phase, in the clock of the inputs that moved it.
+    #[serde(default, skip_serializing_if = "is_zero_ms")]
+    pub since_ms: i64,
     /// A joined ticket only: the group item it is queued into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_in: Option<String>,
@@ -60,6 +67,7 @@ pub struct Item {
 pub struct Member { pub item: String, pub candidate: String }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupOf { pub name: String, pub pin: String }
+fn is_zero_ms(n: &i64) -> bool { *n == 0 }
 fn is_zero(n: &u8) -> bool { *n == 0 }
 /// A failed item can be retried this many times, so a bad step cannot loop forever.
 pub const MAX_RETRIES: u8 = 3;

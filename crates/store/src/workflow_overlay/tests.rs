@@ -19,8 +19,9 @@ fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> 
     Item { definition, pin: "pin".into(), policy_pin: "policy".into(), dependencies: BTreeSet::new(),
         resource: "ref:origin:main".into(), stage: at, iteration: 0, attempt: 0, fence: 1, phase, run: "run".into(),
         pending: None, candidate: candidate.map(Into::into), last_evidence: None, stopping: None,
-        rework_history: vec![], back_edges: BTreeMap::new(), retries: 0,
+        rework_history: vec![], back_edges: BTreeMap::new(), retries: 0, pushed: None,
         members: members.iter().map(|m| Member { item: (*m).into(), candidate: format!("cand-{m}") }).collect(),
+        handed: vec![], since_ms: 0,
         group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None }
 }
 fn ci(sha: &str, status: CiStatus) -> CiRead {
@@ -41,7 +42,7 @@ fn each_verb_maps_to_the_phase_a_person_would_name() {
     assert_eq!(at(2, Phase::Running), LandingPhase::GatingLocally);
     assert_eq!(at(3, Phase::Running), LandingPhase::GatingLocally);
     assert_eq!(at(4, Phase::Running), LandingPhase::WaitingForCi);
-    assert_eq!(at(4, Phase::Failed), LandingPhase::CiFailed);
+    assert_eq!(at(4, Phase::Failed), LandingPhase::Stalled, "a failure with no word from CI is not a red run");
     assert_eq!(at(2, Phase::Failed), LandingPhase::Stalled);
     assert_eq!(at(3, Phase::Uncertain), LandingPhase::Stalled, "an unknown push is not claimed as landed or not");
     assert_eq!(at(2, Phase::WaitingApproval), LandingPhase::ReadyToLand);
@@ -119,4 +120,113 @@ fn a_board_with_no_engine_state_has_no_group_landings() {
     let ws = store.ensure_main_workspace(repo).unwrap().id;
     assert!(store.workflow_groups(ws).unwrap().is_empty());
     assert!(store.workflow_ci_subjects().unwrap().is_empty());
+}
+
+// Groups from real reducer steps: the engine hands a finished group's members back in the step that
+// ends it, so a group that has ended must still name the tickets it ran.
+
+fn act(id: &str, kind: StageKind) -> Stage { stage(id, kind) }
+fn ticket_definition() -> Definition {
+    let mut d = Definition::coding();
+    d.schema = 2; d.max_reworks = 0; d.rework_target = None;
+    d.stages.truncate(3);
+    d.stages[2].routes.insert("rejected".into(), Target::Step("stage-1".into()));
+    d.stages[2].limit = 2;
+    let mut join = act("join", StageKind::Join { group: "landing".into(), adopt: true });
+    join.routes.insert("rejected".into(), Target::Step("stage-1".into()));
+    join.limit = 1;
+    d.stages.push(join);
+    d.stages.push(act("tidy", StageKind::Ci));
+    d.groups.insert("landing".into(), GroupDef { limit: 2, exclusive: "ref:origin:main".into(), steps: steps() });
+    d
+}
+struct Engine { state: State }
+impl Engine {
+    fn run(&mut self, command: Command, grant: Grant) {
+        let s = &self.state;
+        let input = Input { busy_resources: BTreeSet::new(), schema: 1, id: format!("command-{}", s.revision + 1),
+            workspace: s.workspace.clone(), expected_revision: s.revision, epoch: s.epoch, source: "fixture".into(),
+            source_sequence: s.revision + 1, now_ms: 1000 + s.revision as i64, grant, command };
+        self.state = step(s, &input).unwrap().state;
+    }
+    fn observe(&mut self, item: &str, outcome: impl FnOnce(Evidence) -> Outcome) {
+        let i = &self.state.items[item];
+        let (effect, run, fence) = (i.pending.clone().unwrap(), i.run.clone(), i.fence);
+        let evidence = Evidence { candidate: i.candidate.clone().unwrap_or_else(|| "f".repeat(40)), manifest: "m".into(),
+            receipt: "r".into(), policy_pin: i.policy_pin.clone() };
+        self.run(Command::Observe { item: item.into(), effect: effect.clone(), run, fence, outcome: outcome(evidence) },
+            Grant::Operation { effect, run: self.state.items[item].run.clone(), fence });
+    }
+}
+/// One ticket, queued into a group, walked to the stage `at` with every earlier step passed.
+fn engine_group(ticket: &str, at: usize) -> (Engine, String) {
+    let mut e = Engine { state: State::empty("w".into(), 1) };
+    e.run(Command::Enqueue { item: ticket.into(), definition: ticket_definition(), policy_pin: "policy".into(),
+        resource: format!("res-{ticket}"), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
+    while e.state.items[ticket].phase != Phase::WaitingJoin { e.observe(ticket, Outcome::Passed); }
+    e.run(Command::Queue { item: ticket.into() }, Grant::Controller);
+    let group = e.state.items[ticket].grouped_in.clone().unwrap();
+    while e.state.items[&group].stage < at {
+        e.observe(&group, |ev| Outcome::Passed(Evidence { candidate: "f".repeat(40), ..ev }));
+    }
+    (e, group)
+}
+fn viewed(e: &Engine, ticket: &str, group: &str) -> GroupLanding {
+    let id = Uuid::from_u128(7);
+    let key = ticket.to_string();
+    groups_in(&e.state, &|i| (i == key).then_some(id), &|_| 0).into_iter().find(|g| g.group == group).unwrap()
+}
+
+#[test]
+fn a_group_whose_ci_failed_still_names_its_tickets() {
+    let (mut e, group) = engine_group("a", 4);
+    e.observe(&group, Outcome::Rejected);
+    assert_eq!(e.state.items[&group].phase, Phase::Failed);
+    assert!(e.state.items[&group].members.is_empty(), "the engine has handed them back already");
+    let g = viewed(&e, "a", &group);
+    assert_eq!(g.tickets.len(), 1, "the landing still shows its ticket");
+    assert_eq!(g.phase(Some(&ci(&"f".repeat(40), CiStatus::Failed))), LandingPhase::CiFailed);
+}
+
+#[test]
+fn a_wait_that_failed_is_not_called_a_failed_ci_run() {
+    let (mut e, group) = engine_group("a", 4);
+    e.observe(&group, |ev| Outcome::Labeled("timeout".into(), ev));
+    let g = viewed(&e, "a", &group);
+    assert_eq!(e.state.items[&group].phase, Phase::Failed);
+    assert_eq!(g.phase(None), LandingPhase::Stalled);
+    assert_eq!(g.phase(Some(&ci(&"f".repeat(40), CiStatus::Running))), LandingPhase::Stalled);
+}
+
+#[test]
+fn a_group_says_when_it_reached_the_step_it_is_at() {
+    let (mut e, group) = engine_group("a", 2);
+    let at_gate = e.state.items[&group].since_ms;
+    e.observe(&group, |ev| Outcome::Passed(ev));
+    assert!(e.state.items[&group].since_ms > at_gate, "moving to the next step moves the time");
+    assert!(at_gate > 0);
+}
+
+#[test]
+fn the_notice_that_a_group_failed_names_the_tickets_it_ran() {
+    let (e, group) = engine_group("a", 4);
+    let before = e.state.clone();
+    let mut e = e;
+    e.observe(&group, Outcome::Rejected);
+    let input = Input { busy_resources: BTreeSet::new(), schema: 1, id: "fail".into(), workspace: "w".into(),
+        expected_revision: before.revision, epoch: 1, source: "fixture".into(), source_sequence: 1, now_ms: 2000,
+        grant: Grant::Controller, command: Command::Advance };
+    let store = Store::open_in_memory().unwrap();
+    let mut conn = store.conn();
+    conn.execute("INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('w',?1,1,?2)",
+        params![e.state.revision as i64, serde_json::to_string(&e.state).unwrap()]).unwrap();
+    conn.execute("INSERT INTO workflow_events(workspace,revision,id,payload,payload_hash,notices) VALUES('w',?1,'fail','{}','h','[]')",
+        params![e.state.revision as i64]).unwrap();
+    let tx = conn.transaction().unwrap();
+    crate::workflow_notices::select(&tx, &input, &before, &e.state).unwrap();
+    tx.commit().unwrap();
+    drop(conn);
+    let notices = store.workflow_pending_notices(0).unwrap();
+    let failed = notices.iter().map(|(_, d)| &d.notice).find(|n| n.item == group).expect("a notice for the group");
+    assert_eq!(failed.tickets, vec!["a".to_string()]);
 }

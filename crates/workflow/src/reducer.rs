@@ -47,7 +47,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
-                members: Vec::new(), group_of: None, grouped_in: None };
+                members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -215,7 +215,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
                                 stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
-                                members: Vec::new(),
+                                members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None });
                             gid
@@ -284,6 +284,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         };
         let result = if label == "landed" { group.pushed.clone() } else { group.candidate.clone() };
         let members = std::mem::take(&mut group.members);
+        // Remember whom it ran: the board still draws a finished group with its tickets.
+        group.handed = members.iter().map(|m| m.item.clone()).collect();
         for member in members {
             let mut ticket = next.items.remove(&member.item).ok_or(Refusal::Missing)?;
             ticket.grouped_in = None;
@@ -303,6 +305,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         if !ready(&next, &item, input) { next.items.insert(id, item); continue; }
         enter(&mut item, &id, input, &mut effects)?;
         next.items.insert(id, item);
+    }
+    // A group says when it reached the step and phase it is in now.
+    for (id, item) in next.items.iter_mut().filter(|(_, i)| i.group_of.is_some()) {
+        if state.items.get(id).is_none_or(|old| old.stage != item.stage || old.phase != item.phase) {
+            item.since_ms = input.now_ms;
+        }
     }
     for (id, item) in &next.items {
         if state.items.get(id) != Some(item) {
