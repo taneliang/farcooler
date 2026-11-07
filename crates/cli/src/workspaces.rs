@@ -52,6 +52,38 @@ pub(crate) const NO_WORKSPACES: &str =
 pub enum WorkspaceCmd {
     /// Publish a bounded JSON workflow definition and immutable operation settings.
     SetWorkflow { workspace: String, #[arg(long)] repo: Option<String>, #[command(flatten)] publication: crate::workflow::Publication },
+    /// The four ways to land, each a definition you can draft and publish.
+    LandingTemplates,
+    /// Draft one landing template for a workspace, with your gates. Prints a bundle for
+    /// `workspace set-workflow`; nothing is published until you do that.
+    LandingTemplate {
+        workspace: String,
+        /// batched-push, ticket-push, ticket-pr or batched-pr.
+        name: String,
+        /// A command gate, run with `sh -c`. Repeat for several; they run in order.
+        #[arg(long = "gate", value_name = "COMMAND")]
+        gate: Vec<String>,
+        /// Most tickets in one batch (the batched templates).
+        #[arg(long)]
+        batch: Option<u8>,
+        #[command(flatten)]
+        gates: crate::landing_templates::Gates,
+        #[command(flatten)]
+        output: crate::landing_templates::Output,
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Draft a landing definition from the charter's Landing section, once. After it is published
+    /// the definition is the source: change landing by publishing a new one, not by editing the charter.
+    ImportLanding {
+        workspace: String,
+        #[command(flatten)]
+        gates: crate::landing_templates::Gates,
+        #[command(flatten)]
+        output: crate::landing_templates::Output,
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Make a workstream: a board, a task prefix, and later an orchestrator.
     ///
     /// Its charter starts as a copy of Main's. It owns no worktree until one
@@ -573,6 +605,23 @@ async fn workspace_via(
             } else {
                 println!("deleted workspace {}  {}  (its charter is still on disk)", short_bytes(&ws.id), ws.name);
             }
+        }
+
+        WorkspaceCmd::LandingTemplates => print!("{}", crate::landing_templates::list()),
+
+        WorkspaceCmd::LandingTemplate { workspace, name, gate, batch, gates, output, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+            let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, batch)?;
+            crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
+        }
+
+        WorkspaceCmd::ImportLanding { workspace, gates, output, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let charter = charter::read(&mut link, uuid_of(&ws.id)).await?;
+            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+            let (bundle, notes) = crate::landing_templates::import(&charter.text, &held, &gates)?;
+            crate::landing_templates::deliver(&bundle, &notes, &held, uuid_of(&ws.id), &output)?;
         }
 
         WorkspaceCmd::Charter { workspace, repo } => {

@@ -170,6 +170,14 @@ Optional defaults: `Base: main`, `Remote: origin`, `CI: github` (or none). An in
 {{cli}} landing start <key> <key> --repo <repo> --title "<what it carries>" --actor manager
 {{cli}} landing show <N> --repo <repo>
 ```
+**Landing as a definition.** Draft one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) for the owner
+to publish; you never publish, since a definition decides what runs as them. `import-landing` reads the charter's `## Landing` once
+(refused after any landing definition is published; the most careful route wins, `Gate: none` becomes a gate that always passes).
+A gate is a command (`--gate`), an agent (`--agent-gate`) or a person (`--person-gate`). The PR templates' steps aren't live: don't publish them.
+```
+{{cli}} workspace import-landing <workspace> --out landing.json
+{{cli}} workspace landing-template <workspace> batched-push --gate "scripts/landing-gate.sh" --person-gate owner --out landing.json
+```
 Without one, keep landings on the plan by hand, never on a hand-kept page: record tickets when gating now, move to
 `--state gating`, then set the pushed SHA. The runner tracks its CI; Now shows it above its tickets.
 ```

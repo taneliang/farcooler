@@ -87,6 +87,7 @@ mod tasks;
 mod workspaces;
 mod workspace_settings;
 mod workflow;
+mod landing_templates;
 mod workflow_cutover;
 mod repo_landing;
 mod repo_survey;

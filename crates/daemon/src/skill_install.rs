@@ -1128,7 +1128,9 @@ mod tests {
         // lines.
         // 344 once lanes and trains became agents, tickets on the line and
         // landings (ov-872): one line net.
-        assert!(lines <= 344, "{lines} lines");
+        // 352 once it can draft a landing definition for the owner to publish
+        // (ov-959): eight lines.
+        assert!(lines <= 352, "{lines} lines");
     }
 
     #[test]

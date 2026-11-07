@@ -5,7 +5,9 @@
 //! reads the draft and publishes it, as for any definition.
 use farcooler_core::charter_landing::{self, Route};
 use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCommand, CodingConfig};
-use farcooler_workflow::templates::{self, Gate, Pins, Plan, Template};
+pub use farcooler_workflow::templates::Template;
+pub use farcooler_workflow::{Reviewer, StageKind};
+use farcooler_workflow::templates::{self, Gate, Pins, Plan};
 use farcooler_workflow::{Definition, OperationSpec};
 use crate::workflow_runtime::CodingConfigExt;
 
