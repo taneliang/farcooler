@@ -12,6 +12,7 @@ O = 'crates/store/src/engine_cutover/owners.rs'
 S = 'crates/store/src/engine_cutover/startup.rs'
 E_ = 'crates/store/src/engine_cutover.rs'
 V = 'crates/store/src/engine_cutover/verify.rs'
+L = 'crates/cli/src/daemon_link.rs'
 A = 'crates/daemon/src/cutover_admin.rs'
 R = 'crates/daemon/src/rpc/recovery.rs'
 N = 'crates/daemon/src/refusal.rs'
@@ -64,6 +65,15 @@ MUTANTS = [
  ('no-verify-inside-commit', [(E_, '        verify::check(plan,&tx)?;\n', '')], ('store', 'commit_that_could_not_verify')),
  ('unknown-schema-commits', [(C, 'if plan.quarantines.iter().any(|q| q.resource == "schema:unknown") {', 'if plan.quarantines.iter().any(|q| q.resource == "never") {')], ('store', 'commit_a_schema_release_would_refuse')),
  ('lost-backup-passes', [(C, '    refuse("the attempt\'s closed backup is missing")', '    Ok(PathBuf::new())')], ('store', 'verify_and_release_need_the_backup')),
+ ('no-pre-lift-copy', [(T, 'let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT_DB))?;\n    copy.write_all(&bytes)?;', 'let mut copy = OpenOptions::new().write(true).create_new(true).open(dir.join(PRE_LIFT_DB))?;\n    copy.write_all(&[])?;')], ('store', 'engine_cutover::tests::lift')),
+ ('lift-judged-after-the-fact', [(T, '        preflight(&conn)?;\n        Ok(())\n    })();', '        Ok(())\n    })();')], ('store', 'engine_cutover::tests::lift')),
+ ('lift-runs-past-60', [(T, 'crate::migrate::apply_between(&tx, from, LIFT_TO)', 'crate::migrate::apply_between(&tx, from, crate::migrate::CURRENT_SCHEMA_VERSION)')], ('store', 'engine_cutover::tests::lift')),
+ ('lift-leaves-the-floor', [(T, 'tx.execute("INSERT INTO meta (key, value) VALUES (\'compatible_down_to\', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [LIFT_TO.to_string()])?;', '')], ('store', 'engine_cutover::tests::lift')),
+ ('update-replaces-a-held-daemon', [(L, '    if cutover_stranded_here(database) {\n        tracing::info!', '    if false && cutover_stranded_here(database) {\n        tracing::info!')], ('cli', 'cutover_this_build')),
+ ('update-starts-a-daemon-that-refuses', [(L, '            if cutover_stranded_here(database) { return Err(CUTOVER_STRANDED.into()); }', '')], ('cli', 'cutover_this_build')),
+ ('no-restore-compare', [(C, '    if transfer::db_hash(&restore)? != snapshot.db_hash || restored != snapshot.manifest { return refuse("independent restore differs from the live database"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
+ ('no-live-rehash', [(C, '    if transfer::db_hash(db)? != snapshot.db_hash { return refuse("database changed during the backup"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
+ ('no-quick-check', [(C, '    if check != "ok" { return refuse("closed database integrity check failed"); }\n', '')], ('store', 'engine_cutover::tests::safety_steps')),
 ]
 missing = [b for b in BOUNDARIES if not any(isinstance(m[2], list) and b in m[2] for m in MUTANTS)]
 assert not missing, f'boundaries with no mutant: {missing}'
@@ -86,7 +96,7 @@ for name, edits, want in MUTANTS:
             cmd = ['cargo', 'test', '-p', 'farcooler-daemon', '--test', 'a_cutover_survives_every_crash', 'a_raw_schema60' if name == 'floor-after-the-commit' else 'a_current_runner']
             extra = {'CUTOVER_ONLY': ','.join(want)}
         elif isinstance(want, tuple):
-            cmd = ['cargo', 'test', '-p', 'farcooler-store', '--lib', want[1]]; extra = {}
+            cmd = ['cargo', 'test', '-p', 'farcooler-cli', '--bin', 'farcooler', want[1]] if want[0] == 'cli' else ['cargo', 'test', '-p', 'farcooler-store', '--lib', want[1]]; extra = {}
         else:
             cmd = ['cargo', 'test', '-p', 'farcooler-daemon', '--test', 'a_cutover_survives_every_crash', want]; extra = {}
         r = subprocess.run(cmd, cwd=root, env={**env, **extra}, capture_output=True, text=True, timeout=1500)

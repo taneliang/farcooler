@@ -88,6 +88,16 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     copy.sync_all()?;
     Ok(())
 }
+// Test seam: damage a file at a named point of the backup, as a failing disk
+// would, so each safety step below is shown to refuse. Empty in a shipped build.
+#[cfg(test)]
+thread_local! { pub(super) static TAMPER: std::cell::RefCell<std::collections::HashMap<&'static str, Box<dyn FnOnce(&Path)>>> = Default::default(); }
+#[cfg(test)]
+fn tamper(point: &'static str, file: &Path) { if let Some(hook) = TAMPER.with(|h| h.borrow_mut().remove(point)) { hook(file); } }
+#[cfg(not(test))]
+#[inline(always)]
+fn tamper(_point: &'static str, _file: &Path) {}
+
 /// No Store, sidecar or lock on the file, and a clean integrity check.
 fn closed(db: &Path) -> Result<()> {
     transfer::refuse_sidecars(db)?;
@@ -109,6 +119,7 @@ fn manifest_of(db: &Path) -> Result<(String, Preflight, BTreeSet<String>)> {
 /// Copy the closed database, then restore that copy somewhere else and compare
 /// it to what the plan and the live file say. Returns the permit's backup hash.
 fn back_up(db: &Path, plan: &Preflight, attempt: &str, protected: &BTreeSet<String>) -> Result<(PathBuf, String)> {
+    tamper("close.before", db);
     closed(db)?;
     let (manifest, _, _) = manifest_of(db)?;
     let (number, dir) = closed_dir(&artifact_dir(db))?;
@@ -120,6 +131,7 @@ fn back_up(db: &Path, plan: &Preflight, attempt: &str, protected: &BTreeSet<Stri
         mode: fs::metadata(db)?.permissions().mode() & 0o777, manifest, protected: protected.clone() };
     transfer::publish(&dir, "SNAPSHOT.json", &serde_json::to_vec(&snapshot)?, "commit.torn-snapshot")?;
     reach("commit.after-snapshot");
+    tamper("snapshot.after", &dir.join("db"));
     let restore = dir.join("restore-check");
     write_private(&restore, &fs::read(dir.join("db"))?)?;
     let (restored, restored_plan, restored_resources) = manifest_of(&restore)?;
@@ -128,6 +140,7 @@ fn back_up(db: &Path, plan: &Preflight, attempt: &str, protected: &BTreeSet<Stri
     fs::remove_file(&restore)?;
     transfer::sync_dir(&dir)?;
     reach("commit.after-restore");
+    tamper("restore.after", db);
     if transfer::db_hash(db)? != snapshot.db_hash { return refuse("database changed during the backup"); }
     Ok((dir, farcooler_workflow::digest(&snapshot)))
 }
