@@ -45,7 +45,7 @@ impl Log {
         let i = &self.state.items[item]; i.definition.stages[i.stage].id.clone()
     }
     /// Run a ticket until it waits at its join step.
-    fn to_join(&mut self, item: &str) {
+    fn join_group(&mut self, item: &str) {
         self.enqueue(item, ticket());
         while self.state.items[item].phase != Phase::WaitingJoin { self.pass(item); }
     }
@@ -98,7 +98,7 @@ fn pass_group(log: &mut Log, group: &str, steps: usize) { for _ in 0..steps { lo
 #[test]
 fn a_ticket_at_its_join_step_waits_for_the_orchestrator_and_frees_its_resource() {
     let mut log = Log::new();
-    log.to_join("a");
+    log.join_group("a");
     let item = &log.state.items["a"];
     assert_eq!((item.phase.clone(), item.pending.clone()), (Phase::WaitingJoin, None));
     assert!(!owns_resource(item));
@@ -114,7 +114,7 @@ fn only_the_controller_queues_and_only_a_ticket_at_a_join_step() {
     let mut log = Log::new();
     log.enqueue("early", ticket());
     assert_eq!(log.try_run(Command::Queue { item: "early".into() }, Grant::Controller).unwrap_err(), Refusal::Phase);
-    log.to_join("a");
+    log.join_group("a");
     let owner = Grant::Decision { principal: "owner".into() };
     assert_eq!(log.try_run(Command::Queue { item: "a".into() }, owner).unwrap_err(), Refusal::Unauthorized);
     log.queue("a");
@@ -123,7 +123,7 @@ fn only_the_controller_queues_and_only_a_ticket_at_a_join_step() {
 #[test]
 fn queueing_opens_a_group_that_leaves_at_once_when_nothing_is_ahead() {
     let mut log = Log::new();
-    log.to_join("a");
+    log.join_group("a");
     let transition = log.queue("a");
     assert_eq!(transition.effects.len(), 1);
     let effect = &transition.effects[0];
@@ -138,7 +138,7 @@ fn queueing_opens_a_group_that_leaves_at_once_when_nothing_is_ahead() {
 #[test]
 fn tickets_queued_during_a_wait_accumulate_up_to_the_limit_then_a_new_group_opens() {
     let mut log = Log::new();
-    for t in ["a", "b", "c", "d"] { log.to_join(t); }
+    for t in ["a", "b", "c", "d"] { log.join_group(t); }
     log.queue("a");
     let first = log.group_of("a");
     for t in ["b", "c", "d"] { log.queue(t); }
@@ -154,14 +154,14 @@ fn tickets_queued_during_a_wait_accumulate_up_to_the_limit_then_a_new_group_open
 #[test]
 fn a_ticket_without_a_candidate_cannot_be_queued() {
     let mut log = Log::new();
-    log.to_join("a");
+    log.join_group("a");
     log.state.items.get_mut("a").unwrap().candidate = None;
     assert_eq!(log.try_run(Command::Queue { item: "a".into() }, Grant::Controller).unwrap_err(), Refusal::Invalid);
 }
 #[test]
 fn a_finished_group_fans_out_and_a_member_adopts_the_result() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     let last = finish_with(&mut log, &group, "folded-result");
     assert_eq!(log.state.items["a"].candidate.as_deref(), Some("folded-result"), "adopted");
@@ -173,7 +173,7 @@ fn a_finished_group_fans_out_and_a_member_adopts_the_result() {
 #[test]
 fn a_member_whose_resource_was_taken_while_it_waited_queues_for_it() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     // While `a` is in the group its resource is free; another ticket takes it.
     log.run(Command::Enqueue { item: "other".into(), definition: ticket(), policy_pin: "policy-1".into(),
         resource: "res-a".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
@@ -203,7 +203,7 @@ fn a_member_that_does_not_adopt_keeps_its_own_candidate() {
 #[test]
 fn a_failed_group_rejects_its_members_through_their_own_routes() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     pass_group(&mut log, &group, 2);
     // One member, so the gate's split falls to its `else`: the group fails.
@@ -219,7 +219,7 @@ fn a_failed_group_rejects_its_members_through_their_own_routes() {
 #[test]
 fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     log.run(Command::Cancel { item: group.clone() }, Grant::Controller);
     assert_eq!(log.state.items[&group].phase, Phase::Cancelling);
@@ -232,7 +232,7 @@ fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {
 #[test]
 fn a_rejected_gate_splits_a_group_of_two_and_the_halves_run_in_order() {
     let mut log = Log::new();
-    for t in ["x", "a", "b"] { log.to_join(t); }
+    for t in ["x", "a", "b"] { log.join_group(t); }
     log.queue("x");
     let ahead = log.group_of("x");
     log.queue("a"); log.queue("b");
@@ -264,7 +264,7 @@ fn a_rejected_gate_splits_a_group_of_two_and_the_halves_run_in_order() {
 #[test]
 fn a_split_of_a_single_member_takes_its_else_route() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     pass_group(&mut log, &group, 1);
     log.label(&group, "conflict");
@@ -273,7 +273,7 @@ fn a_split_of_a_single_member_takes_its_else_route() {
 #[test]
 fn a_member_can_leave_a_group_that_has_not_left_and_an_empty_group_is_cancelled() {
     let mut log = Log::new();
-    for t in ["x", "a", "b"] { log.to_join(t); }
+    for t in ["x", "a", "b"] { log.join_group(t); }
     log.queue("x"); log.queue("a"); log.queue("b");
     let pair = log.group_of("a");
     log.run(Command::Leave { item: "a".into() }, Grant::Controller);
@@ -289,18 +289,18 @@ fn a_member_can_leave_a_group_that_has_not_left_and_an_empty_group_is_cancelled(
 #[test]
 fn leaving_needs_the_controller_and_a_group_still_waiting() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     assert_eq!(log.try_run(Command::Leave { item: "a".into() }, Grant::Controller).unwrap_err(), Refusal::Phase);
-    log.to_join("b"); log.queue("b");
+    log.join_group("b"); log.queue("b");
     assert_eq!(log.try_run(Command::Leave { item: "b".into() },
         Grant::Decision { principal: "owner".into() }).unwrap_err(), Refusal::Unauthorized);
-    log.to_join("c");
+    log.join_group("c");
     assert_eq!(log.try_run(Command::Leave { item: "c".into() }, Grant::Controller).unwrap_err(), Refusal::Phase);
 }
 #[test]
 fn cancelling_a_waiting_member_removes_it_and_cancelling_a_departed_one_is_refused() {
     let mut log = Log::new();
-    for t in ["x", "a"] { log.to_join(t); }
+    for t in ["x", "a"] { log.join_group(t); }
     log.queue("x"); log.queue("a");
     let waiting = log.group_of("a");
     log.run(Command::Cancel { item: "a".into() }, Grant::Controller);
@@ -311,7 +311,7 @@ fn cancelling_a_waiting_member_removes_it_and_cancelling_a_departed_one_is_refus
 #[test]
 fn a_member_of_a_group_in_flight_cannot_leave_by_any_route() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     assert!(log.try_run(Command::Cancel { item: "a".into() }, Grant::Controller).is_err());
     assert!(log.try_run(Command::Retry { item: "a".into() }, Grant::Controller).is_err());
 }
@@ -319,7 +319,7 @@ fn a_member_of_a_group_in_flight_cannot_leave_by_any_route() {
 fn a_failed_group_cannot_be_retried() {
     // Its members already took their rejected routes; a revived group would land them anyway.
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     pass_group(&mut log, &group, 2);
     log.reject(&group);
@@ -341,7 +341,7 @@ fn fill(log: &mut Log, total: usize) {
 #[test]
 fn queueing_that_would_open_a_group_past_the_item_cap_is_refused_and_nothing_is_bricked() {
     let mut log = Log::new();
-    log.to_join("a");
+    log.join_group("a");
     fill(&mut log, 1024);
     assert_eq!(log.try_run(Command::Queue { item: "a".into() }, Grant::Controller).unwrap_err(), Refusal::Limit);
     // The workspace still takes commands.
@@ -350,7 +350,7 @@ fn queueing_that_would_open_a_group_past_the_item_cap_is_refused_and_nothing_is_
 #[test]
 fn a_split_with_no_room_for_a_new_group_takes_its_fallback() {
     let mut log = Log::new();
-    for t in ["x", "a", "b"] { log.to_join(t); }
+    for t in ["x", "a", "b"] { log.join_group(t); }
     log.queue("x");
     let ahead = log.group_of("x");
     log.queue("a"); log.queue("b");
@@ -448,7 +448,7 @@ fn only_the_exact_shape_of_a_group_id_is_reserved() {
 #[test]
 fn group_runs_replay_to_the_same_state() {
     let mut log = Log::new();
-    for t in ["x", "a", "b"] { log.to_join(t); }
+    for t in ["x", "a", "b"] { log.join_group(t); }
     log.queue("x"); log.queue("a"); log.queue("b");
     let ahead = log.group_of("x"); let pair = log.group_of("a");
     pass_group(&mut log, &ahead, 3);
@@ -476,7 +476,8 @@ fn invalid(edit: impl FnOnce(&mut Definition)) -> bool {
 fn the_validator_accepts_the_grouped_fixture() { assert_eq!(ticket().validate(), Ok(())); }
 #[test]
 fn the_validator_rejects_bad_groups() {
-    let cases: Vec<(&str, Box<dyn FnOnce(&mut Definition)>)> = vec![
+    type Break = Box<dyn FnOnce(&mut Definition)>;
+    let cases: Vec<(&str, Break)> = vec![
         ("join names no group", Box::new(|d| { d.groups.clear(); })),
         ("group nobody joins", Box::new(|d| { d.groups.insert("spare".into(), d.groups["landing"].clone()); })),
         ("limit zero", Box::new(|d| { d.groups.get_mut("landing").unwrap().limit = 0; })),
@@ -508,7 +509,7 @@ fn the_validator_rejects_bad_groups() {
 #[test]
 fn the_state_validator_refuses_forged_membership() {
     let mut log = Log::new();
-    log.to_join("a"); log.queue("a");
+    log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
     let probe = |state: &State| step(state, &Input { id: "probe".into(), expected_revision: state.revision,
         source_sequence: state.revision + 1, ..log.input(Command::Advance, Grant::Controller) });
@@ -653,7 +654,7 @@ fn a_wait_that_fails_for_a_real_reason_spends_attempts_and_ends() {
     walk_to(&mut log, &group, "ci");
     assert!(log.state.items[&group].pushed.is_some());
     for _ in 0..8 { if log.state.items.get(&group).is_some_and(|g| g.phase == Phase::Running) { log.outcome(&group, Outcome::SafeFailure); } }
-    assert!(log.state.items.get(&group).map_or(true, |g| g.phase == Phase::Failed), "the pushed group has an exit");
+    assert!(log.state.items.get(&group).is_none_or(|g| g.phase == Phase::Failed), "the pushed group has an exit");
 }
 
 // ov-957 review blocker B5: the wait for a pull request is a wait like the others.

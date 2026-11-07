@@ -9,8 +9,9 @@ use farcooler_protocol::workflow_config::AdapterConfiguration;
 pub(super) async fn publication_base_current(config: &CodingConfig) -> Result<()> {
     adapters::git(&config.repository, &["cat-file", "-e", &format!("{}^{{commit}}", config.base)]).await?;
     adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
-    if crate::git::git(&config.repository, &["merge-base", "--is-ancestor", &config.base, &config.landing_ref]).await
-        .map_err(|_| Error::Refused("git invocation failed"))?.ok == false {
+    let is_ancestor = crate::git::git(&config.repository, &["merge-base", "--is-ancestor", &config.base, &config.landing_ref]).await
+        .map_err(|_| Error::Refused("git invocation failed"))?.ok;
+    if !is_ancestor {
         return Err(Error::Refused("publication landing ref differs from selected base"));
     }
     if let Some(landing) = &config.landing {

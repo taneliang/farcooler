@@ -35,7 +35,7 @@ async fn hand_moves(client: &mut SocketClient, card: &pb::Task) -> bool {
     let mut req = farcooler_transport::request("task.set_status");
     req.required_capabilities = vec![WORKSTREAMS_CAPABILITY.into()];
     req.payload = Some(request::Payload::TaskSetStatus(pb::TaskSetStatus {
-        task_id: card.id.clone(), status: pb::TaskStatus::Todo as i32, actor: "manager".into(), ..Default::default() }));
+        task_id: card.id.clone(), status: pb::TaskStatus::Todo as i32, actor: "manager".into() }));
     client.call(req).await.is_ok()
 }
 const WORKSTREAMS_CAPABILITY: &str = farcooler_protocol::capability::WORKSTREAMS;

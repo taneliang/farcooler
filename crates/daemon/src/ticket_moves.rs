@@ -60,7 +60,7 @@ mod tests {
     use farcooler_store::models::{Actor, TerminalRole};
 
     fn set(task: uuid::Uuid, status: TaskStatus) -> pb::TaskSetStatus {
-        pb::TaskSetStatus { task_id: task.as_bytes().to_vec().into(), status: crate::task_ops::pb_status(status), actor: "manager".into(), ..Default::default() }
+        pb::TaskSetStatus { task_id: task.as_bytes().to_vec().into(), status: crate::task_ops::pb_status(status), actor: "manager".into() }
     }
 
     /// The workspace's orchestrator pane, and a worker pane opened for `task`.

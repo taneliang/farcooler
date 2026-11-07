@@ -489,8 +489,8 @@ impl Runtime {
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     if let Err(error) = selected {
                         tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
-                        if stored.dispatch_state != "uncertain" {
-                            if self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)? { *count += 1; }
+                        if stored.dispatch_state != "uncertain" && self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)? {
+                            *count += 1;
                         }
                         continue;
                     }

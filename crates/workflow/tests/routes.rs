@@ -157,7 +157,8 @@ fn schema_1_definitions_serialize_and_pin_exactly_as_before() {
 fn the_validator_accepts_the_routed_fixture() { assert_eq!(bad(|_| {}), Ok(())); }
 #[test]
 fn the_validator_rejects_bad_routes() {
-    let cases: Vec<(&str, Box<dyn FnOnce(&mut Definition)>)> = vec![
+    type Break = Box<dyn FnOnce(&mut Definition)>;
+    let cases: Vec<(&str, Break)> = vec![
         ("route to a missing step", Box::new(|d| { d.stages[2].routes.insert("skip-review".into(), Target::Step("nope".into())); })),
         ("back edge with no limit", Box::new(|d| { d.stages[2].limit = 0; })),
         ("limit with no back edge", Box::new(|d| { d.stages[0].limit = 1; })),

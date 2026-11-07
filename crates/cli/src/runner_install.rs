@@ -173,7 +173,7 @@ async fn running_host(target: &str) -> Running {
             Err(e) => return if is_cutover_held(e.as_ref()) { Running::Held } else { Running::Unknown },
         };
         match crate::host_get(&mut link).await {
-            Ok(host) => Running::Host(host),
+            Ok(host) => Running::Host(Box::new(host)),
             Err(e) if is_cutover_held(e.as_ref()) => Running::Held,
             Err(_) => Running::Unknown,
         }
@@ -183,7 +183,7 @@ async fn running_host(target: &str) -> Running {
 
 /// What the daemon on a runner said when asked.
 enum Running {
-    Host(farcooler_protocol::v1::Host),
+    Host(Box<farcooler_protocol::v1::Host>),
     /// It refused with `cutover_held`: an engine cutover is in flight there.
     Held,
     /// Unreachable, or too old to say.
@@ -245,7 +245,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
         return Err(refusal.into());
     }
     let host = match &running {
-        Running::Host(host) => Some(host),
+        Running::Host(host) => Some(host.as_ref()),
         _ => None,
     };
     if let Some(refusal) = downgrade_refusal(target, host) {
@@ -1289,7 +1289,7 @@ mod tests {
         assert!(refusal.starts_with("box is in the middle of an upgrade"), "{refusal}");
         assert!(refusal.contains("Finish the upgrade"), "{refusal}");
         assert_eq!(held_refusal("box", &Running::Unknown), None);
-        assert_eq!(held_refusal("box", &Running::Host(Default::default())), None);
+        assert_eq!(held_refusal("box", &Running::Host(Box::default())), None);
     }
 
     /// An install over a newer runner is refused before anything is uploaded
