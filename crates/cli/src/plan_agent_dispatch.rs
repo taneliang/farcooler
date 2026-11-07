@@ -38,7 +38,7 @@ pub(crate) struct AgentDispatchArgs {
     #[arg(long = "ticket", value_name = "KEY", required = true)]
     tickets: Vec<String>,
     /// The worktree to work in, by name or id.
-    #[arg(long, required_unless_present = "new", conflicts_with = "new")]
+    #[arg(long, conflicts_with = "new")]
     worktree: Option<String>,
     /// Make a new worktree with this name for it.
     #[arg(long, requires = "branch")]
@@ -82,9 +82,15 @@ pub(super) async fn dispatch<L: DispatchLink>(
     let Some((first, rest)) = tickets.split_first() else { return Err("Name a ticket with --ticket.".into()) };
     // A ticket the engine tracks is started by the engine (ov-962); only the rest open a pane.
     let role_name = super::role_word(args.role.wire() as i32);
-    if let Some(said) = super::start::through_engine(link, &tickets, args.role.wire() == pb::AgentRole::Builder, &role_name.to_lowercase(), json).await? {
-        return Ok(said);
-    }
+    // The flags a start can't honor, named if the tickets are tracked (`--base` and `--harness` count when changed).
+    let dropped: Vec<&str> = [
+        ("--worktree", args.worktree.is_some()), ("--new", args.new.is_some()), ("--branch", args.branch.is_some()),
+        ("--base", args.base != "HEAD"), ("--harness", args.harness != "claude"), ("--title", args.title.is_some()), ("--again", args.again),
+    ].into_iter().filter(|(_, given)| *given).map(|(flag, _)| flag).collect();
+    let unanswered = match super::start::through_engine(link, &tickets, args.role.wire() == pb::AgentRole::Builder, &role_name.to_lowercase(), json, &dropped).await? {
+        super::start::Engine::Started(said) => return Ok(said),
+        super::start::Engine::Pane { unanswered } => unanswered,
+    };
     let worktree = match (args.worktree, args.new, args.branch) {
         (Some(named), _, _) => Lane::Existing(named),
         (None, Some(name), Some(branch)) => Lane::New { name, branch, base: args.base },
@@ -103,7 +109,10 @@ pub(super) async fn dispatch<L: DispatchLink>(
         again: args.again,
         agent: Some(agent),
     };
-    let done = crate::tasks::dispatch(link, asked, &mut |w| eprintln!("{w}")).await?;
+    let done = crate::tasks::dispatch(link, asked, &mut |w| eprintln!("{w}")).await.map_err(|e| {
+        // A seat the engine turns away can't read whether a ticket is tracked, and a tracked one refuses a pane.
+        if unanswered { Failed::from(format!("{e} If this ticket is tracked by the engine, only the workspace owner's orchestrator can start it.")) } else { e }
+    })?;
     let said = crate::tasks::dispatched_output(&first.key, &done, json);
     let turn = if done.confirmed() { first_turn(link, done.worktree, done.terminal).await } else { FirstTurn::Unseen };
     let role = super::role_word(args.role.wire() as i32);

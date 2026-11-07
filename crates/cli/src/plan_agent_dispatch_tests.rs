@@ -38,11 +38,15 @@ struct Runner {
     engine: Option<serde_json::Value>,
     /// The engine's answer to a start: `None` accepts it.
     refuse_start: Option<&'static str>,
+    /// `workflow get` fails, as for a seat the engine turns away.
+    engine_unanswered: bool,
+    /// `terminal.create` fails, as it does on a card the engine holds.
+    refuse_pane: bool,
 }
 
 fn runner() -> Runner {
     let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_LINE, capability::TERMINAL_TASK];
-    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None }
+    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None, engine_unanswered: false, refuse_pane: false }
 }
 
 fn items() -> Vec<pb::Task> {
@@ -64,6 +68,9 @@ impl DispatchLink for Runner {
             blocked_question: question.clone(),
             ..Default::default()
         };
+        if (method == "workflow.get" && self.engine_unanswered) || (method == "terminal.create" && self.refuse_pane) {
+            return Err(ClientError::Closed);
+        }
         let value = match (method.as_str(), payload) {
             ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
                 schema: 1,
@@ -275,7 +282,7 @@ fn starts(link: &Runner) -> Vec<serde_json::Value> {
 #[tokio::test]
 async fn a_builder_on_tracked_tickets_goes_through_start() {
     let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")]);
-    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --worktree lane").await.unwrap();
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap();
     let sent = starts(&link);
     assert_eq!(sent.len(), 2, "{:?}", link.methods());
     assert_eq!((sent[0]["item"].as_str(), sent[0]["run"].as_str(), sent[0]["pin"].as_str(), sent[0]["start_pin"].as_str()), (Some("ov-2"), Some("run-ov-2"), Some("pin-ov-2"), Some("wf1:published")));
@@ -301,26 +308,78 @@ async fn untracked_tickets_still_open_a_pane() {
 async fn nothing_starts_that_the_engine_cannot_take() {
     let mixed = [("ov-2", "ticket/v1", "WaitingApproval")];
     let mut link = with_engine(&mixed);
-    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --worktree lane").await.unwrap_err().to_string();
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap_err().to_string();
     assert!(said.starts_with("ov-3 isn't tracked by the engine"), "{said}");
     let mut link = with_engine(&[("ov-2", "configured-coding/v1", "Running")]);
-    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("ov-2 already has a run under the engine"), "{said}");
     let mut link = with_engine(&[("ov-2", "ticket/v1", "Done")]);
-    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("ov-2 has closed under the engine"), "{said}");
     let mut link = with_engine(&mixed);
-    let said = say(&mut link, "--role reviewer --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    let said = say(&mut link, "--role reviewer --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("A reviewer can't be dispatched on a tracked ticket"), "{said}");
     let mut link = with_engine(&mixed);
     link.engine.as_mut().unwrap()["configuration"] = serde_json::Value::Null;
-    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("This board has no published workflow"), "{said}");
     let mut link = with_engine(&mixed);
     link.refuse_start = Some("Resource");
-    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
-    assert!(said.starts_with("The engine didn't start ov-2: Resource."), "{said}");
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
+    assert!(said.starts_with("The engine didn't start ov-2: something else holds what it needs."), "{said}");
     for m in ["terminal.create", "worktree.create"] {
         assert!(!link.methods().contains(&m), "{:?}", link.methods());
     }
+}
+
+/// A flag a start can't honor is named and refused, not dropped with an exit of 0 (ov-962 B3). Nothing starts.
+#[tokio::test]
+async fn a_flag_the_engine_would_drop_is_named() {
+    let held = [("ov-2", "ticket/v1", "WaitingApproval")];
+    let mut link = with_engine(&held);
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane --harness claude:sonnet").await.unwrap_err().to_string();
+    assert!(said.contains("--worktree and --harness would be ignored"), "{said}");
+    assert!(said.ends_with("Leave them out and dispatch again."), "{said}");
+    assert!(starts(&link).is_empty(), "{:?}", link.methods());
+    let mut link = with_engine(&held);
+    let said = say(&mut link, "--role builder --ticket ov-2 --new lane --branch b").await.unwrap_err().to_string();
+    assert!(said.contains("--new and --branch would be ignored"), "{said}");
+    // Untracked tickets keep every flag, and a pane still needs its worktree.
+    let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
+    assert!(say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string().contains("Name a worktree"));
+}
+
+/// A ticket that has closed is in the engine's archive, not its items, from the step after it closes.
+#[tokio::test]
+async fn a_closed_ticket_in_the_archive_is_not_dispatched_to_a_pane() {
+    let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
+    link.engine.as_mut().unwrap()["state"]["archive"] = json!({"ov-2": {"phase": "Done", "candidate": null}});
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-2 has closed under the engine"), "{said}");
+    assert!(!link.methods().contains(&"terminal.create"), "{:?}", link.methods());
+}
+
+/// A start the board moved under is read and sent once more, and a second miss is worded.
+#[tokio::test]
+async fn a_start_the_board_moved_under_is_sent_again_once() {
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval")]);
+    link.refuse_start = Some("Stale");
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
+    assert_eq!(starts(&link).len(), 2, "one retry");
+    assert!(said.starts_with("The engine didn't start ov-2: the board moved while it was starting."), "{said}");
+}
+
+/// A seat the engine turns away from `workflow get` can't tell whether a ticket is tracked. It still gets a
+/// pane, and when the pane fails it is told the ticket may be tracked.
+#[tokio::test]
+async fn an_unanswered_engine_is_said_when_the_pane_fails() {
+    let mut link = with_engine(&[]);
+    link.engine_unanswered = true;
+    link.refuse_pane = true;
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(said.contains("only the workspace owner's orchestrator can start it"), "{said}");
+    let mut link = with_engine(&[]);
+    link.refuse_pane = true;
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap_err().to_string();
+    assert!(!said.contains("workspace owner"), "an answered engine adds nothing: {said}");
 }
